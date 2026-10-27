@@ -55,6 +55,17 @@ public class DataverseContactIdentityStoreTests
             .Should().Contain("statecode eq 0", "the active read is unchanged");
     }
 
+    [Fact]
+    public void TheInactiveEmailLookup_ReadsRemovedContactsFirst_SoTwoRowsIncludeARemovalWhenOneExists()
+    {
+        var path = DataverseContactIdentityStore.BuildInactiveEmailLookupPath("person@firm.example");
+
+        path.Should().Contain("$orderby=sprk_externalaccessremovedon desc",
+            "no contact is created around a removal: a removed contact must be among the two rows read");
+        DataverseContactIdentityStore.BuildEmailLookupPath("person@firm.example")
+            .Should().NotContain("$orderby", "MUST NOT FIRE: the active read is unchanged");
+    }
+
     [Theory]
     [InlineData("400: {\"error\":{\"code\":\"0x80048d19\",\"message\":\"The value 100000012 of 'sprk_identitycollisionreason' on record of type 'contact' is outside the valid range.\"}}", true)]
     [InlineData("400: ... IS OUTSIDE THE VALID RANGE ...", true)]

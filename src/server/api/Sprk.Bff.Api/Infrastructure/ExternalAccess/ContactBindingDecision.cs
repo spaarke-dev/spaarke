@@ -736,6 +736,31 @@ public sealed record InviteDecision(
     IReadOnlyList<Guid>? FlagContactIds = null);
 
 /// <summary>
+/// Slice C2b: <see cref="ContactBindingDecision.DecideCreateAroundRemoval"/>'s answer for a contact create whose email no
+/// ACTIVE contact carries. <see cref="MayCreate"/> only when no inactive contact for the email is removed (or unproven) and
+/// the read succeeded.
+/// </summary>
+/// <param name="MayCreate">True when the create may go ahead.</param>
+/// <param name="RemovedContactId">The removed inactive contact that refuses the create; null otherwise.</param>
+/// <param name="DenyCode">
+/// The sign-in and registration answer when the create may not go ahead: <see cref="ContactBindingDecision.DenyContactRemoved"/>
+/// for a removal, the lookup's deny code for a read that failed.
+/// </param>
+/// <param name="InviteReasonCode">
+/// The invite path's answer for the same refusal: <see cref="ContactBindingDecision.InviteContactRemovedAdminReinstate"/> for
+/// a removal, <see cref="ContactBindingDecision.InviteContactLookupFailed"/> for a read that failed.
+/// </param>
+public sealed record CreateAroundRemovalDecision(
+    bool MayCreate,
+    Guid? RemovedContactId = null,
+    string? DenyCode = null,
+    string? InviteReasonCode = null)
+{
+    /// <summary>True when the refusal is a removal (not a read that failed).</summary>
+    public bool IsRemoval => RemovedContactId is not null;
+}
+
+/// <summary>
 /// The single identity-binding decision. Pure: every input is a value, every output is a value.
 /// </summary>
 public static class ContactBindingDecision
@@ -1501,24 +1526,29 @@ public static class ContactBindingDecision
     }
 
     /// <summary>
-    /// Slice C: consulted only when <see cref="DecideInvite"/> would CREATE a contact (no active contact carries the email).
-    /// An INACTIVE contact for the email whose external access an administrator removed (or whose marker cannot be read)
-    /// refuses the invite with <see cref="InviteContactRemovedAdminReinstate"/>: a new contact is never created around a
-    /// removal. A read that failed is <see cref="InviteContactAction.Fail"/> (a create is never reached while a removed
-    /// contact cannot be ruled out). <c>null</c> when the create may go ahead. Nothing is flagged. Pure.
+    /// Slice C2b: the ONE rule that no contact is created around a removal. Consulted before EVERY contact create whose email
+    /// no active contact carries (the invite create, registration, the first sign-in create and the licensed-user link
+    /// create), over the INACTIVE contacts for that email (<see cref="IContactIdentityStore.FindInactiveContactsByEmailAsync"/>).
+    /// A contact among them whose external access an administrator removed, or whose removed marker cannot be read
+    /// (<see cref="ContactBindingRow.IsRemoved"/>), refuses the create: <see cref="DenyContactRemoved"/> (the invite path
+    /// answers <see cref="InviteContactRemovedAdminReinstate"/>). A read that failed refuses too, with the lookup's code (the
+    /// invite path: <see cref="InviteContactLookupFailed"/>): a create is never reached while a removal cannot be ruled out.
+    /// An unmarked inactive contact does not stop the create here (registration flags it separately). Nothing is flagged.
+    /// Pure.
     /// </summary>
-    public static InviteDecision? DecideInviteInactiveMatch(ContactLookup inactiveLookup)
+    public static CreateAroundRemovalDecision DecideCreateAroundRemoval(ContactLookup inactiveLookup)
     {
         ArgumentNullException.ThrowIfNull(inactiveLookup);
 
         if (inactiveLookup.Status != LookupStatus.Read)
         {
-            return new InviteDecision(InviteContactAction.Fail, ReasonCode: InviteContactLookupFailed);
+            return new CreateAroundRemovalDecision(false, DenyCode: LookupDenyCode(inactiveLookup.Status),
+                InviteReasonCode: InviteContactLookupFailed);
         }
 
-        return inactiveLookup.Rows.FirstOrDefault(r => r.ContactId != Guid.Empty && !r.IsActive && r.IsRemoved) is { } removed
-            ? new InviteDecision(InviteContactAction.Refuse, removed.ContactId, InviteContactRemovedAdminReinstate)
-            : null;
+        return inactiveLookup.Rows.FirstOrDefault(r => r.ContactId != Guid.Empty && r.IsRemoved) is { } removed
+            ? new CreateAroundRemovalDecision(false, removed.ContactId, DenyContactRemoved, InviteContactRemovedAdminReinstate)
+            : new CreateAroundRemovalDecision(true);
     }
 
     /// <summary>
@@ -2147,18 +2177,15 @@ public static class ContactBindingDecision
     {
         ArgumentNullException.ThrowIfNull(inactiveLookup);
 
-        if (inactiveLookup.Status != LookupStatus.Read)
+        // Slice C — the person whose external access an administrator removed is told so, never flagged as a duplicate; a
+        // read that failed denies. The one create-around-removal rule decides both.
+        var removal = DecideCreateAroundRemoval(inactiveLookup);
+        if (!removal.MayCreate)
         {
-            return new RegistrationEmailDecision(RegistrationEmailAction.Deny, DenyCode: LookupDenyCode(inactiveLookup.Status));
+            return new RegistrationEmailDecision(RegistrationEmailAction.Deny, removal.RemovedContactId, DenyCode: removal.DenyCode);
         }
 
         var rows = inactiveLookup.Rows.Where(r => !r.IsActive && r.ContactId != Guid.Empty).ToList();
-
-        // Slice C — the person whose external access an administrator removed is told so, never flagged as a duplicate.
-        if (rows.FirstOrDefault(r => r.IsRemoved) is { } removed)
-        {
-            return new RegistrationEmailDecision(RegistrationEmailAction.Deny, removed.ContactId, DenyCode: DenyContactRemoved);
-        }
 
         return rows.Count == 0
             ? new RegistrationEmailDecision(RegistrationEmailAction.Create)

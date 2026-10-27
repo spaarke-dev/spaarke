@@ -246,15 +246,28 @@ public class RemovedMarkerBindingTests
     }
 
     [Fact]
-    public void Invite_OverAnInactiveMatch_RefusesARemovedOne_FailsOnAFailedRead_AndOtherwiseCreates()
+    public void CreateAroundRemoval_RefusesARemovedInactiveMatch_FailsOnAFailedRead_AndOtherwiseCreates()
     {
-        ContactBindingDecision.DecideInviteInactiveMatch(ContactLookup.Of(Unbound(removed: true, stateCode: 1)))
-            .Should().Be(new InviteDecision(InviteContactAction.Refuse, ContactA,
+        ContactBindingDecision.DecideCreateAroundRemoval(ContactLookup.Of(Unbound(removed: true, stateCode: 1)))
+            .Should().Be(new CreateAroundRemovalDecision(false, ContactA, ContactBindingDecision.DenyContactRemoved,
                 ContactBindingDecision.InviteContactRemovedAdminReinstate));
-        ContactBindingDecision.DecideInviteInactiveMatch(ContactLookup.Failed)!.Action.Should().Be(InviteContactAction.Fail);
-        ContactBindingDecision.DecideInviteInactiveMatch(ContactLookup.Of(Unbound(removed: false, stateCode: 1)))
-            .Should().BeNull("MUST NOT FIRE: an unmarked inactive contact does not stop the create");
-        ContactBindingDecision.DecideInviteInactiveMatch(ContactLookup.Of()).Should().BeNull();
+        ContactBindingDecision.DecideCreateAroundRemoval(ContactLookup.Failed)
+            .Should().Be(new CreateAroundRemovalDecision(false, null, ContactBindingDecision.DenyContactLookupFailed,
+                ContactBindingDecision.InviteContactLookupFailed));
+        ContactBindingDecision.DecideCreateAroundRemoval(ContactLookup.Of(Unbound(removed: false, stateCode: 1)))
+            .MayCreate.Should().BeTrue("MUST NOT FIRE: an unmarked inactive contact does not stop the create");
+        ContactBindingDecision.DecideCreateAroundRemoval(ContactLookup.Of()).MayCreate.Should().BeTrue();
+    }
+
+    [Fact]
+    public void CreateAroundRemoval_AnUnprovenMarker_IsARemoval()
+    {
+        var unproven = Unbound(removed: false, stateCode: 1) with { RemovedMarkerUnproven = true };
+
+        var decision = ContactBindingDecision.DecideCreateAroundRemoval(ContactLookup.Of(unproven));
+
+        decision.MayCreate.Should().BeFalse("an empty marker that may be hidden cannot rule out a removal");
+        decision.DenyCode.Should().Be(ContactBindingDecision.DenyContactRemoved);
     }
 
     // ── Through the binder (the in-memory store applies the production marking) ─────────────────────────────

@@ -563,11 +563,14 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
 
     /// <summary>
     /// INACTIVE contacts by email, two rows (r3 task 047, fix round 2). The pair of <see cref="BuildEmailLookupPath"/>:
-    /// <c>statecode eq 1</c> instead of <c>eq 0</c>, same email literal and same selected columns.
+    /// <c>statecode eq 1</c> instead of <c>eq 0</c>, same email literal and same selected columns. Slice C2b: removed
+    /// contacts first (the removed marker descending; an empty marker sorts last), so the two rows read always include a
+    /// removed contact for the email when one exists, however many inactive contacts carry it.
     /// </summary>
     public static string BuildInactiveEmailLookupPath(string email)
         => $"contacts?$select={ContactSelect}"
-           + $"&$filter=emailaddress1 eq '{Literal(email)}' and statecode eq 1&$top=2";
+           + $"&$filter=emailaddress1 eq '{Literal(email)}' and statecode eq 1"
+           + $"&$orderby={ContactBindingDecision.ExternalAccessRemovedOnColumn} desc&$top=2";
 
     /// <summary>Systemusers linking any of the contacts — any state, so a disabled user's link still counts.</summary>
     public static string BuildReferenceLookupPath(IReadOnlyCollection<Guid> contactIds)

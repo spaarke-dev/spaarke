@@ -481,6 +481,8 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
             if (FailInactiveEmailLookup) return Task.FromResult(Failed(LookupStatus.Failed));
             var rows = Contacts.Values
                 .Where(c => c.StateCode == 1 && string.Equals(c.Email, email, StringComparison.OrdinalIgnoreCase))
+                // As the production read: removed contacts first (the marker descending), then two rows.
+                .OrderByDescending(c => c.RemovedOn.HasValue)
                 .Take(2).Select(Row).ToArray();
             return Task.FromResult(ContactLookup.Of(rows));
         }

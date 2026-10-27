@@ -536,20 +536,22 @@ public sealed class ContactIdentityBinder
         // Slice C: no active contact carries the email. A new contact is never created around a removal: an inactive contact
         // for the email whose external access an administrator removed refuses the invite.
         var inactiveLookup = await _store.FindInactiveContactsByEmailAsync(email, ct).ConfigureAwait(false);
-        if (ContactBindingDecision.DecideInviteInactiveMatch(inactiveLookup) is not { } inactive)
+        var removal = ContactBindingDecision.DecideCreateAroundRemoval(inactiveLookup);
+        if (removal.MayCreate)
         {
             return resolution;
         }
 
-        if (inactive.Action == InviteContactAction.Refuse)
+        var action = removal.IsRemoval ? InviteContactAction.Refuse : InviteContactAction.Fail;
+        if (removal.IsRemoval)
         {
             _logger.LogWarning(
                 "[ID-BIND] Invite REFUSED ({ReasonCode}) — contact {ContactId}'s external access was removed by an administrator",
-                inactive.ReasonCode, inactive.ContactId);
+                removal.InviteReasonCode, removal.RemovedContactId);
         }
 
-        return new InviteContactResolution(inactive.Action, inactive.ContactId, null, inactive.ReasonCode,
-            InviteMessage(inactive.ReasonCode));
+        return new InviteContactResolution(action, removal.RemovedContactId, null, removal.InviteReasonCode,
+            InviteMessage(removal.InviteReasonCode));
     }
 
     /// <summary>
@@ -1125,6 +1127,74 @@ public sealed class ContactIdentityBinder
                 OwningTeamId = owner.TeamId,
             };
 
+    /// <summary>
+    /// Slice C2b: <see cref="CreateContactGuardedAsync"/>'s answer: the refusal's deny code (nothing was written), or the
+    /// store's create result.
+    /// </summary>
+    private readonly record struct GuardedCreate(string? DenyCode, StoreWriteResult Write);
+
+    /// <summary>
+    /// Slice C2b: the ONE place this binder creates a contact (registration, the first sign-in create and the licensed-user
+    /// link create all come through here; a source-scan test pins that no other code calls the store's create). No contact is
+    /// created around a removal: before the create, <see cref="CreateAroundRemovalRefusalAsync"/> reads the inactive contacts
+    /// for the new contact's email and refuses when one is removed (or unproven) or the read failed. Then the store's create.
+    /// </summary>
+    /// <param name="operation">The create, for the log ("Registration", "First sign-in create", ...).</param>
+    /// <param name="who">A log label that never identifies the person (a hash, not an email).</param>
+    private async Task<GuardedCreate> CreateContactGuardedAsync(
+        Guid oid, IdentityPlaneMarker plane, NewContactDetails details, string operation, string who, CancellationToken ct)
+    {
+        if (await CreateAroundRemovalRefusalAsync(details.Email, operation, who, ct).ConfigureAwait(false) is { } refused)
+        {
+            return new GuardedCreate(refused, new StoreWriteResult(StoreWriteStatus.Failed, Error: refused));
+        }
+
+        var write = await _store.CreateContactForOidAsync(oid, plane, details, ct).ConfigureAwait(false);
+        return new GuardedCreate(null, write);
+    }
+
+    /// <summary>
+    /// Slice C2b: the deny code that refuses a contact create for <paramref name="email"/>, or <c>null</c> when it may go
+    /// ahead (<see cref="ContactBindingDecision.DecideCreateAroundRemoval"/> over the inactive contacts for the email). Reads
+    /// only, so the report-only link pass calls it too and reports the refusal the write pass would make.
+    /// <para><b>An email-less create</b> has nothing to match on and is allowed here. That is safe because a create is keyed
+    /// by the caller's oid, and the oid path already denies a removed carrier: removing a person keeps the contact's binding
+    /// (oid, plane and key mirror), so a sign-in with that oid resolves to the removed contact and is denied before any
+    /// create is considered.</para>
+    /// </summary>
+    private async Task<string?> CreateAroundRemovalRefusalAsync(
+        string? email, string operation, string who, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(email))
+        {
+            return null;
+        }
+
+        var inactiveLookup = await _store.FindInactiveContactsByEmailAsync(email.Trim(), ct).ConfigureAwait(false);
+        var removal = ContactBindingDecision.DecideCreateAroundRemoval(inactiveLookup);
+        if (removal.MayCreate)
+        {
+            return null;
+        }
+
+        if (removal.IsRemoval)
+        {
+            _logger.LogWarning(
+                "[ID-BIND] {Operation} for {Who} REFUSED ({DenyCode}): an inactive contact {ContactId} for the email is one whose "
+                + "external access an administrator removed. No contact was created.",
+                operation, who, removal.DenyCode, removal.RemovedContactId);
+        }
+        else
+        {
+            _logger.LogWarning(
+                "[ID-BIND] {Operation} for {Who} REFUSED ({DenyCode}): the inactive contacts for the email could not be read, so "
+                + "a removal cannot be ruled out. No contact was created; retryable.",
+                operation, who, removal.DenyCode);
+        }
+
+        return removal.DenyCode;
+    }
+
     private async Task<HomeRegistrationResult> CreateHomeContactAsync(HomeRegistrationRequest request, string who, CancellationToken ct)
     {
         var owner = await ResolveCustomerOwnerTeamAsync(
@@ -1143,8 +1213,15 @@ public sealed class ContactIdentityBinder
             ExternalTenantId = request.HomeTenantId,
             OwningTeamId = owner.TeamId,
         };
-        var create = await _store.CreateContactForOidAsync(request.HomeObjectId, IdentityPlaneMarker.WorkforceHome, details, ct)
+        var guarded = await CreateContactGuardedAsync(
+                request.HomeObjectId, IdentityPlaneMarker.WorkforceHome, details, "Registration", who, ct)
             .ConfigureAwait(false);
+        if (guarded.DenyCode is { } refused)
+        {
+            return HomeRegistrationResult.Denied(refused);
+        }
+
+        var create = guarded.Write;
         switch (create.Status)
         {
             case StoreWriteStatus.Written when create.ContactId is { } created:
@@ -1458,9 +1535,15 @@ public sealed class ContactIdentityBinder
                             return ContactBindingResult.Denied(ContactBindingDecision.DenyContactLookupFailed);
                     }
 
-                    var create = await _store.CreateContactForOidAsync(
-                            request.CallerOid, request.CallerPlane, WithOwner(details, owner), ct)
+                    var guarded = await CreateContactGuardedAsync(request.CallerOid, request.CallerPlane,
+                            WithOwner(details, owner), "First sign-in create", $"oid#{HashForLog(request.CallerOid)}", ct)
                         .ConfigureAwait(false);
+                    if (guarded.DenyCode is { } refused)
+                    {
+                        return ContactBindingResult.Denied(refused);
+                    }
+
+                    var create = guarded.Write;
                     switch (create.Status)
                     {
                         case StoreWriteStatus.Written when create.ContactId is { } created:
@@ -1761,6 +1844,17 @@ public sealed class ContactIdentityBinder
                             null, none, Array.Empty<IdentityChange>(), false);
                 }
 
+                // Slice C2b: no contact is created around a removal. The report-only pass runs the same check (reads only),
+                // so it reports the refusal instead of promising a create (CreatedAndLinked) the write pass would refuse.
+                var linkCreateWho = $"oid#{HashForLog(request.CallerOid)}";
+                if (!applyWrites
+                    && await CreateAroundRemovalRefusalAsync(details.Email, "Licensed-user link create (report-only)",
+                        linkCreateWho, ct).ConfigureAwait(false) is { } wouldRefuse)
+                {
+                    return Result(suid, SystemUserLinkOutcome.Denied, null, wouldRefuse, null, none,
+                        Array.Empty<IdentityChange>(), false);
+                }
+
                 // #2130: the change log names WHICH columns are written, never a person's values. The email and the last
                 // name (which falls back to the email's local part, LastNameFor) are "(set)" / "(none)"; so is the owner
                 // (ownerid is "(set)" when a team owns the contact, "(none)" when this binder binds no owner), never the team id.
@@ -1774,9 +1868,16 @@ public sealed class ContactIdentityBinder
                     return Result(suid, SystemUserLinkOutcome.CreatedAndLinked, null, null, null, none, changes, false);
                 }
 
-                var create = await _store.CreateContactForOidAsync(
-                        request.CallerOid, IdentityPlaneMarker.Workforce, WithOwner(details, owner), ct)
+                var guarded = await CreateContactGuardedAsync(request.CallerOid, IdentityPlaneMarker.Workforce,
+                        WithOwner(details, owner), "Licensed-user link create", linkCreateWho, ct)
                     .ConfigureAwait(false);
+                if (guarded.DenyCode is { } refused)
+                {
+                    return Result(suid, SystemUserLinkOutcome.Denied, null, refused, null, none,
+                        Array.Empty<IdentityChange>(), false);
+                }
+
+                var create = guarded.Write;
                 if (create.Status == StoreWriteStatus.KeyMissing)
                 {
                     return Result(suid, SystemUserLinkOutcome.Denied, null, ContactBindingDecision.DenyContactCreateUnavailable,
