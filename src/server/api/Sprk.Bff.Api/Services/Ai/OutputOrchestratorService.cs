@@ -75,7 +75,7 @@ public class OutputOrchestratorService : IOutputOrchestratorService
                 var failedCount = results.Count(r => !r.Success);
                 var error = $"{failedCount} of {results.Count} updates failed";
                 _logger.LogError("Output mapping partially failed: {Error}", error);
-                return OutputMappingResult.FailureResult(error);
+                return OutputMappingResult.FailureResult(error, results);
             }
 
             _logger.LogInformation(
@@ -99,6 +99,21 @@ public class OutputOrchestratorService : IOutputOrchestratorService
         PlaybookExecutionContext context,
         CancellationToken ct)
     {
+        // #2257 (owner round 123, "run as the user"): a person's run writes AS that person; only a system run writes
+        // app-only, behind the deny-lists. A person's run whose user is unknown writes nothing (never app-only).
+        if (!PlaybookRunWriteIdentity.TryResolve(context.StartedBy, context.RunUserId, out var impersonateSystemUserId))
+        {
+            _logger.LogWarning(
+                "Output mapping update of {EntityType} refused: the run was started by a person whose systemuserid is unknown ({Code})",
+                update.EntityType, PlaybookRunWriteIdentity.RunUserUnresolvedCode);
+            return new EntityUpdateResult
+            {
+                EntityType = update.EntityType,
+                Success = false,
+                ErrorMessage = $"{PlaybookRunWriteIdentity.RunUserUnresolvedCode}: the user who started this run could not be resolved, so nothing was written."
+            };
+        }
+
         try
         {
             // 1. Resolve recordId from variable reference
@@ -138,7 +153,8 @@ public class OutputOrchestratorService : IOutputOrchestratorService
                 fields,
                 update.ConcurrencyMode ?? ConcurrencyMode.None,
                 update.MaxRetries ?? 3,
-                ct);
+                ct,
+                impersonateSystemUserId);
 
             _logger.LogInformation(
                 "Updated {EntityType} {RecordId} with {FieldCount} fields",
@@ -150,6 +166,20 @@ public class OutputOrchestratorService : IOutputOrchestratorService
                 RecordId = recordId,
                 Success = true,
                 FieldsUpdated = fields.Count
+            };
+        }
+        catch (Exception ex) when (PlaybookRunWriteIdentity.IsAccessDenied(ex, impersonateSystemUserId))
+        {
+            // #2257: Dataverse refused the write made AS the run's user (no Write, or no AppendTo on a bind): a failed
+            // update with a stable code.
+            _logger.LogWarning(
+                "Output mapping update of {EntityType} refused by Dataverse for the run's user ({Code})",
+                update.EntityType, PlaybookRunWriteIdentity.WriteAccessDeniedCode);
+            return new EntityUpdateResult
+            {
+                EntityType = update.EntityType,
+                Success = false,
+                ErrorMessage = $"{PlaybookRunWriteIdentity.WriteAccessDeniedCode}: the user who started this run may not write this record, so nothing was written."
             };
         }
         catch (Exception ex)

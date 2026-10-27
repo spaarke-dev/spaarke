@@ -1,20 +1,21 @@
 # Current Task — field-mapping-server-write-path-r1
 
-> **Last updated**: 2026-10-22 (86% checkpoint: 018b in UAC-r2 condition (b) fix round 2)
-> **Phase**: Wave 2. Done (13/43): 001–006, 010–016 on master; 018a on master (36403e1f4b).
-> **Live on dev: 1283c41817** (R3, 12:50Z; dormant 018a). **Active: task 018, phase 018b** (live Office Matter/Project swap).
+> **Last updated**: 2026-10-22 (task 018 complete; #2281 fixed (1fa0cf5cb8); project blocked on 017)
+> **Phase**: Wave 2. Done (14/43): 001–006, 010–016, 018 on master (018a 36403e1f4b, 018b ef8a91a157 #2261, 018c **ab7cf4fc94** #2266).
+> **Live on dev: 1fa0cf5cb8** (R3, 2026-10-23 00:00Z; carries 018b LIVE, 018c, #2282). Waiting on the owner's 3 Office quick-creates + the Work Assignment attorney-copy check, then this session verifies read-only. **Active: none (blocked on 017).**
 
 ## Quick Recovery
 
 | Field | Value |
 |---|---|
-| **Active task** | 018 (Office quick-create adapter), run as 3 PRs under ONE POML: **018a** service prerequisites → **018b** Matter/Project adapter → **018c** delete the Office core. The Invoice leg is NOT moved (ebilling-r1, owner decision L; task 096 deletes it) |
-| **HEAD** | work branch = master 36403e1f4b + checkpoint docs (pushed). 018b = branch **`task/fm-018b1`** (worktree `C:\code_files\spaarke\.claude\worktrees\agent-a550606fde68f707f`), tip **d04ba0b4cd** (= 830c2b0f1c + #2253 decision note), pushed. Fix round 2 = branch **`task/fm-018b-fix2` @ 29d06d80f3** (pushed, NOT yet merged into task/fm-018b1). Uncommitted: none |
+| **Active task** | None. Every pending task goes through 019, which needs 017 (blocked) |
+| **HEAD** | work branch = master 1fa0cf5cb8 + this checkpoint. No task branches or agent worktrees open |
 | **Running** | Nothing |
-| **Next Action** | (1) **Close the F1-1 gap in the adapter**: `record_owner_no_default_team` on a Project FILED under a source (the adapter derived the pair) must NOT say "your business unit"; use neutral wording (the team that owns records where it is filed has no default owner team); keep the caller-unit wording for an unfiled Matter and `acting_user_unresolved`. No service change. Map/route test + mutant. (2) Merge task/fm-018b-fix2 into task/fm-018b1; verify (`scratchpad/v018b-m3/verify.sh`, repo= agent-a550606fde68f707f). (3) Send UAC-r2 the fix diff (d04ba0b4cd..new tip) for their own re-check, then ACCEPT. (4) Merge task/fm-018b1 into the work branch; fill `{VERDICT}` in `scratchpad/pr-018b.md` (add fix round 2: F1-1 + K1; publish delta +6,843 B / 37.75 MB at 830c2b0f1c, CVE none; re-measure if src changed materially); `gh pr create`; merge on Router + Client lint green (rollup clean or explained); close #1614/#1617 citing the SHA; tell UAC-r2 the SHA (018b is LIVE: deploy candidate; owner go in the R3 session); then 018c |
-| **018 progress** | 018a done (master). 018b: all passes + Opus review (4 F fixed) + Sonnet re-check (clean; K1 closed). UAC-r2 condition (b): every checklist item PASS; REJECT on F1-1 only (OwnerUnresolved wording). Fix round 2 (29d06d80f3, 4510 passed): F1-1 passes `refusal.Detail` except no_default_team / acting_user_unresolved (gap above); K1 the defaults endpoint offers no assignee the caller cannot AppendTo (fail closed). UAC-r2 notes: K2 (map test checks codes, not kind+code), K3 (SecureRootAccessColumnsNeverMappedOfficeTests + SecureRootInheritanceWriterTests mismatch tests still build the dead core: 018c). #2253 (UAC): whichever merges second adds `WriteIdentity.AppOnly` to `DropAppOnlyRefusedRules` + must-fire test (access-deciding contact column dropped at create). #2124 Repair half = 052 criterion |
+| **Next Action** | (1) When the owner reports the dev creates: read-only MCP queries on dev for the newest sprk_matter / sprk_project rows by the owner (ownerid team, sprk_issecure, sprk_regardingrecordid + type, Assigned To, sprk_ai_search_index) and the newest work assignment (sprk_assignedattorney1 copied); report. (2) Unblock 017: ebilling #1911 (DRAFT) + reconcile, owner decisions in "Open items" 2 |
+| **018 progress** | COMPLETE. 018c deleted `OfficeRecordCreationService` + `CreateTimeFieldMapping.Apply`; `ResolveDefaultAssigneeAsync` moved to `IOfficeService`; guards updated (KnownCallSites 2, owner allow-list empty, census). Opus review: F3 fixed, K4 fixed, K2 known limit (cancellation seam test timing). Publish −21,556 B (37.73 MB). #2253 (UAC) carries `WriteIdentity.AppOnly` in `DropAppOnlyRefusedRules` + must-fire/must-not-fire tests (`RecordCreationServiceMappingSeamTests.AppOnlyAccessSets.cs`); nothing for this project |
+| **#2281 (out-of-task defect, fixed)** | PR #2282, merge **1fa0cf5cb8**. `sprk_targetfieldtype` uses the global set `sprk_fieldmappingtypes` (100000000+n, Currency 100000007); legacy rows and `sprk_sourcefieldtype` hold bare n. `FieldMappingColumns.NormalizeFieldType` reads both at the single rule read (`MapToFieldMappingRuleEntity`); Currency → Number. Client `describeError` shows the Xrm message. Ontology reviewed (no findings); dev check after the BFF deploy that carries it: Create Work Assignment from a matter with `sprk_assignedattorney1` copies it. Known limit: one bad column still voids the profile's client `$select` (task 035 deletes the engine). Seeder writing `1` = #2283, already fixed on the provisioning branch |
 | **CI note** | #2252 raised the Tier 1 arch job timeout to 10 min (merged). The Tier 2 ADR job (#2224) may still be cancelled by its timeout; read the log |
-| **Cleanup left for the owner** | Empty, unregistered folders (Remove-WorktreeSafe partial delete, "Permission denied"): `C:\code_files\spaarke\.claude\worktrees\agent-a10e5fe383a4dfcd2`, `...\agent-a80d401ebbcfb9d3e` |
+| **Cleanup left for the owner** | Empty, unregistered folders (Remove-WorktreeSafe partial delete, "Permission denied"): `C:\code_files\spaarke\.claude\worktrees\agent-a10e5fe383a4dfcd2`, `...\agent-a80d401ebbcfb9d3e`, `...\agent-a1ced7a9c67154b2b` (018c, merged) |
 
 ## 018 — what is decided (all in the 018 POML and notes/decisions.md)
 
@@ -51,7 +52,8 @@ FR-06 step 10, #1608 columns, the chat number, SystemPrincipal.
 - **After ANY master merge, run the full ArchTests AND the related suites.** Rebuild ArchTests first; a stale DLL gives
   false failures.
 - **Never run the unfiltered `Sprk.Bff.Api.Tests`** in an agent (the host reaches ~8 GB). Use the filtered set in
-  `scratchpad/v016/verify.sh`.
+  `projects/field-mapping-server-write-path-r1/scripts/verify-suites.sh <repo> <log-dir>`. Publish-size delta + CVE:
+  `scripts/publish-delta.ps1 -wt <worktree> -MasterSha <sha> -BranchSha <sha>` (same folder).
 - Call `Remove-WorktreeSafe.ps1` through PowerShell. If the delete is partial it leaves an unregistered folder; report it.
 - CI: the required checks are `Router` + `Client lint (type-aware ratchet)`. Router reports only after the slow Tier 2
   unit shards finish (~25 min). The Tier 2 ADR job may be CANCELLED by its 5-min timeout after passing (#2224); read
@@ -81,4 +83,4 @@ FR-06 step 10, #1608 columns, the chat number, SystemPrincipal.
 
 ## Next tasks
 
-018a PR → 018b → 018c → 019. 017 once unblocked. Then 033 (before 052), 040 (needs 005, 019), 050 (needs 019).
+019 once 017 lands. 017 once unblocked. Then 033 (before 052), 040 (needs 005, 019), 050 (needs 019).

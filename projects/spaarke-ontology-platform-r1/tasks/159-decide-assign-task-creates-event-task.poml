@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="159" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Decide lane "Assign Task" creates a sprk_event of type Task; the no-budget rule offers Add To Do and Assign Work as Next steps (D-178, UAT round 1)</title>
+    <phase>11 UAT</phase>
+    <gate>startable (D-178, owner 2026-10-22)</gate>
+    <status>in-progress (steps 1-2 done on branch task/159-assign-task; steps 3-4 pending: merge, R3 deploy, owner OK, apply v2, dev proof; see notes/task-159-notes.md)</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Adds a catalog action and an executor in Sprk.Bff.Api (.cs) and a new policy version.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>One executor on the existing ChildCreateExecutorBase, one catalog entry, one new policy version in config; exact references named.</model-tier-reason>
+    <effort>high</effort>
+    <deps>105 (UAT round 1)</deps>
+    <tags>bff,api,dataverse,testing</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+    <parallel-group>K</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Owner UAT round 1 (notes/uat-v4-log.md finding 2) on the Signal "This matter was created more than 5 days ago and has no active budget record": the only action, Assign Work, creates a sprk_workassignment. The owner: a Work Assignment is for creating a matter or a project; this decision should create a Task. A Task is a `sprk_event` whose `sprk_eventtype_ref` is the Task row. It is NOT a `sprk_todo`, and the two must not be conflated. The Next steps should offer both Add To Do (`sprk_todo`) and Assign Work (`sprk_workassignment`).</prompt>
+  <role>SPAARKE BFF engineer (Signals / decision actions).</role>
+  <goal>A new Decide-lane catalog action `assign-task` creates an open `sprk_event` of type Task under the core record, assigned to the chosen contact, as the caller. POL-MATTER-NOBUDGET gets version 2 with plan `{"actions":["assign-task"],"nextSteps":["add-todo","assign-work"]}`, applied to dev.</goal>
+
+  <context>
+    <background>D-178 in notes/decisions.md (changes D-51's Decide-lane action; the Know-promotion rule's trigger is unchanged). The catalog is `Services/Signals/Actions/DecisionActionCatalog.cs` (`assign-work` at :271 is the shape to copy: Decide lane, Judgement, ResolvesSignal, Gate Tier3). Executors are in `Services/Signals/Actions/DecisionActionExecutors.cs`. `ChildCreateExecutorBase` (:1015) supplies the ADR-024 regarding block, the create-privilege and AppendTo checks, and the created id. A subclass supplies Table, CreatePrivilege, AssigneeContact and BuildColumns. `CreateEventExecutor` (:1131) already creates a `sprk_event` this way with `CommunicationRecordAuthorizationFilter.CreateEventPrivilege` and `statuscode` Open. Event type Task = `sprk_eventtype_ref` row `124f5fc9-98ff-f011-8406-7c1e525abd8b`. That id is reference data shared across environments: it is used in `config/do-lane.policies.json`, `infra/dataverse/sprk_playbookconsumer-rows.json` and `Services/Ai/Nodes/ActionCore/TaskActionCore.cs:68`. The event's assignee column is `sprk_assignedto`, a contact (TaskActionCore :295-300). The policy lives in `config/know-promotion.policies.json` and is applied by `scripts/Apply-DoLanePolicies.ps1 -DefinitionPath config/know-promotion.policies.json`, an idempotent upsert by fixed ids. Versions are immutable (FR-49 / D-14): a changed plan is a NEW version entry.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Signals/Actions/DecisionActionCatalog.cs (:133-280 Declared; :271 assign-work)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Signals/Actions/DecisionActionExecutors.cs (:1015 ChildCreateExecutorBase; :1131 CreateEventExecutor; :1170 AssignWorkExecutor)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/SignalsModule.cs:99-113 (executor registrations)</file>
+      <file>config/know-promotion.policies.json (POL-MATTER-NOBUDGET, version 1 `…6311`)</file>
+      <file>scripts/Apply-DoLanePolicies.ps1</file>
+      <file>REFERENCE TO COPY: CreateEventExecutor (columns, privilege, Open status) + AssignWorkExecutor (Person assignee, description first line as name)</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>assign-work creates a work assignment; CreateEventExecutor creates an untyped event; TaskActionCore creates a Task event but is AI-pipeline internal.</existing>
+    <extension>One more ChildCreateExecutorBase subclass and one catalog row. CreateEventExecutor cannot be reused because it is a Next step with no assignee or type, and the Signals path must not call Services/Ai internals (BFF hygiene, PublicContracts facade).</extension>
+    <cost-of-doing-nothing>The no-budget decision keeps creating a Work Assignment, which the owner rejected as the wrong record type.</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="D-178">`assign-task`: label "Assign Task"; PlanLane Decide; IsNextStep false; RecordClass Judgement; ResolvesSignal true; Gate Tier3; parameters `assignee` (Person, required), `description` (TextArea, required), `dueDate` (Date, optional). Effect line: "Creates a task (an event of type Task) linked to the record, assigned to the person above, when the decision is recorded."</constraint>
+    <constraint source="D-178">Columns: `sprk_eventname` = first line of description (≤200 chars, as AssignWorkExecutor); `sprk_description`; `sprk_duedate` when given (yyyy-MM-dd); `statuscode` = Open (659490001); `sprk_eventtype_ref@odata.bind` = the Task row; `sprk_assignedto@odata.bind` = the contact. Written as the caller through the existing route core (no app-only write).</constraint>
+    <constraint source="project">The Task event-type id is one shared constant inside Signals or Spaarke.Dataverse. Reuse an existing one if it exists there. Do NOT reference `Services/Ai/**` from Signals.</constraint>
+    <constraint source="D-178">`assign-work` and `add-todo` stay as they are. `assign-work` remains usable as a Decide action on other plans and as a Next step. Grep non-test code for `assign-work` (found in OntologyAdminAuthoringService.cs, the catalog, the executors, the communication reconciliation web resource, quickSummaryConfig.ts, WelcomeStartCards.tsx and QuickStartModal.tsx) and record keep/fix for each in task notes. The Console quick-start "Assign Work" entries are a different feature; keep them.</constraint>
+    <constraint source="FR-49 / D-14">Add version 2 to POL-MATTER-NOBUDGET in config/know-promotion.policies.json: a new versionId, versionNumber 2, the same rule body and template, proposedAction "assign-task: assign someone to set up this matter's budget.", decisionPlan as in the goal, and currentVersion 2. Version 1 is not edited. Check that Apply-DoLanePolicies.ps1 stamps v1's in-force-to and moves the pointer; if it does not, STOP and report (do not hand-edit Dataverse).</constraint>
+    <constraint source="owner">Applying v2 to dev changes a live, enabled policy: show the owner the `-WhatIf` output and apply only after the owner's OK in this session.</constraint>
+    <constraint source="CLAUDE.md §10">BFF hygiene: publish-size delta against a fresh master build, full ArchTests (RecordOwnerAssignmentCensusTests: add a census row if the new create needs one), no unfiltered Sprk.Bff.Api.Tests.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files.</step>
+    <step order="1">Failing tests first: catalog entry shape; executor columns (with and without dueDate); refused without the create privilege or AppendTo on the contact; the plan `{"actions":["assign-task"],"nextSteps":["add-todo","assign-work"]}` resolves for Decide; KnowPromotionPolicyDefinitionTests for v2.</step>
+    <step order="2">Catalog entry, executor, DI registration; config v2.</step>
+    <step order="3">Merge via PR into docs; R3 deploys the dev BFF (we never do). After the deploy and the owner's OK, run Apply-DoLanePolicies.ps1 for know-promotion with -WhatIf, then for real.</step>
+    <step order="4">On dev: re-evaluate (or wait for nightly). Open a no-budget item, assign a task to a contact, add an Add To Do Next step, and record. Check the event (type Task, Open, assignee, regarding the matter), the To Do, and the Decision Record's steps and followons. Delete the zz- test rows.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a taken `assign-task` with assignee and description, then one `sprk_event` is created with `sprk_eventtype_ref` = Task, `statuscode` Open, `sprk_assignedto` = the contact, the regarding block for the core record, and name = the description's first line; its id is in the step's written list.</criterion>
+    <criterion testable="true">Given no create privilege on sprk_event, or no AppendTo on the contact, then preflight refuses and nothing is written (must-not-fire on success).</criterion>
+    <criterion testable="true">The v2 plan resolves for the Decide lane; a plan naming `assign-task` as a Next step is refused `action_not_allowed`.</criterion>
+    <criterion testable="true">Version 1 of POL-MATTER-NOBUDGET is unchanged in config; v2 is a new entry.</criterion>
+    <criterion testable="true">On dev, a recorded no-budget decision creates the Task event and, when chosen, the To Do and Work Assignment, each listed in sprk_followons. Recorded in notes/deploy-log.md; zz- rows deleted.</criterion>
+    <criterion testable="true">Test scope: the cases above. Anything beyond needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If `sprk_assignedto` on sprk_event is not a contact lookup on dev, or the Task row id differs on dev, STOP and report.</trigger>
+    <trigger>If any code keys D-51's Know-promotion or suppression on the action code `assign-work`, STOP and report before changing it.</trigger>
+  </escalation>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/uat-v4-log.md</file>
+    </files>
+  </knowledge>
+</task>

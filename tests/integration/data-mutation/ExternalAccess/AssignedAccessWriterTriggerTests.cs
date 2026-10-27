@@ -1,6 +1,11 @@
+using System.Net;
+using System.Net.Http.Json;
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Moq;
@@ -15,7 +20,7 @@ using Sprk.Bff.Api.Services.Ai.Handlers;
 using Sprk.Bff.Api.Services.Ai.Nodes;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.ExternalAccess;
-using Sprk.Bff.Api.Services.Office;
+using Sprk.Bff.Api.Tests.Api.Office;
 using Sprk.Bff.Api.Tests.Services.Ai.Handlers;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
@@ -52,50 +57,72 @@ public sealed class AssignedAccessWriterTriggerTests : TypedToolHandlerTestFixtu
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
-    // RecordCreationService (Office quick-create: matter, project) — incl. owner A7: the maker is assigned
+    // Office quick-create (matter, project) through the unified RecordCreationService — incl. owner A7: the maker is
+    // assigned. Field mapping task 018c: driven over the Office route (the deleted Office core's tests, re-pointed).
     // ─────────────────────────────────────────────────────────────────────────────
 
-    private OfficeRecordCreationService OfficeCreator(Guid createdId, Guid? makersContact, AssignedAccessMaterializer? materializer = null)
+    /// <summary>
+    /// The Office contract host with the harness's materializer in DI (what step 12 resolves), every user's linked contact
+    /// <paramref name="makersContact"/>, and the unified create's step-11 write landing in the harness's ledger — what
+    /// Dataverse stores: the created row's Assigned column, as the materializer reads it back. Returns the created rows.
+    /// </summary>
+    private WebApplicationFactory<Program> OfficeHost(
+        OfficeQuickCreateTestWebAppFactory factory, Guid makersContact, List<(string Table, Guid Id)> created)
     {
-        var entities = new Mock<IGenericEntityService>(MockBehavior.Loose);
-        entities.Setup(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
-            .Callback<Entity, CancellationToken>((e, _) =>
+        factory.CallerResolver
+            .Setup(r => r.ResolveAsync(It.IsAny<System.Security.Claims.ClaimsPrincipal>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Sprk.Bff.Api.Services.Ai.Context.CallerSystemUserResolution.Resolved(OfficeQuickCreateWorld.FieldsCaller.ToString("D")));
+        factory.CallerDataverse.WithRow("contact", makersContact); // the maker default is AppendTo-checked as the caller
+        factory.FieldMappings
+            .Setup(m => m.UpdateRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(),
+                It.IsAny<Guid?>()))
+            .Callback<string, Guid, Dictionary<string, object?>, CancellationToken, Guid?>((table, id, fields, _, _) =>
             {
-                // What Dataverse stores: the created row's Assigned column, as the materializer will read it back.
-                if (e.Attributes.TryGetValue("sprk_assignedtointernal", out var v) && v is EntityReference r)
-                    _h.Store.Assign(e.LogicalName == "sprk_matter" ? ExternalGrantRootType.Matter : ExternalGrantRootType.Project,
-                        createdId, "sprk_assignedtointernal", r.Id);
+                created.Add((table, id));
+                var root = table == "sprk_matter" ? ExternalGrantRootType.Matter : ExternalGrantRootType.Project;
+                if (fields.TryGetValue("sprk_AssignedToInternal@odata.bind", out var bind)
+                    && (bind is JsonElement { ValueKind: JsonValueKind.String } json ? json.GetString() : bind as string) is { } path
+                    && Guid.TryParse(path.TrimEnd(')').Split('(').Last(), out var contact))
+                {
+                    _h.Store.Assign(root, id, "sprk_assignedtointernal", contact);
+                }
                 else
-                    _h.Store.Root(e.LogicalName == "sprk_matter" ? ExternalGrantRootType.Matter : ExternalGrantRootType.Project, createdId);
+                {
+                    _h.Store.Root(root, id);
+                }
             })
-            .ReturnsAsync(createdId);
+            .Returns(Task.CompletedTask);
+        factory.Entities
+            .Setup(e => e.RetrieveAsync(
+                It.Is<string>(t => t == "sprk_matter" || t == "sprk_project"), It.IsAny<Guid>(),
+                It.Is<string[]>(columns => columns.Length == 1), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string table, Guid id, string[] columns, CancellationToken _) => new Entity(table, id) { [columns[0]] = "NUM-142" });
 
-        var ownership = new Mock<IRecordOwnershipResolver>();
-        ownership.Setup(o => o.ResolveOwningTeamAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Guid.NewGuid());
-
-        return new OfficeRecordCreationService(
-            entities.Object, new Mock<IFieldMappingDataverseService>().Object, ownership.Object,
-            IdentityNormalizationFixtures.WithContact(makersContact).Object, Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(), materializer ?? _h.Materializer,
-            NullLogger<OfficeRecordCreationService>.Instance);
+        var identity = IdentityNormalizationFixtures.WithContact(makersContact);
+        return factory.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
+        {
+            services.RemoveAll<Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService>();
+            services.AddSingleton(identity.Object);
+            services.RemoveAll<AssignedAccessMaterializer>();
+            services.AddScoped(_ => _h.Materializer);
+        }));
     }
 
     [Theory]
-    [InlineData(QuickCreateEntityType.Matter, "sprk_matter")]
-    [InlineData(QuickCreateEntityType.Project, "sprk_project")]
-    public async Task OfficeQuickCreate_SharesTheRecordWithItsAssignedMaker_BeforeItReturns(
-        QuickCreateEntityType type, string table)
+    [InlineData("matter", "sprk_matter")]
+    [InlineData("project", "sprk_project")]
+    public async Task OfficeQuickCreate_SharesTheRecordWithItsAssignedMaker_BeforeItReturns(string type, string table)
     {
-        var createdId = Guid.NewGuid();
         var (makersContact, makerUser) = _h.LinkedContact();
+        var created = new List<(string Table, Guid Id)>();
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        using var host = OfficeHost(factory, makersContact, created);
 
-        var result = await OfficeCreator(createdId, makersContact).CreateAsync(new RecordCreationRequest
-        {
-            EntityType = type, Name = "Quick", CallerUserId = "maker-oid", OwnerSystemUserId = makerUser.ToString("D"),
-        });
+        var response = await host.CreateClient().PostAsJsonAsync($"/api/office/quickcreate/{type}", new QuickCreateRequest { Name = "Quick" });
 
-        result.Succeeded.Should().BeTrue();
-        result.RecordId.Should().Be(createdId);
+        response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
+        var createdId = created.Should().ContainSingle().Subject.Id;
         _h.Shares.MaskOf(table, createdId, DataversePrincipalRef.User(makerUser)).Should().NotBeNull(
             "owner A7: the maker is assigned, and the Assigned-To share is issued inline (R3 'immediate')");
         _h.Store.RowsOf(createdId, makersContact).Should().ContainSingle().Which.State.Should().Be(AssignedAccessState.Shared);
@@ -104,17 +131,16 @@ public sealed class AssignedAccessWriterTriggerTests : TypedToolHandlerTestFixtu
     [Fact]
     public async Task OfficeQuickCreate_AMaterializerFault_NeverFailsTheCreate()
     {
-        var createdId = Guid.NewGuid();
-        var (makersContact, makerUser) = _h.LinkedContact();
+        var (makersContact, _) = _h.LinkedContact();
         _h.Store.FailLedgerRead = true;
+        var created = new List<(string Table, Guid Id)>();
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        using var host = OfficeHost(factory, makersContact, created);
 
-        var result = await OfficeCreator(createdId, makersContact).CreateAsync(new RecordCreationRequest
-        {
-            EntityType = QuickCreateEntityType.Matter, Name = "Quick", CallerUserId = "maker-oid",
-            OwnerSystemUserId = makerUser.ToString("D"),
-        });
+        var response = await host.CreateClient().PostAsJsonAsync("/api/office/quickcreate/matter", new QuickCreateRequest { Name = "Quick" });
 
-        result.Succeeded.Should().BeTrue("the job repairs it within minutes");
+        response.StatusCode.Should().Be(HttpStatusCode.Created, "the job repairs it within minutes");
+        created.Should().ContainSingle();
         _h.Shares.Writes.Should().BeEmpty();
     }
 

@@ -61,9 +61,10 @@ public static class TodoSourceAccessFilterExtensions
 /// task pane already treats this route's 403 as an ordinary create failure (see the pane note below), so no
 /// client changes.</para>
 ///
-/// <para><b>Timing.</b> Both halves of the pair travel the same path: a non-existent record and an
-/// invisible one each make <c>RetrievePrincipalAccess</c> answer 404, which the probe retries on its
-/// replication-lag schedule before denying. So they share a timing class as well as a body.</para>
+/// <para><b>Timing.</b> Both halves of the pair travel the same path: the source is asked through
+/// <see cref="CallerRecordAccessProbe.GetCallerRightsForAuthorizationGateAsync"/>, so a non-existent record
+/// (<c>RetrievePrincipalAccess</c> 404) and an invisible one (403) are both re-asked on the probe's
+/// replication-lag schedule before denying. So they share a timing class as well as a body (#2137).</para>
 ///
 /// <para><b>What is shared (CLAUDE.md §11).</b> The SAME <see cref="CallerRecordAccessProbe"/> (OBO
 /// <c>RetrievePrincipalAccess</c>), the SAME <c>read</c> key in <see cref="OperationAccessPolicy"/>, the
@@ -181,7 +182,7 @@ public sealed class TodoSourceAccessFilter : IEndpointFilter
             AccessRights rights;
             try
             {
-                rights = await _probe.GetCallerRightsAsync(
+                rights = await _probe.GetCallerRightsForAuthorizationGateAsync(
                     callerToken, entitySet, recordId, httpContext.RequestAborted);
             }
             catch (OperationCanceledException) when (httpContext.RequestAborted.IsCancellationRequested)

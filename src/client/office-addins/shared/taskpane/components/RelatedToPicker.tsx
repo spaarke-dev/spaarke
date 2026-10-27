@@ -121,6 +121,13 @@ const useStyles = makeStyles({
   fieldWarning: { color: tokens.colorPaletteDarkOrangeForeground1, fontSize: tokens.fontSizeBase200 },
 });
 
+/**
+ * Task 133: how a type reads on screen when its identifier is not already words. Every other type shows as itself
+ * ("Matter", "Project", "Invoice"), exactly as before.
+ */
+const ENTITY_TYPE_LABELS: Partial<Record<EntityType, string>> = { WorkAssignment: 'Work Assignment' };
+const typeLabel = (type: EntityType): string => ENTITY_TYPE_LABELS[type] ?? type;
+
 /** A list that has not been provided: not loading, no error, no rows (the form then says none are available). */
 const EMPTY_LIST: ReferenceListState = { options: [], loading: false, error: null, retry: () => undefined };
 
@@ -316,7 +323,7 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
       // from a prior, different query (so they don't linger under this query's error) and show the
       // error + a Retry instead of a silent empty list.
       setSearchResults([]);
-      setSearchError(err instanceof Error ? err.message : `Couldn't search for ${selectedType} records.`);
+      setSearchError(err instanceof Error ? err.message : `Couldn't search for ${typeLabel(selectedType)} records.`);
     } finally {
       setSearching(false);
     }
@@ -330,7 +337,10 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
   const renderCard = (rec: EntitySearchResult, opts: { confidence?: number; keyPrefix?: string }) => {
     const selected = value !== null && sameRecord(rec, value);
     const key = `${opts.keyPrefix ?? ''}${rec.logicalName}:${rec.id}`;
-    const meta = opts.confidence != null ? `${rec.entityType} · ${pct(opts.confidence)}% match` : rec.entityType;
+    const meta =
+      opts.confidence != null
+        ? `${typeLabel(rec.entityType)} · ${pct(opts.confidence)}% match`
+        : typeLabel(rec.entityType);
     if (rec.canFile === false) {
       return (
         <Card key={key} className={styles.card} disabled aria-disabled="true" tabIndex={-1}>
@@ -442,7 +452,7 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
                 role="radio"
                 aria-checked={selected}
               >
-                {type}
+                {typeLabel(type)}
               </Button>
             );
           })}
@@ -495,10 +505,10 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
             onKeyDown={e => {
               if (e.key === 'Enter') void runSearch();
             }}
-            placeholder={`Look up related ${selectedType}...`}
+            placeholder={`Look up related ${typeLabel(selectedType)}...`}
             disabled={disabled}
             style={{ flexGrow: 1 }}
-            aria-label={`Search ${selectedType} records`}
+            aria-label={`Search ${typeLabel(selectedType)} records`}
           />
           <Button
             appearance="subtle"
@@ -546,7 +556,9 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
             typeMatches.map(c => renderCard(c, { confidence: c.confidence }))
           ) : (
             <Text size={200} className={styles.emptyNote}>
-              No suggested {selectedType} matches — search above or create a new record.
+              {/* Task 133: "or create" only where "+ New" exists (the Invoice view's pickers have none). */}
+              No suggested {typeLabel(selectedType)} matches — search above
+              {onCreateRecord ? ' or create a new record' : ''}.
             </Text>
           )}
         </div>

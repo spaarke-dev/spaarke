@@ -82,6 +82,13 @@ public sealed class BicepDeployOutputs
     /// </summary>
     public required string ContentSafetyEndpoint { get; init; }
 
+    /// <summary>
+    /// Customer storage account blob endpoint (ARM output <c>storagePrimaryEndpoint</c>) — written to
+    /// <see cref="Sprk.Provisioning.ControlPlane.Models.InterStepState.StorageBlobEndpoint"/> and set by H4b as the
+    /// BFF's <c>SessionFileStore__BlobEndpoint</c> (T186 follow-up). Not a secret: managed identity only.
+    /// </summary>
+    public required string StorageBlobEndpoint { get; init; }
+
     /// <summary>Whether SignalR was deployed this run (mirrors <see cref="BicepDeployRequest.SignalREnabled"/>; downstream handlers may read to skip SignalR-touching steps when off).</summary>
     public required bool SignalRDeployed { get; init; }
 }

@@ -565,7 +565,7 @@ public class DataverseAccessDataSource : IAccessDataSource
     {
         try
         {
-            var url = $"{entitySetName}({recordId})?$select=createdon";
+            var url = $"{DataverseIdentifier.RequireTableName(entitySetName, nameof(entitySetName))}({recordId})?$select=createdon";
 
             using var requestMessage = new HttpRequestMessage(HttpMethod.Get, url)
             {
@@ -791,7 +791,7 @@ public class DataverseAccessDataSource : IAccessDataSource
             // The function is bound to the PRINCIPAL; Target names the record. The response carries a
             // comma-separated rights string ("ReadAccess,WriteAccess,AppendToAccess,...") — exactly the
             // shape MapDataverseAccessRights and PrincipalAccessResponse were written to consume.
-            var target = $"{{\"@odata.id\":\"{entitySetName}({resourceId})\"}}";
+            var target = $"{{\"@odata.id\":\"{DataverseIdentifier.RequireTableName(entitySetName, nameof(entitySetName))}({resourceId})\"}}";
             var url = $"systemusers({userId})/Microsoft.Dynamics.CRM.RetrievePrincipalAccess(Target=@p1)"
                       + $"?@p1={Uri.EscapeDataString(target)}";
 

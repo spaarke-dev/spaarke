@@ -349,7 +349,7 @@ public sealed partial class SecureRootInheritance
 
     internal const string PairIdColumn = "sprk_regardingrecordid";
     internal const string PairTypeColumn = "sprk_regardingrecordtype";
-    private const string RecordTypeRefEntity = "sprk_recordtype_ref";
+    internal const string RecordTypeRefEntity = "sprk_recordtype_ref"; // #2253 fix round 3 (F3): refused whole (AccessTables)
     private const string RecordTypeLogicalNameColumn = "sprk_recordlogicalname";
     private const string IsSecureColumn = "sprk_issecure";
     private const string AccessPermissionColumn = "sprk_accesspermission"; // task 174: read with the flag (round 84)

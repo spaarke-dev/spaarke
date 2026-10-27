@@ -98,12 +98,22 @@ public class DocumentBffOwnedColumnAppOnlyWriterTests
     [InlineData("sprk_todo")]
     [InlineData("sprk_event")]
     [InlineData("sprk_communication")]
-    [InlineData("sprk_communicationattachment")]
     [InlineData("sprk_matter")]
-    [InlineData(null)]
+    // #2253 fix round 1 (F1-a): a null table is no longer "another table"; it is refused as no table name at all
+    // (AccessTableAppOnlyWriterTests.ATableThatIsNotAnIdentifier_IsRefusedFirst_ForEveryIdentity).
     public void EveryOwnedColumn_IsNotRefusedOnAnotherTable(string? table)
     {
         InheritedAccessPermission.RefuseAppOnlyWrite(table, Owned).Should().BeNull();
+    }
+
+    [Fact]
+    public void AnAttachmentsFilePointer_IsRefusedAsAnAccessColumn_NotAsADocumentColumn()
+    {
+        // #2253 fix round 3 (K): sprk_communicationattachment's sprk_graphdriveid / sprk_graphitemid name the bytes the row
+        // points at, so they are refused per column on that table (AccessColumns); its other columns are not.
+        InheritedAccessPermission.RefuseAppOnlyWrite("sprk_communicationattachment", ["sprk_graphitemid"])?.RefusalCode
+            .Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode);
+        InheritedAccessPermission.RefuseAppOnlyWrite("sprk_communicationattachment", ["sprk_filepath"]).Should().BeNull();
     }
 
     [Fact]
@@ -219,7 +229,7 @@ public class DocumentBffOwnedColumnAppOnlyWriterTests
             new UpdateRecordActionInput(
                 "sprk_document", Row, FieldMappings: null,
                 LegacyFields: new Dictionary<string, string?> { ["sprk_filepath"] = "https://example/x.pdf" },
-                Lookups: null, ImpersonateSystemUserId: user),
+                Lookups: null, ImpersonateSystemUserId: user, PayloadSource: UpdateRecordPayloadSource.ConfirmedProposal),
             CancellationToken.None);
 
         _writes.Verify(w => w.UpdateRecordFieldsAsync(

@@ -58,6 +58,12 @@ internal static class ExternalOrganizationMembership
 {
     internal const string EntitySet = "sprk_contactorganizations";
 
+    /// <summary>
+    /// The membership table's logical name (#2251: the app-only generic writers refuse it whole,
+    /// <c>InheritedAccessPermission.AccessTables</c>).
+    /// </summary>
+    internal const string EntityLogicalName = "sprk_contactorganization";
+
     internal const string MemberSelect = "_sprk_contact_value";
 
     /// <summary>

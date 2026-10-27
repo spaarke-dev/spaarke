@@ -115,6 +115,8 @@ public sealed class H2aBicepInfraDeployHandlerTests
         repo.LastWrittenRun.InterStepState.RedisEndpoint.Should().Be("sprk-acme-prod-redis.westus2.redis.azure.net:10000");
         // Task 246 — the Content Safety endpoint H4b sets as AiSafety__ContentSafety__Endpoint.
         repo.LastWrittenRun.InterStepState.ContentSafetyEndpoint.Should().Be("https://sprk-acme-prod-contentsafety.cognitiveservices.azure.com/");
+        // T186 follow-up - the storage blob endpoint H4b sets as SessionFileStore__BlobEndpoint.
+        repo.LastWrittenRun.InterStepState.StorageBlobEndpoint.Should().Be("https://sprkacmeprod.blob.core.windows.net/");
 
         // Each collaborator called exactly once.
         runner.CallCount.Should().Be(1);
@@ -361,6 +363,8 @@ public sealed class H2aBicepInfraDeployHandlerTests
 
         result.Should().BeOfType<HandlerResult.Success>();
         nameProbe.CallCount.Should().Be(1);
+        nameProbe.LastRequest!.ResourceGroupName.Should().Be("rg-spaarke-acme-prod",
+            "the probe recognises the stamp's own names in customer.bicep's resource group (T186 L23)");
         runner.CallCount.Should().Be(1);
     }
 
@@ -659,6 +663,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
             ServiceBusFullyQualifiedNamespace = "ns.servicebus.windows.net",
             RedisEndpoint = "r.westus2.redis.azure.net:10000",
             ContentSafetyEndpoint = "https://cs.cognitiveservices.azure.com/",
+            StorageBlobEndpoint = "https://x.blob.core.windows.net/",
             SignalRDeployed = false,
         };
         var runner = FakeBicepDeployRunner.Success(incomplete);
@@ -679,6 +684,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
     [InlineData(nameof(BicepDeployOutputs.ServiceBusFullyQualifiedNamespace))]
     [InlineData(nameof(BicepDeployOutputs.RedisEndpoint))]
     [InlineData(nameof(BicepDeployOutputs.ContentSafetyEndpoint))]
+    [InlineData(nameof(BicepDeployOutputs.StorageBlobEndpoint))]
     public async Task RunnerReturnsBlankStampOutput_FailsQuarantineRequired_NamingTheField(string blankField)
     {
         // Task 245a: the three outputs H2a now persists for downstream handlers are
@@ -703,6 +709,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
                 ? "" : complete.ServiceBusFullyQualifiedNamespace,
             RedisEndpoint = blankField == nameof(BicepDeployOutputs.RedisEndpoint) ? "" : complete.RedisEndpoint,
             ContentSafetyEndpoint = blankField == nameof(BicepDeployOutputs.ContentSafetyEndpoint) ? "" : complete.ContentSafetyEndpoint,
+            StorageBlobEndpoint = blankField == nameof(BicepDeployOutputs.StorageBlobEndpoint) ? "" : complete.StorageBlobEndpoint,
             SignalRDeployed = false,
         };
         var handler = BuildHandler(repo, FakeBicepDeployRunner.Success(outputs), FakeArmKeyVaultRefProbe.Match(),
@@ -973,6 +980,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
         ServiceBusFullyQualifiedNamespace = "spaarke-acme-prod-sbus.servicebus.windows.net",
         RedisEndpoint = "sprk-acme-prod-redis.westus2.redis.azure.net:10000",
         ContentSafetyEndpoint = "https://sprk-acme-prod-contentsafety.cognitiveservices.azure.com/",
+        StorageBlobEndpoint = "https://sprkacmeprod.blob.core.windows.net/",
         SignalRDeployed = signalRDeployed,
     };
 

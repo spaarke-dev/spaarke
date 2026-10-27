@@ -127,7 +127,7 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
         return $"{SprkDocumentCreateBlockedMessage} Open the correct path now: [Document Upload wizard]({url})";
     }
 
-    [GeneratedRegex(@"^[a-z][a-z0-9_]*$")]
+    [GeneratedRegex(@"^[a-z][a-z0-9_]*\z")]
     private static partial Regex LogicalNameRegex();
 
     /// <summary>

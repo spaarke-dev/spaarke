@@ -177,6 +177,46 @@ public sealed class WorkerCredentialSelectionOptions
     /// false and an empty secret slot is the SIGNAL (auth-v4 §9.1 — never a
     /// sentinel).
     /// </summary>
+    /// <summary>
+    /// T186 audit: how long the FIRST token exchange waits for Entra to propagate a just-created app registration /
+    /// federated identity credential (AADSTS70025, AADSTS700211/700212/700213, AADSTS700016 — and only those; see
+    /// <see cref="EntraPropagationRetry"/>). <see cref="TimeSpan.Zero"/> disables the wait. Default 10 minutes.
+    /// </summary>
+    public TimeSpan EntraPropagationTimeout { get; set; } = TimeSpan.FromMinutes(10);
+
+    /// <summary>Delay between token-exchange attempts while waiting out Entra propagation. Default 15 seconds.</summary>
+    public TimeSpan EntraPropagationRetryInterval { get; set; } = TimeSpan.FromSeconds(15);
+
+    /// <summary>
+    /// T186 audit: how long the FIRST Dataverse call(s) wait for the application user (H10) and its security role to
+    /// become effective, retrying 401/403 only (see <see cref="DataverseAppUserPropagationGate"/>). One budget per
+    /// operation. <see cref="TimeSpan.Zero"/> disables the wait. Default 10 minutes.
+    /// </summary>
+    public TimeSpan DataverseAppUserPropagationTimeout { get; set; } = TimeSpan.FromMinutes(10);
+
+    /// <summary>Delay between first-call attempts while waiting out application-user propagation. Default 15 seconds.</summary>
+    public TimeSpan DataverseAppUserPropagationRetryInterval { get; set; } = TimeSpan.FromSeconds(15);
+
+    /// <summary>Fail-fast shape check of the propagation budgets (called from the owning options' <c>Validate</c>).</summary>
+    internal void ValidatePropagation(string sectionName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sectionName);
+        Check(nameof(EntraPropagationTimeout), EntraPropagationTimeout, positive: false);
+        Check(nameof(EntraPropagationRetryInterval), EntraPropagationRetryInterval, positive: true);
+        Check(nameof(DataverseAppUserPropagationTimeout), DataverseAppUserPropagationTimeout, positive: false);
+        Check(nameof(DataverseAppUserPropagationRetryInterval), DataverseAppUserPropagationRetryInterval, positive: true);
+
+        void Check(string name, TimeSpan value, bool positive)
+        {
+            if (value < TimeSpan.Zero || (positive && value == TimeSpan.Zero) || value > TimeSpan.FromHours(1))
+            {
+                throw new InvalidOperationException(
+                    $"Configuration '{sectionName}:Credentials:{name}' must be {(positive ? "greater than zero" : "zero or more")} " +
+                    $"and at most 1 hour (actual: {value}).");
+            }
+        }
+    }
+
     internal bool ClientSecretIsRequiredFirst(string sectionName)
         => ResolveEffectiveOrder(sectionName)[0] == CredentialKind.ClientSecret;
 }

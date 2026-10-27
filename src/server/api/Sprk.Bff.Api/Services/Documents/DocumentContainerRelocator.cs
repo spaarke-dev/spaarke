@@ -176,8 +176,8 @@ public sealed class DocumentContainerRelocator
     /// <summary>#2159 B4: when it was checked out (cleared at check-in, with <see cref="CheckedOutByColumn"/>).</summary>
     internal const string CheckedOutDateColumn = "sprk_checkedoutdate";
     private const string DocumentIdColumn = "sprk_documentid";
-    private const string DriveColumn = "sprk_graphdriveid";
-    private const string ItemColumn = "sprk_graphitemid";
+    internal const string DriveColumn = "sprk_graphdriveid";
+    internal const string ItemColumn = "sprk_graphitemid";
     private const string FilePathColumn = "sprk_filepath";
     private const string HasFileColumn = "sprk_hasfile";
     private const string FileNameColumn = "sprk_filename";
@@ -185,9 +185,9 @@ public sealed class DocumentContainerRelocator
     private const string SearchIndexNameColumn = "sprk_searchindexname";
     private const string ParentDocumentColumn = "sprk_parentdocument";
     private const string ParentItemColumn = "sprk_parentgraphitemid";
-    private const string AttachmentEntity = "sprk_communicationattachment";
-    private const string AttachmentDocumentColumn = "sprk_document";
-    private const string AttachmentCommunicationColumn = "sprk_communication";
+    internal const string AttachmentEntity = "sprk_communicationattachment";
+    internal const string AttachmentDocumentColumn = "sprk_document";
+    internal const string AttachmentCommunicationColumn = "sprk_communication";
 
     /// <summary>
     /// The row's OWN legacy columns that hold its file's drive or item (live <c>sprk_document</c> metadata, spaarkedev1

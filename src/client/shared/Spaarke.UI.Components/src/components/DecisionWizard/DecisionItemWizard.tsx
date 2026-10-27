@@ -40,10 +40,11 @@ import {
 } from './decisionDraft';
 import type { Decision, ItemDraft, StepScope } from './decisionDraft';
 import { DecisionItemContext } from './decisionItemContext';
-import type { DecisionItemContextValue, DecisionLookup } from './decisionItemContext';
+import type { DecisionItemContextValue, DecisionLookup, DecisionOpenLookupForItem } from './decisionItemContext';
 import type {
   DecisionCommitFailure,
   DecisionCommitResult,
+  DecisionOpenRecord,
   DecisionPlan,
   DecisionResolution,
   DecisionWizardItem,
@@ -106,6 +107,10 @@ export interface DecisionItemWizardProps {
   /** Post the one review. Resolves when the attempt is over (recorded or failed); never rejects. */
   onRecord: () => Promise<void>;
   lookup: DecisionLookup | null;
+  /** The host's side-pane lookup with the item's core already filled in (D-182); null keeps the inline type-ahead. */
+  openLookup?: DecisionOpenLookupForItem | null;
+  /** The host's open-record-in-a-modal (D-182); absent: the subject is plain text. */
+  openRecord?: DecisionOpenRecord | null;
   /** Other open items left in the browse list after this one closed; null when unknown. */
   openItemsLeft: number | null;
   /** Go to the next open item; undefined when there is none. */
@@ -206,6 +211,8 @@ export const DecisionItemWizard: React.FC<DecisionItemWizardProps> = ({
   recording,
   onRecord,
   lookup,
+  openLookup = null,
+  openRecord = null,
   openItemsLeft,
   onNextOpenItem,
   nav,
@@ -418,6 +425,8 @@ export const DecisionItemWizard: React.FC<DecisionItemWizardProps> = ({
     closedIds,
     recordResult,
     lookup,
+    openLookup,
+    openRecord,
     openItemsLeft,
     today,
   };

@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useEffect, useRef, useState, useCallback } from 'react';
+import React, { Suspense, lazy, useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { FluentProvider, Spinner, MessageBar, MessageBarBody, makeStyles, tokens } from '@fluentui/react-components';
 import { authService } from '@shared/services';
 import type { IHostAdapter, IHostContext } from '@shared/adapters';
@@ -14,6 +14,14 @@ import { ShareView } from './components/views/ShareView';
 import { StatusView } from './components/views/StatusView';
 import { SignInView } from './components/views/SignInView';
 import { CreateTodoView } from './components/views/CreateTodoView';
+import { InvoiceView } from './components/views/InvoiceView';
+import {
+  createInvoiceSubmitHandler,
+  hostAdapterInvoiceEmailSource,
+  loadInvoiceFirms,
+} from './services/invoiceSubmissionService';
+import type { InvoiceSubmissionTarget } from './services/invoiceSubmissionSeam';
+import type { InitialAction } from './initialAction';
 import { FindView, type FindItemNoun } from './components/views/FindView';
 import type {
   SavedTodoContext,
@@ -182,9 +190,11 @@ export interface AppProps {
   /**
    * Initial action discriminator read from the host's URL / launch context.
    * 'createTodo' (from the ribbon `?action=createTodo` deep-link) selects the
-   * Create To Do tab on open. Default: undefined → the default `initialTab`.
+   * Create To Do tab on open. 'submitInvoice' (task 133, the Outlook ribbon's
+   * `?action=submitInvoice`) opens the Invoice view — the ONLY way to reach it.
+   * Default: undefined → the default `initialTab`.
    */
-  initialAction?: 'createTodo';
+  initialAction?: InitialAction;
 }
 
 export const App: React.FC<AppProps> = ({
@@ -209,8 +219,11 @@ export const App: React.FC<AppProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [, setHostContext] = useState<IHostContext | null>(null);
+  // Task 133: true while the Invoice view runs a submission or shows a result that carries a tracking number. The tab
+  // bar is hidden then, so a tab press cannot unmount the view and lose either. Only the Invoice tab sets it.
+  const [invoiceBusy, setInvoiceBusy] = useState(false);
   const [currentTab, setCurrentTab] = useState<NavigationTab>(
-    initialAction === 'createTodo' ? 'createTodo' : initialTab
+    initialAction === 'createTodo' ? 'createTodo' : initialAction === 'submitInvoice' ? 'invoice' : initialTab
   );
 
   // The record this email is filed to — drives the inline "Create To Do" tool. Seeded from
@@ -660,6 +673,22 @@ export const App: React.FC<AppProps> = ({
   // receives a fetch function, never a token — ADR-028).
   const getPaneAccessToken = useCallback(() => authService.getAccessToken(), []);
 
+  // Task 133: the Invoice view's seams. Stable identities: the view reloads the firm list when `loadFirms` changes.
+  const getInvoiceAccessToken = useCallback(async () => (await authService.getAccessToken()) || '', []);
+  const submitInvoice = useMemo(
+    () =>
+      createInvoiceSubmitHandler({
+        config: { apiBaseUrl, getAccessToken: getInvoiceAccessToken },
+        email: hostAdapterInvoiceEmailSource(hostAdapter),
+      }),
+    [apiBaseUrl, getInvoiceAccessToken, hostAdapter]
+  );
+  const loadFirms = useCallback(
+    (target: InvoiceSubmissionTarget) =>
+      loadInvoiceFirms(target, { apiBaseUrl, getAccessToken: getInvoiceAccessToken }),
+    [apiBaseUrl, getInvoiceAccessToken]
+  );
+
   // Task 113 (provisioning's guest sign-in test): "⋮ → Diagnostics" opens a panel above the tab content; the tabs
   // stay mounted underneath, so closing it loses nothing.
   const [showDiagnostics, setShowDiagnostics] = useState(false);
@@ -803,7 +832,9 @@ export const App: React.FC<AppProps> = ({
         // from the shared tab-availability check (getAvailableTabs) rather than a
         // hostType conditional (NFR-10) — Word now gets Save + Find; Outlook keeps
         // Save + Create To Do + Find.
-        showNavigation={getAvailableTabs(hostType, tabCapabilities).length > 0}
+        showNavigation={
+          getAvailableTabs(hostType, tabCapabilities).length > 0 && !(currentTab === 'invoice' && invoiceBusy)
+        }
         tabCapabilities={tabCapabilities}
         selectedTab={currentTab}
         onTabChange={setCurrentTab}
@@ -862,6 +893,20 @@ export const App: React.FC<AppProps> = ({
             // decided from the live adapter's capabilities, never a hostType check. Gates the created-To-Do
             // confirmation's "Open in Spaarke" link.
             canOpenRecord={canOpenRecords}
+          />
+        )}
+
+        {/* Task 133: the Outlook "Submit Invoice" view — reached only from the ribbon (`?action=submitInvoice`), never
+            from a tab. The submission and the firm list are ebilling's from-email contract (invoiceSubmissionService);
+            corrections stay off (`correctionAvailable`) until ebilling 097. */}
+        {currentTab === 'invoice' && (
+          <InvoiceView
+            hostAdapter={hostAdapter}
+            apiBaseUrl={apiBaseUrl}
+            getAccessToken={getInvoiceAccessToken}
+            onSubmit={submitInvoice}
+            loadFirms={loadFirms}
+            onBusyChange={setInvoiceBusy}
           />
         )}
 

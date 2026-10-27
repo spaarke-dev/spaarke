@@ -1,7 +1,7 @@
 {
   "_version": "1.0",
   "kind": "know-promotion-policies",
-  "description": "The first Know-promotion policy of ontology task 063 (FR-33, BR-6, D-51): 'this matter has no budget'. A Decide-lane Existence rule with a notExists clause over sprk_budget (the join sprk_budget.sprk_matter is in PredicateCompiler.VerifiedJoins since task 063), evaluated by the ONE evaluator (SignalEvaluator via the nightly SignalReevaluationJob). Applied to Dataverse by scripts/Apply-DoLanePolicies.ps1 -DefinitionPath config/know-promotion.policies.json (idempotent upsert by the fixed ids below). The policy is created with sprk_enabled = No; the owner turns it on after review, and the script never changes sprk_enabled on an existing row. A version row is immutable once published (FR-49): a changed body, plan or template is a NEW version (a new entry with a higher versionNumber and its own id), never an edit of this one. The five-day knob is the 'now-5d' in the body. The message template asserts only what the body reads (section 0.3): the matter's createdon and the absence of an ACTIVE sprk_budget row (statecode 0) joined by sprk_budget.sprk_matter. No document-based Absence rule is authored (documents are reference-mode data; deferred until documents are mirrored, BR-6).",
+  "description": "The first Know-promotion policy of ontology task 063 (FR-33, BR-6, D-51): 'this matter has no budget'. A Decide-lane Existence rule with a notExists clause over sprk_budget (the join sprk_budget.sprk_matter is in PredicateCompiler.VerifiedJoins since task 063), evaluated by the ONE evaluator (SignalEvaluator via the nightly SignalReevaluationJob). Applied to Dataverse by scripts/Apply-DoLanePolicies.ps1 -DefinitionPath config/know-promotion.policies.json (idempotent upsert by the fixed ids below). The policy is created with sprk_enabled = No; the owner turns it on after review, and the script never changes sprk_enabled on an existing row. A version row is immutable once published (FR-49): a changed body, plan or template is a NEW version (a new entry with a higher versionNumber and its own id), never an edit of this one. The five-day knob is the 'now-5d' in the body. The message template asserts only what the body reads (section 0.3): the matter's createdon and the absence of an ACTIVE sprk_budget row (statecode 0) joined by sprk_budget.sprk_matter. No document-based Absence rule is authored (documents are reference-mode data; deferred until documents are mirrored, BR-6). Version 2 (task 159, D-178, owner UAT round 1) keeps the rule and changes only the decision: the Decide action is assign-task (a Task, a sprk_event of type Task) instead of assign-work, and the plan offers add-todo and assign-work as Next steps. Version 1 is untouched.",
   "policies": [
     {
       "policyId": "00000000-0000-4000-8000-000000006301",
@@ -14,7 +14,7 @@
       "severity": "Info",
       "priority": 500,
       "countsTowardSuppression": true,
-      "currentVersion": 1,
+      "currentVersion": 2,
       "versions": [
         {
           "versionId": "00000000-0000-4000-8000-000000006311",
@@ -39,6 +39,30 @@
           "messageTemplate": "This matter was created more than 5 days ago and has no active budget record.",
           "proposedAction": "assign-work: assign someone to set up this matter's budget.",
           "decisionPlan": { "actions": ["assign-work"], "nextSteps": [] }
+        },
+        {
+          "versionId": "00000000-0000-4000-8000-000000006312",
+          "versionNumber": 2,
+          "inForceFrom": "2026-10-22T00:00:00Z",
+          "ruleType": "Existence",
+          "ruleBody": {
+            "type": "Existence",
+            "subject": "sprk_matter",
+            "when": {
+              "createdon": { "<=": "now-5d" }
+            },
+            "all": [
+              {
+                "notExists": "sprk_budget",
+                "path": "sprk_matter",
+                "filter": { "statecode": 0 }
+              }
+            ]
+          },
+          "shortHeadline": "Matter created more than 5 days ago with no active budget",
+          "messageTemplate": "This matter was created more than 5 days ago and has no active budget record.",
+          "proposedAction": "assign-task: assign someone to set up this matter's budget.",
+          "decisionPlan": { "actions": ["assign-task"], "nextSteps": ["add-todo", "assign-work"] }
         }
       ]
     }

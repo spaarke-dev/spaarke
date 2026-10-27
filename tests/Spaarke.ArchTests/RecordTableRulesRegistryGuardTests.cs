@@ -1,5 +1,5 @@
 using Sprk.Bff.Api.Api;
-using Sprk.Bff.Api.Services.Office;
+using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Services.RecordCreation;
 using Xunit;
 
@@ -14,9 +14,10 @@ namespace Spaarke.ArchTests;
 /// <remarks>
 /// <para><b>The create tables.</b> Read from the compiled create paths, not from the registry (a set derived from the
 /// registry would make the guard pass by construction): the browser create route's accept-list
-/// (<see cref="ChildRecordEndpoints.CreateTables"/>) and the Office quick-create's Matter and Project
-/// (<see cref="OfficeRecordCreationService.MatterEntity"/>, <see cref="OfficeRecordCreationService.ProjectEntity"/>; its Invoice is on the
-/// route's list). The chat <c>dataverse.create_record</c> tool has no accept-list (any table but <c>sprk_document</c>), so
+/// (<see cref="ChildRecordEndpoints.CreateTables"/>) and the Office quick-create's Matter and Project, as the adapter
+/// (<c>OfficeService.QuickCreateViaCreationServiceAsync</c>) names its table — <see cref="QuickCreateFieldRequirements.GetLogicalName"/>
+/// (field mapping task 018c; the deleted Office creation core's constants before it). Its Invoice is on the route's list.
+/// The chat <c>dataverse.create_record</c> tool has no accept-list (any table but <c>sprk_document</c>), so
 /// it is not covered. The unified create service (task 013) accepts exactly the registry's tables — an unregistered table
 /// is refused (<c>record_creation.table_unsupported</c>) — so its accepted set needs no entry here.</para>
 /// <para><b>Controls.</b> <see cref="Guard_MustFire_ACreateTableWithNoEntry_IsReported"/> adds a fixture table the registry
@@ -31,8 +32,8 @@ public class RecordTableRulesRegistryGuardTests
     /// <summary>Every table on a server create path's fixed accept-list today.</summary>
     private static IReadOnlyList<string> CreateTables() =>
         ChildRecordEndpoints.CreateTables
-            .Append(OfficeRecordCreationService.MatterEntity)
-            .Append(OfficeRecordCreationService.ProjectEntity)
+            .Append(QuickCreateFieldRequirements.GetLogicalName(QuickCreateEntityType.Matter))
+            .Append(QuickCreateFieldRequirements.GetLogicalName(QuickCreateEntityType.Project))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(t => t, StringComparer.Ordinal)
             .ToList();

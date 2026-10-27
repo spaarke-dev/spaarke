@@ -60,7 +60,9 @@ const useStyles = makeStyles({
  * gating, similarity results) is tasks 033-034. `search` is a distinct, still-hidden
  * legacy member wired to a job-status placeholder in App.tsx — do not conflate the two.
  */
-export type NavigationTab = 'save' | 'createTodo' | 'find' | 'email' | 'share' | 'recent' | 'search';
+export type NavigationTab = 'save' | 'createTodo' | 'find' | 'email' | 'share' | 'recent' | 'search' | 'invoice';
+// Task 133: `invoice` is the Outlook "Submit Invoice" view. It is deliberately NOT in TAB_CONFIGS — no tab reaches
+// it; only the ribbon's `?action=submitInvoice` opens it (App `initialAction`).
 
 /**
  * The host capabilities the tab table can be gated on (task 096). A subset of `HostCapabilities`, so callers

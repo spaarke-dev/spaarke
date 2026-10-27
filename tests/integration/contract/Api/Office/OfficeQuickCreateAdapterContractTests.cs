@@ -317,6 +317,115 @@ public class OfficeQuickCreateAdapterContractTests
             Assert.Fail(Message);
     }
 
+    // ── #2191 K2: a project created from a record whose pair cannot be derived is refused (re-pointed by 018c) ──────
+
+    /// <summary>
+    /// #2191 K2 and its review K1, re-pointed from the deleted Office core's tests (018c): a project created FROM a record is
+    /// filed under it, so when the pair's record type cannot be derived the create is refused — 403
+    /// <c>record_owner_parent_undetermined</c>, nothing written — never created unfiled (and so possibly not isolated). No
+    /// catalog row is configuration ("Ask an administrator", never "Try again"); a catalog read that faults is "Try again.".
+    /// </summary>
+    [Theory]
+    [InlineData(false, "Ask an administrator to check the record types configured in this environment.")]
+    [InlineData(true, "Try again.")]
+    public async Task Post_Project_FromARecordWhosePairCannotBeDerived_Returns403Undetermined_AndWritesNothing(
+        bool catalogFaults, string ending)
+    {
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        ArrangeResolvedCaller(factory);
+        ArrangeSourceRead(factory, new Entity("sprk_project", SourceProjectId));
+        var catalog = factory.Entities.Setup(e => e.RetrieveMultipleAsync(
+            It.Is<Microsoft.Xrm.Sdk.Query.QueryExpression>(q => q.EntityName == "sprk_recordtype_ref"), It.IsAny<CancellationToken>()));
+        if (catalogFaults)
+            catalog.ThrowsAsync(new TimeoutException("catalog read timed out"));
+        else
+            catalog.ReturnsAsync(new EntityCollection());
+        var created = CaptureCreate(factory, "project");
+
+        var response = await factory.CreateClient().PostAsJsonAsync("/api/office/quickcreate/project", new QuickCreateRequest
+        {
+            Name = "Lease review",
+            SourceEntityType = "sprk_project",
+            SourceRecordId = SourceProjectId,
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden, await response.Content.ReadAsStringAsync());
+        var problem = await ReadProblemAsync(response);
+        problem["errorCode"].Should().Be(Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.ParentUndetermined);
+        problem["detail"].Should().EndWith(ending);
+        if (!catalogFaults)
+            problem["detail"].Should().NotContain("Try again", "no catalog row is configuration: a retry will not help");
+        created.Attempts.Should().BeEmpty("refused before the create: never filed under nothing");
+    }
+
+    // ── The quick-create defaults prefill is the server's own default (task 100; moved intact by 018c) ──────────────
+
+    /// <summary>
+    /// Task 100: the pane's prefill and the server's default are ONE answer — <c>GET /quickcreate/defaults</c>
+    /// (<c>OfficeService.ResolveDefaultAssigneeAsync</c>) names exactly the contact a create that names no assignee is given, and
+    /// offers none, with none written, when the maker has no link. Re-pointed from the deleted core's unit test (018c).
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(MatterAndProject))]
+    public async Task GetDefaults_ThePrefill_IsTheContactTheCreateAssigns_AndNoneWithoutALink(string type)
+    {
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        ArrangeResolvedCaller(factory);
+        using var host = WithMakersContact(factory, MakersContact);
+        factory.Entities
+            .Setup(e => e.RetrieveAsync("contact", MakersContact, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("contact", MakersContact) { ["fullname"] = "Maker Person" });
+        var created = CaptureCreate(factory, type);
+        var client = host.CreateClient();
+
+        var prefill = await DefaultAssigneeAsync(client);
+        var response = await client.PostAsJsonAsync(
+            $"/api/office/quickcreate/{type}", new QuickCreateRequest { Name = "Uses The Default", MatterTypeId = MatterTypeId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        prefill.Should().NotBeNull();
+        prefill!.Id.Should().Be(created.Entity!.GetAttributeValue<EntityReference>(AssignedTo).Id,
+            "the prefill names exactly the contact the create assigns when the request names none");
+        prefill.Name.Should().Be("Maker Person");
+        prefill.Email.Should().BeNull();
+
+        using var unlinkedFactory = new OfficeQuickCreateTestWebAppFactory();
+        ArrangeResolvedCaller(unlinkedFactory);
+        using var unlinked = WithMakersContact(unlinkedFactory, contactId: null);
+        var unlinkedCreate = CaptureCreate(unlinkedFactory, type);
+        var unlinkedClient = unlinked.CreateClient();
+
+        (await DefaultAssigneeAsync(unlinkedClient)).Should().BeNull("no link, no prefill");
+        (await unlinkedClient.PostAsJsonAsync(
+                $"/api/office/quickcreate/{type}", new QuickCreateRequest { Name = "No Default", MatterTypeId = MatterTypeId }))
+            .StatusCode.Should().Be(HttpStatusCode.Created);
+        unlinkedCreate.Entity!.Contains(AssignedTo).Should().BeFalse("and no default is written either");
+    }
+
+    /// <summary>The contact row cannot be read: no prefill (200, <c>assignedTo: null</c>), never a fault.</summary>
+    [Fact]
+    public async Task GetDefaults_WhenTheContactCannotBeRead_GivesNoPrefill_NeverThrows()
+    {
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        ArrangeResolvedCaller(factory);
+        using var host = WithMakersContact(factory, MakersContact);
+        factory.Entities
+            .Setup(e => e.RetrieveAsync("contact", MakersContact, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("dataverse slow"));
+
+        var response = await host.CreateClient().GetAsync("/api/office/quickcreate/defaults");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await response.Content.ReadFromJsonAsync<QuickCreateDefaultsResponse>())!.AssignedTo.Should().BeNull();
+    }
+
+    private static async Task<QuickCreateContactOption?> DefaultAssigneeAsync(HttpClient client)
+    {
+        var response = await client.GetAsync("/api/office/quickcreate/defaults");
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        return (await response.Content.ReadFromJsonAsync<QuickCreateDefaultsResponse>())!.AssignedTo;
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>A resolved caller whose owning team's business unit answers (no "business-unit defaults" warning).</summary>

@@ -49,9 +49,9 @@ namespace Sprk.Bff.Api.Services.RecordCreation;
 /// <see cref="CallerWriteAuthorization"/> and are called here, not written as endpoint filters. <b>ADR-010:</b> one
 /// concrete scoped registration, no interface.</para>
 /// <para><b>Component justification (CLAUDE.md §11).</b> Existing — two create cores, <see cref="OwnedChildWrite.CreateAsync"/>
-/// (children, strong authorization) and the Office <c>OfficeRecordCreationService</c> (roots, weaker authorization).
-/// Extension — this merges them (spec §11 "Yes: merges the two existing cores"); both stay until 017/018 re-point their
-/// callers. Cost of doing nothing — the same row filed under the same parent gets a different owner, stamp and checks by
+/// (children, strong authorization) and the Office creation core (roots, weaker authorization).
+/// Extension — this merges them (spec §11 "Yes: merges the two existing cores"); tasks 017/018 re-pointed their callers,
+/// and 018c deleted the Office core. Cost of doing nothing — the same row filed under the same parent gets a different owner, stamp and checks by
 /// surface, and field mapping reaches 2 of about 30 create paths (spec §11).</para>
 /// </remarks>
 internal sealed partial class RecordCreationService

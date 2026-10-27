@@ -27,19 +27,38 @@ public class OfficeEmailEnricher
     /// Enriches email metadata by fetching body and attachments from Graph API when missing.
     /// Uses OBO authentication to access user's mailbox via Microsoft Graph.
     /// </summary>
+    /// <remarks>
+    /// <para>Task 132: Graph's <c>sentDateTime</c> replaces the request's <see cref="EmailMetadata.SentDate"/> whenever the
+    /// request names the message by an Exchange item id (Office.js has no sent-time property for a read item, so the
+    /// client's value is an approximation — the item's creation time, which is the draft's for a Sent Items message and the
+    /// copy's for a copied one). This runs at the top of <c>OfficeService.SaveAsync</c>, before the capture, the .eml
+    /// build, the file names, the document row and the finalization payload, so <c>sprk_emaildate</c>, the .eml Date
+    /// header and the file-name date prefix all read the enriched value on both the sync and the worker path.</para>
+    /// <para>Two paths. A request WITHOUT a body takes the full fetch (body, attachments, <c>sentDateTime</c>). A request
+    /// WITH a body (the pane and Quick Save always send it since task 116a, so a B2B guest's save does not depend on
+    /// Graph) still makes ONE light read of <c>sentDateTime</c> alone — no body, no attachments. A failed light read (a
+    /// guest whose mailbox is in another tenant, 404, throttling) keeps the request's value and logs a warning without the
+    /// message id; it never fails the save. A request without an item id (an RFC Message-ID alone) makes no Graph call.</para>
+    /// </remarks>
     public async Task<SaveRequest> EnrichEmailFromGraphAsync(
         SaveRequest request,
         HttpContext httpContext,
         CancellationToken cancellationToken)
     {
-        // Only fetch if the body is missing and the request names the message in the caller's mailbox. Task 121: Graph
-        // addresses a message by its Exchange item id, never by the RFC Message-ID, so the key is the item id — sent in
-        // ExchangeItemId, or (an add-in older than task 121) in InternetMessageId. A request that carries only an RFC
-        // Message-ID cannot be fetched and is returned unchanged.
+        // Only read Graph when the request names the message in the caller's mailbox. Task 121: Graph addresses a message
+        // by its Exchange item id, never by the RFC Message-ID, so the key is the item id — sent in ExchangeItemId, or (an
+        // add-in older than task 121) in InternetMessageId. A request that carries only an RFC Message-ID cannot be
+        // fetched and is returned unchanged.
         var graphMessageKey = request.Email is null ? null : ResolveExchangeItemId(request.Email);
-        if (request.Email is null || !string.IsNullOrEmpty(request.Email.Body) || graphMessageKey is null)
+        if (request.Email is null || graphMessageKey is null)
         {
-            return request; // Body already present or no item id
+            return request; // No item id
+        }
+
+        if (!string.IsNullOrEmpty(request.Email.Body))
+        {
+            // Task 132: the client sent the content, but not a trustworthy sent time — read that alone.
+            return await EnrichSentDateFromGraphAsync(request, graphMessageKey, httpContext, cancellationToken);
         }
 
         try
@@ -124,9 +143,15 @@ public class OfficeEmailEnricher
                     graphMessageKey);
             }
 
+            // Task 132 (owner UAT 2026-10-22): the mailbox's own sent time wins over the client's. Office.js has no
+            // sent-time property for a read item, so the client sends an approximation (dateTimeModified before task 132,
+            // which moves whenever the item is read, moved or flagged — "sent 09-03" stored as 10-03; dateTimeCreated
+            // now). The request's value is kept only when Graph does not report one.
+            var sentDate = message.SentDateTime ?? request.Email.SentDate;
+
             // Create updated email metadata with Graph API content
             // EmailMetadata is a record with init-only properties, so we need to create a new instance
-            if (bodyContent != null || attachmentReferences != null)
+            if (bodyContent != null || attachmentReferences != null || sentDate != request.Email.SentDate)
             {
                 return request with
                 {
@@ -134,7 +159,8 @@ public class OfficeEmailEnricher
                     {
                         Body = bodyContent ?? request.Email.Body,
                         IsBodyHtml = bodyContent != null ? isBodyHtml : request.Email.IsBodyHtml,
-                        Attachments = attachmentReferences ?? request.Email.Attachments
+                        Attachments = attachmentReferences ?? request.Email.Attachments,
+                        SentDate = sentDate
                     }
                 };
             }
@@ -150,6 +176,39 @@ public class OfficeEmailEnricher
 
             // Don't throw - continue with whatever content we have from the client
             // This allows fallback to client-provided data if Graph API fails
+            return request;
+        }
+    }
+
+    /// <summary>
+    /// Task 132: the light read for a request that already carries its body — <c>sentDateTime</c> only (no expand), used
+    /// for <see cref="EmailMetadata.SentDate"/> when Graph reports one. Any failure other than the caller's own
+    /// cancellation keeps the request unchanged: this is an improvement to a date, never a precondition of the save.
+    /// </summary>
+    private async Task<SaveRequest> EnrichSentDateFromGraphAsync(
+        SaveRequest request, string graphMessageKey, HttpContext httpContext, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var graphClient = await _graphClientFactory.ForUserAsync(httpContext, cancellationToken);
+            var message = await graphClient.Me.Messages[graphMessageKey]
+                .GetAsync(requestConfig => requestConfig.QueryParameters.Select = new[] { "sentDateTime" }, cancellationToken);
+
+            if (message?.SentDateTime is { } sentDate && sentDate != request.Email!.SentDate)
+            {
+                return request with { Email = request.Email with { SentDate = sentDate } };
+            }
+
+            return request;
+        }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            // Not the exception itself: an SDK error can carry the request URL, which holds the message id (never logged).
+            _logger.LogWarning(
+                "Could not read the sent time of the email from Graph ({ExceptionType}, status {StatusCode}); the client's " +
+                "value is kept.",
+                ex.GetType().Name,
+                (ex as Microsoft.Kiota.Abstractions.ApiException)?.ResponseStatusCode);
             return request;
         }
     }

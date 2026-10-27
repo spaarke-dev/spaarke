@@ -108,7 +108,6 @@ public sealed class SpeAdminConfigSecretNameTests : IClassFixture<AdminSurfaceHo
     [InlineData("SPE-ContainerTypeId")]           // starts with "spe-" but is not an owning-app secret
     [InlineData("spe-owning-apps-acme")]          // a near miss of the prefix
     [InlineData("spe-owning-app-")]               // the prefix alone names nothing
-    [InlineData("spe-owning-app-acme\n")]         // round 41 item 5: a trailing newline (the format check's '$' admits it)
     public async Task Post_WithASecretNameOutsideThePrefix_Is400_WithTheRulesCode_AndNothingIsCreated(string name)
     {
         using var client = Admin();
@@ -117,6 +116,20 @@ public sealed class SpeAdminConfigSecretNameTests : IClassFixture<AdminSurfaceHo
             await client.PostAsJsonAsync("/api/spe/configs", NewConfig(name)), HttpStatusCode.BadRequest);
 
         problem["errorCode"].GetString().Should().Be(Code);
+        _fixture.Dataverse.CallsOn(ConfigSet, "Create").Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Post_WithASecretNameEndingInANewline_IsRefusedByTheFormatCheck_AndNothingIsCreated()
+    {
+        // Round 41 item 5 found the format check's '$' admitted "spe-owning-app-acme\n" (the prefix rule caught it).
+        // #2253 fix round 3 (K): the format check now ends in '\z', so it refuses the name itself.
+        using var client = Admin();
+
+        var problem = await Problem(
+            await client.PostAsJsonAsync("/api/spe/configs", NewConfig("spe-owning-app-acme\n")), HttpStatusCode.BadRequest);
+
+        problem["detail"].GetString().Should().Contain("alphanumeric");
         _fixture.Dataverse.CallsOn(ConfigSet, "Create").Should().BeEmpty();
     }
 

@@ -41,7 +41,7 @@ public sealed partial class DataverseDeleteRecordHandler : IToolHandler
 {
     private const string HandlerIdValue = nameof(DataverseDeleteRecordHandler);
 
-    [GeneratedRegex(@"^[a-z][a-z0-9_]*$")]
+    [GeneratedRegex(@"^[a-z][a-z0-9_]*\z")]
     private static partial Regex LogicalNameRegex();
 
     private readonly IDataverseUserClient _dataverse;

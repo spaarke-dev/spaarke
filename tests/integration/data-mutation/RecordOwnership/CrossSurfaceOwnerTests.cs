@@ -7,11 +7,10 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
-using Sprk.Bff.Api.Models.Office;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Ai.Membership.Events;
 using Sprk.Bff.Api.Services.Dataverse;
-using Sprk.Bff.Api.Services.Office;
 using Sprk.Bff.Api.Services.RecordCreation;
 using Sprk.Bff.Api.Tests.AccessControl;
 using Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
@@ -19,7 +18,6 @@ using Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 using Directory = Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory;
-using OfficeCreateRequest = Sprk.Bff.Api.Services.Office.RecordCreationRequest;
 using UnifiedCreateRequest = Sprk.Bff.Api.Services.RecordCreation.RecordCreationRequest;
 
 namespace Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
@@ -34,10 +32,10 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
 /// communication is never team-owned).
 /// </summary>
 /// <remarks>
-/// <para>The LIVE Office quick-create keeps its pre-015 owner (the acting user's team) until task 018 routes it through the
-/// unified create, whose step-5 AppendTo checks gate a filing the owner then follows (review round 1, #1614); one test pins
-/// that so 018 changes it on purpose.</para>
-/// The REAL <see cref="RecordCreationService"/> and <see cref="OfficeRecordCreationService"/>, the REAL
+/// <para>Task 018 routed the live Office quick-create through the unified create (task 018c deleted the Office creation
+/// core), so its owner is record-first too; the live Office route's own owner tests are in
+/// <c>SecureRootCreateRouteTests.OfficeSecureOwner</c> and the Office contract suites.</para>
+/// The REAL <see cref="RecordCreationService"/>, the REAL
 /// <see cref="RecordOwnershipResolver"/> over <see cref="Directory"/>, the REAL <see cref="SecureRootFilingGate"/> reading the
 /// same directory, and the REAL caller checks over the caller's scripted Dataverse. Only the Dataverse module boundaries are
 /// doubled (<see cref="CreateWorld"/>).
@@ -68,14 +66,9 @@ public sealed class CrossSurfaceOwnerTests
         _world.Creates.Should().HaveCount(4, "one create per surface's input");
     }
 
-    [Fact]
-    public async Task TheLiveOfficeQuickCreate_KeepsTheActingUsersTeam_ForAProjectUnderAMatter_UntilTask018()
-    {
-        var office = await _world.OfficeProjectOwnerAsync(CreateWorld.OrdinaryMatter);
-
-        office.Should().Be(Directory.GeneralTeam,
-            "review round 1: the Office owner moves to record-first only through the unified create (task 018, #1614)");
-    }
+    // TheLiveOfficeQuickCreate_KeepsTheActingUsersTeam_ForAProjectUnderAMatter_UntilTask018 is gone (task 018c): task 018b
+    // changed that owner on purpose (record-first through the unified create), pinned over the live route by
+    // SecureRootCreateRouteTests.OfficeQuickCreate_UnderAnOrdinaryMatter_IsOwnedByTheMattersUnitTeam_NotSecure_AndIndexedByThatUnit.
 
     // =====================================================================================
     // The owner order
@@ -106,10 +99,10 @@ public sealed class CrossSurfaceOwnerTests
     public async Task OwnerOrder_ARecordFiledUnderNothing_GivesTheActingUsersBusinessUnitTeam_OnEverySurface()
     {
         var unified = await _world.UnifiedOwnerAsync(await _world.MappedAsync("sprk_project", new { sprk_projectname = "Phase 2" }));
-        var office = await _world.OfficeProjectOwnerAsync(sourceMatter: null);
 
         unified.Should().Be(Directory.GeneralTeam, "the caller sits in the general business unit");
-        office.Should().Be(Directory.GeneralTeam, "the Office create of a project filed under nothing is unchanged (task 080)");
+        // The Office half (task 018c): the Office quick-create IS this unified create now; its unfiled project's owner over
+        // the live route is pinned by OfficeQuickCreateProjectContractTests.Post_Project_Returns201_OwnedByCallersTeam_….
     }
 
     // =====================================================================================
@@ -141,15 +134,10 @@ public sealed class CrossSurfaceOwnerTests
         unified.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.OwnerUnresolved);
         unified.Refusal.Code.Should().Be(RecordOwnerRefusal.ActingUserUnresolved);
 
-        var office = await _world.OfficeCreateProjectAsync(sourceMatter: null);
-
-        office.Succeeded.Should().BeFalse();
-        office.Failure!.Kind.Should().Be(RecordCreationFailureKind.OwnerUnresolved);
-        office.Failure.Code.Should().Be(Sprk.Bff.Api.Api.Office.Errors.OfficeErrorCodes.RecordOwnerUnresolved,
-            "a record filed under nothing keeps the Office create's own refusal (NFR-07)");
-
         _world.Creates.Should().BeEmpty();
-        _world.OfficeCreates.Should().BeEmpty();
+        // The Office half (task 018c): the same refusal reaches the Office route as OFFICE_022 with nothing written —
+        // OfficeQuickCreateProjectContractTests.Post_Project_WhenTheCallersTeamCannotBeResolved_Returns403_AndCreatesNothingAppOwned
+        // and OfficeQuickCreateContractTests.Post_Matter_WhenTheCallersTeamCannotBeResolved_Returns403_AndCreatesNothingAppOwned.
     }
 
     [Fact]
@@ -248,9 +236,8 @@ public sealed class CrossSurfaceOwnerTests
 
 /// <summary>
 /// The world task 015's create tests run in: one directory (business units, teams, the caller, a matter in each kind of
-/// unit, the ADR-024 record-type catalog) read by the REAL resolver, the REAL secure-root gate and both create services;
-/// the caller's scripted Dataverse; and the app-only boundaries — the unified create's PATCH and the Office create's SDK
-/// create — recorded, never applied.
+/// unit, the ADR-024 record-type catalog) read by the REAL resolver, the REAL secure-root gate and the unified create;
+/// the caller's scripted Dataverse; and the app-only boundary — the unified create's PATCH — recorded, never applied.
 /// </summary>
 internal sealed class CreateWorld
 {
@@ -279,9 +266,6 @@ internal sealed class CreateWorld
 
     /// <summary>Every app-only create the unified service asked for.</summary>
     public List<(string Table, Guid Id, Dictionary<string, object?> Fields)> Creates { get; } = [];
-
-    /// <summary>Every row the Office create asked the SDK to create.</summary>
-    public List<Entity> OfficeCreates { get; } = [];
 
     /// <summary>Owner decisions asked of the resolver.</summary>
     public int OwnerQuestions => _ownerQuestions;
@@ -444,71 +428,12 @@ internal sealed class CreateWorld
             new Mock<IMembershipEventPublisher>().Object, NullLogger<RecordCreationService>.Instance);
     }
 
-    // ── The Office create ─────────────────────────────────────────────────────────────────────────────────────────
-
-    /// <summary>The Office quick-create of a project, from <paramref name="sourceMatter"/> (its mapping profile writes the pair).</summary>
-    public Task<RecordCreationResult> OfficeCreateProjectAsync(Guid? sourceMatter) =>
-        OfficeService().CreateAsync(new OfficeCreateRequest
-        {
-            EntityType = QuickCreateEntityType.Project,
-            Name = "Phase 2",
-            CallerUserId = Directory.CallerOid.ToString("D"),
-            OwnerSystemUserId = Directory.CallerUserId.ToString("D"),
-            SourceEntityLogicalName = sourceMatter is null ? null : "sprk_matter",
-            SourceRecordId = sourceMatter,
-        });
-
-    public async Task<Guid> OfficeProjectOwnerAsync(Guid? sourceMatter)
-    {
-        var result = await OfficeCreateProjectAsync(sourceMatter);
-        result.Succeeded.Should().BeTrue(result.Failure?.Detail);
-        return OfficeCreates.Last().GetAttributeValue<EntityReference>("ownerid").Id;
-    }
-
-    private OfficeRecordCreationService OfficeService()
-    {
-        var fieldMappings = new Mock<IFieldMappingDataverseService>();
-        fieldMappings
-            .Setup(m => m.GetFieldMappingProfileWithRulesAsync("sprk_matter", "sprk_project", true, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new FieldMappingProfileEntity
-            {
-                Id = Guid.NewGuid(),
-                Name = "matter to project",
-                SourceEntity = "sprk_matter",
-                TargetEntity = "sprk_project",
-                IsActive = true,
-                Rules =
-                [
-                    new FieldMappingRuleEntity
-                    {
-                        Id = Guid.NewGuid(), Name = "regarding id", SourceField = "sprk_matterid", SourceFieldType = 0,
-                        TargetField = "sprk_regardingrecordid", TargetFieldType = 0, MappingType = 0, ExecutionOrder = 1,
-                        IsActive = true,
-                    },
-                    new FieldMappingRuleEntity
-                    {
-                        Id = Guid.NewGuid(), Name = "regarding type", SourceField = "sprk_recordtype", SourceFieldType = 1,
-                        TargetField = "sprk_regardingrecordtype", TargetFieldType = 1, MappingType = 0, ExecutionOrder = 2,
-                        IsActive = true,
-                    },
-                ],
-            });
-
-        // #2191: a project created from a matter is filed under it only when the caller may AppendTo that matter.
-        var caller = OfficeCallerRightsSetup.Granting(AccessRights.Read | AccessRights.AppendTo);
-        return new OfficeRecordCreationService(
-            Entities(), fieldMappings.Object, new CountingResolver(_directory.Resolver(), () => _ownerQuestions++),
-            IdentityNormalizationFixtures.NoLinkedContact(), SecureRootFilingGateFixtures.Over(Entities()),
-            AssignedAccessTestDoubles.InertMaterializer(), NullLogger<OfficeRecordCreationService>.Instance,
-            caller.Probe, caller.Http);
-    }
-
     // ── The app-only Dataverse every service here reads ───────────────────────────────────────────────────────────
 
     /// <summary>
     /// The app-only reader: queries answered by the directory (the resolver's, the gate's and the pair's record-type
-    /// reads); a team's business unit; a business unit's search-index defaults; the Office create's source matter and the
-    /// caller's business unit; and the SDK create, recorded.
+    /// reads); a team's business unit; a business unit's search-index defaults; a matter's row and the caller's business
+    /// unit.
     /// </summary>
     private IGenericEntityService Entities(bool serviceReader = false)
     {
@@ -580,16 +505,9 @@ internal sealed class CreateWorld
                 };
 
                 // #2191: the source's own secure flag, explicit (an empty flag is never read as not secure).
-                if (columns.Contains(OfficeRecordCreationService.SecureFlagAttribute))
-                    matter[OfficeRecordCreationService.SecureFlagAttribute] = id == SecureMatter;
+                if (columns.Contains(SecurableEntityRegistry.SecureFlagAttribute))
+                    matter[SecurableEntityRegistry.SecureFlagAttribute] = id == SecureMatter;
                 return Task.FromResult(matter);
-            });
-        entities
-            .Setup(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
-            .Returns((Entity row, CancellationToken _) =>
-            {
-                OfficeCreates.Add(row);
-                return Task.FromResult(Guid.NewGuid());
             });
         return entities.Object;
     }

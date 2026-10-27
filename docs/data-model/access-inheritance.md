@@ -90,12 +90,27 @@ overwritten.
   is trusted: every record is undetermined, nothing is written, and the job run fails with
   `sdap.inherit.access_record_not_secured`.
 - **An EMPTY record is decided on only once the BFF's read is proven.** Proof, once per job pass or request, is any one of:
-  - a non-empty record read in the same pass or request;
-  - the BFF user holds the System Administrator role;
-  - one of its field security profiles grants Read on the column on both tables.
+  - the BFF user holds the System Administrator role, matched by its role template id
+    (`627090ff-40a3-4053-8790-584edc5be201`, carried by every business unit's copy; never by its name), directly or
+    through a team it is a member of;
+  - a field security profile it holds, directly or through a team it is a member of, grants Read (`canread` = 4) on the
+    column on that table (each table is proven separately: a profile granting Read on one table proves only that one).
+    A fault in any of these reads is no proof (fail closed).
+
+  Team membership is joined server-side: one query each for System Administrator and for the profiles, so no request
+  grows with the number of teams the BFF user is in.
+
+  A non-empty record read on a table is not proof: Dataverse can grant a secured field on one record (a record-level field
+  share), so one readable record says nothing about the empty ones (UAC 2026-10-23: a record-level field share must not
+  prove a column).
 
   Without proof, the record is undetermined (`access_record_hidden`) and nothing is written. An empty read the BFF cannot
   vouch for may hide a real record, so the backfill rule's guess must never overwrite it.
+
+- **Provisioning dependency.** Stamps give the BFF app user System Administrator directly (H10 step 9), which proves
+  both tables. If the BFF app user is ever moved off System Administrator (least privilege), that change must add a field
+  security profile with `canread` = 4 on `sprk_accessinheritance` for both `sprk_project` and `sprk_workassignment`;
+  otherwise every empty access record becomes undetermined and the inheritance backfill stops (fails closed).
 
 ## Backfill (existing rows)
 
@@ -133,7 +148,7 @@ Restricted hides it from partners). Rule and writers: [child-access-permission.m
 | `floorPermission` | the floor through task 174's walk | the value task 173's rule gives it: the most restrictive of the TOPS of its filing |
 | A re-file | never loosens (what it held beyond the new floor becomes its own) | follows the new parents (task 173's contract) for a row without an own narrowing; an own narrowing stays |
 | Field security | secured; the BFF's read proven before an empty record is trusted | **not secured** (decision D1): the inherited part is always recomputed from the parents, never read from the record, so an edit of the record can only remove the user's own narrowing or add one. Securing would add no protection and would add the hidden-read widening risk above |
-| Caller-supplied writes | refused (`sdap.access.access_record_server_only`) | a user's write is not refused (the user could write the unsecured column directly); the Office fallback writes `AccessInheritance.OwnNarrowing(Restricted)` on purpose. An app-only generic writer (a playbook's Update Record node or output mapping) is refused, the record and the value alike (`sdap.access.document_access_server_only`, fix round C K5); the same writers refuse the D7 link columns (`sdap.access.document_link_server_only`) and the BFF-owned document columns (`sdap.access.document_bff_column_server_only`, #2240), and on every table the owner (`sdap.access.owner_server_only`) and creator (`sprk_createdbyperson`, `sprk_createdbycontact`, `sprk_requestedby`; `sdap.access.creator_server_only`) columns (#2247; Repair asks only over its mapped columns, never its own owner decision) |
+| Caller-supplied writes | refused (`sdap.access.access_record_server_only`) | a user's write is not refused (the user could write the unsecured column directly); the Office fallback writes `AccessInheritance.OwnNarrowing(Restricted)` on purpose. An app-only generic writer (a playbook's Update Record node or output mapping) is refused, the record and the value alike (`sdap.access.document_access_server_only`, fix round C K5); the same writers refuse the D7 link columns (`sdap.access.document_link_server_only`) and the BFF-owned document columns (`sdap.access.document_bff_column_server_only`, #2240), and on every table the owner (`sdap.access.owner_server_only`) and creator (`sprk_createdbyperson`, `sprk_createdbycontact`, `sprk_requestedby`; `sdap.access.creator_server_only`) columns (#2247; Repair asks only over its mapped columns, never its own owner decision); #2251: the same writers refuse a table whose rows are access whole (`InheritedAccessPermission.AccessTables`: grants, organisation membership, ethical walls, the Assigned-To ledger, team membership; `sdap.access.access_table_server_only`) and, on a secure root, `sprk_accessinheritance` with the secure flag, Access Permission, security business unit and container (`InheritedAccessPermission.SecureRootColumns`, #2220's create-side set plus the container; `sdap.access.secure_root_server_only`); #2253 fix round 1: a table that is not a bare identifier after trimming (`^[A-Za-z][A-Za-z0-9_]*$`) is refused first, for every writer, with `sdap.access.table_name_invalid` (a name such as `sprk_externalrecordaccess')?$select=EntitySetName#` reached `EntityDefinitions(LogicalName='{name}')` as `sprk_externalrecordaccess`); every Spaarke.Dataverse URL builder refuses such a name too (`DataverseIdentifier`). `fieldpermission` joins `AccessTables`. A non-root table's access columns are refused with `sdap.access.access_column_server_only` (`InheritedAccessPermission.AccessColumns`: on `contact` the identity binding and invite columns and the standing grant; on `sprk_organization` the standing grant; on `systemuser` the home link and its mirrors, `sprk_primarycontact` and `sprk_isexternal`; on `businessunit` `sprk_containerid`). The field-mapping push runs as its caller and asks as `WriteIdentity.Caller`: the name check, the document codes, owner and creator only; access tables, secure-root columns and access columns are left to the caller's own privileges and field security (a matter's `sprk_accesspermission` stays editable by a Write holder). #2253 fix round 2: `AccessTables` also holds the platform tables that grant or scope access (`InheritedAccessPermission.PlatformSecurityTables`: `role`, `roleprivileges`, `systemuserroles`, `teamroles`, `fieldsecurityprofile`, `systemuserprofiles`, `teamprofiles`, `principalobjectaccess`, `teamtemplate`, `hierarchysecurityconfiguration`, `position`), and `AccessColumns` also holds `systemuser.businessunitid`, `azureactivedirectoryobjectid`, `domainname`, `internalemailaddress`, `isdisabled`, `accessmode`, `applicationid`, `parentsystemuserid`, `positionid`; `team.businessunitid`, `name`, `teamtype`, `isdefault` (the owner-team predicates); and `businessunit.name` (the Secure Record business unit is found by name). |
 | Writers | `FollowParentsAsync` | `ChildAccessPermissionReconciler` (in `SecureChildReconciliationJob`, every 2 minutes) and `CoreAncestorResolver.RefreshInheritedAccessPermissionAsync` (the child-records create and re-file), both through `InheritedAccessPermission.DecideDocument` |
 | Own vs inherited | `AccessInheritance.OwnPermissionOf` — ONE copy of the classification, shared | the same |
 | An unreadable record, or an unknown stored level | undetermined, nothing written | an unknown stored level: undetermined, nothing written, carried. An unreadable record (or no record column in the environment): the value only raised to the floor, never lowered, the record untouched; an unreadable one is also undetermined and carried (fix round C) |

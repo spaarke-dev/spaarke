@@ -392,18 +392,18 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
         //       `-sb` suffix was already reserved globally). Runs AFTER the
         //       inspector (per punchlist: "wire into H2aBicepInfraDeployHandler
         //       after inspector but before runner") and BEFORE the upgrade-
-        //       drift branch since an upgrade run against existing resources
-        //       will NOT collide (the customer's own resources will report as
-        //       "unavailable — already owned by you", which the probe
-        //       correctly treats as a domain conflict; skip the check on
-        //       upgrade runs to avoid a false positive).
+        //       drift branch. Upgrade runs skip it; a fresh run re-entering H2a
+        //       after an earlier deploy (resume, retry) finds its own names
+        //       taken, which the probe recognises by reading them in the stamp's
+        //       resource group (T186 L23 — it used to fail every such re-run).
         if (!TryGetNonEmpty(parameters, ProvisionedOnParameterKey, out _))
         {
             try
             {
                 var nameCheckRequest = new ResourceNameAvailabilityRequest(
                     SubscriptionId: subscriptionId,
-                    Names: BuildGloballyNamespacedNameChecks(envelope.CustomerId, environmentName));
+                    Names: BuildGloballyNamespacedNameChecks(envelope.CustomerId, environmentName),
+                    ResourceGroupName: StampResourceGroupName(envelope.CustomerId, environmentName));
                 var nameResult = await _nameAvailabilityProbe
                     .CheckAvailabilityAsync(nameCheckRequest, cancellationToken).ConfigureAwait(false);
                 if (nameResult is ResourceNameAvailabilityResult.Conflict conflict)
@@ -619,6 +619,10 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
         };
     }
 
+    /// <summary>The stamp's resource group — exactly customer.bicep's <c>resourceGroupName</c> (<c>rg-spaarke-{customerId}-{env}</c>).</summary>
+    internal static string StampResourceGroupName(string customerId, string environmentName)
+        => $"rg-spaarke-{customerId}-{environmentName}";
+
     private static string TruncateTo(string value, int max)
         => value.Length <= max ? value : value.Substring(0, max);
 
@@ -675,6 +679,7 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
         Check(outputs.ServiceBusFullyQualifiedNamespace, nameof(BicepDeployOutputs.ServiceBusFullyQualifiedNamespace));
         Check(outputs.RedisEndpoint, nameof(BicepDeployOutputs.RedisEndpoint));
         Check(outputs.ContentSafetyEndpoint, nameof(BicepDeployOutputs.ContentSafetyEndpoint));
+        Check(outputs.StorageBlobEndpoint, nameof(BicepDeployOutputs.StorageBlobEndpoint));
         return missing;
     }
 
@@ -755,8 +760,7 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
         var completedAt = DateTimeOffset.UtcNow;
         var startedAt = completedAt - TimeSpan.FromMilliseconds(1);
 
-        run.Status = RunStatus.Running;
-        run.CurrentPhase = HandlerIdentifier; // Reconciler observes + fans out to H2b/H4/H5.
+        run.MarkPhaseSucceeded(HandlerIdentifier); // Reconciler observes + fans out to H2b/H4/H5.
         run.CompletedPhases.Add(new CompletedPhase
         {
             Phase = HandlerIdentifier,
@@ -786,6 +790,7 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
         run.InterStepState.ServiceBusFullyQualifiedNamespace = outputs.ServiceBusFullyQualifiedNamespace;
         run.InterStepState.RedisEndpoint = outputs.RedisEndpoint;
         run.InterStepState.ContentSafetyEndpoint = outputs.ContentSafetyEndpoint;
+        run.InterStepState.StorageBlobEndpoint = outputs.StorageBlobEndpoint;
 
         var replace = await _repository.ReplaceRunAsync(run, etag, cancellationToken).ConfigureAwait(false);
         if (replace is ReplaceRunResult.Conflict conflict)

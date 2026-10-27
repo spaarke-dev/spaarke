@@ -57,7 +57,7 @@ public static class SignalReadEndpoints
             });
         }
 
-        var result = await signalRead.ReadAsync(worklistSet, ct);
+        var result = await signalRead.ReadAsync(worklistSet, httpContext.User, ct);
         return result.Outcome switch
         {
             SignalReadOutcome.Ok when result.Response is { } body => Results.Ok(body),

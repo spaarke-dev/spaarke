@@ -1251,7 +1251,7 @@ public class ExternalDataService
 
     /// <summary>A Dataverse logical name (what <see cref="GetInvoiceLookupsAsync"/> puts in a <c>$select</c>).</summary>
     private static readonly System.Text.RegularExpressions.Regex LookupNamePattern =
-        new("^[a-z][a-z0-9_]*$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+        new(@"^[a-z][a-z0-9_]*\z", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
     /// <summary>This service's logger, for the endpoint-side rule reads that run over its readers (task 187 F1).</summary>
     internal ILogger Logger => _logger;

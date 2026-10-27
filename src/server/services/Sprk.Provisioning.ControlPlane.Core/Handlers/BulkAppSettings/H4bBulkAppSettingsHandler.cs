@@ -69,6 +69,9 @@ public sealed class H4bBulkAppSettingsHandler : IProvisioningHandler
     /// <summary>Non-secret parameter key carrying the Entra tenant id (§4D I1).</summary>
     public const string TenantIdParameterKey = "tenantId";
 
+    /// <summary>Set on a stamp that has been provisioned before (upgrade run) — as in H0, H2a and H4 (T186 L28).</summary>
+    public const string ProvisionedOnParameterKey = "provisionedOn";
+
     /// <summary>Non-secret parameter key carrying the target subscription id.</summary>
     public const string SubscriptionIdParameterKey = "subscriptionId";
 
@@ -389,6 +392,21 @@ public sealed class H4bBulkAppSettingsHandler : IProvisioningHandler
             envelope.RunId, envelope.CustomerId, settings.Count, manifest.KeyVaultReferences.Count, resolvedPerEnv.Count,
             string.Join(",", ((AppServiceSettingsWriteResult.Success)writeResult).SlotsWritten));
 
+        // (6.5) T186 L28: on a FRESH stamp there is no BFF code to answer /healthz yet — H9 deploys it later (H9
+        //       depends on H4b) and verifies the staging slot's health itself before the swap. The site serves only the
+        //       platform's default page (/healthz → 404), so polling here could only ever time out and quarantine.
+        //       Only a stamp that has been provisioned before (provisionedOn, as in H0/H2a/H4) is running a BFF this
+        //       restart can break.
+        if (!TryGetNonEmpty(parameters, ProvisionedOnParameterKey, out _))
+        {
+            stopwatch.Stop();
+            _logger.LogInformation(
+                "H4b BulkAppSettings succeeded: runId={RunId} customerId={CustomerId} totalMs={TotalMs} — /healthz not polled: " +
+                "fresh stamp, no BFF code until H9 (which verifies boot with these settings)",
+                envelope.RunId, envelope.CustomerId, stopwatch.ElapsedMilliseconds);
+            return await MarkCompleteAsync(run, etag, idempotencyKey, envelope, cancellationToken).ConfigureAwait(false);
+        }
+
         // (7) Poll /healthz.
         //
         // FIC-PROPAGATION-FLAP TOLERANCE (task 205c / punch row A39, §5 item 4
@@ -645,8 +663,7 @@ public sealed class H4bBulkAppSettingsHandler : IProvisioningHandler
         var completedAt = DateTimeOffset.UtcNow;
         var startedAt = completedAt - TimeSpan.FromMilliseconds(1);
 
-        run.Status = RunStatus.Running;
-        run.CurrentPhase = HandlerIdentifier;
+        run.MarkPhaseSucceeded(HandlerIdentifier);
         run.CompletedPhases.Add(new CompletedPhase
         {
             Phase = HandlerIdentifier,

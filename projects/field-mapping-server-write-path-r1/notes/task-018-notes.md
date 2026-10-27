@@ -644,3 +644,110 @@ The create then follows the agreed maker-default drop with a warning.
 - defaults check skipped: 4.
 
 **Verify:** sln 0/0; ArchTests 1361/1361; filtered suites 4515 passed, 7 skipped.
+
+## 018c: delete the Office core
+
+`Services/Office/OfficeRecordCreationService.cs` (1588 lines) and its `OfficeModule` registration are deleted. `git grep -n OfficeRecordCreationService -- src tests docs` is empty (no tombstone). The Invoice leg, the pre-create stamps (017) and Repair are untouched; no `RecordCreationService` call was added for `sprk_invoice`.
+
+**No unlanded check, default or error code.** Before deleting, the core was walked against the 018b inventory (rows 1–31, G1–G7). Every check, default and code lands in the service or the adapter, or was removed on purpose by 018b (G4: the mapped-pair refusals; rows 10–11: overwrite mapping). No security finding.
+
+### Where `ResolveDefaultAssigneeAsync` went
+
+`OfficeService.ResolveDefaultAssigneeAsync` (on `IOfficeService`), moved intact. It now reads the adapter's own `ResolveMakerContactIdAsync`, the one place the default assignee is decided, so the prefill and the create's post-mapping default are one answer.
+- `GET /quickcreate/defaults` takes `IOfficeService`; its K1 AppendTo check is unchanged.
+- The stale comments in `OfficeEndpoints.cs` and `quickCreateDefaultsService.ts` name the new home.
+- No new endpoint, DI registration or package.
+
+### Constants
+
+No new constants class.
+- `NumberUnavailableCode`: a literal `"record_number_unavailable"` in `OfficeQuickCreateContractTests`.
+- `SecureFlagAttribute`: `SecurableEntityRegistry.SecureFlagAttribute`.
+- `MatterEntity` / `ProjectEntity`: `QuickCreateFieldRequirements.GetLogicalName`.
+- `Matter/ProjectProtectedAttributes`: `RecordTableRules.Get(t).MappingProtectedColumns`.
+
+### `CreateTimeFieldMapping.Apply`
+
+Deleted (no caller left). `ApplyFillOnly`, `CollectSourceColumns` and `RegardingPairAndResolverColumns` are kept. `callerSupplied` is non-nullable inside the engine now, and the "legacy overwrite path" branch comment is gone.
+- `CreateTimeFieldMappingTests.Run` drives `ApplyFillOnly` over an empty target, which writes what `Apply` wrote. All engine tests are kept.
+- `CreateTimeFieldMappingFillOnlyTests` lost `Apply_TheOverwriteEntryPoint_StillReplacesAnExistingValue` and `Apply_TheLegacyOverwriteEntryPoint_StillWritesAMappedPair_…` (intentionally removed, G4 / rows 10–11), and the helper's `fillOnly: false` branch.
+
+### Guard changes
+
+- `MappingSourceCallerMaskGuardTests`:
+  - `KnownCallSites` 3 → 2 (step 3 and Repair).
+  - The engine-surface fact now requires `ApplyFillOnly` only, and reports any other way in, so a restored `Apply` fails it.
+  - `EngineMethods` still lists `Apply`: the synthetic `Apply(...)` controls stay meaningful, and a restored overwrite entry point is scanned by the same rule.
+  - The allow-list reason and the docs no longer say "two entry points".
+- `CreateOwnerResolutionGuardTests.Allowlist`: the Office entry (expired at 018) is removed; the list is empty.
+- `RecordOwnerAssignmentCensusTests`: the three Office entries (`CreateMatterAsync`, `CreateProjectAsync`, `IsolateProjectCreate`) are removed, with a comment naming the unified create's `OwnedCreateFields` / `IsolatedCreateFields` that now own those writes.
+- `RecordTableRulesRegistryGuardTests`: the Office tables are read from `QuickCreateFieldRequirements.GetLogicalName(Matter/Project)`, the map the adapter picks its table from.
+
+### Per-file disposition
+
+| File / test | Disposition | Where now |
+|---|---|---|
+| `RecordCreationAssignedInternalTests` (deleted file): prefill tests | re-pointed | `OfficeQuickCreateAdapterContractTests.GetDefaults_ThePrefill_IsTheContactTheCreateAssigns_AndNoneWithoutALink`, `GetDefaults_WhenTheContactCannotBeRead_GivesNoPrefill_NeverThrows` |
+| same: `QuickCreate_*` (named / default / no link) | covered | `OfficeQuickCreateAdapterContractTests.Post_With…NamedContact…`, `Post_WhenTheCallerCanUseTheMakersContact_…`, `Post_WhenTheMakerHasNoLinkedContact_…`; `RecordCreationServiceMappingSeamTests.PostMappingDefault_*` |
+| same: "a mapped value means the contact is not even looked up" | removed on purpose | the adapter resolves the default before mapping (018b) |
+| `RecordCreationNumberReadBackTests` (deleted file) | re-pointed | `RecordCreationServicePipelineSeamTests.CreateAsync_AMatter_WhenTheRequestIsCancelledAfterTheCreateCommits_StillSucceeds_WithoutANumberWarning`; the other cases are in `OfficeQuickCreateContractTests.Post_Matter_WhenTheNumberCannotBeReadBack_…` and the seam's `…NumberReadBackFaults…` |
+| `SecureRootAccessColumnsNeverMappedOfficeTests` (deleted file) | covered | `RecordCreationServiceMappingSeamTests.CreateAsync_ARuleTargetingASecureRootsFlagOrAccessColumn_IsSkippedWithTheWarning_…`, `…AnOrdinaryColumnRule_IsStillFilled_BesideASkippedSecureFlagRule` |
+| `RecordCreatorPersonStampTests` (both theories) | re-pointed | the same file, over the Office contract host (matter and project) |
+| `AssignedAccessWriterTriggerTests` Office section | re-pointed | the same file, `OfficeHost` over the Office route (share before return; a materializer fault never fails the create) |
+| `RecordTableRulesTests` protected-view pins | re-pointed | the same file, on `RecordTableRules…MappingProtectedColumns` |
+| `RecordTableRulesTests.OfficeCreate_MatterAndProject_ProtectExactlyTheSame…` | covered | `UnifiedCreate_EverySecureRoot_…` in the same file |
+| `OfficeQuickCreateContractTests` :730 | literal | `"record_number_unavailable"`; assertion unchanged |
+| `CrossSurfaceOwnerTests.TheLiveOfficeQuickCreate_KeepsTheActingUsersTeam_…_UntilTask018` | removed on purpose (018b record-first) | `SecureRootCreateRouteTests.OfficeQuickCreate_UnderAnOrdinaryMatter_IsOwnedByTheMattersUnitTeam_…` |
+| `CrossSurfaceOwnerTests` office halves (unfiled owner; no-BU refusal) | covered | `OfficeQuickCreateProjectContractTests.Post_Project_Returns201_OwnedByCallersTeam_…`, `…WhenTheCallersTeamCannotBeResolved_Returns403_…` (and the matter twin) |
+| `SecureRootInheritanceWriterTests` Office: `IsCreatedIntoIsolation` | covered | `SecureRootCreateRouteTests.OfficeQuickCreate_OfAProjectFromASecureMatter_IsCreatedSecure_EndToEnd`, `…UnderASecureMatter_IsOwnedByTheSecureTeam_…` |
+| `WhenTheMakerCannotBeShared_TheProjectIsRemoved` | covered | `…OfficeQuickCreate_WhenTheMakerCannotBeShared_TheProjectIsRemovedAgain_Is500…` |
+| `…WalledOffAfterThePlan_TheProjectIsRemoved_…` | covered | `…OfficeQuickCreate_WhenTheMakerIsWalledOffAfterThePlan_TheProjectIsRemovedAgain_…` |
+| `…MakerCannotBeSharedNorTheProjectRemoved_WarnsSo`, `…CompensationDeleteAnswersSuccessButTheProjectSurvives…`, `…WalledOffAfterThePlan_AndTheProjectCannotBeRemoved_PromisesNoSelfHeal` | re-pointed | `SecureRootCreateRouteTests.OfficeFiling` (same names, over the route) |
+| `…MakerIsOnTheSecureMattersNoAccessList…` | re-pointed | `…OfficeFiling.OfficeQuickCreate_WhenTheMakerIsOnTheSecureMattersNoAccessList_IsRefused_…` (403, `ReasonCreatorNoAccess`, same detail) |
+| `…FromASecureMatter_WhenTheCaller/AppReadOfTheSourceFails_…`, `…FromAnOrdinaryMatter_IsAnOrdinaryProject_FiledUnderIt` | re-pointed | `…OfficeFiling` (theories; two new fixture switches `SourceAppReadFails` / `SourceCallerReadFailStatus`, reset by `ResetRoutes`) |
+| `…FromASecureProject_WhenTheCallerReadOfTheSourceFails_…` | re-pointed | `…OfficeFiling.OfficeQuickCreate_FromASecureProject_IsFiledUnderIt_AndIsolated` (no project→project profile: the pair is derived, never read from the mapping) |
+| `…FromAnOrdinaryProject_WhenTheCallerCannotAppendToIt…`, `…FromAnOrdinarySource_WhenTheCallerCanAppendToIt…` | re-pointed | `…OfficeFiling` (project source); the matter source is `…UnderASecureMatterTheCallerCannotAppendTo_IsRefusedExactlyAsAnOrdinaryOne…` |
+| `…WhenThePairCannotBeDerived_…` (both), `…WhenTheCatalogReadFails_…` | re-pointed | `OfficeQuickCreateAdapterContractTests.Post_Project_FromARecordWhosePairCannotBeDerived_Returns403Undetermined_AndWritesNothing` (theory: no row → "Ask an administrator", fault → "Try again.") |
+| `…CallerCannotFileUnderTheSecureMatter`, `…FromAnOrdinaryMatter_WhenTheCallerCannotAppendToIt`, `…RightsReadCouldNotAnswer` | covered | `SecureRootCreateRouteTests.OfficeQuickCreate_WhenTheCallerCannotFileUnderTheSecureMatter_Is403…`, `…UnderASecureMatterTheCallerCannotAppendTo_IsRefusedExactlyAsAnOrdinaryOne…` |
+| `…UnderAMatterWhoseFlagCannotBeRead` | covered | `…OfficeQuickCreate_UnderAMatterWhoseSecureFlagIsEmpty_Is403Undetermined…`, `…CannotBeRead_Is403Undetermined…` |
+| `…CallersRightsCannotBeChecked`, `…FromAnOrdinaryMatter_WhenTheCallersRightsCannotBeAsked` | covered | `OfficeQuickCreateProjectContractTests.Post_Project_WhenTheRequestCarriesNoBearerToken_Returns500CallerRightsUnverifiable_…`, `OfficeQuickCreateAdapterContractTests.Post_WhenWhoAmIFails_…` |
+| `…CallerCannotCreateProjects` | covered | `OfficeQuickCreateContractTests.Post_QuickCreate_WhenTheCallerLacksTheTablesCreatePrivilege_Returns403_…` |
+| `…PlansRightsReadThrows`, `…PlansRightsReadAnswersNone`, `…RightsReadThrows` | covered (the two-read mechanism is gone) | `RecordCreationServicePipelineSeamTests.CreateAsync_WhenACallerCheckThrows_Is503_AndCreatesNothing`, `OfficeQuickCreateContractTests.Post_Matter_WhenTheRightsProbeThrows_Returns403_FailClosed`, and the uniform AppendTo refusal above |
+| `…AMappingRuleTargetingTheSecureFlag_IsSkipped` | covered | the seam's `SecureRootAccessColumns` tests (above) |
+| `…MappingFilesItUnderAnotherRecord_IsRefused` / `…KeepsTheMappedPair`, `…MappingWritesHalfAPair`, `…MappingNamesAnotherRecord_AndTheSourceFlag…` (×2), `…MappingWritesItsOwnPairInAnotherSpelling` | removed on purpose (G4: no mapping rule writes the pair; the derived pair is written by construction) | the canonical lower-case "D" spelling: `SecureRootCreateRouteTests.OfficeQuickCreate_UnderASecureMatter_ABodyWithRegardingMembers_IsFiledUnderTheDerivedPair_AndSecure` (its `ShouldBeFiledUnderTheDerivedPair`); the skipped pair rule: `…WithAPairRule_…` |
+| `OfficeCallerRightsSetup.cs` | deleted | no user left |
+
+### §11 answers
+
+No new surface in `src`: no endpoint, DI registration, package, column or class. `IOfficeService.ResolveDefaultAssigneeAsync` is a member moved from the deleted concrete class (which the endpoint took before) onto `IOfficeService`: `OfficeModule` registers only the interface, and the method uses `OfficeService`'s own fields, so an interface member is the smallest surface (a concrete parameter would need a new DI registration).
+1. **Existing:** `OfficeRecordCreationService.ResolveDefaultAssigneeAsync`, which is deleted here.
+2. **Extension:** `IOfficeService` is extended; nothing new is added.
+3. **Cost of doing nothing:** the defaults endpoint keeps the 1588-line dead core alive, with its own maker-contact resolution beside the adapter's, so the prefill could drift from the server default (task 100).
+
+The two test-fixture switches on `SecureRootCreateRouteFixture` are test-only.
+
+### Verification
+
+- `dotnet build Spaarke.sln`: 0 warnings, 0 errors.
+- ArchTests: 1361 / 1361.
+- Filtered `Sprk.Bff.Api.Tests`, run 1 (Office | RecordCreation | FieldMapping | RecordOwnership | CreatorPerson | CrossSurface): 2472 passed, 7 skipped, 1 failed. The failure was `CreateTimeFieldMappingTests.Apply_ARuleThatThrows_…`: its `ThrowingSet` seam also threw in fill-only's supplied-column snapshot, which reads the protected set before any rule runs. The seam now throws from the second lookup on, so it reaches the per-rule guard the test pins; the assertions are unchanged. The `CreateTimeFieldMapping` re-run is 134 / 134.
+- Run 2 (SecureRoot | AssignedAccess | OwnedChildWrite | SecureChildOwnershipAiTool | RouteAuthorization | Census | MappingSourceCallerMask): 1308 / 1308. The two runs overlap: some SecureRoot tests carry "Office" in their names.
+- Before the core was deleted, the re-pointed suites (route, adapter contract, CrossSurface, writer, AssignedAccess, CreatorPerson, RecordTableRules, pipeline seam, Office contract) were 299 / 299.
+- The assertions in the Office QuickCreate Contract, Project and Fields suites are unchanged (one constant became its literal).
+
+**Known limit (test seam only):** `ApplyFillOnly`'s supplied-column snapshot runs outside the per-rule try/catch, so a protected set whose `Contains` throws would escape. The real sets (`RecordTableRules`' `HashSet`s) never throw. Listed, not fixed (out of scope).
+
+**Mutants (each reverted):**
+- (a) `ResolveDefaultAssigneeAsync` always returns null: `GetDefaults_ThePrefill_IsTheContactTheCreateAssigns_AndNoneWithoutALink` fails (2 of 2 cases).
+- (b) `Apply` restored, with an unmasked call site in `OfficeService`: `EverySourceHandedToTheMappingEngine_PassedThroughTheCallerMask` and `TheEngine_OffersNoOtherPathThatTakesASourceEntity` fail (2 of 79).
+- (c) the Office allow-list entry re-added: `CreateOwnerResolutionGuardTests.EveryAllowlistEntry_StillUsesTheName` fails (a stale entry for a gone file).
+
+### 018c review (Opus adversarial, one pass)
+
+No production defect. **F3** (fixed): `OfficeQuickCreate_FromAnOrdinaryMatter_IsAnOrdinaryProject_FiledUnderIt(true)` set
+`SourceCallerReadFailStatus` without proving the read failed; it now asserts `SourceUnavailableWarning`. **K4** (fixed): the
+`ApplyFillOnly` "Never throws" comment now says a faulting rule never escapes and the snapshot is unguarded; the §11
+sentence above is corrected. **K2** (known limit, not fixed): the re-pointed cancellation seam test cancels in the number
+read-back, not in the create callback, and covers Matter only (the deleted test covered Project too). Not a live defect:
+nothing observes `ct` between step 11 and the read-back, and step 12 uses `CancellationToken.None`. A step that starts
+using `ct` there would still be caught.

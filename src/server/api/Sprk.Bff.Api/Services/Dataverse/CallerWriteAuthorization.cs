@@ -133,7 +133,7 @@ internal static class CallerWriteAuthorization
 
     // ── The ADR-024 regarding pair (sprk_regardingrecordid + sprk_regardingrecordtype) ─────────────────────────────
 
-    private static readonly System.Text.RegularExpressions.Regex LogicalName = new("^[a-z][a-z0-9_]*$",
+    private static readonly System.Text.RegularExpressions.Regex LogicalName = new(@"^[a-z][a-z0-9_]*\z",
         System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
     /// <summary>

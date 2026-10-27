@@ -23,10 +23,12 @@
 // H8SpeContainerHandler classifies as RunStatus.WaitingOnGate (a session-free
 // run-level pause) rather than Resumable/QuarantineRequired.
 //
-// NOT UNIT-TESTED IN THE CI SUITE (real Microsoft.Graph HTTP calls) — parity
-// with GraphContainerProvisioner.cs. H8SpeContainerHandlerTests.cs substitutes
-// a fake ISpeContainerVerifier as the real coverage surface for H8's
-// orchestration + the WaitingOnGate classification logic itself.
+// TRANSIENT FAULTS (T186 audit of H8): a 429, a 5xx, a per-attempt timeout or a
+// dropped connection is retried (SpeContainerOptions.VerifyTransientRetryCount /
+// ...Delay); if it persists the result is TransientFailure (handler: Resumable),
+// never NotVerified/QuarantineRequired. Tests: GraphAppOnlyContainerVerifierTests.
+// H8SpeContainerHandlerTests.cs substitutes a fake ISpeContainerVerifier as the
+// coverage surface for H8's orchestration + the WaitingOnGate classification itself.
 // -----------------------------------------------------------------------------
 
 using Microsoft.Extensions.Options;
@@ -73,11 +75,19 @@ public sealed class GraphAppOnlyContainerVerifier : ISpeContainerVerifier
 
         try
         {
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeoutCts.CancelAfter(_options.GraphRequestTimeout);
-
-            var container = await graph.Storage.FileStorage.Containers[request.ContainerId]
-                .GetAsync(cancellationToken: timeoutCts.Token).ConfigureAwait(false);
+            // T186 audit: a 429, 5xx, per-attempt timeout or dropped connection says nothing about the container —
+            // retry it (bounded). 404 (replication gate) and every other answer are not retried here.
+            var container = await SpeGraphRetry.RetryWhileAsync(
+                async attemptCt =>
+                {
+                    using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(attemptCt);
+                    timeoutCts.CancelAfter(_options.GraphRequestTimeout);
+                    return await graph.Storage.FileStorage.Containers[request.ContainerId]
+                        .GetAsync(cancellationToken: timeoutCts.Token).ConfigureAwait(false);
+                },
+                ex => SpeGraphRetry.IsTransientServiceFault(ex, cancellationToken),
+                _options.VerifyTransientRetryCount, _options.VerifyTransientRetryDelay,
+                _logger, "container verification GET", cancellationToken).ConfigureAwait(false);
 
             var status = container?.Status?.ToString() ?? "unknown";
 
@@ -96,6 +106,17 @@ public sealed class GraphAppOnlyContainerVerifier : ISpeContainerVerifier
             _logger.LogInformation(
                 "H8-B SPE container verification pending replication: containerId={ContainerId}", request.ContainerId);
             return new SpeContainerVerificationResult.ReplicationPending(diagnostic);
+        }
+        catch (Exception ex) when (SpeGraphRetry.IsTransientServiceFault(ex, cancellationToken))
+        {
+            // Still failing after the bounded retries — a transient service fault, not a verdict on the container.
+            // Resumable at the handler (never QuarantineRequired); the container stays on the run's record.
+            _logger.LogWarning(ex,
+                "H8-B Graph SPE container app-only verification kept failing transiently: containerId={ContainerId}",
+                request.ContainerId);
+            return new SpeContainerVerificationResult.TransientFailure(
+                $"App-only GET for container '{request.ContainerId}' kept failing transiently after " +
+                $"{_options.VerifyTransientRetryCount} attempt(s): {SpeGraphRetry.Describe(ex)}. This is not a verdict on the container.");
         }
         catch (ODataError ex)
         {

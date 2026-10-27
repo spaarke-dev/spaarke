@@ -967,9 +967,8 @@ public sealed partial class SecureRootInheritance
         }
 
         // F1: an EMPTY record is read as "not written yet" only once the BFF's read of the column is proven — PER TABLE (fix
-        // round 3, F-a): a non-empty record read proves its own table only.
-        foreach (var table in listed.Where(r => !string.IsNullOrEmpty(r.Marker)).Select(r => r.Table).Distinct())
-            MarkReadable(table);
+        // round 3, F-a), and only by the platform's answer. A non-empty record is trusted for its own value but proves nothing
+        // about the others (UAC 2026-10-23: a record-level field share must not prove a column).
         var readable = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
         foreach (var table in listed.Where(r => string.IsNullOrEmpty(r.Marker)).Select(r => r.Table).Distinct())
             readable[table] = await AccessRecordReadableAsync(table, ct).ConfigureAwait(false);
@@ -1451,23 +1450,15 @@ public sealed partial class SecureRootInheritance
 
     private bool? _accessRecordColumnSecured;
 
-    // F-a (fix round 3): readability is proven PER TABLE. Proven: a non-empty record read on it, or the platform's answer.
-    // Hidden: a record written there read back empty — sticky for this scope, whatever was proven before.
-    private readonly HashSet<string> _readableTables = new(StringComparer.OrdinalIgnoreCase);
+    // F-a (fix round 3): readability is proven PER TABLE, and only by the platform's answer (System Administrator, or a field
+    // security profile granting Read). A non-empty record read on a table is NOT a proof: Dataverse can grant a secured field on
+    // one record (a record-level field share), so one readable record says nothing about the empty ones (UAC 2026-10-23: a
+    // record-level field share must not prove a column).
+    // Hidden: a record written there read back empty — sticky for this scope, whatever the platform said.
     private readonly HashSet<string> _hiddenTables = new(StringComparer.OrdinalIgnoreCase);
     private HashSet<string>? _platformReadableTables;
 
-    private void MarkReadable(string table)
-    {
-        if (!_hiddenTables.Contains(table))
-            _readableTables.Add(table);
-    }
-
-    private void MarkHidden(string table)
-    {
-        _hiddenTables.Add(table);
-        _readableTables.Remove(table);
-    }
+    private void MarkHidden(string table) => _hiddenTables.Add(table);
 
     /// <summary>Why no access record (or this EMPTY one, on <paramref name="table"/>) can be trusted, or null when it can.</summary>
     private async Task<(string Code, string Detail)?> AccessRecordDistrustAsync(string table, string? marker, CancellationToken ct)
@@ -1484,8 +1475,6 @@ public sealed partial class SecureRootInheritance
     {
         if (_hiddenTables.Contains(table))
             return false;
-        if (_readableTables.Contains(table))
-            return true;
         _platformReadableTables ??= await PlatformReadableTablesAsync(ct).ConfigureAwait(false);
         return _platformReadableTables.Contains(table);
     }
@@ -1539,9 +1528,18 @@ public sealed partial class SecureRootInheritance
     }
 
     /// <summary>
+    /// The System Administrator role's TEMPLATE id (#2320). It is the same in every environment and every business unit's copy
+    /// of the role carries it, so the role is matched by this id — never by its display name, which an administrator can
+    /// change or give to another role (the same match as <c>SecuredColumnReadProof</c> and provisioning S8/S9).
+    /// </summary>
+    internal static readonly Guid SystemAdministratorRoleTemplateId = Guid.Parse("627090ff-40a3-4053-8790-584edc5be201");
+
+    /// <summary>
     /// F1 / F-a: the tables on which the platform says the BFF reads the column — both when the BFF application user holds the
-    /// System Administrator role; otherwise exactly the tables a field security profile it is a member of grants Read on. A
-    /// fault, or no answer, is no table (fail closed). Asked at most once per scope.
+    /// System Administrator role (by template id, directly or through a team it is a member of); otherwise exactly the tables a
+    /// field security profile it holds (directly or through a team) grants Read on (#2320). Team membership is joined
+    /// server-side (a nested <c>any()</c> over <c>teammembership_association</c>), so no request grows with the number of teams
+    /// the BFF's user is in. A fault, or no answer, is no table (fail closed). Asked at most once per scope.
     /// </summary>
     private async Task<HashSet<string>> PlatformReadableTablesAsync(CancellationToken ct)
     {
@@ -1553,16 +1551,22 @@ public sealed partial class SecureRootInheritance
             if (me is not { } user || user == Guid.Empty)
                 return Unproven("the BFF's own user could not be read");
 
-            var admin = await _webApi.QueryAsync<RoleIdRow>($"systemusers({user})/systemuserroles_association",
-                "name eq 'System Administrator'", "roleid", cancellationToken: ct).ConfigureAwait(false);
+            // #2320: System Administrator held directly or through a team the BFF's user is a member of, in one query.
+            var admin = await _webApi.QueryAsync<RoleIdRow>("roles",
+                $"_roletemplateid_value eq {SystemAdministratorRoleTemplateId} and (systemuserroles_association/any(u:u/systemuserid eq {user}) " +
+                $"or teamroles_association/any(t:t/teammembership_association/any(u:u/systemuserid eq {user})))",
+                "roleid", cancellationToken: ct).ConfigureAwait(false);
             if (admin.Count > 0)
                 return new HashSet<string>(new[] { WorkAssignment, Project }, StringComparer.OrdinalIgnoreCase);
 
-            var profiles = (await _webApi.QueryAsync<ProfileIdRow>($"systemusers({user})/systemuserprofiles_association", null,
+            // #2320: the field security profiles held directly or through a team, in one query.
+            var profiles = (await _webApi.QueryAsync<ProfileIdRow>("fieldsecurityprofiles",
+                $"systemuserprofiles_association/any(u:u/systemuserid eq {user}) " +
+                $"or teamprofiles_association/any(t:t/teammembership_association/any(u:u/systemuserid eq {user}))",
                 "fieldsecurityprofileid", cancellationToken: ct).ConfigureAwait(false))
                 .Select(p => p.FieldSecurityProfileId).Where(id => id != Guid.Empty).Distinct().ToList();
             if (profiles.Count == 0)
-                return Unproven("the BFF's user is in no field security profile");
+                return Unproven("the BFF's user is in no field security profile, directly or through a team");
 
             var grants = await _webApi.QueryAsync<FieldPermissionRow>("fieldpermissions",
                 $"attributelogicalname eq '{AccessInheritance.Column}' and canread eq 4 and (" +
@@ -1634,10 +1638,10 @@ public sealed partial class SecureRootInheritance
         var row = (await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
         if (row is null)
             return null;
-        var marker = row.GetAttributeValue<string>(AccessInheritance.Column);
-        if (!string.IsNullOrEmpty(marker))
-            MarkReadable(logical); // a non-empty record read proves the BFF reads the column on THIS table (F1, F-a)
-        return new OwnAccess(row.GetAttributeValue<bool?>(IsSecureColumn), PermissionOfRow(row), marker);
+        // A non-empty record is trusted for its own value only; it proves nothing about other records on the table (UAC
+        // 2026-10-23: a record-level field share must not prove a column) — see AccessRecordReadableAsync.
+        return new OwnAccess(row.GetAttributeValue<bool?>(IsSecureColumn), PermissionOfRow(row),
+            row.GetAttributeValue<string>(AccessInheritance.Column));
     }
 
     private static int? PermissionOfRow(Entity row) =>

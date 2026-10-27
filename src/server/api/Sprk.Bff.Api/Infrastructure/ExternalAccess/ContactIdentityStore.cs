@@ -767,6 +767,12 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
            + $"&$filter={ContactBindingDecision.HomeTenantIdColumn} eq '{homeTenantId:D}'"
            + $" and {ContactBindingDecision.HomeObjectIdColumn} eq '{homeObjectId:D}'&$top=2&$orderby=isdisabled asc";
 
+    /// <summary>
+    /// <c>systemuser.internalemailaddress</c>: with <c>domainname</c>, the A9 licensed-user email read
+    /// (<see cref="BuildLicensedUserEmailLookupPath"/>, <see cref="ContactBindingDecision.DecideLicensedUserEmail"/>). <c>internal</c> (#2253 fix round 2): <c>InheritedAccessPermission.AccessColumns</c> refuses it to app-only generic writers.
+    /// </summary>
+    internal const string InternalEmailColumn = "internalemailaddress";
+
     /// <summary>The systemuser home-link uniqueness mirror (unsecured): the home probe's row filter (task 044).</summary>
     public const string HomeObjectIdKeyColumn = "sprk_homeobjectidkey";
 
@@ -813,8 +819,9 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     /// Dataverse compares text case-insensitively; <see cref="ContactBindingDecision.DecideLicensedUserEmail"/> re-checks.
     /// </summary>
     public static string BuildLicensedUserEmailLookupPath(string email)
-        => "systemusers?$select=systemuserid,isdisabled,internalemailaddress,domainname"
-           + $"&$filter=isdisabled eq false and (internalemailaddress eq '{Literal(email)}' or domainname eq '{Literal(email)}')"
+        => "systemusers?$select=systemuserid,isdisabled," + InternalEmailColumn + ",domainname"
+           + "&$filter=isdisabled eq false and (" + InternalEmailColumn
+           + $" eq '{Literal(email)}' or domainname eq '{Literal(email)}')"
            + "&$top=2";
 
     /// <summary>

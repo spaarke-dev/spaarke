@@ -728,7 +728,7 @@ public class OfficeQuickCreateContractTests
         var response = await factory.CreateClient().PostAsJsonAsync(Route, new QuickCreateRequest { Name = "Always Collides" });
 
         response.StatusCode.Should().Be(HttpStatusCode.Conflict);
-        (await ReadProblemAsync(response)).Should().ContainKey("errorCode").WhoseValue.Should().Be(OfficeRecordCreationService.NumberUnavailableCode);
+        (await ReadProblemAsync(response)).Should().ContainKey("errorCode").WhoseValue.Should().Be("record_number_unavailable");
         created.Attempts.Should().HaveCount(3,
             "the attempts are bounded; a run of typed-ahead numbers is the operator's re-seed, not an endless loop");
         created.Writes.Should().BeEmpty();

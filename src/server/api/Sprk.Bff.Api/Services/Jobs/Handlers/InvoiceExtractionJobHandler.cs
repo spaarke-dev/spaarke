@@ -238,7 +238,10 @@ public class InvoiceExtractionJobHandler : IJobHandler
                 documentId, aiExtractionResult.LineItems.Length, aiExtractionResult.ExtractionConfidence);
 
             // Build PlaybookExecutionContext with variables for OutputOrchestrator
-            var context = new PlaybookExecutionContext();
+            // #2257 (owner round 123): this Service Bus job applies the operator-configured invoice playbook's output mapping
+            // (FinanceOptions.InvoiceExtractionPlaybookId) with no person in the run, so it writes app-only, behind the
+            // deny-lists. The confirming user is not carried on the job.
+            var context = new PlaybookExecutionContext { StartedBy = PlaybookRunStartedBy.System };
 
             // context.* variables (from job payload)
             context.SetVariable("context.invoiceId", invoiceId.ToString());
