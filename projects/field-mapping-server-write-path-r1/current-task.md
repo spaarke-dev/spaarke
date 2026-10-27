@@ -2,7 +2,7 @@
 
 > **Last updated**: 2026-10-22 (task 018 complete; #2281 fixed (1fa0cf5cb8); project blocked on 017)
 > **Phase**: Wave 2. Done (14/43): 001–006, 010–016, 018 on master (018a 36403e1f4b, 018b ef8a91a157 #2261, 018c **ab7cf4fc94** #2266).
-> **Live on dev: 3ff2c04bf5** (R3, 2026-10-27 01:29Z; gate clean: 0 5xx, 0 403, 0 access_record_hidden; rollback deploy/rollback/wwwroot-20261027T012731Z; includes UAC #2324, the team-filter fix from our catch). Office smoke done. Waiting on the owner's wizard re-runs against the new dev mapping rules. **Active: W7 design (record family service + TrackingFieldTrio Family tool), waiting on UAC-r2's canonical family definition (asked 2026-10-27). 017 still blocked on ebilling #1911.**
+> **Live on dev: de38296499** (R3, 2026-10-27 19:42Z; carries our #2331 timing fix and UAC 194; read-back green; rollback deploy/rollback/wwwroot-20261027T193805Z = 3ff2c04bf5). Owner click checks pending: Create Work Assignment from a matter with sprk_assignedattorney1 copies it (also #2281); Push Updates returns a child count. Then read App Insights. Previous: **3ff2c04bf5** (R3, 2026-10-27 01:29Z; gate clean: 0 5xx, 0 403, 0 access_record_hidden; rollback deploy/rollback/wwwroot-20261027T012731Z; includes UAC #2324, the team-filter fix from our catch). Office smoke done. Waiting on the owner's wizard re-runs against the new dev mapping rules. **Active: W7 design (record family service + TrackingFieldTrio Family tool), waiting on UAC-r2's canonical family definition (asked 2026-10-27). 017 still blocked on ebilling #1911.**
 
 ## Quick Recovery
 
