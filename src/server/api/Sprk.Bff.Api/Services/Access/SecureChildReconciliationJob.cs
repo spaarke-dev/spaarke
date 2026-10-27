@@ -751,6 +751,11 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                     capReached = ordinary.CapReached,
                     incompleteRoots = ordinary.IncompleteRoots.Take(50).ToArray(),
                     carriedRoots = ordinary.CarriedRoots,
+                    // F1-a: the walk's document files handed to the re-file pass, and the roots deferred for want of room.
+                    documentsHandedOff = ordinary.DocumentsHandedOff,
+                    documentsToHandOff = ordinary.DocumentsToHandOff,
+                    handOffsPending = ordinary.HandOffsPending,
+                    deferredRoots = ordinary.DeferredRoots.Take(50).ToArray(),
                     // F4-a: the per-instance catch-up sweep over every ordinary root (once in each mode).
                     sweep = new { ran = ordinary.SweepRan, roots = ordinary.SweepRoots, complete = ordinary.SweepComplete },
                     changesTotal = ordinary.ChangesTotal,
@@ -898,6 +903,14 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         /// <summary>Roots whose pass did not complete for a reason other than the write cap (a refusal, a failure).</summary>
         public List<string> IncompleteRoots { get; } = new();
         public int CarriedRoots { get; set; }
+
+        /// <summary>F1-a: documents handed to the re-file pass this run (writes on), or that would be (report-only).</summary>
+        public int DocumentsHandedOff { get; set; }
+        public int DocumentsToHandOff { get; set; }
+
+        /// <summary>F1-a: roots whose documents did not all fit the re-file carry: carried, or held by the sweep cursor.</summary>
+        public List<string> DeferredRoots { get; } = new();
+        public int HandOffsPending { get; set; }
         public int ChangesTotal { get; set; }
         public List<object> Changes { get; } = new();
         public string? Failure { get; init; }
@@ -935,6 +948,12 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
     /// A switch of <see cref="OrdinaryMovesWritesEnabledConfigKey"/> starts it over: a report-only cover never stands in for a
     /// writing one. A root of the window that the write cap stops is carried; a carry past <see cref="MaxCarriedRows"/> holds
     /// the cursor where it is.</para>
+    /// <para><b>Files (F1-a).</b> With writes on, every document of a root's walk that may move
+    /// (<see cref="SecureChildReconcileReport.OrdinaryHandOffDocumentIds"/>: any owner, never one held in isolation or answered
+    /// Secure) is handed to the re-file pass as a carried row, so it is examined and moved this run or later under the
+    /// Refile purpose's guards, <see cref="MaxRelocationsPerRunConfigKey"/> and the examination budget. At most the carry's
+    /// free capacity (<see cref="MaxCarriedRows"/> minus the re-file carry and the hand-offs not yet reached); a root whose
+    /// documents do not all fit is deferred: carried, or (swept) held by the cursor, never dropped, and walked again.</para>
     /// <para>Never throws (cancellation aside): a listing fault is reported and the window is listed again next run.</para>
     /// </remarks>
     private async Task<OrdinaryMovesRun> ReconcileOrdinaryParentMovesAsync(
@@ -1009,6 +1028,7 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         };
 
         var carry = new List<(string Table, Guid Id)>();
+        (string Table, Guid Id)? firstDeferredSweep = null;
         var remaining = writeCap;
         foreach (var (table, id, swept) in take.Select(r => (r.Table, r.Id, false))
                      .Concat(sweepBatch.Select(r => (r.Table, r.Id, true))))
@@ -1034,6 +1054,38 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
             {
                 run.Totals[0] += t.Examined; run.Totals[1] += t.AlreadyCorrect; run.Totals[2] += t.Changed;
                 run.Totals[3] += t.WouldChange; run.Totals[4] += t.Untouched; run.Totals[5] += t.Refused; run.Totals[6] += t.Failed;
+            }
+
+            // F1-a: the files of the walk's documents (any owner, never one held in isolation or answered Secure) go to the
+            // re-file pass, at most the carry's free capacity. A root whose documents do not all fit is deferred: carried (or,
+            // swept, held by the cursor), never dropped; it is walked again and only the rest are handed on.
+            var deferred = false;
+            if (writes)
+            {
+                lock (_cursorGate)
+                {
+                    var pending = new HashSet<Guid>(_refilePending);
+                    pending.UnionWith(_ordinaryHandOffs);
+                    var fresh = report.OrdinaryHandOffDocumentIds.Where(d => !pending.Contains(d)).ToList();
+                    var free = Math.Max(0, MaxCarriedRows - pending.Count);
+                    foreach (var documentId in fresh.Take(free))
+                        _ordinaryHandOffs.Add(documentId);
+                    run.DocumentsHandedOff += Math.Min(fresh.Count, free);
+                    deferred = fresh.Count > free;
+                }
+            }
+            else
+            {
+                run.DocumentsToHandOff += report.OrdinaryHandOffDocumentIds.Count;
+            }
+
+            if (deferred)
+            {
+                run.DeferredRoots.Add(key);
+                if (swept)
+                    firstDeferredSweep ??= (table, id);
+                else if (report.IsComplete)
+                    carry.Add((table, id));
             }
 
             var capped = report.Changes.Any(c => c.Detail == SecureChildReconciler.OrdinaryMoveCapDetail);
@@ -1086,7 +1138,15 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
             // MaxCarriedRows holds it where it is.
             if (sweepRuns && (!writes || carry.Concat(overflow).Distinct().Count() <= MaxCarriedRows))
             {
-                if (sweep.ReachedEnd)
+                // F1-a: a swept root whose documents did not all fit holds the cursor just before it (the carry is full:
+                // the sweep does not advance past roots it could not hand off).
+                var held = firstDeferredSweep is { } first ? sweep.Rows.IndexOf(first) : -1;
+                if (held >= 0)
+                {
+                    if (held > 0)
+                        _ordinarySweepCursor = sweep.Rows[held - 1];
+                }
+                else if (sweep.ReachedEnd)
                 {
                     _ordinarySweepComplete = true;
                     _ordinarySweepCursor = null;
@@ -1099,6 +1159,7 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
 
             run.SweepComplete = _ordinarySweepComplete;
             run.CarriedRoots = _pendingOrdinaryRoots.Count;
+            run.HandOffsPending = _ordinaryHandOffs.Count;
         }
 
         _logger.Log(
@@ -1107,10 +1168,11 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
             "rootsInRun={InRun} rootsOverflow={Overflow} examined={Examined} alreadyCorrect={AlreadyCorrect} moved={Moved} " +
             "wouldMove={WouldMove} reported={Reported} refused={Refused} failed={Failed} writesAttempted={Writes} " +
             "capReached={CapReached} incompleteRoots={Incomplete} carriedRoots={Carried} sweepRan={SweepRan} " +
-            "sweepRoots={SweepRoots} sweepComplete={SweepComplete}",
+            "sweepRoots={SweepRoots} sweepComplete={SweepComplete} documentsHandedOff={HandedOff} deferredRoots={Deferred}",
             runId, writes ? ModeWrite : ModeReportOnly, since, run.RootsListed, run.RootsInRun, run.RootsOverflow, run.Totals[0],
             run.Totals[1], run.Totals[2], run.Totals[3], run.Reported, run.Totals[5], run.Totals[6], run.WritesAttempted,
-            run.CapReached, run.IncompleteRoots.Count, run.CarriedRoots, run.SweepRan, run.SweepRoots, run.SweepComplete);
+            run.CapReached, run.IncompleteRoots.Count, run.CarriedRoots, run.SweepRan, run.SweepRoots, run.SweepComplete,
+            run.DocumentsHandedOff, run.DeferredRoots.Count);
         return run;
     }
 
@@ -1585,7 +1647,8 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         lock (_cursorGate)
         {
             since = _refileWatermark ?? startedAt - InitialRecentChangesLookback;
-            carried = _refilePending.OrderBy(id => id).ToList();
+            // F1-a: the ordinary pass's hand-offs are carried rows too (read by id whatever their modifiedon).
+            carried = _refilePending.Union(_ordinaryHandOffs).OrderBy(id => id).ToList();
             after = _refileCursor;
             // B2: the window a cursor walks started with the run that found no cursor; the watermark moves to THAT start
             // when the window drains, so a row modified while the window was being walked is listed again.
@@ -1856,8 +1919,11 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         {
             if (moveWatermark)
                 _refileWatermark = windowStartedAt - RecentChangesOverlap;
+            // F1-a: a hand-off this pass did not reach stays a hand-off (never truncated); one it reached is dropped (a
+            // failure is in `carry`, like any carried row's); one without a file, or not read back, has nothing to move.
+            _ordinaryHandOffs.IntersectWith(pendingCarried);
             _refilePending.Clear();
-            _refilePending.UnionWith(carry.Concat(pendingCarried).Take(MaxCarriedRows));
+            _refilePending.UnionWith(carry.Concat(pendingCarried.Where(id => !_ordinaryHandOffs.Contains(id))).Take(MaxCarriedRows));
             _refileCursor = windowDone ? null : cursor;
             _refileWindowStartedAt = windowDone ? null : windowStartedAt;
             _refileUndecidableRuns.Clear();
@@ -2231,6 +2297,11 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
     // reasoning; its own watermark, so it never holds the secure pass's window, #1378).
     private DateTimeOffset? _ordinaryMovesWatermark;
     private readonly HashSet<(string Table, Guid Id)> _pendingOrdinaryRoots = new();
+
+    // UAC task 194 F1-a: the documents the ordinary pass handed to the re-file pass that it has not reached yet. The re-file
+    // pass reads them with its own carried rows and drops each once it examines it; they are never truncated, and with its
+    // own carry they never exceed MaxCarriedRows (the ordinary pass hands off at most the free capacity).
+    private readonly HashSet<Guid> _ordinaryHandOffs = new();
 
     // UAC task 194 F4-a: the ordinary catch-up sweep — per instance, like the secure catch-up. It walks every ordinary root
     // once IN THE CURRENT MODE (a switch of OrdinaryMovesWritesEnabled starts it over), then only the watermark decides.

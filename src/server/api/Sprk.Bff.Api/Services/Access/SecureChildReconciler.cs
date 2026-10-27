@@ -206,6 +206,14 @@ public sealed record SecureChildReconcileReport(
     /// </summary>
     public int OrdinaryWritesAttempted { get; init; }
 
+    /// <summary>
+    /// UAC task 194 F1-a: the documents of an ordinary-parent-move pass's walk whose FILE the job may hand to its re-file pass
+    /// (any owner): every <c>sprk_document</c> of the walk except one owned in isolation or in the Secure Record business unit,
+    /// one the rule gives the Secure team (it is also filed under a Secure record, so its container answer is a Secure
+    /// record's), and one whose owner could not be decided or the rule refused. Empty for every other pass.
+    /// </summary>
+    public IReadOnlyList<Guid> OrdinaryHandOffDocumentIds { get; init; } = Array.Empty<Guid>();
+
     /// <summary>Rows re-owned by this pass.</summary>
     public int ChildrenReowned => Tables.Sum(t => t.Changed);
 
@@ -1431,6 +1439,9 @@ public sealed class SecureChildReconciler
         private readonly Dictionary<Guid, (Guid? BusinessUnit, bool IsDefault)> _teamFacts = new();
         private int _ordinaryWritesAttempted;
 
+        // UAC task 194 F1-a: each document's latest ordinary decision — whether its file may be handed to the re-file pass.
+        private readonly Dictionary<Guid, bool> _documentHandOff = new();
+
         public Pass(
             SecureChildReconciler owner, SecureChildReconcileMode mode, RecordOwnershipParent root, bool rootIsolated,
             bool unsecuring, bool mayRelease, Guid secureTeamId, CancellationToken ct, OrdinaryMove? ordinary = null)
@@ -1967,6 +1978,7 @@ public sealed class SecureChildReconciler
                 mirrorRevoked, mirrorIncomplete, null)
             {
                 OrdinaryWritesAttempted = _ordinaryWritesAttempted,
+                OrdinaryHandOffDocumentIds = _documentHandOff.Where(d => d.Value).Select(d => d.Key).OrderBy(id => id).ToList(),
                 IsolatedDocumentIds = ordered
                     .Where(r => string.Equals(r.LogicalName, DocumentTable, StringComparison.OrdinalIgnoreCase)
                                 && IsIsolated(current[(r.LogicalName, r.Id)]))
@@ -2185,6 +2197,32 @@ public sealed class SecureChildReconciler
         /// not a business unit's default team, is reported when its answer is in another business unit, and never moved.
         /// </summary>
         private async Task<RowDecision> DecideOrdinaryRowAsync(Entity row, DataversePrincipalRef? current, OrdinaryMove ordinary)
+        {
+            var decision = await DecideOrdinaryRowCoreAsync(row, current, ordinary).ConfigureAwait(false);
+            if (string.Equals(row.LogicalName, DocumentTable, StringComparison.OrdinalIgnoreCase))
+                _documentHandOff[row.Id] = MayHandOffFile(decision, ordinary);
+            return decision;
+        }
+
+        /// <summary>
+        /// F1-a: whether a document's file may go to the re-file pass — never one held in isolation or in the Secure Record
+        /// business unit (decided Stay with no rule answer), never one the rule gives the Secure team (its container answer
+        /// is a Secure record's), never one whose owner could not be decided or the rule refused. The relocator's own
+        /// refusals still hold for every file handed on.
+        /// </summary>
+        private bool MayHandOffFile(RowDecision decision, OrdinaryMove ordinary)
+        {
+            if (decision.Kind is SecureChildRowOutcome.Failed or SecureChildRowOutcome.Refused)
+                return false;
+            if (decision.Move == RowMove.Stay && decision.Resolution is null)
+                return false;
+            return decision.Resolution?.OwningTeamId is not { } target
+                   || target != _secureTeamId
+                   && !(ordinary.SecureBusinessUnit is { } secureBu
+                        && _teamFacts.TryGetValue(target, out var facts) && facts.BusinessUnit == secureBu);
+        }
+
+        private async Task<RowDecision> DecideOrdinaryRowCoreAsync(Entity row, DataversePrincipalRef? current, OrdinaryMove ordinary)
         {
             var table = row.LogicalName;
             var secureBu = ordinary.SecureBusinessUnit;

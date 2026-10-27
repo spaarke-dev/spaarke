@@ -638,6 +638,125 @@ public class SecureChildOrdinaryParentMoveTests
         result.Success.Should().BeTrue(result.ErrorMessage);
     }
 
+    /// <summary>F1-a: the pointer world — the document filed (for its derivation) under the plain matter, whose container is
+    /// CustomerA1Container; its file still in CustomerBContainer. The job world says how it is filed.</summary>
+    private T.Rig MisplacedFileRig()
+    {
+        var pointer = R.Env();
+        pointer.Rows[("sprk_document", T.DocumentId)] = R.Doc(T.DocumentId, T.PlainMatter, T.CustomerBContainer);
+        _world.Add("businessunit", T.CustomerA, ("sprk_containerid", T.CustomerAContainer));
+        return new T.Rig(pointer);
+    }
+
+    private static EntityReference SomeUser => new("systemuser", SecureChildShareWorld.SomeUser);
+
+    [Fact(DisplayName = "194 F1-a must fire: a USER-owned document under an EVENT of a moved matter has its file moved (handed to the re-file pass)")]
+    public async Task TheJob_MovesTheFileOfAUserOwnedDocumentUnderAnEventOfAMovedMatter()
+    {
+        var rig = MisplacedFileRig();
+        MatterMovedToB(T.PlainMatter);
+        _world.Modified(Matter, T.PlainMatter, DateTime.UtcNow);
+        Row("sprk_event", EventId, TeamRef(GeneralTeam), ("sprk_regardingmatter", Matter, T.PlainMatter));
+        Row("sprk_document", T.DocumentId, SomeUser, ("sprk_relatedevent", "sprk_event", EventId));
+        _world.Set("sprk_document", T.DocumentId, "sprk_graphdriveid", T.CustomerBContainer);
+        var harness = new JobHarness(_world, _webApi, rig);
+
+        var (result, ordinary) = await harness.RunAsync(ordinaryWrites: "true");
+        var refile = harness.Last.GetProperty("refileRelocations");
+
+        _world.OwnerOf("sprk_document", T.DocumentId).Should().Be(DataversePrincipalRef.User(SecureChildShareWorld.SomeUser),
+            "a user-owned document is reported, not re-owned");
+        ordinary.GetProperty("documentsHandedOff").GetInt32().Should().Be(1);
+        R.Ids(refile, "movedDocuments").Should().Equal(new[] { T.DocumentId },
+            "below the matter's direct children only the hand-off reaches it (the re-file pass's A3 lists direct children)");
+        rig.DriveOf(T.DocumentId).Should().Be(T.CustomerA1Container);
+        result.Success.Should().BeTrue(result.ErrorMessage);
+    }
+
+    [Fact(DisplayName = "194 F1-a back-pressure: with the carry nearly full a swept root is deferred and the sweep HOLDS on it; the next run hands off the rest and moves the file — nothing lost")]
+    public async Task WithTheCarryNearlyFull_ASweptRootIsDeferred_AndCompletesOnALaterRun()
+    {
+        // Stale: the matter is found only by the catch-up sweep. Two documents; the one with a misplaced file sorts LAST, so
+        // it is the one left over when only one fits.
+        var rig = MisplacedFileRig();
+        var firstDocument = Guid.Parse("1c000000-0000-4000-8000-0000000194f1");
+        MatterMovedToB(T.PlainMatter);
+        Row("sprk_document", firstDocument, SomeUser, ("sprk_matter", Matter, T.PlainMatter));
+        Row("sprk_document", T.DocumentId, SomeUser, ("sprk_matter", Matter, T.PlainMatter));
+        _world.Set("sprk_document", T.DocumentId, "sprk_graphdriveid", T.CustomerBContainer);
+        var harness = new JobHarness(_world, _webApi, rig);
+        harness.SeedRefileCarry(SecureChildReconciliationJob.MaxCarriedRows - 1);
+
+        var (_, run1) = await harness.RunAsync(ordinaryWrites: "true");
+
+        run1.GetProperty("documentsHandedOff").GetInt32().Should().Be(1, "only one place was free");
+        run1.GetProperty("deferredRoots").EnumerateArray().Select(r => r.GetString()).Should()
+            .Equal($"{Matter}:{T.PlainMatter:D}");
+        run1.GetProperty("sweep").GetProperty("complete").GetBoolean().Should().BeFalse("the sweep holds on the deferred root");
+        rig.DriveOf(T.DocumentId).Should().Be(T.CustomerBContainer, "its document was not handed off yet");
+
+        var (result2, run2) = await harness.RunAsync(ordinaryWrites: "true");
+
+        run2.GetProperty("deferredRoots").GetArrayLength().Should().Be(0);
+        run2.GetProperty("sweep").GetProperty("complete").GetBoolean().Should().BeTrue();
+        rig.DriveOf(T.DocumentId).Should().Be(T.CustomerA1Container, "the deferred document was handed off and moved");
+        result2.Success.Should().BeTrue(result2.ErrorMessage);
+    }
+
+    [Fact(DisplayName = "194 F1-a back-pressure: a RECENT root deferred for want of room is carried and completes on a later run")]
+    public async Task WithTheCarryNearlyFull_ARecentRootIsCarried_AndCompletesOnALaterRun()
+    {
+        var rig = MisplacedFileRig();
+        var firstDocument = Guid.Parse("1c000000-0000-4000-8000-0000000194f2");
+        MatterMovedToB(T.PlainMatter);
+        _world.Modified(Matter, T.PlainMatter, DateTime.UtcNow);
+        Row("sprk_event", EventId, SomeUser, ("sprk_regardingmatter", Matter, T.PlainMatter));
+        Row("sprk_document", firstDocument, SomeUser, ("sprk_relatedevent", "sprk_event", EventId));
+        Row("sprk_document", T.DocumentId, SomeUser, ("sprk_relatedevent", "sprk_event", EventId));
+        _world.Set("sprk_document", T.DocumentId, "sprk_graphdriveid", T.CustomerBContainer);
+        var harness = new JobHarness(_world, _webApi, rig);
+        harness.SeedRefileCarry(SecureChildReconciliationJob.MaxCarriedRows - 1);
+
+        var (_, run1) = await harness.RunAsync(ordinaryWrites: "true");
+        _world.Modified(Matter, T.PlainMatter, SecureChildShareWorld.RecordsLastModified); // found next run only through the carry
+
+        run1.GetProperty("deferredRoots").GetArrayLength().Should().Be(1);
+        run1.GetProperty("carriedRoots").GetInt32().Should().Be(1, "a deferred root is carried, never dropped");
+        rig.DriveOf(T.DocumentId).Should().Be(T.CustomerBContainer);
+
+        var (result2, run2) = await harness.RunAsync(ordinaryWrites: "true");
+
+        run2.GetProperty("retriedRoots").GetInt32().Should().Be(1);
+        run2.GetProperty("deferredRoots").GetArrayLength().Should().Be(0);
+        rig.DriveOf(T.DocumentId).Should().Be(T.CustomerA1Container);
+        result2.Success.Should().BeTrue(result2.ErrorMessage);
+    }
+
+    [Fact(DisplayName = "194 F1-a must not fire: in a mixed tree a Secure-owned document, and one the rule answers Secure, are never handed off")]
+    public async Task InAMixedTree_SecureDocumentsAreNeverHandedOff()
+    {
+        var (ordinaryDocument, isolatedDocument, familyDocument, secureAnswerDocument) =
+            (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        var secureMatter = Guid.NewGuid();
+        MatterMovedToB();
+        _world.SecureRoot(Matter, secureMatter);
+        Row("sprk_document", ordinaryDocument, SomeUser, ("sprk_matter", Matter, MatterId));
+        Row("sprk_document", isolatedDocument, TeamRef(_world.OwnerTeam), ("sprk_matter", Matter, MatterId));
+        Row("sprk_document", familyDocument, TeamRef(SecureFamilyTeam), ("sprk_matter", Matter, MatterId));
+        // Filed under the moved matter AND a Secure matter: the rule answers Secure (secure-if-any), and its container
+        // answer is the Secure matter's.
+        Row("sprk_document", secureAnswerDocument, TeamRef(GeneralTeam),
+            ("sprk_matter", Matter, MatterId), ("sprk_relatedmatter", Matter, secureMatter));
+
+        var report = await Reconciler().ReconcileOrdinaryParentMoveAsync(
+            Matter, MatterId, SecureChildReconcileMode.Apply, maxWrites: 200, CancellationToken.None);
+
+        report.OrdinaryHandOffDocumentIds.Should().Equal(new[] { ordinaryDocument },
+            "never a document held in isolation or the Secure Record business unit, nor one whose answer is a Secure record's");
+        _world.OwnerOf("sprk_document", isolatedDocument).Should().Be(DataversePrincipalRef.Team(_world.OwnerTeam));
+        _world.OwnerOf("sprk_document", secureAnswerDocument).Should().Be(DataversePrincipalRef.Team(GeneralTeam));
+    }
+
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
     // Doubles
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -670,6 +789,20 @@ public class SecureChildOrdinaryParentMoveTests
         }
 
         public JsonElement Last { get; private set; }
+
+        /// <summary>
+        /// F1-a back-pressure: fills the re-file pass's carried rows (per-instance state, no other seam) with
+        /// <paramref name="count"/> ids no row has, as earlier runs' carries would. The re-file pass drops them in its next run
+        /// (a carried id it cannot read back has nothing to move).
+        /// </summary>
+        public void SeedRefileCarry(int count)
+        {
+            var field = typeof(SecureChildReconciliationJob).GetField(
+                "_refilePending", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+            var carry = (HashSet<Guid>)field.GetValue(_job)!;
+            for (var i = 0; i < count; i++)
+                carry.Add(Guid.NewGuid());
+        }
 
         public async Task<(JobRunResult Result, JsonElement Ordinary)> RunAsync(
             string? ordinaryWrites, bool recentWrites = true, string? maxMoves = null, string? maxRoots = null)
