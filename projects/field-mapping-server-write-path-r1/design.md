@@ -754,6 +754,14 @@ Still open: classify `sprk_procedureassignment` and record-scoped ruleset rules 
   - Service requests are walked in ordinary mode through `ExternalDataService.ServiceRequestRelations`. That list is a service request's OWN family (it is its own root, §12.2), not part of a matter's.
   - `sprk_invoicelineitem` stays out until ebilling deploys it (#2348).
   - Grant rows do not follow an ordinary move (#2341). This does not affect a read-only view.
+- **Matter → Project edge (#2352, 2026-10-27; owner decision pending between (a) and (b)):**
+  - A project is filed under a matter by its regarding PAIR (`sprk_regardingrecordid` + `sprk_regardingrecordtype`), the edge UAC's inheritance already keys on (`SecureRootInheritance` task 158).
+  - CreateProjectWizard writes only the N:N `sprk_Project_Matter_nn` and never the pair, so no dev project is filed under its matter today.
+  - UAC-r2 recommends (a): the pair, one root per project, written by the wizard, with the 7 N:N-linked dev projects backfilled. UAC owns or reviews that fix. The alternative, (b), is a typed lookup kept in agreement with the pair. (c), promoting the N:N, is rejected: Filing is single-root.
+  - **For W7:**
+    - A models the pair as the Matter → Project filing edge (an EdgeKind for a pair).
+    - B queries a pair edge by (id, record type).
+    - D's parent-edge check (task 040) accepts a pair edge, not only an N:1 lookup. This replaces `ResolveParentLookup`'s lookup-only rule for push.
 
 ### 12.11 Known limits (one line each in the PR)
 
