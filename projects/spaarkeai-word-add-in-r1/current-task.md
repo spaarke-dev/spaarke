@@ -71,6 +71,7 @@
   Not built; it waits on the owner finalizing ebilling's model.
 - **Future work for this project (no task yet):** the Invoice view and ribbon button, removing Invoice from Save and quick-create, the email-only .eml save. All ship in ONE add-in release; ebilling 096 removes the server legs one release later.
   - **Owner decision 2026-10-21: create the task only once ebilling 095 (from-email) is built.** Send ebilling the task number then.
+  - **ebilling timeline (2026-10-27, owner asked them to send it):** 095 not started; chain 089 (~4d) → 086 (~1d) → 094 (~3-4d) → 095 (~3-4d), with 092/098 alongside 089 (089, 092, 098 started 10-27). 095 code-complete ~11-13 at the earliest, ~11-20 realistic; on dev after #1911 merges and an R3 deploy. They will update at 094's merge or a slip of more than a few days. We asked them to pin in 095's POML: request DTO names, idempotency-key transport, response (status, ids, how to follow progress), a reasonCode per refusal, duplicate replay. Question to the owner: start our task now against §9.1 with a mock (release still waits on a working dev endpoint)?
   - Gates: 118's shared `InvoiceAttachmentMarking` merged; 095 deployed. The 095 shapes are frozen at v5.9 FINAL.
   - Non-invoice attachments default to Supporting (owner decision 2026-10-21).
   - Production needs a manifest version bump and an M365 Admin Center upload (new ribbon button).
