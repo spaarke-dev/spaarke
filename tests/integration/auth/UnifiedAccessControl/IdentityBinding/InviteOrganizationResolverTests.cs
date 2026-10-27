@@ -259,4 +259,82 @@ public class InviteOrganizationResolverTests
         log.Messages.Should().OnlyContain(m => !m.Contains("secret.person", StringComparison.Ordinal));
         log.Messages.Should().Contain(m => m.Contains("customer.example", StringComparison.Ordinal));
     }
+
+    // ── Slice B3 (K1): the body is read with a byte cap counted from the stream, and a broken body is a fault ──────────
+
+    /// <summary>A body with no Content-Length (chunked), served in small reads, optionally breaking off with an exception.</summary>
+    private static HttpResponseMessage Chunked(HttpStatusCode status, byte[] body, Exception? breakWith = null)
+        => Chunked(status, new ChunkedStream(body, breakWith));
+
+    private static HttpResponseMessage Chunked(HttpStatusCode status, ChunkedStream stream)
+    {
+        var response = new HttpResponseMessage(status) { Content = new StreamContent(stream) };
+        response.Content.Headers.ContentLength.Should().BeNull("a non-seekable body announces no length");
+        return response;
+    }
+
+    /// <summary>
+    /// MUST FIRE: a chunked body longer than the cap is a fault even though no Content-Length announced it, and reading stops
+    /// at the cap (a 4 MB body is never read whole); MUST NOT FIRE: a chunked body inside the cap is read as before.
+    /// </summary>
+    [Fact]
+    public async Task AChunkedBodyOverTheCap_IsLookupUnavailable_AndOneInsideItIsRead()
+    {
+        var over = new ChunkedStream(System.Text.Encoding.UTF8.GetBytes(
+            "{\"issuer\":\"https://login.microsoftonline.com/" + Customer.ToString("D") + "/v2.0\",\"pad\":\""
+            + new string('x', 4 * 1024 * 1024) + "\"}"), breakWith: null);
+        _handler.Answer(() => Chunked(HttpStatusCode.OK, over));
+        (await Resolver().DecideAsync("p@customer.example", null, CancellationToken.None)).Status
+            .Should().Be(InviteOrganizationStatus.LookupUnavailable);
+        over.BytesRead.Should().BeLessThanOrEqualTo(InviteOrganizationResolver.MaxBodyBytes + 1024,
+            "the body is read only up to the cap");
+
+        _handler.Answer(() => Chunked(HttpStatusCode.OK, System.Text.Encoding.UTF8.GetBytes(DiscoveryBody(Customer))));
+        (await Resolver().DecideAsync("p@customer.example", null, CancellationToken.None))
+            .Should().Be(InviteOrganizationDecision.WorkAccount(Customer));
+    }
+
+    /// <summary>MUST FIRE: a body that breaks off (IOException) or cannot be decoded (InvalidDataException) is a fault.</summary>
+    [Theory]
+    [InlineData("io")]
+    [InlineData("invalid-data")]
+    public async Task ABodyThatCannotBeRead_IsLookupUnavailable(string fault)
+    {
+        Exception error = fault == "io" ? new IOException("connection reset") : new InvalidDataException("bad gzip");
+        _handler.Answer(() => Chunked(HttpStatusCode.OK, System.Text.Encoding.UTF8.GetBytes(DiscoveryBody(Customer)), error));
+
+        (await Resolver().DecideAsync("p@customer.example", CallerTenant, CancellationToken.None)).Status
+            .Should().Be(InviteOrganizationStatus.LookupUnavailable);
+        _cache.Writes.Should().BeEmpty("a fault is never cached");
+    }
+
+    /// <summary>A read-only, non-seekable stream that hands out at most 1 KB per read, then throws or ends.</summary>
+    private sealed class ChunkedStream(byte[] data, Exception? breakWith) : Stream
+    {
+        private int _position;
+
+        /// <summary>How many bytes the reader took.</summary>
+        public int BytesRead => _position;
+
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => _position; set => throw new NotSupportedException(); }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            if (breakWith is not null && _position >= Math.Min(16, data.Length))
+                throw breakWith;
+            var n = Math.Min(Math.Min(count, 1024), data.Length - _position);
+            Array.Copy(data, _position, buffer, offset, n);
+            _position += n;
+            return n;
+        }
+
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
 }

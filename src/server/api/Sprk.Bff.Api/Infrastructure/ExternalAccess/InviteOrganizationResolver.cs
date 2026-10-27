@@ -94,8 +94,11 @@ public sealed class InviteOrganizationResolver
     /// <summary>The cached value's schema version.</summary>
     internal const int CacheVersion = 1;
 
-    /// <summary>The largest response body read.</summary>
-    private const int MaxBodyChars = 64 * 1024;
+    /// <summary>
+    /// The largest response body read, in bytes, counted from the stream as it is read (never from Content-Length alone), so
+    /// a chunked body cannot exceed it. A longer body is a fault.
+    /// </summary>
+    internal const int MaxBodyBytes = 64 * 1024;
 
     private const int TenantNotFoundErrorCode = 90002;
 
@@ -299,13 +302,8 @@ public sealed class InviteOrganizationResolver
             using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token)
                 .ConfigureAwait(false);
 
-            if (response.Content.Headers.ContentLength is > MaxBodyChars)
-            {
-                return Fault(domain, $"HTTP {(int)response.StatusCode} with an oversized body");
-            }
-
-            var body = await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false);
-            if (body.Length > MaxBodyChars)
+            if (response.Content.Headers.ContentLength is > MaxBodyBytes
+                || await ReadCappedAsync(response.Content, timeout.Token).ConfigureAwait(false) is not { } body)
             {
                 return Fault(domain, $"HTTP {(int)response.StatusCode} with an oversized body");
             }
@@ -332,6 +330,34 @@ public sealed class InviteOrganizationResolver
         {
             return Fault(domain, $"request failed ({ex.HttpRequestError})");
         }
+        catch (Exception ex) when (ex is IOException or InvalidDataException)
+        {
+            // A body that broke off or could not be decoded (decompression) is no definite answer.
+            return Fault(domain, $"the response body could not be read ({ex.GetType().Name})");
+        }
+    }
+
+    /// <summary>
+    /// The body as UTF-8 text, reading at most <see cref="MaxBodyBytes"/> bytes from the stream; <c>null</c> when it holds
+    /// more. Throws what the stream throws (IOException, InvalidDataException, cancellation).
+    /// </summary>
+    private static async Task<string?> ReadCappedAsync(HttpContent content, CancellationToken ct)
+    {
+        await using var stream = await content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+        var buffer = new byte[MaxBodyBytes + 1];
+        var total = 0;
+        while (total < buffer.Length)
+        {
+            var read = await stream.ReadAsync(buffer.AsMemory(total), ct).ConfigureAwait(false);
+            if (read == 0)
+            {
+                break;
+            }
+
+            total += read;
+        }
+
+        return total > MaxBodyBytes ? null : System.Text.Encoding.UTF8.GetString(buffer, 0, total);
     }
 
     private DiscoveredTenant? Fault(string domain, string reason)
