@@ -180,8 +180,25 @@ never relaxed: the look-through keeps the original parents in the secure-if-any 
   decides, which is where they already are.
 - `sprk_event`: 2 name both a matter and a project; the matter now decides.
 
+**Fix round, slice 1 (adversarial review at 3fc7ef2b4f: F1-a, F4, K2, To Do parity of F3).**
+- F1-a: a regarding-pair host table ranks its SUBJECT (the lookup that repeats `sprk_regardingrecordid`,
+  `RecordOwnershipContext.SubjectColumnOf`, through `SignalWriter.SubjectEntityOf`) by its writer's rule. `sprk_todo`: the
+  subject, then `sprk_regardingdocument`, then `sprk_regardingcommunication`, then the lineage order (OfficeService: "the
+  record regarding first, then the document or email"). `sprk_signal` / `sprk_decisionrecord`: the typed core lookups, then
+  the subject, then the lineage order. Before, a To Do regarding a matter and created from an unfiled email took the email's
+  unit. `ReparentAsync` reads the pair from the row as it stands; a change that moves the subject lookup without the pair
+  (the pair is not part of `RecordReparent`) falls back to the carrier and lineage order for that one decision, and the
+  reconciler re-asks with the row's pair afterwards.
+- F4: `RecordOwnershipContext.ForChild` lists its parents primary first, then in the table's primary order, and with no
+  explicit primary takes the first of that order; `OwnedChildWrite.ParentsOf` (create_record, `BudgetInquiryExecutor`,
+  `RecordCreationService`) orders the payload's lookups the same way, reading the pair from the body.
+- K2: `RecordThreadFiling.ParentsOf` uses `OrderedParentsOf`.
+- Parity (F3, To Do): `TodoOwnershipParityTests` drives the Office route, `TodoGenerationService` and
+  `InquiryReplyTodoCreator` and compares the writer's full ordered parent list with the reconciler's question.
+- Dev (read-only, 2026-10-27): 69 To Dos; 2 carry a document beside a matter, both in the matter's unit; none names two
+  record lookups. 0 To Do answers change under F1-a.
+
 **Known gaps (not 194b).**
 - `DecisionRecordWriter` also names the subjects of every Signal the record resolves; those are not on the row, so the
   existing-row question lacks them (secure-if-any only; the primary is unaffected).
-- `RecordOwnershipContext.ForChild` still orders by attribute order at create time.
 - The secure pass still decides a no-core row over its parents, so it can still be taken INTO isolation (fails closed).
