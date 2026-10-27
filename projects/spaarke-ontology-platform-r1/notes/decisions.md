@@ -290,3 +290,13 @@ Sources: **design** = [`design.md`](../design.md) §8 (D-1..D-12, §8.0c) and §
   - `projects/unified-access-control-r2/notes/secure-family-design-research-2026-10-12.md` §8 leaves an owner choice open: keep it secure-only, or generalise it to a record family for every core root, with a secure flag. That choice is still the owner's. Either way it is a materialisation of the Filing kind, so D-191 holds.
   - ebilling has nothing (its "invoice family" is a table group). project-coordination's session held the question undelivered.
 - **Access rule (from uac-r2):** Secure-family membership comes only from Filing edges; a peer kind never confers it, crosses it, or carries actions across it.
+- **Clarification: one family per record (owner, 2026-10-27).** Approved in unified-access-control-r2's session and relayed by uac-r2. It is not yet in uac-r2's decision log; they cite their record.
+  - A record filed under several parents belongs to exactly ONE family: its **primary** parent's.
+  - The primary is the I-6 primary-parent rule, the same one that decides ownership: `RecordOwnershipContext.InPrimaryOrder` / `OrderedParentsOf` in `RecordOwnershipResolver.cs`, from UAC 194b, which is not yet on master. The order:
+    - Signals and Decision Records: the core record first, then the subject, then lineage order.
+    - Regarding-pair hosts such as To Do: the lookup that repeats the pair's record first, then the document carrier, then the communication carrier.
+    - Every other table: `SecureChildLineage.LookupOrder`.
+  - The other filing edges are **secondary**. They can be navigated, but they make the record a member of no other family.
+  - **Security is a separate question.** Secure-if-any still runs over ALL of a record's filing parents. A record can be isolated because a secondary parent is Secure, even though its family is its primary parent's. "Family" must not be read as "the security boundary": the Secure qualifier (`sprk_securefamily`) describes a family, and a row's isolation comes from its filing edges.
+  - **Projects (#2352, owner choice (a)):** a project has ONE filing root, its regarding pair. The Project ↔ Matter N:N stays an association; it is not a Filing edge. UAC task 195 makes the wizards write the pair. W7 models the pair as the Matter → Project filing edge.
+  - **W7 guidance:** `RecordFamilyReader` takes the primary parent from `InPrimaryOrder`, through `RecordFamilyEdges` (UAC-owned content), never from a second ordering.
