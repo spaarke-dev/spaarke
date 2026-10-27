@@ -1154,12 +1154,18 @@ internal static class AssignedAccessTestDoubles
                 .AddInMemoryCollection(new Dictionary<string, string?> { ["ExternalAccess:PortalUrl"] = "https://external.test" })
                 .Build();
             return new Sprk.Bff.Api.Api.ExternalAccess.ExternalInviteService(
-                Grants, ciam ?? Ciam, Emails, IdentityBindingTestKit.Binder(identities), settings,
+                Grants, ciam ?? Ciam, Emails, IdentityBindingTestKit.Binder(identities), Organizations, settings,
                 new Sprk.Bff.Api.Configuration.CustomerIdentity(
                     Options.Create(new Sprk.Bff.Api.Configuration.CustomerOptions { Id = "acme" }), settings,
                     NullLogger<Sprk.Bff.Api.Configuration.CustomerIdentity>.Instance),
                 Time, InviteLogger);
         }
+
+        /// <summary>
+        /// Slice B3: the organisation decision the invite service makes for an automatic invite. A deployment with no customer
+        /// tenants by default (every invite a portal account, the discovery endpoint never called); a test sets a scripted one.
+        /// </summary>
+        public InviteOrganizationResolver Organizations { get; set; } = InviteOrganizationTestKit.PortalOnly();
 
         /// <summary>Task 185 slice E: the invite service's logger; set a capturing logger to assert what it writes.</summary>
         public ILogger<Sprk.Bff.Api.Api.ExternalAccess.ExternalInviteService> InviteLogger { get; set; } =

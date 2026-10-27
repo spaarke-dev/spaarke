@@ -43,6 +43,7 @@ public sealed class ExternalInviteService
     private readonly CiamUserProvisioningService _ciam;
     private readonly RegistrationEmailService _emails;
     private readonly ContactIdentityBinder _binder;
+    private readonly InviteOrganizationResolver _organizations;
     private readonly IConfiguration _configuration;
     private readonly CustomerIdentity _customer;
     private readonly TimeProvider _time;
@@ -55,11 +56,16 @@ public sealed class ExternalInviteService
     /// <see cref="GrantInviteStatus.Failed"/> with <see cref="GrantInviteStatus.CiamNotConfiguredReasonCode"/> and the grant
     /// stands (I-1).
     /// </param>
+    /// <param name="organizations">
+    /// Slice B3: the ONE work-account / portal-account decision <c>/invite</c> makes, so an automatic invite after a grant is
+    /// decided from the email's domain exactly as a staff invite is.
+    /// </param>
     public ExternalInviteService(
         DataverseWebApiClient dataverse,
         CiamUserProvisioningService ciam,
         RegistrationEmailService emails,
         ContactIdentityBinder binder,
+        InviteOrganizationResolver organizations,
         IConfiguration configuration,
         CustomerIdentity customer,
         TimeProvider time,
@@ -69,6 +75,7 @@ public sealed class ExternalInviteService
         _ciam = ciam ?? throw new ArgumentNullException(nameof(ciam));
         _emails = emails ?? throw new ArgumentNullException(nameof(emails));
         _binder = binder ?? throw new ArgumentNullException(nameof(binder));
+        _organizations = organizations ?? throw new ArgumentNullException(nameof(organizations));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _customer = customer ?? throw new ArgumentNullException(nameof(customer));
         _time = time ?? throw new ArgumentNullException(nameof(time));
@@ -180,6 +187,20 @@ public sealed class ExternalInviteService
             if (string.IsNullOrWhiteSpace(portalUrl))
                 return Logged(contactId, Failed(GrantInviteStatus.InviteFailedReasonCode));
 
+            // Slice B3: the same organisation decision /invite makes (InviteOrganizationResolver.DecideAsync), before anything
+            // is written. A customer-tenant domain gets a work-account stamp, never a portal-account invite. A lookup with no
+            // definite answer writes nothing and is answered "not sent: tenant_lookup_unavailable" in this result, so staff
+            // see it and retry with Invite; the grant stands (I-1). The cache is scoped to this deployment's tenant.
+            var organization = await _organizations.DecideAsync(
+                email, ImpersonatedRootSetSource.DeploymentCacheTenant(_configuration), ct).ConfigureAwait(false);
+            switch (organization.Status)
+            {
+                case InviteOrganizationStatus.LookupUnavailable:
+                    return Logged(contactId, Failed(ContactBindingDecision.InviteTenantLookupUnavailable));
+                case InviteOrganizationStatus.MalformedDomain:
+                    return Logged(contactId, Failed(GrantInviteStatus.InviteFailedReasonCode));
+            }
+
             // Task 185 slice F: a host without Ciam:* constructs the provisioner but cannot create an account. Answered here,
             // before anything is written (no marker, no code), as the invite core would refuse it.
             if (!_ciam.IsConfigured)
@@ -191,7 +212,7 @@ public sealed class ExternalInviteService
 
             var outcome = await ProvisionAsync(
                 request, _dataverse, _ciam, _emails, _binder, portalUrl, InviteLinkCustomerKey(_customer), _logger,
-                resolution, ct).ConfigureAwait(false);
+                resolution, ct, organization.WorkAccountTenantId).ConfigureAwait(false);
 
             if (outcome.Refusal is { } refusal)
                 return Logged(contactId, Failed(refusal.ReasonCode));
@@ -214,6 +235,7 @@ public sealed class ExternalInviteService
                 ExistingAccountStatus => new GrantInviteResult(GrantInviteStatus.Sent),
                 AlreadyProvisionedStatus => new GrantInviteResult(GrantInviteStatus.NotNeeded),
                 ProvisionedStatus => new GrantInviteResult(GrantInviteStatus.Sent),
+                WorkAccountInvitedStatus => new GrantInviteResult(GrantInviteStatus.WorkAccountInvited),
                 _ => Failed(GrantInviteStatus.InviteFailedReasonCode),
             });
         }
