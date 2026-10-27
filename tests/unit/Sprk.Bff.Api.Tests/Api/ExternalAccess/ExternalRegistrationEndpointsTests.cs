@@ -444,8 +444,9 @@ public sealed class ExternalRegistrationEndpointsTests : IClassFixture<ExternalR
 
     /// <summary>
     /// C5, MUST FIRE: an invited, unbound active contact is never bound while an inactive contact for the same email is one
-    /// whose external access an administrator removed: the final 403 a removed person's registration answers, asked before
-    /// the confirmation prompt, nothing written. A read of the inactive contacts that fails refuses retryably (503).
+    /// whose external access an administrator removed: the final 403 a removed person's registration answers (the ordinary
+    /// not-invited answer), asked before the confirmation prompt, nothing written. A read of the inactive contacts that fails
+    /// refuses retryably (503).
     /// </summary>
     [Theory]
     [InlineData(true, false)]
@@ -463,7 +464,7 @@ public sealed class ExternalRegistrationEndpointsTests : IClassFixture<ExternalR
         if (readFails)
             await ShouldBeProblem(response, HttpStatusCode.ServiceUnavailable, ExternalRegistrationEndpoints.ErrorUnavailable);
         else
-            await ShouldBeProblem(response, HttpStatusCode.Forbidden, ContactBindingDecision.DenyContactRemoved);
+            await ShouldBeTheNotInvitedAnswer(response);
         active.Oid.Should().BeNull();
         removed.Oid.Should().BeNull();
         _store.Writes.Should().BeEmpty();
@@ -500,8 +501,8 @@ public sealed class ExternalRegistrationEndpointsTests : IClassFixture<ExternalR
 
     /// <summary>
     /// MUST FIRE: the email belongs to a person whose external access an administrator removed (an active or an inactive
-    /// contact carrying the marker): a terminal 403 with the removed code and a neutral message, never the retryable 503.
-    /// Nothing is bound or created.
+    /// contact carrying the marker): a terminal 403, never the retryable 503, answered exactly as the ordinary not-invited
+    /// refusal (status, code, title, detail). Nothing is bound or created.
     /// </summary>
     [Theory]
     [InlineData(0)]
@@ -513,9 +514,7 @@ public sealed class ExternalRegistrationEndpointsTests : IClassFixture<ExternalR
 
         var response = await Post(Body(confirm: true));
 
-        await ShouldBeProblem(response, HttpStatusCode.Forbidden, ContactBindingDecision.DenyContactRemoved);
-        (await Json(response)).GetProperty("detail").GetString().Should().Contain("Contact your administrator")
-            .And.NotContain("removed", "the message is neutral");
+        await ShouldBeTheNotInvitedAnswer(response);
         _store.Writes.Should().BeEmpty();
         _store.Contacts.Should().ContainSingle();
     }
@@ -543,6 +542,47 @@ public sealed class ExternalRegistrationEndpointsTests : IClassFixture<ExternalR
         {
             _store.RemovedMarkerProof = ColumnReadProofOutcome.Proven;
         }
+    }
+
+    /// <summary>
+    /// A registered home contact whose external access an administrator removed (refused by the home resolution, before any
+    /// registration step) is answered exactly as the ordinary not-invited refusal, and nothing is written.
+    /// </summary>
+    [Fact]
+    public async Task ARegisteredHomeContactWhoseAccessWasRemoved_IsAnsweredAsNotInvited_NothingWritten()
+    {
+        var home = AddHomeContact(Guid.NewGuid());
+        home.RemovedOn = DateTimeOffset.Parse("2026-10-01T00:00:00Z");
+
+        var response = await Post(Body(confirm: true));
+
+        await ShouldBeTheNotInvitedAnswer(response);
+        _store.Writes.Should().BeEmpty();
+        _store.Contacts.Should().ContainSingle();
+    }
+
+    /// <summary>
+    /// The route's answer for a removal (the binder's decision code <c>contact_removed</c>) is the not-invited answer: the
+    /// same status, reason code, error code, title and detail. MUST NOT FIRE: a marker whose empty read is not proven stays
+    /// the retryable 503.
+    /// </summary>
+    [Fact]
+    public void ToResult_ARemoval_IsTheNotInvitedAnswer_AnUnprovenMarker_StaysRetryable()
+    {
+        var notInvited = ProblemOf(ExternalRegistrationEndpoints.ToResult(
+            HomeRegistrationResult.Denied(ContactBindingDecision.DenyContactNotInvited)));
+        var removed = ProblemOf(ExternalRegistrationEndpoints.ToResult(
+            HomeRegistrationResult.Denied(ContactBindingDecision.DenyContactRemoved)));
+        var unproven = ProblemOf(ExternalRegistrationEndpoints.ToResult(
+            HomeRegistrationResult.Denied(ContactBindingDecision.DenyContactRemoved) with { RemovedMarkerUnproven = true }));
+
+        removed.Status.Should().Be(notInvited.Status).And.Be(Microsoft.AspNetCore.Http.StatusCodes.Status403Forbidden);
+        removed.Title.Should().Be(notInvited.Title);
+        removed.Detail.Should().Be(notInvited.Detail);
+        removed.Extensions["reasonCode"].Should().Be(ContactBindingDecision.DenyContactNotInvited);
+        removed.Extensions["errorCode"].Should().Be(notInvited.Extensions["errorCode"]);
+        unproven.Status.Should().Be(Microsoft.AspNetCore.Http.StatusCodes.Status503ServiceUnavailable);
+        unproven.Extensions["reasonCode"].Should().Be(ExternalRegistrationEndpoints.ErrorUnavailable);
     }
 
     [Fact]
@@ -883,6 +923,25 @@ public sealed class ExternalRegistrationEndpointsTests : IClassFixture<ExternalR
 
     private static async Task<Guid> ContactIdOf(HttpResponseMessage response)
         => (await Json(response)).GetProperty("contactId").GetGuid();
+
+    private static Microsoft.AspNetCore.Mvc.ProblemDetails ProblemOf(Microsoft.AspNetCore.Http.IResult result)
+        => result.Should().BeOfType<Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult>().Subject.ProblemDetails;
+
+    /// <summary>
+    /// The response is the registration's ordinary not-invited refusal: the status, reason code, error code, title and detail
+    /// of <see cref="ExternalRegistrationEndpoints.ToResult"/> for <see cref="ContactBindingDecision.DenyContactNotInvited"/>.
+    /// </summary>
+    private static async Task ShouldBeTheNotInvitedAnswer(HttpResponseMessage response)
+    {
+        var expected = ProblemOf(
+            ExternalRegistrationEndpoints.ToResult(HomeRegistrationResult.Denied(ContactBindingDecision.DenyContactNotInvited)));
+        await ShouldBeProblem(response, HttpStatusCode.Forbidden, ContactBindingDecision.DenyContactNotInvited);
+        var json = await Json(response);
+        json.GetProperty("status").GetInt32().Should().Be(expected.Status);
+        json.GetProperty("title").GetString().Should().Be(expected.Title);
+        json.GetProperty("detail").GetString().Should().Be(expected.Detail);
+        json.GetProperty("errorCode").GetString().Should().Be((string?)expected.Extensions["errorCode"]);
+    }
 
     internal static async Task ShouldBeProblem(HttpResponseMessage response, HttpStatusCode status, string reasonCode)
     {

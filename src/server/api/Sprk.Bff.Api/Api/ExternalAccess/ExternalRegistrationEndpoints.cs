@@ -156,6 +156,13 @@ public static class ExternalRegistrationEndpoints
             return Problem(StatusCodes.Status401Unauthorized, resolution.DenyCode, "The token is missing identity claims.");
         }
 
+        // A registered home contact whose external access an administrator removed: the person is answered as not invited,
+        // the same answer as their ordinary refusal. The resolver's log keeps the specific code.
+        if (resolution.DenyCode == ContactBindingDecision.DenyContactRemoved)
+        {
+            return NotInvited();
+        }
+
         if (resolution.DenyCode != WorkforcePrincipalResolver.DenyRegistrationRequired)
         {
             return Problem(StatusCodes.Status403Forbidden, resolution.DenyCode, "Your account cannot be registered.");
@@ -236,17 +243,13 @@ public static class ExternalRegistrationEndpoints
     {
         // No current invite names this sign-in: a new invitation (naming their organization's tenant) is the fix, not a
         // retry. Nothing was bound or created. The answer says nothing about what records exist.
-        ContactBindingDecision.DenyContactNotInvited =>
-            Problem(StatusCodes.Status403Forbidden, ContactBindingDecision.DenyContactNotInvited,
-                "This sign-in cannot be registered until you are invited. Ask the person who invited you to send a new "
-                + "invitation."),
+        ContactBindingDecision.DenyContactNotInvited => NotInvited(),
 
         // C5: the email belongs to a person whose external access an administrator removed. Final, not a retry: only an
-        // administrator reinstates the person. The answer is neutral and says nothing about the record. A removed marker whose
-        // empty read is not proven is not a removal: it falls to the retryable 503 below.
-        ContactBindingDecision.DenyContactRemoved when !result.RemovedMarkerUnproven =>
-            Problem(StatusCodes.Status403Forbidden, ContactBindingDecision.DenyContactRemoved,
-                "Your account cannot be registered. Contact your administrator."),
+        // administrator reinstates the person. The person is answered exactly as the ordinary not-invited refusal (status,
+        // code, title, detail); the binder's log keeps the specific code for operators. A removed marker whose empty read is
+        // not proven is not a removal: it falls to the retryable 503 below.
+        ContactBindingDecision.DenyContactRemoved when !result.RemovedMarkerUnproven => NotInvited(),
 
         // A squatted uniqueness mirror: an administrator must resolve the record (the holder is flagged).
         ContactBindingDecision.DenyContactKeyConflict =>
@@ -263,6 +266,15 @@ public static class ExternalRegistrationEndpoints
         // A read or write that did not land: retryable, nothing registered.
         _ => Problem(StatusCodes.Status503ServiceUnavailable, ErrorUnavailable, "Nothing was registered; try again."),
     };
+
+    /// <summary>
+    /// The registration's ordinary refusal when no current invite names this sign-in: 403
+    /// <see cref="ContactBindingDecision.DenyContactNotInvited"/>. A person whose external access was removed gets this same answer.
+    /// </summary>
+    private static IResult NotInvited()
+        => Problem(StatusCodes.Status403Forbidden, ContactBindingDecision.DenyContactNotInvited,
+            "This sign-in cannot be registered until you are invited. Ask the person who invited you to send a new "
+            + "invitation.");
 
     /// <summary>
     /// The token's <c>email</c> claim (or its <see cref="ClaimTypes.Email"/> mapping), trimmed — exactly one distinct

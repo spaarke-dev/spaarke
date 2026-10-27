@@ -517,7 +517,11 @@ public sealed class CiamContactPrincipalStrategy : ICallerPrincipalStrategy
             _logger.LogWarning(
                 "[EXT-AUTH] Cannot resolve Dataverse Contact ({DenyCode}; oid present: {HasOid}, email present: {HasEmail})",
                 code, !string.IsNullOrEmpty(oid), !string.IsNullOrEmpty(email));
-            return CallerPrincipalResolution.Denied(ProblemDetailsHelper.Forbidden(code, CiamDenyDetail(code)));
+
+            // A person whose external access an administrator removed is answered exactly as one who is not invited; the
+            // log line above (and the binder's) keeps the specific code for operators.
+            var answer = code == ContactBindingDecision.DenyContactRemoved ? ContactBindingDecision.DenyContactNotInvited : code;
+            return CallerPrincipalResolution.Denied(ProblemDetailsHelper.Forbidden(answer, CiamDenyDetail(answer)));
         }
 
         var contactId = binding.ContactId!.Value;
@@ -754,9 +758,11 @@ public sealed class WorkforcePrincipalStrategy : ICallerPrincipalStrategy
                         WorkforceMembershipTest.DenyGuestUseHomeSignin, GuestUseHomeSignInDetail));
 
                 case WorkforceDenyReason.PrincipalNotResolved
-                    when resolution.DenyCode == ContactBindingDecision.DenyContactNotInvited:
+                    when resolution.DenyCode is ContactBindingDecision.DenyContactNotInvited
+                        or ContactBindingDecision.DenyContactRemoved:
                     // The email bind needs a current invite naming this sign-in: the fix is a new invitation. Same shape as
-                    // the CIAM plane's contact_not_invited, so the SPA shows this detail.
+                    // the CIAM plane's contact_not_invited, so the SPA shows this detail. A person whose external access an
+                    // administrator removed gets this same answer; the log line keeps the specific code for operators.
                     _logger.LogWarning("[WF-AUTH] Denying request: {DenyCode}", resolution.DenyCode);
                     return CallerPrincipalResolution.Denied(ProblemDetailsHelper.Forbidden(
                         ContactBindingDecision.DenyContactNotInvited, WorkforceNotInvitedDetail));

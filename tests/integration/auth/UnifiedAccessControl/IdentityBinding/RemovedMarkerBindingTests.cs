@@ -298,8 +298,8 @@ public class RemovedMarkerBindingTests
     }
 
     /// <summary>
-    /// Slice C2c: the person's sign-in answer stays <c>contact_removed</c> for both, and the binder logs the two apart: a set
-    /// marker at Warning, an unproven one at Error naming the unproven read.
+    /// Slice C2c: the sign-in decision code stays <c>contact_removed</c> for both (the person is answered as not invited), and
+    /// the binder logs the two apart: a set marker at Warning, an unproven one at Error naming the unproven read.
     /// </summary>
     [Theory]
     [InlineData(false)]

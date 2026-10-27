@@ -222,7 +222,7 @@ public sealed record HomeRegistrationResult(
     /// <summary>
     /// C5: with <see cref="ContactBindingDecision.DenyContactRemoved"/>, <c>true</c> when the removed marker that refused the
     /// registration is not set but its empty read is not proven (the route answers a retryable 503), <c>false</c> for an
-    /// administrator's removal (a final 403).
+    /// administrator's removal (a final 403, answered as not invited).
     /// </summary>
     public bool RemovedMarkerUnproven { get; init; }
 
@@ -1955,7 +1955,8 @@ public sealed class ContactIdentityBinder
     /// <summary>
     /// Slice C2c: a removed-person deny is logged with text that tells a SET marker (an administrator's removal, Warning) from
     /// an UNPROVEN one (the marker's empty read is not proven, so the person is refused fail closed: Error, an operator
-    /// problem). The person's answer is <see cref="ContactBindingDecision.DenyContactRemoved"/> either way.
+    /// problem). The decision's code is <see cref="ContactBindingDecision.DenyContactRemoved"/> either way, and the person is
+    /// answered as not invited (<see cref="ContactBindingDecision.DenyContactNotInvited"/>).
     /// </summary>
     private void LogRemovedDeny(BindingDecision decision, BindingPlane plane)
     {

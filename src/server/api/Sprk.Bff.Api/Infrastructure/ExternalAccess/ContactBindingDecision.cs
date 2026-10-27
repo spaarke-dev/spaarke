@@ -757,8 +757,8 @@ public sealed record InviteDecision(
 /// <param name="MayCreate">True when the create may go ahead.</param>
 /// <param name="RemovedContactId">The removed inactive contact that refuses the create; null otherwise.</param>
 /// <param name="DenyCode">
-/// The sign-in and registration answer when the create may not go ahead: <see cref="ContactBindingDecision.DenyContactRemoved"/>
-/// for a removal, the lookup's deny code for a read that failed.
+/// The sign-in and registration decision code when the create may not go ahead: <see cref="ContactBindingDecision.DenyContactRemoved"/>
+/// for a removal (logged; the person is answered as not invited), the lookup's deny code for a read that failed.
 /// </param>
 /// <param name="InviteReasonCode">
 /// The invite path's answer for the same refusal: <see cref="ContactBindingDecision.InviteContactRemovedAdminReinstate"/> for
@@ -898,7 +898,9 @@ public static class ContactBindingDecision
     /// Slice C: an administrator removed this person's external access (<see cref="ExternalAccessRemovedOnColumn"/> is set),
     /// or whether they did cannot be read (<see cref="ContactBindingRow.IsRemoved"/>). A removed contact neither resolves nor
     /// binds, on any plane and whatever its <c>statecode</c>; nothing is written and nothing is flagged. Only an
-    /// administrator can reinstate the person.
+    /// administrator can reinstate the person. This is the decision's code, kept in the logs for operators: the person's own
+    /// sign-in and registration answer with the same status, code, title and detail as their ordinary
+    /// <see cref="DenyContactNotInvited"/> refusal. Staff surfaces (invite, grant, reinstate) name the removal.
     /// </summary>
     public const string DenyContactRemoved = "sdap.access.deny.contact_removed";
 
@@ -912,7 +914,8 @@ public static class ContactBindingDecision
     /// Slice C2c: whether an administrator removed this person's external access could not be established (the removed
     /// marker read empty on a read that is not proven, or could not be read at all). The staff-facing invite and grant
     /// surfaces refuse with this RETRYABLE code (503, nothing written or sent), so an outage is never reported as a removal
-    /// an administrator must undo. The person's own sign-in and composition still answer <see cref="DenyContactRemoved"/>.
+    /// an administrator must undo. The person's own sign-in still decides <see cref="DenyContactRemoved"/> (logged), and is
+    /// answered as not invited.
     /// </summary>
     public const string InviteContactRemovedStateUnavailable = "sdap.access.deny.contact_removed_state_unavailable";
 
