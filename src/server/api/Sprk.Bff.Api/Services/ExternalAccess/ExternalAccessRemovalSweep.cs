@@ -239,10 +239,19 @@ internal sealed class ExternalAccessRemovalSweep
                 continue;
             }
 
-            var outcome = await _removal().RemoveAsync(contactId, correlationId, ct).ConfigureAwait(false);
+            // Slice C5: audited whatever happens, so a removal that throws is recorded as interrupted, never lost.
+            var outcome = PersonAdministrationOutcome.Interrupted;
+            try
+            {
+                outcome = await _removal().RemoveAsync(contactId, correlationId, ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                Audit(contactId, action.Value, outcome, correlationId);
+            }
+
             if (outcome.Status == PersonAdministrationStatus.Completed) report.Completed++; else report.Incomplete++;
             report.Contacts.Add(new RemovalSweepContact(contactId, action.Value, outcome.Status));
-            Audit(contactId, action.Value, outcome, correlationId);
         }
 
         if (report.DeferredByCap > 0)

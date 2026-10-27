@@ -25,6 +25,14 @@ internal enum PersonAdministrationStatus
     /// reactivate the contact first, then reinstate.
     /// </summary>
     RefusedContactInactive,
+
+    /// <summary>
+    /// Slice C5: the call ended with an exception (a cancelled request, or a fault) before it returned an outcome, so the
+    /// audit record says so instead of being lost. Steps already taken stay taken; every step is idempotent, so a retry
+    /// finishes the work. CLAUDE.md §11: Existing — <see cref="Incomplete"/>. Extension — Incomplete carries the step results,
+    /// and an interrupted call has none to report. Cost of doing nothing: an interrupted removal leaves no audit record.
+    /// </summary>
+    Interrupted,
 }
 
 /// <summary>The outcome of one removal or reinstatement.</summary>
@@ -39,6 +47,9 @@ internal sealed record PersonAdministrationOutcome(
 {
     internal static PersonAdministrationOutcome Refused(PersonAdministrationStatus status)
         => new(status, null, Array.Empty<ExternalPersonStepResult>());
+
+    /// <summary>Slice C5: what the audit records when the call threw before it returned an outcome.</summary>
+    internal static PersonAdministrationOutcome Interrupted { get; } = Refused(PersonAdministrationStatus.Interrupted);
 }
 
 /// <summary>
@@ -75,6 +86,9 @@ internal sealed record PersonAdministrationOutcome(
 /// removal, not a defect.</para>
 /// <para><b>Staleness.</b> Composition and binding read the marker live on every request, so the person is refused on their
 /// next request once the marker is written (0 seconds); the cache evictions are belt and braces.</para>
+/// <para><b>Cancellation.</b> The caller's token is honoured up to the marker write. Once the marker is in place every
+/// remaining step runs on <see cref="CancellationToken.None"/>, as the cache eviction always did. A caller that sees the call
+/// throw still writes its audit record, with <see cref="PersonAdministrationStatus.Interrupted"/>.</para>
 /// <para><b>CLAUDE.md §11.</b> Existing: <see cref="ExternalGrantRevocationService"/> revokes one grant; the identity store
 /// reads the marker. Extension: this calls that revoke once per grant and adds the three contact writes to the store; it holds
 /// no revoke logic of its own. Cost of doing nothing: removing a person would mean revoking each grant by hand, with no marker,
@@ -159,25 +173,29 @@ internal sealed class ExternalPersonRemovalService
             steps.Add(new ExternalPersonStepResult(MarkerStep, true));
         }
 
+        // Slice C5: once the marker is in place every remaining step runs to its end, whatever the caller's token says, so a
+        // cancelled request never leaves a marked person with their grants, invite state or standing grant in place.
+        var afterMarker = CancellationToken.None;
+
         // ── 2. Every active grant the person holds, through the ONE revoke ───────────────────────────────────────────
-        var (revoked, notCompleted, grantsStep) = await RevokeGrantsAsync(revocation, contactId, ct).ConfigureAwait(false);
+        var (revoked, notCompleted, grantsStep) = await RevokeGrantsAsync(revocation, contactId, afterMarker).ConfigureAwait(false);
         steps.Add(grantsStep);
 
         // ── 2b. Slice C2c: the person's own permission on the containers of their organizations' grants ─────────────
-        steps.Add(await RemoveOrganizationGrantPermissionsAsync(revocation, contactId, ct).ConfigureAwait(false));
+        steps.Add(await RemoveOrganizationGrantPermissionsAsync(revocation, contactId, afterMarker).ConfigureAwait(false));
 
         // ── 3. Cache eviction (the marker is read live, so this is belt and braces) ────────────────────────────────
         steps.Add(await EvictCachesAsync(contactId, correlationId).ConfigureAwait(false));
 
         // ── 4. The invite state and the access permission baseline ───────────────────────────────────────────────────
-        var cleared = await _identityStore.ClearRemovedPersonAccessStateAsync(contactId, ct).ConfigureAwait(false);
+        var cleared = await _identityStore.ClearRemovedPersonAccessStateAsync(contactId, afterMarker).ConfigureAwait(false);
         steps.Add(cleared.Status == StoreWriteStatus.Written
             ? new ExternalPersonStepResult(InviteStateStep, true)
             : new ExternalPersonStepResult(InviteStateStep, false,
                 "The person's invite and access permission could not be cleared. They stay removed; retry the removal."));
 
         // ── 5. The standing grant, in a write of its own ────────────────────────────────────────────────────────────
-        var standing = await _identityStore.ClearStandingGrantAsync(contactId, ct).ConfigureAwait(false);
+        var standing = await _identityStore.ClearStandingGrantAsync(contactId, afterMarker).ConfigureAwait(false);
         steps.Add(standing.Status switch
         {
             StoreWriteStatus.Written => new ExternalPersonStepResult(StandingGrantStep, true),

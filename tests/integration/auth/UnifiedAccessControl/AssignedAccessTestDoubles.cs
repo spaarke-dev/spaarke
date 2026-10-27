@@ -624,6 +624,9 @@ internal static class AssignedAccessTestDoubles
             if (FailQueries)
                 throw new HttpRequestException("Simulated Dataverse query failure.");
 
+            // As the Web API client does: a cancelled token ends the read.
+            cancellationToken.ThrowIfCancellationRequested();
+
             if (entitySetName == GrantSet)
             {
                 lock (_gate)

@@ -132,11 +132,19 @@ public static class PersonAccessAdministrationEndpoints
         var revocation = new ExternalGrantRevocationService(
             dataverseClient, speContainerMembership, participations, assignedAccess, containerResolver,
             timeProvider, identityStore, logger);
-        var outcome = await new ExternalPersonRemovalService(
-                dataverseClient, revocation, participations, identityStore, membershipInvalidator, timeProvider, logger)
-            .RemoveAsync(request.ContactId, httpContext.TraceIdentifier, ct);
-
-        Audit(loggerFactory, RemovePersonAuditEvent, "remove", admin, request.ContactId, outcome, httpContext.TraceIdentifier);
+        // Slice C5: the audit record is written whatever happens, so a removal that throws (a cancelled request after the
+        // marker, a fault) is recorded as interrupted instead of leaving no trace.
+        var outcome = PersonAdministrationOutcome.Interrupted;
+        try
+        {
+            outcome = await new ExternalPersonRemovalService(
+                    dataverseClient, revocation, participations, identityStore, membershipInvalidator, timeProvider, logger)
+                .RemoveAsync(request.ContactId, httpContext.TraceIdentifier, ct);
+        }
+        finally
+        {
+            Audit(loggerFactory, RemovePersonAuditEvent, "remove", admin, request.ContactId, outcome, httpContext.TraceIdentifier);
+        }
 
         switch (outcome.Status)
         {

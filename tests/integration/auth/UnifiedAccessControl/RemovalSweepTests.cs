@@ -50,7 +50,8 @@ public class RemovalSweepTests
 
     private RemovalSweepWorld World { get; set; } = null!;
 
-    private async Task<JobRunResult> RunAsync(bool? linkWrites, bool? sweepWrites, int? cap = null, bool looseScan = false)
+    private async Task<JobRunResult> RunAsync(bool? linkWrites, bool? sweepWrites, int? cap = null, bool looseScan = false,
+        CancellationToken ct = default)
     {
         var settings = new Dictionary<string, string?> { ["Dataverse:ServiceUrl"] = "https://own.crm.dynamics.com" };
         if (linkWrites is { } l) settings["IdentityLink:Reconciliation:WritesEnabled"] = l ? "true" : "false";
@@ -74,7 +75,7 @@ public class RemovalSweepTests
         var job = new IdentityLinkReconciliationJob(provider.GetRequiredService<IServiceScopeFactory>(), _h.Time, configuration, _log);
         return await job.ExecuteAsync(
             new JobRunContext(Guid.NewGuid(), "corr-c4", JobRunTrigger.ManualAdmin, new Dictionary<string, object>()),
-            CancellationToken.None);
+            ct);
     }
 
     /// <summary>A person signed in through CIAM (bound oid), with an invite stamp and baselines, at <paramref name="stateCode"/>.</summary>
@@ -207,6 +208,32 @@ public class RemovalSweepTests
 
         _h.Identities.Contacts[contact].RemovedOn.Should().NotBeNull();
         _h.Grants.ActiveRowsOf(_matter, contact).Should().BeEmpty();
+    }
+
+    /// <summary>Slice C5: a removal that throws (here, the run is cancelled inside it) is still audited, as interrupted.</summary>
+    [Fact]
+    public async Task ARemovalThatThrows_IsStillAudited_AsInterrupted()
+    {
+        var (contact, _) = Person(stateCode: 1);
+        GrantOnMatter(contact);
+        using var run = new CancellationTokenSource();
+        var decided = false;
+        _h.Grants.BeforeGrantQuery = _ => decided = true; // the live decision's grant read; the removal comes next
+        _h.Identities.BeforeRemovedMarkerRead = _ =>
+        {
+            if (!decided) return;
+            run.Cancel();
+            throw new OperationCanceledException(run.Token);
+        };
+
+        var result = await RunAsync(linkWrites: true, sweepWrites: true, ct: run.Token);
+
+        result.Success.Should().BeFalse("control: the run was cancelled inside the removal");
+        var audit = SweepAudit.Should().ContainSingle().Subject;
+        audit.Category.Should().Be(ExternalAccessAudit.Category);
+        audit.Message.Should().StartWith("[EXT-PERSON-AUDIT] sweep-remove:")
+            .And.Contain($"status {PersonAdministrationStatus.Interrupted}")
+            .And.Contain(contact.ToString());
     }
 
     // ── Must not fire: the closed selection ────────────────────────────────────────────────────────────────────

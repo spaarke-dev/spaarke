@@ -69,7 +69,7 @@ public class PersonAccessAdministrationTests
     };
 
     private Task<IResult> Remove(Guid contactId, HttpContext? http = null, RecordContainerResolver? resolver = null,
-        SpeContainerMembershipService? spe = null) =>
+        SpeContainerMembershipService? spe = null, CancellationToken ct = default) =>
         PersonAccessAdministrationEndpoints.RemovePersonAsync(
             new ExternalPersonRequest(contactId),
             _h.Grants,
@@ -83,7 +83,7 @@ public class PersonAccessAdministrationTests
             http ?? AdminContext(),
             _log,
             _audit.Factory,
-            CancellationToken.None);
+            ct);
 
     private Task<IResult> Reinstate(Guid contactId, HttpContext? http = null) =>
         PersonAccessAdministrationEndpoints.ReinstatePersonAsync(
@@ -235,6 +235,50 @@ public class PersonAccessAdministrationTests
         _h.Grants.Rows.Single(r => r.Id == grant.Id).IsActive.Should().BeTrue();
         _h.Identities.Contacts[contact].InviteCodeHash.Should().NotBeNull();
         _h.Identities.Contacts[contact].StandingGrant.Should().NotBeNull();
+    }
+
+    // ── Slice C5: a cancelled request ───────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Remove_ARequestCancelledOnceTheMarkerIsPlaced_StillRunsEveryRemainingStep_AndIsAudited()
+    {
+        var (contact, _) = BoundPerson();
+        var grant = GrantOnMatter(contact);
+        using var request = new CancellationTokenSource();
+        _h.Identities.BeforeRemovedMarkerRead = _ => request.Cancel(); // the caller goes away just before the marker lands
+
+        var result = await Remove(contact, ct: request.Token);
+
+        result.Should().BeOfType<Ok<RemovePersonResponse>>().Subject.Value!.Steps.Should().OnlyContain(s => s.Completed);
+        var row = _h.Identities.Contacts[contact];
+        row.RemovedOn.Should().NotBeNull();
+        _h.Grants.Rows.Single(r => r.Id == grant.Id).IsActive.Should().BeFalse("the grants are still revoked");
+        row.InviteCodeHash.Should().BeNull("the invite state is still cleared");
+        row.StandingGrant.Should().BeNull("the standing grant is still cleared");
+        _audit.Records.Should().ContainSingle(r => r.EventId.Id == 9821)
+            .Which.Message.Should().Contain($"status {PersonAdministrationStatus.Completed}");
+    }
+
+    [Fact]
+    public async Task Remove_ACallThatThrows_IsStillAudited_AsInterrupted()
+    {
+        var (contact, _) = BoundPerson();
+        using var request = new CancellationTokenSource();
+        _h.Identities.BeforeRemovedMarkerRead = _ =>
+        {
+            request.Cancel();
+            throw new OperationCanceledException(request.Token);
+        };
+
+        var act = () => Remove(contact, ct: request.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        var audit = _audit.Records.Should().ContainSingle(r => r.EventId.Id == 9821).Subject;
+        audit.Category.Should().Be(ExternalAccessAudit.Category);
+        audit.Message.Should().StartWith("[EXT-PERSON-AUDIT] remove:")
+            .And.Contain($"status {PersonAdministrationStatus.Interrupted}")
+            .And.Contain(contact.ToString())
+            .And.Contain(AdminUser.ToString());
     }
 
     // ── Slice C2c: the person's own permission on their organizations' granted containers ──────────────────────
