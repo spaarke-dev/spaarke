@@ -499,3 +499,152 @@ describe.
   <root-claude-md>Y</root-claude-md>  <!-- W6 updates the Field Mapping Framework and Dataverse write path pointer rows -->
 </hot-path-declaration>
 ```
+
+---
+
+## 12. W7 — Record family service and the Family tool (addendum, 2026-10-27; DRAFT for UAC-r2 and ontology review)
+
+### 12.1 Why
+
+- **Owner decisions (2026-10-27):**
+  - build ONE shared, read-only "record family" service;
+  - add a **Family** tool to the TrackingFieldTrio PCF. It opens a modal listing the record's family, with an action toolbar;
+  - the first actions are **Push field updates** and **Update Assigned To** (owner 4a). More actions come later, each with its own review;
+  - keep it in this project and follow the procedure.
+- **Current state:** about eight separate enumerations each declare their own copy of the hierarchy, and nobody checks that they agree (code map, notes/decisions.md 2026-10-27):
+  - push `BuildChildRecordQuery`;
+  - `SecureRootInheritance` up and down walks;
+  - `SecureChildLineage` / `SecureChildReconciler`;
+  - `ChildAccessPermissionReconciler`;
+  - `CoreAncestorResolver` / `CoreAncestorRestamper`;
+  - `RecordOwnershipResolver.OwnershipParentEntities`;
+  - `AccessibleRecordSetService`.
+- **Gaps:** none of them answers "what in this record's family can THIS user see". Push is one level deep and has no preview.
+
+### 12.2 The canonical family (UAC-r2, 2026-10-27; full text in notes/decisions.md)
+
+- **Filing edges only:**
+  - core → core: projects and work assignments under a matter or project (typed filing, intermediate filing, record-type pair);
+  - core → child: the four regarding stamps plus each child table's direct filing lookups;
+  - child → grandchild: the `SecureChildLineage` hops.
+  - Depth is 4. The walk goes down from the record, plus up to its root.
+- **Not family:** citations, people and organization lookups, N:N associations, grant rows, system rows.
+- **Service requests:** a service request is a core record with its own family, outside the Secure family.
+
+### 12.3 Components
+
+**A. `RecordFamilyEdges` — the canonical edge registry (data, `Services/Dataverse`, beside `CoreAncestorResolver`)**
+
+- **Rows:** `(ChildTable, LookupColumn, ParentTable, EdgeKind = FilingCore | Stamp | LineageHop, InSecureFamily, …)`.
+- **Seed:** from `SecureChildLineage`, `TypedFilingColumns` / `IntermediateFilingColumns` / pair, and `StampSourceColumns`, AFTER UAC task 194 merges. Never written from scratch.
+- **Parity test:** each existing registry is a checked view of this one, with a ratchet baseline. A new disagreement fails the build; the known ones are listed and worked down by UAC. Migrating UAC's walks onto it is UAC's call.
+- **Content ownership:** UAC-r2. Enforced by a content-pin test. Changing an edge fails the test, and its message requires a UAC review line in the PR (enforcement ladder: a test, not prose).
+
+**B. `RecordFamilyReader` — read-only, scoped**
+
+- **Signature:** `ReadAsync(table, id, direction, continuation)`.
+- **Identity:** walks AS THE CALLER (OBO), level by level, with one batched query per (child table, lookup) per level (no N+1).
+- **Unreadable records:** the walk never passes through one. It never returns an unreadable member, and never counts or hints at hidden ones.
+- **Root probe:** uses the equalised gate call, so an unknown root and a denied root look the same.
+- **Caps:** depth 4; 500 members per view and a per-level cap. Past a cap it returns `truncated = true`, per-table counts of what IS shown, and a per-level continuation. It never truncates silently.
+- **Fields returned:** id, table, primary name, parent edge, depth. No access metadata (grants, No Access, sharees, owner team).
+- **Not an authorization input.** No cross-caller cache.
+
+**C. `GET /api/v1/records/{table}/{id}/family`**
+
+- Lives in the existing `/api/v1/records` group (`RecordNoAccessEndpoint.cs`), with auth required.
+- Takes `direction` (down by default; up returns the ancestors to the root) and `continuation`.
+- An unknown or unreadable root gets one uniform 404.
+
+**D. `/push` extensions (task 040; UAC 4a design)**
+
+- `includeAssignedTo` defaults to false when absent.
+- `preview: true` writes nothing. It returns, per child whose value would change: id, name, column, from → to, and the Secure (suggestion only) and Restricted (no contact grant) flags. It also returns a skipped-for-no-Write count and `truncated`.
+- `childIds` is the confirmed list. The server re-derives the children as the caller and intersects them with the list; any other id is refused per id.
+- With `includeAssignedTo`, the caller needs Write on the SOURCE (equalised probe).
+- The profile's parent lookup must be a `RecordFamilyEdges` filing edge, or the push is refused.
+- Unchanged: filing columns are never pushed, invariant columns are never copied, `SecureRootFilingGate` and `AssignedAccessMaterializer` run per child.
+- Sync mode becomes class-aware: Assigned-To targets 0, filing targets never, plain data 1. The values ship with 040 after the owner reviews the dry run.
+
+**E. Family modal (client, `Spaarke.UI.Components`)**
+
+- `RecordFamilyModal` is built on `SprkModal/presets/BrowseModal` (ADR-050 Layout 2, in-app).
+- It shows the family grouped by level and table, with checkboxes, a truncation notice and "load more".
+- **Action toolbar, v1:**
+  - **Push field updates:** push preview → the person confirms rows → apply → result summary.
+  - **Update Assigned To:** the same flow with `includeAssignedTo`.
+- An action never acts on unconfirmed rows. The server re-checks everything.
+
+**F. TrackingFieldTrio**
+
+- A new toolbar icon, **Family**. The shared component gains an optional `onOpenFamily` callback, the same pattern as `onOpenGrantModal` / `onOpenEmailMembers`, so existing consumers see no change.
+- The PCF (`index.ts`) wires it and renders the modal.
+- Forms: Matter, Project, Work Assignment and Event. All four already host the PCF, so no form change is needed.
+- The PCF bundle delta is measured.
+
+### 12.4 Sequencing
+
+1. **A**, after UAC 194 merges.
+2. **B + C + E + F** as a read-only Family view. This does not depend on 017.
+3. **D**, with 040. The modal's actions light up when 040 ships. 040 still depends on 019 → 017 → ebilling #1911.
+
+### 12.5 Out of scope (later, each with its own review)
+
+- Monitor or High Priority across the family; email family members (UAC: recipients from readable members' people lookups, field security respected, the existing send path).
+- Any bulk share or grant (needs UAC review first).
+- External users (they use `AccessibleRecordSetService`).
+- A Console entry point.
+
+### 12.6 Placement (§10) and component justification (§11)
+
+**Placement.** In the BFF: a caller-scoped Dataverse read used by PCF and code-page surfaces. CRUD only, with no AI dependency (ADR-013 is not triggered). No new packages.
+
+| Surface | Existing (checked) | Extend instead? | Cost of doing nothing |
+|---|---|---|---|
+| `RecordFamilyEdges` | Seven registries in five files | **Consolidate**: a seeded union plus a parity ratchet; existing registries untouched | The hierarchy keeps drifting (UAC 194 just found `sprk_budgetbucket` missing); every new family feature adds an eighth copy |
+| `RecordFamilyReader` | Access walks are app-only and enforce invariants; push is one level as the caller | **No**: those walks must stay app-only for isolation (UAC), and the push query is private, one level and profile-bound | The Family modal and the push preview each build their own caller walk |
+| `GET …/family` | `/api/v1/records` group | **Extend the group** | The PCF has no way to list the family |
+| `/push` `preview` / `includeAssignedTo` / `childIds` | `/push` | **Extend the existing endpoint** | Assigned-To re-push stays impossible, or becomes an unpreviewed mass access change |
+| `RecordFamilyModal` | `BrowseModal`, `AccessGrantModal` pattern | **Compose `BrowseModal`** | No user surface for family actions |
+| TrackingFieldTrio Family icon | Existing toolbar (grant, email) | **Extend the toolbar** | No entry point on the forms |
+
+- **Publish size:** measured per BFF task against a fresh master build.
+- **Hot path:** BFF Y (unchanged). SpaarkeAi N. The PCF and the shared UI library are not hot-path surfaces.
+
+### 12.7 ADR tensions
+
+| ADR | Point | Resolution |
+|---|---|---|
+| ADR-050 / MODAL-DECISION-CRITERIA | A collection browse with actions | Comply: `BrowseModal` (Layout 2), in-app from a React surface |
+| ADR-021 / ADR-022 | Fluent v9 and React 16 in a PCF | Comply: the shared library is already consumed by this PCF (`AccessGrantModal`) |
+| ADR-028 / ADR-008 | Read identity | Comply: OBO as the caller; the equalised root probe; auth required |
+| ADR-010 | DI | One scoped reader plus static registry data |
+| ADR-019 | Error text | Fixed, actionable texts; detail to logs |
+| ADR-038 | Tests | Registry parity and content pin (unit or arch), reader seam tests (as the caller, unreadable pruning, no counts, caps), endpoint contract, push preview/ids tests (UAC's list), UI component tests |
+
+None needs path A or B.
+
+### 12.8 Success criteria (W7)
+
+1. One edge registry. The parity test lists every disagreement with the existing registries, and a new one fails the build.
+2. The family view shows only caller-readable members. A readable record below an unreadable one is absent, and nothing reveals hidden members (tested with a Secure family).
+3. A truncated family says so and can load more. Nothing is dropped silently.
+4. **Push:**
+   - preview writes nothing;
+   - an absent `includeAssignedTo` leaves Assigned columns untouched;
+   - a Read-only source with `includeAssignedTo` is refused (403);
+   - an unticked child keeps its value and its grants;
+   - a foreign id is refused;
+   - a Secure child gets a suggestion, not a grant.
+5. The Family tool works from the Matter, Project, Work Assignment and Event forms; existing TrackingFieldTrio consumers are unchanged.
+
+### 12.9 Open questions for the owner
+
+1. **The Push Updates ribbon button:** remove it once the Family tool ships (one entry point), or keep it and point it at the Family view?
+2. **Columns per member** in the list (proposal: name, record type, status, modified on).
+3. **Default view:** down only, or also show the ancestors to the root?
+
+### 12.10 Reviews required before the spec amendment
+
+- **UAC-r2:** the registry (A), read identity and limits (B, C), push extensions (D).
+- **Ontology-r1:** the hierarchy vocabulary and the term "family" (terminology changes originate in its component model, root CLAUDE.md §1.1).
