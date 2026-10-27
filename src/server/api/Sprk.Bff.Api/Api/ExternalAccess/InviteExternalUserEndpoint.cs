@@ -497,11 +497,17 @@ public static class InviteExternalUserEndpoint
         }
     }
 
-    /// <summary>The 409 ProblemDetails for a refused invite (both <c>/invite</c> and <c>/invite-and-grant</c>).</summary>
+    /// <summary>
+    /// The 409 ProblemDetails for a refused invite (both <c>/invite</c> and <c>/invite-and-grant</c>). C5: titled by reason
+    /// code, as the grant core titles its refusals: a person whose external access an administrator removed is "External
+    /// access removed", never an identity collision; every other refusal keeps "Identity collision".
+    /// </summary>
     internal static IResult RefusalResult(InviteRefusal refusal, HttpContext httpContext)
         => Results.Problem(
             statusCode: StatusCodes.Status409Conflict,
-            title: "Identity collision",
+            title: refusal.ReasonCode == ContactBindingDecision.InviteContactRemovedAdminReinstate
+                ? "External access removed"
+                : "Identity collision",
             detail: refusal.Message,
             extensions: new Dictionary<string, object?>
             {

@@ -1586,6 +1586,7 @@ public class ExistingCiamAccountInviteTests
             var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
             problem.StatusCode.Should().Be(409);
             problem.ProblemDetails.Extensions["reasonCode"].Should().Be(ContactBindingDecision.InviteContactAlreadyBound);
+            problem.ProblemDetails.Title.Should().Be("Identity collision", "C5: every refusal other than a removal keeps its title");
         }
 
         _h.Emails.Sent.Should().BeEmpty("a bound contact gets no work-account notice");
@@ -1602,10 +1603,11 @@ public class ExistingCiamAccountInviteTests
     /// <remarks>Slice C2c: an unproven marker is not a removal: 503 <c>contact_removed_state_unavailable</c> (retryable),
     /// with nothing written either.</remarks>
     [Theory]
-    [InlineData("active-removed", 409, ContactBindingDecision.InviteContactRemovedAdminReinstate)]
-    [InlineData("inactive-removed", 409, ContactBindingDecision.InviteContactRemovedAdminReinstate)]
-    [InlineData("active-unreadable", 503, ContactBindingDecision.InviteContactRemovedStateUnavailable)]
-    public async Task AnInvite_ToARemovedContact_IsRefused_SetMarker409_UnprovenMarker503(string how, int status, string code)
+    [InlineData("active-removed", 409, ContactBindingDecision.InviteContactRemovedAdminReinstate, "External access removed")]
+    [InlineData("inactive-removed", 409, ContactBindingDecision.InviteContactRemovedAdminReinstate, "External access removed")]
+    [InlineData("active-unreadable", 503, ContactBindingDecision.InviteContactRemovedStateUnavailable, null)]
+    public async Task AnInvite_ToARemovedContact_IsRefused_SetMarker409_UnprovenMarker503(
+        string how, int status, string code, string? title)
     {
         var contact = Guid.NewGuid();
         _h.Identities.AddContact(contact, email: Email, stateCode: how.StartsWith("inactive", StringComparison.Ordinal) ? 1 : 0);
@@ -1623,6 +1625,12 @@ public class ExistingCiamAccountInviteTests
             var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
             problem.StatusCode.Should().Be(status);
             problem.ProblemDetails.Extensions["reasonCode"].Should().Be(code);
+            // C5: the removed refusal is titled by its reason code, never "Identity collision".
+            problem.ProblemDetails.Title.Should().NotBe("Identity collision");
+            if (title is not null)
+            {
+                problem.ProblemDetails.Title.Should().Be(title);
+            }
         }
 
         _h.Identities.Contacts.Should().ContainSingle("no contact is created around a removal");
