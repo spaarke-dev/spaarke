@@ -301,8 +301,10 @@ internal sealed class FromEmailSubmissionService
         };
     }
 
+    /// <summary>A firm or firm-link read fault. Contract section 6 lists one code for a transient Dataverse fault on this route,
+    /// <c>record_unavailable</c>; the internal intake's <c>firm_unverifiable</c> is not in the add-in's closed set, so it is not used here.</summary>
     private static FromEmailSubmissionOutcome FirmUnverifiable() =>
-        FromEmailSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.FirmUnverifiable,
+        FromEmailSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.CoreRecordUnavailable,
             "The firm could not be checked right now. Try again shortly.");
 
     // ═══════════════════════════════════════════════════════════════════════════

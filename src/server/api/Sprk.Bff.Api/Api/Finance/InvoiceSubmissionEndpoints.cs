@@ -74,7 +74,9 @@ public static class InvoiceSubmissionEndpoints
             .AddOfficeRateLimitFilter(OfficeRateLimitCategory.Save)
             .AddOfficeVersionSaveAuthorizationFilter()
             .RequireEbillingEnabled()
-            .AddIdempotencyFilter(bindClientKeyTo: InvoiceSubmissionFromEmailHttp.IdempotencyBinding)
+            .AddIdempotencyFilter(
+                bindClientKeyTo: InvoiceSubmissionFromEmailHttp.IdempotencyBinding,
+                mayReplayResponse: InvoiceSubmissionFromEmailHttp.MayReplayResponse)
             .Accepts<FromEmailSubmissionRequest>("application/json")
             .WithName("SubmitInvoiceFromEmail")
             .WithSummary("Submit an invoice from an Outlook email: save the email alone and submit its marked attachment")

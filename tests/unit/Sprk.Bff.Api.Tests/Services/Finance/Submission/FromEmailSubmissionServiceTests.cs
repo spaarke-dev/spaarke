@@ -190,14 +190,14 @@ public class FromEmailSubmissionServiceTests
     }
 
     [Fact]
-    public async Task Firm_ReadFault_Is503FirmUnverifiable()
+    public async Task Firm_ReadFault_Is503RecordUnavailable_TheContractsCode()
     {
         var world = new W();
         world.Intake.FirmReadFailure = new TimeoutException();
 
         var outcome = await Run(world);
 
-        (outcome.Status, outcome.ErrorCode).Should().Be((503, "ebilling.submission.firm_unverifiable"));
+        (outcome.Status, outcome.ErrorCode).Should().Be((503, "ebilling.submission.record_unavailable"));
         RefusedBeforeAnyWrite(world);
     }
 
@@ -214,12 +214,12 @@ public class FromEmailSubmissionServiceTests
     }
 
     [Fact]
-    public async Task Firm_LinkUnreadable_Is503FirmUnverifiable()
+    public async Task Firm_LinkUnreadable_Is503RecordUnavailable_TheContractsCode()
     {
         var world = new W();
         world.Intake.LinksUnreadable = true;
 
-        (await Run(world)).Should().Match<FromEmailSubmissionOutcome>(o => o.Status == 503 && o.ErrorCode == "ebilling.submission.firm_unverifiable");
+        (await Run(world)).Should().Match<FromEmailSubmissionOutcome>(o => o.Status == 503 && o.ErrorCode == "ebilling.submission.record_unavailable");
         RefusedBeforeAnyWrite(world);
     }
 

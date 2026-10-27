@@ -218,7 +218,11 @@ internal sealed class FromEmailWorld
 
         public Task<SubmissionEmailSaveOutcome> SaveEmailForSubmissionAsync(SaveRequest request, string userId, HttpContext http, CancellationToken ct)
         {
-            Requests.Add(request);
+            lock (Requests)
+            {
+                Requests.Add(request);
+            }
+
             if (Answer is { } answer)
             {
                 return Task.FromResult(answer);
@@ -260,7 +264,11 @@ internal sealed class FromEmailWorld
 
         public Task<FromEmailSubmitResult> SubmitAsync(FromEmailSubmitInput input, CancellationToken ct)
         {
-            Submits.Add(input);
+            lock (Submits)
+            {
+                Submits.Add(input); // the contract suite's concurrent retry reaches here from two requests at once
+            }
+
             if (Answer is { } answer)
             {
                 return Task.FromResult(answer(input));
@@ -281,7 +289,11 @@ internal sealed class FromEmailWorld
 
         public Task<bool> RequeueAsync(Guid submissionId, Guid jobId, string? correlationId, CancellationToken ct)
         {
-            Requeues.Add((submissionId, jobId));
+            lock (Requeues)
+            {
+                Requeues.Add((submissionId, jobId));
+            }
+
             return Task.FromResult(Requeued);
         }
 

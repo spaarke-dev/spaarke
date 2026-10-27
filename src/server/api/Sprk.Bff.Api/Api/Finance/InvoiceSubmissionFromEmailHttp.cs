@@ -338,6 +338,17 @@ internal static class InvoiceSubmissionFromEmailHttp
             ? FromEmailSubmissionKey.CacheBinding(FromEmailSubmissionKey.Of(input))
             : null;
 
+    /// <summary>
+    /// Only a request that carries <c>X-Idempotency-Key</c> is answered from (or written to) the response cache (contract section 4: the
+    /// header names the cache). Without the header the filter would key the cache on the body, so an identical retry after a Failed
+    /// attempt would get the failed attempt's cached 202 for 24 hours instead of the new attempt EB-D-160 grants (section 5). The
+    /// handler's own replay (ids derived from K) answers a repeat either way; the in-flight lock still applies.
+    /// </summary>
+    internal static bool MayReplayResponse(EndpointFilterInvocationContext context) =>
+        !string.IsNullOrEmpty(context.HttpContext.Request.Headers[IdempotencyKeyHeader].FirstOrDefault());
+
+    private const string IdempotencyKeyHeader = "X-Idempotency-Key";
+
     // ═══════════════════════════════════════════════════════════════════════════
     // Handlers
     // ═══════════════════════════════════════════════════════════════════════════
