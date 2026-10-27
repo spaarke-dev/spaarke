@@ -4,7 +4,8 @@ namespace Sprk.Bff.Api.Models.Office;
 
 /// <summary>
 /// Request model for searching association targets (entities) in the Office add-in.
-/// Supports typeahead search for Matters, Projects, Invoices, Accounts, and Contacts.
+/// Supports typeahead search for Matters, Projects, Invoices, Accounts, and Contacts, plus Work Assignments when asked
+/// for by name (task 133).
 /// </summary>
 /// <remarks>
 /// <para>

@@ -444,6 +444,11 @@ public class OfficeSearchService
     private static string? GetJsonString(Dictionary<string, JsonElement> row, string key)
         => row.TryGetValue(key, out var el) && el.ValueKind == JsonValueKind.String ? el.GetString() : null;
 
+    /// <summary>Every <see cref="AssociationEntityType"/> by its defined name (case-insensitive) — the only names a request can use.</summary>
+    private static readonly IReadOnlyDictionary<string, AssociationEntityType> EntityTypesByName =
+        Enum.GetValues<AssociationEntityType>()
+            .ToDictionary(t => Enum.GetName(t)!, t => t, StringComparer.OrdinalIgnoreCase);
+
     /// <summary>
     /// Determines which entity types to search based on the request.
     /// </summary>
@@ -458,10 +463,11 @@ public class OfficeSearchService
         var typesToSearch = new HashSet<AssociationEntityType>();
         foreach (var typeStr in requestedTypes)
         {
-            // Names only: Enum.TryParse also accepts numeric strings ("5"), which would reach a type by its ordinal.
-            if (Enum.TryParse<AssociationEntityType>(typeStr, ignoreCase: true, out var entityType)
-                && Enum.IsDefined(entityType)
-                && !int.TryParse(typeStr, out _))
+            // An exact match on a defined NAME, ignoring case and surrounding spaces — and nothing else. Enum.TryParse
+            // is not used: it also accepts a numeric string ("5", a type by its ordinal) and a comma-joined list
+            // ("Project,Contact"), which it flag-combines into the OR of the values — here 1|4 = 5, WorkAssignment,
+            // a type the caller never named. No name contains a comma, so such a string matches nothing.
+            if (typeStr is not null && EntityTypesByName.TryGetValue(typeStr.Trim(), out var entityType))
             {
                 typesToSearch.Add(entityType);
             }
