@@ -53,7 +53,7 @@ internal sealed class FromEmailSubmissionService
 {
     private static readonly string[] AttemptColumns =
     [
-        "sprk_processingstatus", "sprk_document", TrackingNumberAllocator.TrackingNumberColumn, TrackingNumberAllocator.FirmColumn,
+        "sprk_processingstatus", TrackingNumberAllocator.TrackingNumberColumn, TrackingNumberAllocator.FirmColumn,
         TrackingNumberAllocator.FirmInvoiceNumberColumn, "sprk_regardingmatter", "sprk_regardingproject", "sprk_regardingworkassignment",
         RecordCreatorPerson.Column,
     ];
@@ -223,13 +223,14 @@ internal sealed class FromEmailSubmissionService
         var jobId = FromEmailSubmissionKey.JobIdFor(k, generation);
         var result = await _operation.SubmitAsync(new FromEmailSubmitInput
         {
-            EmlDocumentId = resolved.EmlDocumentId,
+            SourceEmlDocumentId = resolved.EmlDocumentId,
             CommunicationId = resolved.CommunicationId,
             CoreRecord = input.CoreRecord,
             FirmId = input.FirmId,
             FirmInvoiceNumber = number,
             PoNumber = string.IsNullOrWhiteSpace(input.PoNumber) ? null : input.PoNumber.Trim(),
-            MarkedParts = resolved.Parts,
+            // Task 092: each part is staged in the file store under its deterministic Stored File id; the row names no document.
+            MarkedParts = resolved.Parts.Select(p => p with { StoredFileId = FromEmailSubmissionKey.StoredFileIdFor(submissionId, p) }).ToList(),
             SubmissionId = submissionId,
             JobId = jobId,
             Generation = generation,
@@ -387,26 +388,26 @@ internal sealed class FromEmailSubmissionService
                 "This email was already submitted as an invoice and that submission was rejected. Nothing was saved.");
         }
 
-        string? recordedSha;
+        // Task 092: the submission row names no document; the attempt's source (.eml and Invoice part) is what the operation recorded.
+        FromEmailAttemptSource? source;
         try
         {
-            recordedSha = await _operation.ReadInvoicePartSha256Async(row.Id, ct);
+            source = await _operation.ReadAttemptSourceAsync(row.Id, ct);
         }
         catch (Exception ex) when (!IsCallerCancellation(ex, ct))
         {
-            _logger.LogWarning(ex, "From-email submission {SubmissionId}: its Invoice part could not be read", row.Id);
+            _logger.LogWarning(ex, "From-email submission {SubmissionId}: its source could not be read", row.Id);
             return Unavailable("Invoice submissions could not be read right now. Nothing was saved; try again shortly.");
         }
 
-        if (recordedSha is not null && !string.Equals(recordedSha, invoiceSha, StringComparison.OrdinalIgnoreCase))
+        if (source is not null && !string.Equals(source.InvoiceSha256, invoiceSha, StringComparison.OrdinalIgnoreCase))
         {
             _logger.LogInformation("From-email submission {SubmissionId}: the Invoice part differs from the earlier attempt; refused (409)", row.Id);
             return DocumentAlreadySubmitted();
         }
 
         var tracking = row.GetAttributeValue<string>(TrackingNumberAllocator.TrackingNumberColumn);
-        var eml = row.GetAttributeValue<EntityReference>("sprk_document")?.Id;
-        if (string.IsNullOrEmpty(tracking) || eml is not { } emlId || emlId == Guid.Empty || status is null)
+        if (string.IsNullOrEmpty(tracking) || source is not { SourceEmlDocumentId: var emlId } || emlId == Guid.Empty || status is null)
         {
             _logger.LogWarning("From-email submission {SubmissionId}: the earlier attempt has no tracking number, source or status", row.Id);
             return NotQueued();

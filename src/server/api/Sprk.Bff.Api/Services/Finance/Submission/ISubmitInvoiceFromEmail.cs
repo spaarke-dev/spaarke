@@ -13,12 +13,25 @@ namespace Sprk.Bff.Api.Services.Finance.Submission;
 /// <see cref="InvoiceDocumentRefile"/>), and derives its ids from the document, not from K and a generation;
 /// <see cref="InvoiceSubmissionService.SubmitAsync"/> creates a second, invoice-PDF Document with random ids. Neither can carry a
 /// source <c>.eml</c> with marked parts without changing what it does today (notes/095-submit-invoice-from-email.md, "Seam").</para>
-/// <para><b>What 094 must do</b> (the contract this interface pins): create the submission row with exactly
-/// <see cref="FromEmailSubmitInput.SubmissionId"/> through <see cref="ITrackingNumberAllocator.CreateSubmissionAsync"/> (its
-/// <see cref="TrackingNumberOutcome.AlreadyCreated"/> is the race guard two concurrent retries rely on, EB-D-160), with
-/// <c>sprk_document</c> = the <c>.eml</c>, Channel Internal (OP-6) and the caller as creator person (OP-5 reads it); queue the job
-/// <see cref="FromEmailSubmitInput.JobId"/> only after the <c>.eml</c>'s finalization; read the marked parts in the job with
-/// <see cref="EmlMarkedPartReader"/>; and run step A (filing an unfiled communication) and steps 1 to 6.</para>
+/// <para><b>What 094 must do</b> (the contract this interface pins; task 092's file-store intake):</para>
+/// <list type="number">
+/// <item>Read each marked part out of the saved <c>.eml</c> with <see cref="EmlMarkedPartReader"/>: its ordinal, name and SHA-256
+/// must match (uac-r2 F2-c; the read's <c>versionnumber</c> is the source version).</item>
+/// <item>Stage each part in the Finance file store under its <see cref="FromEmailMarkedPart.StoredFileId"/>. The Invoice part goes
+/// under <c>StoredFileIds.ForUpload(SubmissionId)</c>, exactly as 092's upload does, with purpose Invoice PDF. Supporting parts are
+/// Invoice supporting files. All are Firm-visible = No, with the future invoice (<c>InvoiceIdFor(SubmissionId)</c>) as parent. The
+/// source <c>.eml</c> and its communication are recorded as the Stored File's <c>sprk_sourcedocument</c> and
+/// <c>sprk_sourcecommunication</c> (model §5 table).</item>
+/// <item>Create the submission row with exactly <see cref="FromEmailSubmitInput.SubmissionId"/> through
+/// <see cref="ITrackingNumberAllocator.CreateSubmissionAsync"/>. Its <see cref="TrackingNumberOutcome.AlreadyCreated"/> is the race
+/// guard two concurrent retries rely on (EB-D-160). The row has Channel Internal (OP-6) and the caller as creator person (OP-5 reads
+/// it). <b>Its <c>sprk_document</c> stays EMPTY</b>: 092's <c>SubmissionSnapshot.Read</c> fails any document that is not a 050a
+/// confirm with <c>document_unavailable</c>.</item>
+/// <item>Queue the job <see cref="FromEmailSubmitInput.JobId"/>. It reads the staged bytes through 092's
+/// <c>StoredFileService.OpenStagedForProcessingAsync</c>.</item>
+/// <item>Run step A (filing an unfiled communication) and steps 1 to 6.</item>
+/// <item>Answer <see cref="ReadAttemptSourceAsync"/> from what it recorded.</item>
+/// </list>
 /// </remarks>
 internal interface ISubmitInvoiceFromEmail
 {
@@ -32,23 +45,37 @@ internal interface ISubmitInvoiceFromEmail
     Task<bool> RequeueAsync(Guid submissionId, Guid jobId, string? correlationId, CancellationToken ct);
 
     /// <summary>
-    /// The SHA-256 (lower-case hex) of the Invoice part a submission recorded, for the replay's "other details differ" check (contract
-    /// section 5); null when it is not recorded. A read fault throws.
+    /// What an earlier attempt recorded about its source, for the replay (contract section 5): the source <c>.eml</c> (the 202's
+    /// <c>emlDocumentId</c>) and the Invoice part's SHA-256 (the "other details differ" check). Null when nothing is recorded (the replay
+    /// then answers 503 failed). A read fault throws. The submission row names no document (092), so this cannot come from it.
     /// </summary>
-    Task<string?> ReadInvoicePartSha256Async(Guid submissionId, CancellationToken ct);
+    Task<FromEmailAttemptSource?> ReadAttemptSourceAsync(Guid submissionId, CancellationToken ct);
 }
+
+/// <summary>An earlier attempt's source, as the Submit Invoice operation recorded it (<see cref="ISubmitInvoiceFromEmail.ReadAttemptSourceAsync"/>).</summary>
+/// <param name="SourceEmlDocumentId">The <c>.eml</c> Document the attempt's files were copied from.</param>
+/// <param name="InvoiceSha256">The SHA-256 (lower-case hex) of its Invoice part.</param>
+internal sealed record FromEmailAttemptSource(Guid SourceEmlDocumentId, string InvoiceSha256);
 
 /// <summary>A marked attachment as the submission names it: matched against the <c>.eml</c>'s MIME parts (model §9.1 step 2).</summary>
 /// <param name="Ordinal">The part's 0-based ordinal among the <c>.eml</c>'s attachment parts (<c>EmlMimeParts</c>).</param>
 /// <param name="FileName">The part's file name as stored in the <c>.eml</c>.</param>
 /// <param name="Sha256">The SHA-256 (lower-case hex) of the part's decoded bytes.</param>
 /// <param name="Mark"><see cref="FromEmailMarks.Invoice"/> or <see cref="FromEmailMarks.Supporting"/> (Don't save is never passed).</param>
-internal sealed record FromEmailMarkedPart(int Ordinal, string FileName, string Sha256, string Mark);
+/// <param name="StoredFileId">The Stored File the part is staged under, deterministic from the submission id
+/// (<see cref="FromEmailSubmissionKey.StoredFileIdFor"/>). Empty until the submission id is known.</param>
+internal sealed record FromEmailMarkedPart(int Ordinal, string FileName, string Sha256, string Mark, Guid StoredFileId = default);
 
 /// <summary>Everything the Submit Invoice operation needs from the from-email route (task 095).</summary>
 internal sealed record FromEmailSubmitInput
 {
-    public required Guid EmlDocumentId { get; init; }
+    /// <summary>
+    /// The source <c>.eml</c> Document. It is recorded as the Stored Files' <c>sprk_sourcedocument</c> and is the copy rule's and the step 4
+    /// guard's source (model §9.1). It is NEVER the submission's <c>sprk_document</c> (092).
+    /// </summary>
+    public required Guid SourceEmlDocumentId { get; init; }
+
+    /// <summary>The email's communication (the Stored Files' <c>sprk_sourcecommunication</c>).</summary>
     public required Guid CommunicationId { get; init; }
     public required InvoiceCoreRecord CoreRecord { get; init; }
     public required Guid FirmId { get; init; }
@@ -58,8 +85,11 @@ internal sealed record FromEmailSubmitInput
 
     public string? PoNumber { get; init; }
 
-    /// <summary>The Invoice part first, then the Supporting parts in attachment order.</summary>
+    /// <summary>The Invoice part first, then the Supporting parts in attachment order; each with its Stored File id.</summary>
     public required IReadOnlyList<FromEmailMarkedPart> MarkedParts { get; init; }
+
+    /// <summary>The Invoice part's Stored File: <c>StoredFileIds.ForUpload(SubmissionId)</c>, as 092's upload stages its PDF.</summary>
+    public Guid InvoiceStoredFileId => MarkedParts.Single(p => p.Mark == FromEmailMarks.Invoice).StoredFileId;
 
     /// <summary>Deterministic from K and <see cref="Generation"/> (<see cref="FromEmailSubmissionKey"/>).</summary>
     public required Guid SubmissionId { get; init; }
@@ -137,6 +167,6 @@ internal sealed class SubmitInvoiceFromEmailNotYetAvailable : ISubmitInvoiceFrom
     public Task<bool> RequeueAsync(Guid submissionId, Guid jobId, string? correlationId, CancellationToken ct) =>
         throw new SubmitInvoiceFromEmailNotYetAvailableException();
 
-    public Task<string?> ReadInvoicePartSha256Async(Guid submissionId, CancellationToken ct) =>
+    public Task<FromEmailAttemptSource?> ReadAttemptSourceAsync(Guid submissionId, CancellationToken ct) =>
         throw new SubmitInvoiceFromEmailNotYetAvailableException();
 }

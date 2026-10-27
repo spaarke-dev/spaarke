@@ -300,6 +300,21 @@ internal static class FromEmailSubmissionKey
     /// <summary>The value the <c>X-Idempotency-Key</c> response cache is bound to: K itself (the filter hashes it).</summary>
     public static string CacheBinding(string k) => k;
 
+    /// <summary>
+    /// The Stored File a marked part of attempt <paramref name="submissionId"/> is staged under (092's file-store intake), so a retried
+    /// stage meets the blob the first one left. The Invoice part is <see cref="Files.StoredFileIds.ForUpload"/>, the id 092's upload stages
+    /// its one PDF under. A Supporting part is <see cref="Files.StoredFileIds.ForAttachment"/>, keyed by its ordinal in the <c>.eml</c>
+    /// (<c>eml-part-{ordinal}</c>).
+    /// </summary>
+    public static Guid StoredFileIdFor(Guid submissionId, FromEmailMarkedPart part)
+    {
+        ArgumentNullException.ThrowIfNull(part);
+        return part.Mark == FromEmailMarks.Invoice
+            ? Files.StoredFileIds.ForUpload(submissionId)
+            : Files.StoredFileIds.ForAttachment(submissionId,
+                "eml-part-" + part.Ordinal.ToString(System.Globalization.CultureInfo.InvariantCulture));
+    }
+
     private static string GenerationSuffix(int generation)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(generation, 1);

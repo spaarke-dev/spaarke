@@ -51,7 +51,7 @@ public class FromEmailSubmissionServiceTests
         save.IdempotencyKey.Should().BeNull();
 
         var submit = world.Operation.Submits.Should().ContainSingle().Subject;
-        submit.EmlDocumentId.Should().Be(W.EmlId);
+        submit.SourceEmlDocumentId.Should().Be(W.EmlId);
         submit.CommunicationId.Should().Be(W.CommunicationId);
         submit.Generation.Should().Be(1);
         submit.FirmInvoiceNumber.Should().Be("1001");
@@ -61,6 +61,47 @@ public class FromEmailSubmissionServiceTests
         submit.MarkedParts.Select(p => (p.Ordinal, p.FileName, p.Mark, p.Sha256)).Should().Equal(
             (0, "Invoice 1001.pdf", "Invoice", EmlMimeParts.Sha256Hex(W.PdfBytes)),
             (1, "Timesheet.xlsx", "Supporting", EmlMimeParts.Sha256Hex(W.XlsxBytes)));
+
+        // Task 092: the parts are staged in the file store; the Invoice under the id 092's upload stages its PDF under.
+        var submissionId = FromEmailSubmissionKey.SubmissionIdFor(k, 1);
+        submit.InvoiceStoredFileId.Should().Be(Sprk.Bff.Api.Services.Finance.Files.StoredFileIds.ForUpload(submissionId));
+        submit.MarkedParts[1].StoredFileId.Should().Be(Sprk.Bff.Api.Services.Finance.Files.StoredFileIds.ForAttachment(submissionId, "eml-part-1"));
+    }
+
+    [Fact]
+    public async Task Fresh_TheStoredFileIds_AreNewForEachGeneration()
+    {
+        var world = new W();
+        var k = W.K();
+        world.AddAttempt(k, 1, InvoiceSubmissionStatus.Failed);
+
+        await Run(world);
+
+        world.Operation.Submits.Single().InvoiceStoredFileId.Should().Be(
+            Sprk.Bff.Api.Services.Finance.Files.StoredFileIds.ForUpload(FromEmailSubmissionKey.SubmissionIdFor(k, 2)),
+            "a re-attempt after Failed stages its own files, never over the failed attempt's");
+    }
+
+    [Fact]
+    public async Task Replay_AnAttemptWithNoRecordedSource_Is503Failed()
+    {
+        var world = new W();
+        var row = world.AddAttempt(W.K(), 1, InvoiceSubmissionStatus.Processing);
+        world.Operation.Sources.Remove(row.Id);
+
+        (await Run(world)).ErrorCode.Should().Be("ebilling.submission.failed");
+        world.Save.Requests.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Replay_TheSourceReadFaults_Is503RecordUnavailable()
+    {
+        var world = new W();
+        world.AddAttempt(W.K(), 1, InvoiceSubmissionStatus.Processing);
+        world.Operation.SourceReadFailure = new TimeoutException();
+
+        (await Run(world)).ErrorCode.Should().Be("ebilling.submission.record_unavailable");
+        world.Save.Requests.Should().BeEmpty();
     }
 
     [Fact]
@@ -275,7 +316,7 @@ public class FromEmailSubmissionServiceTests
     {
         var world = new W();
         var row = world.AddAttempt(W.K(), 1, InvoiceSubmissionStatus.Accepted);
-        world.Operation.InvoiceShas[row.Id] = new string('0', 64);
+        world.Operation.Sources[row.Id] = new FromEmailAttemptSource(W.EmlId, new string('0', 64));
 
         (await Run(world)).ErrorCode.Should().Be("ebilling.submission.document_already_submitted");
         RefusedBeforeAnyWrite(world);

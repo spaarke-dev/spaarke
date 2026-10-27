@@ -41,7 +41,10 @@ internal sealed record EmlMarkedPartRead(
 /// from SPE app-only, never from a mailbox; each marked part must be at its ordinal with its name and SHA-256, or the submission ends
 /// Failed. Logs carry ids and ordinals only, never a file name or a subject.
 /// </summary>
-/// <remarks>Built for task 094, which calls it at staging (094 owns the job handler; 092 is changing it in parallel, so 095 does not wire it).</remarks>
+/// <remarks>Built for task 094, which calls it at staging: it reads each marked part out of the saved <c>.eml</c> and stages the bytes in
+/// the Finance file store under the part's Stored File id. Since task 092 the job reads the staged bytes
+/// (<c>StoredFileService.OpenStagedForProcessingAsync</c>), not a Document, so this read is the one place the bytes leave the
+/// <c>.eml</c>. Where 094 runs it (intake or job) decides whether its outcomes are a refusal or a Failed submission; 095 does not wire it.</remarks>
 internal sealed class EmlMarkedPartReader
 {
     private const string DocumentEntity = "sprk_document";

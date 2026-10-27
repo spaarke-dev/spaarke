@@ -160,14 +160,15 @@ internal sealed class FromEmailWorld
     public Entity AddAttempt(string k, int generation, InvoiceSubmissionStatus status, Guid? creator = null, string? tracking = null, Guid? eml = null)
     {
         var id = FromEmailSubmissionKey.SubmissionIdFor(k, generation);
+        // Task 092: the row names no document; its source is what the operation recorded (Operation.Sources).
         var row = new Entity(InvoiceSubmissionService.SubmissionEntity, id)
         {
             ["sprk_processingstatus"] = new OptionSetValue((int)status),
-            ["sprk_document"] = new EntityReference("sprk_document", eml ?? EmlId),
             [TrackingNumberAllocator.TrackingNumberColumn] = tracking ?? "1001." + generation,
             [RecordCreatorPerson.Column] = new EntityReference("systemuser", creator ?? CallerId),
         };
         Attempts[id] = row;
+        Operation.Sources[id] = new FromEmailAttemptSource(eml ?? EmlId, EmlMimeParts.Sha256Hex(PdfBytes));
         return row;
     }
 
@@ -233,7 +234,8 @@ internal sealed class FromEmailWorld
         public bool Available = true;
         public readonly List<FromEmailSubmitInput> Submits = new();
         public readonly List<(Guid Submission, Guid Job)> Requeues = new();
-        public readonly Dictionary<Guid, string> InvoiceShas = new();
+        /// <summary>What each attempt recorded about its source (the .eml and the Invoice part's SHA-256).</summary>
+        public readonly Dictionary<Guid, FromEmailAttemptSource> Sources = new();
 
         /// <summary>Null (default): Received, storing the row. Otherwise this answer (AlreadyCreated, Refused).</summary>
         public Func<FromEmailSubmitInput, FromEmailSubmitResult>? Answer;
@@ -250,15 +252,16 @@ internal sealed class FromEmailWorld
                 return Task.FromResult(answer(input));
             }
 
+            // As 094 does on 092's intake: the row names NO document; the source is recorded with the staged files.
             var tracking = input.FirmInvoiceNumber + "." + input.Generation;
             world.Attempts[input.SubmissionId] = new Entity(InvoiceSubmissionService.SubmissionEntity, input.SubmissionId)
             {
                 ["sprk_processingstatus"] = new OptionSetValue((int)InvoiceSubmissionStatus.Received),
-                ["sprk_document"] = new EntityReference("sprk_document", input.EmlDocumentId),
                 [TrackingNumberAllocator.TrackingNumberColumn] = tracking,
                 [RecordCreatorPerson.Column] = new EntityReference("systemuser", input.CallerSystemUserId),
             };
-            InvoiceShas[input.SubmissionId] = input.MarkedParts.Single(p => p.Mark == FromEmailMarks.Invoice).Sha256;
+            Sources[input.SubmissionId] = new FromEmailAttemptSource(
+                input.SourceEmlDocumentId, input.MarkedParts.Single(p => p.Mark == FromEmailMarks.Invoice).Sha256);
             return Task.FromResult(FromEmailSubmitResult.Received(tracking));
         }
 
@@ -268,7 +271,11 @@ internal sealed class FromEmailWorld
             return Task.FromResult(Requeued);
         }
 
-        public Task<string?> ReadInvoicePartSha256Async(Guid submissionId, CancellationToken ct) =>
-            Task.FromResult(InvoiceShas.TryGetValue(submissionId, out var sha) ? sha : null);
+        public Exception? SourceReadFailure;
+
+        public Task<FromEmailAttemptSource?> ReadAttemptSourceAsync(Guid submissionId, CancellationToken ct) =>
+            SourceReadFailure is { } failure
+                ? Task.FromException<FromEmailAttemptSource?>(failure)
+                : Task.FromResult(Sources.TryGetValue(submissionId, out var source) ? source : null);
     }
 }
