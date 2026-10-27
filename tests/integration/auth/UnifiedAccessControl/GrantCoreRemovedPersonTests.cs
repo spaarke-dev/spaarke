@@ -106,6 +106,60 @@ public class GrantCoreRemovedPersonTests
         _h.Shares.Writes.Should().BeEmpty();
     }
 
+    /// <summary>Slice C2c: a contact id that names no contact is 404 contact_not_found, never a removal; nothing written.</summary>
+    [Fact]
+    public async Task Grant_ToANonexistentContact_Is404ContactNotFound_AndWritesNothing()
+    {
+        var result = await Grant(Guid.NewGuid());
+
+        Problem(result).StatusCode.Should().Be(StatusCodes.Status404NotFound);
+        Problem(result).ProblemDetails.Title.Should().Be("Contact not found");
+        ReasonCode(result).Should().Be(ExternalGrantLifecycle.GrantContactNotFoundReasonCode);
+        _h.Grants.WriteCount.Should().Be(0);
+        _h.Shares.Writes.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Slice C2c: 404 only on a contact read that SUCCEEDED and found no row. A contact read that failed keeps the removed
+    /// refusal (fail closed).
+    /// </summary>
+    [Theory]
+    [InlineData("failed")]
+    [InlineData("column-missing")]
+    [InlineData("throws")]
+    public async Task Grant_ToAnIdWhoseContactReadFails_KeepsThe503_NeverA404(string read)
+    {
+        if (read == "failed")
+            _h.Identities.FailGetContact = true;
+        else if (read == "column-missing")
+            _h.Identities.GetContactStatus = LookupStatus.ColumnMissing;
+        else
+            _h.Identities.AfterRead = r => { if (r == "contact") throw new InvalidOperationException("contact read fault"); };
+
+        var result = await Grant(Guid.NewGuid());
+
+        Problem(result).StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable);
+        ReasonCode(result).Should().Be(ContactBindingDecision.InviteContactRemovedStateUnavailable);
+        _h.Grants.WriteCount.Should().Be(0);
+    }
+
+    /// <summary>Slice C2c: an existing contact keeps its removed refusal: a set marker 409, an unreadable one 503.</summary>
+    [Theory]
+    [InlineData("removed", StatusCodes.Status409Conflict)]
+    [InlineData("unreadable", StatusCodes.Status503ServiceUnavailable)]
+    public async Task Grant_ToAnExistingContact_WithAMarkerThatIsNotNotRemoved_IsNeverA404(string marker, int expected)
+    {
+        var contact = _h.Contact();
+        _h.Identities.LiveRemovedMarkerOverride =
+            marker == "removed" ? RemovedMarkerRead.Removed : RemovedMarkerRead.Unreadable;
+
+        var result = await Grant(contact);
+
+        Problem(result).StatusCode.Should().Be(expected);
+        ReasonCode(result).Should().NotBe(ExternalGrantLifecycle.GrantContactNotFoundReasonCode);
+        _h.Grants.WriteCount.Should().Be(0);
+    }
+
     [Fact]
     public async Task Grant_ToAnUnmarkedContact_IsUnchanged()
     {

@@ -836,6 +836,15 @@ public static class GrantExternalAccessEndpoint
             && await ReadGranteeRemovedMarkerAsync(identityStore, granteeContactId, logger, ct) is var marker
             && marker != RemovedMarkerRead.NotRemoved)
         {
+            // Slice C2c (E): a contact id that names no row is answered as such (404), never as a removal. Only on a read
+            // that SUCCEEDED and found no row; a read that failed keeps the refusal below (fail closed).
+            if (await GranteeContactIsMissingAsync(identityStore, granteeContactId, logger, ct))
+            {
+                logger.LogWarning(
+                    "[EXT-GRANT] Refused: grantee contact {ContactId} does not exist. Nothing was written.", granteeContactId);
+                return GrantCheck.Refused(GrantPolicyDecision.ContactNotFound, requestedLevel);
+            }
+
             if (marker == RemovedMarkerRead.Removed)
             {
                 logger.LogWarning(
@@ -939,6 +948,32 @@ public static class GrantExternalAccessEndpoint
                     "({Answer}); refusing (fail closed), reported as a fault, not as an entry on the list.",
                     rootType, rootId, noAccess);
                 return GrantCheck.Refused(GrantPolicyDecision.GranteeDenyListUnreadable, requestedLevel);
+        }
+    }
+
+    /// <summary>
+    /// Slice C2c (E): <c>true</c> only when the grantee's contact read SUCCEEDED and found no row for
+    /// <paramref name="contactId"/>. A failed read, a throw or a row found is <c>false</c>, so the caller keeps the removed
+    /// refusal (fail closed). The caller's cancellation propagates.
+    /// </summary>
+    private static async Task<bool> GranteeContactIsMissingAsync(
+        IContactIdentityStore identityStore, Guid contactId, ILogger logger, CancellationToken ct)
+    {
+        try
+        {
+            var lookup = await identityStore.GetContactAsync(contactId, ct).ConfigureAwait(false);
+            return lookup.Status == LookupStatus.Read && !lookup.Rows.Any(r => r.ContactId == contactId);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "[EXT-GRANT] Grantee contact {ContactId} could not be read to tell a missing contact from a removed one; the " +
+                "removed refusal stands (fail closed).", contactId);
+            return false;
         }
     }
 
@@ -1078,6 +1113,8 @@ public static class GrantExternalAccessEndpoint
                 ? "External access removed" // slice C3: a 409 that is not about a higher level either
                 : refusal.ReasonCode == ContactBindingDecision.InviteContactRemovedStateUnavailable
                 ? "External access state unavailable" // slice C2c: a 503 about the person, not the record's settings
+                : refusal.ReasonCode == ExternalGrantLifecycle.GrantContactNotFoundReasonCode
+                ? "Contact not found" // slice C2c: a 404 about the person, not the record
                 : refusal.StatusCode switch
             {
                 StatusCodes.Status503ServiceUnavailable => "Access settings unavailable",

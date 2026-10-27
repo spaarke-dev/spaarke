@@ -745,6 +745,12 @@ internal static class ExternalGrantLifecycle
     internal const string GrantOwnerUnreadableReasonCode = "sdap.access.grant.owner_unreadable";
 
     /// <summary>
+    /// Stable reason code (404; slice C2c): the grantee contact id names no contact. Nothing was granted. Answered only when
+    /// the contact read succeeded and found no row; any doubt keeps the removed refusal.
+    /// </summary>
+    internal const string GrantContactNotFoundReasonCode = "sdap.access.grant.contact_not_found";
+
+    /// <summary>
     /// Stable reason code (500): no team could be resolved to own a NEW grant row (the record's business unit has no
     /// single default owner team, the Secure Record owner team is missing, or a flagged-secure record is not isolated).
     /// Nothing was granted — a grant row is never left owned by the application identity (D-11). The grant routes'
@@ -1179,6 +1185,18 @@ internal sealed record GrantPolicyDecision(bool IsAllowed, string? ReasonCode, i
         StatusCodes.Status409Conflict,
         "An administrator removed this person's external access, so they cannot be given access. Nothing was granted. " +
         "An administrator must reinstate the person first.");
+
+    /// <summary>
+    /// Slice C2c: the grantee contact id names no contact (the contact read succeeded and found no row). 404
+    /// <see cref="ExternalGrantLifecycle.GrantContactNotFoundReasonCode"/>; nothing is written. Answered only when the removed
+    /// marker did not read as not-removed AND the contact read proved the row absent; a failed contact read keeps
+    /// <see cref="ContactRemoved"/> or <see cref="ContactRemovedStateUnavailable"/> (fail closed).
+    /// </summary>
+    public static GrantPolicyDecision ContactNotFound { get; } = new(
+        false,
+        ExternalGrantLifecycle.GrantContactNotFoundReasonCode,
+        StatusCodes.Status404NotFound,
+        "This contact does not exist, so nothing was granted.");
 
     /// <summary>
     /// Slice C2c: whether an administrator removed the grantee contact's external access could not be established (its removed
