@@ -310,3 +310,23 @@ A system-principal create of a project or work assignment filed under a record k
   opens a work assignment under a matter). Then choose between "ordinary parents only" (option a) and an app-only
   AppendTo check on `RequestedBy` (option b; needs ADR-028 approval and must fail closed on a null `RequestedBy`).
 - 017 carries no SystemPrincipal change.
+
+## 2026-10-27 — UAC-r2 recommendations on 4a, 4b/4c, 4d (pending the owner)
+
+Asked at the owner's direction ("consult with uac-r2 directly"). Nothing applied yet. The 4a migration `-Apply` is on hold, at UAC's request.
+
+- **4a — sync mode:** classify rules; do not make every Copy rule re-pushable.
+  - Assigned-To registry targets stay One-time (0), including the 15 added on 2026-10-22. Push runs `AssignedAccessMaterializer.RunAfterWriteAsync` per child, so re-pushing an assignee is a mass access grant and revoke from one click.
+  - Filing, lineage and ownership targets are never re-pushable: that would be a mass re-file.
+  - Plain data columns are re-pushable (1).
+  - `Set-FieldMappingRuleSyncMode.ps1` becomes class-aware and prints the classification in its dry run. The values ship with task 040, in the same PR and deploy, after the owner reviews the dry-run list.
+- **4b/4c — rights on copies:** agrees with the owner for field restrictions and ordinary lookups, with three boundaries:
+  1. A mapped FILING lookup keeps the caller's AppendTo check; the whole create is refused (403). AppendTo is record-level: who may attach into a record's family. Without it, a View Only user could add rows under a record, including a Secure one. The K-2 field-security refusal on filing lookups also stays. If the owner still wants filing to bypass AppendTo, it is a UAC security decision that needs the owner's explicit sign-off in UAC's session.
+  2. Ordinary mapped lookups and values are copied regardless of the caller's AppendTo or target field security (the owner's policy). This reverses #1617's drop. Assigned* columns are safe: the materializer applies Secure, Restricted and Limited policy itself.
+  3. Never copied, whatever the rights: BFF-owned invariant columns (ownerid, sprk_issecure, sprk_accessinheritance, sprk_createdbyperson, sprk_regarding* stamps, sprk_accesspermission, contact identity/binding). Refused when a rule is authored and skipped at copy time. Also never copied: a value from a field-secured SOURCE column into a non-field-secured target (declassification); it is copied only into a field-secured target, otherwise dropped with a warning.
+  - Keep the FR-04 source Read check as the caller.
+- **4d — search index:** Secure isolation does not use the index.
+  - Retrieval is trimmed per caller by `IRetrievalAccessTrim` (fail closed), and Secure files are isolated by their SPE container.
+  - Do not stamp the index from the owning BU at create. Route by kind (files → spaarke-files-index, records → spaarke-records-index) through the tenant default.
+  - The original 4d precedence question goes away.
+  - Data clean-up for the owner: the singular `spaarke-file-index` catalog row, and the BU and document stamps on knowledge-index-v2 / spaarke-file-index.
