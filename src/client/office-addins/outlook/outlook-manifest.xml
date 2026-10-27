@@ -273,8 +273,6 @@
           <bt:Url id="CreateTodoTaskpane.Url" DefaultValue="https://icy-desert-0bfdbb61e.6.azurestaticapps.net/outlook/taskpane.html?action=createTodo"/>
           <!-- task 133 (V1.1 pinning variant). -->
           <bt:Url id="SubmitInvoiceTaskpane.Url" DefaultValue="https://icy-desert-0bfdbb61e.6.azurestaticapps.net/outlook/taskpane.html?action=submitInvoice"/>
-        <!-- task 133: same taskpane HTML, ?action=submitInvoice routes App.tsx to InvoiceView. -->
-        <bt:Url id="SubmitInvoiceTaskpane.Url" DefaultValue="https://icy-desert-0bfdbb61e.6.azurestaticapps.net/outlook/taskpane.html?action=submitInvoice"/>
         </bt:Urls>
         <bt:ShortStrings>
           <bt:String id="CommandsGroup.Label" DefaultValue="Spaarke"/>
@@ -284,14 +282,11 @@
           <bt:String id="CreateTodoButton.SupertipTitle" DefaultValue="Create Spaarke To Do"/>
           <bt:String id="SubmitInvoiceButton.Label" DefaultValue="Submit Invoice"/>
           <bt:String id="SubmitInvoiceButton.SupertipTitle" DefaultValue="Submit Invoice to Spaarke"/>
-        <bt:String id="SubmitInvoiceButton.Label" DefaultValue="Submit Invoice"/>
-        <bt:String id="SubmitInvoiceButton.SupertipTitle" DefaultValue="Submit Invoice to Spaarke"/>
         </bt:ShortStrings>
         <bt:LongStrings>
           <bt:String id="TaskpaneButton.SupertipText" DefaultValue="Open Spaarke task pane to save emails"/>
           <bt:String id="CreateTodoButton.SupertipText" DefaultValue="Create a Spaarke To Do linked to this email"/>
           <bt:String id="SubmitInvoiceButton.SupertipText" DefaultValue="Submit an invoice from this email to its matter, project or work assignment"/>
-        <bt:String id="SubmitInvoiceButton.SupertipText" DefaultValue="Submit an invoice from this email to its matter, project or work assignment"/>
         </bt:LongStrings>
       </Resources>
     </VersionOverrides>
