@@ -106,6 +106,13 @@ public static class SubmissionReasonCodes
     /// <summary>ebilling-r1 task 092: the uploaded invoice PDF's malware scan said Malicious; it is never read. Permanent; no invoice.</summary>
     public const string FileMalicious = "ebilling.submission.file_malicious";
 
+    /// <summary>
+    /// ebilling-r1 task 092 (review F1): the uploaded invoice PDF's malware scan gave no verdict in time. Each delivery of the job waits up to
+    /// <c>InvoiceSubmissionProcessingJobHandler.ScanWaitBudget</c> (3 min 50 s) for it; while deliveries remain it is transient, and on the final
+    /// delivery the submission is Failed with this code (about 19 minutes in all). No invoice; the PDF was never read.
+    /// </summary>
+    public const string FileScanTimeout = "ebilling.submission.file_scan_timeout";
+
     // ── Rejected, not read: no invoice (FR-21, D-101) ──
 
     /// <summary>043: the document could not be opened.</summary>

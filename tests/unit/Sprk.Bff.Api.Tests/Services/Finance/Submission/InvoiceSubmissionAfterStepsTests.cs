@@ -1522,6 +1522,36 @@ public class InvoiceSubmissionAfterStepsTests
         world.TerminalWrites.Should().BeEmpty();
     }
 
+    [Fact(DisplayName = "092 review K6: the PRODUCTION constructor wires the resume's flip gate to FlipUploadFileAsync over the real file store (no row to flip is FileUnservable, nothing after it runs)")]
+    public async Task ProductionConstructor_WiresTheFlipGateToTheFileStore()
+    {
+        var world = new World(await Accepted());
+        world.Row.Attributes.Remove("sprk_document");
+        var files = new Sprk.Bff.Api.Tests.Finance.Files.StoredFileRig();
+
+        // The concrete writers are only captured as method groups at construction; nothing past the gate may call them here.
+        static T Unused<T>() => (T)System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(typeof(T));
+        var sut = new InvoiceSubmissionAfterSteps(
+            world.Entities.Object,
+            Unused<SignalWriter>(),
+            world.Recorder,
+            Unused<JobSubmissionService>(),
+            Mock.Of<Sprk.Bff.Api.Services.Jobs.IIdempotencyService>(MockBehavior.Strict),
+            world.Totals.Object,
+            Mock.Of<IEbillingNotificationSink>(MockBehavior.Strict),
+            Unused<InvoiceDocumentRefile>(),
+            files.Service,
+            world.Log);
+
+        var resumed = await sut.ResumeAsync(Submission, null);
+
+        resumed.Status.Should().Be(SubmissionAfterStepsStatus.Refused, "the default seam would answer 'servable' and go on to the totals");
+        resumed.ReasonCode.Should().Be(SubmissionReasonCodes.FileUnservable);
+        world.Totals.Verify(t => t.RecalculateAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        world.TerminalWrites.Should().BeEmpty();
+        files.Dataverse.Writes.Should().Be(0);
+    }
+
     [Fact(DisplayName = "092 must-not-fire: a submission with a document (050a) runs no flip gate on resume; RunAsync after a commit runs none either (the persister flipped)")]
     public async Task NoFlipGate_ForADocument_OrOnRunAsync()
     {

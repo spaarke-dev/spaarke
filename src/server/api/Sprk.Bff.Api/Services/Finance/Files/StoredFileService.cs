@@ -410,18 +410,26 @@ public sealed class StoredFileService
     public async Task<StoredFileProcessingRead> OpenForProcessingAsync(Guid fileId, CancellationToken ct)
     {
         var row = await ReadRowAsync(fileId, ct).ConfigureAwait(false);
-        if (row is null || row.Status is not (StoredFileStatus.Servable or StoredFileStatus.NotYetServable) || !PathIsOwn(row) || row.Sha256 is null)
+        return row is null
+            ? new StoredFileProcessingRead(StoredFileProcessingOutcome.Missing)
+            : await ReadRowForProcessingAsync(row, ct).ConfigureAwait(false);
+    }
+
+    private async Task<StoredFileProcessingRead> ReadRowForProcessingAsync(StoredFileRow row, CancellationToken ct)
+    {
+        if (row.Status is not (StoredFileStatus.Servable or StoredFileStatus.NotYetServable) || !PathIsOwn(row) || row.Sha256 is null)
         {
             return new StoredFileProcessingRead(StoredFileProcessingOutcome.Missing);
         }
 
-        return await ReadVerifiedAsync(fileId, row.Container!, row.BlobPath!, expectedSha256: _ => row.Sha256, row.ContentType, ct).ConfigureAwait(false);
+        return await ReadVerifiedAsync(row.FileId, row.Container!, row.BlobPath!, expectedSha256: _ => row.Sha256, row.ContentType, ct).ConfigureAwait(false);
     }
 
     /// <summary>
     /// The job read of a file STAGED under a deterministic id whose row is written later, in the caller's own transaction (ebilling-r1
     /// task 092: a firm upload is staged at intake, and its row is created with the invoice the job commits). When the row exists the
-    /// answer is <see cref="OpenForProcessingAsync"/>'s. Otherwise the blob is found by its name (built from the typed purpose, parent
+    /// answer is <see cref="OpenForProcessingAsync"/>'s, provided the row has the asked purpose and parent (a row that does not is
+    /// <see cref="StoredFileProcessingOutcome.Missing"/>). Otherwise the blob is found by its name (built from the typed purpose, parent
     /// and id, never read back), its scan verdict is read as for a row, and its bytes must match the SHA-256 the stage recorded in the
     /// blob's metadata; no metadata hash, a mismatch or no blob is <see cref="StoredFileProcessingOutcome.Missing"/>. A fault throws.
     /// </summary>
@@ -429,9 +437,12 @@ public sealed class StoredFileService
     public async Task<StoredFileProcessingRead> OpenStagedForProcessingAsync(
         StoredFilePurpose purpose, StoredFileParent parent, Guid fileId, CancellationToken ct)
     {
-        if (await ReadRowAsync(fileId, ct).ConfigureAwait(false) is not null)
+        if (await ReadRowAsync(fileId, ct).ConfigureAwait(false) is { } row)
         {
-            return await OpenForProcessingAsync(fileId, ct).ConfigureAwait(false);
+            // 092 review K6: the row under this id must be the file asked for (same purpose and parent); anything else fails closed.
+            return row.Purpose == purpose && row.Parent == parent
+                ? await ReadRowForProcessingAsync(row, ct).ConfigureAwait(false)
+                : new StoredFileProcessingRead(StoredFileProcessingOutcome.Missing);
         }
 
         if (!Enum.IsDefined(purpose) || StoredFileSchema.ParentKindOf(purpose) != parent.Kind || parent.Id == Guid.Empty || fileId == Guid.Empty)

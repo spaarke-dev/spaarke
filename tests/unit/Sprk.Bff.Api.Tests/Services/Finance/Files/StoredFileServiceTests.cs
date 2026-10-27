@@ -865,6 +865,36 @@ public sealed class StoredFileServiceTests
             .Outcome.Should().Be(StoredFileProcessingOutcome.Missing);
     }
 
+    [Fact(DisplayName = "092 review K6 must-fire: a row under the id whose parent or purpose is not the one asked for is Missing, even Servable and clean")]
+    public async Task OpenStaged_RowWithAnotherParentOrPurpose_IsMissing()
+    {
+        var fileId = UploadSpec().FileId;
+
+        var otherParent = new StoredFileRig();
+        otherParent.SeedFile(fileId, new StoredFileParent(StoredFileParentKind.Invoice, Guid.NewGuid()), Pdf);
+        (await otherParent.Service.OpenStagedForProcessingAsync(StoredFilePurpose.InvoicePdf, Invoice, fileId, CancellationToken.None))
+            .Outcome.Should().Be(StoredFileProcessingOutcome.Missing);
+
+        var otherPurpose = new StoredFileRig();
+        otherPurpose.SeedFile(fileId, Invoice, Pdf, purpose: StoredFilePurpose.InvoiceSupportingFile);
+        (await otherPurpose.Service.OpenStagedForProcessingAsync(StoredFilePurpose.InvoicePdf, Invoice, fileId, CancellationToken.None))
+            .Outcome.Should().Be(StoredFileProcessingOutcome.Missing);
+        otherPurpose.Gateway.Calls.Should().NotContain(c => c.StartsWith("open ", StringComparison.Ordinal), "no bytes are read for a mismatched row");
+    }
+
+    [Fact(DisplayName = "092 review K6 must-not-fire: a row with the asked parent and purpose, Servable and clean, returns its bytes")]
+    public async Task OpenStaged_MatchingRow_ReturnsBytes()
+    {
+        var rig = new StoredFileRig();
+        var fileId = UploadSpec().FileId;
+        rig.SeedFile(fileId, Invoice, Pdf);
+
+        var read = await rig.Service.OpenStagedForProcessingAsync(StoredFilePurpose.InvoicePdf, Invoice, fileId, CancellationToken.None);
+
+        read.Outcome.Should().Be(StoredFileProcessingOutcome.Ok);
+        read.Content!.ToArray().Should().Equal(Pdf);
+    }
+
     [Fact(DisplayName = "092 staged read: a purpose under the wrong parent is Missing with no storage call; an unconfigured store throws (the job retries)")]
     public async Task OpenStaged_WrongParent_AndNotConfigured()
     {

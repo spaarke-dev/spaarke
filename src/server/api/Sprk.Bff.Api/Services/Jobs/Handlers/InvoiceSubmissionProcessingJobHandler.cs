@@ -50,7 +50,8 @@ namespace Sprk.Bff.Api.Services.Jobs.Handlers;
 /// submission is marked Failed with that code although it links its invoice, no after-step runs, and the Stored File row stays Not yet
 /// servable for the file store's detector.</para>
 /// <para><b>The PDF (task 092).</b> An upload's bytes are the blob the intake staged in the Finance file store
-/// (<see cref="StoredFileService.OpenStagedForProcessingAsync"/>): no scan verdict yet is transient, Malicious is Failed
+/// (<see cref="StoredFileService.OpenStagedForProcessingAsync"/>): no scan verdict yet is polled within the delivery (<see cref="ScanWaits"/>), then
+/// transient, and Failed <see cref="SubmissionReasonCodes.FileScanTimeout"/> on the final delivery; Malicious is Failed
 /// <see cref="SubmissionReasonCodes.FileMalicious"/>, missing (or bytes that do not match the staged hash) is Failed
 /// <see cref="SubmissionReasonCodes.DocumentUnavailable"/>. Only an existing-document submission (050a) still reads its SharePoint Embedded
 /// document.</para>
@@ -79,6 +80,24 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
     internal const string CoreRecordChangedCode = "ebilling.submission.core_record_changed";
 
     private static readonly string[] StatusColumns = ["sprk_processingstatus", InvoiceSubmissionPersister.SubmissionInvoice];
+
+    /// <summary>
+    /// ebilling-r1 task 092 (review F1): the waits between reads of an upload whose malware scan has no verdict yet, within ONE delivery.
+    /// Their sum (<see cref="ScanWaitBudget"/>, 3 min 50 s) stays inside the processor's 10-minute message-lock renewal and
+    /// <see cref="LockDuration"/>, leaving room for the extraction and the commit. Over all <see cref="JobContract.MaxDeliveryCount"/>
+    /// deliveries a scan gets about 19 minutes before the submission is Failed with <see cref="SubmissionReasonCodes.FileScanTimeout"/>.
+    /// </summary>
+    internal static readonly TimeSpan[] ScanWaits =
+    [
+        TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(15), TimeSpan.FromSeconds(20), TimeSpan.FromSeconds(30),
+        TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30),
+    ];
+
+    /// <summary>The longest one delivery waits for a scan verdict: the sum of <see cref="ScanWaits"/>.</summary>
+    internal static readonly TimeSpan ScanWaitBudget = TimeSpan.FromTicks(ScanWaits.Sum(w => w.Ticks));
+
+    /// <summary>The wait between scan reads (<see cref="Task.Delay(TimeSpan, CancellationToken)"/>); a test seam, so tests never sleep.</summary>
+    internal Func<TimeSpan, CancellationToken, Task> ScanDelay { get; init; } = static (delay, ct) => Task.Delay(delay, ct);
 
     private readonly IGenericEntityService _entities;
     private readonly IDocumentDataverseService _documents;
@@ -614,7 +633,17 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
     {
         var fileId = StoredFileIds.ForUpload(snapshot.SubmissionId);
         var parent = new StoredFileParent(StoredFileParentKind.Invoice, InvoiceSubmissionPersister.InvoiceIdFor(snapshot.SubmissionId));
+        // 092 review F1: a fresh upload usually has no scan verdict yet (Defender tags it seconds to minutes later). A Pending read is polled
+        // here, with backoff, for at most ScanWaits' sum (3 min 50 s: inside the 10-minute message-lock renewal and the 20-minute submission
+        // lock), instead of handing the delivery back at once: an immediate abandon redelivers in seconds and burns every delivery before any
+        // scan could finish.
         var read = await _files.OpenStagedForProcessingAsync(StoredFilePurpose.InvoicePdf, parent, fileId, ct).ConfigureAwait(false);
+        for (var wait = 0; read.Outcome == StoredFileProcessingOutcome.Pending && wait < ScanWaits.Length; wait++)
+        {
+            await ScanDelay(ScanWaits[wait], ct).ConfigureAwait(false);
+            read = await _files.OpenStagedForProcessingAsync(StoredFilePurpose.InvoicePdf, parent, fileId, ct).ConfigureAwait(false);
+        }
+
         switch (read.Outcome)
         {
             case StoredFileProcessingOutcome.Ok when read.Content is { } content:
@@ -626,9 +655,11 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
                 };
 
             case StoredFileProcessingOutcome.Pending:
-                // No scan verdict yet (or the blob changed since its verdict): the broker redelivers and the scan catches up.
-                _logger.LogInformation("Invoice submission {SubmissionId}: its PDF {FileId} has no scan verdict yet; retry", snapshot.SubmissionId, fileId);
-                throw new SubmissionStepFailure(SubmissionReasonCodes.ProcessingFailed, permanent: false);
+                // Still no scan verdict (or the blob changed since its verdict) after this delivery's wait: transient, so the broker redelivers
+                // and the next delivery waits again; on the final delivery the submission is Failed with FileScanTimeout (TransientAsync).
+                _logger.LogWarning("Invoice submission {SubmissionId}: its PDF {FileId} has no scan verdict after {Wait}; retry",
+                    snapshot.SubmissionId, fileId, ScanWaitBudget);
+                throw new SubmissionStepFailure(SubmissionReasonCodes.FileScanTimeout, permanent: false);
 
             case StoredFileProcessingOutcome.Malicious:
                 _logger.LogWarning("Invoice submission {SubmissionId}: its PDF {FileId} was scanned Malicious; not read", snapshot.SubmissionId, fileId);

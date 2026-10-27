@@ -383,8 +383,23 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
                 Locks,
                 Mock.Of<IOptionsMonitor<EbillingOptions>>(m => m.CurrentValue == new EbillingOptions { Enabled = Enabled }),
                 Files.Service,
-                Log);
+                Log)
+            {
+                // 092 review F1: the scan wait is recorded, never slept.
+                ScanDelay = (delay, _) =>
+                {
+                    ScanWaits.Add(delay);
+                    OnScanWait?.Invoke(ScanWaits.Count);
+                    return Task.CompletedTask;
+                },
+            };
         }
+
+        /// <summary>092 review F1: every wait between scan reads, across every delivery built from this rig.</summary>
+        public List<TimeSpan> ScanWaits { get; } = [];
+
+        /// <summary>Runs after the n-th wait (1-based), before the next read: where a test lets the scan catch up.</summary>
+        public Action<int>? OnScanWait { get; set; }
 
         /// <summary>Scripts the happy path of every component: Accepted outcome, Committed, Completed.</summary>
         public Rig HappyPath()
@@ -1146,8 +1161,71 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
         var outcome = await rig.Build().ProcessAsync(Job(), CancellationToken.None);
 
         outcome.Status.Should().Be(JobStatus.Failed);
+        outcome.ErrorMessage.Should().Be(SubmissionReasonCodes.FileScanTimeout);
+        rig.ScanWaits.Should().Equal(InvoiceSubmissionProcessingJobHandler.ScanWaits, "the delivery waited its whole budget before handing back");
         rig.StatusWrites.Should().NotContain(w => w.Status == Failed);
         rig.Persister.Calls.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "092 review F1 must-fire: a scan still Pending on every one of the MaxDeliveryCount deliveries waits ~4 minutes on EACH, and only the final delivery fails it with file_scan_timeout")]
+    public async Task Upload_PendingOnEveryDelivery_WaitsEachDelivery_ThenFailsFileScanTimeout()
+    {
+        var rig = new Rig().HappyPath();
+        rig.StageUpload([1, 2, 3], scanned: false);
+        LoadsTheUpload(rig);
+        SubmissionReasonCodes.FileScanTimeout.Should().Be("ebilling.submission.file_scan_timeout");
+        InvoiceSubmissionProcessingJobHandler.ScanWaitBudget.Should().BeGreaterThanOrEqualTo(TimeSpan.FromMinutes(3))
+            .And.BeLessThan(TimeSpan.FromMinutes(5), "inside the message-lock renewal and the submission lock, with room for the run");
+
+        var outcomes = new List<JobStatus>();
+        for (var delivery = 1; delivery <= JobContract.MaxDeliveryCount; delivery++)
+        {
+            var before = rig.ScanWaits.Count;
+            var outcome = await rig.Build().ProcessAsync(Job(deliveryCount: delivery), CancellationToken.None);
+            outcomes.Add(outcome.Status);
+            outcome.ErrorMessage.Should().Be(SubmissionReasonCodes.FileScanTimeout);
+            TimeSpan.FromTicks(rig.ScanWaits.Skip(before).Sum(w => w.Ticks)).Should().Be(InvoiceSubmissionProcessingJobHandler.ScanWaitBudget,
+                $"delivery {delivery} waited for the scan instead of handing the message straight back");
+        }
+
+        outcomes.Should().Equal(JobStatus.Failed, JobStatus.Failed, JobStatus.Failed, JobStatus.Failed, JobStatus.Poisoned);
+        rig.StatusWrites.Where(w => w.Status == Failed).Should().Equal([(Failed, SubmissionReasonCodes.FileScanTimeout)],
+            "only the final delivery fails it, with the scan code (not processing_failed)");
+        rig.StatusWrites.Last().Should().Be((Failed, (string?)SubmissionReasonCodes.FileScanTimeout));
+        rig.Persister.Calls.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "092 review F1: a scan verdict that arrives during the delivery's wait is read on that delivery (no redelivery)")]
+    public async Task Upload_ScanArrivesDuringTheWait_IsReadOnTheSameDelivery()
+    {
+        var rig = new Rig().HappyPath();
+        var blob = rig.StageUpload([0x25, 0x50, 0x44, 0x46, 9], scanned: false);
+        var request = LoadsTheUpload(rig);
+        rig.OnScanWait = n =>
+        {
+            if (n == 3)
+            {
+                rig.Files.Gateway.Get(blob.Container, blob.BlobPath)!.Tags =
+                    new Dictionary<string, string>(StoredFileRig.CleanTags(rig.Files.Gateway.Now.AddMinutes(1)), StringComparer.Ordinal);
+            }
+        };
+
+        var outcome = await rig.Build().ProcessAsync(Job(deliveryCount: 1), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Completed);
+        rig.ScanWaits.Should().Equal(InvoiceSubmissionProcessingJobHandler.ScanWaits.Take(3), "it stopped waiting as soon as the verdict was there");
+        request()!.Content.ToArray().Should().Equal(0x25, 0x50, 0x44, 0x46, 9);
+    }
+
+    [Fact(DisplayName = "092 review F1 must-not-fire: an upload already scanned clean is read at once (no wait)")]
+    public async Task Upload_AlreadyScanned_DoesNotWait()
+    {
+        var rig = new Rig().HappyPath();
+        rig.StageUpload([1, 2, 3]);
+        LoadsTheUpload(rig);
+
+        (await rig.Build().ProcessAsync(Job(), CancellationToken.None)).Status.Should().Be(JobStatus.Completed);
+        rig.ScanWaits.Should().BeEmpty();
     }
 
     [Fact(DisplayName = "092 must-fire: an upload scanned Malicious is Failed file_malicious and Poisoned; nothing persisted")]
