@@ -1,6 +1,6 @@
 # 095 from-email: wire contract (pinned 2026-10-27 for word-add-in-r1)
 
-> **Agreed by word-add-in-r1 at 717cf238d9 (2026-10-27).** Changes since: EB-D-160 (re-attempt after Failed, section 5), sent to word-add-in-r1 for agreement.
+> **Agreed by word-add-in-r1 at 717cf238d9 (2026-10-27).** Changes since: EB-D-160 (re-attempt after Failed, section 5), agreed by word-add-in-r1 2026-10-27; `marks_invalid` reason `invoice_not_pdf` (2026-10-27, from their review).
 
 Binding for 095 and word-add-in-r1; changes need word-add-in-r1's agreement first. Behaviour is model §9.1 (v5.9 FINAL); this pins names, statuses and codes only. Citations: `work/ebilling-r1` @ 786d1ea17a, under `src/server/api/Sprk.Bff.Api/` unless shown. NEW = no existing code to follow.
 
@@ -126,7 +126,7 @@ ProblemDetails (ADR-019). Own refusals carry `errorCode` (submission routes, Inv
 | 409 | RecordOwnerRefused reasonCode | No owner team for the new rows | – | no | InvoiceSubmissionHttp.cs:108 |
 | as `/office/save` | `OFFICE_004`/`005`/`006` (400), `OFFICE_020` (409), `OFFICE_022` (403), `OFFICE_012` (502, retry), `OFFICE_INTERNAL` (500) | Passed through from the in-process save | as there | – | OfficeErrorCodes.cs:226-249 |
 
-**`marks_invalid` reasons:** `invoice_count` (zero or more than one Invoice), `unknown_mark`, `inline_attachment`, `unmarked_attachment` (a non-inline entry with no mark), `duplicate_mark` (two marks on one entry), `ambiguous_attachment` (two non-inline entries share all three identity fields; OP-3). A `DontSave` mark matching no entry is accepted.
+**`marks_invalid` reasons:** `invoice_count` (zero or more than one Invoice), `unknown_mark`, `inline_attachment`, `unmarked_attachment` (a non-inline entry with no mark), `duplicate_mark` (two marks on one entry), `ambiguous_attachment` (two non-inline entries share all three identity fields; OP-3). `invoice_not_pdf` (the entry marked `Invoice` is not a PDF: its content type does not contain `pdf` and its name does not end in `.pdf`; model 9.1 "PDF only"; added 2026-10-27 at word-add-in-r1's review, matching the 118a component). A `DontSave` mark matching no entry is accepted.
 
 **`email_unidentifiable` reasons:** `no_message_id`; `email_not_found` (Graph 403/404); `earlier_save_unlinked` (duplicate onto an unlinked or task-130 Restricted .eml); `no_communication`; `eml_ambiguous` (none or several candidates after the SHA check). Clients may show a reason and must accept unknown ones.
 
