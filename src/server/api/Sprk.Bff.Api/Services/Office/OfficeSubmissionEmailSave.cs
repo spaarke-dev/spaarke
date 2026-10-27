@@ -6,7 +6,7 @@ namespace Sprk.Bff.Api.Services.Office;
 /// ebilling-r1 task 095 (model §9.1 step 1): the from-email submission's in-process run of the <c>/office/save</c> pipeline. The
 /// SAME <see cref="OfficeService.SaveAsync"/> code (Graph enrich, the caller's own duplicate, owner, capture and filing, job row,
 /// upload, document create, finalization), with three differences the submission needs: the <c>.eml</c> is created with its own
-/// non-provisional Restricted and the submission marker in the same create (<see cref="OfficeDocumentPersistence.ApplySubmissionNarrowing"/>);
+/// non-provisional Restricted and the submission marker in the same create (<see cref="OfficeDocumentPersistence.ApplyEmailCommunicationOutcome"/> with <c>submissionNarrowing</c>);
 /// an email whose communication cannot be identified is refused before the job row and the upload (never task 130's save-Restricted
 /// fallback, model §9.1 F1-c); and the outcome carries the created <c>.eml</c>, its communication and its MIME parts, so the
 /// caller resolves the <c>.eml</c> from this request rather than from a job result (§9.1 step 1a).

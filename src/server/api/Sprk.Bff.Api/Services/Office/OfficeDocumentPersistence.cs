@@ -123,9 +123,37 @@ public class OfficeDocumentPersistence
     /// created with its own Access Permission = Restricted. Returns <see langword="true"/> when it chose Restricted, so
     /// the caller logs it (<see cref="LogCreatedRestricted"/>) once the document id exists.
     /// </summary>
-    internal static bool ApplyEmailCommunicationOutcome(CreateDocumentRequest create, Guid? relatedCommunicationId)
+    /// <param name="create">The request this create sends.</param>
+    /// <param name="relatedCommunicationId">The email's communication, when one was identified.</param>
+    /// <param name="submissionNarrowing">
+    /// ebilling-r1 task 095 (model §9.1 own-Restricted, uac-r2 v5.7 change 1 and round 122): the <c>.eml</c> that the from-email
+    /// invoice submission creates. It is linked to its communication AND carries its own NON-provisional Restricted narrowing
+    /// (<see cref="Sprk.Bff.Api.Services.Access.AccessInheritance.OwnNarrowing"/>, so linking never releases it) and the
+    /// invoice-submission marker, all in the same create. A communication is required: the submission path refuses before any
+    /// write when none resolves (model §9.1 F1-c), so a missing one here is a defect and throws. Returns <see langword="false"/>
+    /// (this Restricted is chosen, not the unidentified-email fallback the caller logs as an Error). This is the ONLY writer
+    /// of the marker (SubmissionMarkerWriterGuardTests), and the one save-time owner of an own narrowing stays this method (I-19).
+    /// </param>
+    internal static bool ApplyEmailCommunicationOutcome(
+        CreateDocumentRequest create, Guid? relatedCommunicationId, bool submissionNarrowing = false)
     {
         ArgumentNullException.ThrowIfNull(create);
+
+        const int restricted = Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.Restricted;
+        if (submissionNarrowing)
+        {
+            if (relatedCommunicationId is not { } submissionCommunicationId || submissionCommunicationId == Guid.Empty)
+            {
+                throw new InvalidOperationException(
+                    "A from-email submission .eml is created only linked to its communication (task 095, model 9.1 F1-c).");
+            }
+
+            create.RelatedCommunicationId = submissionCommunicationId;
+            create.AccessPermission = restricted;
+            create.AccessInheritanceRecord = Sprk.Bff.Api.Services.Access.AccessInheritance.OwnNarrowing(restricted).Serialize();
+            create.RestrictedBySubmission = true;
+            return false;
+        }
 
         if (relatedCommunicationId is { } communicationId && communicationId != Guid.Empty)
         {
@@ -138,38 +166,11 @@ public class OfficeDocumentPersistence
         // UAC-r2 task 189 (D7 T7a): the Restricted is recorded as the document's OWN narrowing in the same create, so the
         // reconciler keeps it when the document's parents are wider. Owner round 122: it is marked provisional, so once the
         // document is linked to a communication the reconciler releases it and the document follows that communication.
-        const int restricted = Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.Restricted;
         create.RelatedCommunicationId = null;
         create.AccessPermission = restricted;
         create.AccessInheritanceRecord =
             Sprk.Bff.Api.Services.Access.AccessInheritance.OwnNarrowingUntilEmailIdentified(restricted).Serialize();
         return true;
-    }
-
-    /// <summary>
-    /// ebilling-r1 task 095 (model §9.1 own-Restricted, uac-r2 v5.7 change 1 and round 122): the .eml the from-email
-    /// submission creates is linked to its communication AND carries its own NON-provisional Restricted narrowing and the
-    /// invoice-submission marker, all in the same create. Unlike <see cref="ApplyEmailCommunicationOutcome"/>'s
-    /// unidentified branch, this narrowing is <see cref="Sprk.Bff.Api.Services.Access.AccessInheritance.OwnNarrowing"/>
-    /// (not the provisional one), so linking the communication never releases it. A communication is required: the
-    /// submission path refuses before any write when none resolves (model §9.1 F1-c), so a missing one here is a defect.
-    /// The ONLY writer of the marker (SubmissionMarkerWriterGuardTests).
-    /// </summary>
-    internal static void ApplySubmissionNarrowing(CreateDocumentRequest create, Guid? relatedCommunicationId)
-    {
-        ArgumentNullException.ThrowIfNull(create);
-
-        if (relatedCommunicationId is not { } communicationId || communicationId == Guid.Empty)
-        {
-            throw new InvalidOperationException(
-                "A from-email submission .eml is created only linked to its communication (task 095, model 9.1 F1-c).");
-        }
-
-        const int restricted = Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.Restricted;
-        create.RelatedCommunicationId = communicationId;
-        create.AccessPermission = restricted;
-        create.AccessInheritanceRecord = Sprk.Bff.Api.Services.Access.AccessInheritance.OwnNarrowing(restricted).Serialize();
-        create.RestrictedBySubmission = true;
     }
 
     /// <summary>
@@ -403,17 +404,8 @@ public class OfficeDocumentPersistence
         // could be identified — Restricted. In the create itself, so no document exists, even briefly, with neither.
         // A Document save is untouched: no link, its Access Permission left at the default.
         // Task 095: the from-email submission's .eml instead carries its own non-provisional Restricted and the marker.
-        bool createdRestricted;
-        if (submissionNarrowing)
-        {
-            ApplySubmissionNarrowing(createRequest, canonicalCommunicationId);
-            createdRestricted = false;
-        }
-        else
-        {
-            createdRestricted = IsEmailDerived(request.ContentType)
-                && ApplyEmailCommunicationOutcome(createRequest, canonicalCommunicationId);
-        }
+        var createdRestricted = IsEmailDerived(request.ContentType)
+            && ApplyEmailCommunicationOutcome(createRequest, canonicalCommunicationId, submissionNarrowing);
 
         var documentIdString = await _documentService.CreateDocumentAsync(createRequest, cancellationToken);
         var documentId = Guid.Parse(documentIdString);

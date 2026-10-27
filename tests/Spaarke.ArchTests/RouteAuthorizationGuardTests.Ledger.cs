@@ -382,7 +382,13 @@ public partial class RouteAuthorizationGuardTests
             + "AppendTo on the route's core record (finance.submit_invoice) and AppendTo on the query firm (finance.attach_invoice); "
             + "the status read needs Read on the submission (uniform 404). The eBilling kill switch runs after each filter. The firm must also be "
             + "linked to the record (task 051, D-110: the record's assigned law firms only; 403 firm_not_linked, 503 when the link cannot be read) "
-            + "-- decided in InvoiceSubmissionService.SubmitAsync, the one owner both channels call, not in this file."),
+            + "-- decided in InvoiceSubmissionService.SubmitAsync, the one owner both channels call, not in this file. "
+            + "Task 095 adds POST /api/finance/invoice-submissions/from-email (the Outlook add-in): the same Finance filter first "
+            + "(finance.submit_invoice on the body's core record, finance.attach_invoice on its firm; a malformed body is a 400 before any "
+            + "check), then the /office/save chain (OfficeAuth, EntityAccess entity.associate_document, rate limit, version-save "
+            + "authorization), the kill switch and the idempotency filter bound to the submission key; firm_not_linked through "
+            + "CheckFirmLinkAsync. And GET /api/finance/core-records/{entityType}/{entityId}/firms (finance.read on the core record, "
+            + "uniform 404), which lists only the record's active linked firms."),
         new GovernedFile("Api/Finance/CodeSetMappingEndpoints.cs", Scope.RouteLevelGate,
             "/api/finance/code-set-mappings/* (ebilling-r1 task 048, FR-22) -- AI code-set proposals (GET) and the admin confirm that writes one "
             + "default code set (POST). Each route declares the Dataverse table privileges the caller must hold (AddFinanceAuthorizationFilter, "
