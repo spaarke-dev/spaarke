@@ -1941,3 +1941,29 @@ Reading:
 - The exception covers exactly those roles and privileges, and only when the role is held directly. If the same role is held through a team, or the role reaches the secure BU through any other privilege, it is still a finding.
 
 Also recorded from ebilling's session: EB-D-151 (Core User stays as D-90, with a known limit) and EB-D-152 (#2310 option C).
+
+### Round 128 (2026-10-27): owner answers on the UAC access guide questions (#2337, #2338, #2339)
+
+**1. #2337, closing a matter or work assignment.** Asked: "should closing a matter also close the projects and work assignments filed under it?" (recommendation: no). The owner answered, verbatim: **"agree 'no'"**.
+
+Reading:
+- A close acts on the one record closed.
+- Filed core records keep their own grants. The close reports any filed core records that still have active grants.
+- #2337 is not scheduled in this project. The owner scheduled only #2338 and #2339.
+
+**2. #2338, one "add person" entry in Manage Access.** The owner answered, verbatim: **"yes this seems like a good way to streamline and remove potential user training complexity; let's address this in this project"**.
+
+Reading (UAC's design, stated back to the owner):
+- One entry replaces "+ Contact" and "+ User".
+- The server, not the modal, decides between a share and a grant. It uses the Assigned-To rule's contact → user resolution (task 141 link rule, plus `/share-user` eligibility), in one shared place.
+- A contact that represents exactly one eligible internal user is shared with as that user. Anyone else gets a grant.
+- An ambiguous link is refused, never guessed.
+- A user flagged external on a Restricted record gets nothing.
+
+Scheduled as task 193. This is in scope beyond the round-90 wrap-up because the owner asked for it.
+
+**3. #2339, the children of a parent reassigned to a new business unit.** The owner answered, verbatim: **"yes this is a gap that should be closed; also note that e-billing-r1 is asking the same and related questions; i will refer that project to you in order to ensure consistency; this fix should be addressed in this project"**.
+
+Reading:
+- UAC owns the fix. Scheduled as task 194.
+- ebilling-r1 is referred to UAC. Its child tables, the invoice family among them, follow the same rule and the same mechanism. ebilling does not build its own.
