@@ -691,10 +691,10 @@ None needs path A or B.
 
 Owner answers, 2026-10-27:
 
-1. **The Push Updates ribbon button:** keep it, and point it at the Family view. This is my reading of "yes push updates ribbon button"; the owner can correct it.
+1. **The Push Updates ribbon button:** keep it, and have it open the Family view (owner confirmed 2026-10-27).
 2. **Columns per member:** name, **record number** (blank where a table has none), record type, status and modified on.
 3. **Default view:** the full family, all the way up and down (§12.3 C).
-4. **`sprk_procedureassignment`:** open with the owner. The recommendation is to keep it OUT of the view (billing configuration), and UAC-r2 agrees. Its access lineage is unchanged either way.
+4. **`sprk_procedureassignment`:** OUT of the Family view (owner, 2026-10-27; UAC-r2 agrees). It is billing configuration; its access lineage is unchanged.
 
 The family as a data-model concept, including future patent and trademark families, has been raised with ontology-r1. See §12.10.
 
@@ -754,7 +754,9 @@ Still open: classify `sprk_procedureassignment` and record-scoped ruleset rules 
   - Service requests are walked in ordinary mode through `ExternalDataService.ServiceRequestRelations`. That list is a service request's OWN family (it is its own root, §12.2), not part of a matter's.
   - `sprk_invoicelineitem` stays out until ebilling deploys it (#2348).
   - Grant rows do not follow an ordinary move (#2341). This does not affect a read-only view.
-- **Matter → Project edge (#2352, 2026-10-27; owner decision pending between (a) and (b)):**
+- **Matter → Project edge (#2352). Owner decided (a), the regarding pair only, 2026-10-27.**
+  - The existing Project↔Matter N:N stays as an association (for example, related matters). It is not a filing edge and confers nothing.
+  - The background below is kept for reference.
   - A project is filed under a matter by its regarding PAIR (`sprk_regardingrecordid` + `sprk_regardingrecordtype`), the edge UAC's inheritance already keys on (`SecureRootInheritance` task 158).
   - CreateProjectWizard writes only the N:N `sprk_Project_Matter_nn` and never the pair, so no dev project is filed under its matter today.
   - UAC-r2 recommends (a): the pair, one root per project, written by the wizard, with the 7 N:N-linked dev projects backfilled. UAC owns or reviews that fix. The alternative, (b), is a typed lookup kept in agreement with the pair. (c), promoting the N:N, is rejected: Filing is single-root.
