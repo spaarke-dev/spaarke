@@ -17,11 +17,16 @@
          src/dataverse/solutions/SpaarkeMaster/Roles/Spaarke Billing Administrator.xml), in the root business unit and in the
          SpaarkeMaster solution. Created when absent (AddPrivilegesRole re-injects the platform defaults every Spaarke role
          carries: the plugin-metadata reads and the SharePoint four).
-      2. It holds Read at Global, and Create / Write / Append / AppendTo at Basic (User), on sprk_ruleset, sprk_Policy and
-         sprk_PolicyVersion, added with AddPrivilegesRole. Basic, not Global (uac-r2 review of the task 120 pre-notice): the
+      2. It holds Read at Deep, and Create / Write / Append / AppendTo at Basic (User), on sprk_ruleset, sprk_Policy and
+         sprk_PolicyVersion, added with AddPrivilegesRole. Read is Deep, not Global (owner EB-D-162, 2026-10-27): with task 089 a
+         Secure record's rule set and record rules are owned in the Secure Record business unit, and Global Read reaches it under
+         every layout; Deep stops at the admin's business-unit subtree once UAC design section 5.2 makes Secure a sibling. The BFF
+         reads these tables app-only (D-173), so no route depends on the depth. A Read still held at Global (the task 120
+         depth) is lowered: RemovePrivilegeRole, then AddPrivilegesRole at Deep, each read back. That is the one lowering
+         this script makes. Basic, not Global (uac-r2 review of the task 120 pre-notice): the
          BFF uses Create / Write only as markers at any depth (D-108) and writes these tables app-only (D-173), so Global
          would only let a billing admin create or edit any rule set or policy natively, bypassing RuleSetService's
-         invariants (ADR-002). A privilege held deeper than that stops a plain run (exit 2; this script never lowers one).
+         invariants (ADR-002). Any other privilege held deeper than that stops a plain run (exit 2; it is never lowered).
          Never Delete, Assign or Share; nothing on sprk_procedure, sprk_procedureversion or sprk_procedureassignment (task
          121 adds those after uac-r2 task 191). Holding one of these stops the run (exit 2).
       3. Spaarke Core User and Spaarke Basic User: prvReadsprk_ruleset is removed with RemovePrivilegeRole, one call per
@@ -82,8 +87,8 @@ $RoleDescription = 'Spaarke billing administrator (ebilling-r1 D-76, D-108, D-18
 # logical name -> schema name as the live privilege names spell it (BillingAdminAuthorization).
 $AdminTables = [ordered]@{ sprk_ruleset = 'sprk_ruleset'; sprk_policy = 'sprk_Policy'; sprk_policyversion = 'sprk_PolicyVersion' }
 $AdminVerbs = 'Create', 'Read', 'Write', 'Append', 'AppendTo'
-# The depth of each, the same on all three tables (uac-r2: only Read is Global; the rest are markers, held at Basic).
-$AdminDepth = @{ Create = 'Basic'; Read = 'Global'; Write = 'Basic'; Append = 'Basic'; AppendTo = 'Basic' }
+# The depth of each, the same on all three tables (uac-r2: the markers are held at Basic; owner EB-D-162: Read is Deep, not Global).
+$AdminDepth = @{ Create = 'Basic'; Read = 'Deep'; Write = 'Basic'; Append = 'Basic'; AppendTo = 'Basic' }
 $Rank = @{ Basic = 0; Local = 1; Deep = 2; Global = 3 }
 $Verbs = 'Create', 'Read', 'Write', 'Delete', 'Append', 'AppendTo', 'Assign', 'Share'
 $ProcedureTables = 'sprk_procedure', 'sprk_procedureversion', 'sprk_procedureassignment'
@@ -110,13 +115,13 @@ function Get-TableInfo([string]$Table) {
     return [pscustomobject]@{ Table = $Table; Schema = [string]$e.SchemaName; Ownership = [string]$e.OwnershipType }
 }
 
-# verb -> privilege (name, id, can be Basic / Global) of one table.
+# verb -> privilege (name, id, can be Basic / Deep / Global) of one table.
 function Get-TablePrivileges($info) {
-    $r = Invoke-Dv "privileges?`$select=name,privilegeid,canbebasic,canbeglobal&`$filter=endswith(name,'$($info.Schema)')"
+    $r = Invoke-Dv "privileges?`$select=name,privilegeid,canbebasic,canbedeep,canbeglobal&`$filter=endswith(name,'$($info.Schema)')"
     $map = [ordered]@{}
     foreach ($v in $Verbs) {
         $p = @($r.value | Where-Object { $_.name -ceq "prv$v$($info.Schema)" })
-        if ($p.Count -eq 1) { $map[$v] = [pscustomobject]@{ Verb = $v; Name = [string]$p[0].name; Id = ([string]$p[0].privilegeid).ToLower(); Basic = [bool]$p[0].canbebasic; Global = [bool]$p[0].canbeglobal } }
+        if ($p.Count -eq 1) { $map[$v] = [pscustomobject]@{ Verb = $v; Name = [string]$p[0].name; Id = ([string]$p[0].privilegeid).ToLower(); Basic = [bool]$p[0].canbebasic; Deep = [bool]$p[0].canbedeep; Global = [bool]$p[0].canbeglobal } }
     }
     return $map
 }
@@ -249,22 +254,38 @@ try {
 
     # --- 3. The role's privileges --------------------------------------------------------------------------------------
     Write-Host ""
-    Write-Host "3. $RoleName privileges (Read Global; Create / Write / Append / AppendTo Basic)" -ForegroundColor Cyan
+    Write-Host "3. $RoleName privileges (Read Deep; Create / Write / Append / AppendTo Basic)" -ForegroundColor Cyan
     $have = if ($roleExists) { Get-RolePrivilegeMap $RoleId } else { @{} }
     $forbidden = @($forbiddenForAdmin | Where-Object { $have.ContainsKey($_.Id) })
     if ($forbidden.Count) {
         $msg = "$RoleName holds $(($forbidden | ForEach-Object { "$($_.Name) ($($have[$_.Id].Depth))" }) -join ', '): no Delete / Assign / Share on the rule-set and policy tables and nothing on the Procedure tables (D-76, uac-r2 081)."
         if ($Verify) { $Gaps.Add($msg) } else { throw [EscalationException]::new("$msg STOP: this script removes nothing from the role. Nothing further was changed.") }
     }
-    # Held deeper than wanted: an over-grant this script never lowers (uac-r2: Global Create / Write bypasses RuleSetService).
-    $deeper = @($wanted | Where-Object { $have.ContainsKey($_.Id) -and $Rank[$have[$_.Id].Depth] -gt $Rank[$_.Depth] })
+    # The one lowering (owner EB-D-162): a Read still held at Global, the task 120 depth, goes to Deep. RemovePrivilegeRole first,
+    # so the AddPrivilegesRole below adds it at Deep; nothing else of the role is touched, and the removal is read back.
+    $lowerReads = @($wanted | Where-Object { $_.Name -clike 'prvRead*' -and $have.ContainsKey($_.Id) -and $have[$_.Id].Depth -eq 'Global' })
+    foreach ($l in $lowerReads) {
+        $Gaps.Add("$RoleName holds $($l.Name) at Global (wanted $($l.Depth), EB-D-162)")
+        if ($ReadOnly) { $script:Changed.Add("$RoleName $($l.Name) Global -> $($l.Depth)"); Write-Host ("  WOULD LOWER {0,-28} Global -> {1}" -f $l.Name, $l.Depth) -ForegroundColor Cyan; continue }
+        $before = $have
+        Invoke-Dv -Path "roles($RoleId)/Microsoft.Dynamics.CRM.RemovePrivilegeRole" -Method POST -Body @{
+            Privilege = @{ '@odata.type' = 'Microsoft.Dynamics.CRM.privilege'; privilegeid = $l.Id }
+        } | Out-Null
+        $have = Wait-Settled { Get-RolePrivilegeMap $RoleId } { param($m) -not $m.ContainsKey($l.Id) }
+        if ($have.ContainsKey($l.Id)) { throw "RemovePrivilegeRole on '$RoleName' did not take: $($l.Name) still reads as held." }
+        $diff = @($before.Keys | Where-Object { $_ -ne $l.Id -and (-not $have.ContainsKey($_) -or $have[$_].Depth -ne $before[$_].Depth) })
+        if ($diff.Count) { throw [EscalationException]::new("After removing $($l.Name), '$RoleName' differs beyond it ($($diff.Count) changed). STOP: investigate before another run.") }
+        $script:Changed.Add("$RoleName - $($l.Name) Global"); Write-Host ("  REMOVED  {0,-30} Global (re-added at {1} below)" -f $l.Name, $l.Depth) -ForegroundColor Green
+    }
+    # Held deeper than wanted otherwise: an over-grant this script never lowers (uac-r2: Global Create / Write bypasses RuleSetService).
+    $deeper = @($wanted | Where-Object { $lowerReads -notcontains $_ -and $have.ContainsKey($_.Id) -and $Rank[$have[$_.Id].Depth] -gt $Rank[$_.Depth] })
     if ($deeper.Count) {
         $msg = "$RoleName holds $(($deeper | ForEach-Object { "$($_.Name) at $($have[$_.Id].Depth) (wanted $($_.Depth))" }) -join ', ')."
         if ($Verify) { $Gaps.Add($msg) } else { throw [EscalationException]::new("$msg STOP: this script never lowers a privilege. Nothing further was changed.") }
     }
     $toAdd = @($wanted | Where-Object { -not $have.ContainsKey($_.Id) -or $Rank[$have[$_.Id].Depth] -lt $Rank[$_.Depth] })
     foreach ($w in $wanted) {
-        if ($toAdd -contains $w -or $deeper -contains $w) { continue }
+        if ($toAdd -contains $w -or $deeper -contains $w -or ($ReadOnly -and $lowerReads -contains $w)) { continue }
         $script:Skipped.Add("$RoleName $($w.Name)"); Write-Host ("  skipped  {0,-30} (held at {1})" -f $w.Name, $w.Depth) -ForegroundColor Yellow
     }
     foreach ($a in $toAdd) {
