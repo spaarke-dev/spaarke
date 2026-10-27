@@ -79,7 +79,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 076 | ✅ [done] | Rule set endpoints: proposals, edit, publish, visibility | FULL | sonnet / high | P3-B | 019, 070 |
 | 077 | ✅ [done] | Rule Review code page | STANDARD | sonnet / high | P3-C | 076 |
 | 078 | ✅ [done] | Rate card and timekeeper import and publish | STANDARD | sonnet / high | P2-B | 017, 028, 029 |
-| 079 | 🔲 [open] | Deploy WP3 to dev: Procedure and Stored File schema, rule types, storage settings, solution sync, BFF and SPA via SPA-r3 | STANDARD | sonnet / high | none (deploy) | 053, 080–083, 085, 086, 088–094, 098, 099, 115, 116, 117 |
+| 079 | 🔲 [open] | Deploy WP3 to dev: Procedure and Stored File schema, rule types, storage settings, solution sync, BFF and SPA via SPA-r3 | STANDARD | sonnet / high | none (deploy) | 053, 080–083, 085, 086, 088–094, 098, 099, 115, 116, 117, 124 |
 | 080 | ✅ [done] | Procedure schema: Procedure, Procedure Version, assignments; rule-set record scope; policy-version and rate-card links | STANDARD | sonnet / high | P3-A | none |
 | 081 | ✅ [done] | Procedure and Procedure Version service: I-P1 to I-P5, copy-forward, publish, dates, retire with a caller-scoped preview | FULL | opus / high | P3-B (p-safe false) | 080, 088, 099 |
 | 082 | 🔲 [open] | Procedure resolver (7.1): firm condition, gaps and holds, re-keyed version selection (7.2), snapshot, ratchet ArchTest | FULL | opus / high | P3-D | 080, 081, 089 |
@@ -112,6 +112,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 121 | 🔲 [open] | Procedure-table role grants after uac-r2 191: O-6 org Read, Billing Administrator Create/Write on sprk_procedure; flip UntilTask191 | FULL | opus / high | P3-R (p-safe false) | 120 |
 | 122 | ✅ | #2235 fix: field-secure sprk_findingsjson (BFF-only), off the form; Decision Records store the generic Duplicate sentence | FULL | opus / high | P4-A | 119 |
 | 123 | 🔲 [open] | Internal upload of supporting files to an existing invoice: POST /api/finance/invoices/{invoiceId}/files (EB-D-161) | FULL | opus / high | P3-F | 090, 092, 086 |
+| 124 | 🔲 [open] | Retire the Procedure Library container: remove Finance:ProcedureLibraryContainerId, close the per-customer SPE hand-off DEF-013 / #1967 (EB-D-163) | FULL | sonnet / high | P3-F | 116, 092 |
 
 ### Phase 4 — Review and approval (WP4)
 
