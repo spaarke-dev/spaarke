@@ -1767,6 +1767,7 @@ internal sealed class HeaderDrivenIdentityStore : IContactIdentityStore
             ? _inner.ReadRemovedMarkerAsync(contactId, ct)
             : Task.FromResult(RemovedMarkerRead.NotRemoved);
     public Task<StoreWriteResult> WriteRemovedMarkerAsync(Guid contactId, DateTimeOffset? removedOn, CancellationToken ct) => _inner.WriteRemovedMarkerAsync(contactId, removedOn, ct);
+    public Task<StoreWriteResult> WriteRemovedMarkerIfUnchangedAsync(Guid contactId, string? etag, DateTimeOffset? removedOn, CancellationToken ct) => _inner.WriteRemovedMarkerIfUnchangedAsync(contactId, etag, removedOn, ct);
     public Task<StoreWriteResult> ClearRemovedPersonAccessStateAsync(Guid contactId, CancellationToken ct) => _inner.ClearRemovedPersonAccessStateAsync(contactId, ct);
     public Task<StoreWriteResult> ClearStandingGrantAsync(Guid contactId, CancellationToken ct) => _inner.ClearStandingGrantAsync(contactId, ct);
     public Task<ReferenceLookup> FindSystemUsersLinkingAsync(IReadOnlyCollection<Guid> contactIds, CancellationToken ct) => _inner.FindSystemUsersLinkingAsync(contactIds, ct);

@@ -556,6 +556,27 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
         }
     }
 
+    /// <summary>Slice C5: the conditional marker write, honouring the row version as Dataverse does (a mismatch is 412).</summary>
+    public Task<StoreWriteResult> WriteRemovedMarkerIfUnchangedAsync(
+        Guid contactId, string? etag, DateTimeOffset? removedOn, CancellationToken ct)
+    {
+        lock (_gate)
+        {
+            if (RemovedMarkerWriteFailure is { } failure) return Task.FromResult(new StoreWriteResult(failure, Error: "simulated"));
+            if (DataverseContactIdentityStore.RowVersionPrecondition(etag) is null)
+            {
+                return Task.FromResult(new StoreWriteResult(StoreWriteStatus.Failed, Error: "no row version for the removed marker"));
+            }
+
+            if (!Contacts.TryGetValue(contactId, out var c)) return Task.FromResult(new StoreWriteResult(StoreWriteStatus.NotFound));
+            if (!VersionMatches(etag, c.Version)) return Task.FromResult(new StoreWriteResult(StoreWriteStatus.PreconditionFailed));
+            c.RemovedOn = removedOn;
+            c.Version = NextVersion();
+            Writes.Add((removedOn is null ? "removed-marker-clear" : "removed-marker", contactId, string.Empty));
+            return Task.FromResult(StoreWriteResult.Written);
+        }
+    }
+
     public Task<StoreWriteResult> ClearRemovedPersonAccessStateAsync(Guid contactId, CancellationToken ct)
     {
         lock (_gate)

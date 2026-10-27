@@ -236,6 +236,34 @@ public class RemovalSweepTests
             .And.Contain(contact.ToString());
     }
 
+    /// <summary>
+    /// Slice C5: the sweep marks only the row its decision read. A contact reactivated after the decision read (its row
+    /// version changed) is not marked, nothing else is written, and the run reports it and stays partial; no blind retry.
+    /// </summary>
+    [Fact]
+    public async Task AContactChangedAfterItsDecisionRead_IsNotMarked_AndIsReported()
+    {
+        var (contact, _) = Person(stateCode: 1);
+        var grant = GrantOnMatter(contact);
+        _h.Grants.BeforeGrantQuery = ordinal =>
+        {
+            if (ordinal != 1) return; // the decision's own grant read: the row was read just before it
+            var row = _h.Identities.Contacts[contact];
+            row.StateCode = 0;          // staff reactivate the contact
+            _h.Identities.Touch(row);   // and its row version moves on
+        };
+
+        var result = await RunAsync(linkWrites: true, sweepWrites: true);
+
+        _h.Identities.Contacts[contact].RemovedOn.Should().BeNull("the marker is written only on the row the decision read");
+        _h.Identities.Writes.Should().BeEmpty();
+        _h.Grants.Rows.Single(r => r.Id == grant.Id).IsActive.Should().BeTrue("nothing after the marker runs");
+        Sweep(result).GetProperty("changedSinceRead").GetInt32().Should().Be(1);
+        Sweep(result).GetProperty("completed").GetInt32().Should().Be(0);
+        Sweep(result).GetProperty("incomplete").GetInt32().Should().Be(0);
+        result.Success.Should().BeFalse("a contact left undecided makes the run partial");
+    }
+
     // ── Must not fire: the closed selection ────────────────────────────────────────────────────────────────────
 
     /// <summary>

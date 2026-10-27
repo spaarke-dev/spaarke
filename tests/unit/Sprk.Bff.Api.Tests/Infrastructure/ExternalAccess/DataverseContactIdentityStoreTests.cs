@@ -904,6 +904,48 @@ public class DataverseContactIdentityStoreTests
         requests.Should().Be(0);
     }
 
+    /// <summary>
+    /// Slice C5: the conditional removed-marker write is ONE PATCH of that column only, conditional on exactly the row version
+    /// it was given (never <c>*</c>); a row changed since that version answers 412, which is PreconditionFailed.
+    /// </summary>
+    [Theory]
+    [InlineData(HttpStatusCode.NoContent, StoreWriteStatus.Written)]
+    [InlineData(HttpStatusCode.PreconditionFailed, StoreWriteStatus.PreconditionFailed)]
+    public async Task TheConditionalMarkerWrite_IsConditionalOnTheRowVersion_NeverStar(HttpStatusCode answer, StoreWriteStatus expected)
+    {
+        var http = new ScriptedHttp((answer, null));
+
+        var write = await http.Store().WriteRemovedMarkerIfUnchangedAsync(
+            IntentContact, "W/\"11\"", DateTimeOffset.Parse("2026-10-27T09:00:00Z"), CancellationToken.None);
+
+        write.Status.Should().Be(expected);
+        var request = http.Requests.Should().ContainSingle().Subject;
+        request.Method.Should().Be(HttpMethod.Patch);
+        request.Uri.Should().EndWith($"/contacts({IntentContact:D})");
+        request.IfMatch.Should().Be("W/\"11\"").And.NotBe("*");
+        JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(request.Body)!.Keys
+            .Should().BeEquivalentTo("sprk_externalaccessremovedon");
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("*")]
+    public async Task TheConditionalMarkerWrite_WithoutARowVersion_SendsNothing(string? etag)
+    {
+        var requests = 0;
+        var store = new DataverseContactIdentityStore(
+            new CountingHttpClientFactory(() => requests++),
+            _ => { requests++; throw new InvalidOperationException("no request may be made"); },
+            "https://org.test.invalid",
+            NullLogger.Instance);
+
+        var write = await store.WriteRemovedMarkerIfUnchangedAsync(IntentContact, etag, null, CancellationToken.None);
+
+        write.Status.Should().Be(StoreWriteStatus.Failed, "a marker write on a row it did not read is never sent");
+        requests.Should().Be(0);
+    }
+
     /// <summary>An invite stamp (no tenant) for the marker-write tests.</summary>
     private static readonly InviteStamp AStamp = new(InviteEmailStamp.Create("person@customer.example"), null);
 

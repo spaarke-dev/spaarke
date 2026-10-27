@@ -33,7 +33,23 @@ internal enum PersonAdministrationStatus
     /// and an interrupted call has none to report. Cost of doing nothing: an interrupted removal leaves no audit record.
     /// </summary>
     Interrupted,
+
+    /// <summary>
+    /// Slice C5: a conditional marker write found the contact changed since the caller read it (HTTP 412), so nothing was
+    /// written. The caller does not retry blindly: the removal sweep reports the contact and decides it again on its next run.
+    /// CLAUDE.md §11: Existing — <see cref="Incomplete"/>. Extension — Incomplete means "marked, retry"; this contact was not
+    /// marked at all and must be decided again from a fresh read. Cost of doing nothing: a stale decision is counted as a
+    /// failed removal, or retried on a row whose state it no longer knows.
+    /// </summary>
+    RowChangedSinceRead,
 }
+
+/// <summary>
+/// Slice C5: the contact's row version as a removal sweep read it with its decision. A removal given one writes the marker
+/// only on the row as it was read (<see cref="IContactIdentityStore.WriteRemovedMarkerIfUnchangedAsync"/>); a null
+/// <paramref name="ETag"/> writes nothing. An administrator's removal is given none and marks the row as it is.
+/// </summary>
+internal sealed record DecisionRowVersion(string? ETag);
 
 /// <summary>The outcome of one removal or reinstatement.</summary>
 /// <param name="StateCodeAtStart">The contact's statecode when the call read it (audit only; neither call changes it).</param>
@@ -139,7 +155,12 @@ internal sealed class ExternalPersonRemovalService
     }
 
     /// <summary>Removes <paramref name="contactId"/>'s external access (see the class remarks for the order).</summary>
-    public async Task<PersonAdministrationOutcome> RemoveAsync(Guid contactId, string? correlationId, CancellationToken ct)
+    /// <param name="markOnlyIfUnchanged">
+    /// Slice C5, the removal sweep only: the row version its decision read. The marker is then written only on that row
+    /// version; a row changed since is <see cref="PersonAdministrationStatus.RowChangedSinceRead"/> with nothing written.
+    /// </param>
+    public async Task<PersonAdministrationOutcome> RemoveAsync(
+        Guid contactId, string? correlationId, CancellationToken ct, DecisionRowVersion? markOnlyIfUnchanged = null)
     {
         // A wiring fault, thrown before anything is read or written.
         var revocation = _revocation ?? throw new InvalidOperationException("A removal needs the shared grant revoke.");
@@ -158,7 +179,21 @@ internal sealed class ExternalPersonRemovalService
         }
         else
         {
-            var written = await _identityStore.WriteRemovedMarkerAsync(contactId, _time.GetUtcNow(), ct).ConfigureAwait(false);
+            var written = markOnlyIfUnchanged is { } read
+                ? await _identityStore.WriteRemovedMarkerIfUnchangedAsync(contactId, read.ETag, _time.GetUtcNow(), ct)
+                    .ConfigureAwait(false)
+                : await _identityStore.WriteRemovedMarkerAsync(contactId, _time.GetUtcNow(), ct).ConfigureAwait(false);
+            if (written.Status == StoreWriteStatus.PreconditionFailed && markOnlyIfUnchanged is not null)
+            {
+                _logger.LogInformation(
+                    "[EXT-REMOVE-PERSON] Contact {ContactId} changed since its decision was read, so it was not marked; " +
+                    "nothing was changed.", contactId);
+                steps.Add(new ExternalPersonStepResult(MarkerStep, false,
+                    "The contact changed since it was read, so it was not marked and nothing was changed."));
+                return new PersonAdministrationOutcome(PersonAdministrationStatus.RowChangedSinceRead, stateCode, steps,
+                    GrantsNotCompleted: Array.Empty<Guid>());
+            }
+
             if (written.Status != StoreWriteStatus.Written)
             {
                 _logger.LogError(

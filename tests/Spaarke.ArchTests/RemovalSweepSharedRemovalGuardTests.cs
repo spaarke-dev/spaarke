@@ -28,7 +28,7 @@ public class RemovalSweepSharedRemovalGuardTests
     /// <summary>The writes a person's removal is made of; only <c>ExternalPersonRemovalService</c> may call them for the sweep.</summary>
     private static readonly string[] RemovalParts =
     {
-        "WriteRemovedMarkerAsync", "ClearRemovedPersonAccessStateAsync", "ClearStandingGrantAsync", "ClearPendingInviteAsync",
+        "WriteRemovedMarkerAsync", "WriteRemovedMarkerIfUnchangedAsync", "ClearRemovedPersonAccessStateAsync", "ClearStandingGrantAsync", "ClearPendingInviteAsync",
         "RevokeAsync", "RemovePersonOrganizationGrantPermissionsAsync", "DeactivateAsync", "RevokeMembershipAsync",
         "RemoveMembershipsAsync", "InvalidateGrantSetsAsync", "InvalidateUserAccessAsync", "MarkGrantRevokedAsync",
         "UpdateAsync", "CreateAsync", "PatchAsync", "DeleteAsync", "UpsertAsync",

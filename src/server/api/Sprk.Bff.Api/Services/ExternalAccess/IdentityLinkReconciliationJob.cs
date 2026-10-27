@@ -769,6 +769,8 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
                 problems.Add($"{report.MarkerUnproven} contact(s) skipped by the removal sweep: the removed marker's read is not proven. None was marked.");
             if (report.ReadFailed > 0)
                 problems.Add($"{report.ReadFailed} contact(s) not decided by the removal sweep: a live read failed. The next run retries them.");
+            if (report.ChangedSinceRead > 0)
+                problems.Add($"{report.ChangedSinceRead} contact(s) not marked by the removal sweep: the contact changed after it was decided. The next run decides them again.");
             if (report.DeferredByCap > 0)
                 problems.Add($"{report.DeferredByCap} candidate(s) not read by the removal sweep: the run reached its cap of {report.MaxContactsPerRun}. The next run takes them.");
             if (report.Incomplete > 0)
@@ -790,6 +792,7 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
             readFailed = Report?.ReadFailed ?? 0,
             clean = Report?.Clean ?? 0,
             deferredByCap = Report?.DeferredByCap ?? 0,
+            changedSinceRead = Report?.ChangedSinceRead ?? 0,
             completed = Report?.Completed ?? 0,
             incomplete = Report?.Incomplete ?? 0,
             contacts = (Report?.Contacts ?? new List<RemovalSweepContact>()).Take(MaxSampledIds).Select(c => new

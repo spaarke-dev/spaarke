@@ -226,6 +226,22 @@ public interface IContactIdentityStore
     Task<StoreWriteResult> WriteRemovedMarkerAsync(Guid contactId, DateTimeOffset? removedOn, CancellationToken ct);
 
     /// <summary>
+    /// Slice C5: the removed-marker write of <see cref="WriteRemovedMarkerAsync"/> (set, or cleared when
+    /// <paramref name="removedOn"/> is null), made ONLY on the row as it was read: <c>If-Match</c> on <paramref name="etag"/>,
+    /// the row version read with the decision. Never <c>*</c>; no row version, no write. A row changed since that read is
+    /// <see cref="StoreWriteStatus.PreconditionFailed"/> and nothing is written.
+    /// </summary>
+    /// <remarks>
+    /// CLAUDE.md §11. Existing: <see cref="WriteRemovedMarkerAsync"/> writes the same column with <c>If-Match: *</c>.
+    /// Extension: that write serves an administrator's explicit removal, which is meant to land whatever the row holds; a
+    /// null-means-<c>*</c> parameter on it would let a missing version turn into an unconditional write. Cost of doing nothing:
+    /// the removal sweep marks a contact that was reactivated after its decision read, and a reinstatement clears a marker
+    /// on a row whose state it did not read.
+    /// </remarks>
+    Task<StoreWriteResult> WriteRemovedMarkerIfUnchangedAsync(
+        Guid contactId, string? etag, DateTimeOffset? removedOn, CancellationToken ct);
+
+    /// <summary>
     /// Slice C (administrator removal): clears the invite state (<c>sprk_externalinvitedon</c>,
     /// <c>sprk_externalinvitecodehash</c>, <c>sprk_externalinvitedemailhash</c>, <c>sprk_externalinvitedtenantid</c>) and
     /// <c>sprk_accesspermissiongrant</c> in ONE PATCH, <c>If-Match: *</c>, so no outstanding invite link or stamp can bind.
@@ -1502,6 +1518,13 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     /// <inheritdoc />
     public Task<StoreWriteResult> WriteRemovedMarkerAsync(Guid contactId, DateTimeOffset? removedOn, CancellationToken ct)
         => WriteAsync(HttpMethod.Patch, $"contacts({contactId:D})", RemovedMarkerPayload(removedOn), ("If-Match", "*"), ct);
+
+    /// <inheritdoc />
+    public Task<StoreWriteResult> WriteRemovedMarkerIfUnchangedAsync(
+        Guid contactId, string? etag, DateTimeOffset? removedOn, CancellationToken ct)
+        => RowVersionPrecondition(etag) is { } version
+            ? WriteAsync(HttpMethod.Patch, $"contacts({contactId:D})", RemovedMarkerPayload(removedOn), ("If-Match", version), ct)
+            : Task.FromResult(NoRowVersion("removed marker", contactId));
 
     /// <inheritdoc />
     public Task<StoreWriteResult> ClearRemovedPersonAccessStateAsync(Guid contactId, CancellationToken ct)

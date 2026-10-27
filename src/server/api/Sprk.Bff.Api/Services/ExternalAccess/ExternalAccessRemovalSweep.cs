@@ -38,6 +38,9 @@ internal sealed class RemovalSweepReport
     public int ReadFailed { get; set; }
     public int Clean { get; set; }
     public int DeferredByCap { get; set; }
+
+    /// <summary>Slice C5: contacts not marked because their row changed after the decision read (nothing written).</summary>
+    public int ChangedSinceRead { get; set; }
     public int Completed { get; set; }
     public int Incomplete { get; set; }
     public List<RemovalSweepContact> Contacts { get; } = new();
@@ -61,6 +64,9 @@ internal sealed class RemovalSweepReport
 /// the person's organization-grant container permissions, the cache eviction and the invite, access and standing-grant
 /// clears. It changes neither the statecode nor the binding. A source-scan guard pins that the sweep reaches no part of the
 /// removal any other way.</para>
+/// <para><b>On the row it read.</b> The sweep writes the marker only on the row version its decision read (Slice C5): a
+/// contact changed since (reactivated, say) is not marked, is counted (<see cref="RemovalSweepReport.ChangedSinceRead"/>) and
+/// is decided again on the next run. No blind retry.</para>
 /// <para><b>Gates.</b> Writes need BOTH <c>IdentityLink:Reconciliation:WritesEnabled</c> and
 /// <see cref="RemovalSweepWritesEnabledConfigKey"/>. With either absent, empty, unparseable or false the pass is report-only:
 /// it logs what it would do and writes nothing.</para>
@@ -211,7 +217,7 @@ internal sealed class ExternalAccessRemovalSweep
                 continue;
             }
 
-            var action = await DecideLiveAsync(report, contactId, ct).ConfigureAwait(false);
+            var (action, rowVersion) = await DecideLiveAsync(report, contactId, ct).ConfigureAwait(false);
             if (action is null)
             {
                 continue; // a read failed; logged, retried next run
@@ -247,14 +253,32 @@ internal sealed class ExternalAccessRemovalSweep
             var outcome = PersonAdministrationOutcome.Interrupted;
             try
             {
-                outcome = await _removal().RemoveAsync(contactId, correlationId, ct).ConfigureAwait(false);
+                // Slice C5: the marker is written only on the row this decision read.
+                outcome = await _removal().RemoveAsync(contactId, correlationId, ct, new DecisionRowVersion(rowVersion))
+                    .ConfigureAwait(false);
             }
             finally
             {
                 Audit(contactId, action.Value, outcome, correlationId);
             }
 
-            if (outcome.Status == PersonAdministrationStatus.Completed) report.Completed++; else report.Incomplete++;
+            switch (outcome.Status)
+            {
+                case PersonAdministrationStatus.Completed:
+                    report.Completed++;
+                    break;
+                case PersonAdministrationStatus.RowChangedSinceRead:
+                    report.ChangedSinceRead++;
+                    _logger.LogInformation(
+                        "[ID-LINK-RECON] removal-sweep environment={Environment} contact={ContactId}: the contact changed since "
+                        + "it was decided, so it was not marked; the next run decides it again. correlationId={CorrelationId}",
+                        environment, contactId, correlationId);
+                    break;
+                default:
+                    report.Incomplete++;
+                    break;
+            }
+
             report.Contacts.Add(new RemovalSweepContact(contactId, action.Value, outcome.Status));
         }
 
@@ -268,8 +292,12 @@ internal sealed class ExternalAccessRemovalSweep
         return report;
     }
 
-    /// <summary>The live reads of one contact, and the decision. Null when a read failed (logged).</summary>
-    private async Task<RemovalSweepAction?> DecideLiveAsync(RemovalSweepReport report, Guid contactId, CancellationToken ct)
+    /// <summary>
+    /// The live reads of one contact, the decision, and the row version the decision read (Slice C5: the marker is written
+    /// only on that version). A null action when a read failed (logged).
+    /// </summary>
+    private async Task<(RemovalSweepAction? Action, string? RowVersion)> DecideLiveAsync(
+        RemovalSweepReport report, Guid contactId, CancellationToken ct)
     {
         ContactBindingRow? row;
         RemovedMarkerRead marker;
@@ -282,14 +310,14 @@ internal sealed class ExternalAccessRemovalSweep
                 report.ReadFailed++;
                 _logger.LogWarning("[ID-LINK-RECON] removal-sweep contact={ContactId}: the contact could not be read ({Status}).",
                     contactId, lookup.Status);
-                return null;
+                return (null, null);
             }
 
             row = lookup.Rows.FirstOrDefault(r => r.ContactId == contactId);
             if (row is null)
             {
                 report.Clean++;
-                return null; // gone since the scan
+                return (null, null); // gone since the scan
             }
 
             marker = await _store.ReadRemovedMarkerAsync(contactId, ct).ConfigureAwait(false);
@@ -305,10 +333,10 @@ internal sealed class ExternalAccessRemovalSweep
         {
             report.ReadFailed++;
             _logger.LogWarning(ex, "[ID-LINK-RECON] removal-sweep contact={ContactId}: a live read failed; not decided.", contactId);
-            return null;
+            return (null, null);
         }
 
-        return Decide(row.StateCode, !string.IsNullOrWhiteSpace(row.RawOid), holdsActiveGrant, marker);
+        return (Decide(row.StateCode, !string.IsNullOrWhiteSpace(row.RawOid), holdsActiveGrant, marker), row.ETag);
     }
 
     /// <summary>The candidate contact ids: holders of active grants first (they still have access), then bound ones.</summary>
