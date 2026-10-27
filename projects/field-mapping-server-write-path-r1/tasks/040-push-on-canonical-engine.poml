@@ -106,7 +106,7 @@
   </acceptance-criteria>
 
   <notes>Spec FR-23, NFR-07. #2098 out of scope. The push web resource is unchanged unless it displays the error text.
-DI-002 / #2137 (2026-10-20): replace AuthorizePushSourceAsync's own Read check with MappingSourceReadProbe.CheckCallerReadAsync (timing-equalised; task 003). Close the push part of #2137.
+DI-002 / #2137 (2026-10-20; timing half fixed by PR #2331, 2026-10-27): replace AuthorizePushSourceAsync's own Read check with MappingSourceReadProbe.CheckCallerReadAsync (task 003; always equalised since #2331). Keep the AuthorizationGateTimingTests push case green. This closes the push part of #2137's F2 (duplicate copy) item.
 UAC-r2 #2169 (2026-10-21): landed as c8c591777f on uac/189-own-narrowing (PR #2169; draft until the owner signs off). The skip is in ApplyMappingsToChildRecordsAsync's per-rule loop: InheritedAccessPermission.RefuseAppOnlyWrite(targetEntity, [rule.TargetField]) runs before ApplyMappingRule, and a refused rule becomes FieldMappingStatus.Skipped with the reason as ErrorMessage. Keep tests/integration/data-mutation/ChildAccessPermission/DocumentAccessPermissionPushTargetTests.cs (3 methods, 6 cases) green UNCHANGED. A RecordTableRules protected-target entry may replace the call only with the same normalisation (trimmed, case-insensitive) and the same per-rule Skipped shape.
 DI-003 / #2181 (2026-10-21): the provisioning seeder must set sprk_syncmode = Manual Refresh on seeded Copy rules, or /push skips them in new environments. Add a seeder test, and add a deployment-guide step to run Set-FieldMappingRuleSyncMode.ps1 after an upgrade.</notes>
 
