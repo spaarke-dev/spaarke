@@ -57,6 +57,19 @@ public static class PersonAccessAdministrationEndpoints
     /// </summary>
     internal const string ContactInactiveReasonCode = "sdap.access.person.contact_inactive_reactivate_first";
 
+    /// <summary>
+    /// Slice C5: the reason code of a reinstatement refused because the person still holds an active grant row; nothing was
+    /// written and the marker is kept. CLAUDE.md §11: Existing — <see cref="ContactInactiveReasonCode"/> and the reinstate
+    /// incomplete code. Extension — neither names the action that unblocks the request (re-run the removal), and the contact is
+    /// neither inactive nor a failed write. Cost of doing nothing: the reinstatement would make the leftover grants effective
+    /// again, or fail with a code that tells staff nothing.
+    /// </summary>
+    internal const string GrantsPendingRevokeReasonCode = "sdap.access.person.grants_pending_revoke";
+
+    /// <summary>What staff are told when a reinstatement is refused because the person still holds an active grant.</summary>
+    internal const string GrantsPendingRevokeStaffMessage =
+        "This person still holds external access that the removal has not revoked. Run the removal again, then reinstate the person.";
+
     /// <summary>What staff are told when a reinstatement is refused because the contact is inactive.</summary>
     internal const string ContactInactiveStaffMessage =
         "This contact is inactive. Reactivate the contact first, then reinstate the person.";
@@ -92,7 +105,8 @@ public static class PersonAccessAdministrationEndpoints
             .WithDescription(
                 "Clears the contact's removed marker and nothing else: no grant is restored and no invite is sent. A contact " +
                 "that is not removed is left unchanged. Only an active contact is reinstated: an inactive one is refused (409) " +
-                "with nothing changed; reactivate it first.")
+                "with nothing changed; reactivate it first. A person who still holds an active grant is refused (409) with " +
+                "nothing changed; run the removal again first.")
             .Produces<ReinstatePersonResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -222,6 +236,17 @@ public static class PersonAccessAdministrationEndpoints
                 {
                     ["reasonCode"] = ContactInactiveReasonCode,
                     ["staffMessage"] = ContactInactiveStaffMessage,
+                    ["contactId"] = request.ContactId,
+                    ["traceId"] = httpContext.TraceIdentifier,
+                }),
+            PersonAdministrationStatus.RefusedGrantsPendingRevoke => Results.Problem(
+                statusCode: StatusCodes.Status409Conflict,
+                title: "Grants pending revoke",
+                detail: GrantsPendingRevokeStaffMessage,
+                extensions: new Dictionary<string, object?>
+                {
+                    ["reasonCode"] = GrantsPendingRevokeReasonCode,
+                    ["staffMessage"] = GrantsPendingRevokeStaffMessage,
                     ["contactId"] = request.ContactId,
                     ["traceId"] = httpContext.TraceIdentifier,
                 }),

@@ -27,6 +27,15 @@ internal enum PersonAdministrationStatus
     RefusedContactInactive,
 
     /// <summary>
+    /// Slice C5: a reinstatement refused because the person still holds an active grant row (a removal that did not finish,
+    /// or a grant written around it). The marker is unchanged and nothing was written: staff re-run the removal first, then
+    /// reinstate. CLAUDE.md §11: Existing — <see cref="RefusedContactInactive"/> and <see cref="Incomplete"/>. Extension —
+    /// neither names the action that unblocks it (re-run the removal). Cost of doing nothing: clearing the marker would make
+    /// those rows effective again, giving back access the removal was meant to end.
+    /// </summary>
+    RefusedGrantsPendingRevoke,
+
+    /// <summary>
     /// Slice C5: the call ended with an exception (a cancelled request, or a fault) before it returned an outcome, so the
     /// audit record says so instead of being lost. Steps already taken stay taken; every step is idempotent, so a retry
     /// finishes the work. CLAUDE.md §11: Existing — <see cref="Incomplete"/>. Extension — Incomplete carries the step results,
@@ -94,7 +103,9 @@ internal sealed record PersonAdministrationOutcome(
 /// <para>The binding (the object id, its plane and its key mirror) is never cleared: the person is still found by their object
 /// id and refused, and the same object id can never be keyed onto another contact.</para>
 /// <para><b>Reinstatement</b> clears the marker and nothing else: no grant is restored (staff grant again) and no invite is
-/// sent. A contact that carries no marker is a no-op. Only an ACTIVE contact is reinstated: the statecode is read live first,
+/// sent. A contact that carries no marker is a no-op. A person who still holds an active grant row is refused with nothing
+/// written (re-run the removal first), so a reinstatement never makes a leftover grant effective. Only an ACTIVE contact is
+/// reinstated: the statecode is read live first,
 /// an inactive contact is refused with nothing written (reactivate it first, then reinstate), and a statecode that cannot be
 /// read refuses as an unreadable contact. So a reinstatement never leaves an inactive contact unmarked for the removal sweep
 /// (<see cref="Sprk.Bff.Api.Services.ExternalAccess.ExternalAccessRemovalSweep"/>) to mark again. Residual, intended: a
@@ -276,6 +287,18 @@ internal sealed class ExternalPersonRemovalService
                 new[] { new ExternalPersonStepResult(MarkerClearedStep, true, "The person was not marked as removed; nothing was changed.") });
         }
 
+        // Slice C5: no active grant row may sit on the person when the marker goes: clearing it would make those rows effective.
+        if (await HoldsActiveGrantAsync(contactId, ct).ConfigureAwait(false) is not { } holds)
+            return PersonAdministrationOutcome.Refused(PersonAdministrationStatus.ContactUnreadable);
+        if (holds)
+        {
+            _logger.LogWarning(
+                "[EXT-REINSTATE-PERSON] Contact {ContactId} still holds an active grant row; the reinstatement is refused and " +
+                "the marker is kept. Re-run the removal first.", contactId);
+            return new PersonAdministrationOutcome(PersonAdministrationStatus.RefusedGrantsPendingRevoke, stateCode,
+                Array.Empty<ExternalPersonStepResult>());
+        }
+
         // Removed, or a marker that cannot be read: the administrator asked to reinstate, so the clear is sent either way.
         var written = await _identityStore.WriteRemovedMarkerAsync(contactId, null, ct).ConfigureAwait(false);
         if (written.Status != StoreWriteStatus.Written)
@@ -315,6 +338,30 @@ internal sealed class ExternalPersonRemovalService
         return lookup.Rows.FirstOrDefault(r => r.ContactId == contactId) is { } row
             ? (PersonAdministrationStatus.Completed, row.StateCode)
             : (PersonAdministrationStatus.NotFound, null);
+    }
+
+    /// <summary>
+    /// Slice C5: whether the person holds at least one active grant row as grantee, read live. Null when the read failed
+    /// (logged): a reinstatement then refuses, never assumes "none".
+    /// </summary>
+    private async Task<bool?> HoldsActiveGrantAsync(Guid contactId, CancellationToken ct)
+    {
+        try
+        {
+            var rows = await ExternalGrantLifecycle.QueryActiveRowsForContactAsync(_dataverse, contactId, 1, ct)
+                .ConfigureAwait(false);
+            return rows.Count > 0;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "[EXT-REINSTATE-PERSON] The active grants of contact {ContactId} could not be read; nothing was written.", contactId);
+            return null;
+        }
     }
 
     private async Task<RemovedMarkerRead> ReadMarkerAsync(Guid contactId, CancellationToken ct)

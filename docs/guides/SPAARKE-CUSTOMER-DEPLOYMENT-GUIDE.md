@@ -1088,7 +1088,9 @@ A repeated collision by the same identity does not write again; a different iden
    A person is removed by an administrator's **Remove person** (the contact stays as it is: its access is revoked and
    it is marked removed). An oid on an inactive contact is also denied and no replacement is created; with the
    removal sweep's write switch on, the reconciliation job marks such a contact removed and revokes its access the
-   same way. **Reinstate** applies only to an active contact: reactivate the contact first, then reinstate.
+   same way. **Reinstate** applies only to an active contact: reactivate the contact first, then reinstate. It also
+   applies only once the removal has finished: while the person still holds an active grant, Reinstate is refused
+   (`sdap.access.person.grants_pending_revoke`); run **Remove person** again first, then reinstate.
    **Several identities on one contact** — read `sprk_identitycollisionparties` and resolve each party; the
    summary columns name only the first.
 3. **Do not clear the flag by hand.** The next `identity-link-reconciliation` run re-evaluates every recorded

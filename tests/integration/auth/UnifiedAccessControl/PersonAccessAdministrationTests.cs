@@ -662,6 +662,45 @@ public class PersonAccessAdministrationTests
             .And.Contain(contact.ToString());
     }
 
+    /// <summary>
+    /// Slice C5: a marked person who still holds an active grant row (a removal that did not finish, or a grant written around
+    /// it) is not reinstated: 409 grants_pending_revoke, the marker kept, nothing written, and the 9822 audit records it.
+    /// </summary>
+    [Fact]
+    public async Task Reinstate_AMarkedPersonStillHoldingAnActiveGrantRow_Is409_TheMarkerKept_AndTheRefusalAudited()
+    {
+        var (contact, _) = BoundPerson();
+        var marked = _h.Time.Now.AddDays(-1);
+        _h.Identities.Contacts[contact].RemovedOn = marked;
+        var grant = GrantOnMatter(contact);
+
+        var result = await Reinstate(contact);
+
+        var problem = Problem(result);
+        problem.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        ReasonCode(result).Should().Be("sdap.access.person.grants_pending_revoke");
+        problem.ProblemDetails.Extensions["staffMessage"].Should().Be(PersonAccessAdministrationEndpoints.GrantsPendingRevokeStaffMessage);
+        _h.Identities.Contacts[contact].RemovedOn.Should().Be(marked, "the marker is kept");
+        _h.Identities.Writes.Should().BeEmpty("nothing is written");
+        _h.Grants.Rows.Single(r => r.Id == grant.Id).IsActive.Should().BeTrue();
+        _audit.Records.Should().ContainSingle(r => r.EventId.Id == 9822)
+            .Which.Message.Should().Contain($"status {PersonAdministrationStatus.RefusedGrantsPendingRevoke}");
+    }
+
+    [Fact]
+    public async Task Reinstate_AGrantReadThatFails_Is503_AndTheMarkerIsKept()
+    {
+        var (contact, _) = BoundPerson();
+        _h.Identities.Contacts[contact].RemovedOn = _h.Time.Now;
+        _h.Grants.FailQueries = true;
+
+        var result = await Reinstate(contact);
+
+        Problem(result).StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable);
+        _h.Identities.Contacts[contact].RemovedOn.Should().NotBeNull();
+        _h.Identities.Writes.Should().BeEmpty();
+    }
+
     /// <summary>Reinstate option (b): a contact or a statecode that cannot be read is a 503 and nothing is written.</summary>
     [Theory]
     [InlineData("contact-read-fails")]
