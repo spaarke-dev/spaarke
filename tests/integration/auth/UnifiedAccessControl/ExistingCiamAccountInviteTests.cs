@@ -1321,6 +1321,46 @@ public class ExistingCiamAccountInviteTests
     }
 
     /// <summary>
+    /// MUST FIRE (C5): on a host without <c>Ciam:*</c>, a malformed request is the same 400 as on any host (a blank email, a
+    /// supplied tenant, a supplied SendAsPortalAccount), on both routes, before any organisation lookup, read or write.
+    /// </summary>
+    [Theory]
+    [InlineData("blank-email")]
+    [InlineData("supplied-tenant")]
+    [InlineData("supplied-kind")]
+    public async Task NoCiamHost_AMalformedRequest_Is400_BeforeAnyLookup(string shape)
+    {
+        UnboundContact();
+        var handler = new InviteOrganizationTestKit.DiscoveryHandler();
+        var organizations = Organizations(handler);
+        var noCiam = NoCiamProvisioner();
+        var (email, tenant, kind, field) = shape switch
+        {
+            "blank-email" => ("  ", (string?)null, (bool?)null, "Email"),
+            "supplied-tenant" => (Email, "11111111-aaaa-4aaa-8aaa-111111111111", (bool?)null, "InvitedTenantId"),
+            _ => (Email, (string?)null, (bool?)false, "SendAsPortalAccount"),
+        };
+
+        foreach (var result in new[]
+                 {
+                     await InviteRoute(organizations: organizations, ciam: noCiam, email: email, invitedTenantId: tenant,
+                         sendAsPortalAccount: kind),
+                     await InviteAndGrant(organizations: organizations, ciam: noCiam, email: email, invitedTenantId: tenant,
+                         sendAsPortalAccount: kind),
+                 })
+        {
+            var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
+            problem.StatusCode.Should().Be(400, "the request's shape is validated before the host's CIAM configuration");
+            problem.ProblemDetails.Detail.Should().Contain(field);
+        }
+
+        handler.Requests.Should().BeEmpty("a malformed request looks nothing up");
+        _h.Identities.Writes.Should().BeEmpty();
+        _h.Identities.Reads.Should().BeEmpty();
+        _h.Grants.Rows.Should().BeEmpty();
+    }
+
+    /// <summary>
     /// MUST FIRE: on a host without <c>Ciam:*</c>, a portal-account invite is still refused on both routes with 503
     /// ciam_not_configured, and nothing is read, written or granted.
     /// </summary>

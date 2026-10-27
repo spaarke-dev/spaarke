@@ -92,6 +92,18 @@ public static class InviteExternalUserEndpoint
         ILogger<Program> logger,
         CancellationToken ct)
     {
+        // ── Validation ───────────────────────────────────────────────────────
+        // C5: the request's own shape is validated first, on every host, before any lookup: a malformed request is a 400
+        // whether or not this host has a CIAM configuration.
+        if (string.IsNullOrWhiteSpace(request.Email))
+            return ProblemDetailsHelper.ValidationError("Email is required.");
+
+        if (ValidateInvitedTenant(request.InvitedTenantId) is { } tenantProblem)
+            return tenantProblem;
+
+        if (ValidateNoInviteKindChoice(request.SendAsPortalAccount) is { } kindProblem)
+            return kindProblem;
+
         // Task 185 slice F + §12 I-11: the CIAM provisioner constructs on a host without Ciam:* and validates at first use.
         // A portal-account invite needs CIAM, so there it answers a 503 ProblemDetails with the same reason code /grant
         // reports (ciam_not_configured), before anything else is read or written. Slice B3: a work-account invite needs no
@@ -104,16 +116,6 @@ public static class InviteExternalUserEndpoint
                 return withoutCiamProblem;
             organizationWithoutCiam = decided;
         }
-
-        // ── Validation ───────────────────────────────────────────────────────
-        if (string.IsNullOrWhiteSpace(request.Email))
-            return ProblemDetailsHelper.ValidationError("Email is required.");
-
-        if (ValidateInvitedTenant(request.InvitedTenantId) is { } tenantProblem)
-            return tenantProblem;
-
-        if (ValidateNoInviteKindChoice(request.SendAsPortalAccount) is { } kindProblem)
-            return kindProblem;
 
         // Note (task 070): /invite only onboards (resolve-or-create Contact + CIAM account); it writes NO grant.
         // The grant is created separately by /grant or /invite-and-grant.

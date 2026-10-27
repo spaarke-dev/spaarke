@@ -85,6 +85,18 @@ public static class InviteAndGrantExternalUserEndpoint
         TimeProvider timeProvider,
         CancellationToken ct)
     {
+        // ── Validation ───────────────────────────────────────────────────────
+        // C5: the request's own shape is validated first, on every host, before any lookup: a malformed request is a 400
+        // whether or not this host has a CIAM configuration.
+        if (string.IsNullOrWhiteSpace(request.Email))
+            return ProblemDetailsHelper.ValidationError("Email is required.");
+
+        if (InviteExternalUserEndpoint.ValidateInvitedTenant(request.InvitedTenantId) is { } tenantProblem)
+            return tenantProblem;
+
+        if (InviteExternalUserEndpoint.ValidateNoInviteKindChoice(request.SendAsPortalAccount) is { } kindProblem)
+            return kindProblem;
+
         // Task 185 slice F + §12 I-11: the CIAM provisioner constructs on a host without Ciam:* and validates at first use.
         // A portal-account invite needs CIAM, so there it answers a 503 ProblemDetails with the same reason code /grant
         // reports (ciam_not_configured), before anything else is read or written: no contact, no account, no grant. Slice
@@ -99,16 +111,6 @@ public static class InviteAndGrantExternalUserEndpoint
                 return withoutCiamProblem;
             organizationWithoutCiam = decided;
         }
-
-        // ── Validation ───────────────────────────────────────────────────────
-        if (string.IsNullOrWhiteSpace(request.Email))
-            return ProblemDetailsHelper.ValidationError("Email is required.");
-
-        if (InviteExternalUserEndpoint.ValidateInvitedTenant(request.InvitedTenantId) is { } tenantProblem)
-            return tenantProblem;
-
-        if (InviteExternalUserEndpoint.ValidateNoInviteKindChoice(request.SendAsPortalAccount) is { } kindProblem)
-            return kindProblem;
 
         if (!Enum.IsDefined(typeof(ExternalAccessLevel), request.AccessLevel))
             return ProblemDetailsHelper.ValidationError(
