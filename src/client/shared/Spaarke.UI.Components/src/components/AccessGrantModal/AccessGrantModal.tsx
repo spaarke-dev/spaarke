@@ -956,6 +956,19 @@ export function alreadyHasAccountSentence(entry: IAlreadyHasAccount): string {
   return `${entry.name}: ${entry.message}${entry.signInUrl ? ` ${entry.signInUrl}` : ''}`;
 }
 
+/**
+ * Slice C2c: the server's sign-in link, as a link target only when it is an absolute `https:` URL; otherwise `undefined`
+ * and the link is shown as text, never as a link. Pure.
+ */
+export function safeSignInHref(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  try {
+    return new URL(url).protocol === 'https:' ? url : undefined;
+  } catch {
+    return undefined; // not an absolute URL
+  }
+}
+
 /** Slice B3: `/invite-and-grant`'s 503 when the person's organisation could not be checked (nothing was written). */
 export const INVITE_TENANT_LOOKUP_UNAVAILABLE_REASON_CODE = 'sdap.access.invite.tenant_lookup_unavailable';
 
@@ -993,6 +1006,29 @@ interface IModalNotice {
   intent: 'success' | 'warning' | 'error';
   text: string;
   retry?: boolean;
+  /** Slice C2c: the sign-in links in `text` that render as links: each one {@link safeSignInHref} accepted. Any other
+   * link in `text` stays text. */
+  links?: string[];
+}
+
+/** Slice C2c: `text`, with each of `links` it contains rendered as a link (opened in a new tab); the rest as text. */
+function noticeContent(text: string, links: string[] | undefined): React.ReactNode {
+  if (!links || links.length === 0) return text;
+  const parts: React.ReactNode[] = [];
+  let rest = text;
+  links.forEach((href, i) => {
+    const at = rest.indexOf(href);
+    if (at < 0) return;
+    parts.push(rest.slice(0, at));
+    parts.push(
+      <Link key={`notice-link-${i}`} href={href} target="_blank" rel="noopener noreferrer">
+        {href}
+      </Link>
+    );
+    rest = rest.slice(at + href.length);
+  });
+  parts.push(rest);
+  return parts;
 }
 
 /** Builds the post-batch notice for `Add (N)` — five distinct shapes ordered by
@@ -1036,8 +1072,10 @@ function buildGrantBatchNotice(outcome: IGrantBatchOutcome): IModalNotice {
     const reasons = policyRefusals.length > 0 ? ` ${Array.from(new Set(policyRefusals)).join(' ')}` : '';
     const others = failures > 0 ? ` ${failures} other item(s) failed; please try those again.` : '';
     const text = `Granted access to ${granted} of ${selectedCount}.${lookupSentence}${inviteSentence}${accountSentence}${reasons}${others}${relatedSuffix}`;
-    if (!needsRetry) return { intent: policyRefusals.length > 0 || failures > 0 ? 'error' : 'warning', text };
-    return { intent: 'error', text, retry: true };
+    // Slice C2c: a sign-in link is a link only when it is an absolute https URL; any other value stays text.
+    const links = alreadyHasAccount.flatMap(entry => safeSignInHref(entry.signInUrl) ?? []);
+    if (!needsRetry) return { intent: policyRefusals.length > 0 || failures > 0 ? 'error' : 'warning', text, links };
+    return { intent: 'error', text, retry: true, links };
   }
   if (policyRefusals.length > 0) {
     // Task 138: the record's access policy refused at least one grant. The
@@ -2667,7 +2705,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                   <MessageBarTitle>
                     {notice.intent === 'success' ? 'Success' : notice.intent === 'warning' ? 'Notice' : 'Error'}
                   </MessageBarTitle>
-                  {notice.text}
+                  {noticeContent(notice.text, notice.links)}
                 </MessageBarBody>
                 {notice.retry && (
                   <MessageBarActions>

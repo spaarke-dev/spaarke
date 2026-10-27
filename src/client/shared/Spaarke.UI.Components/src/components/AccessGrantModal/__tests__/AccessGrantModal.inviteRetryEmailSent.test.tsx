@@ -10,7 +10,7 @@
 import * as React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
-import { AccessGrantModal, INVITE_CONTACT_ALREADY_HAS_ACCOUNT_REASON_CODE } from '../AccessGrantModal';
+import { AccessGrantModal, INVITE_CONTACT_ALREADY_HAS_ACCOUNT_REASON_CODE, safeSignInHref } from '../AccessGrantModal';
 import { throwingAuthenticatedFetch } from '../../../__tests__/helpers/authenticatedFetchDouble';
 import type { IAccessGrantModalProps, IAccessGrantCandidate } from '../types';
 
@@ -146,5 +146,60 @@ describe('AccessGrantModal — an invite Retry is sent only when emailSent is tr
     expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
     expect(isStaged()).toBe(true);
     expect(inviteCalls(fetchMock)).toHaveLength(1);
+  });
+});
+
+/**
+ * Slice C2c: the sign-in link is a link only when it is an absolute https URL. Any other value (a script URL, a relative
+ * path, plain http) is shown as text, never as a link.
+ */
+describe('AccessGrantModal — the already-has-account sign-in link', () => {
+  async function noticeFor(signInUrl: string): Promise<HTMLElement> {
+    const fetchMock = fetchWith([
+      jsonResponse({
+        status: 'AlreadyProvisioned',
+        emailSent: false,
+        emailErrorCode: INVITE_CONTACT_ALREADY_HAS_ACCOUNT_REASON_CODE,
+        staffMessage: STAFF_TEXT,
+        signInUrl,
+      }),
+    ]);
+    renderWithTheme(<AccessGrantModal {...makeProps(fetchMock)} />);
+    await addCandidateWhoseInviteWasNotSent();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    return screen.findByText(/already has an account/);
+  }
+
+  it('an absolute https URL renders as a link to that URL', async () => {
+    const notice = await noticeFor(SIGN_IN_URL);
+
+    const link = screen.getByRole('link', { name: SIGN_IN_URL });
+    expect(link).toHaveAttribute('href', SIGN_IN_URL);
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(notice.textContent).toContain(`Gene Gatekeeper: ${STAFF_TEXT} ${SIGN_IN_URL}`);
+  });
+
+  it.each([
+    ['a javascript: URL', 'javascript:void(0)'],
+    ['a relative path', '/portal/?customer=acme'],
+    ['a protocol-relative URL', '//portal.example/?customer=acme'],
+    ['plain http', 'http://portal.example/?customer=acme'],
+  ])('%s renders as text, never as a link', async (_label, signInUrl) => {
+    const notice = await noticeFor(signInUrl);
+
+    expect(screen.queryByRole('link', { name: signInUrl })).not.toBeInTheDocument();
+    expect(document.querySelector(`a[href="${signInUrl}"]`)).toBeNull();
+    expect(notice.textContent).toContain(`Gene Gatekeeper: ${STAFF_TEXT} ${signInUrl}`);
+  });
+
+  it.each([
+    ['https://portal.example/?customer=acme', 'https://portal.example/?customer=acme'],
+    ['javascript:void(0)', undefined],
+    ['JavaScript:void(0)', undefined],
+    ['/relative', undefined],
+    ['http://portal.example', undefined],
+    ['', undefined],
+  ])('safeSignInHref(%p) is %p', (input, expected) => {
+    expect(safeSignInHref(input)).toBe(expected);
   });
 });
