@@ -213,12 +213,18 @@ A set built over a failed read is never cached.
 | **Manage Access → organization** | An organization-wide grant row (no contact). | Every current member of an organization |
 | **Contact Grants** (in the SPA) | A grant row issued by a contact to a colleague in their own organization (§4). A contact cannot grant themselves (409 `self_grant`). | Partners granting colleagues |
 | **Assigned-To rule** (automatic) | For each person or organization named in an "Assigned …" column: a Collaborate grant row, or a Collaborate share if the contact is linked to an eligible systemuser. Runs after BFF saves, from the form's post-save step (Update Access), and every 5 minutes. Never lowers existing access; if staff remove it, it is not re-added. Policy applies: on a **Secure** record grants and shares are only *suggested* for staff to confirm (an existing automatic grant is kept); on **Restricted** no contact or organization grant is written (a linked internal user's share still is, unless they are flagged external); on **Limited** no organization grant. When an assignment is changed or cleared, the previous person's unmodified automatic access is removed (always on save; by the 5-minute job only when its revoke switch is on). | Assignees |
-| **Close project** (`/close-project`, projects only) | Deactivates every contact and organization grant on the project and removes those people's container permissions on a Secure project's own container. | Ending a project |
+| **Close project** (`/close-project`, projects only) | Deactivates every contact and organization grant on the project and removes those people's container permissions on a Secure project's own container. Matters and work assignments have no close yet (#2337): end their access by revoking each grant. | Ending a project |
 | **Contact form: Standing Grant** | `sprk_standinggrant` + baseline level on the contact. | Contact-only workforce users |
 | **Owner / business unit** (platform Assign) | `ownerid`. | MDA users (and the licensed SPA membership walk) |
 
 Every Manage Access call requires the caller to hold **Write and Share** on the record, checked as the caller. The one
 exception is **Update Access** (`/assigned-access/sync`, which re-runs the Assigned-To rule): Write is enough.
+
+> **"+ Contact" or "+ User" for an internal colleague?** Use **"+ User"**. "+ Contact" on a colleague's contact writes a
+> grant, which gives a licensed colleague access in the SPA (through their linked contact) but **not** in the model-driven
+> app. "+ User" writes a share, which the model-driven app honours. Only the Assigned-To rule makes this choice itself: it
+> shares with the internal user a contact represents (`AssignedAccessMaterializer.ResolveTargetAsync`). A single "add
+> person" entry that decides the same way on the server is proposed in #2338.
 
 **Where in the code**: `Api/ExternalAccess/GrantExternalAccessEndpoint.cs`, `InviteAndGrantExternalUserEndpoint.cs`,
 `InternalShareEndpoints.cs`, `ContactGrantEndpoints.cs`, `DelegationRuleFilter.cs`,
@@ -456,6 +462,23 @@ Consequences to be aware of:
   An ordinary parent's move changes neither the document's owner nor its container. (The 2-minute re-file pass acts
   only on a document whose own row changed and whose container no longer matches where its file is.)
 - A child's owner is set only when the child itself is created or re-filed through Spaarke.
+
+**Why the children do not follow.** Nothing makes them follow, which is a gap, not a design choice:
+
+- **The platform cannot do it.** Dataverse cascades Assign only through a table's single *parental* relationship. Most
+  Spaarke children can be filed under several kinds of parent (a document links to matter, project, work assignment and
+  more), so there is no one parent to cascade from, and every Spaarke relationship is NoCascade.
+- **Platform cascade is the wrong rule anyway.** A cascade copies the parent's owner onto the child. Spaarke's rule (I-6)
+  is different: a child is owned by its business unit's default owner team, and Secure children by the Secure Record Owners
+  team.
+- **Nothing else reacts.** Spaarke does not use plugins (ADR-002), so a re-own would have to come from a server job, and
+  none has been built for ordinary moves.
+
+The result breaks rule I-6 (a child is owned by the default team of its filed record's business unit) until the child is
+re-filed. **Tracked in #2339**: a reconcile job that re-owns the children of a moved parent through
+`RecordOwnershipResolver` and lets the existing re-file pass move their files, on the same pattern as the Secure-child
+reconcile. Until then, after moving an ordinary parent to another business unit, expect model-driven-app users to see the
+parent and its children according to different business units.
 
 **What *does* flow to the family** is a change of **Secure** or **Access Permission** — see §4 (parent floor) and §10.
 Those changes are applied by the BFF when it makes them, and by the background jobs within minutes when they are made
