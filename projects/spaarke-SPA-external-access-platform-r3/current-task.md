@@ -1,6 +1,6 @@
 # Current Task State - spaarke-SPA-external-access-platform-r3
 
-> **Last Updated**: 2026-10-27 (after C1). Dev BFF = 3ff2c04bf5 (gate passed); dev SPA = 1fa0cf5cb8.
+> **Last Updated**: 2026-10-27 (after C3). Dev BFF = 3ff2c04bf5 (gate passed); dev SPA = 1fa0cf5cb8.
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -10,9 +10,9 @@
 | Field | Value |
 |-------|-------|
 | **Task** | **Contact identity hardening (security rework)** on branch `fix/r3-iss-005-combined` (worktree `C:/wtr3-005`). Tracked ONLY in private draft advisory GHSA-hq7m-w2pf-v8j7. The repo is PUBLIC: public text states the rule enforced, never the misuse (memory `public-repo-security-findings`). Before every push, scan commits for sensitive wording. |
-| **Step** | Pushed to origin at e33747fade: slices A–B3 accepted; 424e95ebd5 (modal shows a failed /grant invite), d085247994 (C2 removed marker), e9ca3dfa14 (Retry calls /invite), e33747fade (C1 shared revoke service) sent to UAC. **Implementer `r3-sec-slice-c3` RUNNING (C3: admin helper, /remove-person, /reinstate-person, /grant refusal for a marked contact).** Then C2b (UAC ruling pending: invite resend after a failed send ×2; contact creation refused for a removed email), then C4 (sweep + -Verify/S19). |
+| **Step** | Pushed to origin at 411ffa3658. UAC accepted A–B3, C2 d085247994 and C1 e33747fade; the Retry fix e9ca3dfa14 is accepted in principle. C3 198ba97884..411ffa3658 (grant-core refusal, /remove-person, /reinstate-person) is sent to UAC. **Implementer `r3-sec-slice-c2b` RUNNING**: no create around a removal, failed-send invite clear, /invite re-send to a bound contact, modal sent ⇔ emailSent===true, grant-read paging, not-found vs removed in the grant core, revoke description. Then C4 (sweep with its own write gate + -Verify/S19). Design: remove keeps the binding and does NOT deactivate; reinstate = clear the marker only. |
 | **Status** | in-progress |
-| **Next Action** | (1) When C3 reports: review, scan the wording, push, send the range to UAC. (2) C2b per UAC's ruling. (3) C4. (4) Final head to UAC for the two security passes. (5) The §10 publish-size delta. (6) The PR + advisory. Rollout: the marker column must exist before this BFF is deployed (schema first). |
+| **Next Action** | (1) When C2b reports: review, scan the wording, push, send to UAC. (2) Launch C4 from the brief ("C4 sweep conditions" + the -Verify/S19 invariant). (3) Final head to UAC for the two security passes. (4) The §10 publish-size delta vs a fresh master build. (5) The PR + advisory. Rollout: schema first; the sweep's first dev run is report-only; the apply needs the owner's go. |
 
 ### Private files (scratchpad, NOT in repo)
 `C:\Users\RALPHS~1\AppData\Local\Temp\claude\c--code-files-spaarke-wt-SPA-external-access-platform-r3\15aa240f-634c-4332-99f6-382ebcb06a62\scratchpad\`
