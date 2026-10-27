@@ -31,6 +31,16 @@ public sealed class KvSecretsPopulationOptions
     public TimeSpan KvOperationTimeout { get; set; } = TimeSpan.FromSeconds(90);
 
     /// <summary>
+    /// T186 L24: how long the writer keeps retrying an entry Key Vault answers with 403 (the Secrets Officer role
+    /// H4 granted moments earlier has not reached the data plane yet — Azure documents up to ~10 minutes). Shared by
+    /// the whole write, so a role that never takes effect costs this once, not per entry. Defaults to 10 minutes.
+    /// </summary>
+    public TimeSpan RbacPropagationTimeout { get; set; } = TimeSpan.FromMinutes(10);
+
+    /// <summary>Pause between those retries. Defaults to 15 seconds.</summary>
+    public TimeSpan RbacPropagationRetryInterval { get; set; } = TimeSpan.FromSeconds(15);
+
+    /// <summary>
     /// Maximum time to wait for a single <c>keyVaultReferenceIdentity</c> ARM
     /// PATCH (T1 — ArmAppServiceIdentityPatcher). Defaults to 60 seconds per slot.
     /// </summary>

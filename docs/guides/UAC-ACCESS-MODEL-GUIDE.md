@@ -447,44 +447,70 @@ the family; a service request is a core record of its own.
 
 ## 7. What happens to the family when a parent is reassigned to a new business unit or owner?
 
-**Short answer.** For an ordinary (non-Secure) record, **the children do not move.** Dataverse is configured not to
-cascade Assign, Reparent or Share from matter, project or work assignment to any Spaarke child, and Spaarke does not
-re-own children when an ordinary parent changes owner or business unit. Each child keeps its own owner and business unit.
+**Short answer.** For an ordinary (non-Secure) record, **the children follow it**, within about two minutes plus the
+run, once the owner has turned the switch on (task 194, #2339). Dataverse itself is configured not to cascade Assign,
+Reparent or Share from matter, project or work assignment to any Spaarke child, so the BFF does it: the two-minute
+`secure-child-reconciliation` job lists every ordinary matter, project, work assignment and service request changed since
+its last run (an MDA Assign changes the record's `modifiedon`), walks its children and re-owns each child that a business unit's default
+team owns to the owner `RecordOwnershipResolver` answers now (rule I-6). Until the switch is on, the job only reports
+the moves it would make.
 
-Consequences to be aware of:
+What moves, and what does not:
+
+- **Moved:** every child (and grandchild — a To Do under an event under the matter) owned by a business unit's default
+  owner team, to the default team of its primary parent's business unit. A child filed under several records in
+  different business units takes the resolver's answer for its first (primary) parent, the same answer a new child would
+  get. Each move is a conditional write (it is refused if the row changed since it was read), logged with the previous
+  owner, and read back.
+- **Never moved by this job:** a Secure child (owned by the Secure Record Owners team or any team in the Secure Record
+  business unit), and nothing is moved into or out of isolation — that is the Secure pass's (§10). A child the rule would
+  make Secure (it is also filed under a Secure record) is reported and left to the Secure pass.
+- **Reported, not moved:** a user-owned child (one created outside the product keeps its creator, the accepted I-6
+  interim), and a child owned by a team that is not a business unit's default team.
+- **Service requests:** a row filed only under a service request (`sprk_regardingservicerequest`, a document's
+  `sprk_relatedservicerequest`) follows the service request. Only this job walks those lookups: a service request is not
+  in the Secure family, so the Secure pass never does.
+- **Budget buckets** follow their budget (`sprk_budgetbucket.sprk_budget`), here and into isolation under a Secure budget.
+- **Not covered:** the root's access-grant rows (`sprk_externalrecordaccess`). See
+  `projects/unified-access-control-r2/notes/task-194-ordinary-parent-move.md`.
+- **Files follow.** A filed document's file belongs in the container of the record it is filed under (that record's
+  business unit, `RecordContainerResolver.DeriveDocumentContainersAsync`); only an unfiled document uses its own row's
+  business unit. The job's 2-minute re-file pass moves a file whose container no longer matches — for a document filed
+  directly under a changed matter, project or work assignment (whatever its owner), for every document this job
+  re-owns (the re-own changes its `modifiedon`), and for every other document of the moved record's family that this job
+  hands it (any owner, at any depth — never one held in isolation or filed under a Secure record). The hand-off is
+  bounded by the re-file pass's carry (1000 rows); a record whose documents do not fit waits for the next run and is
+  never dropped.
+
+Consequences while the switch is off (and for what the job does not cover):
 
 - **MDA users** see each child according to the child's own owner and business unit. After a parent moves to business
   unit B, its children stay in business unit A, so someone whose roles reach only business unit B may see the parent but
   not its children (and the reverse).
 - **SPA users and partners** are not affected by the move: their access to children follows the core record's grants
   (§6), not the child's owner.
-- **Files do not move.** A non-secure document's file lives in the container of the document row's own business unit.
-  An ordinary parent's move changes neither the document's owner nor its container. (The 2-minute re-file pass acts
-  only on a document whose own row changed and whose container no longer matches where its file is.)
-- A child's owner is set only when the child itself is created or re-filed through Spaarke.
 
-**Why the children do not follow.** Nothing makes them follow, which is a gap, not a design choice:
+**Why the platform cannot do it.** Dataverse cascades Assign only through a table's single *parental* relationship. Most
+Spaarke children can be filed under several kinds of parent (a document links to matter, project, work assignment and
+more), so there is no one parent to cascade from, and every Spaarke relationship is NoCascade. A cascade would also copy
+the parent's owner onto the child, while Spaarke's rule (I-6) gives a child its business unit's default owner team.
+Spaarke does not use plugins (ADR-002), so the re-own is the scheduled job's.
 
-- **The platform cannot do it.** Dataverse cascades Assign only through a table's single *parental* relationship. Most
-  Spaarke children can be filed under several kinds of parent (a document links to matter, project, work assignment and
-  more), so there is no one parent to cascade from, and every Spaarke relationship is NoCascade.
-- **Platform cascade is the wrong rule anyway.** A cascade copies the parent's owner onto the child. Spaarke's rule (I-6)
-  is different: a child is owned by its business unit's default owner team, and Secure children by the Secure Record Owners
-  team.
-- **Nothing else reacts.** Spaarke does not use plugins (ADR-002), so a re-own would have to come from a server job, and
-  none has been built for ordinary moves.
-
-The result breaks rule I-6 (a child is owned by the default team of its filed record's business unit) until the child is
-re-filed. **Tracked in #2339**: a reconcile job that re-owns the children of a moved parent through
-`RecordOwnershipResolver` and lets the existing re-file pass move their files, on the same pattern as the Secure-child
-reconcile. Until then, after moving an ordinary parent to another business unit, expect model-driven-app users to see the
-parent and its children according to different business units.
+**Switches** (app settings): `SecureChild:Reconciliation:OrdinaryMovesWritesEnabled` (default `false`, report-only;
+turned on only after UAC reads a report-only run and the owner gives the go), `SecureChild:Reconciliation:MaxOrdinaryMovesPerRun`
+(default 200 owner writes a run) and the shared `SecureChild:Reconciliation:MaxRootsPerRun` (50 records a run). The
+recent-changes emergency stop (`RecentChangesWritesEnabled = false`) stops it too. A record not finished in one run is
+carried to the next. Each run's report is `ResultJson.ordinaryMoves`. **Older moves:** besides its one-hour window, each
+App Service instance sweeps every ordinary record once (50 a run, then it stops), and sweeps again when the switch is
+turned on, so a reassignment made before this job existed, or before a restart, is corrected too
+(`ResultJson.ordinaryMoves.sweep`).
 
 **What *does* flow to the family** is a change of **Secure** or **Access Permission** — see §4 (parent floor) and §10.
 Those changes are applied by the BFF when it makes them, and by the background jobs within minutes when they are made
 some other way (for example directly in the MDA).
 
-**Where in the code**: relationship cascade settings in
+**Where in the code**: `SecureChildReconciler.ReconcileOrdinaryParentMoveAsync` and
+`SecureChildReconciliationJob` (the ordinary-moves pass), relationship cascade settings in
 `src/dataverse/solutions/SpaarkeMaster/Other/Relationships/` (all Spaarke child relationships are `NoCascade` for Assign,
 Reparent and Share), `Infrastructure/Dataverse/AssignCascadeChildOwners.cs` (the only platform Assign cascades: from
 matter and project to their teams, SharePoint document locations and SharePoint documents; a work assignment cascades
@@ -732,7 +758,7 @@ code already does; deviating needs an ADR conflict resolution (CLAUDE.md §6.5).
 |---|---|---|
 | Partner granted access but sees nothing | Grant has no expiry date or has expired; record is Restricted; person is on the No Access list; organization grant on a Secure / Limited record | Set an expiry date; check Access Permission and Secure; check the No Access list; grant the person directly |
 | An organization grant is refused | The record (or a parent) is Secure or Limited | Grant the people directly, or change the policy if appropriate |
-| A child record is visible on the parent in the SPA but not in the MDA | Children keep their own owner/business unit when an ordinary parent moves (§7) | Reassign the child, or share it |
+| A child record is visible on the parent in the SPA but not in the MDA | The child is user-owned or owned by a non-default team (reported, not moved), or the ordinary-moves switch is off, after an ordinary parent moved (§7) | Check `ResultJson.ordinaryMoves` of the `secure-child-reconciliation` job; reassign the child, or share it |
 | Someone who should not see Secure records can | Their business unit is an ancestor of the secure one with a Deep Read role, or they hold Global Read | Check `[SECURE-CENSUS]`; move them out of the root business unit or narrow the role depth |
 | Share button missing on a record | The record is Restricted (by design) | Use Manage Access "+ User" for internal users |
 | Remove Secure refused | Caller is not a Full Access holder or the creator (403), or a parent is Secure (409 `access_follows_parent`) | Ask a Full Access holder; un-secure the parent instead |

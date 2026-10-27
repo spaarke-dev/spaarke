@@ -523,6 +523,23 @@ configuration is shaped correctly.
 | 14 | The BFF's `secure-child-reconciliation` job (`/api/admin/jobs/secure-child-reconciliation/status`, task 148) | **enabled every 2 minutes** (task 147, owner round 28 item 2): its recent-changes pass WRITES (`recentChanges.mode = write`; only `SecureChild__Reconciliation__RecentChangesWritesEnabled=false` stops it). The sweep stays REPORT-ONLY with `SecureChild__Reconciliation__WritesEnabled` unset — heartbeat `[SECURE-CHILD-RECONCILE] heartbeat mode=ReportOnly`, and `wouldChange` is the backfill still owed (0 once §7c.1 has run); a scheduled tick does not run (or move) the report-only sweep |
 | 15 | The BFF's `secure-root-inheritance` job (`/api/admin/jobs/secure-root-inheritance/status`, task 158) | **enabled** (writes on, every 5 minutes), last run `Success = true`, heartbeat `[SECURE-INHERIT] heartbeat`. It makes every work assignment / project FILED UNDER a secure matter or project secure itself (provisioning's own steps, for its recorded creator — refused when that person is on the No Access list of the record or of a secure parent) and gives it the parent's sharees, recording where each came from on the `sprk_assignedaccess` ledger (a parent's unshare ends only an unmodified inherited share). `unverifiable > 0` names a record whose parent's flag cannot be read or reads EMPTY (`emptyFlagParents` counts those parents — run `scripts/Repair-SecureFlagNulls.ps1`); `refused > 0` a record with no usable or a walled creator; `deferred > 0` means the run hit its bound of 25 provisionings — `Success = false`, `resumeAfter` names where the next run continues. `unfiledProvenance.notDone > 0` names inherited shares on records re-filed away from their parent that could not be checked (the run is not a success). Prerequisite: `scripts/Set-AssignedAccessLedgerSchema.ps1 -Apply` then `-Verify` (the `sprk_subjectteam` column) |
 
+**Items 11, 12, 14 and 15 without an admin token** (T186, 2026-10-20). The `/api/admin/jobs/*/status` endpoints need a
+token for the environment's BFF API, and the Azure CLI client is not pre-authorized on it (`az account get-access-token
+--resource api://<bff app id>` fails with AADSTS65001). Read the same verdicts from the jobs' heartbeat lines in the
+stamp's Application Insights instead (read-only):
+
+```kusto
+traces | where timestamp > ago(1h) and message contains "] heartbeat"
+| extend job = extract(@"\[(SECURE-[A-Z-]+)\]", 1, message) | where job != ""
+| summarize arg_max(timestamp, message) by job
+```
+
+Expected: `[SECURE-CENSUS] … status=isolated findings=0` (11); `[SECURE-CHILD-SHARES] … status=Completed` with `held` and
+`notUpdated` explained (12); `[SECURE-CHILD-RECONCILE] … mode=ReportOnly` every two minutes (14);
+`[SECURE-INHERIT] … failed=0 deferred=0` every five minutes (15). A job with no heartbeat in the hour is not running.
+Run the query with `POST https://api.applicationinsights.io/v1/apps/<appId>/query` (`az rest --resource
+https://api.applicationinsights.io`); `az monitor app-insights query` on Windows breaks on the quotes.
+
 ### 7a. The children of a secure record — who can see them (task 149)
 
 A secure record's children (documents, events, to-dos, communications, memos, analyses and the rest of the codified

@@ -142,8 +142,11 @@ public sealed class GraphContainerProvisionerBindTests
     }
 
     [Fact]
-    public async Task ARemovalThatFindsTheContainerAlreadyGone_CountsAsRemoved()
+    public async Task ARemovalThatKeepsAnswering404_KeepsTheContainerOnTheRecord()
     {
+        // T186 review: the container was created by this run moments ago, so a 404 on its removal is most likely the
+        // replication lag the bind just hit, not proof it is gone. Counting it as removed would let a resume create a
+        // second container and orphan this one.
         var graph = new FakeGraph
         {
             OnPatch = _ => Json(HttpStatusCode.NotFound, """{"error":{"code":"itemNotFound","message":"gone"}}"""),
@@ -152,8 +155,28 @@ public sealed class GraphContainerProvisionerBindTests
 
         var outcome = await Bind(graph, Unit);
 
-        outcome.Should().BeOfType<SpeContainerBindOutcome.NotBound>().Which.Removed.Should().BeTrue(
-            "nothing unbound remains — a resume must not keep binding a container that no longer exists");
+        var notBound = outcome.Should().BeOfType<SpeContainerBindOutcome.NotBound>().Subject;
+        notBound.Removed.Should().BeFalse("a resume must bind or remove this container, never create another");
+        notBound.Diagnostic.Should().Contain("kept on the run's record");
+        graph.Requests.Count(r => r.Method == "DELETE").Should().BeGreaterThan(1, "the removal waits out the lag too");
+    }
+
+    [Fact]
+    public async Task ARemovalThatAnswers404WhileTheContainerReplicates_IsRetried_AndRemovesIt()
+    {
+        var deletes = 0;
+        var graph = new FakeGraph
+        {
+            OnPatch = _ => Json(HttpStatusCode.Forbidden, """{"error":{"code":"accessDenied","message":"no"}}"""),
+            OnDelete = _ => ++deletes < 3
+                ? Json(HttpStatusCode.NotFound, """{"error":{"code":"itemNotFound","message":"not yet"}}""")
+                : new HttpResponseMessage(HttpStatusCode.NoContent),
+        };
+
+        var outcome = await Bind(graph, Unit);
+
+        outcome.Should().BeOfType<SpeContainerBindOutcome.NotBound>().Which.Removed.Should().BeTrue();
+        deletes.Should().Be(3);
     }
 
     // ── Creation: every fault after the POST is an outcome saying what may exist (owner round 49 item 2) ──
@@ -306,7 +329,8 @@ public sealed class GraphContainerProvisionerBindTests
     private static GraphContainerProvisioner Sut(
         FakeGraph transport, TimeSpan? graphRequestTimeout = null, TokenCredential? credential = null)
     {
-        var options = new SpeContainerOptions();
+        // A 404 is retried (T186 audit) — keep the wait out of these tests.
+        var options = new SpeContainerOptions { ReplicationRetryDelay = TimeSpan.FromMilliseconds(1) };
         if (graphRequestTimeout is { } timeout)
         {
             options.GraphRequestTimeout = timeout;
