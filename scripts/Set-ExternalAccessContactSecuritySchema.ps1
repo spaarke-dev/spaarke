@@ -469,7 +469,8 @@ if ($Verify) {
             $queries = Get-StandingGrantWriterQuery -SystemUserId $u.systemuserid -Table $Table -Column $StandingGrantColumn
             try {
                 $findings = Get-StandingGrantWriterFinding -UserName "app user '$($u.fullname)'" `
-                    -StandingGrantProfileId $sgaId -StandingGrantProfileName $StandingGrantProfileName -Column "$Table.$StandingGrantColumn" `
+                    -StandingGrantProfileId $sgaId -StandingGrantProfileName $StandingGrantProfileName `
+                    -SystemAdministratorProfileName $SystemAdministratorProfileName -Column "$Table.$StandingGrantColumn" `
                     -DirectProfiles @((Invoke-DvGet $queries.DirectProfiles).value) `
                     -TeamProfiles @((Invoke-DvGet $queries.TeamProfiles).value) `
                     -WriterPermissions @((Invoke-DvGet $queries.Writers).value)

@@ -9,6 +9,12 @@
     create or update on that column. The administrator removal clears the standing grant, so the BFF needs that update; any
     other route would widen who can set a standing grant and is not covered by provisioning's S19 other-writer check.
 
+    ONE EXEMPTION (C5, owner decision). The platform's System Administrator field security profile, by S19's pinned name
+    (SecureRecordSetupProcedure.SystemAdministratorProfileName, passed in by the caller): field security does not restrict a
+    holder of it, so its grant on the column is not a second route this check can close. It is reported as INFO on every
+    run, never as a FAIL and never left out. No other profile is exempt, and Standing Grant Administrators held only
+    through a team still fails.
+
     Read-only. The membership is ADDED by a provisioning S-step (one owner); nothing here writes it. The team leg is ONE
     server-side join (teamprofiles -> teammembership, nested any()), never a client-side team list.
 
@@ -36,14 +42,16 @@ function Get-StandingGrantWriterQuery {
     }
 }
 
-# The findings for one BFF application user: one @{ State = 'OK' | 'FAIL'; What = '...' } per check.
+# The findings for one BFF application user: one @{ State = 'OK' | 'FAIL' | 'INFO'; What = '...' } per check.
 #   DirectProfiles / TeamProfiles: rows with fieldsecurityprofileid and name (the two leg queries' answers).
 #   WriterPermissions: rows with _fieldsecurityprofileid_value, cancreate, canupdate (the Writers query's answer).
+#   SystemAdministratorProfileName: S19's pinned name of the one exempt profile, matched exactly (case-sensitive).
 function Get-StandingGrantWriterFinding {
     param(
         [Parameter(Mandatory)][string]$UserName,
         [Parameter(Mandatory)][string]$StandingGrantProfileId,
         [Parameter(Mandatory)][string]$StandingGrantProfileName,
+        [Parameter(Mandatory)][string]$SystemAdministratorProfileName,
         [Parameter(Mandatory)][string]$Column,
         [object[]]$DirectProfiles = @(),
         [object[]]$TeamProfiles = @(),
@@ -66,6 +74,12 @@ function Get-StandingGrantWriterFinding {
         $findings.Add(@{ State = 'FAIL'; What = "$UserName is not a DIRECT member of '$StandingGrantProfileName' — the person removal cannot clear a standing grant. A provisioning step adds this membership; this script never writes it" })
     }
 
+    # C5: the System Administrator profile, held directly or through a team, is noted on every run and never fails.
+    $holdsSystemAdministrator = @(@($direct.Values) + @($team.Values) | Where-Object { "$_" -ceq $SystemAdministratorProfileName }).Count -gt 0
+    if ($holdsSystemAdministrator) {
+        $findings.Add(@{ State = 'INFO'; What = "$UserName holds ${SystemAdministratorProfileName}: field security does not restrict it; the direct-SGA rule constrains every other route." })
+    }
+
     $others = 0
     if ($team.ContainsKey($sga)) {
         $others++
@@ -77,6 +91,7 @@ function Get-StandingGrantWriterFinding {
         $profileId = & $id $w._fieldsecurityprofileid_value
         if ($profileId -eq $sga) { continue }
         $rights = "create=$($w.cancreate) update=$($w.canupdate)"
+        if ($direct[$profileId] -ceq $SystemAdministratorProfileName -or $team[$profileId] -ceq $SystemAdministratorProfileName) { continue }
         if ($direct.ContainsKey($profileId)) {
             $others++
             $findings.Add(@{ State = 'FAIL'; What = "$UserName holds profile '$($direct[$profileId])' ($profileId) directly, and it grants $Column ($rights) — only '$StandingGrantProfileName' may" })
@@ -88,7 +103,8 @@ function Get-StandingGrantWriterFinding {
     }
 
     if ($others -eq 0) {
-        $findings.Add(@{ State = 'OK'; What = "no other profile $UserName holds (directly or through a team) grants create or update on $Column" })
+        $exempt = if ($holdsSystemAdministrator) { " (apart from '$SystemAdministratorProfileName', noted above)" } else { '' }
+        $findings.Add(@{ State = 'OK'; What = "no other profile $UserName holds (directly or through a team) grants create or update on $Column$exempt" })
     }
 
     , $findings.ToArray()

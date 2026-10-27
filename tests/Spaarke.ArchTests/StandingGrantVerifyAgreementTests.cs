@@ -51,6 +51,8 @@ public sealed class StandingGrantVerifyAgreementTests
         var script = Read(ScriptFile);
         Assert.Matches(new Regex(@"Get-StandingGrantWriterQuery\s+-SystemUserId\s+\S+\s+-Table\s+\$Table\s+-Column\s+\$StandingGrantColumn\b"), script);
         Assert.Matches(new Regex(@"-StandingGrantProfileName\s+\$StandingGrantProfileName\b"), script);
+        // C5: the one exempt profile is S19's pinned System Administrator name (the pair above), never a literal.
+        Assert.Matches(new Regex(@"-SystemAdministratorProfileName\s+\$SystemAdministratorProfileName\b"), script);
         Assert.Matches(new Regex(@"\$sgaId\s*=\s*\$profileIds\[\$StandingGrantProfileName\]"), script);
     }
 

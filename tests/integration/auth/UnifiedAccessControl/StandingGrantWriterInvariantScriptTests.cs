@@ -19,6 +19,13 @@ public class StandingGrantWriterInvariantScriptTests
     private const string Writers = "77777777-0000-4000-8000-00000000c4c4";
     private const string Other = "88888888-0000-4000-8000-00000000c4c4";
     private const string User = "11111111-0000-4000-8000-00000000c4c4";
+    private const string SystemAdministrator = "99999999-0000-4000-8000-00000000c5c5";
+
+    /// <summary>S19's pinned name (<c>SecureRecordSetupProcedure.SystemAdministratorProfileName</c>), as step h passes it.</summary>
+    private const string SystemAdministratorName = "System Administrator";
+
+    private const string SystemAdministratorInfo =
+        "app user 'BFF' holds System Administrator: field security does not restrict it; the direct-SGA rule constrains every other route.";
 
     private static object Profile(string id, string name) => new { fieldsecurityprofileid = id, name };
 
@@ -34,7 +41,8 @@ public class StandingGrantWriterInvariantScriptTests
             $team = @('{{Json(team)}}' | ConvertFrom-Json)
             $writers = @('{{Json(writers)}}' | ConvertFrom-Json)
             $f = Get-StandingGrantWriterFinding -UserName "app user 'BFF'" -StandingGrantProfileId '{{Sga}}' `
-                -StandingGrantProfileName 'Standing Grant Administrators' -Column 'contact.sprk_standinggrant' `
+                -StandingGrantProfileName 'Standing Grant Administrators' -SystemAdministratorProfileName '{{SystemAdministratorName}}' `
+                -Column 'contact.sprk_standinggrant' `
                 -DirectProfiles $direct -TeamProfiles $team -WriterPermissions $writers
             ConvertTo-Json -InputObject @($f | ForEach-Object { [pscustomobject]@{ State = $_.State; What = $_.What } }) -Depth 4 -Compress
             """);
@@ -118,6 +126,77 @@ public class StandingGrantWriterInvariantScriptTests
             writers: Array.Empty<object>());
 
         findings.Should().Contain(f => f.State == "FAIL" && f.What.Contains("grants no update", StringComparison.Ordinal));
+    }
+
+    // ── C5: the System Administrator profile ─────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// MUST NOT FIRE: a BFF that holds S19's pinned System Administrator profile (directly or through a team), which grants
+    /// the column, passes (no FAIL, so -Verify exits 0) and is noted as INFO, with the exact text, on every run.
+    /// </summary>
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public void HoldingSystemAdministrator_Passes_AndIsNotedAsInfo(bool direct, bool grantsTheColumn)
+    {
+        var admin = Profile(SystemAdministrator, SystemAdministratorName);
+        var findings = Findings(
+            direct: direct ? new[] { Profile(Sga, "Standing Grant Administrators"), admin } : new[] { Profile(Sga, "Standing Grant Administrators") },
+            team: direct ? Array.Empty<object>() : new[] { admin },
+            writers: grantsTheColumn ? new[] { SgaWrites, Permission(SystemAdministrator, 4, 4) } : new[] { SgaWrites });
+
+        findings.Should().NotContain(f => f.State == "FAIL");
+        findings.Should().ContainSingle(f => f.State == "INFO").Which.What.Should().Be(SystemAdministratorInfo);
+
+        // An INFO is not a gap: -Verify counts only MISSING and FAIL, so it exits 0.
+        File.ReadAllText(Path.Combine(RepoRoot(), "scripts", "Set-ExternalAccessContactSecuritySchema.ps1"))
+            .Should().Contain("if ($State -in 'MISSING', 'FAIL') { $gaps.Add($What) }");
+    }
+
+    /// <summary>MUST NOT FIRE: a BFF that does not hold System Administrator gets no INFO line.</summary>
+    [Fact]
+    public void NotHoldingSystemAdministrator_HasNoInfo()
+    {
+        var findings = Findings(
+            direct: new[] { Profile(Sga, "Standing Grant Administrators") },
+            team: Array.Empty<object>(),
+            writers: new[] { SgaWrites, Permission(SystemAdministrator, 4, 4) });
+
+        findings.Should().NotContain(f => f.State == "INFO");
+        findings.Should().OnlyContain(f => f.State == "OK");
+    }
+
+    /// <summary>
+    /// MUST FIRE: the exemption is System Administrator alone. Another profile the BFF holds that grants the column still
+    /// fails beside it, and so does a profile whose name only resembles the pinned one.
+    /// </summary>
+    [Theory]
+    [InlineData("Some Other Profile")]
+    [InlineData("system administrator")]
+    [InlineData("System Administrators")]
+    public void AnotherWritingProfile_BesideSystemAdministrator_StillFails(string otherName)
+    {
+        var findings = Findings(
+            direct: new[] { Profile(Sga, "Standing Grant Administrators"), Profile(SystemAdministrator, SystemAdministratorName), Profile(Other, otherName) },
+            team: Array.Empty<object>(),
+            writers: new[] { SgaWrites, Permission(SystemAdministrator, 4, 4), Permission(Other, 0, 4) });
+
+        findings.Should().ContainSingle(f => f.State == "FAIL" && f.What.Contains($"'{otherName}'", StringComparison.Ordinal));
+        findings.Should().ContainSingle(f => f.State == "INFO");
+    }
+
+    /// <summary>MUST FIRE: Standing Grant Administrators held only through a team fails, System Administrator or not.</summary>
+    [Fact]
+    public void TeamOnlyStandingGrantAdministrators_WithSystemAdministrator_StillFails()
+    {
+        var findings = Findings(
+            direct: new[] { Profile(SystemAdministrator, SystemAdministratorName) },
+            team: new[] { Profile(Sga, "Standing Grant Administrators") },
+            writers: new[] { SgaWrites, Permission(SystemAdministrator, 4, 4) });
+
+        findings.Should().Contain(f => f.State == "FAIL" && f.What.Contains("not a DIRECT member", StringComparison.Ordinal));
+        findings.Should().Contain(f => f.State == "FAIL" && f.What.Contains("through a team", StringComparison.Ordinal));
     }
 
     // ── The queries ──────────────────────────────────────────────────────────────────────────────────────────────
