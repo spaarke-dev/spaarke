@@ -15,6 +15,10 @@ Usage:
                          [--project SUBSTR ...] [--format text|json|csv|html]
                          [--out PATH] [--open] [--archive [PATH]] [--source transcripts|archive]
                          [--model-fit [--launch-log PATH] [--repo PATH]]
+  python spend-report.py --actuals [--invoices PATH] [--archive PATH] [--project SUBSTR ...] [--format text|json|csv]
+
+--actuals: what was invoiced (a hand-kept CSV, default %USERPROFILE%\\.claude\\spend-archive\\invoices.csv) against
+the archived estimate, by month, billing cycle and year, with each cycle's invoices allocated to projects.
 
 --model-fit: was each piece of work run on the right model? Matches the agent launch log
 (%USERPROFILE%\\.claude\\spend-archive\\agent-launches.csv, written by scripts/quality/require-agent-model.py)
@@ -503,6 +507,214 @@ def write_archive(path, rows):
         if os.path.exists(tmp):
             os.remove(tmp)
         raise
+
+
+# --- invoiced actuals (--actuals) ---------------------------------------------------------
+# The estimate prices this machine's transcripts at list price; the invoices are what was paid. They are typed in by
+# hand from the claude.ai billing page into a CSV beside the archive (there is no export for a Max plan). The plan fee
+# is charged on the same day each month; every other charge is a credit purchase, mostly auto-recharge when the
+# balance runs low. Credits are prepaid, so a charge pays for LATER usage: actuals are compared with the estimate per
+# billing cycle and per month, never per day.
+
+DEFAULT_INVOICES = os.path.join(os.path.expanduser("~"), ".claude", "spend-archive", "invoices.csv")
+INVOICE_COLUMNS = ["date", "amount", "kind", "invoice_id", "notes"]
+INVOICE_KINDS = ("plan", "credits", "other")
+
+
+def read_invoices(path):
+    """Invoice rows sorted by date ([] if the file does not exist). Raises ArchiveError if malformed.
+
+    `amount` may carry `$` and thousands commas; a negative amount (refund) is kept as is."""
+    if not os.path.exists(path):
+        return []
+    with open(path, encoding="utf-8-sig", newline="") as fh:
+        rd = csv.DictReader(fh)
+        missing = [c for c in ("date", "amount", "kind") if c not in (rd.fieldnames or [])]
+        if missing:
+            raise ArchiveError(f"{path} is not an invoice list (missing columns: {', '.join(missing)})")
+        rows = []
+        for n, rec in enumerate(rd, start=2):
+            try:
+                day = datetime.strptime((rec["date"] or "").strip(), "%Y-%m-%d").strftime("%Y-%m-%d")
+                amount = float((rec["amount"] or "").strip().replace("$", "").replace(",", ""))
+            except (TypeError, ValueError) as ex:
+                raise ArchiveError(f"{path} line {n}: {ex}")
+            kind = (rec["kind"] or "").strip().lower()
+            if kind not in INVOICE_KINDS:
+                raise ArchiveError(f"{path} line {n}: kind '{rec['kind']}' is not one of {', '.join(INVOICE_KINDS)}")
+            rows.append({"date": day, "amount": amount, "kind": kind,
+                         "invoice_id": (rec.get("invoice_id") or "").strip(), "notes": (rec.get("notes") or "").strip()})
+    return sorted(rows, key=lambda r: r["date"])
+
+
+def prev_day(day):
+    return (datetime.strptime(day, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
+
+
+def billing_cycles(invoices, until):
+    """[(start, end)]: each plan charge starts a cycle that runs to the day before the next plan charge; the last
+    one runs to `until`. Charges before the first plan charge form a leading cycle."""
+    starts = sorted({r["date"] for r in invoices if r["kind"] == "plan"})
+    if invoices and (not starts or invoices[0]["date"] < starts[0]):
+        starts.insert(0, invoices[0]["date"])
+    return [(s, prev_day(starts[i + 1]) if i + 1 < len(starts) else max(until, s)) for i, s in enumerate(starts)]
+
+
+def calendar_months(first, until):
+    """[(YYYY-MM, start, end)] for every month from `first`'s to `until`'s, the last one cut at `until`."""
+    out, y, m = [], int(first[:4]), int(first[5:7])
+    while f"{y:04d}-{m:02d}" <= until[:7]:
+        nxt = (y + (m == 12), m % 12 + 1)
+        end = prev_day(f"{nxt[0]:04d}-{nxt[1]:02d}-01")
+        out.append((f"{y:04d}-{m:02d}", f"{y:04d}-{m:02d}-01", min(end, until)))
+        y, m = nxt
+    return out
+
+
+def coverage(start, end, archive_first):
+    """How much of a period the archive covers: full (it starts on or after the first archived day), partial, none."""
+    if archive_first is None or end < archive_first:
+        return "none"
+    return "full" if start >= archive_first else "partial"
+
+
+def period_rows(periods, invoices, est_by_day, archive_first):
+    """One row per (label, start, end): invoiced plan / credits / other, actual, estimate, ratio, coverage."""
+    out = []
+    for label, s, e in periods:
+        inv = [r for r in invoices if s <= r["date"] <= e]
+        row = {"period": label, "start": s, "end": e, "charges": len(inv)}
+        row.update({k: round(sum(r["amount"] for r in inv if r["kind"] == k), 2) for k in INVOICE_KINDS})
+        row["actual"] = round(sum(r["amount"] for r in inv), 2)
+        row["est"] = round(sum(v for d, v in est_by_day.items() if s <= d <= e), 2)
+        row["ratio"] = round(row["actual"] / row["est"], 4) if row["est"] else None
+        row["coverage"] = coverage(s, e, archive_first)
+        out.append(row)
+    return out
+
+
+def allocate(invoices, arows, cycles):
+    """Split each billing cycle's invoiced total across projects by their share of that cycle's estimate.
+
+    Returns ({project: {"est", "allocated"}}, unallocated $). A cycle with no estimate (before the archive) stays
+    unallocated. A partly covered cycle is split whole, by the share of the days the archive has."""
+    est = [defaultdict(float) for _ in cycles]
+    for r in arows:
+        for i, (s, e) in enumerate(cycles):
+            if s <= r["day"] <= e:
+                est[i][r["project"]] += flat_cost(r)
+                break
+    out, unallocated = {}, 0.0
+    for i, (s, e) in enumerate(cycles):
+        actual = sum(r["amount"] for r in invoices if s <= r["date"] <= e)
+        total = sum(est[i].values())
+        if total <= 0:
+            unallocated += actual
+            continue
+        for p, v in est[i].items():
+            if v <= 0:
+                continue
+            t = out.setdefault(p, {"est": 0.0, "allocated": 0.0})
+            t["est"] += v
+            t["allocated"] += actual * v / total
+    return ({p: {k: round(v, 2) for k, v in t.items()} for p, t in out.items()}, round(unallocated, 2))
+
+
+def actuals_report(invoices, arows):
+    """Everything --actuals prints, as one dict. Pure function of the invoice list and the archive rows."""
+    est_by_day = defaultdict(float)
+    for r in arows:
+        est_by_day[r["day"]] += flat_cost(r)
+    days = sorted(d for d, v in est_by_day.items() if v > 0)
+    archive_first = days[0] if days else None
+    if not invoices:
+        return {"archive_first": archive_first, "until": days[-1] if days else None, "months": [], "cycles": [],
+                "years": [], "rate": None, "projects": {}, "unallocated": 0.0}
+    until = max([invoices[-1]["date"]] + days[-1:])
+    cycles = billing_cycles(invoices, until)
+    months = period_rows(calendar_months(invoices[0]["date"], until), invoices, est_by_day, archive_first)
+    ytd = {}
+    for m in months:
+        ytd[m["period"][:4]] = ytd.get(m["period"][:4], 0.0) + m["actual"]
+        m["ytd"] = round(ytd[m["period"][:4]], 2)
+        m["ratio"] = None        # credits bought late in one month pay for the next: only a billing cycle has a ratio
+    years = period_rows([(y, f"{y}-01-01", min(f"{y}-12-31", until)) for y in sorted(ytd)],
+                        invoices, est_by_day, archive_first)
+    crow = period_rows([(f"{s}..{e}", s, e) for s, e in cycles], invoices, est_by_day, archive_first)
+    full = [c for c in crow if c["coverage"] == "full"]
+    rate = None
+    if full and sum(c["est"] for c in full):
+        a, x = sum(c["actual"] for c in full), sum(c["est"] for c in full)
+        rate = {"since": full[0]["start"], "actual": round(a, 2), "est": round(x, 2), "ratio": round(a / x, 4)}
+    projects, unallocated = allocate(invoices, arows, cycles)
+    return {"archive_first": archive_first, "until": until, "months": months, "cycles": crow, "years": years,
+            "rate": rate, "projects": projects, "unallocated": unallocated}
+
+
+def _est(r):
+    return f"{'-':>9}" if r["coverage"] == "none" else f"{r['est']:>9,.0f}"
+
+
+def _ratio(r):
+    if r["ratio"] is None:
+        return f"{'-':>7}"
+    return f"{r['ratio']:>6.2f}" + ("*" if r["coverage"] == "partial" else " ")
+
+
+def actuals_text(rep, projects_filter, inv_path, arch_path, tzl):
+    L = [f"AI spend: invoiced actuals vs list-price estimate (invoices {inv_path}; archive {arch_path}, "
+         f"from {rep['archive_first'] or '-'}, days in {tzl})"]
+    if not rep["months"]:
+        return L[0] + "\nno invoices yet: add the billing page's charges to the invoice list (see scripts/ai-cost/README.md)\n"
+    head = f"{'plan':>8}{'credits':>9}{'other':>7}{'actual':>9}{'est $':>9}"
+    L += ["", f"{'By month':<10}{head}{'year to date':>14}"]
+    for m in rep["months"]:
+        L.append(f"{m['period']:<10}{m['plan']:>8,.0f}{m['credits']:>9,.0f}{m['other']:>7,.0f}{m['actual']:>9,.0f}"
+                 f"{_est(m)}{m['ytd']:>14,.0f}")
+    for y in rep["years"]:
+        L.append(f"{y['period'] + ' total':<10}{y['plan']:>8,.0f}{y['credits']:>9,.0f}{y['other']:>7,.0f}"
+                 f"{y['actual']:>9,.0f}{y['est']:>9,.0f}")
+    L.append("Months have no ratio: credits bought late in one month pay for the next month's usage.")
+    L += ["", f"{'By billing cycle':<24}{head}{'ratio':>7}{'charges':>9}"]
+    for c in rep["cycles"]:
+        L.append(f"{c['period']:<24}{c['plan']:>8,.0f}{c['credits']:>9,.0f}{c['other']:>7,.0f}{c['actual']:>9,.0f}"
+                 f"{_est(c)}{_ratio(c)}{c['charges']:>9}")
+    L.append("* the archive covers only part of the period, so the ratio is overstated; - no estimate (before the archive)")
+    L.append("")
+    if rep["rate"]:
+        r = rep["rate"]
+        L.append(f"Effective rate, fully covered cycles since {r['since']}: ${r['actual']:,.0f} invoiced / "
+                 f"${r['est']:,.0f} estimated = {r['ratio']:.2f} (each estimated dollar cost {100 * r['ratio']:.0f} cents)")
+    else:
+        L.append("Effective rate: no billing cycle is fully covered by the archive yet")
+    rows = sorted(rep["projects"].items(), key=lambda kv: -kv[1]["allocated"])
+    if projects_filter:
+        rows = [kv for kv in rows if any(p.lower() in kv[0].lower() for p in projects_filter)]
+    alloc_total = sum(t["allocated"] for t in rep["projects"].values())
+    L += ["", f"{'Allocated actual by project':<44}{'est $':>9}{'allocated $':>13}{'share':>7}"]
+    for p, t in rows:
+        L.append(f"{p[:43]:<44}{t['est']:>9,.0f}{t['allocated']:>13,.0f}{100 * t['allocated'] / (alloc_total or 1e-9):>6.0f}%")
+    L.append(f"{'unallocated (cycles with no estimate)':<44}{'':>9}{rep['unallocated']:>13,.0f}")
+    L.append("Each cycle's invoiced total is split by the projects' share of that cycle's estimate.")
+    return "\n".join(L) + "\n"
+
+
+ACTUALS_CSV_COLUMNS = ["section", "period", "start", "end", "plan", "credits", "other", "actual", "est", "ratio",
+                       "coverage", "charges", "ytd"]
+
+
+def actuals_csv(rep, projects_filter):
+    buf = io.StringIO()
+    w = csv.DictWriter(buf, fieldnames=ACTUALS_CSV_COLUMNS, extrasaction="ignore")
+    w.writeheader()
+    for section in ("months", "cycles", "years"):
+        for r in rep[section]:
+            w.writerow(dict(r, section=section[:-1]))
+    for p, t in sorted(rep["projects"].items(), key=lambda kv: -kv[1]["allocated"]):
+        if not projects_filter or any(x.lower() in p.lower() for x in projects_filter):
+            w.writerow({"section": "project", "period": p, "actual": t["allocated"], "est": t["est"]})
+    w.writerow({"section": "unallocated", "actual": rep["unallocated"]})
+    return buf.getvalue()
 
 
 # --- model fit (--model-fit) --------------------------------------------------------------
@@ -1061,11 +1273,20 @@ def main():
                          f"{DEFAULT_LAUNCH_LOG.replace('%', '%%')})")
     ap.add_argument("--repo", metavar="PATH", default=os.path.dirname(os.path.dirname(HERE)),
                     help="--model-fit: repo root whose projects/*/notes and tasks hold the `rework:` lines (default: this repo)")
+    ap.add_argument("--actuals", action="store_true",
+                    help="invoiced actuals vs the archived estimate, by month, billing cycle and year, with each "
+                         "cycle's invoices allocated to projects; reads the invoice list and the archive (--archive "
+                         "PATH picks the archive), covers the whole history")
+    ap.add_argument("--invoices", metavar="PATH",
+                    help=f"--actuals: the invoice list (default {DEFAULT_INVOICES.replace('%', '%%')})")
     a = ap.parse_args()
     if a.today and (a.days is not None or a.since):
         ap.error("--today cannot be combined with --days or --since")
     if a.model_fit and (a.archive or a.source == "archive"):
         ap.error("--model-fit reads the transcripts; it cannot be combined with --archive or --source archive")
+    if a.actuals and (a.model_fit or a.days is not None or a.since or a.today or a.format == "html"):
+        ap.error("--actuals covers the whole history from the archive; it takes no --days/--since/--today, "
+                 "no --model-fit and no --format html")
     if a.since:
         try:
             datetime.strptime(a.since, "%Y-%m-%d")
@@ -1095,6 +1316,24 @@ def main():
             if not a.out:
                 a.out = os.path.join(tempfile.gettempdir(), "spaarke-model-fit.html")
         emit(out, a, len(rows), f"{summ['files']} files", t0)
+        return
+
+    if a.actuals:
+        inv_path = a.invoices or DEFAULT_INVOICES
+        try:
+            invoices = read_invoices(inv_path)
+            arows = read_archive(archive_path)
+        except ArchiveError as ex:
+            fail(str(ex))
+        tz_name = arows[0]["tz"] if arows else tz_name
+        rep = actuals_report(invoices, arows)
+        if a.format == "text":
+            out = actuals_text(rep, a.project, inv_path, archive_path, tz_label(tz_name))
+        elif a.format == "json":
+            out = json.dumps(dict(rep, tz=tz_name, invoices=inv_path, archive=archive_path), indent=1)
+        else:
+            out = actuals_csv(rep, a.project)
+        emit(out, a, len(invoices), f"{len(invoices)} invoices, {len(arows)} archive rows", t0)
         return
 
     if a.source == "archive":

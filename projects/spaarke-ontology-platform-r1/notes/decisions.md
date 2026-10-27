@@ -254,3 +254,23 @@ Sources: **design** = [`design.md`](../design.md) §8 (D-1..D-12, §8.0c) and §
 
 - **Composer:** add an opt-in `composeOnly` prop to the shared EmailComposer (hides Send, From and the Internal-only tags; `send()`/`saveDraft()` refuse). Existing callers are unchanged; `hostOwnsChrome` keeps its meaning. Server and client halves go in separate commits so the email project and R3 can review the shared-component diff on its own.
 - **Link by recipient:** an enabled systemuser gets the app link, including one flagged `sprk_isexternal`; anyone else gets the portal link.
+
+## D-188 — Document parent link: the unprefixed lookups are current (owner delegated the call, 2026-10-23)
+
+- **Question:** which column is the long-term link from a `sprk_document` to its parent? The unprefixed `sprk_matter`, `sprk_project`, `sprk_invoice` and `sprk_workassignment`, or their `sprk_related*` counterparts, which `DocumentLinkFieldMap.SupersededBy` calls the successors?
+- **Answer:** the unprefixed columns (the owner asked the main session to pick).
+- **Evidence (spaarkedev1, 614 documents):** 173 rows use the unprefixed columns; the `related` columns hold 1 row. Parent Documents subgrids bind to the unprefixed relationships. Task 162 binds uploads there.
+- **Follow-up:** DI-127 / #2315 (fix the map, then decide on the `related` columns). Outside the ontology critical path.
+
+## D-189 — Spaarke Basic User needs no change for D-185 (owner, 2026-10-23)
+
+- The owner asked for Basic User to be set "to what it needs to be". Live (669 privileges) already lacks the policy, policyversion and ruleset Reads, and has no depth differences from master's XML. So no change was made (security-roles §19).
+- The owner does not believe they edited the role on 10-22. The cause stays unexplained.
+- The leftover AppendTo on `sprk_policy` and `sprk_policyversion` (Console User, depth 4) is outside D-185, which covered only Read. It is left as is (uac-r2 observation, no write path).
+
+## D-190 — DI-126 accepted as a known limit (owner, 2026-10-26)
+
+- **Decision:** a direct (native form, view or Web API) read of a billing Duplicate Signal may show the earlier invoice's tracking number and line detail to a matter-team member who cannot read that invoice. Option C, accept (ebilling EB-D-152; the owner confirmed it in this session).
+- **Unchanged:** the BFF Signal read route still withholds it (157, D-176). Options A, B and D are not pursued.
+- **Related:** #2310 is closed. DI-120 (#2118) stays open separately.
+

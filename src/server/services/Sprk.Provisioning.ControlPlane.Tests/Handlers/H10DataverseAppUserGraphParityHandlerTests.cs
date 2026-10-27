@@ -201,6 +201,48 @@ public sealed class H10DataverseAppUserGraphParityHandlerTests
         repo.LastWrittenRun!.Status.Should().Be(RunStatus.Quarantined);
     }
 
+    // ---------- T186 audit: a transient outage that outlasts the verifiers' retries is not a trap ----------
+
+    [Fact]
+    public async Task T186_T2RequeryUnverified_FailsResumable_NotQuarantined_AndStopsBeforeGraph()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-t186a");
+        var granter = FakeGranter.Success(ThreeRoleFixture.Count);
+        var handler = BuildHandler(repo, FakeCreator.Success(), FakeVerifier.Unverified("HTTP 503 after 4 attempt(s)."),
+            granter, FakeParityVerifier.Verified(ThreeRoleFixture.Count), FakeRegistry.WithRoles(ThreeRoleFixture));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(H10Rejections.AppUserUnverified);
+        failure.Diagnostic.Should().Contain("HTTP 503");
+        granter.CallCount.Should().Be(0);
+        repo.LastWrittenRun!.Status.Should().Be(RunStatus.Failed, "no verdict is not a quarantine");
+        repo.LastWrittenRun.Quarantine.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task T186_T3ReadUnverified_FailsResumable_NotQuarantined()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-t186b");
+        var handler = BuildHandler(repo, FakeCreator.Success(), FakeVerifier.Verified(UamiSystemUserId),
+            FakeGranter.Success(ThreeRoleFixture.Count),
+            FakeParityVerifier.Unverified("HTTP 429 after 4 attempt(s).", ThreeRoleFixture.Count),
+            FakeRegistry.WithRoles(ThreeRoleFixture));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(H10Rejections.GraphRoleParityUnverified);
+        failure.Diagnostic.Should().Contain("HTTP 429");
+        repo.LastWrittenRun!.Status.Should().Be(RunStatus.Failed);
+        repo.LastWrittenRun.Quarantine.Should().BeNull();
+    }
+
     // ---------- AC-4 H10 escalation gate ----------
 
     [Fact]
@@ -895,6 +937,9 @@ public sealed class H10DataverseAppUserGraphParityHandlerTests
         public static FakeVerifier Mismatch(int observedCount)
             => new(new DataverseAppUserVerificationResult.CountMismatch(observedCount));
 
+        public static FakeVerifier Unverified(string diagnostic)
+            => new(new DataverseAppUserVerificationResult.Unverified(diagnostic));
+
         public Task<DataverseAppUserVerificationResult> VerifyAsync(
             string environmentUrl, string tenantId, string applicationId, CancellationToken ct)
         {
@@ -970,6 +1015,9 @@ public sealed class H10DataverseAppUserGraphParityHandlerTests
 
         public static FakeParityVerifier Partial(IReadOnlyList<string> missing, int granted, int expected)
             => new(new GraphAppRoleParityResult.Partial(missing, granted, expected));
+
+        public static FakeParityVerifier Unverified(string diagnostic, int expected)
+            => new(new GraphAppRoleParityResult.Unverified(diagnostic, expected));
 
         public Task<GraphAppRoleParityResult> VerifyAsync(
             string uamiServicePrincipalObjectId, string tenantId,

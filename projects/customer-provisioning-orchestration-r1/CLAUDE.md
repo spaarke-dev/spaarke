@@ -121,6 +121,7 @@ Rationale: `notes/decisions.md`. The owner's D1–D29 are in plan §2.
 - `SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md` is authoritative; never merge an SPE owning app with a BFF app registration (2026-08-30).
 - Demo is the next environment for testing the orchestration (D27).
 - The prod L2 control plane goes into `rg-spaarke-shared-prod` from its first deploy (D23).
+- **Do not upgrade the ACME stamp BFF (`sprk-acme-prod-api`, build 2026.10.16-2) to a build containing UAC #2128 until A9 home sign-in is in place for ACME** (R3, 2026-10-20). Today ACME's users are B2B guests in the Spaarke tenant. #2128 refuses a guest whose home tenant is in `WorkforceIdentity__CustomerTenantIds` (`78195073-…`) unless the guest has an enabled systemuser (`workforce_guest_use_home_signin`). First: v2 tokens on the stamp app, the production workforce SPA client pre-authorized (id not final; never the dev `5859e812…`), `ExternalAccess__CustomerBusinessUnitId` on both slots, and customer-tenant consent for the workforce client only (never v1 `/adminconsent` — R3 C-1). Check with UAC before any ACME BFF upgrade (2026-10-20).
 
 ## 4. Coordination
 
@@ -214,6 +215,9 @@ Rationale: `notes/decisions.md`. The owner's D1–D29 are in plan §2.
 **Shell (2026-10-09)**
 - Windows `bash` on PATH can be the WSL stub in `%LOCALAPPDATA%\Microsoft\WindowsApps` (not only System32): "no installed distributions". Resolve Git for Windows' bash from `(Get-Command git).Source` → `..\..\bin\bash.exe` (the skill's Step 0.5b does).
 - A PowerShell command containing `"..."` with `$(...)` or `)` inside `-replace`/expressions can fail to parse as a whole (nothing runs). Check `git status` after such a command before assuming a commit happened.
+
+**Exchange RBAC (2026-10-20, T186 L62)**
+- `Set-ManagementRoleEntry -Parameters` REPLACES the list, and Exchange checks the PowerShell common parameters (`-ErrorAction`, `-WhatIf`, …) against it. A narrowed entry needs them listed, and some parents cannot grant them at all. `Get-Command` as the app shows them either way, and the EXO module reports the 403 as "A server side error has occurred". Test a role by running the exact call on an `@authz-probe.invalid` address, never with `-WhatIf` (`.claude/FAILURE-MODES.md` G-23).
 
 ## 7. Key documents
 

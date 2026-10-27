@@ -99,6 +99,17 @@
 // created with it; an existing one gets it added (every other optional claim preserved — the retired script's
 // -AcctClaimOnly mode, Get-SpaarkeAccessTokenOptionalClaimsWithAcct). Read fresh, PATCH only when missing, read back.
 //
+// UNVERIFIED EMAIL CLAIM (task 264, #2001 from SPA-r3 ISS-013): every per-customer BFF registration carries
+// authenticationBehaviors.removeUnverifiedEmailClaim = true. R3's email-bound contact registration
+// (ExternalRegistrationEndpoints.cs / ContactIdentityBinder.cs) binds a workforce sign-in to a contact by the token `email`
+// claim, which is safe only when Entra strips that claim for an unverified domain; otherwise a user in an allowed customer
+// directory with an unverified-domain email equal to a contact's could register as that contact. New and existing
+// registrations alike: read fresh (get-before-set), PATCH only when it is not already true, read back. The setting is a
+// complex type that Graph replaces whole, so the other authenticationBehaviors values (blockAzureADGraphAccess,
+// requireClientServicePrincipal) are carried over unchanged. Graph v1.0 (SDK 6.5.0) returns and accepts it; no beta call.
+// The multitenant SPA client (Spaarke Workforce SPA) carries the same flag as an operator one-time setting that H3 never
+// touches. H13 trap T7 verifies the result independently.
+//
 // KEYLESS-PROOF APP ROLE (task 230b, owner D13): the app-reg exposes the application role
 // KeylessProofContract.AppRoleValue (fixed id, allowedMemberTypes ["Application"]) and H3 assigns it to
 // the L2 Worker identity (ControlPlaneIdentityOptions.PrincipalObjectId) — the only caller of the
@@ -260,6 +271,13 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
             if (acctFailure is not null)
             {
                 return acctFailure;
+            }
+
+            // (2d) T264: authenticationBehaviors.removeUnverifiedEmailClaim = true (new and existing registrations alike).
+            var unverifiedEmailFailure = await EnsureRemoveUnverifiedEmailClaimAsync(graph, app.Id!, request, cancellationToken).ConfigureAwait(false);
+            if (unverifiedEmailFailure is not null)
+            {
+                return unverifiedEmailFailure;
             }
 
             // (3) Ensure service principal.
@@ -515,10 +533,18 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
         // configurations (api://{appId} requires the appId to already exist);
         // PATCH it in as a second call — matches the retired script's own
         // two-phase approach (create THEN append identifierUri).
-        await graph.Applications[created.Id].PatchAsync(new Application
-        {
-            IdentifierUris = new List<string> { $"api://{created.AppId}" },
-        }, cancellationToken: timeoutCts.Token).ConfigureAwait(false);
+        // T186 L26: the app object is not addressable by id for a few seconds after the POST (Graph 404
+        // Request_ResourceNotFound) — the first live H3 failed here.
+        await RetryWhileReplicatingAsync(
+            async attemptCt =>
+            {
+                await graph.Applications[created.Id].PatchAsync(new Application
+                {
+                    IdentifierUris = new List<string> { $"api://{created.AppId}" },
+                }, cancellationToken: attemptCt).ConfigureAwait(false);
+                return true;
+            },
+            IsNotYetReplicated, "identifierUris PATCH on the new application", ct).ConfigureAwait(false);
 
         return created;
     }
@@ -794,9 +820,10 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeoutCts.CancelAfter(_options.GraphRequestTimeout);
 
-            var current = await graph.Applications[appObjectId]
-                .GetAsync(rc => rc.QueryParameters.Select = ["id", "appId", "optionalClaims"], timeoutCts.Token)
-                .ConfigureAwait(false);
+            var current = await RetryWhileReplicatingAsync(
+                attemptCt => graph.Applications[appObjectId]
+                    .GetAsync(rc => rc.QueryParameters.Select = ["id", "appId", "optionalClaims"], attemptCt),
+                IsNotYetReplicated, "optionalClaims read", ct).ConfigureAwait(false);
             if (current is null)
             {
                 return new EntraAppRegOutcome.Failure(
@@ -845,6 +872,104 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
                 $"Adding the acct optional claim to application {appObjectId} failed: Graph ODataError " +
                 $"{ex.ResponseStatusCode}: {ex.Error?.Code} {ex.Error?.Message ?? ex.Message}. " +
                 $"[{EntraAppRegRejectionCodes.AcctClaimFailed}]");
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // `removeUnverifiedEmailClaim` (task 264) — see file header
+    // ---------------------------------------------------------------------
+
+    /// <summary>
+    /// The <c>authenticationBehaviors</c> to PATCH so the registration strips unverified-domain emails from its tokens, or
+    /// null when it already does. Graph replaces the whole complex type, so the plan carries the other two values over
+    /// unchanged. They are COPIED into a new object: a model read from Graph is not re-serialised whole when reused in a
+    /// PATCH body (the SDK's backing store sends only changed values) — the same reason <see cref="PlanAcctOptionalClaim"/> copies.
+    /// An unset value is not assigned, so the body carries no explicit null for it (as <see cref="PlanClientAccess"/>).
+    /// </summary>
+    internal static AuthenticationBehaviors? PlanRemoveUnverifiedEmailClaim(AuthenticationBehaviors? current)
+    {
+        if (current?.RemoveUnverifiedEmailClaim == true)
+        {
+            return null;
+        }
+
+        var plan = new AuthenticationBehaviors { RemoveUnverifiedEmailClaim = true };
+        if (current?.BlockAzureADGraphAccess is { } blockAzureAdGraphAccess)
+        {
+            plan.BlockAzureADGraphAccess = blockAzureAdGraphAccess;
+        }
+        if (current?.RequireClientServicePrincipal is { } requireClientServicePrincipal)
+        {
+            plan.RequireClientServicePrincipal = requireClientServicePrincipal;
+        }
+        return plan;
+    }
+
+    /// <summary>
+    /// Reads the app's <c>authenticationBehaviors</c> fresh, sets <c>removeUnverifiedEmailClaim</c> when it is not already
+    /// true (<see cref="PlanRemoveUnverifiedEmailClaim"/>), and reads it back. Idempotent: a registration that has it is
+    /// not written. Returns null on success or a Failure.
+    /// </summary>
+    private async Task<EntraAppRegOutcome?> EnsureRemoveUnverifiedEmailClaimAsync(
+        GraphServiceClient graph, string appObjectId, EntraAppRegRequest request, CancellationToken ct)
+    {
+        try
+        {
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeoutCts.CancelAfter(_options.GraphRequestTimeout);
+
+            var current = await RetryWhileReplicatingAsync(
+                attemptCt => graph.Applications[appObjectId]
+                    .GetAsync(rc => rc.QueryParameters.Select = ["id", "appId", "authenticationBehaviors"], attemptCt),
+                IsNotYetReplicated, "authenticationBehaviors read", ct).ConfigureAwait(false);
+            if (current is null)
+            {
+                return new EntraAppRegOutcome.Failure(
+                    $"Graph GET /applications/{appObjectId} returned nothing. [{EntraAppRegRejectionCodes.UnverifiedEmailClaimFailed}]");
+            }
+
+            var plan = PlanRemoveUnverifiedEmailClaim(current.AuthenticationBehaviors);
+            if (plan is null)
+            {
+                return null;
+            }
+
+            await graph.Applications[appObjectId].PatchAsync(new Application { AuthenticationBehaviors = plan }, cancellationToken: timeoutCts.Token)
+                .ConfigureAwait(false);
+
+            // A write we did not observe is not a write we can report. Entra replicates writes, so a read straight after
+            // the PATCH may be stale: retry before calling it a failure.
+            for (var attempt = 1; ; attempt++)
+            {
+                using var readCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                readCts.CancelAfter(_options.GraphRequestTimeout);
+                var after = await graph.Applications[appObjectId]
+                    .GetAsync(rc => rc.QueryParameters.Select = ["id", "authenticationBehaviors"], readCts.Token)
+                    .ConfigureAwait(false);
+                if (PlanRemoveUnverifiedEmailClaim(after?.AuthenticationBehaviors) is null)
+                {
+                    break;
+                }
+                if (attempt >= _options.RoleAssignmentRetryCount)
+                {
+                    return new EntraAppRegOutcome.Failure(
+                        $"authenticationBehaviors.removeUnverifiedEmailClaim was written to application {current.AppId} but is " +
+                        $"not true when read back ({attempt} reads). Resume H3. [{EntraAppRegRejectionCodes.UnverifiedEmailClaimFailed}]");
+                }
+                await Task.Delay(_options.RoleAssignmentRetryDelay, ct).ConfigureAwait(false);
+            }
+
+            _logger.LogInformation(
+                "H3 set removeUnverifiedEmailClaim: customerId={CustomerId} appId={AppId}",
+                request.CustomerId, current.AppId);
+            return null;
+        }
+        catch (ODataError ex)
+        {
+            return new EntraAppRegOutcome.Failure(
+                $"Setting authenticationBehaviors.removeUnverifiedEmailClaim on application {appObjectId} failed: Graph " +
+                $"ODataError {ex.ResponseStatusCode}: {ex.Error?.Code} {ex.Error?.Message ?? ex.Message}. " +
+                $"[{EntraAppRegRejectionCodes.UnverifiedEmailClaimFailed}]");
         }
     }
 
@@ -1039,25 +1164,76 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
     // ---------------------------------------------------------------------
 
     /// <summary>Ensures the app's service principal exists and returns its object id.</summary>
-    private async Task<string> EnsureServicePrincipalAsync(GraphServiceClient graph, string appId, CancellationToken ct)
+    private Task<string> EnsureServicePrincipalAsync(GraphServiceClient graph, string appId, CancellationToken ct)
+        // T186 L26: a service principal for an app created moments ago is refused until the app replicates
+        // (400 "...does not reference a valid application object"). Each attempt re-reads first, so a POST that
+        // landed but timed out is found rather than created twice.
+        => RetryWhileReplicatingAsync(
+            async attemptCt =>
+            {
+                var existing = await graph.ServicePrincipals.GetAsync(rc =>
+                {
+                    rc.QueryParameters.Filter = $"appId eq '{EscapeODataLiteral(appId)}'";
+                }, attemptCt).ConfigureAwait(false);
+
+                var found = existing?.Value?.FirstOrDefault()?.Id;
+                if (!string.IsNullOrWhiteSpace(found))
+                {
+                    return found;
+                }
+
+                var created = await graph.ServicePrincipals.PostAsync(new ServicePrincipal { AppId = appId },
+                    cancellationToken: attemptCt).ConfigureAwait(false);
+                return created?.Id
+                    ?? throw new InvalidOperationException($"Graph POST /servicePrincipals returned no id for app '{appId}'.");
+            },
+            IsNotYetReplicated, "service principal ensure", ct);
+
+    /// <summary>
+    /// T186 L26: Graph's answer for an object created moments ago that has not replicated to the replica serving the
+    /// request — 404 Request_ResourceNotFound by id, or 400 when a service principal names the new appId.
+    /// </summary>
+    internal static bool IsNotYetReplicated(ODataError ex) =>
+        ex.ResponseStatusCode == 404
+        || (ex.ResponseStatusCode == 400
+            && (ex.Error?.Message ?? ex.Message).Contains("does not reference a valid application object", StringComparison.OrdinalIgnoreCase));
+
+    private Task<T> RetryWhileReplicatingAsync<T>(
+        Func<CancellationToken, Task<T>> call, Func<ODataError, bool> isTransient, string operation, CancellationToken ct)
+        => RetryWhileReplicatingAsync(call, isTransient, _options.RoleAssignmentRetryCount, _options.RoleAssignmentRetryDelay,
+            _options.GraphRequestTimeout, _logger, operation, ct);
+
+    /// <summary>
+    /// Runs <paramref name="call"/> (each attempt under its own <paramref name="attemptTimeout"/>), retrying up to
+    /// <paramref name="attempts"/> times while <paramref name="isTransient"/> says Graph has not caught up. The last
+    /// error, and any other error, propagates. Internal static for tests.
+    /// </summary>
+    internal static async Task<T> RetryWhileReplicatingAsync<T>(
+        Func<CancellationToken, Task<T>> call,
+        Func<ODataError, bool> isTransient,
+        int attempts,
+        TimeSpan delay,
+        TimeSpan attemptTimeout,
+        ILogger logger,
+        string operation,
+        CancellationToken ct)
     {
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(_options.GraphRequestTimeout);
-        var existing = await graph.ServicePrincipals.GetAsync(rc =>
+        for (var attempt = 1; ; attempt++)
         {
-            rc.QueryParameters.Filter = $"appId eq '{EscapeODataLiteral(appId)}'";
-        }, timeoutCts.Token).ConfigureAwait(false);
-
-        var found = existing?.Value?.FirstOrDefault()?.Id;
-        if (!string.IsNullOrWhiteSpace(found))
-        {
-            return found;
+            using var attemptCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            attemptCts.CancelAfter(attemptTimeout);
+            try
+            {
+                return await call(attemptCts.Token).ConfigureAwait(false);
+            }
+            catch (ODataError ex) when (attempt < attempts && isTransient(ex))
+            {
+                logger.LogInformation(
+                    "H3 {Operation} attempt {Attempt}/{Max} got Graph {Status} — the new object has not replicated yet; " +
+                    "retrying in {Delay}.", operation, attempt, attempts, ex.ResponseStatusCode, delay);
+                await Task.Delay(delay, ct).ConfigureAwait(false);
+            }
         }
-
-        var created = await graph.ServicePrincipals.PostAsync(new ServicePrincipal { AppId = appId },
-            cancellationToken: timeoutCts.Token).ConfigureAwait(false);
-        return created?.Id
-            ?? throw new InvalidOperationException($"Graph POST /servicePrincipals returned no id for app '{appId}'.");
     }
 
     private async Task<string> EnsureClientSecretAsync(GraphServiceClient graph, Application app, CancellationToken ct)
@@ -1256,21 +1432,19 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
     }
 
     /// <summary>
-    /// Ensures the registration carries every credential in <paramref name="specs"/>
-    /// (<see cref="PlanFederatedCredentials"/>), then performs an INDEPENDENT re-GET (never trusting the write call's own
-    /// echoed response) to confirm they persisted exactly as planned — see GOTCHA 2 in the file header for why a literal
-    /// OAuth2 exchange is not something L2 can perform for the stamp UAMI here (the Worker credential's first exchange is
-    /// H6's first token request). Returns null on success (the caller reports
-    /// <see cref="FicVerificationState.PendingPostAppServiceVerification"/> — the script exit-2 equivalent, NEVER
-    /// terminal success per SF-8), or a Failure outcome to propagate. The cross-tenant guard (SF-5) ran when the specs
-    /// were built, before any Graph call.
+    /// T186 L27: Graph's answer to a credential write it has not caught up with — 404 on the app, or 400 "duplicate
+    /// values" for a triple that is not in fact present (the plan re-read the collection before writing).
     /// </summary>
-    private async Task<EntraAppRegOutcome?> EnsureFederatedIdentityCredentialsAsync(
+    internal static bool IsFicWriteNotYetConsistent(ODataError ex) =>
+        ex.ResponseStatusCode == 404
+        || (ex.ResponseStatusCode == 400
+            && (ex.Error?.Message ?? ex.Message).Contains("duplicate values", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>One read → plan → delete/create pass (<see cref="PlanFederatedCredentials"/>); null, or a Failure.</summary>
+    private async Task<EntraAppRegOutcome?> ReconcileFederatedCredentialsOnceAsync(
         GraphServiceClient graph, string appObjectId, IReadOnlyList<FicSpec> specs, EntraAppRegRequest request,
         CancellationToken ct)
     {
-        try
-        {
             FederatedIdentityCredentialCollectionResponse? existing;
             using (var readCts = CancellationTokenSource.CreateLinkedTokenSource(ct))
             {
@@ -1315,6 +1489,37 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
                 _logger.LogInformation(
                     "H3 created FIC '{FicName}' (subject {Subject}) on appObjectId={AppObjectId} customerId={CustomerId}",
                     spec.Name, spec.Subject, appObjectId, request.CustomerId);
+            }
+
+            return null;
+        }
+
+    /// <summary>
+    /// Ensures the registration carries every credential in <paramref name="specs"/>
+    /// (<see cref="PlanFederatedCredentials"/>), then performs an INDEPENDENT re-GET (never trusting the write call's own
+    /// echoed response) to confirm they persisted exactly as planned — see GOTCHA 2 in the file header for why a literal
+    /// OAuth2 exchange is not something L2 can perform for the stamp UAMI here (the Worker credential's first exchange is
+    /// H6's first token request). Returns null on success (the caller reports
+    /// <see cref="FicVerificationState.PendingPostAppServiceVerification"/> — the script exit-2 equivalent, NEVER
+    /// terminal success per SF-8), or a Failure outcome to propagate. The cross-tenant guard (SF-5) ran when the specs
+    /// were built, before any Graph call.
+    /// </summary>
+    private async Task<EntraAppRegOutcome?> EnsureFederatedIdentityCredentialsAsync(
+        GraphServiceClient graph, string appObjectId, IReadOnlyList<FicSpec> specs, EntraAppRegRequest request,
+        CancellationToken ct)
+    {
+        try
+        {
+            // T186 L26/L27: a credential write straight after the app's creation, or straight after another
+            // credential write on the same app, can be refused while Graph replicates (404, or 400 "Request contains a
+            // property with duplicate values" — the first live H3 got the latter creating its second credential).
+            // Each attempt re-reads and re-plans, so a write that did land is never repeated.
+            var reconcileFailure = await RetryWhileReplicatingAsync(
+                attemptCt => ReconcileFederatedCredentialsOnceAsync(graph, appObjectId, specs, request, attemptCt),
+                IsFicWriteNotYetConsistent, "federated credential reconcile", ct).ConfigureAwait(false);
+            if (reconcileFailure is not null)
+            {
+                return reconcileFailure;
             }
         }
         catch (ODataError ex)
@@ -1437,29 +1642,85 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
             return null;
         }
 
-        try
-        {
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeoutCts.CancelAfter(_options.KvOperationTimeout);
+        // Group by vault so a (hypothetical) multi-vault pending set only
+        // constructs one SecretClient per vault.
+        var clients = pendingWrites
+            .Select(w => w.VaultName)
+            .Distinct(StringComparer.Ordinal)
+            .ToDictionary(v => v, v => new SecretClient(new Uri($"https://{v}.vault.azure.net/"), _sharedCredential), StringComparer.Ordinal);
 
-            // Group by vault so a (hypothetical) multi-vault pending set only
-            // constructs one SecretClient per vault.
-            foreach (var group in pendingWrites.GroupBy(w => w.VaultName, StringComparer.Ordinal))
-            {
-                var vaultUri = new Uri($"https://{group.Key}.vault.azure.net/");
-                var client = new SecretClient(vaultUri, _sharedCredential);
-                foreach (var write in group)
-                {
-                    await client.SetSecretAsync(write.SecretName, write.Value, timeoutCts.Token).ConfigureAwait(false);
-                }
-            }
-            return null;
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            return $"KV commit failed: {ex.GetType().Name}: {ex.Message}";
-        }
+        return await CommitWithRetryAsync(
+            pendingWrites,
+            (write, ct) => clients[write.VaultName].SetSecretAsync(write.SecretName, write.Value, ct),
+            _options.KvCommitRetryCount, _options.KvCommitRetryDelay, _options.KvOperationTimeout,
+            _logger, cancellationToken).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// T186 audit: writes each pending secret with its own timeout and retries what is transient — Key Vault 403
+    /// while the control plane's Secrets Officer grant propagates (L24), 408/429/5xx, a transport failure, or the
+    /// attempt timing out. A Set is idempotent (same name, same value), so a retry never leaves a different state.
+    /// Returns null on success, else the diagnostic of the last failure. The caller's cancellation still throws.
+    /// </summary>
+    internal static async Task<string?> CommitWithRetryAsync(
+        IReadOnlyList<PendingKvSecretWrite> pendingWrites,
+        Func<PendingKvSecretWrite, CancellationToken, Task> write,
+        int attempts,
+        TimeSpan delay,
+        TimeSpan attemptTimeout,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        foreach (var pending in pendingWrites)
+        {
+            for (var attempt = 1; ; attempt++)
+            {
+                using var attemptCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                attemptCts.CancelAfter(attemptTimeout);
+                string failure;
+                try
+                {
+                    await write(pending, attemptCts.Token).ConfigureAwait(false);
+                    break;
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (OperationCanceledException)
+                {
+                    failure = $"KV commit of '{pending.SecretName}' timed out after {(int)attemptTimeout.TotalSeconds}s";
+                }
+                catch (Azure.RequestFailedException ex) when (IsTransientKvStatus(ex.Status))
+                {
+                    failure = $"KV commit of '{pending.SecretName}' failed: RequestFailedException {ex.Status}: {ex.Message}";
+                }
+                catch (HttpRequestException ex)
+                {
+                    failure = $"KV commit of '{pending.SecretName}' failed: HttpRequestException: {ex.Message}";
+                }
+                catch (Exception ex)
+                {
+                    return $"KV commit failed: {ex.GetType().Name}: {ex.Message}";
+                }
+
+                if (attempt >= attempts)
+                {
+                    return $"{failure} (after {attempts} attempts)";
+                }
+
+                logger.LogInformation(
+                    "H3 KV commit attempt {Attempt}/{Max} for {SecretName}: {Failure} — retrying in {Delay}.",
+                    attempt, attempts, pending.SecretName, failure, delay);
+                await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>0 = no response (transport); 403 = RBAC grant still propagating; 408/429/5xx = transient service.</summary>
+    internal static bool IsTransientKvStatus(int status) => status is 0 or 403 or 408 or 429 or >= 500;
 
     // ---------------------------------------------------------------------
     // Helpers

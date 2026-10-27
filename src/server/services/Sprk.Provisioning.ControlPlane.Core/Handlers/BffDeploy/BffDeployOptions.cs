@@ -84,10 +84,12 @@ public sealed class BffDeployOptions
     public TimeSpan SlotSwapTimeout { get; set; } = TimeSpan.FromMinutes(10);
 
     /// <summary>
-    /// Post-swap production /health probe retry count. Defaults to 24 (matches
-    /// Deploy-BffApi.ps1's <c>MaxHealthCheckRetries</c> default).
+    /// Staging and post-swap production /health probe retry count. Defaults to 120 so that
+    /// <c>HealthProbeMaxRetries × HealthProbeInterval</c> (10 min, even when every request fails fast)
+    /// covers the stamp's <c>WEBSITES_CONTAINER_START_TIME_LIMIT</c> (600 s, customer.bicep).
+    /// T186 L48: 24 (the Deploy-BffApi.ps1 default) gave 2–6 min, and the BFF needed ~220 s to start on S1.
     /// </summary>
-    public int HealthProbeMaxRetries { get; set; } = 24;
+    public int HealthProbeMaxRetries { get; set; } = 120;
 
     /// <summary>
     /// Interval between /health probe retries. Defaults to 5 s (matches
@@ -120,7 +122,7 @@ public sealed class BffDeployOptions
     /// <summary>
     /// Base URI of the `provisioning-artifacts` blob container (e.g.
     /// <c>https://{account}.blob.core.windows.net/provisioning-artifacts</c>).
-    /// Same underlying container task 116's <c>deploy-bff-api.yml</c> +
+    /// Same underlying container <c>publish-bff-artifact.yml</c> (T186 L42; task 116 had it in deploy-bff-api.yml) +
     /// task 117's <c>publish-provisioning-arm-artifacts.yml</c> both push to
     /// — naming matches <c>BicepInfraDeployOptions.ProvisioningArtifactsContainerUri</c>
     /// EXACTLY. Required — <see cref="Validate"/> throws if blank.
@@ -130,8 +132,8 @@ public sealed class BffDeployOptions
     /// <summary>
     /// Blob name of task 116's manifest — the mutable "latest" pointer
     /// <see cref="ArtifactManifestVerifier"/> reads. Defaults to
-    /// <c>latest.json</c> (matches <c>deploy-bff-api.yml</c>'s "Generate +
-    /// push latest.json manifest" step exactly).
+    /// <c>latest.json</c> (matches <c>publish-bff-artifact.yml</c>'s "Publish
+    /// (zip, versioned manifest, previous pointer, latest)" step exactly).
     /// </summary>
     public string ArtifactManifestBlobName { get; set; } = "latest.json";
 
@@ -145,12 +147,15 @@ public sealed class BffDeployOptions
         = Path.Combine(AppContext.BaseDirectory, "deploy", "bff-artifacts");
 
     /// <summary>
-    /// Maximum time to wait for a single Kudu zip-deploy POST to complete
-    /// (synchronous — no <c>?isAsync=true</c> polling). Defaults to 15
-    /// minutes; a zip-deploy of a ~45 MB linux-x64 publish typically
-    /// completes in 1-3 minutes, the ceiling absorbs cold Kudu instances.
+    /// Maximum time for one Kudu zip-deploy: the async POST plus the
+    /// deployment-status poll (T186 L45). Defaults to 15 minutes; a
+    /// zip-deploy of a ~45 MB linux-x64 publish typically completes in 1-3
+    /// minutes, the ceiling absorbs cold Kudu instances.
     /// </summary>
     public TimeSpan KuduZipDeployTimeout { get; set; } = TimeSpan.FromMinutes(15);
+
+    /// <summary>Interval between Kudu deployment-status polls after the async zip-deploy POST (T186 L45).</summary>
+    public TimeSpan KuduDeploymentPollInterval { get; set; } = TimeSpan.FromSeconds(10);
 
     /// <summary>
     /// Validates the task-132 additions that have no safe default (per this

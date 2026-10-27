@@ -7,6 +7,16 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-27 — `project-spend-update`: invoiced actuals and `AI Cost (allocated)`
+
+The board carried only the list-price estimate. The owner's invoices (Max plan fee plus credit purchases, typed in by hand: a Max plan has no export) show what was paid: about 0.58 of the estimate over the cycles the archive fully covers.
+
+- **`scripts/ai-cost/spend-report.py --actuals`** (new): reads `%USERPROFILE%\.claude\spend-archive\invoices.csv` (outside the repo) against the archive. By month with year to date, by billing cycle with actual / estimate, an effective rate over fully covered cycles, and each cycle's invoices allocated to projects by their share of its estimate. Ratios are per cycle only, because credits are prepaid.
+- **`update-board-spend.py`** writes the allocation to the new board field **`AI Cost (allocated)`**, as computed (both inputs are durable).
+- **Skill**: `project-spend-update` Step 6 (how to enter invoices from the owner's screenshots), Step 1 item 6, the "does NOT do" list. `scripts/ai-cost/README.md` "Invoiced actuals".
+- **Controls**: `scripts/ai-cost/tests/test_actuals.py` (parsing and refusals, cycles, months, coverage, allocation conserves every invoiced dollar, effective rate, CLI) and a board-write test in `test_update_board_spend.py`.
+
+---
 ###### 2026-10-16 — Context-checkpoint hooks: prompt `/context-handoff` before auto-compaction
 
 With `autoCompactWindow: 400000` (agent-cost rule 6), compaction comes sooner, so a missed checkpoint costs more. Claude cannot see its own context usage, and the only trigger was prose ("when the user or harness reports it is high").

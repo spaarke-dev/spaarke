@@ -592,12 +592,16 @@ public class RecordOwnerAssignmentCensusTests
             "out of isolation whose mirrored shares could not all be removed (back on the Secure team, so no later pass reads " +
             "it as never isolated), or a row the pass pulled into isolation whose support then left (back on its ordinary " +
             "owner); read back."),
-        new OwnerWriteEntry("SecureChildReconciler.cs", "ReownOrdinaryRowAsync", 1, OwnerWriteKind.OrdinaryReown,
+        // UAC task 194: the write moved, unchanged, into the member both entry points share (ReownOrdinaryRowAsync forwards to
+        // it with its two-table contract; the reconciler's ordinary-parent-move pass calls it for any lineage child).
+        new OwnerWriteEntry("SecureChildReconciler.cs", "ReownOrdinaryRowCoreAsync", 1, OwnerWriteKind.OrdinaryReown,
             "UAC task 183 (owner round 96, D-135 item 2): an ORDINARY sprk_decisionrecord or sprk_signal re-owned to the ordinary " +
             "team ontology task 148's job names (the To Do's assignee's team) — refused when the row's owner, its business unit " +
             "or the team is in the Secure Record business unit, or the row is user-owned. The write is a conditional Web API PATCH " +
             "(If-Match on the guard read's versionnumber; a 412 is Conflict, a 404 NotFound) that shares the pass's evict and " +
-            "read-back (WriteOwnerAndReadBackAsync). No identity gains Write on a Decision Record."),
+            "read-back (WriteOwnerAndReadBackAsync). No identity gains Write on a Decision Record. UAC task 194 (#2339): the same " +
+            "member re-owns a default-team-owned lineage child of a reassigned ORDINARY record to the team IRecordOwnershipResolver " +
+            "answers for it (ReconcileOrdinaryParentMoveAsync), behind the same guards."),
         // The Office quick-create of a MATTER or PROJECT (a root) writes its owner through the unified create below
         // (RecordCreationService.cs: OwnedCreateFields, IsolatedCreateFields) since field mapping task 018; task 018c deleted
         // the Office creation core and its three owner writes (CreateMatterAsync, CreateProjectAsync, IsolateProjectCreate).

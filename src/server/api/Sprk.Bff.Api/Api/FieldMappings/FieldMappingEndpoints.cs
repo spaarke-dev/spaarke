@@ -800,11 +800,11 @@ public static class FieldMappingEndpoints
     /// <remarks>
     /// Reuses, does not fork: the entity set comes from <see cref="EntityAccessFilter.TryResolveEntitySet"/> (a miss
     /// denies — a type whose per-record access cannot be evaluated is a type this route must not push from), the
-    /// rights from <see cref="CallerRecordAccessProbe.GetCallerRightsAsync"/> under the existing <c>"read"</c> key,
+    /// rights from <see cref="CallerRecordAccessProbe.GetCallerRightsForAuthorizationGateAsync"/> under the existing <c>"read"</c> key,
     /// and the identity from <see cref="CallerRecordAccessProbe.GetCallerSystemUserIdAsync"/> (WhoAmI on the caller's
     /// own token — the one identity path that cannot be fooled). The try covers the decision only.
     /// </remarks>
-    private static async Task<Guid?> AuthorizePushSourceAsync(
+    internal static async Task<Guid?> AuthorizePushSourceAsync(
         PushFieldMappingsRequest request,
         CallerRecordAccessProbe probe,
         HttpContext httpContext,
@@ -822,7 +822,7 @@ public static class FieldMappingEndpoints
         var token = TokenHelper.ExtractBearerTokenOrNull(httpContext);
         try
         {
-            var rights = await probe.GetCallerRightsAsync(token, sourceEntitySet, request.SourceRecordId, ct);
+            var rights = await probe.GetCallerRightsForAuthorizationGateAsync(token, sourceEntitySet, request.SourceRecordId, ct);
             if (!OperationAccessPolicy.HasRequiredRights(rights, ReadOperation))
             {
                 logger.LogWarning(

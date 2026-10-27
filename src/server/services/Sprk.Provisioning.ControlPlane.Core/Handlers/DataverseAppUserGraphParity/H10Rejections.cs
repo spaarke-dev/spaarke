@@ -81,6 +81,13 @@ public static class H10Rejections
     public const string TrapT2VerificationFailed = "h10-trap-T2-verification-failed";
 
     /// <summary>
+    /// T186 audit: the T2 re-query of <c>systemusers</c> could not be completed — Dataverse kept answering 429 / 5xx, timing
+    /// out or dropping the connection after the bounded retries. Resumable: no verdict was reached and the registration
+    /// is idempotent. Distinct from <see cref="TrapT2VerificationFailed"/>, which is a real count != 1.
+    /// </summary>
+    public const string AppUserUnverified = "h10-app-user-unverified";
+
+    /// <summary>
     /// One or more Graph app-role grant calls failed. RetryableWithCleanup —
     /// grants are individually idempotent (re-POSTing an existing assignment
     /// is a safe no-op per Grant-GraphAppRoles.ps1's delta-apply design); a
@@ -99,6 +106,13 @@ public static class H10Rejections
     /// blind retry.
     /// </summary>
     public const string TrapT3VerificationFailed = "h10-trap-T3-verification-failed";
+
+    /// <summary>
+    /// T186 audit: the T3 re-read of the UAMI SP's <c>appRoleAssignments</c> could not be completed — Microsoft Graph kept
+    /// answering 429 / 5xx, timing out or dropping the connection after the bounded retries. Resumable: no verdict was
+    /// reached, so nothing points at a wrong GUID. Distinct from <see cref="TrapT3VerificationFailed"/>.
+    /// </summary>
+    public const string GraphRoleParityUnverified = "h10-graph-role-parity-unverified";
 
     // ---- Task 261 (G31, owner 2026-10-09): the stamp identity holds exactly the evidence-backed role set ----
 

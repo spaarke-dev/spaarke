@@ -221,7 +221,8 @@ public sealed class DataverseWebApiAppUserCreatorTests
         });
 
     private static DataverseWebApiAppUserCreator Creator(FakeHttp http)
-        => new(new HttpClient(http), Options.Create(new H10DataverseAppUserGraphParityOptions()),
+        // T186 audit: the role-copy lookup waits while Dataverse copies roles into a new unit — inject a tiny delay.
+        => new(new HttpClient(http), Options.Create(new H10DataverseAppUserGraphParityOptions { PropagationRetryDelay = TimeSpan.FromMilliseconds(1) }),
             NullLogger<DataverseWebApiAppUserCreator>.Instance, _ => new FakeCredential());
 
     private static HttpResponseMessage Json(string body)

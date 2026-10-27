@@ -456,7 +456,7 @@ public sealed class ArmDeploymentRunner : IBicepDeployRunner
     [
         "userAssignedIdentityResourceId", "userAssignedIdentityObjectId", "userAssignedIdentityClientId",
         "appServiceName", "appServiceStagingSlotName", "openAiEndpoint", "aiSearchEndpoint", "cosmosAccountEndpoint",
-        "keyVaultName", "keyVaultUri", "serviceBusEndpoint", "redisEndpoint", "contentSafetyEndpoint",
+        "keyVaultName", "keyVaultUri", "serviceBusEndpoint", "redisEndpoint", "contentSafetyEndpoint", "storagePrimaryEndpoint",
     ];
 
     /// <summary>
@@ -522,6 +522,7 @@ public sealed class ArmDeploymentRunner : IBicepDeployRunner
                 : string.Empty,
             RedisEndpoint = hasRoot ? ReadString(root, "redisEndpoint") : string.Empty,
             ContentSafetyEndpoint = hasRoot ? ReadString(root, "contentSafetyEndpoint") : string.Empty,
+            StorageBlobEndpoint = hasRoot ? ReadString(root, "storagePrimaryEndpoint") : string.Empty,
             SignalRDeployed = hasRoot && ReadBool(root, "signalrEnabled"),
         };
     }
