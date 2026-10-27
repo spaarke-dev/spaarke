@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="195" project="unified-access-control-r2">
+  <metadata>
+    <title>A project associated with a matter is filed under it through the regarding pair: one root per project (#2352 (i) + (ii))</title>
+    <phase>Session 28: UAC (#2352, owner choice (a), 2026-10-27)</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes which parent a core record is filed under, which the access model reads (I-6, secure-if-any); .cs + .tsx; access-control.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>A server-side filing invariant on a core record, with Secure-inheritance and ownership consequences, plus a data backfill.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches RecordOwnershipResolver / SecureRootInheritance, which task 194b (fix/uac-194b-ownership-primary) is changing. Start after 194b merges.</parallel-reason>
+    <deps>194b merged</deps>
+    <tags>bff-api, access-control, dataverse, react, testing</tags>
+    <estimated-effort>2 days</estimated-effort>
+    <origin>
+      GitHub #2352 (field-mapping-r1). The owner chose option (a) on 2026-10-27: the regarding pair (`sprk_regardingrecordid` + `sprk_regardingrecordtype`) is the project's ONE filing root, and the Project ↔ Matter N:N (`sprk_Project_Matter_nn`) stays an association that confers nothing. UAC owns (i) the wizard write and (ii) the dev backfill. Field-mapping owns (iii): the W7 registry models the pair as the Matter → Project filing edge, and push (040) accepts a pair edge (field-mapping design.md §12.10). W7 and 040 depend on this task.
+    </origin>
+  </metadata>
+
+  <goal>
+When a project is associated with a matter in either wizard, the SERVER files the project under that matter by writing the regarding pair, read back. A project has at most one filing root. The 7 existing dev projects are backfilled from their single N:N row. The access model (SecureRootInheritance, RecordOwnershipResolver) and W7 then read the same edge.
+  </goal>
+
+  <component-justification>
+    1. Existing: `SecureRootInheritance` already keys on the project's pair (~:303-311). The BFF child-record re-file route (`PATCH /api/v1/child-records/{table}/{id}`, used by CreateMatterWizard via `withBffChildWrites`, UAC task 147) already performs a server-side re-file with ownership. CreateProjectWizard.tsx :62/:746 writes only the N:N.
+    2. Extension: extend the existing server-side re-file path (or the project create path, whichever already owns project writes) to accept the matter pair for `sprk_project`. No new table, no new column, no new route unless the existing route cannot carry it; if a route is needed, say why in two sentences.
+    3. Cost of doing nothing: the access model and W7 read the pair; the wizards never write it, so every wizard-associated project has no filing root and is decided as unfiled.
+  </component-justification>
+
+  <steps mode="directional">
+    1. Design note first (`notes/task-195-project-filing-root.md`), owner checkpoint before code:
+       - Which server path writes the pair (extend the existing one; I-2, one server-side owner, wizards preview only; never Xrm.WebApi for the pair).
+       - What filing changes for the project: its ownership under I-6 and its secure-if-any answer. Use the existing reconciler and Make Secure paths; never release a row from isolation.
+       - One root: a second matter, or a pair naming another record, is refused with a named 409 code; nothing written. Re-filing to another matter is the existing re-file semantics, or out of scope (state which).
+    2. Server: implement the write with If-Match and read-back; the previous pair is logged.
+    3. Clients: CreateProjectWizard (association = matter) and CreateMatterWizard (association = an existing project) call the server path. The N:N association is still written as today. A failure is a visible warning, not a silent skip.
+    4. Backfill (ii): a script under scripts/ (report-only by default) lists each project with exactly one N:N matter row and no pair, and writes the pair through the same server rule. It reports and skips projects with more than one N:N row or an existing pair. -Apply needs the owner's go in this session.
+    5. Tests:
+       - must-fire: a wizard association writes the pair; the backfill sets it.
+       - must-not-fire: a second root is refused; an account association writes no pair; an unreadable project fails closed.
+       - Perturbation-check the must-fire tests.
+    6. Gates: build with 0 warnings, ArchTests, the filtered unit tests, both integration suites in full, jest for Spaarke.UI.Components, and the publish delta. PR, merge with both checks green, deploy via R3 (owner go), server gate, then the backfill (owner go).
+  </steps>
+
+  <acceptance-criteria>
+    - A project associated with a matter in either wizard has its pair set to that matter, read back, written by the server.
+    - A project never has two filing roots: the second is refused with a named code, and nothing is written.
+    - The 7 dev projects have their pair set (report, then apply with the owner's go); any skipped ones are listed with the reason.
+    - Field-mapping is told the merge sha (W7 and 040 depend on it).
+    - Negative: no plugin, no new column, no change to the N:N, and no client-side write of the pair.
+  </acceptance-criteria>
+
+  <constraints>
+    - CLAUDE.md §9-§11, §10 (publish delta); ADR-002; I-2 and I-6 (DATAVERSE-WRITE-PATH-ARCHITECTURE.md).
+    - Never release a row from isolation; security fails closed.
+    - Public repo: notes and PR text describe the filing rule only.
+  </constraints>
+</task>
