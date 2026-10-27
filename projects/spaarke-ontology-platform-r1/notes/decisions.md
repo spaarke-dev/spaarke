@@ -284,5 +284,9 @@ Sources: **design** = [`design.md`](../design.md) §8 (D-1..D-12, §8.0c) and §
   - the response describes the walk from an anchor, with an optional root;
   - members carry `kind` and `edgeKind`;
   - edge TYPES stay in code (parity-ratcheted), edge INSTANCES of a future peer kind live in Dataverse.
-- **Open:** the owner recalls an earlier "family component" discussion. None is written in ontology R1/R2 or on master; project-coordination, unified-access-control-r2 and ebilling were asked on 2026-10-27, and any answer is folded in here.
-
+- **Earlier discussion (found 2026-10-27, unified-access-control-r2):** the "family table" the owner remembers is UAC's Secure family.
+  - Round 94 (2026-10-12): the owner directed a `sprk_securefamily` table with a single-membership lookup on every family table.
+  - Round 100b (2026-10-14): an owner team per family was decided, conditional on platform spikes 2–7. It is NOT BUILT and needs its own task or project.
+  - `projects/unified-access-control-r2/notes/secure-family-design-research-2026-10-12.md` §8 leaves an owner choice open: keep it secure-only, or generalise it to a record family for every core root, with a secure flag. That choice is still the owner's. Either way it is a materialisation of the Filing kind, so D-191 holds.
+  - ebilling has nothing (its "invoice family" is a table group). project-coordination's session held the question undelivered.
+- **Access rule (from uac-r2):** Secure-family membership comes only from Filing edges; a peer kind never confers it, crosses it, or carries actions across it.
