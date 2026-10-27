@@ -100,7 +100,15 @@ namespace Sprk.Bff.Api.Services.Access;
 /// row is never written. Its listing, watermark and carried rows are its own, so its faults never hold the secure pass's
 /// window (#1378). Reported in <c>ResultJson.accessPermission</c>; a listing fault or a failed write makes the run
 /// unsuccessful.</para>
-/// <para><b>ADR-036 A1.</b> Rule 3: the unit of work is one root's pass, idempotent and read back, so no claim marker is
+/// <para><b>Ordinary parent moves (UAC task 194, #2339; rule I-6).</b> After the secure work and before the file passes,
+/// each run lists the ORDINARY projects, matters and work assignments modified since this pass's own watermark (an MDA Assign
+/// changes the record's <c>modifiedon</c>) and moves every child a business unit's default team owns to the owner the rule
+/// gives it now (<see cref="SecureChildReconciler.ReconcileOrdinaryParentMoveAsync"/>). It never touches a row owned in the
+/// Secure Record business unit and never moves a row into or out of isolation; user-owned rows are reported, not moved. A
+/// re-owned document's file follows through the re-file pass below in the same run. Report-only unless
+/// <see cref="OrdinaryMovesWritesEnabledConfigKey"/> is <c>true</c>; capped by <see cref="MaxRootsPerRunConfigKey"/> and
+/// <see cref="MaxOrdinaryMovesPerRunConfigKey"/>. Reported in <c>ResultJson.ordinaryMoves</c>.</para>
+/// /// <para><b>ADR-036 A1.</b> Rule 3: the unit of work is one root's pass, idempotent and read back, so no claim marker is
 /// needed. Rule 4: only a run that could not LIST the secure records throws (nothing was decided; a retry this tick can do
 /// the work); a run in which some roots are incomplete returns <c>Success = false</c> — the next run revisits them. Rule 5:
 /// one heartbeat per attempt. Rule 6: registered through <c>AddScheduledJob</c> in <c>ExternalAccessModule</c>.</para>
@@ -141,6 +149,19 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
     internal const string MaxRelocationsPerRunConfigKey = "SecureChild:Reconciliation:MaxRelocationsPerRun";
 
     internal const int DefaultMaxRelocationsPerRun = 25;
+
+    /// <summary>
+    /// UAC task 194 (#2339, owner round 128 item 3): the switch that turns the ORDINARY-PARENT-MOVE pass from report-only into
+    /// writes. Absent, empty or unparseable = report-only (it is an opt-in, set only after UAC reads a report-only run and the
+    /// owner gives the go). The recent-changes emergency stop (<see cref="RecentChangesWritesEnabledConfigKey"/> = false)
+    /// stops it too.
+    /// </summary>
+    internal const string OrdinaryMovesWritesEnabledConfigKey = "SecureChild:Reconciliation:OrdinaryMovesWritesEnabled";
+
+    /// <summary>UAC task 194: the most owner writes the ordinary-parent-move pass makes a run.</summary>
+    internal const string MaxOrdinaryMovesPerRunConfigKey = "SecureChild:Reconciliation:MaxOrdinaryMovesPerRun";
+
+    internal const int DefaultMaxOrdinaryMovesPerRun = 200;
 
     /// <summary>
     /// #2159 B2: the most documents the re-file pass EXAMINES (derives) a run — in place or not. The rest of its window waits
@@ -245,7 +266,8 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         "whose related records changed since the last run are reconciled first (task 147), with the records that " +
         "themselves changed (#1943). Report-only unless " +
         "SecureChild:Reconciliation:WritesEnabled is true. Also keeps the Access Permission of To Do, Event, " +
-        "Communication and Document equal to their parents' (task 173).";
+        "Communication and Document equal to their parents' (task 173). The children of an ordinary record reassigned to " +
+        "another owner follow it (task 194; report-only unless SecureChild:Reconciliation:OrdinaryMovesWritesEnabled is true).";
 
     /// <inheritdoc />
     public async Task<JobRunResult> ExecuteAsync(JobRunContext context, CancellationToken cancellationToken)
@@ -486,9 +508,15 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
             }
         }
 
+        // UAC task 194 (#2339): the ORDINARY-PARENT-MOVE pass — the children of an ordinary record reassigned to another owner
+        // follow it (I-6). After the secure work (it never touches an isolated row) and BEFORE the re-file pass, so a document
+        // it re-owns has its file moved by that pass in the same run. Its own switch (report-only by default), window and carry.
+        var ordinary = await ReconcileOrdinaryParentMovesAsync(
+            reconciler, dataverse, recentWrites, cap, startedAt, context.RunId, cancellationToken).ConfigureAwait(false);
+
         // Round 46 item 2: the Make Secure file backstop, after the children (each document's container derives from its
         // now-secure parents). Its writes follow the recent-changes pass.
-        var relocations = await SettleMakeSecureRelocationsAsync(scope.ServiceProvider, dataverse, recentWrites, cancellationToken)
+        var relocations =await SettleMakeSecureRelocationsAsync(scope.ServiceProvider, dataverse, recentWrites, cancellationToken)
             .ConfigureAwait(false);
 
 
@@ -570,7 +598,9 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         var success = incompleteRoots.Count == 0 && recent.Failure is null && recent.Undetermined.Count == 0
                       && relocations.Failure is null && (relocations.Files?.Incomplete ?? 0) == 0
                       && !refile.Incomplete
-                      && accessPermission.Run?.Failure is null && (accessPermission.Run?.Failed ?? 0) == 0;
+                      && accessPermission.Run?.Failure is null && (accessPermission.Run?.Failed ?? 0) == 0
+                      // UAC task 194: only a WRITING ordinary pass fails the run (report-only is the owner's reading).
+                      && !ordinary.FailsTheRun;
         int carriedRoots, carriedRows;
         bool catchUpComplete;
         (string Table, Guid Id)? catchUpResumeAfter;
@@ -614,6 +644,10 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                       : "") +
                   (accessPermission.Run is { } ap && (ap.Failure is not null || ap.Failed > 0)
                       ? $", and the inherited Access Permission pass {(ap.Failure ?? $"could not write {ap.Failed} row(s)")}"
+                      : "") +
+                  (ordinary.FailsTheRun
+                      ? $", {ordinary.IncompleteRoots.Count} reassigned ordinary record(s) whose children were not all moved" +
+                        (ordinary.Failure is null ? "" : $" ({ordinary.Failure})")
                       : "") +
                   "; the next run revisits them: " + string.Join("; ", problems),
             ProcessedItems: work.Count,
@@ -690,6 +724,35 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                         startPosition = catchUpRuns ? catchUpStart + 1 : (int?)null,
                         resumeAfter = catchUpResumeAfter is { } c ? $"{c.Table}:{c.Id:D}" : null,
                     },
+                },
+                // UAC task 194 (#2339): the ordinary-parent-move pass — the ordinary records reassigned since `since` whose
+                // default-team-owned children were moved (or, report-only, would be) to the owner the rule gives them now.
+                // `changes` lists moves, refusals, failures and the rows reported but not moved (user-owned, a non-default
+                // owner team, a Secure answer), at most MaxSampledChanges; the counts are complete.
+                ordinaryMoves = new
+                {
+                    mode = ordinary.Writes ? ModeWrite : ModeReportOnly,
+                    since = ordinary.Since.UtcDateTime,
+                    rootsListed = ordinary.RootsListed,
+                    rootsInRun = ordinary.RootsInRun,
+                    rootsOverflow = ordinary.RootsOverflow,
+                    retriedRoots = ordinary.RetriedRoots,
+                    examined = ordinary.Totals[0],
+                    alreadyCorrect = ordinary.Totals[1],
+                    moved = ordinary.Totals[2],
+                    wouldMove = ordinary.Totals[3],
+                    untouched = ordinary.Totals[4],
+                    refused = ordinary.Totals[5],
+                    failed = ordinary.Totals[6],
+                    reported = ordinary.Reported,
+                    writesAttempted = ordinary.WritesAttempted,
+                    capReached = ordinary.CapReached,
+                    incompleteRoots = ordinary.IncompleteRoots.Take(50).ToArray(),
+                    carriedRoots = ordinary.CarriedRoots,
+                    changesTotal = ordinary.ChangesTotal,
+                    changesListed = ordinary.Changes.Count,
+                    changes = ordinary.Changes,
+                    failure = ordinary.Failure,
                 },
                 // Round 46 item 2: the Make Secure file backstop. `mode` "write" is what Set-AccessRibbon.ps1
                 // -SecureTransitionDeployed requires of the latest run before it ships Make Secure.
@@ -808,6 +871,214 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                     },
                 attempt = context.Attempt,
             }, ResultJsonOptions));
+    }
+
+    /// <summary>What the ordinary-parent-move pass did in one run (UAC task 194).</summary>
+    internal sealed record OrdinaryMovesRun(bool Writes, DateTimeOffset Since)
+    {
+        public int RootsListed { get; init; }
+        public int RootsInRun { get; init; }
+
+        /// <summary>Listed or carried roots past <see cref="MaxRootsPerRunConfigKey"/>: carried to the next run (writes on).</summary>
+        public int RootsOverflow { get; init; }
+        public int RetriedRoots { get; init; }
+
+        /// <summary>examined, alreadyCorrect, changed, wouldChange, untouched, refused, failed (the reconciler's per-table counts).</summary>
+        public int[] Totals { get; } = new int[7];
+
+        /// <summary>Rows reported and not moved (user-owned, a non-default owner team, a Secure answer).</summary>
+        public int Reported { get; set; }
+        public int WritesAttempted { get; set; }
+        public bool CapReached { get; set; }
+
+        /// <summary>Roots whose pass did not complete for a reason other than the write cap (a refusal, a failure).</summary>
+        public List<string> IncompleteRoots { get; } = new();
+        public int CarriedRoots { get; set; }
+        public int ChangesTotal { get; set; }
+        public List<object> Changes { get; } = new();
+        public string? Failure { get; init; }
+
+        /// <summary>Only a WRITING pass fails the run: a listing that failed, or a root left incomplete (not merely capped).</summary>
+        public bool FailsTheRun => Writes && (Failure is not null || IncompleteRoots.Count > 0);
+    }
+
+    /// <summary>
+    /// UAC task 194 (#2339, owner round 128 item 3) — the ORDINARY-PARENT-MOVE pass: every ordinary project, matter and work
+    /// assignment (<c>sprk_issecure</c> = false; an empty flag is not listed — it fails closed) whose <c>modifiedon</c> is at or
+    /// after this pass's watermark, with the roots earlier runs carried, goes through
+    /// <see cref="SecureChildReconciler.ReconcileOrdinaryParentMoveAsync"/>: its default-team-owned children follow it to the
+    /// owner the rule gives them now (an MDA Assign changes the record's <c>modifiedon</c> — verified on dev, see
+    /// notes/task-194-ordinary-parent-move.md). Never an isolated row, never out of isolation.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Report-only unless</b> <see cref="OrdinaryMovesWritesEnabledConfigKey"/> is <c>true</c> and the recent-changes
+    /// emergency stop is not set. At most <see cref="MaxRootsPerRunConfigKey"/> roots (carried first, then oldest change
+    /// first) and <see cref="MaxOrdinaryMovesPerRunConfigKey"/> owner writes a run.</para>
+    /// <para><b>Window and carry</b> (the secure pass's rule): the watermark moves only in a run that WROTE and listed
+    /// completely, so a report-only run looks back <see cref="InitialRecentChangesLookback"/> every time. With writes on, a
+    /// root left incomplete, stopped by the write cap, or past the root cap is carried and looked at first next run (at most
+    /// <see cref="MaxCarriedRows"/>; beyond that the watermark stays). Per instance, like every window of this job: a restart
+    /// looks back <see cref="InitialRecentChangesLookback"/>. Known limit: a reassignment older than that window when writes
+    /// are first turned on (or at a restart that lost a carry) is not reached until the record changes again.</para>
+    /// <para>Never throws (cancellation aside): a listing fault is reported and the window is listed again next run.</para>
+    /// </remarks>
+    private async Task<OrdinaryMovesRun> ReconcileOrdinaryParentMovesAsync(
+        SecureChildReconciler reconciler, IGenericEntityService dataverse, bool recentWrites, int rootCap,
+        DateTimeOffset startedAt, Guid runId, CancellationToken ct)
+    {
+        var writes = recentWrites
+                     && bool.TryParse(_configuration[OrdinaryMovesWritesEnabledConfigKey], out var enabled) && enabled;
+        var mode = writes ? SecureChildReconcileMode.Apply : SecureChildReconcileMode.ReportOnly;
+        var writeCap = int.TryParse(_configuration[MaxOrdinaryMovesPerRunConfigKey], out var configured) && configured > 0
+            ? configured
+            : DefaultMaxOrdinaryMovesPerRun;
+
+        DateTimeOffset since;
+        List<(string Table, Guid Id)> carried;
+        lock (_cursorGate)
+        {
+            since = _ordinaryMovesWatermark ?? startedAt - InitialRecentChangesLookback;
+            carried = _pendingOrdinaryRoots.OrderBy(r => r.Table, StringComparer.Ordinal).ThenBy(r => r.Id).ToList();
+        }
+
+        List<(string Table, Guid Id, DateTime ModifiedOn)> changed;
+        try
+        {
+            changed = await ListChangedOrdinaryRootsAsync(dataverse, since, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex, "[SECURE-CHILD-RECONCILE] ordinary-moves run={RunId}: the ordinary records changed since " +
+                "{Since:o} could not be listed; that window is looked at again next run.", runId, since);
+            return new OrdinaryMovesRun(writes, since)
+            {
+                Failure = "the reassigned ordinary records could not be listed",
+                CarriedRoots = carried.Count,
+            };
+        }
+
+        var all = carried
+            .Concat(changed.OrderBy(r => r.ModifiedOn).ThenBy(r => r.Table, StringComparer.Ordinal).ThenBy(r => r.Id)
+                .Select(r => (r.Table, r.Id)))
+            .Distinct()
+            .ToList();
+        var take = all.Take(rootCap).ToList();
+        var overflow = all.Skip(rootCap).ToList();
+        var run = new OrdinaryMovesRun(writes, since)
+        {
+            RootsListed = changed.Count,
+            RootsInRun = take.Count,
+            RootsOverflow = overflow.Count,
+            RetriedRoots = carried.Count,
+        };
+
+        var carry = new List<(string Table, Guid Id)>();
+        var remaining = writeCap;
+        foreach (var (table, id) in take)
+        {
+            ct.ThrowIfCancellationRequested();
+            var key = $"{table}:{id:D}";
+            if (writes && remaining == 0)
+            {
+                // The write cap is spent: the rest are carried unread (each is walked again first next run).
+                carry.Add((table, id));
+                run.CapReached = true;
+                continue;
+            }
+
+            _logger.LogInformation(
+                "[SECURE-CHILD-RECONCILE] ordinary-moves run={RunId} mode={Mode} root={Root}: an ordinary record changed since " +
+                "{Since:o}; its children follow its owner.", runId, mode, key, since);
+            var report = await reconciler.ReconcileOrdinaryParentMoveAsync(table, id, mode, remaining, ct).ConfigureAwait(false);
+            remaining = Math.Max(0, remaining - report.OrdinaryWritesAttempted);
+            run.WritesAttempted += report.OrdinaryWritesAttempted;
+            foreach (var t in report.Tables)
+            {
+                run.Totals[0] += t.Examined; run.Totals[1] += t.AlreadyCorrect; run.Totals[2] += t.Changed;
+                run.Totals[3] += t.WouldChange; run.Totals[4] += t.Untouched; run.Totals[5] += t.Refused; run.Totals[6] += t.Failed;
+            }
+
+            var capped = report.Changes.Any(c => c.Detail == SecureChildReconciler.OrdinaryMoveCapDetail);
+            run.CapReached |= capped;
+            if (!report.IsComplete)
+            {
+                carry.Add((table, id));
+                var onlyCapped = report.Status == SecureChildReconcileStatus.Incomplete
+                                 && report.Changes.Where(c => c.Outcome is SecureChildRowOutcome.Failed or SecureChildRowOutcome.Refused)
+                                     .All(c => c.Detail == SecureChildReconciler.OrdinaryMoveCapDetail);
+                if (!onlyCapped)
+                    run.IncompleteRoots.Add($"{key}: {report.Status}{(report.Detail is null ? "" : " — " + report.Detail)}");
+            }
+
+            foreach (var change in report.Changes)
+            {
+                run.ChangesTotal++;
+                if (change.Outcome == SecureChildRowOutcome.Untouched)
+                    run.Reported++;
+                if (run.Changes.Count >= MaxSampledChanges)
+                    continue;
+                run.Changes.Add(new
+                {
+                    root = key,
+                    table = change.Table,
+                    id = change.Id,
+                    previousOwner = change.PreviousOwner is { } p ? $"{p.Kind.ToEntitySet()}({p.Id:D})" : null,
+                    targetTeam = change.TargetTeamId,
+                    outcome = change.Outcome.ToString(),
+                    detail = change.Detail,
+                });
+            }
+        }
+
+        lock (_cursorGate)
+        {
+            // Only a run that WROTE moves the window and keeps a carry (a report-only run corrected nothing — the secure
+            // pass's rule). Past MaxCarriedRows the watermark stays, so the whole window is listed again.
+            if (writes)
+            {
+                var toCarry = carry.Concat(overflow).Distinct().ToList();
+                _pendingOrdinaryRoots.Clear();
+                _pendingOrdinaryRoots.UnionWith(toCarry.Take(MaxCarriedRows));
+                if (toCarry.Count <= MaxCarriedRows)
+                    _ordinaryMovesWatermark = startedAt - RecentChangesOverlap;
+            }
+
+            run.CarriedRoots = _pendingOrdinaryRoots.Count;
+        }
+
+        _logger.Log(
+            run.FailsTheRun ? LogLevel.Warning : LogLevel.Information,
+            "[SECURE-CHILD-RECONCILE] ordinary-moves run={RunId} mode={Mode} since={Since:o} rootsListed={Listed} " +
+            "rootsInRun={InRun} rootsOverflow={Overflow} examined={Examined} alreadyCorrect={AlreadyCorrect} moved={Moved} " +
+            "wouldMove={WouldMove} reported={Reported} refused={Refused} failed={Failed} writesAttempted={Writes} " +
+            "capReached={CapReached} incompleteRoots={Incomplete} carriedRoots={Carried}",
+            runId, writes ? ModeWrite : ModeReportOnly, since, run.RootsListed, run.RootsInRun, run.RootsOverflow, run.Totals[0],
+            run.Totals[1], run.Totals[2], run.Totals[3], run.Reported, run.Totals[5], run.Totals[6], run.WritesAttempted,
+            run.CapReached, run.IncompleteRoots.Count, run.CarriedRoots);
+        return run;
+    }
+
+    /// <summary>
+    /// UAC task 194: the ordinary projects, matters and work assignments (<c>sprk_issecure</c> = false) modified at or after
+    /// <paramref name="since"/>. A fault propagates (the caller reports it).
+    /// </summary>
+    private static async Task<List<(string Table, Guid Id, DateTime ModifiedOn)>> ListChangedOrdinaryRootsAsync(
+        IGenericEntityService dataverse, DateTimeOffset since, CancellationToken ct)
+    {
+        var roots = new List<(string, Guid, DateTime)>();
+        foreach (var table in SecureChildLineage.Roots.OrderBy(t => t, StringComparer.Ordinal))
+        {
+            var query = new QueryExpression(table) { ColumnSet = new ColumnSet(table + "id", ModifiedOnColumn), NoLock = true };
+            query.Criteria.AddCondition(ModifiedOnColumn, ConditionOperator.GreaterEqual, since.UtcDateTime);
+            query.Criteria.AddCondition("sprk_issecure", ConditionOperator.Equal, false);
+            foreach (var row in await ReadAllAsync(dataverse, query, ct).ConfigureAwait(false))
+            {
+                if (row.Id != Guid.Empty)
+                    roots.Add((table, row.Id, row.GetAttributeValue<DateTime?>(ModifiedOnColumn) ?? DateTime.MinValue));
+            }
+        }
+
+        return roots;
     }
 
     /// <summary>What the inherited Access Permission pass did in one run (task 173); <see cref="Run"/> null when it did not run.</summary>
@@ -1849,6 +2120,11 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
     // every run that carried it.
     private readonly HashSet<(string Table, Guid Id)> _pendingRoots = new();
     private readonly HashSet<(string Table, Guid Id)> _pendingRows = new();
+
+    // UAC task 194: the ordinary-parent-move pass's own window and carried roots (the same per-instance, in-singleton
+    // reasoning; its own watermark, so it never holds the secure pass's window, #1378).
+    private DateTimeOffset? _ordinaryMovesWatermark;
+    private readonly HashSet<(string Table, Guid Id)> _pendingOrdinaryRoots = new();
 
     /// <summary>
     /// Task 147 r1: the most unplaced rows the job carries between runs. Beyond it the watermark does not move, so the whole
