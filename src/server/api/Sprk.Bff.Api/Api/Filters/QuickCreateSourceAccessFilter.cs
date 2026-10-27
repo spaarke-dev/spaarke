@@ -253,7 +253,6 @@ public sealed class QuickCreateSourceAccessFilter : IEndpointFilter
             TokenHelper.ExtractBearerTokenOrNull(httpContext),
             sourceEntityType,
             sourceRecordId,
-            equalizeUnknownAndDenied: true,
             httpContext.RequestAborted);
 
         switch (check.Decision)
@@ -325,7 +324,6 @@ public sealed class QuickCreateSourceAccessFilter : IEndpointFilter
             TokenHelper.ExtractBearerTokenOrNull(httpContext),
             AssigneeLogicalName,
             contactId,
-            equalizeUnknownAndDenied: true,
             httpContext.RequestAborted);
 
         switch (check.Decision)
