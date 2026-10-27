@@ -442,6 +442,31 @@ public sealed class ProcedureAssignmentServiceTests
     }
 
     [Fact]
+    public async Task ChangeRule_ARuleThatIsNotInForce_Is409RuleNotInForce_AndWritesNothing_ButAProcedureSetsRuleCanBeChanged()
+    {
+        var w = new World();
+        var (_, switchedOff, _) = w.BaseRule("BILL-OFF");
+        w.H.Row("sprk_policy", switchedOff)["sprk_enabled"] = false;
+        var retiredSet = w.H.RuleSet(RuleSetService.RuleSetRetired, scope: (int)RuleSetScope.ClientDefault);
+        var (inRetiredSet, _) = w.H.Rule(retiredSet, "BILL-RET", ProposalState.Accepted, current: true);
+
+        foreach (var policy in new[] { switchedOff, inRetiredSet })
+        {
+            var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, new(policy, Cap(12), "x", null), CallerOid, default);
+            outcome.ErrorCode.Should().Be("assignment.rule_not_in_force", "a change would revive a rule that is not in force on this record");
+        }
+
+        w.H.Transactions.Should().BeEmpty();
+
+        // Must not fire: a Procedure set is Draft by design (in force through its Procedure Version), so its On rule can be changed.
+        var procedureSet = w.H.RuleSet(RuleSetService.RuleSetDraft, scope: (int)RuleSetScope.ClientDefault);
+        w.H.Row("sprk_ruleset", procedureSet)[RuleSetService.ProcedureColumn] = new EntityReference("sprk_procedure", w.Procedure());
+        var (procedureRule, _) = w.H.Rule(procedureSet, "BILL-PROC", ProposalState.Accepted, current: true);
+        (await w.Service().ChangeRuleAsync(Matter, MatterId, new(procedureRule, Cap(12), "x", null), CallerOid, default))
+            .Kind.Should().Be(RuleSetOutcomeKind.Done);
+    }
+
+    [Fact]
     public async Task ARecordRule_IsNotABaseRule_AndARecordScopedSetIsHiddenFromTheRuleSetAdminReads()
     {
         var w = new World();

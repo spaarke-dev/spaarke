@@ -377,10 +377,10 @@ public class ProcedureAssignmentService
         }
 
         var rule = loaded!;
-        if (rule.Current is not { } current)
+        if (rule.Current is not { } current || !rule.InForce)
         {
             return Refused<OverrideView>(StatusCodes.Status409Conflict, CodeRuleNotInForce,
-                "This rule has no published version to change. Exclude it instead, or publish it first.");
+                "This rule is not in force (no published version, switched off, or its rule set is not published), so there is nothing to change. Exclude it instead.");
         }
 
         // O-20: a firm-named base rule changes only for its own firm (never for every firm, never for another firm).
@@ -707,8 +707,12 @@ public class ProcedureAssignmentService
     // ───────────────────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>A base rule: the policy, its set's firm, the policy columns a copy carries, and its current version (null when none).</summary>
+    /// <remarks><see cref="InForce"/>: the rule is switched On, and its set is a Procedure set (in force through its Procedure Version, 081) or a
+    /// Published client or firm set. A change creates an in-force record rule, so it is refused for a rule that is not in force (it would revive
+    /// a switched-off or retired rule on this record); an exclusion of such a rule is harmless and allowed.</remarks>
     private sealed record BaseRule(
-        RuleSetService.PolicyRow Policy, Guid? SetFirmId, IReadOnlyList<(string Column, object Value)> Copied, RuleSetService.VersionRow? Current);
+        RuleSetService.PolicyRow Policy, Guid? SetFirmId, IReadOnlyList<(string Column, object Value)> Copied, RuleSetService.VersionRow? Current,
+        bool InForce);
 
     /// <summary>
     /// The rule an override names: a live Billing policy in a Billing set that is NOT record-scoped (a record rule is removed, not overridden), and
@@ -762,7 +766,10 @@ public class ProcedureAssignmentService
             policy.GetAttributeValue<string>("sprk_name") ?? policy.Id.ToString(),
             current?.Id,
             Domain: RuleDomains.PolicyDomainBilling);
-        return (new BaseRule(row, set.GetAttributeValue<EntityReference>("sprk_firm")?.Id, copied, current), null);
+        var inForce = policy.GetAttributeValue<bool?>("sprk_enabled") == true
+            && (set.GetAttributeValue<EntityReference>(RuleSetService.ProcedureColumn) is not null
+                || set.GetAttributeValue<OptionSetValue>("statuscode")?.Value == RuleSetPublished);
+        return (new BaseRule(row, set.GetAttributeValue<EntityReference>("sprk_firm")?.Id, copied, current, inForce), null);
     }
 
     /// <summary>The override row, only when it names THIS record in the route's core column (else null: the uniform not found).</summary>

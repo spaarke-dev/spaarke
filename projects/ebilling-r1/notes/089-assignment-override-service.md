@@ -76,7 +76,8 @@ Branch `task/ebill-089-assignments`, based on `work/ebilling-r1` 78f7c390ff. Rig
 5. **The RuleSetService waiver kind changed from Pending to Permanent.** This is for ontology-r1 review, with the widened scope guard and the census guard.
 6. **Not evaluated until 082.** The resolver (BillingFactLoader) does not read record sets or Exclude rows yet, and `FirmClauseText` returns no clause for a record set. Both are by design for this task.
 7. **Client package test not run.** `OWNERSHIP_CHILD_TABLES` is pinned by `SecureChildNewCommandAgreementTests`, and its seeding proof is below. The worktree has no `node_modules`, and no jest test names the list.
-8. **`CoreAncestorResolver.ChildRecordEntities`.** Unchanged, per the coordinator. None of the new tables carries a core stamp in its sense.
+8. **A change needs a base rule in force** (review fix). The rule must be switched On, and its set must be a Procedure set (Draft by design, in force through its Procedure Version) or a Published client or firm set. Otherwise it is 409 `assignment.rule_not_in_force`, because a change would revive a switched-off or retired rule on the record. Excluding such a rule is harmless and stays allowed.
+9. **`CoreAncestorResolver.ChildRecordEntities`.** Unchanged, per the coordinator. None of the new tables carries a core stamp in its sense.
 
 ## uac-r2 conditions 1-6
 
@@ -119,6 +120,7 @@ Recommendation: A for sprk_ruleset (D-185 already makes Billing Administrator th
 | removal close with `withBillingSubject: false` | unit 1 failed |
 | matter DELETE route without `RequireReadOnTheOverridesSubject` | unit 1 failed |
 | `GuardedChildPrivileges` without prvReadsprk_ruleset | unit 3 failed |
+| change without the in-force check | unit 1 failed |
 
 ## Tests
 
@@ -183,4 +185,20 @@ Run them in this order on spaarkedev1 (`https://spaarkedev1.crm.dynamics.com`). 
 
 ## Reviews
 
-The main session sends the uac-r2 and ontology-r1 review requests. The adversarial review is recorded in the commit history of this branch.
+- **Adversarial review.** The two `adversarial-reviewer` agents could not be launched: the session's concurrent sub-agent limit was reached and the tool said not to retry. I reviewed the change myself instead, in two passes: authorization and tenant isolation, then correctness and ADRs.
+  - **Fix-now, fixed:** F2, change of a rule that is not in force (deviation 8).
+  - **Known limits:**
+    - K1: the 201 Location points to a path with no GET route. The read is 084's.
+    - K2: the preview or removal throws (500) if a record set holds more than one page of rules.
+    - K3: the census logs an unresolved secure-child privilege name as Critical, the default for a new verdict.
+    - K4: excluding a firm-named base rule "for another firm" is accepted but restricts nothing.
+  - **The main session should run one independent adversarial pass on this branch before the PR (two are required for auth / tenant-isolation work).**
+- **ADR check.** Every point complies:
+  - ADR-001: Minimal API.
+  - ADR-008: endpoint filters.
+  - ADR-010: concrete scoped service, no new interface.
+  - ADR-019: ProblemDetails with a stable `errorCode`.
+  - ADR-002: no plugin.
+  - ADR-038: maintain-class tests with seeding proofs.
+  - ADR-028: every route is authorized as the caller and fails closed.
+- **uac-r2 and ontology-r1 reviews.** The main session sends both requests.
