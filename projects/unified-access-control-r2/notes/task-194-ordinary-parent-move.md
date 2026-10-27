@@ -128,3 +128,60 @@ assignments, 6 service requests = 117 roots → 117 ÷ 50 = 3 runs × 2 minutes 
   catch-up sweep (F4-a) walks every root again, handing the documents off anew.
 - Each changed ordinary root is walked in full (one query per lineage table per level, plus resolver reads per row), so
   a burst of edits to large matters is bounded only by `MaxRootsPerRun` (50).
+
+## 194b: one deterministic ownership question per existing row
+
+**Defect (found in the post-deploy report-only gate).** The ordinary-moves pass, the secure pass and `ReparentAsync` took
+an existing row's primary parent from the order Dataverse returned its lookup attributes. That order is not the writer's
+order, so the reconciler could plan a move to a different team than the row's writer chose (49 of 52 planned moves on dev).
+
+**A. A fixed primary per table, shared by the writers and the reconciler.**
+- `RecordOwnershipContext.InPrimaryOrder` ranks a row's ownership lookups by its table's `SecureChildLineage` declaration
+  order (the order is now meaningful and stated in the class remarks); `OrderedParentsOf(row)` uses it.
+- `sprk_signal` / `sprk_decisionrecord`: `ForExistingRowAsync` asks the writer's question: core
+  (`sprk_corerecordtype` + `sprk_corerecordid`, the catalog read through `CoreAncestorResolver.CoreTableOfRecordTypeAsync`),
+  then the subject (`SignalWriter.SubjectEntityOf`), then the subject's core-ancestor stamps re-derived through
+  `CoreAncestorResolver.ResolveStampsAsync` (read-only), then the row's other lookups. Parity tests compare the FULL ordered
+  parent list against `SignalWriter.OwnershipContextOf` and `DecisionRecordWriter.OwnershipContextOf`.
+- A Signal or Decision Record with NO core record is reported, never moved: its owner is its To Do assignee's team (D-134),
+  kept by `TodoAssigneeOwnerReconciliationJob`. An unknown core type or an unreadable catalog row is Undetermined (Failed,
+  never a guess).
+- `sprk_analysis`: its document first. `sprk_analysisoutput`: its analysis. `sprk_document`: parent document, then core
+  lookups (matter, project, work assignment), then `sprk_related*`.
+- Used by `SecureChildReconciler` (`ContextFor`, both passes) and both `ReparentAsync` paths. Secure-if-any is still read
+  over every parent.
+
+**B. Look through a user-owned FILED primary child (I-6).** In `ResolveFromParentsAsync`, a primary that is a child-table
+row (`IsReparentableChild`) with no owning team and with a filing answers with that filing (the same look-through the
+content-row rule already used, generalised, not duplicated). Bounded by `MaxLineageDepth`; past it the resolver REFUSES
+(`ParentUnresolved`), never "ordinary". A core record (matter, project, work assignment, service request) is a root and
+is never looked through. An unfiled user-owned primary keeps its own unit. `SignalWriter`'s check is unchanged.
+
+Create-time writers whose answer B changes (only when the primary is a user-owned, filed child): analysis create/promote
+(`AnalysisEndpoints`, `AppOnlyAnalysisService`) for a user-owned filed document; the
+attachment child (`EmailAttachmentProcessor`) of a user-owned filed parent document; a no-core Signal or Decision Record
+whose subject is a user-owned filed child and that has no assignee; content-row chains deeper than one level. Isolation is
+never relaxed: the look-through keeps the original parents in the secure-if-any set (same set or a superset).
+
+**C. Time slice.** `SecureChildReconciliationJob.OrdinaryTimeSlice` (60 s), checked between roots like
+`RefileTimeSlice`. Roots not reached are carried (recent) or held by the sweep cursor (swept); none is dropped.
+`ResultJson.ordinaryMoves.timeSliceReached` and the summary log report it.
+
+**Dev measurement (read-only, 2026-10-27).**
+- `sprk_signal`: 191 with a core (164 matter, 6 project, 21 work assignment): every one already in its core's business
+  unit, so 0 differ from the 194b answer (= SignalWriter's). 13 with no core: now reported, not decided.
+- `sprk_decisionrecord`: 24 with a core (18 matter, 1 project, 1 service request, 4 work assignment): 0 differ. 3 with no
+  core: reported.
+- `sprk_analysis`: none has a user-owned document (B changes nothing on dev). 69 user-owned analyses sit in a different
+  unit from their document; user-owned rows are reported, not moved, before and after.
+- `sprk_document`: no child of a user-owned parent document; the 7 children in another unit from their (team-owned)
+  parent are user-owned (reported). 14 team-owned documents name both a matter (BU1) and a communication in another unit:
+  before 194b their answer depended on attribute order (the communication's unit when read first); after, the matter
+  decides, which is where they already are.
+- `sprk_event`: 2 name both a matter and a project; the matter now decides.
+
+**Known gaps (not 194b).**
+- `DecisionRecordWriter` also names the subjects of every Signal the record resolves; those are not on the row, so the
+  existing-row question lacks them (secure-if-any only; the primary is unaffected).
+- `RecordOwnershipContext.ForChild` still orders by attribute order at create time.
+- The secure pass still decides a no-core row over its parents, so it can still be taken INTO isolation (fails closed).
