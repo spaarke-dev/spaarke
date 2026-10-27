@@ -61,6 +61,13 @@ All four owner decisions are made (2026-10-22/23: 2a-2c option a, 2d option c); 
 
 ## Open items for the owner
 
+**Owner answers 2026-10-27:** group 3 (016 Repair) waits on UAC-r2's build review. #2137 approved → implementer on
+`fix/fm-2137-timing-equalise` (review before merge). #2224 approved → PR #2328 (auto-merge). Leftover folders: clean
+up at project end. 4a–4d, 5b–5d: explained, waiting on answers. Owner stated policy for 4b/4c: a mapping copy is not
+user-scoped (not yet applied; it reverses 014's AppendTo/field-security checks on mapped values and needs UAC-r2).
+Dev reads: 0 of 64 matters have an empty `sprk_issecure`; 40 active Copy rules (4 Manual Refresh, 16 One-time,
+20 empty); documents point at several indexes (537 none, 76 knowledge-index-v2, 1 spaarke-file-index).
+
 1. **016 Repair questions:** cross-BU re-own (skip for now); whether Repair re-owns roots; SYSTEM/INTEGRATION-owned
    unfiled rows.
 2. **017 decisions:** FR-06 step 10 (UAC-r2 text recommended); #1608 columns; the chat matter/project number (recommend
