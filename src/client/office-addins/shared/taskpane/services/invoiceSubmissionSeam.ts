@@ -2,18 +2,11 @@
  * invoiceSubmissionSeam.ts — what the Invoice view (task 133) hands to the from-email submission, and the pure rules
  * that build it. NO I/O here.
  *
- * The client service itself (task 133 step A1, `invoiceSubmissionService.ts`) is NOT written yet: it waits on open
- * gaps in ebilling-r1's pinned contract, `projects/ebilling-r1/notes/095-from-email-contract.md`
- * (`POST /api/finance/invoice-submissions/from-email`). Until it lands, the view receives no `onSubmit` and says
- * submitting is not available.
- *
- * TODO(task 133 A1, 095-from-email-contract.md): implement {@link InvoiceSubmitHandler} — capture the email with
- * `captureEmailContent` (no second copy of capture), build the contract body from {@link InvoiceSubmissionInput}
- * plus `email`, send `X-Idempotency-Key` per {@link InvoiceSubmitAttempt.actionId}, map the contract's codes to
- * {@link InvoiceSubmissionOutcome}, and follow `statusUrl`.
+ * The client service behind {@link InvoiceSubmitHandler} is `invoiceSubmissionService.ts` (task 133 A1; contract
+ * `projects/ebilling-r1/notes/095-from-email-contract.md`, `POST /api/finance/invoice-submissions/from-email`).
  * ⚠️ The contract matches a mark to an attachment by (fileName, size, contentType) AS SENT. Capture renames an
  * attached Outlook item to `<name>.eml` and sends it as `application/octet-stream` (`emailContentCapture.ts`
- * `toStoredAttachment`), so A1 must rewrite each mark from the captured attachment with the same `attachmentId`
+ * `toStoredAttachment`), so the service rewrites each mark from the captured attachment with the same `attachmentId`
  * — the values here are the ones Outlook listed, before capture.
  */
 
@@ -21,7 +14,10 @@ import type { AttachmentInfo } from '@shared/adapters/types';
 import { cleanGuid } from '@spaarke/ui-components/guid';
 import type { EntityType } from '../hooks/useEntitySearch';
 import { EMAIL_CONTENT_BUDGET_BYTES, MAX_ATTACHMENT_BYTES, base64Length, formatSize } from './emailContentCapture';
-import type { InvoiceAttachmentRole, MarkableAttachment } from '../components/views/InterimInvoiceAttachmentMarking';
+import type {
+  InvoiceAttachmentRole,
+  MarkableAttachment,
+} from '@spaarke/communication-components/invoice-attachment-marking';
 
 /** The core records an invoice is submitted against (owner decision 2026-10-21 item 5; the contract's targetEntity). */
 export type InvoiceCoreRecordType = Extract<EntityType, 'Matter' | 'Project' | 'WorkAssignment'>;
@@ -68,6 +64,8 @@ export interface InvoiceSubmissionInput {
 /** One user action. A Retry of the same action reuses `actionId` (the contract's `X-Idempotency-Key` rule). */
 export interface InvoiceSubmitAttempt {
   actionId: string;
+  /** Called once the server has accepted the submission (202), before its final status is known: "processing". */
+  onAccepted?: (info: { trackingNumber?: string }) => void;
 }
 
 /**
@@ -96,7 +94,7 @@ export interface InvoiceFirmOption {
   name: string;
 }
 
-/** TODO(task 133, firm route not pinned yet): the firms linked to a core record. */
+/** The firms linked to a core record (contract §8; `invoiceSubmissionService.loadInvoiceFirms`). */
 export type LoadInvoiceFirms = (target: InvoiceSubmissionTarget) => Promise<InvoiceFirmOption[]>;
 
 /** The contract's `firmInvoiceNumber` bound: trimmed, 1-100 characters. */

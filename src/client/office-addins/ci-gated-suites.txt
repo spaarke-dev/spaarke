@@ -384,11 +384,13 @@ shared/taskpane/services/__tests__/openRecordLauncher.webOpen.test.ts
 shared/taskpane/components/__tests__/SaveFlow.messageId.test.tsx
 shared/taskpane/components/views/__tests__/SaveView.messageId.test.tsx
 outlook/commands/__tests__/commands.messageId.test.ts
-# Task 133 slice A (2026-10-27): the Outlook Submit Invoice view (?action=submitInvoice only), its interim marking list,
-# the seam rules, and Work Assignment kept out of Save's types.
+# Task 133 slice A (2026-10-27): the Outlook Submit Invoice view (?action=submitInvoice only) over ebilling's shared
+# InvoiceAttachmentMarking, the seam rules, the from-email service and its messages, and Work Assignment kept out of
+# Save's types.
 shared/taskpane/__tests__/initialAction.test.ts
 shared/taskpane/__tests__/App.invoiceRoute.test.tsx
-shared/taskpane/components/views/__tests__/InterimInvoiceAttachmentMarking.test.tsx
 shared/taskpane/services/__tests__/invoiceSubmissionSeam.test.ts
+shared/taskpane/services/__tests__/invoiceSubmissionService.test.ts
+shared/taskpane/utils/__tests__/invoiceSubmissionMessages.test.ts
 shared/taskpane/components/views/__tests__/InvoiceView.test.tsx
 shared/taskpane/components/__tests__/SaveFlow.invoiceTaskTypes.test.tsx

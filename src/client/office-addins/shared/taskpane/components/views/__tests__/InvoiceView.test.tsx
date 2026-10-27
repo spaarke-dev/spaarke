@@ -1,6 +1,7 @@
 /**
  * Task 133: the Outlook "Submit Invoice" view. The record searches are doubled at `searchOfficeEntities` (the
- * Save picker's own search); the submission and the firm list are the view's injected seams.
+ * Save picker's own search); the submission and the firm list are the view's injected seams. The attachment marking
+ * is the REAL shared `InvoiceAttachmentMarking` (ebilling 118a), through the jest alias.
  */
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -10,6 +11,7 @@ import { searchOfficeEntities } from '../../../services/officeEntitySearch';
 import type { IHostAdapter } from '@shared/adapters';
 import type { AttachmentInfo } from '@shared/adapters/types';
 import type { EntitySearchResult } from '../../../hooks/useEntitySearch';
+import type { InvoiceSubmissionOutcome, InvoiceSubmitAttempt } from '../../../services/invoiceSubmissionSeam';
 
 jest.mock('../../../services/officeEntitySearch', () => ({ searchOfficeEntities: jest.fn() }));
 const mockSearch = searchOfficeEntities as jest.MockedFunction<typeof searchOfficeEntities>;
@@ -79,7 +81,7 @@ async function findRow(fileName: string): Promise<HTMLElement> {
   return name.closest('[role="listitem"]') as HTMLElement;
 }
 
-const submitButton = () => screen.getByRole('button', { name: /^(Submit|Submitting…|Submitted)$/ });
+const submitButton = () => screen.getByRole('button', { name: /^(Submit|Submitting…|Processing…|Submitted)$/ });
 
 beforeEach(() => {
   mockSearch.mockReset();
@@ -211,6 +213,36 @@ describe('InvoiceView — New invoice (task 133)', () => {
   );
 
   it(
+    'two PDFs: none is pre-selected; marking both as Invoice is refused with its own message',
+    async () => {
+      const twoPdfs: AttachmentInfo[] = [
+        { ...ATTACHMENTS[0]! },
+        {
+          id: 'att-8',
+          name: 'INV-4712.pdf',
+          contentType: 'application/pdf',
+          size: 99,
+          isInline: false,
+          attachmentType: 'file',
+        },
+      ];
+      renderView({
+        hostAdapter: {
+          getCapabilities: () => ({ canGetAttachments: true }),
+          getAttachments: jest.fn(async () => twoPdfs),
+        } as unknown as IHostAdapter,
+      });
+      const first = await findRow('INV-4711.pdf');
+      const second = await findRow('INV-4712.pdf');
+      expect(screen.getByText('Mark the PDF that is the invoice.')).toBeInTheDocument();
+      await userEvent.click(within(first).getByRole('radio', { name: 'Invoice' }));
+      await userEvent.click(within(second).getByRole('radio', { name: 'Invoice' }));
+      expect(screen.getByText('Only one file can be the invoice.')).toBeInTheDocument();
+    },
+    TIMEOUT
+  );
+
+  it(
     'wire marks: a disabled attachment is DontSave; inline attachments get no mark',
     async () => {
       const withCloud: AttachmentInfo[] = [
@@ -321,6 +353,31 @@ describe('InvoiceView — results (task 133)', () => {
       await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
       const calls = onSubmit.mock.calls as unknown as Array<[unknown, { actionId: string }]>;
       expect(calls[1]![1].actionId).not.toBe(calls[0]![1].actionId);
+    },
+    TIMEOUT
+  );
+
+  it(
+    'accepted: shows the submission processing until its final status, then the result',
+    async () => {
+      let finish: (outcome: InvoiceSubmissionOutcome) => void = () => undefined;
+      const onSubmit = jest.fn(
+        (_input: unknown, attempt: InvoiceSubmitAttempt) =>
+          new Promise<InvoiceSubmissionOutcome>(resolve => {
+            attempt.onAccepted?.({ trackingNumber: 'INV-4711.1' });
+            finish = resolve;
+          })
+      );
+      renderView({ onSubmit });
+      await fillAndSubmit();
+      expect(await screen.findByText('Processing the invoice')).toBeInTheDocument();
+      expect(screen.getByText(/Tracking number INV-4711\.1/)).toBeInTheDocument();
+      expect(submitButton()).toHaveTextContent('Processing…');
+      expect(submitButton()).toBeDisabled();
+
+      finish({ kind: 'success', trackingNumber: 'INV-4711.1' });
+      expect(await screen.findByText('Invoice submitted')).toBeInTheDocument();
+      expect(screen.queryByText('Processing the invoice')).toBeNull();
     },
     TIMEOUT
   );

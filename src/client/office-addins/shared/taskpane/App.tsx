@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useEffect, useRef, useState, useCallback } from 'react';
+import React, { Suspense, lazy, useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { FluentProvider, Spinner, MessageBar, MessageBarBody, makeStyles, tokens } from '@fluentui/react-components';
 import { authService } from '@shared/services';
 import type { IHostAdapter, IHostContext } from '@shared/adapters';
@@ -15,6 +15,12 @@ import { StatusView } from './components/views/StatusView';
 import { SignInView } from './components/views/SignInView';
 import { CreateTodoView } from './components/views/CreateTodoView';
 import { InvoiceView } from './components/views/InvoiceView';
+import {
+  createInvoiceSubmitHandler,
+  hostAdapterInvoiceEmailSource,
+  loadInvoiceFirms,
+} from './services/invoiceSubmissionService';
+import type { InvoiceSubmissionTarget } from './services/invoiceSubmissionSeam';
 import type { InitialAction } from './initialAction';
 import { FindView, type FindItemNoun } from './components/views/FindView';
 import type {
@@ -664,6 +670,22 @@ export const App: React.FC<AppProps> = ({
   // receives a fetch function, never a token — ADR-028).
   const getPaneAccessToken = useCallback(() => authService.getAccessToken(), []);
 
+  // Task 133: the Invoice view's seams. Stable identities: the view reloads the firm list when `loadFirms` changes.
+  const getInvoiceAccessToken = useCallback(async () => (await authService.getAccessToken()) || '', []);
+  const submitInvoice = useMemo(
+    () =>
+      createInvoiceSubmitHandler({
+        config: { apiBaseUrl, getAccessToken: getInvoiceAccessToken },
+        email: hostAdapterInvoiceEmailSource(hostAdapter),
+      }),
+    [apiBaseUrl, getInvoiceAccessToken, hostAdapter]
+  );
+  const loadFirms = useCallback(
+    (target: InvoiceSubmissionTarget) =>
+      loadInvoiceFirms(target, { apiBaseUrl, getAccessToken: getInvoiceAccessToken }),
+    [apiBaseUrl, getInvoiceAccessToken]
+  );
+
   // Task 113 (provisioning's guest sign-in test): "⋮ → Diagnostics" opens a panel above the tab content; the tabs
   // stay mounted underneath, so closing it loses nothing.
   const [showDiagnostics, setShowDiagnostics] = useState(false);
@@ -870,13 +892,15 @@ export const App: React.FC<AppProps> = ({
         )}
 
         {/* Task 133: the Outlook "Submit Invoice" view — reached only from the ribbon (`?action=submitInvoice`), never
-            from a tab. Slice A: the submission (`onSubmit`, task 133 A1) and the firm list (`loadFirms`) are not wired
-            yet, so the view says submitting is not available; corrections stay off (`correctionAvailable`). */}
+            from a tab. The submission and the firm list are ebilling's from-email contract (invoiceSubmissionService);
+            corrections stay off (`correctionAvailable`) until ebilling 097. */}
         {currentTab === 'invoice' && (
           <InvoiceView
             hostAdapter={hostAdapter}
             apiBaseUrl={apiBaseUrl}
-            getAccessToken={async () => (await authService.getAccessToken()) || ''}
+            getAccessToken={getInvoiceAccessToken}
+            onSubmit={submitInvoice}
+            loadFirms={loadFirms}
           />
         )}
 

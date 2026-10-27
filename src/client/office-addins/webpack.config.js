@@ -233,6 +233,13 @@ module.exports = async (env, options) => {
           __dirname,
           '../shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts'
         ),
+        // Task 133: the Outlook Invoice view's attachment marking is ebilling's shared `InvoiceAttachmentMarking`
+        // (ebilling-r1 118a, #2342) — the package's own `./invoice-attachment-marking` export (the component folder's
+        // index: the component plus its pure rules; Fluent + React only, no Xrm). Exact ($) match, never the barrel.
+        '@spaarke/communication-components/invoice-attachment-marking$': path.resolve(
+          __dirname,
+          '../shared/Spaarke.Communication.Components/src/components/InvoiceAttachmentMarking/index.ts'
+        ),
         // Task 096 (owner 2026-10-04: "use our shared UI components so it looks consistent"): the
         // Word pane's Email tab mounts the SAME compose engine the Spaarke email page mounts
         // (`EmailComposer`), through its pane wrapper `SendEmailPane` (ADR-045: every send UX goes
@@ -267,7 +274,11 @@ module.exports = async (env, options) => {
           // copies break hooks) even on a machine that has the shared library installed. Scoped to requests
           // ISSUED by the shared source (Rule.resolve), so the add-in's own dependency resolution — including
           // any nested package versions — is untouched.
-          include: path.resolve(__dirname, '../shared/Spaarke.UI.Components/src'),
+          // Task 133: also the shared InvoiceAttachmentMarking (Spaarke.Communication.Components), same reason.
+          include: [
+            path.resolve(__dirname, '../shared/Spaarke.UI.Components/src'),
+            path.resolve(__dirname, '../shared/Spaarke.Communication.Components/src/components/InvoiceAttachmentMarking'),
+          ],
           resolve: {
             modules: [path.resolve(__dirname, 'node_modules'), 'node_modules'],
           },

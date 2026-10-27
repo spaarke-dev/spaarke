@@ -36,12 +36,11 @@ import {
   type InvoiceSubmitHandler,
   type LoadInvoiceFirms,
 } from '../../services/invoiceSubmissionSeam';
-// INTERIM: slice B points this import at ebilling's shared InvoiceAttachmentMarking (PR #2342); same names and props.
 import {
   InvoiceAttachmentMarking,
   defaultInvoiceMarking,
   validateInvoiceMarking,
-} from './InterimInvoiceAttachmentMarking';
+} from '@spaarke/communication-components/invoice-attachment-marking';
 
 /**
  * InvoiceView — Outlook's "Submit Invoice" view (task 133, owner decisions 2026-10-21; contract
@@ -57,10 +56,13 @@ import {
  *   supports them ({@link InvoiceViewProps.correctionAvailable}); adding supporting files has no server route and is
  *   not offered.
  *
- * Submit goes through the injected {@link InvoiceViewProps.onSubmit} seam; the client service behind it (task 133
- * A1) is not written yet, so without it the view says submitting is not available and Submit stays disabled.
- * Results are shown generically (success / refused / retry / use Spaarke instead) from {@link InvoiceSubmissionOutcome};
- * the view never reads a reason code.
+ * Submit goes through the injected {@link InvoiceViewProps.onSubmit} seam (App wires `invoiceSubmissionService`);
+ * without it the view says submitting is not available and Submit stays disabled. Once the server accepts the
+ * submission the view shows it processing until the final status is known. Results are shown generically (success /
+ * refused / retry / use Spaarke instead) from {@link InvoiceSubmissionOutcome}; the view never reads a reason code.
+ *
+ * The attachment marking is ebilling's shared `InvoiceAttachmentMarking` (`value` always holds every listed id, seeded
+ * from `defaultInvoiceMarking`; `validateInvoiceMarking` always gets the attachments).
  *
  * Search reuses the Save picker's component (`RelatedToPicker`) and search (`searchOfficeEntities`); the attachment
  * list comes from the host adapter as Save's does, and the content is captured at submit by A1 (no second capture).
@@ -73,11 +75,9 @@ export interface InvoiceViewProps {
   apiBaseUrl?: string;
   /** Token getter for the record searches. */
   getAccessToken?: () => Promise<string>;
-  /**
-   * TODO(task 133 A1, 095-from-email-contract.md): the from-email submission. Absent → submitting is not available.
-   */
+  /** The from-email submission (contract 095 §2-§3). Absent → submitting is not available. */
   onSubmit?: InvoiceSubmitHandler;
-  /** TODO(task 133, firm route not pinned): the firms linked to the chosen core record. Absent → none can be listed. */
+  /** The firms linked to the chosen core record (contract 095 §8). Absent → none can be listed. */
   loadFirms?: LoadInvoiceFirms;
   /** Whether "Submit a corrected invoice" can be used (the server refuses corrections until ebilling 097). */
   correctionAvailable?: boolean;
@@ -173,6 +173,8 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
   const [poNumber, setPoNumber] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [outcome, setOutcome] = useState<InvoiceSubmissionOutcome | null>(null);
+  /** Set between the server's 202 and the submission's final status. */
+  const [processing, setProcessing] = useState<{ trackingNumber?: string } | null>(null);
   const [retryableInARow, setRetryableInARow] = useState(0);
   const lastAttemptRef = useRef<{ input: InvoiceSubmissionInput; actionId: string } | null>(null);
   const firmRequestRef = useRef(0);
@@ -281,15 +283,24 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
     if (!onSubmit) return;
     lastAttemptRef.current = { input, actionId };
     setSubmitting(true);
+    setProcessing(null);
     setOutcome(null);
     let result: InvoiceSubmissionOutcome;
     try {
-      result = await onSubmit(input, { actionId });
+      result = await onSubmit(input, {
+        actionId,
+        // Accepted (202): the final answer comes from following its status — show that it is being processed.
+        onAccepted: ({ trackingNumber }) => {
+          setProcessing({ ...(trackingNumber ? { trackingNumber } : {}) });
+          announce('Invoice sent. Spaarke is processing it.', 'polite');
+        },
+      });
     } catch (err) {
       // An unexpected throw says nothing about whether a retry helps; offer one (the same action).
       result = { kind: 'retryable', message: err instanceof Error ? err.message : "Couldn't submit the invoice." };
     }
     setSubmitting(false);
+    setProcessing(null);
     setOutcome(result);
     setRetryableInARow(prev => (result.kind === 'retryable' ? prev + 1 : 0));
     announce(
@@ -319,6 +330,17 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
   };
 
   const renderOutcome = () => {
+    if (processing) {
+      return (
+        <MessageBar intent="info" layout="multiline" role="status">
+          <MessageBarBody>
+            <MessageBarTitle>Processing the invoice</MessageBarTitle>
+            {processing.trackingNumber ? `Tracking number ${processing.trackingNumber}. ` : ''}
+            Spaarke is checking it. This can take a minute.
+          </MessageBarBody>
+        </MessageBar>
+      );
+    }
     if (!outcome) return null;
     switch (outcome.kind) {
       case 'success':
@@ -500,7 +522,7 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
           </Text>
         )}
         <Button appearance="primary" onClick={handleSubmit} disabled={!canSubmit}>
-          {submitting ? 'Submitting…' : succeeded ? 'Submitted' : 'Submit'}
+          {processing ? 'Processing…' : submitting ? 'Submitting…' : succeeded ? 'Submitted' : 'Submit'}
         </Button>
       </div>
     </>

@@ -90,7 +90,12 @@ function outlookAdapter(): IHostAdapter {
   } as unknown as IHostAdapter;
 }
 
-beforeEach(() => jest.clearAllMocks());
+let fetchSpy: jest.Mock;
+beforeEach(() => {
+  jest.clearAllMocks();
+  fetchSpy = jest.fn(async () => ({ ok: true, status: 200, json: async () => ({}), text: async () => '{}' }));
+  global.fetch = fetchSpy as unknown as typeof fetch;
+});
 
 describe('App — the Invoice view is reachable only through ?action=submitInvoice (task 133)', () => {
   it('initialAction "submitInvoice" renders the Invoice view and not the Save tab', async () => {
@@ -98,11 +103,15 @@ describe('App — the Invoice view is reachable only through ?action=submitInvoi
 
     await waitFor(() => expect(InvoiceView).toHaveBeenCalled());
     expect(SaveView).not.toHaveBeenCalled();
-    // Slice A: the submission and the firm list are not wired; corrections stay off.
+    // A1: the submission and the firm list are wired (ebilling's from-email contract); corrections stay off.
     const props = InvoiceView.mock.calls[InvoiceView.mock.calls.length - 1]![0];
-    expect(props.onSubmit).toBeUndefined();
-    expect(props.loadFirms).toBeUndefined();
+    expect(typeof props.onSubmit).toBe('function');
+    expect(typeof props.loadFirms).toBe('function');
     expect(props.correctionAvailable).toBeUndefined();
+    // Stable seams across re-renders: a new `loadFirms` would make the view reload the firms and drop the choice.
+    const first = InvoiceView.mock.calls[0]![0];
+    expect(props.loadFirms).toBe(first.loadFirms);
+    expect(props.onSubmit).toBe(first.onSubmit);
   });
 
   it('the default pane (no action) renders Save and no Invoice view', async () => {
@@ -110,6 +119,8 @@ describe('App — the Invoice view is reachable only through ?action=submitInvoi
 
     await waitFor(() => expect(SaveView).toHaveBeenCalled());
     expect(InvoiceView).not.toHaveBeenCalled();
+    // Inert: nothing in the default pane reaches the from-email route.
+    expect(fetchSpy).not.toHaveBeenCalledWith(expect.stringContaining('/api/finance/'), expect.anything());
   });
 
   it('initialAction "createTodo" is unchanged and renders no Invoice view', async () => {
