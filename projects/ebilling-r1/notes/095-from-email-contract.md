@@ -43,12 +43,23 @@ Header `X-Idempotency-Key`: optional (section 4). Body (camelCase):
     { "fileName": "INV-4711.pdf", "size": 182344, "contentType": "application/pdf", "mark": "Invoice" },
     { "fileName": "timesheet.csv", "size": 40211, "contentType": "text/csv", "mark": "Supporting" }
   ],
+  "firmId": "8b0c6f1e-4c2a-4f7e-9a51-2f3d1c0e9b77",
+  "firmInvoiceNumber": "INV-4711",
+  "poNumber": null,
   "mode": "New",
   "invoiceId": null
 }
 ```
 
-Pending OP-1 (not pinned): `firmId`, `firmInvoiceNumber`, `poNumber`.
+**Firm fields (OP-1, settled 2026-10-27 from D-91 / D-106; same meaning as the internal intake's):**
+
+| Field | Type | Required | Rule | Refusal |
+|---|---|---|---|---|
+| `firmId` | GUID (`sprk_organization` id) | yes | Must be linked to `targetEntity` (D-106). For `Correction` it must equal the old invoice's firm. | 400 `ebilling.submission.firm_invalid` (not a firm); 403 `ebilling.submission.firm_not_linked`; Correction mismatch: 409 `correction_not_allowed` reason `different_firm` |
+| `firmInvoiceNumber` | string, trimmed, 1-100 | yes | Typed by the user (D-91); the tracking number is `{firmInvoiceNumber}.{n}` (D-87). A different number read from the PDF holds the invoice for review, never refuses it. | 400 `ebilling.submission.firm_invoice_number_required` |
+| `poNumber` | string or null | no | Stored as given. | none |
+
+The firm fields are part of the idempotency key K (section 4): the same email, record and marks with another firm or number is a different submission, which the duplicate rule then answers (section 5).
 
 ## 3. Response
 
@@ -67,7 +78,7 @@ Pending OP-1 (not pinned): `firmId`, `firmInvoiceNumber`, `poNumber`.
 
 **Rule: the server derives the operation key; the client cannot choose or collide it.**
 
-- **K** is the §9.1 key: the RFC Message-ID (`OfficeEmailEnricher.ResolveRfcMessageId`, :603); the core record (kind, id); `mode`; `invoiceId` (empty for New); and every mark as (`fileName`, `mark`), sorted ordinal by fileName, then by mark.
+- **K** is the §9.1 key: the RFC Message-ID (`OfficeEmailEnricher.ResolveRfcMessageId`, :603); the core record (kind, id); `mode`; `invoiceId` (empty for New); `firmId`; `firmInvoiceNumber` (trimmed); and every mark as (`fileName`, `size`, `contentType`, `mark`), sorted ordinal by fileName, then size, contentType, mark (OP-1, OP-3).
 - **Ids:** submission id = `IdOf("ebilling-from-email-submission-" + K)` and job id = `IdOf("ebilling-from-email-job-" + K)` (InvoiceSubmissionPersister.cs:199). This is the 050a scheme (InvoiceSubmissionService.cs:204-207): one row per key, race-safe through the allocator's `AlreadyCreated`.
 - **`X-Idempotency-Key`:** the existing header (IdempotencyFilter.cs:112; the add-in sends it, `useSaveFlow.ts:1229`), opaque and optional. It names only the per-user 24 h response cache (:108, :181-207), bound to K as in OfficeEndpoints.cs:384-386, so a reused header on another body is never replayed. Send one value per user action; reuse it on retries. Never compared with K.
 - A body `idempotencyKey` is not accepted (it is ignored).
@@ -118,13 +129,17 @@ ProblemDetails (ADR-019). Own refusals carry `errorCode` (submission routes, Inv
 
 **Order:** filter refusals (401, 403, 400 shape, 429, 503 disabled) come before any handler refusal. The handler checks marks (400), then bytes (422), then the rest. Nothing is written before a refusal except step A's filing (§9.1).
 
-## 7. Open points for the main session
+## 7. Settled points (main session, 2026-10-27)
 
-- **OP-1 (blocks the shape): firm and firm invoice number.** Intake needs `FirmId` linked to the record (D-106/D-110; the tracking number is firm-scoped, D-87; InvoiceSubmissionContracts.cs:106) and a firm invoice number refused before any write (D-91; :227); confirm sends `vendorOrgId` + `invoiceNumber` (Services/Finance/InvoiceReviewService.cs:72-85). §9.1 names neither. Add `firmId`, `firmInvoiceNumber`, `poNumber` (codes `firm_invalid` 400, `firm_not_linked` 403, `firm_invoice_number_required` 400), or say how the submission gets them later (`trackingNumber` may then be null). The shapes are frozen, so either needs word-add-in-r1.
-- **OP-2: `internetMessageId` required**, so K exists before any Graph call and the header can bind to it. "No Message-ID" then means "the client sent none or not RFC-shaped"; Graph is not asked. Confirm.
-- **OP-3: key collision.** The §9.1 key is (file name, mark): two same-name attachments differing only in size or type give one K with their marks swapped. Proposal: key on (fileName, size, contentType, mark) plus `ambiguous_attachment`.
-- **OP-4: retry after Failed.** D-139's code answers 409 `submission_already_ended`; §9.1's marker text ("the retry would then reuse a Restricted .eml") implies a new submission, which needs a generation in K.
-- **OP-5: caller scope.** K has no caller; the save's duplicate check is per user (OfficeService.cs:445). A second user with the same email, record and marks gets the same submission id with another .eml source, so 409 `document_already_submitted`. Should K include the caller?
-- **OP-6: AI options and channel.** The in-process save uses `/office/save` defaults (`TriggerAiProcessing` true), so the own-Restricted .eml is profiled like any save. Channel: `Internal` or the reserved Outlook value? The job refuses unsupported channels (SubmissionReasonCodes.cs:73).
-- **OP-7:** what `mode: "Correction"` answers before 097 merges.
-- **OP-8: `errorCode` vs `reasonCode`.** The brief asked for `reasonCode`; the code uses `errorCode` on submission refusals and `reasonCode` on filter denials. Pinned per code with the client rule.
+Field names and codes in this file are binding once word-add-in-r1 agrees (095 POML constraint).
+
+- **OP-1 firm fields:** added above (`firmId`, `firmInvoiceNumber`, `poNumber`), following D-91 and D-106. Not a new behaviour: the internal intake already requires them.
+- **OP-2:** `email.internetMessageId` is required; a missing or non-RFC value is the 400 body-shape refusal, and Graph is not asked.
+- **OP-3:** marks match attachments on (`fileName`, `size`, `contentType`); K uses (fileName, size, contentType, mark), sorted. Two non-inline attachments equal on all three are 400 `marks_invalid` reason `ambiguous_attachment`.
+- **OP-4:** D-139 stands: the same K after the submission ended Failed or Rejected answers 409 `ebilling.submission.submission_already_ended`. A new attempt on the same email is a later feature (owner question raised 2026-10-27; a change would add a generation to K and needs word-add-in-r1's agreement).
+- **OP-5:** K has no caller. The same email, record, firm, number and marks from a second user is the same submission and answers 409 `document_already_submitted`; it prevents a second invoice for one email.
+- **OP-6:** the in-process save keeps `/office/save`'s AI defaults; the .eml is an ordinary Document under its own Restricted narrowing, and D7 rules govern its indexing. Channel: `Internal` (R1 supports SPA and Internal; the reserved Outlook value is not enabled in R1).
+- **OP-7:** until task 097 merges, `mode: "Correction"` answers 409 `ebilling.submission.correction_not_allowed` with `reason: "not_available"` before any write. After 097 the reasons are `invoice_status`, `different_firm`, `different_core_record`.
+- **OP-8:** code is `errorCode ?? reasonCode` (route refusals carry `errorCode`, filter denials `reasonCode`), as the existing finance routes do.
+
+**Not on this route:** adding supporting files to an existing invoice. No internal upload route exists today (090 built the service, no route); whether R1 gets one is an open owner question (2026-10-27).
