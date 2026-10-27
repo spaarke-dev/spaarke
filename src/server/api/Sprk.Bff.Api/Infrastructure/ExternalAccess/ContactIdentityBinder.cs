@@ -568,8 +568,9 @@ public sealed class ContactIdentityBinder
     /// over the inactive contacts for <paramref name="email"/> immediately before the create, so no contact is created around
     /// a removal even when the resolution that answered "create" was read earlier (<c>/invite-and-grant</c> hands its
     /// pre-check's resolution to onboarding). The owner team is the caller's decision and is only written here. The POST's
-    /// exceptions propagate unchanged (the caller maps the owner-privilege refusal). Every contact-entity-set create in server
-    /// code is either this method or <see cref="CreateContactGuardedAsync"/> (ArchTest <c>ContactCreateAroundRemovalGuardTests</c>).
+    /// exceptions propagate unchanged (the caller maps the owner-privilege refusal). Every contact create in server code is
+    /// either this method or the store's create seam, reached only through <see cref="CreateContactGuardedAsync"/> (ArchTest
+    /// <c>ContactCreateAroundRemovalGuardTests</c>, over the ownership census's create shapes).
     /// </summary>
     /// <returns>The refusal (and no contact id) when the create may not go ahead; else the new contact's id.</returns>
     internal async Task<(InviteContactResolution? Refusal, Guid ContactId)> CreateInviteContactGuardedAsync(

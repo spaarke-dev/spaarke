@@ -19,9 +19,13 @@ namespace Spaarke.ArchTests;
 /// and does not count as the method. Comments and XML documentation are trivia and are not scanned.</para>
 /// <para>Known limit: the rule matches the member's name, not its behaviour; a reflection call by a computed string is not
 /// seen. Slice C2c: the invite create does not use the store's create; it POSTs through the Web API client inside
-/// <c>ContactIdentityBinder.CreateInviteContactGuardedAsync</c>, which applies the same rule immediately before the POST.
-/// <see cref="AContactEntitySetCreate_IsMadeOnlyInsideTheGuardedInviteCreate"/> pins every contact-entity-set create
-/// (<c>CreateAsync</c> / <c>PostAsync</c> on <c>"contacts"</c>) to that method.</para>
+/// <c>ContactIdentityBinder.CreateInviteContactGuardedAsync</c>, which applies the same rule immediately before the POST.</para>
+/// <para>C2d: <see cref="EveryContactCreate_InServerCode_IsTheGuardedInviteCreate_OrTheStoreSeam"/> pins EVERY contact create
+/// the ownership census sees (<see cref="ContactCreateOwnerPolicyGuardTests.ContactCreates(string, SyntaxNode, IReadOnlyCollection{string}?)"/>:
+/// Web API creates, HTTP POSTs to a contacts path, user-client posts and SDK contact entities, by literal, interpolated or
+/// prefixed path, constant or local) to two sites: that method, and the store's create seam, whose only caller is the store
+/// create pinned above. One detector serves both rules, so a create shape the census learns is covered here too. Must-fire
+/// and must-not-fire controls below. Enforced by: this guard (ArchTests, CI and the Stop hook).</para>
 /// </remarks>
 public class ContactCreateAroundRemovalGuardTests
 {
@@ -112,157 +116,218 @@ public class ContactCreateAroundRemovalGuardTests
         => Assert.True(Scan(BinderFile, code).Violations.Count == 0, because);
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════
-    // Slice C2c: every contact-entity-set create in server code is a guarded one
+    // C2d F1: every contact create in server code is a guarded one (ONE detector: the ownership census)
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════
 
-    /// <summary>The binder's guarded invite POST, the one place a contact may be created through the Web API client.</summary>
+    /// <summary>The binder's guarded invite create: one of the two places a contact may be created.</summary>
     internal const string InviteGuardMethod = "CreateInviteContactGuardedAsync";
 
-    /// <summary>The Web API client members that create a row.</summary>
-    private static readonly HashSet<string> CreateMembers = new(StringComparer.Ordinal) { "CreateAsync", "PostAsync" };
+    /// <summary>The identity store's create seam: the other place, reached only through <see cref="GuardMethod"/>.</summary>
+    internal const string StoreFile = "src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ContactIdentityStore.cs";
+    internal const string StoreClass = "DataverseContactIdentityStore";
+    internal const string StoreSeam = "BuildCreateRequest";
 
-    private const string ContactEntitySetLiteral = "contacts";
+    /// <summary>One file's contact creates: those at neither allowed site, and how many sit at each allowed site.</summary>
+    internal sealed record CreateSiteResult(IReadOnlyList<string> Violations, int InviteCreates, int StoreSeamCreates);
 
-    [Fact]
-    public void AContactEntitySetCreate_IsMadeOnlyInsideTheGuardedInviteCreate()
+    /// <summary>
+    /// The contact creates in one server file, judged by site. The creates are the ownership census's
+    /// (<see cref="ContactCreateOwnerPolicyGuardTests.ContactCreates(string, SyntaxNode, IReadOnlyCollection{string}?)"/>):
+    /// <c>CreateAsync</c> on a contact table or set, <c>HttpMethod.Post</c> next to a contacts path, <c>Post*Async</c> to a
+    /// contacts path and <c>new Entity("contact")</c>, with the path read from literals, interpolated, prefixed and concatenated
+    /// strings, constants and locals. Whether the create binds an owner does not matter here. A create is allowed only (i) in
+    /// the member <see cref="InviteGuardMethod"/> of <see cref="GuardClass"/> in <see cref="BinderFile"/>, or (ii) in the member
+    /// <see cref="StoreSeam"/> of <see cref="StoreClass"/> in <see cref="StoreFile"/>; a lambda or local function inside either
+    /// is a unit of its own and is not allowed. Known limit: what the census does not see (its own doc comment lists it, and
+    /// the runtime-table chat create) is not seen here either.
+    /// </summary>
+    internal static CreateSiteResult ScanContactCreateSites(
+        string relativePath, SyntaxNode root, IReadOnlyCollection<string> constantNames)
     {
-        var files = SourceScan.ServerSourceFiles()
-            .Select(f => (Path: SourceScan.Relative(f).Replace('\\', '/'), Code: File.ReadAllText(f)))
-            .ToList();
-        var contactSetNames = ContactSetConstantNames(files.Select(f => f.Code));
-
         var violations = new List<string>();
-        var guardedUses = 0;
-        foreach (var (path, code) in files)
+        int invite = 0, store = 0;
+        foreach (var hit in ContactCreateOwnerPolicyGuardTests.ContactCreates(relativePath, root, constantNames))
         {
-            var result = ScanEntitySetCreates(path, code, contactSetNames);
-            violations.AddRange(result.Violations);
-            guardedUses += result.GuardedUses;
+            if (IsSite(relativePath, hit, BinderFile, GuardClass, InviteGuardMethod))
+            {
+                invite++;
+            }
+            else if (IsSite(relativePath, hit, StoreFile, StoreClass, StoreSeam))
+            {
+                store++;
+            }
+            else
+            {
+                violations.Add($"{relativePath}:{hit.Line}: {hit.Shape} in {hit.TypeName}.{hit.MemberName ?? "?"} ({hit.Unit})");
+            }
         }
 
-        Assert.True(guardedUses == 1,
-            $"Expected exactly one contact-entity-set create inside {GuardClass}.{InviteGuardMethod}, found {guardedUses}: the "
-            + "guard is vacuous or the guarded method was renamed or moved.");
+        return new CreateSiteResult(violations, invite, store);
+    }
+
+    internal static CreateSiteResult ScanContactCreateSites(string relativePath, string code, IReadOnlyCollection<string>? constantNames = null)
+    {
+        var root = CSharpSyntaxTree.ParseText(code, new CSharpParseOptions(LanguageVersion.Latest)).GetRoot();
+        return ScanContactCreateSites(relativePath, root,
+            constantNames ?? ContactCreateOwnerPolicyGuardTests.ContactConstantNames(root));
+    }
+
+    private static bool IsSite(string relativePath, ContactCreateOwnerPolicyGuardTests.ContactCreateHit hit, string file,
+        string typeName, string memberName)
+        => relativePath == file
+           && hit.Unit == ContactCreateOwnerPolicyGuardTests.MemberKind
+           && string.Equals(hit.TypeName, typeName, StringComparison.Ordinal)
+           && string.Equals(hit.MemberName, memberName, StringComparison.Ordinal);
+
+    /// <summary>Every mention of <see cref="StoreSeam"/> outside its own declaration: "path:line in Type.Member" for each.</summary>
+    internal static IReadOnlyList<string> StoreSeamCallers(string relativePath, SyntaxNode root)
+        => root.DescendantNodes().OfType<IdentifierNameSyntax>()
+            .Where(n => n.Identifier.ValueText == StoreSeam)
+            .Select(n =>
+            {
+                var unit = n.Ancestors().FirstOrDefault(a =>
+                    a is AnonymousFunctionExpressionSyntax or LocalFunctionStatementSyntax or MemberDeclarationSyntax);
+                var member = unit is MethodDeclarationSyntax m ? m.Identifier.ValueText : unit?.Kind().ToString() ?? "?";
+                var type = n.Ancestors().OfType<BaseTypeDeclarationSyntax>().FirstOrDefault()?.Identifier.ValueText ?? "?";
+                return $"{relativePath}:{n.GetLocation().GetLineSpan().StartLinePosition.Line + 1} in {type}.{member}";
+            })
+            .ToList();
+
+    [Fact]
+    public void EveryContactCreate_InServerCode_IsTheGuardedInviteCreate_OrTheStoreSeam()
+    {
+        var files = SourceScan.ServerSourceFiles()
+            .Select(f => (Path: SourceScan.Relative(f).Replace('\\', '/'),
+                Root: CSharpSyntaxTree.ParseText(File.ReadAllText(f), new CSharpParseOptions(LanguageVersion.Latest)).GetRoot()))
+            .ToList();
+        var names = files.SelectMany(f => ContactCreateOwnerPolicyGuardTests.ContactConstantNames(f.Root)).Distinct().ToList();
+
+        var violations = new List<string>();
+        int invite = 0, store = 0;
+        foreach (var (path, root) in files)
+        {
+            var result = ScanContactCreateSites(path, root, names);
+            violations.AddRange(result.Violations);
+            invite += result.InviteCreates;
+            store += result.StoreSeamCreates;
+        }
+
+        Assert.True(invite == 1 && store == 1,
+            $"Expected exactly one contact create in {GuardClass}.{InviteGuardMethod} and one in {StoreClass}.{StoreSeam}, found "
+            + $"{invite} and {store}: the guard is vacuous or a site was renamed or moved.");
         Assert.True(violations.Count == 0,
-            "No contact is created around a removal: a contact-entity-set create (CreateAsync / PostAsync on \"contacts\") may "
-            + $"be made only inside {GuardClass}.{InviteGuardMethod}, which checks the inactive contacts for the email first "
-            + $"(or through the store's {StoreCreate}, guarded by {GuardMethod}). Offending creates:\n"
+            "No contact is created around a removal: a contact create may be made only in "
+            + $"{GuardClass}.{InviteGuardMethod} (it checks the inactive contacts for the email first) or in the store's "
+            + $"{StoreClass}.{StoreSeam}, reached only through {GuardClass}.{GuardMethod}. Offending creates:\n"
             + string.Join("\n", violations));
     }
 
+    [Fact]
+    public void TheStoreSeam_IsCalledOnlyByTheStoreCreate_WhichOnlyTheGuardedCreateCalls()
+    {
+        var callers = SourceScan.ServerSourceFiles()
+            .SelectMany(f => StoreSeamCallers(SourceScan.Relative(f).Replace('\\', '/'),
+                CSharpSyntaxTree.ParseText(File.ReadAllText(f), new CSharpParseOptions(LanguageVersion.Latest)).GetRoot()))
+            .ToList();
+
+        // The store create's own callers are pinned by TheStoreCreate_IsCalledOnlyInsideTheGuardedCreate.
+        Assert.Equal(new[] { $"{StoreClass}.{StoreCreate}" }, callers.Select(c => c[(c.IndexOf(" in ", StringComparison.Ordinal) + 4)..]));
+        Assert.All(callers, c => Assert.StartsWith(StoreFile + ":", c, StringComparison.Ordinal));
+    }
+
+    // ── Must fire ────────────────────────────────────────────────────────────────────────────────────────────
+
+    private const string OtherFile = "src/server/api/Sprk.Bff.Api/Services/Other.cs";
+    private const string InviteServiceFile = "src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalInviteService.cs";
+
     [Theory]
-    [InlineData("a direct \"contacts\" create in another file", "src/server/api/Sprk.Bff.Api/Services/Other.cs",
-        "class Other { async Task Make() { await _dataverse.CreateAsync(\"contacts\", payload, ct); } }")]
-    [InlineData("a create in the invite service outside the guarded method",
-        "src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalInviteService.cs",
+    [InlineData("an interpolated HttpMethod.Post to contacts in another file", OtherFile,
+        "class Other { async Task M() { await _http.SendAsync(new HttpRequestMessage(HttpMethod.Post, $\"{_baseUrl}/api/data/v9.2/contacts\"), ct); } }")]
+    [InlineData("an interpolated PostAsync to contacts in another file", OtherFile,
+        "class Other { async Task M() { await _client.PostAsync($\"{_root}contacts\", body, ct); } }")]
+    [InlineData("a prefixed path held in a local", OtherFile,
+        "class Other { async Task M() { var path = ApiPrefix + \"contacts\"; await _client.PostAsJsonAsync(path, body, ct); } }")]
+    [InlineData("an SDK Entity(\"contact\") create outside the binder, even with an owner", OtherFile,
+        "class Other { async Task M() { var e = new Entity(\"contact\") { [\"ownerid\"] = owner }; await _svc.CreateAsync(e, ct); } }")]
+    [InlineData("a Web API create on contacts, even with an owner", OtherFile,
+        "class Other { async Task M() { var p = new Dictionary<string, object?> { [\"ownerid@odata.bind\"] = t }; await _d.CreateAsync(\"contacts\", p, ct); } }")]
+    [InlineData("a create in the invite service outside the guarded method", InviteServiceFile,
         "class ExternalInviteService { private const string ContactEntitySet = \"contacts\";\n"
         + " static async Task<Guid> CreateContactAsync() => await dataverseClient.CreateAsync(ContactEntitySet, payload, ct); }")]
-    [InlineData("a PostAsync to \"contacts\"", "src/server/api/Sprk.Bff.Api/Services/Other.cs",
-        "class Other { async Task Make() { await _client.PostAsync(\"contacts\", body, ct); } }")]
-    [InlineData("a lambda inside the guarded method", ContactCreateAroundRemovalGuardTests.BinderFile,
+    [InlineData("a create in another binder method", BinderFile,
+        "class ContactIdentityBinder { async Task Other() { await _d.CreateAsync(\"contacts\", p, ct); } }")]
+    [InlineData("a lambda inside the guarded invite create", BinderFile,
         "class ContactIdentityBinder { async Task CreateInviteContactGuardedAsync() { Func<Task> f = () => _d.CreateAsync(\"contacts\", p, ct); } }")]
-    [InlineData("the guard-named method of another class", ContactCreateAroundRemovalGuardTests.BinderFile,
+    [InlineData("the guard-named method of another class", BinderFile,
         "class Other { async Task CreateInviteContactGuardedAsync() { await _d.CreateAsync(\"contacts\", p, ct); } }")]
-    public void TheEntitySetRule_Fires(string because, string path, string code)
-        => Assert.True(ScanEntitySetCreates(path, code, ContactSetConstantNames(new[] { code })).Violations.Count == 1, because);
+    [InlineData("a local function named like the guarded method", BinderFile,
+        "class ContactIdentityBinder { async Task Other() { async Task CreateInviteContactGuardedAsync() { await _d.CreateAsync(\"contacts\", p, ct); } } }")]
+    [InlineData("the guard-named method in another file", OtherFile,
+        "class ContactIdentityBinder { async Task CreateInviteContactGuardedAsync() { await _d.CreateAsync(\"contacts\", p, ct); } }")]
+    [InlineData("a second create request in the store, outside the seam", StoreFile,
+        "class DataverseContactIdentityStore { static (HttpMethod, string, object) BuildOther() => (HttpMethod.Post, \"contacts\", null); }")]
+    public void TheCreateSiteRule_Fires(string because, string path, string code)
+        => Assert.True(ScanContactCreateSites(path, code).Violations.Count == 1, because);
 
     [Fact]
-    public void TheEntitySetRule_Fires_OnAConstantDeclaredInAnotherFile()
-        => Assert.Single(ScanEntitySetCreates("src/server/api/Sprk.Bff.Api/Services/Other.cs",
-            "class Other { async Task Make() { await _d.CreateAsync(Names.ContactSet, p, ct); } }",
-            ContactSetConstantNames(new[] { "static class Names { internal const string ContactSet = \"contacts\"; }" })).Violations);
+    public void TheCreateSiteRule_Fires_OnAConstantDeclaredInAnotherFile()
+    {
+        var names = ContactCreateOwnerPolicyGuardTests.ContactConstantNames(
+            "static class Names { internal const string ContactSet = \"contacts\"; }");
+        Assert.Single(ScanContactCreateSites(OtherFile,
+            "class Other { async Task M() { await _d.CreateAsync(Names.ContactSet, p, ct); } }", names).Violations);
+    }
 
     [Fact]
-    public void TheEntitySetRule_DoesNotFire_InsideTheGuardedInviteCreate()
+    public void TheStoreSeamCallers_Fire_OnASecondCaller()
+    {
+        var root = CSharpSyntaxTree.ParseText(
+            "class DataverseContactIdentityStore { void Other() { var r = BuildCreateRequest(o, p, d); } }").GetRoot();
+        Assert.Equal(new[] { $"{StoreFile}:1 in {StoreClass}.Other" }, StoreSeamCallers(StoreFile, root));
+    }
+
+    // ── Must not fire: the two allowed sites ─────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void TheCreateSiteRule_DoesNotFire_OnTheGuardedInviteCreate()
     {
         const string code = "class ContactIdentityBinder { private const string InviteContactEntitySet = \"contacts\";\n"
             + " internal async Task<(object, Guid)> CreateInviteContactGuardedAsync() {\n"
+            + "  var payload = new Dictionary<string, object?> { [\"ownerid@odata.bind\"] = t };\n"
             + "  var created = await dataverseClient.CreateAsync(InviteContactEntitySet, payload, ct).ConfigureAwait(false);\n"
             + "  return (null, created); } }";
 
-        var result = ScanEntitySetCreates(BinderFile, code, ContactSetConstantNames(new[] { code }));
+        var result = ScanContactCreateSites(BinderFile, code);
 
         Assert.Empty(result.Violations);
-        Assert.Equal(1, result.GuardedUses);
+        Assert.Equal(1, result.InviteCreates);
+    }
+
+    [Fact]
+    public void TheCreateSiteRule_DoesNotFire_OnTheStoreSeam()
+    {
+        const string code = """
+            public sealed class DataverseContactIdentityStore
+            {
+                public static (HttpMethod Method, string Path, Dictionary<string, object?> Payload) BuildCreateRequest(
+                    Guid oid, IdentityPlaneMarker plane, NewContactDetails details)
+                    => (HttpMethod.Post, "contacts", CreatePayload(oid, plane, details));
+            }
+            """;
+
+        var result = ScanContactCreateSites(StoreFile, code);
+
+        Assert.Empty(result.Violations);
+        Assert.Equal(1, result.StoreSeamCreates);
     }
 
     [Theory]
-    [InlineData("a read of \"contacts\"", "class Other { async Task R() { await _d.RetrieveAsync<Row>(\"contacts\", id, \"fullname\", ct); } }")]
+    [InlineData("a read of contacts", "class Other { async Task R() { await _d.RetrieveAsync<Row>(\"contacts\", id, \"fullname\", ct); } }")]
     [InlineData("a create on another entity set", "class Other { async Task M() { await _d.CreateAsync(\"sprk_externalrecordaccesses\", p, ct); } }")]
-    [InlineData("a create on a constant naming another set",
-        "class Other { private const string GrantSet = \"sprk_externalrecordaccesses\"; async Task M() { await _d.CreateAsync(GrantSet, p, ct); } }")]
+    [InlineData("a PATCH of a contact", "class Other { async Task M() { await _d.UpdateAsync(\"contacts\", id, p, ct); } }")]
     [InlineData("a comment", "class Other { void M() { // _d.CreateAsync(\"contacts\", p, ct)\n } }")]
-    public void TheEntitySetRule_DoesNotFire(string because, string code)
-        => Assert.True(ScanEntitySetCreates("src/server/api/Sprk.Bff.Api/Services/Other.cs", code,
-            ContactSetConstantNames(new[] { code })).Violations.Count == 0, because);
-
-    /// <summary>The names of every <c>const string</c> whose value is <c>"contacts"</c> in <paramref name="sources"/>.</summary>
-    internal static IReadOnlySet<string> ContactSetConstantNames(IEnumerable<string> sources)
-    {
-        var names = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var source in sources)
-        {
-            var root = CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.Latest)).GetRoot();
-            foreach (var declarator in root.DescendantNodes().OfType<VariableDeclaratorSyntax>())
-            {
-                if (declarator.Parent?.Parent is FieldDeclarationSyntax field
-                    && field.Modifiers.Any(SyntaxKind.ConstKeyword)
-                    && declarator.Initializer?.Value is LiteralExpressionSyntax { Token.ValueText: ContactEntitySetLiteral })
-                {
-                    names.Add(declarator.Identifier.ValueText);
-                }
-            }
-        }
-
-        return names;
-    }
-
-    /// <summary>
-    /// Every invocation of <c>CreateAsync</c> / <c>PostAsync</c> whose first argument is the literal <c>"contacts"</c> or a
-    /// constant (by name, from <paramref name="contactSetNames"/>) holding it. Allowed only inside the binder's guarded invite
-    /// create. Known limit: an entity set computed at run time is not seen.
-    /// </summary>
-    internal static ScanResult ScanEntitySetCreates(string relativePath, string code, IReadOnlySet<string> contactSetNames)
-    {
-        var root = CSharpSyntaxTree.ParseText(code, new CSharpParseOptions(LanguageVersion.Latest)).GetRoot();
-        var violations = new List<string>();
-        var guarded = 0;
-        foreach (var invocation in root.DescendantNodes().OfType<InvocationExpressionSyntax>())
-        {
-            var name = invocation.Expression switch
-            {
-                MemberAccessExpressionSyntax member => member.Name.Identifier.ValueText,
-                IdentifierNameSyntax identifier => identifier.Identifier.ValueText,
-                GenericNameSyntax generic => generic.Identifier.ValueText,
-                _ => null,
-            };
-            if (name is null || !CreateMembers.Contains(name)
-                || invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression is not { } first
-                || !NamesContactSet(first, contactSetNames))
-            {
-                continue;
-            }
-
-            if (IsInsideMethod(relativePath, invocation, InviteGuardMethod))
-            {
-                guarded++;
-                continue;
-            }
-
-            var line = invocation.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
-            violations.Add($"{relativePath}:{line}: {invocation.ToString().Trim()}");
-        }
-
-        return new ScanResult(violations, guarded);
-    }
-
-    private static bool NamesContactSet(ExpressionSyntax expression, IReadOnlySet<string> contactSetNames) => expression switch
-    {
-        LiteralExpressionSyntax literal => literal.Token.ValueText == ContactEntitySetLiteral,
-        IdentifierNameSyntax identifier => contactSetNames.Contains(identifier.Identifier.ValueText),
-        MemberAccessExpressionSyntax member => contactSetNames.Contains(member.Name.Identifier.ValueText),
-        _ => false,
-    };
+    public void TheCreateSiteRule_DoesNotFire(string because, string code)
+        => Assert.True(ScanContactCreateSites(OtherFile, code).Violations.Count == 0, because);
 
     // ── The scan ─────────────────────────────────────────────────────────────────────────────────────────────
 

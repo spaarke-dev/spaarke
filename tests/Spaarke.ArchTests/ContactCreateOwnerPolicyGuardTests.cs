@@ -634,7 +634,7 @@ public class ContactCreateOwnerPolicyGuardTests
     /// <summary>The unit of code a create is judged against: what it is, and its name (null for a lambda or a top-level statement).</summary>
     private readonly record struct Unit(SyntaxNode Node, string Kind, string? Name);
 
-    private const string MemberKind = "member";
+    internal const string MemberKind = "member";
     private const string LocalFunctionKind = "local function";
     private const string LambdaKind = "lambda";
     private const string StatementKind = "statement";
