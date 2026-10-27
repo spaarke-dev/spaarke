@@ -628,9 +628,7 @@ public sealed class H0PreflightHandler : IProvisioningHandler
         JsonElement? evidence,
         CancellationToken cancellationToken)
     {
-        run.Status = RunStatus.Failed;
-        run.CurrentPhase = HandlerIdentifier;
-        run.ErrorDetail = $"[{rejectionCode}] {diagnostic}";
+        run.MarkPhaseFailed(HandlerIdentifier, RunStatus.Failed, $"[{rejectionCode}] {diagnostic}"); // T186 L41
 
         // Gate state — one entry per H0 preflight run outcome. Verifier is
         // H0; state is Pending (external precondition to resolve). Evidence
@@ -675,8 +673,7 @@ public sealed class H0PreflightHandler : IProvisioningHandler
         var completedAt = DateTimeOffset.UtcNow;
         var startedAt = completedAt - TimeSpan.FromMilliseconds(1); // Approximate; probe start not tracked separately.
 
-        run.Status = RunStatus.Running;
-        run.CurrentPhase = HandlerIdentifier; // Reconciler observes + fans out
+        run.MarkPhaseSucceeded(HandlerIdentifier); // Reconciler observes + fans out
         run.CompletedPhases.Add(new CompletedPhase
         {
             Phase = HandlerIdentifier,

@@ -119,6 +119,8 @@
 //   │ Provisioner ActivateFailure                │ QuarantineRequired       │
 //   │                                            │ (container exists, on    │
 //   │                                            │ record; resume activates)│
+//   │ Verification kept failing transiently (429,│ Resumable (container on  │
+//   │ 5xx, timeout, dropped connection)          │ record; resume verifies) │
 //   │ Verification NotVerified                   │ QuarantineRequired       │
 //   │                                            │ (created + activated,    │
 //   │                                            │ unverifiable)            │
@@ -723,6 +725,17 @@ public sealed class H8SpeContainerHandler : IProvisioningHandler
                 .ConfigureAwait(false);
         }
 
+        // A transient service fault (429, 5xx, timeout, dropped connection) that outlasted the verifier's retries says
+        // nothing about the container — Resumable, never a quarantine. The container is RECORDED (6b), so the resume
+        // verifies the same one.
+        if (verifyResult is SpeContainerVerificationResult.TransientFailure transientFailure)
+        {
+            return await FailAsync(run, etag, FailureClass.Resumable,
+                SpeContainerRejectionCodes.ContainerVerificationTransient,
+                transientFailure.Diagnostic + $" Container '{outputs.RootContainerId}' stays on the run's record; a resume verifies it again.",
+                cancellationToken).ConfigureAwait(false);
+        }
+
         // (7b) DS-4 §2 / this project's CLAUDE.md MUST rules: the up-to-24h
         // SPE container-type replication window is a RUN-LEVEL external
         // blocker, not a handler defect. The container DOES exist + is
@@ -1089,8 +1102,7 @@ public sealed class H8SpeContainerHandler : IProvisioningHandler
             Evidence = BuildEvidence(outputs.RootContainerId, verified.Status, verifiedViaAppOnlyToken: true, owningBusinessUnitId),
         };
 
-        run.Status = RunStatus.Running;
-        run.CurrentPhase = HandlerIdentifier; // Reconciler observes + fans out.
+        run.MarkPhaseSucceeded(HandlerIdentifier); // Reconciler observes + fans out.
         run.CompletedPhases.Add(new CompletedPhase
         {
             Phase = HandlerIdentifier,

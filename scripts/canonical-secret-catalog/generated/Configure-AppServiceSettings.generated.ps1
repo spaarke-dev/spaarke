@@ -60,6 +60,9 @@ param(
     [string]$CosmosEndpoint,
 
     [Parameter(Mandatory = $true)]
+    [string]$CustomerBusinessUnitId,
+
+    [Parameter(Mandatory = $true)]
     [string]$CustomerId,
 
     [Parameter(Mandatory = $true)]
@@ -82,6 +85,9 @@ param(
 
     [Parameter(Mandatory = $true)]
     [string]$SpeContainerId,
+
+    [Parameter(Mandatory = $true)]
+    [string]$StorageBlobEndpoint,
 
     [Parameter(Mandatory = $true)]
     [string]$TenantId,
@@ -114,6 +120,7 @@ $settings = @(
     "AzureAd__Audience=$(Format-KvRef 'BFF-API-Audience')",
     "AzureAd__ClientId=$(Format-KvRef 'BFF-API-ClientId')",
     "AzureAd__ClientId=$BffAppClientId",
+    "AzureAd__Instance=https://login.microsoftonline.com/",
     "AzureAd__TenantId=$(Format-KvRef 'TenantId')",
     "AzureAd__TenantId=$TenantId",
     "AzureOpenAI__ChatModelName=gpt-4o-mini",
@@ -130,6 +137,7 @@ $settings = @(
     "Compose__Webhook__SigningKey=$(Format-KvRef 'Compose-Webhook-SigningKey')",
     "Cors__AllowedOrigins__0=https://addins.spaarke.com",
     "Cors__AllowedOrigins__1=https://external.spaarke.com",
+    "CosmosPersistence__DatabaseName=spaarke-ai",
     "CosmosPersistence__Endpoint=$CosmosEndpoint",
     "Customer__Id=$CustomerId",
     "Dataverse__ClientId=$(Format-KvRef 'BFF-API-ClientId')",
@@ -143,6 +151,7 @@ $settings = @(
     "Email__WebhookSecret=$(Format-KvRef 'Email-WebhookSecret')",
     "Email__WebhookSigningKey=$(Format-KvRef 'Email-WebhookSigningKey')",
     "EmailProcessing__DefaultContainerId=$SpeContainerId",
+    "ExternalAccess__CustomerBusinessUnitId=$CustomerBusinessUnitId",
     "Graph__ClientId=$(Format-KvRef 'BFF-API-ClientId')",
     "Graph__Credentials__Order__0=ManagedIdentityFederated",
     "Graph__Credentials__RequireSecretFreeIdentity=true",
@@ -160,6 +169,7 @@ $settings = @(
     "ScheduledRagIndexing__TenantId=$(Format-KvRef 'TenantId')",
     "ServiceBus__FullyQualifiedNamespace=$ServiceBusFqns",
     "ServiceBus__QueueName=sdap-jobs",
+    "SessionFileStore__BlobEndpoint=$StorageBlobEndpoint",
     "SharePointEmbedded__ContainerTypeId=$ContainerTypeId",
     "SpeAdmin__KeyVaultUri=$KvVaultUri",
     "TENANT_ID=$(Format-KvRef 'TenantId')"
