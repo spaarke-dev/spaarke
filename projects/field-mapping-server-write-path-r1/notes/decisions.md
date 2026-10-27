@@ -390,3 +390,41 @@ Sync-mode migration (UAC-r2 4a): class-aware. Assigned-To targets stay 0; filing
   - Today there is no single family service: about 8 separate enumerations with their own registries (see the code-map summary in the UAC message).
 - **5c:** see the task-006 notes (name maps deleted; the system map can't be deleted; handed to UAC).
 - **77 documents:** no re-index (owner).
+
+## 2026-10-27 — UAC-r2: canonical record family (binding input for the W7 design; UAC reviews the addendum before task-create)
+
+1. **Definition.** A family is a tree joined ONLY by FILING edges:
+   - core → core: projects and WAs under a matter or project (`SecureRootInheritance.TypedFilingColumns` / `IntermediateFilingColumns` / record-type pair; depth 4);
+   - core → child: the four regarding stamps (`sprk_regardingmatter` / `project` / `workassignment` / `servicerequest`) plus each child table's direct filing lookups (documents, communications and threads, events, to-dos, memos, invoices, analyses, agreements, budgets, report cards);
+   - child → grandchild: the `SecureChildLineage` hops (file version → document, to-do → regarding document, communication attachment / participant → communication, budget bucket → budget, the invoice family → invoice; `MaxLineageDepth` 4).
+   - Direction: down from the record, plus up to its root. Siblings come only through the shared parent.
+   - NOT family: citations (signal / decision → policy); people and organization lookups (assigned*, attorneys, law firm, contacts); N:N associations; grant rows (`sprk_externalrecordaccess`); system rows.
+   - Policy → version is included only if a policy can be filed under a core record.
+   - A service request is a core record with its own family, NOT in the Secure family (task 194 adds its stamp to the ordinary walk only).
+2. **Registry.**
+   - ONE declared EDGE registry: (child table, lookup column, parent table, edge kind filing-core | stamp | lineage-hop, depth role, attributes such as InSecureFamily). It lives in `Services/Dataverse`, next to `CoreAncestorResolver`, as DATA.
+   - The existing registries become checked views: a parity test with a ratchet baseline.
+   - Seed it from `SecureChildLineage`, `TypedFilingColumns` / `IntermediateFilingColumns` / pair and `StampSourceColumns`. Do NOT start from scratch.
+   - Seed only AFTER UAC task 194 merges (it changes `SecureChildLineage`: budget bucket, the ordinary service-request edge). UAC will send its head.
+   - UAC owns the CONTENT. Any change needs a UAC review line, enforced by a source-scan / ArchTest note on the file.
+   - Migrating UAC's walks onto the registry is UAC's call, not this project's.
+3. **Read identity.**
+   - The walk runs as the CALLER (OBO), level by level, batched per level (no N+1).
+   - Never traverse through an unreadable record. Never count or hint at hidden members.
+   - The root read probe uses the equalised gate call.
+   - Actions re-derive the family as the caller at execution and intersect the confirmed ids; the client tree is never trusted.
+   - No app-only walk plus trim.
+4. **Limits.**
+   - Depth 4. A size cap per view (500) and per level.
+   - Past the cap: `truncated=true` plus per-table counts of what IS shown, and load more per level. Never truncate silently.
+   - Actions take only the confirmed ids.
+   - No cross-caller cache. Any per-caller cache lasts minutes at most and is evicted by the access-cache invalidators.
+5. **Never:**
+   - return an unreadable member, or its count, name or id;
+   - be an authorization input (the family list is display only);
+   - write (actions go through their own endpoints, which re-authorize per record);
+   - expose access metadata (grants, No Access, sharees, the Secure owner team);
+   - serve external users (the SPA uses `AccessibleRecordSetService`).
+
+   Anything access-changing (bulk share/grant, Monitor if it shares) needs UAC review before it is built. "Email family members" takes recipients only from the people lookups on readable members, respects field security, and uses the existing communication send path.
+- **5c follow-up:** UAC filed #2343. Recommendation: retire the `sprk_securitybu` mechanism (remove `HasLegacyPerProjectBusinessUnit` and its 409, then delete the column). Interim: hide the BU-form navigation. UAC takes the schema delete to the owner.
