@@ -41,6 +41,13 @@
                         systemuserroles, fieldpermission, systemuserprofiles, teamprofiles, teammembership — or every
                         such empty read is refused (fail closed). The proof's own queries are run AS that user
                         (MSCRMCallerID); the operator running -Verify needs the act-on-behalf-of privilege for it.
+      (h) STANDING GRANT -Verify only, read-only. Each -BffApplicationIds application user may update
+                        contact.sprk_standinggrant ONLY through its DIRECT membership of Standing Grant Administrators
+                        (the person removal clears the standing grant), and no other profile it holds, directly or through
+                        a team, grants create or update on it. The team leg is one server-side join. The membership is
+                        added by a provisioning step; this script never writes it, so a missing one is FAIL here.
+                        (scripts/common/StandingGrantWriterInvariant.ps1; the profile names are S19's, pinned by
+                        StandingGrantVerifyAgreementTests.)
 
     WHO READS WHAT (the BFF application user must keep reading every column):
       sprk_accesspermissiongrant      every user (BFF-Managed Field Readers, 4/0/0); the BFF reads through the
@@ -125,6 +132,8 @@ $LinkReaderProfileName = 'Spaarke Identity Link Readers'
 $LinkWriterProfileName = 'Spaarke Identity Link Writers'
 $StandingGrantProfileName = 'Standing Grant Administrators'
 $SystemAdministratorProfileName = 'System Administrator'
+# (h) The standing grant: provisioning's S19 owns its lock; -Verify reads only who of the BFF may update it.
+$StandingGrantColumn = 'sprk_standinggrant'
 $Secured = $true
 
 # The columns this script creates. Existing columns in $Grants are only secured and granted.
@@ -199,6 +208,7 @@ function Get-AttrPath([string]$Column) {
 
 $IsDryRun = -not $Apply.IsPresent
 . (Join-Path $PSScriptRoot 'common/DataverseSolutionMembership.ps1')
+. (Join-Path $PSScriptRoot 'common/StandingGrantWriterInvariant.ps1')
 $gaps = [System.Collections.Generic.List[string]]::new()
 function Report([string]$State, [string]$What) {
     $color = switch ($State) { 'OK' { 'Green' } 'MISSING' { 'Yellow' } 'WOULD' { 'Cyan' } 'DONE' { 'Green' } 'INFO' { 'Gray' } default { 'Red' } }
@@ -449,6 +459,29 @@ if ($Verify) {
     }
 }
 
+# ── (h) STANDING GRANT WRITER INVARIANT (verify only, read-only) ────────────────────────────────────────────
+if ($Verify) {
+    Write-Host "`n(h) Standing grant: each BFF application user updates $Table.$StandingGrantColumn only through its direct '$StandingGrantProfileName' membership"
+    $sgaId = $profileIds[$StandingGrantProfileName]
+    if (-not $sgaId) { Report 'FAIL' "the invariant cannot be checked: profile '$StandingGrantProfileName' was not found (see (b))" }
+    else {
+        foreach ($u in $bffUsers) {
+            $queries = Get-StandingGrantWriterQuery -SystemUserId $u.systemuserid -Table $Table -Column $StandingGrantColumn
+            try {
+                $findings = Get-StandingGrantWriterFinding -UserName "app user '$($u.fullname)'" `
+                    -StandingGrantProfileId $sgaId -StandingGrantProfileName $StandingGrantProfileName -Column "$Table.$StandingGrantColumn" `
+                    -DirectProfiles @((Invoke-DvGet $queries.DirectProfiles).value) `
+                    -TeamProfiles @((Invoke-DvGet $queries.TeamProfiles).value) `
+                    -WriterPermissions @((Invoke-DvGet $queries.Writers).value)
+                foreach ($f in $findings) { Report $f.State $f.What }
+            }
+            catch {
+                Report 'FAIL' "app user '$($u.fullname)': the standing-grant writer check could not be read ($($_.Exception.Message)); it is not assumed to pass"
+            }
+        }
+    }
+}
+
 # ── (f) PUBLISH ─────────────────────────────────────────────────────────────────────────────────────────────
 if ($Apply) {
     Invoke-DvWrite POST 'PublishXml' @{ ParameterXml = "<importexportxml><entities><entity>$Table</entity></entities></importexportxml>" } | Out-Null
@@ -457,7 +490,7 @@ if ($Apply) {
 }
 
 if ($Verify) {
-    if ($gaps.Count -eq 0) { Write-Host "`nVERIFY PASS: every column is in place, field-secured, granted exactly as listed, in every listed solution, only the listed profiles can access it, and every BFF application user reads the tables its readability proof reads." -ForegroundColor Green; exit 0 }
+    if ($gaps.Count -eq 0) { Write-Host "`nVERIFY PASS: every column is in place, field-secured, granted exactly as listed, in every listed solution, only the listed profiles can access it, every BFF application user reads the tables its readability proof reads, and updates the standing grant only through its direct Standing Grant Administrators membership." -ForegroundColor Green; exit 0 }
     Write-Host "`nVERIFY FAIL ($($gaps.Count)):" -ForegroundColor Red
     $gaps | ForEach-Object { Write-Host "  - $_" -ForegroundColor Red }
     exit 1
