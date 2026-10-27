@@ -749,7 +749,11 @@ Still open: classify `sprk_procedureassignment` and record-scoped ruleset rules 
   - C3: the pin covers the access columns only;
   - C4: truncation keeps the anchor's chain and subtree;
   - OBO field security on display columns.
-- Seed: UAC 194 is PR #2349. Its merge head is sent when it lands. It adds `sprk_budgetbucket` → `sprk_budget`, and service requests are walked in ordinary mode.
+- **Seed: UAC 194 merged as PR #2349, master `de38296499` (2026-10-27).** Component A is seeded from that commit.
+  - It adds `sprk_budgetbucket` → `sprk_budget` to `SecureChildLineage`.
+  - Service requests are walked in ordinary mode through `ExternalDataService.ServiceRequestRelations`. That list is a service request's OWN family (it is its own root, §12.2), not part of a matter's.
+  - `sprk_invoicelineitem` stays out until ebilling deploys it (#2348).
+  - Grant rows do not follow an ordinary move (#2341). This does not affect a read-only view.
 
 ### 12.11 Known limits (one line each in the PR)
 
