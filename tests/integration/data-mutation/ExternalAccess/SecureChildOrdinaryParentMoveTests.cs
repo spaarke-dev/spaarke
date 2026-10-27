@@ -612,6 +612,32 @@ public class SecureChildOrdinaryParentMoveTests
         result.Success.Should().BeTrue(result.ErrorMessage);
     }
 
+    [Fact(DisplayName = "194 F1-a (existing A3): a USER-owned document directly under a moved matter is not re-owned, and its file still moves")]
+    public async Task TheJob_MovesTheFileOfAUserOwnedDocumentDirectlyUnderAMovedMatter()
+    {
+        var pointer = R.Env();
+        pointer.Rows[("sprk_document", T.DocumentId)] = R.Doc(T.DocumentId, T.PlainMatter, T.CustomerBContainer);
+        var rig = new T.Rig(pointer);
+
+        _world.Add("businessunit", T.CustomerA, ("sprk_containerid", T.CustomerAContainer));
+        MatterMovedToB(T.PlainMatter);
+        _world.Modified(Matter, T.PlainMatter, DateTime.UtcNow);
+        Row("sprk_document", T.DocumentId, new EntityReference("systemuser", SecureChildShareWorld.SomeUser),
+            ("sprk_matter", Matter, T.PlainMatter));
+        _world.Set("sprk_document", T.DocumentId, "sprk_graphdriveid", T.CustomerBContainer);
+        var harness = new JobHarness(_world, _webApi, rig);
+
+        var (result, ordinary) = await harness.RunAsync(ordinaryWrites: "true");
+        var refile = harness.Last.GetProperty("refileRelocations");
+
+        ordinary.GetProperty("moved").GetInt32().Should().Be(0, "a user-owned row is reported, not re-owned");
+        _world.OwnerOf("sprk_document", T.DocumentId).Should().Be(DataversePrincipalRef.User(SecureChildShareWorld.SomeUser));
+        R.Ids(refile, "movedDocuments").Should().Equal(new[] { T.DocumentId },
+            "the re-file pass lists every document filed directly under a changed matter, whatever its owner (A3)");
+        rig.DriveOf(T.DocumentId).Should().Be(T.CustomerA1Container);
+        result.Success.Should().BeTrue(result.ErrorMessage);
+    }
+
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
     // Doubles
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
