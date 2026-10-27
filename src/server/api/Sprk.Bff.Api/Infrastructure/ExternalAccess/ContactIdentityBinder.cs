@@ -503,6 +503,8 @@ public sealed class ContactIdentityBinder
                     var refs = await _store.FindSystemUsersLinkingAsync(new[] { linked }, ct).ConfigureAwait(false);
                     decision = ContactBindingDecision.DecideExistingLink(request, linked, oidLookup, linkedLookup, refs);
                 }
+
+                LogRemovedDeny(decision, request.Plane);
             }
             else
             {
@@ -562,11 +564,19 @@ public sealed class ContactIdentityBinder
             return resolution;
         }
 
-        var action = removal.IsRemoval ? InviteContactAction.Refuse : InviteContactAction.Fail;
-        if (removal.IsRemoval)
+        // Slice C2c: only a SET marker is a refusal (409); an unproven one, like a read that failed, is a retryable failure.
+        var action = removal.IsRemoval && !removal.MarkerUnproven ? InviteContactAction.Refuse : InviteContactAction.Fail;
+        if (removal.IsRemoval && !removal.MarkerUnproven)
         {
             _logger.LogWarning(
                 "[ID-BIND] Invite REFUSED ({ReasonCode}) — contact {ContactId}'s external access was removed by an administrator",
+                removal.InviteReasonCode, removal.RemovedContactId);
+        }
+        else if (removal.MarkerUnproven)
+        {
+            _logger.LogError(
+                "[ID-BIND] Invite NOT SENT ({ReasonCode}) — whether contact {ContactId}'s external access was removed could not " +
+                "be established (its removed marker's empty read is not proven). Nothing was created or sent; retryable.",
                 removal.InviteReasonCode, removal.RemovedContactId);
         }
 
@@ -595,6 +605,14 @@ public sealed class ContactIdentityBinder
             // Slice C: not a collision; nothing is flagged. Only an administrator reinstates the person.
             _logger.LogWarning(
                 "[ID-BIND] Invite REFUSED ({ReasonCode}) — contact {ContactId}'s external access was removed by an administrator",
+                decision.ReasonCode, decision.ContactId);
+        }
+        else if (decision.ReasonCode == ContactBindingDecision.InviteContactRemovedStateUnavailable)
+        {
+            // Slice C2c: not a removal; the marker's empty read is not proven. Nothing is flagged, written or sent.
+            _logger.LogError(
+                "[ID-BIND] Invite NOT SENT ({ReasonCode}) — whether contact {ContactId}'s external access was removed could not " +
+                "be established (its removed marker's empty read is not proven). Retryable.",
                 decision.ReasonCode, decision.ContactId);
         }
         else if (decision.Action == InviteContactAction.Refuse)
@@ -847,6 +865,9 @@ public sealed class ContactIdentityBinder
         ContactBindingDecision.InviteContactRemovedAdminReinstate =>
             "An administrator removed this person's external access, so they cannot be invited. Nothing was created or "
             + "sent. Ask an administrator to reinstate them first.",
+        ContactBindingDecision.InviteContactRemovedStateUnavailable =>
+            "Whether this person's external access was removed could not be checked just now, so nothing was created, "
+            + "granted or sent. Try again in a moment.",
         _ => null,
     };
 
@@ -1274,7 +1295,14 @@ public sealed class ContactIdentityBinder
             return null;
         }
 
-        if (removal.IsRemoval)
+        if (removal.MarkerUnproven)
+        {
+            _logger.LogError(
+                "[ID-BIND] {Operation} for {Who} REFUSED ({DenyCode}): the removed marker of inactive contact {ContactId} for the " +
+                "email could not be proven empty, so a removal cannot be ruled out. No contact was created; retryable.",
+                operation, who, removal.DenyCode, removal.RemovedContactId);
+        }
+        else if (removal.IsRemoval)
         {
             _logger.LogWarning(
                 "[ID-BIND] {Operation} for {Who} REFUSED ({DenyCode}): an inactive contact {ContactId} for the email is one whose "
@@ -1736,7 +1764,35 @@ public sealed class ContactIdentityBinder
             }
         }
 
+        LogRemovedDeny(decision, request.Plane);
         return (decision, emailLookup, stamped);
+    }
+
+    /// <summary>
+    /// Slice C2c: a removed-person deny is logged with text that tells a SET marker (an administrator's removal, Warning) from
+    /// an UNPROVEN one (the marker's empty read is not proven, so the person is refused fail closed: Error, an operator
+    /// problem). The person's answer is <see cref="ContactBindingDecision.DenyContactRemoved"/> either way.
+    /// </summary>
+    private void LogRemovedDeny(BindingDecision decision, BindingPlane plane)
+    {
+        if (decision.DenyCode != ContactBindingDecision.DenyContactRemoved)
+        {
+            return;
+        }
+
+        if (decision.RemovedMarkerUnproven)
+        {
+            _logger.LogError(
+                "[ID-BIND] {Plane} sign-in refused ({DenyCode}): the removed marker of the matched contact could not be proven " +
+                "empty, so the person is refused until it can be read. Check the BFF's read of the removed-marker column.",
+                plane, decision.DenyCode);
+        }
+        else
+        {
+            _logger.LogWarning(
+                "[ID-BIND] {Plane} sign-in refused ({DenyCode}): an administrator removed the matched contact's external access.",
+                plane, decision.DenyCode);
+        }
     }
 
     /// <summary>

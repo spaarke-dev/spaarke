@@ -70,22 +70,38 @@ public class GrantCoreRemovedPersonTests
         => Problem(result).ProblemDetails.Extensions.TryGetValue("reasonCode", out var code) ? code as string : null;
 
 
-    [Theory]
-    [InlineData("removed")]
-    [InlineData("unreadable")]
-    public async Task Grant_ToARemovedOrUnreadableMarker_Is409_AndWritesNothing(string marker)
+    [Fact]
+    public async Task Grant_ToARemovedPerson_Is409_AndWritesNothing()
     {
         var contact = _h.Contact();
-        if (marker == "removed")
-            _h.Identities.Contacts[contact].RemovedOn = _h.Time.Now;
-        else
-            _h.Identities.RemovedMarkerProof = ColumnReadProofOutcome.Unproven;
+        _h.Identities.Contacts[contact].RemovedOn = _h.Time.Now;
 
         var result = await Grant(contact);
 
         Problem(result).StatusCode.Should().Be(StatusCodes.Status409Conflict);
         Problem(result).ProblemDetails.Title.Should().Be("External access removed");
         ReasonCode(result).Should().Be(ContactBindingDecision.InviteContactRemovedAdminReinstate);
+        _h.Grants.WriteCount.Should().Be(0);
+        _h.Shares.Writes.Should().BeEmpty();
+    }
+
+    /// <summary>Slice C2c: a marker that cannot be read, or reads empty unproven, is the retryable 503, never a removal.</summary>
+    [Theory]
+    [InlineData("unproven")]
+    [InlineData("unreadable")]
+    public async Task Grant_ToAnUnreadableOrUnprovenMarker_Is503StateUnavailable_AndWritesNothing(string marker)
+    {
+        var contact = _h.Contact();
+        if (marker == "unproven")
+            _h.Identities.RemovedMarkerProof = ColumnReadProofOutcome.Unproven;
+        else
+            _h.Identities.LiveRemovedMarkerOverride = RemovedMarkerRead.Unreadable;
+
+        var result = await Grant(contact);
+
+        Problem(result).StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable);
+        Problem(result).ProblemDetails.Title.Should().Be("External access state unavailable");
+        ReasonCode(result).Should().Be(ContactBindingDecision.InviteContactRemovedStateUnavailable);
         _h.Grants.WriteCount.Should().Be(0);
         _h.Shares.Writes.Should().BeEmpty();
     }
@@ -118,6 +134,47 @@ public class GrantCoreRemovedPersonTests
         _h.Ciam.Attempts.Should().BeEmpty();
         _h.Emails.Onboarding.Should().BeEmpty();
         _h.Identities.Contacts.Should().ContainSingle();
+    }
+
+    /// <summary>
+    /// Slice C2c: /invite-and-grant to a person whose marker becomes unreadable after the invite read: the grant core's 503,
+    /// with nothing onboarded, written or granted.
+    /// </summary>
+    [Fact]
+    public async Task InviteAndGrant_ToAPersonWhoseMarkerIsUnreadable_Is503_AndNothingIsOnboardedOrGranted()
+    {
+        var contact = Guid.NewGuid();
+        _h.Identities.AddContact(contact, email: Email);
+        _h.Identities.LiveRemovedMarkerOverride = RemovedMarkerRead.Unreadable;
+
+        var result = await InviteAndGrant();
+
+        Problem(result).StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable);
+        ReasonCode(result).Should().Be(ContactBindingDecision.InviteContactRemovedStateUnavailable);
+        _h.Grants.WriteCount.Should().Be(0);
+        _h.Ciam.Attempts.Should().BeEmpty();
+        _h.Emails.Onboarding.Should().BeEmpty();
+        _h.Identities.Writes.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Slice C2c: the Assigned-To rule skips an unreadable marker without a sticky decline, so the next pass grants once the
+    /// marker reads (proven) empty.
+    /// </summary>
+    [Fact]
+    public async Task TheAssignedToRule_RetriesAnUnreadableMarker_OnTheNextPass()
+    {
+        var contact = _h.Contact();
+        _h.Store.Assign(Matter, _matter, Attorney1, contact);
+        _h.Identities.LiveRemovedMarkerOverride = RemovedMarkerRead.Unreadable;
+
+        await Sync();
+        _h.Grants.ActiveRowsOf(_matter, contact).Should().BeEmpty();
+
+        _h.Identities.LiveRemovedMarkerOverride = null;
+        await Sync();
+
+        _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle("an unreadable marker is never recorded as a decline");
     }
 
     [Fact]

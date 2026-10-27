@@ -95,7 +95,7 @@ public class AutomaticInviteOrganizationTests
     [InlineData("removed-unbound")]
     [InlineData("removed-bound")]
     [InlineData("unreadable")]
-    public async Task InviteOnGrant_RemovedContact_IsFailed_ContactRemovedAdminReinstate_AndNothingIsWritten(string how)
+    public async Task InviteOnGrant_RemovedContact_IsFailed_SetMarkerReinstate_UnprovenStateUnavailable_AndNothingIsWritten(string how)
     {
         var contact = UnboundContact();
         switch (how)
@@ -117,7 +117,9 @@ public class AutomaticInviteOrganizationTests
 
         var result = await _h.Invites.InviteOnGrantAsync(contact, Matter, _matter);
 
-        result.Should().Be(new GrantInviteResult(GrantInviteStatus.Failed, ContactBindingDecision.InviteContactRemovedAdminReinstate));
+        result.Should().Be(new GrantInviteResult(GrantInviteStatus.Failed, how == "unreadable"
+            ? ContactBindingDecision.InviteContactRemovedStateUnavailable // slice C2c: retryable, not a removal
+            : ContactBindingDecision.InviteContactRemovedAdminReinstate));
         _discovery.Requests.Should().BeEmpty("the organisation is not even looked up");
         _h.Identities.Writes.Should().BeEmpty();
         _h.Ciam.Attempts.Should().BeEmpty();

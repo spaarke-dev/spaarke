@@ -2442,10 +2442,14 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
                              && linkedMarker != RemovedMarkerRead.NotRemoved)
                     {
                         // Slice C: likewise a linked contact whose external access was removed, or whose marker cannot be
-                        // read. The systemuser's own membership is unaffected.
-                        _logger.LogWarning(
-                            "[WF-AUTHZ] Systemuser {SystemUserId}'s linked contact {ContactId}'s removed marker reads {Marker}: " +
-                            "its grants on {EntityType} confer nothing; the systemuser's own membership is unaffected.",
+                        // read. The systemuser's own membership is unaffected. Slice C2c: the two are logged apart.
+                        _logger.Log(linkedMarker == RemovedMarkerRead.Removed ? LogLevel.Warning : LogLevel.Error,
+                            linkedMarker == RemovedMarkerRead.Removed
+                                ? "[WF-AUTHZ] Systemuser {SystemUserId}'s linked contact {ContactId} was removed by an administrator " +
+                                  "({Marker}): its grants on {EntityType} confer nothing; the systemuser's own membership is unaffected."
+                                : "[WF-AUTHZ] Systemuser {SystemUserId}'s linked contact {ContactId}'s removed marker could not be " +
+                                  "proven empty ({Marker}): its grants on {EntityType} confer nothing (fail closed); the systemuser's " +
+                                  "own membership is unaffected.",
                             systemUserId, resolved, linkedMarker, entityType);
                         grants = null;
                         contactGrantsApplied = false;
@@ -2776,10 +2780,21 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         var removedMarker = await ReadRemovedMarkerAsync(contactId, ct).ConfigureAwait(false);
         if (removedMarker != RemovedMarkerRead.NotRemoved)
         {
-            _logger.LogWarning(
-                "[WF-AUTHZ] Contact {ContactId}'s removed marker reads {Marker}: its {Plane} contact-plane composition on " +
-                "{EntityType} is EMPTY — a removed contact, or one whose marker cannot be read, confers nothing.",
-                contactId, removedMarker, includeDerivedMemberTerms ? "workforce" : "CIAM", entityType);
+            // Slice C2c: the same EMPTY set either way; the log tells an administrator's removal from an unproven read.
+            if (removedMarker == RemovedMarkerRead.Removed)
+            {
+                _logger.LogWarning(
+                    "[WF-AUTHZ] Contact {ContactId}'s external access was removed by an administrator: its {Plane} " +
+                    "contact-plane composition on {EntityType} is EMPTY.",
+                    contactId, includeDerivedMemberTerms ? "workforce" : "CIAM", entityType);
+            }
+            else
+            {
+                _logger.LogError(
+                    "[WF-AUTHZ] Contact {ContactId}'s removed marker could not be proven empty ({Marker}): its {Plane} " +
+                    "contact-plane composition on {EntityType} is EMPTY (fail closed) until the marker can be read.",
+                    contactId, removedMarker, includeDerivedMemberTerms ? "workforce" : "CIAM", entityType);
+            }
 
             return new AccessibleRecordSet
             {

@@ -268,6 +268,66 @@ public class RemovedMarkerBindingTests
 
         decision.MayCreate.Should().BeFalse("an empty marker that may be hidden cannot rule out a removal");
         decision.DenyCode.Should().Be(ContactBindingDecision.DenyContactRemoved);
+        // Slice C2c: the invite path answers the retryable code, never the administrator-reinstate refusal.
+        decision.InviteReasonCode.Should().Be(ContactBindingDecision.InviteContactRemovedStateUnavailable);
+        decision.MarkerUnproven.Should().BeTrue();
+    }
+
+    /// <summary>Slice C2c: a set marker wins over an unproven one, so a real removal is reported as a removal.</summary>
+    [Fact]
+    public void CreateAroundRemoval_ASetMarker_WinsOverAnUnprovenOne()
+    {
+        var unproven = Unbound(removed: false, stateCode: 1) with { ContactId = Guid.NewGuid(), RemovedMarkerUnproven = true };
+
+        var decision = ContactBindingDecision.DecideCreateAroundRemoval(
+            ContactLookup.Of(unproven, Unbound(removed: true, stateCode: 1)));
+
+        decision.InviteReasonCode.Should().Be(ContactBindingDecision.InviteContactRemovedAdminReinstate);
+        decision.MarkerUnproven.Should().BeFalse();
+        decision.RemovedContactId.Should().Be(ContactA);
+    }
+
+    /// <summary>Slice C2c: the invite decision splits a set marker (409 refusal) from an unproven one (retryable failure).</summary>
+    [Fact]
+    public void DecideInvite_AnUnprovenMarker_FailsWithTheStateUnavailableCode()
+    {
+        var unproven = Unbound(removed: false) with { RemovedMarkerUnproven = true };
+
+        ContactBindingDecision.DecideInvite(ContactLookup.Of(unproven)).Should().Be(
+            new InviteDecision(InviteContactAction.Fail, ContactA, ContactBindingDecision.InviteContactRemovedStateUnavailable));
+    }
+
+    /// <summary>
+    /// Slice C2c: the person's sign-in answer stays <c>contact_removed</c> for both, and the binder logs the two apart: a set
+    /// marker at Warning, an unproven one at Error naming the unproven read.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CiamSignIn_ASetAndAnUnprovenMarker_AreBothDeniedContactRemoved_WithDistinctLogs(bool unproven)
+    {
+        _store.AddContact(ContactA, email: Email, oid: Caller.ToString("D"), plane: IdentityPlaneMarker.External);
+        if (unproven)
+            _store.RemovedMarkerProof = ColumnReadProofOutcome.Unproven;
+        else
+            _store.Contacts[ContactA].RemovedOn = RemovedOn;
+        var log = new BindingLogCapture<ContactIdentityBinder>();
+
+        var result = await Binder(_store, log).ResolveCiamCallerAsync(Caller.ToString(), Email, inviteCode: null, CancellationToken.None);
+
+        result.DenyCode.Should().Be(ContactBindingDecision.DenyContactRemoved);
+        if (unproven)
+        {
+            log.Entries.Should().Contain(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Error
+                                              && e.Message.Contains("could not be proven empty", StringComparison.Ordinal));
+            log.Messages.Should().NotContain(m => m.Contains("an administrator removed", StringComparison.Ordinal));
+        }
+        else
+        {
+            log.Entries.Should().Contain(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Warning
+                                              && e.Message.Contains("an administrator removed", StringComparison.Ordinal));
+            log.Messages.Should().NotContain(m => m.Contains("could not be proven empty", StringComparison.Ordinal));
+        }
     }
 
     // ── Through the binder (the in-memory store applies the production marking) ─────────────────────────────
@@ -352,7 +412,8 @@ public class RemovedMarkerBindingTests
     [Theory]
     [InlineData("active-removed", InviteContactAction.Refuse)]
     [InlineData("inactive-removed", InviteContactAction.Refuse)]
-    [InlineData("active-unproven", InviteContactAction.Refuse)]
+    [InlineData("active-unproven", InviteContactAction.Fail)]
+    [InlineData("inactive-unproven", InviteContactAction.Fail)]
     [InlineData("active-unmarked", InviteContactAction.NeedReferenceLookup)]
     [InlineData("inactive-unmarked", InviteContactAction.CreateContact)]
     public async Task InviteResolution_RefusesARemovedContact_ActiveOrInactive(string row, InviteContactAction expected)
@@ -369,6 +430,14 @@ public class RemovedMarkerBindingTests
             resolution.ReasonCode.Should().Be(ContactBindingDecision.InviteContactRemovedAdminReinstate);
             resolution.Message.Should().NotBeNullOrWhiteSpace();
             _store.Writes.Should().BeEmpty("a refusal for a removal flags nothing");
+        }
+        else if (expected == InviteContactAction.Fail)
+        {
+            // Slice C2c: an unproven marker is not a removal: a retryable failure, nothing flagged.
+            resolution.Action.Should().Be(InviteContactAction.Fail);
+            resolution.ReasonCode.Should().Be(ContactBindingDecision.InviteContactRemovedStateUnavailable);
+            resolution.Message.Should().NotBeNullOrWhiteSpace();
+            _store.Writes.Should().BeEmpty();
         }
         else
         {

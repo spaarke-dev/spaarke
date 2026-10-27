@@ -1181,6 +1181,20 @@ internal sealed record GrantPolicyDecision(bool IsAllowed, string? ReasonCode, i
         "An administrator must reinstate the person first.");
 
     /// <summary>
+    /// Slice C2c: whether an administrator removed the grantee contact's external access could not be established (its removed
+    /// marker could not be read, or read empty on a read that is not proven). 503
+    /// <see cref="ContactBindingDecision.InviteContactRemovedStateUnavailable"/>, retryable; nothing is written. Kept apart from
+    /// <see cref="ContactRemoved"/> so an outage is never reported as a removal an administrator must undo. The Assigned-To
+    /// materializer records it as a skip, which is never sticky: the next pass decides again.
+    /// </summary>
+    public static GrantPolicyDecision ContactRemovedStateUnavailable { get; } = new(
+        false,
+        ContactBindingDecision.InviteContactRemovedStateUnavailable,
+        StatusCodes.Status503ServiceUnavailable,
+        "Whether this person's external access was removed could not be checked just now, so nothing was granted. Try " +
+        "again in a moment.");
+
+    /// <summary>
     /// Task 140: a CONTACT grantor's request names a grantee who already holds an active row somebody else issued. 409;
     /// nothing is changed. The contact-side handler restates the detail with the grantee's name.
     /// </summary>

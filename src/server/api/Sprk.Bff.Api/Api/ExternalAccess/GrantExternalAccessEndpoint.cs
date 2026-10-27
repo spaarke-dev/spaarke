@@ -831,14 +831,23 @@ public static class GrantExternalAccessEndpoint
 
         // (1b) Slice C3 — a contact whose external access an administrator removed is never granted, by any grant surface
         // (this core serves them all). The marker is read live; a marker that cannot be read refuses too (fail closed).
+        // Slice C2c: a SET marker is the 409 removal; an unreadable or unproven one is the retryable 503, never a removal.
         if (grantee.ContactId is { } granteeContactId
             && await ReadGranteeRemovedMarkerAsync(identityStore, granteeContactId, logger, ct) is var marker
             && marker != RemovedMarkerRead.NotRemoved)
         {
-            logger.LogWarning(
-                "[EXT-GRANT] Refused: grantee contact {ContactId}'s removed marker reads {Marker}; a removed person (or one " +
-                "whose marker cannot be read) is never granted. Nothing was written.", granteeContactId, marker);
-            return GrantCheck.Refused(GrantPolicyDecision.ContactRemoved, requestedLevel);
+            if (marker == RemovedMarkerRead.Removed)
+            {
+                logger.LogWarning(
+                    "[EXT-GRANT] Refused: an administrator removed grantee contact {ContactId}'s external access. Nothing was " +
+                    "written.", granteeContactId);
+                return GrantCheck.Refused(GrantPolicyDecision.ContactRemoved, requestedLevel);
+            }
+
+            logger.LogError(
+                "[EXT-GRANT] Refused: grantee contact {ContactId}'s removed marker reads {Marker}, so a removal cannot be ruled " +
+                "out. Nothing was written; retryable.", granteeContactId, marker);
+            return GrantCheck.Refused(GrantPolicyDecision.ContactRemovedStateUnavailable, requestedLevel);
         }
 
         // (2) Task 139 — the grantor ceiling.
@@ -1067,6 +1076,8 @@ public static class GrantExternalAccessEndpoint
                 ? "Access is managed by someone else" // task 140: a 409 that is not about a higher level
                 : refusal.ReasonCode == ContactBindingDecision.InviteContactRemovedAdminReinstate
                 ? "External access removed" // slice C3: a 409 that is not about a higher level either
+                : refusal.ReasonCode == ContactBindingDecision.InviteContactRemovedStateUnavailable
+                ? "External access state unavailable" // slice C2c: a 503 about the person, not the record's settings
                 : refusal.StatusCode switch
             {
                 StatusCodes.Status503ServiceUnavailable => "Access settings unavailable",

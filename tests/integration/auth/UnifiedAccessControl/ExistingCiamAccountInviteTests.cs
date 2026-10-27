@@ -1422,11 +1422,13 @@ public class ExistingCiamAccountInviteTests
     /// and an unreadable marker refuses too. Nothing is created, written, granted or sent. MUST NOT FIRE: the unmarked twin
     /// is invited as before.
     /// </summary>
+    /// <remarks>Slice C2c: an unproven marker is not a removal: 503 <c>contact_removed_state_unavailable</c> (retryable),
+    /// with nothing written either.</remarks>
     [Theory]
-    [InlineData("active-removed")]
-    [InlineData("inactive-removed")]
-    [InlineData("active-unreadable")]
-    public async Task AnInvite_ToARemovedContact_IsRefused_ContactRemovedAdminReinstate(string how)
+    [InlineData("active-removed", 409, ContactBindingDecision.InviteContactRemovedAdminReinstate)]
+    [InlineData("inactive-removed", 409, ContactBindingDecision.InviteContactRemovedAdminReinstate)]
+    [InlineData("active-unreadable", 503, ContactBindingDecision.InviteContactRemovedStateUnavailable)]
+    public async Task AnInvite_ToARemovedContact_IsRefused_SetMarker409_UnprovenMarker503(string how, int status, string code)
     {
         var contact = Guid.NewGuid();
         _h.Identities.AddContact(contact, email: Email, stateCode: how.StartsWith("inactive", StringComparison.Ordinal) ? 1 : 0);
@@ -1442,8 +1444,8 @@ public class ExistingCiamAccountInviteTests
         foreach (var result in new[] { await InviteRoute(), await InviteAndGrant() })
         {
             var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
-            problem.StatusCode.Should().Be(409);
-            problem.ProblemDetails.Extensions["reasonCode"].Should().Be(ContactBindingDecision.InviteContactRemovedAdminReinstate);
+            problem.StatusCode.Should().Be(status);
+            problem.ProblemDetails.Extensions["reasonCode"].Should().Be(code);
         }
 
         _h.Identities.Contacts.Should().ContainSingle("no contact is created around a removal");

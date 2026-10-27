@@ -700,6 +700,13 @@ public sealed record BindingDecision(
     /// </summary>
     public bool ConsumeInviteCode { get; init; }
 
+    /// <summary>
+    /// Slice C2c: on a <see cref="ContactBindingDecision.DenyContactRemoved"/> deny, <c>true</c> when the contact's removed
+    /// marker is not SET but its empty read is not proven (an unreadable state), <c>false</c> when the marker is set. The
+    /// person's answer is the same either way; the flag only lets the binder log the two cases apart.
+    /// </summary>
+    public bool RemovedMarkerUnproven { get; init; }
+
     /// <summary>True for an outcome that ends the decision.</summary>
     public bool IsTerminal => Action is not (BindingAction.NeedEmailLookup or BindingAction.NeedReferenceLookup
         or BindingAction.NeedLinkedContact or BindingAction.NeedIntentLookup);
@@ -756,8 +763,15 @@ public sealed record CreateAroundRemovalDecision(
     string? DenyCode = null,
     string? InviteReasonCode = null)
 {
-    /// <summary>True when the refusal is a removal (not a read that failed).</summary>
+    /// <summary>True when the refusal is a removal, or a removal that cannot be ruled out (not a read that failed).</summary>
     public bool IsRemoval => RemovedContactId is not null;
+
+    /// <summary>
+    /// Slice C2c: <c>true</c> when the refusing contact's marker is not set but its empty read is not proven. The invite path
+    /// answers <see cref="ContactBindingDecision.InviteContactRemovedStateUnavailable"/> (retryable) then, not the
+    /// administrator-reinstate refusal.
+    /// </summary>
+    public bool MarkerUnproven { get; init; }
 }
 
 /// <summary>
@@ -886,6 +900,14 @@ public static class ContactBindingDecision
     /// marker cannot be read. Refused (409, nothing written or sent): only an administrator can reinstate the person.
     /// </summary>
     public const string InviteContactRemovedAdminReinstate = "sdap.access.deny.contact_removed_admin_reinstate";
+
+    /// <summary>
+    /// Slice C2c: whether an administrator removed this person's external access could not be established (the removed
+    /// marker read empty on a read that is not proven, or could not be read at all). The staff-facing invite and grant
+    /// surfaces refuse with this RETRYABLE code (503, nothing written or sent), so an outage is never reported as a removal
+    /// an administrator must undo. The person's own sign-in and composition still answer <see cref="DenyContactRemoved"/>.
+    /// </summary>
+    public const string InviteContactRemovedStateUnavailable = "sdap.access.deny.contact_removed_state_unavailable";
 
     // ── Invite reason codes ─────────────────────────────────────────────────────────────────────────
 
@@ -1076,7 +1098,7 @@ public static class ContactBindingDecision
         // bound or resolved by email, and never created around.
         if (row.IsRemoved)
         {
-            return Deny(DenyContactRemoved);
+            return DenyRemoved(row);
         }
 
         var binding = row.Binding;
@@ -1365,7 +1387,7 @@ public static class ContactBindingDecision
             if (carrier.IsRemoved)
             {
                 // Slice C — a removed contact verifies no link and binds nothing.
-                return Deny(DenyContactRemoved);
+                return DenyRemoved(carrier);
             }
 
             if (carrier.ContactId == linkedContactId)
@@ -1400,7 +1422,7 @@ public static class ContactBindingDecision
         // Slice C — a removed linked contact verifies no link and binds nothing.
         if (linked.IsRemoved)
         {
-            return Deny(DenyContactRemoved);
+            return DenyRemoved(linked);
         }
 
         var binding = linked.Binding;
@@ -1487,11 +1509,17 @@ public static class ContactBindingDecision
 
         var row = rows[0];
 
-        // Slice C — an ordinary invite never reaches a contact whose external access an administrator removed (or whose
-        // marker cannot be read). Refused, nothing flagged: only an administrator reinstates the person.
-        if (row.IsRemoved)
+        // Slice C — an ordinary invite never reaches a contact whose external access an administrator removed. Refused,
+        // nothing flagged: only an administrator reinstates the person. Slice C2c: a marker that is not set but whose empty
+        // read is not proven is not a removal an administrator must undo — it fails retryably, nothing written or sent.
+        if (row.RemovedOn is not null)
         {
             return new InviteDecision(InviteContactAction.Refuse, row.ContactId, InviteContactRemovedAdminReinstate);
+        }
+
+        if (row.IsRemoved)
+        {
+            return new InviteDecision(InviteContactAction.Fail, row.ContactId, InviteContactRemovedStateUnavailable);
         }
 
         var binding = row.Binding;
@@ -1538,7 +1566,8 @@ public static class ContactBindingDecision
     /// create), over the INACTIVE contacts for that email (<see cref="IContactIdentityStore.FindInactiveContactsByEmailAsync"/>).
     /// A contact among them whose external access an administrator removed, or whose removed marker cannot be read
     /// (<see cref="ContactBindingRow.IsRemoved"/>), refuses the create: <see cref="DenyContactRemoved"/> (the invite path
-    /// answers <see cref="InviteContactRemovedAdminReinstate"/>). A read that failed refuses too, with the lookup's code (the
+    /// answers <see cref="InviteContactRemovedAdminReinstate"/> for a set marker and the retryable
+    /// <see cref="InviteContactRemovedStateUnavailable"/> for an unproven one). A read that failed refuses too, with the lookup's code (the
     /// invite path: <see cref="InviteContactLookupFailed"/>): a create is never reached while a removal cannot be ruled out.
     /// An unmarked inactive contact does not stop the create here (registration flags it separately). Nothing is flagged.
     /// Pure.
@@ -1553,8 +1582,17 @@ public static class ContactBindingDecision
                 InviteReasonCode: InviteContactLookupFailed);
         }
 
-        return inactiveLookup.Rows.FirstOrDefault(r => r.ContactId != Guid.Empty && r.IsRemoved) is { } removed
-            ? new CreateAroundRemovalDecision(false, removed.ContactId, DenyContactRemoved, InviteContactRemovedAdminReinstate)
+        // Slice C2c: a set marker wins over an unproven one, so a removal is reported as a removal.
+        if (inactiveLookup.Rows.FirstOrDefault(r => r.ContactId != Guid.Empty && r.RemovedOn is not null) is { } removed)
+        {
+            return new CreateAroundRemovalDecision(false, removed.ContactId, DenyContactRemoved, InviteContactRemovedAdminReinstate);
+        }
+
+        return inactiveLookup.Rows.FirstOrDefault(r => r.ContactId != Guid.Empty && r.IsRemoved) is { } unproven
+            ? new CreateAroundRemovalDecision(false, unproven.ContactId, DenyContactRemoved, InviteContactRemovedStateUnavailable)
+            {
+                MarkerUnproven = true,
+            }
             : new CreateAroundRemovalDecision(true);
     }
 
@@ -2054,7 +2092,7 @@ public static class ContactBindingDecision
             // Slice C — a removed contact resolves to nothing, whatever its statecode.
             if (matches[0].IsRemoved)
             {
-                return Deny(DenyContactRemoved);
+                return DenyRemoved(matches[0]);
             }
 
             return matches[0].IsActive
@@ -2232,7 +2270,7 @@ public static class ContactBindingDecision
             // statecode: reactivating the row does not reinstate the person.
             if (rows[0].IsRemoved)
             {
-                return Deny(DenyContactRemoved);
+                return DenyRemoved(rows[0]);
             }
 
             // D3 — never falls through to the email bind and never creates a replacement: deactivating a
@@ -2249,6 +2287,10 @@ public static class ContactBindingDecision
         => status == LookupStatus.ColumnMissing ? DenyBindingColumnMissing : DenyContactLookupFailed;
 
     private static BindingDecision Deny(string code) => new(BindingAction.Deny, DenyCode: code);
+
+    /// <summary>Slice C2c: the removed-person deny, flagged when the marker is unproven rather than set (logs only).</summary>
+    private static BindingDecision DenyRemoved(ContactBindingRow row)
+        => Deny(DenyContactRemoved) with { RemovedMarkerUnproven = row.RemovedOn is null };
 
     private static BindingDecision Collide(IdentityCollisionReason reason, string code, params Guid[] contactIds)
         => Collide(reason, code, (IEnumerable<Guid>)contactIds);
