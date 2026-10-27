@@ -1,6 +1,6 @@
 # Current Task State - spaarke-SPA-external-access-platform-r3
 
-> **Last Updated**: 2026-10-27 (after C2b). Dev BFF = 3ff2c04bf5 (gate passed); dev SPA = 1fa0cf5cb8.
+> **Last Updated**: 2026-10-27 (after C2c). Dev BFF = 3ff2c04bf5 (gate passed); dev SPA = 1fa0cf5cb8.
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -10,9 +10,9 @@
 | Field | Value |
 |-------|-------|
 | **Task** | **Contact identity hardening (security rework)** on branch `fix/r3-iss-005-combined` (worktree `C:/wtr3-005`). Tracked ONLY in private draft advisory GHSA-hq7m-w2pf-v8j7. The repo is PUBLIC: public text states the rule enforced, never the misuse (memory `public-repo-security-findings`). Before every push, scan commits for sensitive wording. |
-| **Step** | Pushed to origin at 3b1a489b21. UAC accepted A–B3, C2, C1 and C3; the Retry fix is accepted in principle. C2b 411ffa3658..3b1a489b21 (no create around a removal, failed-send invite clear, /invite to a bound contact = already-has-account with a sign-in URL, bounded removal read, revoke description) is sent to UAC. **Implementer `r3-sec-slice-c2c` RUNNING**: A org SPE permission on remove; B 409 vs 503 for an unreadable marker; E grant-core 404 contact_not_found; F /invite-and-grant retracts its own pending invite; D audit durability (dedicated category + Activity-cleared helper + level guard). Then C4. Issues: #2326 (re-send to a bound person, enhancement), #2158 (BFF-wide sampling, cause commented). |
+| **Step** | Pushed to origin at 0a545eace8. UAC accepted A–B3, C2, C1, C3 and C2b. **C2c 3b1a489b21..0a545eace8 pushed and sent to UAC** (A org SPE permission on remove, B 503 for an unreadable marker, G guarded invite create, E 404 contact_not_found, F invite-and-grant retract, H already-has-account, I https-only sign-in link, D audit category + Activity-cleared helper). The two follow-up commits were folded in (identical tree; local backup ref `backup/r3-005-c2c-presquash`, never pushed). **Implementer `r3-sec-slice-c4` RUNNING** from 0a545eace8: removal sweep (conditions 1–6, its own gate), -Verify/S19 invariant + agreement test, and a test documenting reinstate-vs-sweep. **Asked UAC** to rule on reinstate of an inactive contact (sweep re-marks it): options a/b/c, R3 recommends (b) a 409 refusal. Issues: #2326, #2158. |
 | **Status** | in-progress |
-| **Next Action** | (1) When C2c reports: review, scan the wording, push, send to UAC. (2) Launch C4 from the brief ("C4 sweep conditions", including its own write gate, + the -Verify/S19 invariant). (3) Final head to UAC for the two security passes. (4) The §10 publish-size delta vs a fresh master build. (5) The PR + advisory. Rollout: schema first; the sweep's first dev run is report-only; the apply needs the owner's go. |
+| **Next Action** | (1) Read UAC's replies (C2c review; the reinstate ruling). (2) When C4 reports: review, scan the wording, push, send to UAC; apply the reinstate ruling as a small follow-up. (3) Final head to UAC for the two security passes. (4) The §10 publish-size delta vs a fresh master build. (5) The PR + advisory. Rollout: schema first; the sweep's first dev run is report-only; the apply needs the owner's go. |
 
 ### Private files (scratchpad, NOT in repo)
 `C:\Users\RALPHS~1\AppData\Local\Temp\claude\c--code-files-spaarke-wt-SPA-external-access-platform-r3\15aa240f-634c-4332-99f6-382ebcb06a62\scratchpad\`
