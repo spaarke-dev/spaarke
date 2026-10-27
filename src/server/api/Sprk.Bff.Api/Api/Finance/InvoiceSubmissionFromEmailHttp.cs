@@ -39,7 +39,7 @@ public sealed record FromEmailTargetEntity
 /// body-shape 400 (a ValidationProblem), AFTER step 0 and before any record is read. The filters (Finance, EntityAccessFilter, idempotency)
 /// read the SAME instance the handler receives.
 /// </summary>
-public sealed class FromEmailSubmissionBody : IEntityAccessTarget
+public sealed class FromEmailSubmissionBody
 {
     private FromEmailSubmissionBody(FromEmailSubmissionRequest? request, Dictionary<string, string[]> errors)
     {
@@ -56,7 +56,8 @@ public sealed class FromEmailSubmissionBody : IEntityAccessTarget
     /// <summary>The validated request; null whenever <see cref="Errors"/> is not empty.</summary>
     internal FromEmailSubmissionInput? Input { get; }
 
-    /// <inheritdoc />
+    /// <summary>The record <see cref="EntityAccessFilter"/> gates (the record the <c>.eml</c> is filed to), in the filter's spellings; null
+    /// when the body is not valid (the route's Finance filter refuses it first).</summary>
     public SaveEntityReference? EntityAccessTarget =>
         Input is { } input ? new SaveEntityReference { EntityType = input.SaveEntityType, EntityId = input.CoreRecord.RecordId } : null;
 
