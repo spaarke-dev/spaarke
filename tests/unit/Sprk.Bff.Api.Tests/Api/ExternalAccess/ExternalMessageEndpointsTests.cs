@@ -174,8 +174,12 @@ public class ExternalMessageEndpointsTests
         var data = _roots.NewService();
         return ExternalMessageEndpoints.GetMessagesCoreAsync(
             root, id, caller, registry ?? ProductionRegistry(), ReadRecord, ReadService(),
-            data.GetNonSecureRootsAsync, NullLogger.Instance, CancellationToken.None, data.GetLiveParentRootsAsync);
+            data.GetNonSecureRootsAsync, NullLogger.Instance, CancellationToken.None, data.GetLiveParentRootsAsync,
+            _invoiceHiding.Seam);
     }
+
+    /// <summary>ebilling-r1 task 098: the (a') predicate the route passes; hides nothing unless a test says so.</summary>
+    private InvoiceHidingStub _invoiceHiding = InvoiceHidingStub.NoneHidden();
 
     /// <summary>A lookup value as RecordService projects it.</summary>
     private static Dictionary<string, object?> Lookup(Guid id, string entity) =>

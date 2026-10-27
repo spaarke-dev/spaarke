@@ -44,6 +44,9 @@ public sealed class DataverseDescribeHandlerTests : TypedToolHandlerTestFixture
     /// <summary>Task 188: what the BFF reads APP-ONLY when it decides an external caller's document.</summary>
     private readonly AppOnlyDocumentWorld _appOnly = new();
 
+    /// <summary>Task 098: the assistant tools' (a') invoice-family seam (a test that reaches it sets one).</summary>
+    private Sprk.Bff.Api.Infrastructure.ExternalAccess.AppOnlyInvoiceFamilyHiding _hideInvoiceFamily = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyHidingStubs.NeverCalled;
+
     public DataverseDescribeHandlerTests()
     {
         // Default caller: a resolved INTERNAL systemuser (sprk_isexternal not true).
@@ -57,7 +60,7 @@ public sealed class DataverseDescribeHandlerTests : TypedToolHandlerTestFixture
 
     private DataverseDescribeHandler CreateHandler() =>
         new(_dataverse.Object, CreateLogger<DataverseDescribeHandler>(), _httpContextAccessor,
-            _callerResolver.Object, _identityResolver.Object, _appOnly.Narrowing);
+            _callerResolver.Object, _identityResolver.Object, _appOnly.Narrowing, _hideInvoiceFamily);
 
     private void AsExternalCaller() =>
         _identityResolver

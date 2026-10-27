@@ -120,6 +120,18 @@ public static class ExternalAccessModule
             (documentIds, ct) => sp.GetRequiredService<ExternalDataService>()
                 .ReadAndNarrowDocumentsAsync(documentIds, ct, ExternalDataService.InternalRoutesPlane));
 
+        // ebilling-r1 task 098 (procedure-and-file-model 9.1, (a′)): THE invoice predicate, read app-only through the reader
+        // above with the effective root flags. ExternalInvoiceHiding is the external plane's caller-aware seam (an internal
+        // systemuser hides nothing; a fault hides every asked invoice); AppOnlyInvoiceFamilyHiding is the assistant tools'
+        // hide-only seam for invoice-family rows (the tool has decided the caller is external; a fault throws). Both resolve
+        // their readers lazily, on the first call.
+        services.AddScoped<ExternalInvoiceHiding>(sp =>
+            (caller, invoiceIds, ct) => sp.GetRequiredService<ExternalDataService>().HideInvoicesForAsync(
+                caller, invoiceIds, sp.GetRequiredService<ExternalParticipationService>().GetEffectiveRootRecordFlagsAsync, ct));
+        services.AddScoped<AppOnlyInvoiceFamilyHiding>(sp =>
+            (table, rowIds, ct) => sp.GetRequiredService<ExternalDataService>().HideInvoiceFamilyRowsAsync(
+                table, rowIds, sp.GetRequiredService<ExternalParticipationService>().GetEffectiveRootRecordFlagsAsync, ct));
+
         // Per-customer external-access switches (external-access-platform-r3 task 011, spec FR-06 / FR-19, ADR-028
         // A8). PartnerServiceRequestsEnabled (default false) lets CIAM partners use the Service Requests module for
         // their own requests and adds legal-front-door to their default modules. Read by the entitlement resolver

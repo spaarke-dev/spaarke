@@ -971,7 +971,8 @@ public sealed class ExternalMultiRootListReadTests : IClassFixture<ExternalRootE
 
         body.Entities.Select(r => r["sprk_name"]).Should().Equal("Project only");
         executed.Should().Contain("name=\"sprk_matter\"").And.Contain("name=\"sprk_regardingagreement\"");
-        body.Entities.Single().Keys.Should().BeEquivalentTo(new[] { "@logicalName", "sprk_name", "sprk_project" },
+        // The grid asks for sprk_invoiceid (InvoiceGridFetch), so it comes back; the rule's own columns do not.
+        body.Entities.Single().Keys.Should().BeEquivalentTo(new[] { "@logicalName", "sprk_invoiceid", "sprk_name", "sprk_project" },
             "the columns the server projected for the rule are not returned");
     }
 
@@ -1021,6 +1022,8 @@ public sealed class ExternalMultiRootListReadTests : IClassFixture<ExternalRootE
         string name, Guid? project = null, Guid? matter = null, Guid? agreement = null) => new Dictionary<string, object?>
     {
         ["@logicalName"] = "sprk_invoice",
+        // ebilling-r1 task 098: the primary id every FetchXML row carries (the (a') predicate is keyed on it).
+        ["sprk_invoiceid"] = Guid.NewGuid(),
         ["sprk_name"] = name,
         ["sprk_project"] = project,
         ["sprk_matter"] = matter,
@@ -1043,7 +1046,9 @@ public sealed class ExternalMultiRootListReadTests : IClassFixture<ExternalRootE
                     ProjectThroughFetch(request.FetchXml, rows), MoreRecords: false, PagingCookie: null));
             },
             data.GetNonSecureRootsAsync, data.NarrowDocumentsAsync, NullLogger.Instance, CancellationToken.None,
-            data.GetLiveParentRootsAsync);
+            data.GetLiveParentRootsAsync,
+            // ebilling-r1 task 098: these tests are about the multi-root rule; the (a') predicate hides nothing here.
+            InvoiceHidingStub.NoneHidden().Seam);
         return (result.Should().BeOfType<Ok<FetchResponseDto>>().Subject.Value!, executed);
     }
 

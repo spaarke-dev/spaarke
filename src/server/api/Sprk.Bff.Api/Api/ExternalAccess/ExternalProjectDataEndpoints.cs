@@ -604,7 +604,8 @@ public static class ExternalProjectDataEndpoints
         ExternalModuleRegistry modules,
         CallerRecordAccessProbe probe,
         ILogger logger,
-        CancellationToken ct)
+        CancellationToken ct,
+        ExternalInvoiceHiding? hideInvoices = null)
     {
         var callerContext = GetCallerPrincipal(httpContext);
         if (callerContext is null) return MissingContextResult();
@@ -617,7 +618,7 @@ public static class ExternalProjectDataEndpoints
         // An unanswered Dataverse question offers no upload (canCreate: false, a UI affordance only; fix round 4, F1).
         var (rights, upstreamFault, _) = await RightsForDocumentParentAsync(
             callerContext, parentKind, parentId, dataService, modules, ct, CallerRightsReader(probe, httpContext), logger,
-            CallerPrivilegeReader(probe, httpContext));
+            CallerPrivilegeReader(probe, httpContext), hideInvoices);
         if (upstreamFault is not null) return upstreamFault;
         if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Read))
             return DenyDocumentParent(parentKind);
@@ -652,7 +653,8 @@ public static class ExternalProjectDataEndpoints
         IDocumentStorageResolver storageResolver,
         ISpeFileOperations fileStore,
         ILogger<Program> logger,
-        CancellationToken ct)
+        CancellationToken ct,
+        ExternalInvoiceHiding? hideInvoices = null)
     {
         var callerContext = GetCallerPrincipal(httpContext);
         if (callerContext is null) return MissingContextResult();
@@ -661,7 +663,8 @@ public static class ExternalProjectDataEndpoints
         // (1) Read on the parent (task 136 · C2). Presence in the caller's map is NOT enough: a Secure
         //     project reached only through an organization grant used to sit there with no rights, and this
         //     route then streamed its documents app-only.
-        var (rights, upstreamFault, _) = await RightsForDocumentParentAsync(callerContext, parentKind, id, dataService, modules, ct);
+        var (rights, upstreamFault, _) = await RightsForDocumentParentAsync(
+            callerContext, parentKind, id, dataService, modules, ct, hideInvoices: hideInvoices);
         if (upstreamFault is not null) return upstreamFault;
         if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Read))
         {
@@ -1271,7 +1274,8 @@ public static class ExternalProjectDataEndpoints
         CancellationToken ct,
         Func<string, Guid, CancellationToken, Task<Spaarke.Dataverse.AccessRights?>>? confirmWrites = null,
         ILogger? logger = null,
-        Func<string, CancellationToken, Task<bool?>>? readCallerPrivilege = null)
+        Func<string, CancellationToken, Task<bool?>>? readCallerPrivilege = null,
+        ExternalInvoiceHiding? hideInvoices = null)
     {
         const Spaarke.Dataverse.AccessRights none = Spaarke.Dataverse.AccessRights.None;
         switch (parentKind)
@@ -1298,7 +1302,7 @@ public static class ExternalProjectDataEndpoints
                 try
                 {
                     return WithoutFault(await RightsForInvoiceAsync(
-                        caller, parentId, dataService, modules, ct, confirmWrites, logger, readCallerPrivilege));
+                        caller, parentId, dataService, modules, ct, confirmWrites, logger, readCallerPrivilege, hideInvoices));
                 }
                 catch (ExternalDataService.DataverseUnavailableException)
                 {
@@ -1340,6 +1344,30 @@ public static class ExternalProjectDataEndpoints
     internal const string InvoiceUnreadableReasonCode = "sdap.access.invoice_unreadable";
 
     /// <summary>
+    /// ebilling-r1 task 098: whether the (a') predicate leaves <paramref name="invoiceId"/> visible to <paramref name="caller"/>.
+    /// False when no predicate is given, when it hides the invoice, and when its read failed (fail closed).
+    /// </summary>
+    private static async Task<bool> InvoiceVisibleToAsync(
+        CallerPrincipal caller, Guid invoiceId, ExternalInvoiceHiding? hideInvoices, ILogger logger, CancellationToken ct)
+    {
+        if (hideInvoices is null)
+        {
+            logger.LogError(
+                "[EXT-INVOICE-DOCS] No invoice (a') predicate is configured; invoice {InvoiceId} is denied (fail closed).", invoiceId);
+            return false;
+        }
+
+        var decision = await hideInvoices(caller, new[] { invoiceId }, ct).ConfigureAwait(false);
+        if (decision.IsVisible(invoiceId))
+            return true;
+
+        logger.LogInformation(
+            "[EXT-INVOICE-DOCS] Invoice {InvoiceId} hidden by the (a') predicate ({Reasons}); denied like a missing invoice.",
+            invoiceId, decision.HiddenSummary());
+        return false;
+    }
+
+    /// <summary>
     /// The caller's rights on an invoice's documents (task 031, owner decision 2026-10-11, option A "inherit"): the UNION
     /// of the caller's rights on the invoice's parent records, its <c>sprk_matter</c> and <c>sprk_project</c>, through
     /// the same <see cref="RightsForRoot"/> the matter and project routes use.
@@ -1370,7 +1398,8 @@ public static class ExternalProjectDataEndpoints
         CancellationToken ct,
         Func<string, Guid, CancellationToken, Task<Spaarke.Dataverse.AccessRights?>>? confirmWrites = null,
         ILogger? logger = null,
-        Func<string, CancellationToken, Task<bool?>>? readCallerPrivilege = null)
+        Func<string, CancellationToken, Task<bool?>>? readCallerPrivilege = null,
+        ExternalInvoiceHiding? hideInvoices = null)
     {
         var denied = new ConfirmedRights(Spaarke.Dataverse.AccessRights.None, Spaarke.Dataverse.AccessRights.None);
         if (caller.GetAccessibleMatterIds().Count == 0 && !caller.GetAccessibleProjectIds().Any())
@@ -1378,6 +1407,12 @@ public static class ExternalProjectDataEndpoints
 
         var parents = await dataService.GetInvoiceParentsAsync(invoiceId, ct);
         if (parents is not { } invoiceParents)
+            return denied;
+
+        // ebilling-r1 task 098 (model 9.1, (a')): an invoice whose Submit Invoice source is isolated is denied exactly like a
+        // missing one (the same `denied`, so the same 403 body), before any Dataverse confirmation or gate read. No predicate
+        // and a failed predicate read deny too (fail closed; never "unknown means visible").
+        if (!await InvoiceVisibleToAsync(caller, invoiceId, hideInvoices, dataService.Logger, ct).ConfigureAwait(false))
             return denied;
 
         var rights = Spaarke.Dataverse.AccessRights.None;
@@ -1405,7 +1440,9 @@ public static class ExternalProjectDataEndpoints
         var (gate, undecided) = await ExternalMessageEndpoints.GetRecordRightsDecisionAsync(
                 ExternalMessageEndpoints.Roots["invoices"], invoiceId, caller, modules,
                 (_, id, attributes, token) => dataService.GetInvoiceLookupsAsync(id, attributes ?? Array.Empty<string>(), token),
-                dataService.Logger, ct, dataService.GetNonSecureRootsAsync, dataService.GetLiveParentRootsAsync)
+                dataService.Logger, ct, dataService.GetNonSecureRootsAsync, dataService.GetLiveParentRootsAsync,
+                // Task 098: the gate asks (a') itself (it refuses an invoice without the predicate); decided visible above.
+                hideInvoices)
             .ConfigureAwait(false);
         if (undecided)
             throw new ExternalDataService.DataverseUnavailableException("The invoice's secure roots could not be read.");
@@ -1543,9 +1580,9 @@ public static class ExternalProjectDataEndpoints
 
     private static Task<IResult> GetInvoiceDocuments(
         Guid id, HttpContext httpContext, ExternalDataService dataService, ExternalModuleRegistry modules,
-        CallerRecordAccessProbe probe, ILogger<Program> logger, CancellationToken ct) =>
+        CallerRecordAccessProbe probe, [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices, ILogger<Program> logger, CancellationToken ct) =>
         ListDocumentsForParent(
-            ExternalDataService.DocumentParentKind.Invoice, id, httpContext, dataService, modules, probe, logger, ct);
+            ExternalDataService.DocumentParentKind.Invoice, id, httpContext, dataService, modules, probe, logger, ct, hideInvoices);
 
     private static Task<IResult> DownloadDocumentContent(
         Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
@@ -1578,9 +1615,9 @@ public static class ExternalProjectDataEndpoints
     private static Task<IResult> DownloadInvoiceDocumentContent(
         Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
         ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
-        ILogger<Program> logger, CancellationToken ct) =>
+        [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices, ILogger<Program> logger, CancellationToken ct) =>
         DownloadDocumentForParent(ExternalDataService.DocumentParentKind.Invoice, id, documentId, httpContext,
-            dataService, modules, storageResolver, fileStore, logger, ct);
+            dataService, modules, storageResolver, fileStore, logger, ct, hideInvoices);
 
     private static Task<IResult> UploadDocument(
         Guid id, IFormFile file, HttpContext httpContext, ExternalDataService dataService,
@@ -1618,9 +1655,10 @@ public static class ExternalProjectDataEndpoints
         Guid id, IFormFile file, HttpContext httpContext, ExternalDataService dataService,
         ExternalModuleRegistry modules, RecordContainerResolver containerResolver, ISpeFileOperations fileStore,
         IRecordOwnershipResolver ownership, IPostUploadIndexingEnqueuer indexing, JobSubmissionService jobs,
-        IConfiguration configuration, CallerRecordAccessProbe probe, ILogger<Program> logger, CancellationToken ct) =>
+        IConfiguration configuration, CallerRecordAccessProbe probe, [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices,
+        ILogger<Program> logger, CancellationToken ct) =>
         UploadDocumentForParent(ExternalDataService.DocumentParentKind.Invoice, id, file, httpContext, dataService,
-            modules, containerResolver, fileStore, ownership, indexing, jobs, configuration, probe, logger, ct);
+            modules, containerResolver, fileStore, ownership, indexing, jobs, configuration, probe, logger, ct, hideInvoices);
 
     private static Task<IResult> GetDocumentVersions(
         Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
@@ -1653,9 +1691,10 @@ public static class ExternalProjectDataEndpoints
     private static Task<IResult> GetInvoiceDocumentVersions(
         Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
         ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
-        Spaarke.Dataverse.IGenericEntityService entityService, ILogger<Program> logger, CancellationToken ct) =>
+        Spaarke.Dataverse.IGenericEntityService entityService, [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices,
+        ILogger<Program> logger, CancellationToken ct) =>
         ListDocumentVersionsForParent(ExternalDataService.DocumentParentKind.Invoice, id, documentId, httpContext,
-            dataService, modules, storageResolver, fileStore, entityService, logger, ct);
+            dataService, modules, storageResolver, fileStore, entityService, logger, ct, hideInvoices);
 
     private static IResult DenyRoot(ExternalDataService.TodoRootKind rootKind)
     {
@@ -1755,7 +1794,8 @@ public static class ExternalProjectDataEndpoints
         IConfiguration configuration,
         CallerRecordAccessProbe probe,
         ILogger<Program> logger,
-        CancellationToken ct)
+        CancellationToken ct,
+        ExternalInvoiceHiding? hideInvoices = null)
     {
         var callerContext = GetCallerPrincipal(httpContext);
         if (callerContext is null) return MissingContextResult();
@@ -1768,7 +1808,7 @@ public static class ExternalProjectDataEndpoints
         // Task 036 (FR-20): the rights are confirmed against Dataverse for a caller whose access Dataverse decided.
         var (rights, upstreamFault, unanswered) = await RightsForDocumentParentAsync(
             callerContext, parentKind, id, dataService, modules, ct, CallerRightsReader(probe, httpContext), logger,
-            CallerPrivilegeReader(probe, httpContext));
+            CallerPrivilegeReader(probe, httpContext), hideInvoices);
         if (upstreamFault is not null) return upstreamFault;
         if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Read))
         {
@@ -2078,13 +2118,15 @@ public static class ExternalProjectDataEndpoints
         ISpeFileOperations fileStore,
         Spaarke.Dataverse.IGenericEntityService entityService,
         ILogger<Program> logger,
-        CancellationToken ct)
+        CancellationToken ct,
+        ExternalInvoiceHiding? hideInvoices = null)
     {
         var callerContext = GetCallerPrincipal(httpContext);
         if (callerContext is null) return MissingContextResult();
 
         // ── AUTHORIZATION FIRST — nothing below reads SPE/Graph until BOTH checks pass ──
-        var (rights, upstreamFault, _) = await RightsForDocumentParentAsync(callerContext, parentKind, id, dataService, modules, ct);
+        var (rights, upstreamFault, _) = await RightsForDocumentParentAsync(
+            callerContext, parentKind, id, dataService, modules, ct, hideInvoices: hideInvoices);
         if (upstreamFault is not null) return upstreamFault;
         if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Read))
         {
@@ -2487,7 +2529,8 @@ public static class ExternalProjectDataEndpoints
         ExternalModuleRegistry modules,
         Func<string, Guid, CancellationToken, Task<Spaarke.Dataverse.AccessRights?>> readCallerRights,
         ILogger logger,
-        CancellationToken ct)
+        CancellationToken ct,
+        ExternalInvoiceHiding? hideInvoices = null)
     {
         ExternalDataService.DeleteTarget? target;
         try
@@ -2515,7 +2558,8 @@ public static class ExternalProjectDataEndpoints
 
         foreach (var parent in target.Parents)
         {
-            var (rights, fault, _) = await RightsForDocumentParentAsync(caller, parent.Kind, parent.Id, dataService, modules, ct);
+            var (rights, fault, _) = await RightsForDocumentParentAsync(
+                caller, parent.Kind, parent.Id, dataService, modules, ct, hideInvoices: hideInvoices);
             if (fault is not null)
                 return fault;
             if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Read))
@@ -2609,6 +2653,7 @@ public static class ExternalProjectDataEndpoints
         ExternalModuleRegistry modules,
         DocumentCheckoutService documents,
         CallerRecordAccessProbe probe,
+        [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices,
         ILogger<Program> logger,
         CancellationToken ct)
     {
@@ -2616,7 +2661,7 @@ public static class ExternalProjectDataEndpoints
         if (callerContext is null) return MissingContextResult();
 
         if (await AuthorizeDeleteOwnAsync(callerContext, ExternalDataService.DeletableKind.Document, id, dataService,
-                modules, CallerRightsReader(probe, httpContext), logger, ct) is { } refusal)
+                modules, CallerRightsReader(probe, httpContext), logger, ct, hideInvoices) is { } refusal)
             return refusal;
 
         DeleteResult result;
@@ -2686,13 +2731,13 @@ public static class ExternalProjectDataEndpoints
     /// <summary>DELETE /api/v1/external/todos/{id} — hard-delete a to-do the caller created (FR-26).</summary>
     private static async Task<IResult> DeleteOwnTodo(
         Guid id, HttpContext httpContext, ExternalDataService dataService, ExternalModuleRegistry modules,
-        CallerRecordAccessProbe probe, ILogger<Program> logger, CancellationToken ct)
+        CallerRecordAccessProbe probe, [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices, ILogger<Program> logger, CancellationToken ct)
     {
         var callerContext = GetCallerPrincipal(httpContext);
         if (callerContext is null) return MissingContextResult();
 
         if (await AuthorizeDeleteOwnAsync(callerContext, ExternalDataService.DeletableKind.Todo, id, dataService,
-                modules, CallerRightsReader(probe, httpContext), logger, ct) is { } refusal)
+                modules, CallerRightsReader(probe, httpContext), logger, ct, hideInvoices) is { } refusal)
             return refusal;
 
         return await DeleteAuthorizedRowAsync(ExternalDataService.DeletableKind.Todo, id, dataService, logger, ct);
@@ -2701,13 +2746,13 @@ public static class ExternalProjectDataEndpoints
     /// <summary>DELETE /api/v1/external/events/{id} — hard-delete a calendar event the caller created (FR-26).</summary>
     private static async Task<IResult> DeleteOwnEvent(
         Guid id, HttpContext httpContext, ExternalDataService dataService, ExternalModuleRegistry modules,
-        CallerRecordAccessProbe probe, ILogger<Program> logger, CancellationToken ct)
+        CallerRecordAccessProbe probe, [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices, ILogger<Program> logger, CancellationToken ct)
     {
         var callerContext = GetCallerPrincipal(httpContext);
         if (callerContext is null) return MissingContextResult();
 
         if (await AuthorizeDeleteOwnAsync(callerContext, ExternalDataService.DeletableKind.Event, id, dataService,
-                modules, CallerRightsReader(probe, httpContext), logger, ct) is { } refusal)
+                modules, CallerRightsReader(probe, httpContext), logger, ct, hideInvoices) is { } refusal)
             return refusal;
 
         return await DeleteAuthorizedRowAsync(ExternalDataService.DeletableKind.Event, id, dataService, logger, ct);

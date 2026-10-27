@@ -129,7 +129,10 @@ public class ExternalNotificationFeedTests
     private Task<IResult> FeedUnderCeiling(CallerPrincipal caller, WorkforceRoleCeiling ceiling) =>
         ExternalNotificationFeedEndpoints.GetFeedCoreAsync(
             caller, Tenant, ProductionRegistry(), _data, ReadService(), _cache, Now, NullLogger.Instance, CancellationToken.None,
-            table => WorkforceRoleCeilingGate.CanRead(ceiling, table));
+            table => WorkforceRoleCeilingGate.CanRead(ceiling, table), _invoiceHiding.Seam);
+
+    /// <summary>ebilling-r1 task 098: the (a') predicate the route passes; hides nothing unless a test says so.</summary>
+    private InvoiceHidingStub _invoiceHiding = InvoiceHidingStub.NoneHidden();
 
     private static WorkforceRoleCeiling EveryRoutePrivilegeWithout(string table, AccessRights removed)
     {
@@ -250,7 +253,7 @@ public class ExternalNotificationFeedTests
     private Task<IResult> Feed(CallerPrincipal caller, ExternalModuleRegistry? registry = null, DateTimeOffset? now = null) =>
         ExternalNotificationFeedEndpoints.GetFeedCoreAsync(
             caller, Tenant, registry ?? ProductionRegistry(), _data, ReadService(), _cache, now ?? Now,
-            NullLogger.Instance, CancellationToken.None);
+            NullLogger.Instance, CancellationToken.None, hideInvoices: _invoiceHiding.Seam);
 
     private Task<IResult> Seen(CallerPrincipal caller, DateTimeOffset at) =>
         ExternalNotificationFeedEndpoints.MarkSeenCoreAsync(caller, Tenant, _cache, at, NullLogger.Instance, CancellationToken.None);

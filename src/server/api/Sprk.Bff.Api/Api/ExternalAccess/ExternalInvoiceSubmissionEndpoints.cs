@@ -232,7 +232,9 @@ public static class ExternalInvoiceSubmissionEndpoints
         return Results.Ok(new ExternalInvoiceFirmRecords(firmId, matters, projects, workAssignments, partial, truncated));
     }
 
-    private static async Task<IResult> ListAsync(HttpContext http, InvoiceSubmissionService service, CancellationToken ct)
+    private static async Task<IResult> ListAsync(
+        HttpContext http, InvoiceSubmissionService service, [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices, ILogger<Program> logger,
+        CancellationToken ct)
     {
         if (Scope(http) is not { } scope)
         {
@@ -248,12 +250,39 @@ public static class ExternalInvoiceSubmissionEndpoints
                 principal.GetAccessibleProjectIds().ToList(),
                 principal.AccessibleWorkAssignmentIds,
                 ct);
-            return Results.Ok(views);
+            return Results.Ok(await WithoutHiddenInvoicesAsync(principal, views, hideInvoices, logger, ct));
         }
         catch (SdapProblemException ex)
         {
             return InvoiceSubmissionHttp.ReadFault(ex);
         }
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 098 (model 9.1, (a')): the list without the submissions whose resulting invoice the predicate hides (a
+    /// derived row is omitted, never marked). One predicate call for the whole page; none when no submission has an invoice. A
+    /// failed predicate read omits every submission that has an invoice (fail closed); one without an invoice is unaffected.
+    /// </summary>
+    internal static async Task<IReadOnlyList<InvoiceSubmissionView>> WithoutHiddenInvoicesAsync(
+        CallerPrincipal principal, IReadOnlyList<InvoiceSubmissionView> views, ExternalInvoiceHiding? hideInvoices, ILogger logger,
+        CancellationToken ct)
+    {
+        var invoiceIds = views.Where(v => v.InvoiceId is not null).Select(v => v.InvoiceId!.Value).Distinct().ToList();
+        if (invoiceIds.Count == 0)
+            return views;
+
+        var decision = hideInvoices is null
+            ? InvoiceVisibilityResult.ReadFailed(invoiceIds)
+            : await hideInvoices(principal, invoiceIds, ct).ConfigureAwait(false);
+        var kept = views.Where(v => v.InvoiceId is not { } id || decision.IsVisible(id)).ToList();
+        if (kept.Count < views.Count)
+        {
+            logger.LogInformation(
+                "[EBILLING-SUBMIT] {Withheld} of {Count} submission(s) withheld: their invoice is hidden by the (a') predicate ({Reasons}).",
+                views.Count - kept.Count, views.Count, hideInvoices is null ? "no predicate" : decision.HiddenSummary());
+        }
+
+        return kept;
     }
 }
 

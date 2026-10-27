@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Dataverse;
 
@@ -212,6 +213,13 @@ public sealed record InvoiceSubmissionView
     public InvoiceCoreRecord? CoreRecord { get; init; }
 
     public DateTime? CreatedOn { get; init; }
+
+    /// <summary>
+    /// ebilling-r1 task 098: the resulting invoice (accepted submissions only), read so the external routes can hide a submission
+    /// whose invoice the (a') predicate hides. Server-side only: never serialized, so the response contract is unchanged.
+    /// </summary>
+    [JsonIgnore]
+    public Guid? InvoiceId { get; init; }
 }
 
 /// <summary>Stable error codes of the submission operation (ADR-019). The strings are a contract with the SPA (051) and the review UI.</summary>

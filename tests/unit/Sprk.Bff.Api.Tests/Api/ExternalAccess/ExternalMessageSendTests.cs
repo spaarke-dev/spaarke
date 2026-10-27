@@ -209,8 +209,12 @@ public class ExternalMessageSendTests
         var data = _roots.NewService();
         return ExternalMessageEndpoints.PostMessageCoreAsync(
             root, id, request, caller, registry ?? ProductionRegistry(), ReadRecord, Service(), NullLogger.Instance,
-            CancellationToken.None, data.GetNonSecureRootsAsync, data.GetLiveParentRootsAsync);
+            CancellationToken.None, data.GetNonSecureRootsAsync, data.GetLiveParentRootsAsync,
+            hideInvoices: _invoiceHiding.Seam);
     }
+
+    /// <summary>ebilling-r1 task 098: the (a') predicate the route passes; hides nothing unless a test says so.</summary>
+    private InvoiceHidingStub _invoiceHiding = InvoiceHidingStub.NoneHidden();
 
     /// <summary>Task 036: a post with the Dataverse rights reader the route passes (the probe, as the caller), and (fix
     /// round 1, F1) its privilege reader.</summary>
@@ -223,7 +227,8 @@ public class ExternalMessageSendTests
         return ExternalMessageEndpoints.PostMessageCoreAsync(
             root, id, new PostExternalMessageRequest { SprkBody = "Can you confirm the filing date?" }, caller,
             ProductionRegistry(), ReadRecord, Service(), NullLogger.Instance, CancellationToken.None,
-            data.GetNonSecureRootsAsync, data.GetLiveParentRootsAsync, readCallerRights, readCallerPrivilege);
+            data.GetNonSecureRootsAsync, data.GetLiveParentRootsAsync, readCallerRights, readCallerPrivilege,
+            _invoiceHiding.Seam);
     }
 
     /// <summary>A request body bound exactly as the route binds it (System.Text.Json, web defaults).</summary>
