@@ -66,13 +66,13 @@ The firm fields are part of the idempotency key K (section 4): the same email, r
 **202 Accepted**, `Location` = `statusUrl`:
 
 ```json
-{ "submissionId": "0b9e...", "jobId": "5d2a...", "trackingNumber": "FIRMF-000123",
+{ "submissionId": "0b9e...", "jobId": "5d2a...", "trackingNumber": "INV-4711.1",
   "statusUrl": "/api/finance/invoice-submissions/0b9e...", "emlDocumentId": "a41c..." }
 ```
 
 - The first four fields are `InvoiceSubmissionAccepted` (InvoiceSubmissionEndpoints.cs:184; InvoiceSubmissionHttp.cs:112-113). `emlDocumentId` is NEW: the .eml source (fresh, or resolved in 1a).
 - `jobId` is the submission job (deterministic, as InvoiceSubmissionService.cs:207), not an Office job: never poll `/api/office/jobs/{id}`. The .eml's save job is not returned; its failure ends the submission Failed (§9.1 step 3).
-- **Progress:** `GET statusUrl`, the existing route (InvoiceSubmissionEndpoints.cs:66-74), returns 200 `InvoiceSubmissionView` (InvoiceSubmissionContracts.cs:185-215). `status`: `Received`, `Processing` (not final); `Accepted`, `Rejected`, `Failed` (final). `outcomeReasonCode` is display-only and not pinned. Unreadable or absent: 404 reasonCode `sdap.access.deny.record_unavailable`; read fault: 503 `ebilling.submission.record_unavailable`.
+- **Progress:** `GET statusUrl`, the existing route (InvoiceSubmissionEndpoints.cs:66-74), returns 200 `InvoiceSubmissionView` (InvoiceSubmissionContracts.cs:185-215). `status`: `Received`, `Processing` (not final); `Accepted`, `Rejected`, `Failed` (final). `outcomeReasonCode` is pinned in section 9 (G2). Unreadable or absent: 404 reasonCode `sdap.access.deny.record_unavailable`; read fault: 503 `ebilling.submission.record_unavailable`.
 
 ## 4. Idempotency
 
@@ -142,4 +142,37 @@ Field names and codes in this file are binding once word-add-in-r1 agrees (095 P
 - **OP-7:** until task 097 merges, `mode: "Correction"` answers 409 `ebilling.submission.correction_not_allowed` with `reason: "not_available"` before any write. After 097 the reasons are `invoice_status`, `different_firm`, `different_core_record`.
 - **OP-8:** code is `errorCode ?? reasonCode` (route refusals carry `errorCode`, filter denials `reasonCode`), as the existing finance routes do.
 
+- **G3 (correction prefill):** deferred to task 097, which pins a read of an invoice's firm, core record, status and tracking number for the caller. Until then Correction is `not_available` (OP-7).
+
 **Not on this route:** adding supporting files to an existing invoice. No internal upload route exists today (090 built the service, no route); whether R1 gets one is an open owner question (2026-10-27).
+
+## 8. Firms for a record (G1, built in 095)
+
+`GET /api/finance/core-records/{entityType}/{entityId}/firms`, in the /api/finance group with step 0, internal callers only.
+
+- `entityType`: `Matter` | `Project` | `WorkAssignment` (as `targetEntity.entityType`); anything else is 400 ValidationProblem.
+- Gate: the caller's Read on the core record (the same gate the submission applies); no Read or not found: 404 reasonCode `sdap.access.deny.record_unavailable`.
+- **200** `[{ "firmId": "guid", "name": "string" }]`, sorted by name (ordinal, case-insensitive), then id. It holds exactly the firms D-106 accepts: the record's assigned law firms (`sprk_assignedlawfirm1`, `sprk_assignedlawfirm2`; the one definition is `InvoiceSubmissionService.CheckFirmLinkAsync`), each at most once. **No linked firm: 200 `[]`** (the view says no firm is linked to this record).
+- A read fault: 503 `ebilling.submission.record_unavailable`; never a partial or empty list on a fault.
+- Every `firmId` it returns passes `firm_not_linked` on the from-email route at that moment.
+
+## 9. Submission outcome codes (G2)
+
+`InvoiceSubmissionView.outcomeReasonCode` when `status` is final and not `Accepted`, or while an Accepted invoice is held. Clients must accept unknown codes and show a generic message for them. No server prose is pinned; the add-in localises.
+
+| status | outcomeReasonCode | Meaning |
+|---|---|---|
+| Failed | `invoice.read.no_invoice` | The file marked Invoice is not an invoice (it is the one file marked Invoice, so no file name is sent) |
+| Failed | `invoice.read.unreadable` | The Invoice file could not be read (damaged or protected PDF) |
+| Failed | `invoice.read.page_limit` | The Invoice file has too many pages |
+| Failed | `invoice.read.service_failed` | Extraction failed after retries |
+| Failed | `ebilling.submission.email_save_failed` | NEW (095/094): the .eml save did not finish |
+| Failed | `ebilling.submission.document_unavailable` | The marked parts could not be read from the saved .eml |
+| Failed | `ebilling.submission.file_malicious` | A marked file failed the malware scan (task 092) |
+| Failed | `ebilling.submission.file_unservable` | A marked file could not be stored or verified (task 092) |
+| Failed | `ebilling.submission.source_check_failed` | NEW (094 step 5): the source's filing or isolation re-check failed at commit |
+| Failed | `ebilling.submission.processing_failed` | Any other processing failure |
+| Rejected | `ebilling.submission.blocked` | A blocking rule rejected the invoice |
+| Rejected | `ebilling.submission.returned` | Returned to the firm |
+
+Replay after `Failed` or `Rejected` follows section 5 (OP-4: an open owner question may later allow a new attempt after `Failed`).
