@@ -638,6 +638,7 @@ describe.
 
 - Monitor or High Priority across the family; email family members (UAC: recipients from readable members' people lookups, field security respected, the existing send path).
 - Any bulk share or grant (needs UAC review first).
+- Any family table: neither a stored membership (UAC's unbuilt `sprk_securefamily`, D-191) nor a peer IP kind or its link table.
 - External users (they use `AccessibleRecordSetService`).
 - A Console entry point.
 
@@ -729,7 +730,14 @@ Still open: classify `sprk_procedureassignment` and record-scoped ruleset rules 
   - `kind` and `edgeKind` on every member;
   - a visited set;
   - edge types in code, edge instances in Dataverse.
-- Term: ontology is putting the component-model §3 row to the owner. Until then, "Family" is the UI word for the Filing view.
+- Term: **decided, D-191 (owner, 2026-10-27; ontology component model §3 "Family").**
+  - There is ONE canonical Family concept: a set of records joined by typed edges of one kind.
+  - Filing is the kind now, which is exactly W7. A peer IP kind (for example Priority) comes later and keeps the name "patent family".
+  - "Secure family" is a qualifier, not a kind.
+- **Materialised form, not foreclosed:** UAC-r2 rounds 94/100b decided an UNBUILT `sprk_securefamily` table: a single-membership lookup on every family table, an owner team per family, and nesting. UAC research note §8 leaves the owner the option to generalise it to a record family for every core root.
+  - That table would be a stored form of this same Filing family.
+  - W7's names and API must not foreclose it. If it is built, `RecordFamilyReader` may use the stored membership as an index instead of walking. The response contract does not change.
+  - W7 creates NO family table (§12.5).
 
 **UAC-r2, round 2 (2026-10-27, at 4d0bba20dd):**
 - Accepted: the `FamilyKind` column and the `kind` parameter. The full-family default is covered by the existing pruning rule.
