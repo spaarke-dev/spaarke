@@ -1664,7 +1664,7 @@ public sealed class UnifiedEvaluatorSeamTests
             harness.Participations, harness.Materializer,
             TestRecordContainerResolver.ForNonSecureRecord(ProjectEntity, root),
             harness.Identities, Mock.Of<IMembershipCacheInvalidator>(), harness.Time, http, NullLogger<Program>.Instance,
-            CancellationToken.None);
+            Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance, CancellationToken.None);
 
         harness.Identities.Contacts[ContactId].StateCode.Should().Be(0, "the contact stays active");
         (await evaluator.ComposeForCiamContactAsync(ContactId, ProjectEntity, CancellationToken.None))

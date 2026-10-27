@@ -2,6 +2,8 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.Extensions.Configuration;
+using System.Diagnostics;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Spaarke.Dataverse;
@@ -14,6 +16,7 @@ using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.ExternalAccess;
 using Sprk.Bff.Api.Tests.AccessControl.IdentityBinding;
+using Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 using static Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles;
@@ -40,6 +43,7 @@ public class PersonAccessAdministrationTests
     private readonly Guid _matter = Guid.NewGuid();
     private readonly Mock<IMembershipCacheInvalidator> _invalidator = new();
     private readonly BindingLogCapture<Program> _log = new();
+    private readonly AuditLogCapture _audit = new();
 
     public PersonAccessAdministrationTests()
     {
@@ -78,12 +82,13 @@ public class PersonAccessAdministrationTests
             _h.Time,
             http ?? AdminContext(),
             _log,
+            _audit.Factory,
             CancellationToken.None);
 
     private Task<IResult> Reinstate(Guid contactId, HttpContext? http = null) =>
         PersonAccessAdministrationEndpoints.ReinstatePersonAsync(
             new ExternalPersonRequest(contactId), _h.Grants, _h.Participations, _h.Identities, _invalidator.Object, _h.Time,
-            http ?? AdminContext(), _log, CancellationToken.None);
+            http ?? AdminContext(), _log, _audit.Factory, CancellationToken.None);
 
     private Task<IResult> Grant(Guid contactId) =>
         GrantExternalAccessEndpoint.GrantAccessAsync(
@@ -440,8 +445,11 @@ public class PersonAccessAdministrationTests
         await Remove(contact, AdminContext(leg));
         await Reinstate(contact, AdminContext(leg));
 
-        var audit = _log.Messages.Where(m => m.StartsWith("[EXT-PERSON-AUDIT]", StringComparison.Ordinal)).ToList();
-        audit.Should().HaveCount(2);
+        var records = _audit.Records.Where(r => r.Message.StartsWith("[EXT-PERSON-AUDIT]", StringComparison.Ordinal)).ToList();
+        records.Select(r => (r.Category, r.EventId.Id, r.Level)).Should().Equal(
+            (ExternalAccessAudit.Category, 9821, LogLevel.Information),
+            (ExternalAccessAudit.Category, 9822, LogLevel.Information));
+        var audit = records.Select(r => r.Message).ToList();
         audit[0].Should().StartWith("[EXT-PERSON-AUDIT] remove:");
         audit[1].Should().StartWith("[EXT-PERSON-AUDIT] reinstate:");
         audit.Should().OnlyContain(m => m.Contains(AdminUser.ToString(), StringComparison.Ordinal)
@@ -450,6 +458,31 @@ public class PersonAccessAdministrationTests
                                         && m.Contains("trace-c3", StringComparison.Ordinal)
                                         && m.Contains("statecode at start 0", StringComparison.Ordinal)
                                         && !m.Contains(Email, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Slice C2c: both audit records (9821 remove, 9822 reinstate) are written through the audit helper: inside the request's
+    /// Activity, sampled or not, each is written with no Activity (so its exported record carries no span), and the request's
+    /// Activity is back afterwards. The request's own log carries no audit record.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Remove_AndReinstate_WriteTheirAudit_OutsideTheRequestTrace(bool recorded)
+    {
+        var (contact, _) = BoundPerson();
+        using var request = new Activity("request").SetIdFormat(ActivityIdFormat.W3C);
+        request.ActivityTraceFlags = recorded ? ActivityTraceFlags.Recorded : ActivityTraceFlags.None;
+        request.Start();
+
+        await Remove(contact);
+        await Reinstate(contact);
+
+        Activity.Current.Should().BeSameAs(request);
+        var audit = _audit.Records.Where(r => r.Category == ExternalAccessAudit.Category).ToList();
+        audit.Select(r => r.EventId.Id).Should().Equal(9821, 9822);
+        audit.Should().OnlyContain(r => r.ActivityAtWrite == null, "each audit record is written outside the request's trace");
+        _log.Messages.Should().NotContain(m => m.StartsWith("[EXT-PERSON-AUDIT]", StringComparison.Ordinal));
     }
 
     // ── After removal: refused everywhere, by the marker ────────────────────────────────────────────────────

@@ -105,6 +105,7 @@ public static class PersonAccessAdministrationEndpoints
         TimeProvider timeProvider,
         HttpContext httpContext,
         ILogger<Program> logger,
+        ILoggerFactory loggerFactory,
         CancellationToken ct)
     {
         if (request.ContactId == Guid.Empty)
@@ -121,7 +122,7 @@ public static class PersonAccessAdministrationEndpoints
                 dataverseClient, revocation, participations, identityStore, membershipInvalidator, timeProvider, logger)
             .RemoveAsync(request.ContactId, httpContext.TraceIdentifier, ct);
 
-        Audit(logger, RemovePersonAuditEvent, "remove", admin, request.ContactId, outcome, httpContext.TraceIdentifier);
+        Audit(loggerFactory, RemovePersonAuditEvent, "remove", admin, request.ContactId, outcome, httpContext.TraceIdentifier);
 
         switch (outcome.Status)
         {
@@ -168,6 +169,7 @@ public static class PersonAccessAdministrationEndpoints
         TimeProvider timeProvider,
         HttpContext httpContext,
         ILogger<Program> logger,
+        ILoggerFactory loggerFactory,
         CancellationToken ct)
     {
         if (request.ContactId == Guid.Empty)
@@ -181,7 +183,7 @@ public static class PersonAccessAdministrationEndpoints
                 dataverseClient, revocation: null, participations, identityStore, membershipInvalidator, timeProvider, logger)
             .ReinstateAsync(request.ContactId, ct);
 
-        Audit(logger, ReinstatePersonAuditEvent, "reinstate", admin, request.ContactId, outcome, httpContext.TraceIdentifier);
+        Audit(loggerFactory, ReinstatePersonAuditEvent, "reinstate", admin, request.ContactId, outcome, httpContext.TraceIdentifier);
 
         return outcome.Status switch
         {
@@ -216,12 +218,13 @@ public static class PersonAccessAdministrationEndpoints
     /// <summary>
     /// The audit trace of one removal or reinstatement: the administrator's systemuserid as WhoAmI answered it, how they hold
     /// the authority (direct or team), the contact, the statecode read at the start, every step's result and the correlation
-    /// id. Never an email address.
+    /// id. Never an email address. Slice C2c: written under <see cref="ExternalAccessAudit.Category"/> through
+    /// <see cref="ExternalAccessAudit.Write"/>, so it is exported regardless of trace sampling.
     /// </summary>
     private static void Audit(
-        ILogger logger, EventId verb, string action, AdministratorAuthorityDecision admin, Guid contactId,
+        ILoggerFactory loggerFactory, EventId verb, string action, AdministratorAuthorityDecision admin, Guid contactId,
         PersonAdministrationOutcome outcome, string correlationId)
-        => logger.LogInformation(verb,
+        => ExternalAccessAudit.Write(loggerFactory.CreateLogger(ExternalAccessAudit.Category), audit => audit.LogInformation(verb,
             "[EXT-PERSON-AUDIT] {Action}: administrator {AdminSystemUserId} ({AuthorityLeg}), contact {ContactId}, statecode at " +
             "start {StateCode}, status {Status}, steps [{Steps}], grants revoked {GrantsRevoked}, grants not completed " +
             "[{GrantsNotCompleted}], correlation {CorrelationId}.",
@@ -230,5 +233,5 @@ public static class PersonAccessAdministrationEndpoints
             string.Join("; ", outcome.Steps.Select(s => $"{s.Step}={(s.Completed ? "completed" : "not completed")}")),
             outcome.GrantsRevoked,
             string.Join(", ", outcome.GrantsNotCompleted ?? Array.Empty<Guid>()),
-            correlationId);
+            correlationId));
 }
