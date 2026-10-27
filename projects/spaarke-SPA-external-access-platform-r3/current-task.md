@@ -1,6 +1,6 @@
 # Current Task State - spaarke-SPA-external-access-platform-r3
 
-> **Last Updated**: 2026-10-27 ~03:20Z. Dev BFF = 3ff2c04bf5 (gate passed); dev SPA = 1fa0cf5cb8.
+> **Last Updated**: 2026-10-27 (after C1). Dev BFF = 3ff2c04bf5 (gate passed); dev SPA = 1fa0cf5cb8.
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -10,9 +10,9 @@
 | Field | Value |
 |-------|-------|
 | **Task** | **Contact identity hardening (security rework)** on branch `fix/r3-iss-005-combined` (worktree `C:/wtr3-005`). Tracked ONLY in private draft advisory GHSA-hq7m-w2pf-v8j7. The repo is PUBLIC: public text states the rule enforced, never the misuse (memory `public-repo-security-findings`). Before every push, scan commits for sensitive wording. |
-| **Step** | Pushed to origin at 424e95ebd5 (slices A, B, B2, B3 accepted; 424e95ebd5 = the modal shows the /grant invite Failed, UAC condition pending: prove Retry really invites). Slice C split into C2 (removed marker), C1 (shared revoke service), C3 (admin helper, /remove-person, /reinstate-person), C4 (sweep + -Verify/S19). **Implementer `r3-sec-slice-c` RUNNING: the Retry fix, C2, then C1; it stops before C3.** The C3/C4 decisions are in the private brief's last section. |
+| **Step** | Pushed to origin at e33747fade: slices A–B3 accepted; 424e95ebd5 (modal shows a failed /grant invite), d085247994 (C2 removed marker), e9ca3dfa14 (Retry calls /invite), e33747fade (C1 shared revoke service) sent to UAC. **Implementer `r3-sec-slice-c3` RUNNING (C3: admin helper, /remove-person, /reinstate-person, /grant refusal for a marked contact).** Then C2b (UAC ruling pending: invite resend after a failed send ×2; contact creation refused for a removed email), then C4 (sweep + -Verify/S19). |
 | **Status** | in-progress |
-| **Next Action** | (1) When the agent reports: review, scan the wording, push, send the ranges to UAC. (2) Launch C3, then C4, from the brief's "Slice C decisions (2026-10-27)". (3) Final head to UAC for the two security passes. (4) The §10 publish-size delta vs a fresh master build. (5) The PR (rule-level title; body = SpaarkeMaster 1.2.4.0 ordering + schema-first), then the advisory. |
+| **Next Action** | (1) When C3 reports: review, scan the wording, push, send the range to UAC. (2) C2b per UAC's ruling. (3) C4. (4) Final head to UAC for the two security passes. (5) The §10 publish-size delta. (6) The PR + advisory. Rollout: the marker column must exist before this BFF is deployed (schema first). |
 
 ### Private files (scratchpad, NOT in repo)
 `C:\Users\RALPHS~1\AppData\Local\Temp\claude\c--code-files-spaarke-wt-SPA-external-access-platform-r3\15aa240f-634c-4332-99f6-382ebcb06a62\scratchpad\`
