@@ -400,6 +400,14 @@ ontology D-191)
     - Going up, it stops at the first unreadable ancestor. The full view then walks down from the highest readable
       ancestor.
     - Each walk covers one kind only.
+    - **One family per record (owner-approved, UAC-r2, 2026-10-27).** A record filed under several parents belongs to
+      exactly one family, its PRIMARY parent's. Its other filing edges are secondary.
+      - The walk goes up only through the primary parent, and going down it lists a child only under its primary
+        parent.
+      - The primary parent comes from `RecordOwnershipResolver`'s order (`InPrimaryOrder` / `OrderedParentsOf`, UAC
+        194b). There is no second ordering.
+      - Isolation is unchanged: secure-if-any still applies over ALL filing parents. Family membership is not the
+        security boundary.
     - Members are unique by (table, id), and the shallowest edge is kept.
     - Caps: depth 4 and 500 members. A truncated view keeps the anchor's chain and its own subtree, and returns
       `truncated` plus a continuation.
@@ -612,6 +620,7 @@ ontology D-191)
 - ontology-r1 awareness for the chat tool, decision cores and Signal/Decision writer re-pointing.
 - W7 prerequisites:
   - FR-29 seeds from UAC 194 (merged, `de38296499`);
+  - FR-30's primary-parent order needs UAC 194b merged;
   - the Matter → Project pair edge needs UAC task 195 merged (the server writes the pair; dev backfill);
   - FR-34/FR-35 ship with task 040 (needs 019 → 017 → ebilling #1911);
   - FR-36 needs a UAC-r2 diff review.

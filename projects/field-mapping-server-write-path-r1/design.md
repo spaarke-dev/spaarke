@@ -584,6 +584,12 @@ describe.
   - Otherwise, opening a document under a large matter could truncate the document's own branch out of the view.
   - Covered by a K line in §12.11 and a test.
 - **Field security:** because the walk is OBO, Dataverse applies field security. A field-secured record number or status comes back null. These columns are never read app-only (UAC).
+- **One family per record (owner-approved via UAC-r2, 2026-10-27; sent to ontology for D-191):**
+  - A record filed under several parents belongs only to its PRIMARY parent's family.
+  - Up and down walks follow primary edges only.
+  - The primary parent comes from `RecordOwnershipContext.InPrimaryOrder` / `OrderedParentsOf` (UAC 194b). Never a second ordering.
+  - Isolation still uses secure-if-any over all filing parents.
+  - Only the pair is the Matter → Project edge, never an N:N row.
 - **De-duplication (ontology review):** members are unique by (table, id), and the shallowest edge is kept. Example: a Signal reached from a matter both directly and through its Decision Record appears once. Counts and the 500 cap count unique members.
 - **Fields returned:** id, table, primary name, record number (null for a table without a number column), status, modified on, parent edge, depth (owner, 2026-10-27). The record-number column per table comes from the registry. No access metadata (grants, No Access, sharees, owner team).
 - **Not an authorization input.** No cross-caller cache.
