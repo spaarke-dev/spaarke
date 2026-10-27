@@ -117,6 +117,27 @@ public class SecureChildOrdinaryParentMoveTests
         _webApi.ConditionalWrites.Single(w => w.Id == TodoId).Should().Be(("sprk_todos", TodoId, "W/\"1\""));
     }
 
+    [Fact(DisplayName = "194 must fire: descendants with NO core stamp, reached only through a lineage hop (a file version and a To Do under a document), follow the document to B")]
+    public async Task DescendantsReachedOnlyThroughALineageHop_FollowTheirParent()
+    {
+        var fileVersion = Guid.NewGuid();
+        var todoOnDocument = Guid.NewGuid();
+        MatterMovedToB();
+        Row("sprk_document", DocumentId, TeamRef(GeneralTeam), ("sprk_matter", Matter, MatterId));
+        Row("sprk_fileversion", fileVersion, TeamRef(GeneralTeam), ("sprk_document", "sprk_document", DocumentId));
+        Row("sprk_todo", todoOnDocument, TeamRef(GeneralTeam), ("sprk_regardingdocument", "sprk_document", DocumentId));
+
+        var report = await Reconciler().ReconcileOrdinaryParentMoveAsync(
+            Matter, MatterId, SecureChildReconcileMode.Apply, maxWrites: 200, CancellationToken.None);
+
+        report.Status.Should().Be(SecureChildReconcileStatus.Completed, report.Detail);
+        _world.OwnerOf("sprk_fileversion", fileVersion).Should().Be(DataversePrincipalRef.Team(TeamB),
+            "a file version carries no core stamp; the walk reaches it through its document, and it follows the document's new unit");
+        _world.OwnerOf("sprk_todo", todoOnDocument).Should().Be(DataversePrincipalRef.Team(TeamB));
+        _world.OwnerOf("sprk_document", DocumentId).Should().Be(DataversePrincipalRef.Team(TeamB));
+        report.ChildrenReowned.Should().Be(3);
+    }
+
     [Fact(DisplayName = "194 must fire: report-only plans every move, the grandchild through its planned parent, and writes nothing")]
     public async Task ReportOnly_PlansEveryMove_AndWritesNothing()
     {
