@@ -11,10 +11,12 @@ using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Finance;
+using Sprk.Bff.Api.Services.Finance.Files;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Jobs.Handlers;
 using Sprk.Bff.Api.Services.Signals;
+using Sprk.Bff.Api.Tests.Finance.Files;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Jobs.Handlers;
@@ -62,7 +64,6 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
             ["sprk_firminvoicenumber"] = "INV-100",
             ["sprk_vendororg"] = new EntityReference("sprk_organization", FirmId),
             ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId),
-            ["sprk_document"] = new EntityReference("sprk_document", DocumentId),
             ["createdon"] = new DateTime(2026, 6, 5, 23, 30, 0, DateTimeKind.Utc),
             ["sprk_channel"] = new OptionSetValue((int)InvoiceSubmissionChannel.Spa),
             ["sprk_processingstatus"] = new OptionSetValue(status),
@@ -80,6 +81,12 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
 
         return row;
     }
+
+    /// <summary>
+    /// The snapshot of an existing-document submission (050a) over <paramref name="row"/>: its document is read from SharePoint Embedded.
+    /// Task 092: the default row is an upload (no document).
+    /// </summary>
+    internal static SubmissionSnapshot DocumentSnapshot(Entity row) => SubmissionSnapshot.Read(row).Snapshot! with { DocumentId = DocumentId };
 
     internal static SubmissionEvaluationOutcome Outcome(SubmissionEvaluationKind kind, string? reason = null, Entity? row = null) => new()
     {
@@ -272,6 +279,23 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
         public byte[] Bytes { get; set; } = [1, 2, 3];
         public List<string> Downloads { get; } = [];
 
+        /// <summary>Task 092: the Finance file store an upload's bytes are read from (real service, in-memory blob gateway).</summary>
+        public StoredFileRig Files { get; } = new();
+
+        /// <summary>Task 092: stages the upload of <see cref="SubmissionId"/> as the intake does; scanned clean unless tags are given.</summary>
+        public StagedBlob StageUpload(byte[] bytes, IDictionary<string, string>? tags = null, bool scanned = true)
+        {
+            var spec = InvoiceSubmissionService.UploadFileSpec(SubmissionId, "invoice.pdf", InvoiceSubmissionChannel.Spa);
+            var staged = Files.Service.StageAsync(spec, new MemoryStream(bytes), CancellationToken.None).GetAwaiter().GetResult().Blob!;
+            if (scanned)
+            {
+                Files.Gateway.Get(staged.Container, staged.BlobPath)!.Tags =
+                    new Dictionary<string, string>(tags ?? StoredFileRig.CleanTags(Files.Gateway.Now.AddMinutes(1)), StringComparer.Ordinal);
+            }
+
+            return staged;
+        }
+
         public IEnumerable<(int Status, string? Reason)> StatusWrites => Writes
             .Where(w => w.ContainsKey("sprk_processingstatus"))
             .Select(w => (((OptionSetValue)w["sprk_processingstatus"]).Value, w.TryGetValue("sprk_outcomereasoncode", out var r) ? (string?)r : null));
@@ -358,6 +382,7 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
                 sink.Object,
                 Locks,
                 Mock.Of<IOptionsMonitor<EbillingOptions>>(m => m.CurrentValue == new EbillingOptions { Enabled = Enabled }),
+                Files.Service,
                 Log);
         }
 
@@ -873,7 +898,7 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
         var rig = new Rig { Row = SubmissionRow(Received, InvoiceId), DocumentMissing = true }.HappyPath();
         rig.Processor.Script = async (row, load) =>
         {
-            await load(SubmissionSnapshot.Read(row).Snapshot!, CancellationToken.None);
+            await load(DocumentSnapshot(row), CancellationToken.None);
             return Outcome(SubmissionEvaluationKind.Accepted);
         };
 
@@ -995,14 +1020,14 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
 
     // ── 1a: the document ──
 
-    [Fact(DisplayName = "049 E 1a: the bytes and MIME type of the document reach the read request; the pointer's container is verified first")]
+    [Fact(DisplayName = "049 E 1a / 092: an existing-document submission's bytes and MIME type reach the read request; the pointer's container is verified first")]
     public async Task Document_IsDownloadedAfterTheContainerCheck_AndHandedToTheRead()
     {
         var rig = new Rig { Bytes = [9, 8, 7], MimeType = "image/png" }.HappyPath();
         InvoiceReadRequest? request = null;
         rig.Processor.Script = async (row, load) =>
         {
-            request = await load(SubmissionSnapshot.Read(row).Snapshot!, CancellationToken.None);
+            request = await load(DocumentSnapshot(row), CancellationToken.None);
             return Outcome(SubmissionEvaluationKind.Accepted);
         };
 
@@ -1022,7 +1047,7 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
         InvoiceReadRequest? request = null;
         rig.Processor.Script = async (row, load) =>
         {
-            request = await load(SubmissionSnapshot.Read(row).Snapshot!, CancellationToken.None);
+            request = await load(DocumentSnapshot(row), CancellationToken.None);
             return Outcome(SubmissionEvaluationKind.Accepted);
         };
 
@@ -1037,7 +1062,7 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
         var rig = new Rig { PointerContainer = "drive-evil" }.HappyPath();
         rig.Processor.Script = async (row, load) =>
         {
-            await load(SubmissionSnapshot.Read(row).Snapshot!, CancellationToken.None);
+            await load(DocumentSnapshot(row), CancellationToken.None);
             return Outcome(SubmissionEvaluationKind.Accepted);
         };
 
@@ -1055,7 +1080,7 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
         var rig = new Rig { DocumentMissing = true }.HappyPath();
         rig.Processor.Script = async (row, load) =>
         {
-            await load(SubmissionSnapshot.Read(row).Snapshot!, CancellationToken.None);
+            await load(DocumentSnapshot(row), CancellationToken.None);
             return Outcome(SubmissionEvaluationKind.Accepted);
         };
 
@@ -1071,7 +1096,7 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
         var rig = new Rig { DownloadReturnsNothing = true }.HappyPath();
         rig.Processor.Script = async (row, load) =>
         {
-            await load(SubmissionSnapshot.Read(row).Snapshot!, CancellationToken.None);
+            await load(DocumentSnapshot(row), CancellationToken.None);
             return Outcome(SubmissionEvaluationKind.Accepted);
         };
 
@@ -1079,6 +1104,131 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
 
         outcome.Status.Should().Be(JobStatus.Failed);
         rig.StatusWrites.Should().NotContain(w => w.Status == Failed);
+    }
+
+    // ── 1a (task 092): an upload's bytes come from the Finance file store ──
+
+    /// <summary>Scripts the processor to load the default (upload) row's PDF and keep the request it got.</summary>
+    private static Func<InvoiceReadRequest?> LoadsTheUpload(Rig rig)
+    {
+        InvoiceReadRequest? request = null;
+        rig.Processor.Script = async (row, load) =>
+        {
+            request = await load(SubmissionSnapshot.Read(row).Snapshot!, CancellationToken.None);
+            return Outcome(SubmissionEvaluationKind.Accepted);
+        };
+        return () => request;
+    }
+
+    [Fact(DisplayName = "092: an upload's staged bytes (scanned clean, hash matching) reach the read request; nothing is read from SPE")]
+    public async Task Upload_IsReadFromTheFileStore()
+    {
+        var rig = new Rig().HappyPath();
+        rig.StageUpload([0x25, 0x50, 0x44, 0x46, 7]);
+        var request = LoadsTheUpload(rig);
+
+        var outcome = await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Completed);
+        request()!.Content.ToArray().Should().Equal(0x25, 0x50, 0x44, 0x46, 7);
+        request()!.ContentType.Should().Be("application/pdf");
+        request()!.DocumentId.Should().Be(StoredFileIds.ForUpload(SubmissionId), "the reader's id is the Stored File's");
+        rig.Downloads.Should().BeEmpty("no SharePoint Embedded read for an upload");
+    }
+
+    [Fact(DisplayName = "092: an upload with no scan verdict yet is transient (Failure), never Failed")]
+    public async Task Upload_PendingScan_IsTransient()
+    {
+        var rig = new Rig().HappyPath();
+        rig.StageUpload([1, 2, 3], scanned: false);
+        LoadsTheUpload(rig);
+
+        var outcome = await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Failed);
+        rig.StatusWrites.Should().NotContain(w => w.Status == Failed);
+        rig.Persister.Calls.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "092 must-fire: an upload scanned Malicious is Failed file_malicious and Poisoned; nothing persisted")]
+    public async Task Upload_Malicious_IsFailedFileMalicious()
+    {
+        var rig = new Rig().HappyPath();
+        rig.StageUpload([1, 2, 3], new Dictionary<string, string> { [StoredFileBlobs.ScanResultTagKey] = StoredFileBlobs.ScanMaliciousValue });
+        LoadsTheUpload(rig);
+
+        var outcome = await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Poisoned);
+        rig.StatusWrites.Should().Equal([(Processing, (string?)null), (Failed, SubmissionReasonCodes.FileMalicious)]);
+        SubmissionReasonCodes.FileMalicious.Should().Be("ebilling.submission.file_malicious");
+        rig.Persister.Calls.Should().BeEmpty();
+    }
+
+    [Theory(DisplayName = "092 must-fire: an upload with no staged blob, or bytes that no longer match the staged hash, is Failed document_unavailable and Poisoned")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Upload_MissingOrChanged_IsFailedDocumentUnavailable(bool staged)
+    {
+        var rig = new Rig().HappyPath();
+        if (staged)
+        {
+            var blob = rig.StageUpload([1, 2, 3]);
+            rig.Files.Gateway.Get(blob.Container, blob.BlobPath)!.Content = [9, 9, 9];
+        }
+
+        LoadsTheUpload(rig);
+
+        var outcome = await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Poisoned);
+        rig.StatusWrites.Should().Equal([(Processing, (string?)null), (Failed, SubmissionReasonCodes.DocumentUnavailable)]);
+        rig.Persister.Calls.Should().BeEmpty();
+    }
+
+    // ── 092: file_unservable is the one refusal that fails a submission linked to its invoice ──
+
+    [Fact(DisplayName = "092 (model 9.1 step 6): the persister's FileUnservable WITH the invoice marks the submission Failed, Poisons the job and runs no after-step")]
+    public async Task PersistUnservable_WithTheInvoice_IsFailed_NoAfterStep()
+    {
+        var rig = new Rig().HappyPath();
+        rig.Persister.Script.Clear();
+        rig.Persister.Script.Add(_ => Task.FromResult(Persist(SubmissionPersistStatus.Refused, InvoiceId, SubmissionReasonCodes.FileUnservable)));
+
+        var outcome = await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Poisoned);
+        outcome.ErrorMessage.Should().Be(SubmissionReasonCodes.FileUnservable);
+        rig.StatusWrites.Should().Equal([(Processing, (string?)null), (Failed, SubmissionReasonCodes.FileUnservable)]);
+        rig.After.RunCalls.Should().BeEmpty("no after-step runs after a definitive flip failure");
+        rig.After.ResumeCalls.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "092: a resume whose flip gate answers FileUnservable marks the linked submission Failed and Poisons the job")]
+    public async Task ResumeUnservable_IsFailed()
+    {
+        var rig = new Rig { Row = SubmissionRow(Processing, InvoiceId) }.HappyPath();
+        rig.After.Resume = () => Task.FromResult(AfterResult(SubmissionAfterStepsStatus.Refused, SubmissionReasonCodes.FileUnservable));
+
+        var outcome = await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Poisoned);
+        rig.StatusWrites.Should().Equal([(Failed, SubmissionReasonCodes.FileUnservable)]);
+        rig.Writes.Should().NotContain(w => w.ContainsKey(AttentionColumn), "the Failed status is the signal; no stopped note");
+    }
+
+    [Fact(DisplayName = "092 must-not-fire: a refusal WITHOUT an invoice keeps the ordinary FailAsync path (same Failed write, no FileUnservable special case)")]
+    public async Task PersistRefused_WithoutTheInvoice_IsTheOrdinaryFailure()
+    {
+        var rig = new Rig().HappyPath();
+        rig.Persister.Script.Clear();
+        rig.Persister.Script.Add(_ => Task.FromResult(Persist(SubmissionPersistStatus.Refused, null, SubmissionReasonCodes.FileUnservable)));
+
+        var outcome = await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Poisoned);
+        rig.StatusWrites.Should().Equal([(Processing, (string?)null), (Failed, SubmissionReasonCodes.FileUnservable)]);
+        rig.After.RunCalls.Should().BeEmpty();
     }
 
     // ── 2: the processor's outcome kinds ──

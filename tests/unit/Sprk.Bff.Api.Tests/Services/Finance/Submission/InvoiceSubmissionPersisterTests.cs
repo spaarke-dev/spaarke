@@ -11,9 +11,11 @@ using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Coding;
+using Sprk.Bff.Api.Services.Finance.Files;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Billing;
+using Sprk.Bff.Api.Tests.Finance.Files;
 using Xunit;
 using static Sprk.Bff.Api.Tests.Domain.Signals.Billing.BillingEvaluationKit;
 using ProcessorHarness = Sprk.Bff.Api.Tests.Services.Finance.Submission.InvoiceSubmissionProcessorTests.Harness;
@@ -23,7 +25,9 @@ namespace Sprk.Bff.Api.Tests.Services.Finance.Submission;
 /// <summary>
 /// ebilling-r1 task 049 part C: step 6, all-or-nothing persistence (<see cref="InvoiceSubmissionPersister"/>). The outcomes are produced by the
 /// real processor (part B harness: real 072 evaluation and 073 decision); Dataverse is a strict double, so any write outside the one
-/// transaction fails the test.
+/// transaction fails the test. Task 092: an upload's PDF is staged in the real Finance file store over an in-memory blob gateway
+/// (<see cref="StoredFileRig"/>); the committed transaction's Stored File create lands in that store's Dataverse, so the flip after the
+/// commit runs for real.
 /// </summary>
 public class InvoiceSubmissionPersisterTests
 {
@@ -38,11 +42,14 @@ public class InvoiceSubmissionPersisterTests
     private static readonly Guid Submitter = Guid.Parse("04900000-0000-4000-8000-0000000000c9");
     private static readonly Guid SubmitterContact = Guid.Parse("04900000-0000-4000-8000-0000000000ca");
 
-    private static readonly Guid InvoiceId =InvoiceSubmissionPersister.InvoiceIdFor(Submission);
+    private static readonly Guid InvoiceId = InvoiceSubmissionPersister.InvoiceIdFor(Submission);
+
+    /// <summary>Task 092: the upload's Stored File id (the intake staged it, the transaction creates its row).</summary>
+    private static readonly Guid FileId = StoredFileIds.ForUpload(Submission);
 
     // ── the four persisted kinds ──
 
-    [Fact(DisplayName = "049 C: Accepted is ONE transaction: invoice (In Review), lines, approval, document link, submission update")]
+    [Fact(DisplayName = "049 C / 092: Accepted is ONE transaction: invoice (In Review), the invoice PDF's Stored File, lines, approval, submission update")]
     public async Task Accepted_IsOneTransaction_WithEveryRow()
     {
         var outcome = await new ProcessorHarness().RunAsync();
@@ -59,7 +66,7 @@ public class InvoiceSubmissionPersisterTests
 
         var requests = store.Transactions[0];
         requests.Select(Describe).Should().Equal(
-            "Create sprk_invoice", "Create sprk_billingevent", "Create sprk_invoiceapproval", "Update sprk_document", "Update sprk_invoicesubmission");
+            "Create sprk_invoice", "Create sprk_storedfile", "Create sprk_billingevent", "Create sprk_invoiceapproval", "Update sprk_invoicesubmission");
 
         var invoice = Target(requests[0]);
         invoice.Id.Should().Be(InvoiceId);
@@ -72,10 +79,24 @@ public class InvoiceSubmissionPersisterTests
         invoice.GetAttributeValue<string>("sprk_regardingrecordid").Should().Be(Matter.ToString("D"));
         invoice.GetAttributeValue<EntityReference>("sprk_regardingrecordtype").Id.Should().Be(RecordTypeId);
         invoice.GetAttributeValue<string>("sprk_correlationid").Should().Be("corr-1");
-        invoice.GetAttributeValue<EntityReference>("sprk_document").Id.Should().Be(Document);
+        invoice.Attributes.Should().NotContainKey("sprk_document", "an upload has no document (task 092)");
         invoice.GetAttributeValue<Money>("sprk_totalamount").Value.Should().Be(750m);
 
-        var line = Target(requests[1]);
+        // Task 092 (model 4.1, 9.1 step 4): the invoice PDF's row, Not yet servable, under the invoice, Firm-visible for the SPA channel.
+        var file = Target(requests[1]);
+        file.Id.Should().Be(FileId);
+        file.GetAttributeValue<OptionSetValue>(StoredFileSchema.Purpose).Value.Should().Be((int)StoredFilePurpose.InvoicePdf);
+        file.GetAttributeValue<OptionSetValue>(StoredFileSchema.Status).Value.Should().Be((int)StoredFileStatus.NotYetServable);
+        file.GetAttributeValue<EntityReference>("sprk_invoice").Id.Should().Be(InvoiceId);
+        file.GetAttributeValue<bool>(StoredFileSchema.FirmVisible).Should().BeTrue("the firm uploaded it through the SPA");
+        file.GetAttributeValue<string>(StoredFileSchema.Sha256).Should().Be(store.StagedBlob!.Sha256);
+        file.GetAttributeValue<string>(StoredFileSchema.BlobPath).Should().Be(store.StagedBlob.BlobPath);
+        file.GetAttributeValue<string>(StoredFileSchema.Name).Should().Be("INV-100.2.pdf");
+        file.GetAttributeValue<EntityReference>("ownerid").Should().Be(new EntityReference("team", TeamId), "owned like the invoice");
+        file.GetAttributeValue<EntityReference>("sprk_createdbyperson").Id.Should().Be(Submitter);
+        file.Attributes.Keys.Should().NotContain(new[] { StoredFileSchema.SourceDocument, StoredFileSchema.SourceCommunication }, "an upload has no source");
+
+        var line = Target(requests[2]);
         line.GetAttributeValue<EntityReference>("sprk_invoice").Id.Should().Be(InvoiceId);
         line.GetAttributeValue<EntityReference>("sprk_matter").Id.Should().Be(Matter, "D-75: the line's own core lookup");
         line.GetAttributeValue<int>("sprk_linesequence").Should().Be(1);
@@ -96,15 +117,11 @@ public class InvoiceSubmissionPersisterTests
             confidence.RootElement.GetProperty("fields").GetProperty("Hours").GetProperty("page").GetInt32().Should().Be(1);
         }
 
-        var approval = Target(requests[2]);
+        var approval = Target(requests[3]);
         approval.GetAttributeValue<OptionSetValue>("sprk_approvalstatus").Value.Should().Be(InvoiceSubmissionPersister.ApprovalStatusPending);
         approval.GetAttributeValue<EntityReference>("sprk_invoice").Id.Should().Be(InvoiceId);
         approval.GetAttributeValue<EntityReference>("sprk_regardingmatter").Id.Should().Be(Matter);
         approval.Attributes.Keys.Should().NotContain(k => k.Contains("approver"), "approvers are 103's");
-
-        var document = Target(requests[3]);
-        document.Id.Should().Be(Document);
-        document.GetAttributeValue<EntityReference>("sprk_invoice").Id.Should().Be(InvoiceId);
 
         var submission = Target(requests[4]);
         submission.Id.Should().Be(Submission);
@@ -120,6 +137,8 @@ public class InvoiceSubmissionPersisterTests
         }
 
         store.TotalsCalls.Should().Equal(InvoiceId);
+        store.FileStatusAtTotals.Should().Equal([StoredFileStatus.Servable], "the flip runs right after the commit, before the totals");
+        store.FileStatus.Should().Be(StoredFileStatus.Servable);
     }
 
     [Fact(DisplayName = "049 C (D-101): AutoRejected creates the invoice Rejected through 014, no approval; the submission is Rejected with the deciding code and the findings")]
@@ -192,7 +211,7 @@ public class InvoiceSubmissionPersisterTests
         result.Status.Should().Be(SubmissionPersistStatus.Committed);
         var requests = store.Transactions.Should().ContainSingle().Subject;
         Target(requests[0]).GetAttributeValue<OptionSetValue>("statuscode").Value.Should().Be(InvoiceStatusCodes.InReview);
-        var line = Target(requests[1]);
+        var line = Target(requests[2]);
         line.Attributes.Should().NotContainKey("sprk_codingconfidence", "the lines are uncoded");
         using (var confidence = JsonDocument.Parse(line.GetAttributeValue<string>("sprk_extractionconfidence")))
         {
@@ -227,7 +246,7 @@ public class InvoiceSubmissionPersisterTests
         result.ApprovalId.Should().BeNull();
         var requests = store.Transactions.Should().ContainSingle().Subject;
         Target(requests[0]).GetAttributeValue<OptionSetValue>("statuscode").Value.Should().Be(InvoiceStatusCodes.Rejected);
-        var line = Target(requests[1]);
+        var line = Target(requests[2]);
         line.Attributes.Should().NotContainKey("sprk_codingconfidence");
         var submission = Target(requests[^1]);
         submission.GetAttributeValue<string>("sprk_outcomereasoncode").Should().Be(outcome.ReasonCode);
@@ -254,10 +273,10 @@ public class InvoiceSubmissionPersisterTests
 
         result.Status.Should().Be(SubmissionPersistStatus.Committed);
         var creates = store.Transactions.Single().OfType<CreateRequest>().Select(c => c.Target).ToList();
-        creates.Select(c => c.LogicalName).Should().Equal("sprk_invoice", "sprk_billingevent", "sprk_billingevent", "sprk_invoiceapproval");
+        creates.Select(c => c.LogicalName).Should().Equal("sprk_invoice", "sprk_storedfile", "sprk_billingevent", "sprk_billingevent", "sprk_invoiceapproval");
         creates.Should().OnlyContain(c => c.GetAttributeValue<EntityReference>("sprk_createdbyperson")!.Id == Submitter
                 && c.GetAttributeValue<EntityReference>("sprk_createdbyperson")!.LogicalName == "systemuser",
-            "the submitter is the person on all three kinds of row");
+            "the submitter is the person on every kind of row, the invoice PDF's Stored File included");
         Target(store.Transactions.Single()[^1]).Attributes.Should().NotContainKey("sprk_createdbyperson", "the submission carries its own stamp from intake");
     }
 
@@ -274,7 +293,7 @@ public class InvoiceSubmissionPersisterTests
 
         result.Status.Should().Be(SubmissionPersistStatus.Committed);
         var creates = store.Transactions.Single().OfType<CreateRequest>().Select(c => c.Target).ToList();
-        creates.Select(c => c.LogicalName).Should().Equal("sprk_invoice", "sprk_billingevent", "sprk_billingevent", "sprk_invoiceapproval");
+        creates.Select(c => c.LogicalName).Should().Equal("sprk_invoice", "sprk_storedfile", "sprk_billingevent", "sprk_billingevent", "sprk_invoiceapproval");
         var invoice = creates[0];
         invoice.GetAttributeValue<EntityReference>("sprk_createdbyperson")!.Id.Should().Be(Submitter);
         var submittedBy = invoice.GetAttributeValue<EntityReference>("sprk_submittedby")!;
@@ -300,8 +319,8 @@ public class InvoiceSubmissionPersisterTests
 
         result.Status.Should().Be(SubmissionPersistStatus.Committed);
         var creates = store.Transactions.Single().OfType<CreateRequest>().Select(c => c.Target).ToList();
-        creates.Select(c => c.LogicalName).Should().Equal("sprk_invoice", "sprk_billingevent", "sprk_billingevent", "sprk_invoiceapproval");
-        creates.Should().OnlyContain(c => !c.Attributes.ContainsKey("sprk_createdbyperson"), "an unknown person refuses nothing; the row records nobody");
+        creates.Select(c => c.LogicalName).Should().Equal("sprk_invoice", "sprk_storedfile", "sprk_billingevent", "sprk_billingevent", "sprk_invoiceapproval");
+        creates.Should().OnlyContain(c => !c.Attributes.ContainsKey("sprk_createdbyperson"), "an unknown person refuses nothing; the row records nobody (K6 for the Stored File)");
         creates[0].GetAttributeValue<EntityReference>("sprk_submittedby")!.Id.Should().Be(SubmitterContact);
         var warnings = logger.Entries.Where(e => e.Level == LogLevel.Warning).ToList();
         warnings.Should().ContainSingle();
@@ -407,7 +426,7 @@ public class InvoiceSubmissionPersisterTests
 
         await store.Build().PersistAsync(outcome, null);
 
-        var credit = Target(store.Transactions.Single()[2]);
+        var credit = Target(store.Transactions.Single()[3]);
         credit.GetAttributeValue<int>("sprk_linesequence").Should().Be(2);
         credit.GetAttributeValue<Money>("sprk_amount").Value.Should().Be(-500m);
         credit.GetAttributeValue<decimal>("sprk_quantity").Should().Be(-1m);
@@ -425,7 +444,7 @@ public class InvoiceSubmissionPersisterTests
 
         await store.Build().PersistAsync(outcome, null);
 
-        Target(store.Transactions.Single()[1]).GetAttributeValue<OptionSetValue>("sprk_linestatus").Value
+        Target(store.Transactions.Single()[2]).GetAttributeValue<OptionSetValue>("sprk_linestatus").Value
             .Should().Be(InvoiceSubmissionPersister.LineStatusFlagged);
     }
 
@@ -465,14 +484,16 @@ public class InvoiceSubmissionPersisterTests
     public async Task FaultAtTheLineRequest_PersistsNothing_Retry()
     {
         var outcome = await new ProcessorHarness().RunAsync();
-        var store = new Store { TransactionFault = new DataverseTransactionException("line refused", failedRequestIndex: 1, outcomeUnknown: false, null) };
+        var store = new Store { TransactionFault = new DataverseTransactionException("line refused", failedRequestIndex: 2, outcomeUnknown: false, null) };
 
         var result = await store.Build().PersistAsync(outcome, null);
 
         result.Status.Should().Be(SubmissionPersistStatus.Retry);
         result.ReasonCode.Should().Be(InvoiceSubmissionPersister.TransactionFailedCode);
         result.InvoiceId.Should().BeNull("nothing was committed");
-        Describe(store.Transactions.Single()[1]).Should().Be("Create sprk_billingevent", "the fault named the line request");
+        Describe(store.Transactions.Single()[2]).Should().Be("Create sprk_billingevent", "the fault named the line request");
+        store.Files.Dataverse.Rows.Should().BeEmpty("a rolled-back transaction leaves no Stored File row");
+        store.Files.Gateway.Names.Should().ContainSingle("the staged blob is kept for the retry");
         store.TotalsCalls.Should().BeEmpty();
         store.Submission.Attributes.Should().NotContainKey("sprk_invoice");
         store.Submission.GetAttributeValue<OptionSetValue>("sprk_processingstatus").Value.Should().Be((int)InvoiceSubmissionStatus.Processing,
@@ -900,7 +921,7 @@ public class InvoiceSubmissionPersisterTests
     private static SubmissionEvaluationOutcome AsConfirmSubmission(SubmissionEvaluationOutcome outcome)
     {
         var id = InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(Document);
-        return outcome with { SubmissionId = id, Submission = outcome.Submission! with { SubmissionId = id } };
+        return outcome with { SubmissionId = id, Submission = outcome.Submission! with { SubmissionId = id, DocumentId = Document } };
     }
 
     [Fact(DisplayName = "050a review #1: a confirm submission whose document is unlinked commits WITHOUT the document link (its re-file is the link's one writer)")]
@@ -1175,20 +1196,134 @@ public class InvoiceSubmissionPersisterTests
         (await store.Build().PersistAsync(outcome, null)).Status.Should().Be(SubmissionPersistStatus.Committed);
     }
 
-    [Fact(DisplayName = "050a review #1: an intake submission's document is not read; the transaction links it as before")]
-    public async Task IntakeSubmission_DocumentIsNotRead_AndIsLinkedInTheTransaction()
+    // ── ebilling-r1 task 092: the upload's Stored File row in the transaction, and the flip right after the commit ──
+
+    [Fact(DisplayName = "092: an upload reads no document and links none; the transaction holds exactly one Stored File create")]
+    public async Task Upload_ReadsNoDocument_LinksNone_OneStoredFileCreate()
     {
         var outcome = await new ProcessorHarness().RunAsync();
-        var store = new Store
-        {
-            DocumentRow = new Entity("sprk_document", Document) { ["sprk_invoice"] = new EntityReference("sprk_invoice", Guid.NewGuid()) },
-        };
+        outcome.Submission!.IsUpload.Should().BeTrue();
+        var store = new Store();
 
         var result = await store.Build().PersistAsync(outcome, null);
 
         result.Status.Should().Be(SubmissionPersistStatus.Committed);
         store.DocumentReads.Should().BeEmpty();
-        store.Transactions.Single().Select(Describe).Should().Contain("Update sprk_document");
+        var described = store.Transactions.Single().Select(Describe).ToList();
+        described.Should().NotContain(d => d.EndsWith(" sprk_document", StringComparison.Ordinal));
+        described.Count(d => d == "Create sprk_storedfile").Should().Be(1);
+        store.Files.Dataverse.Rows.Keys.Should().Equal(FileId);
+        store.Files.Dataverse.Writes.Should().Be(1, "the flip's one update; the row's create was the transaction's");
+    }
+
+    [Theory(DisplayName = "092: the Stored File is Firm-visible only for the SPA channel")]
+    [InlineData(InvoiceSubmissionChannel.Spa, true)]
+    [InlineData(InvoiceSubmissionChannel.Internal, false)]
+    public async Task StoredFile_FirmVisible_ByChannel(InvoiceSubmissionChannel channel, bool firmVisible)
+    {
+        var outcome = await new ProcessorHarness { Channel = channel }.RunAsync();
+        var store = new Store();
+        store.Submission["sprk_channel"] = new OptionSetValue((int)channel);
+
+        (await store.Build().PersistAsync(outcome, null)).Status.Should().Be(SubmissionPersistStatus.Committed);
+
+        var file = store.Transactions.Single().OfType<CreateRequest>().Single(c => c.Target.LogicalName == StoredFileSchema.Entity).Target;
+        file.GetAttributeValue<bool>(StoredFileSchema.FirmVisible).Should().Be(firmVisible);
+    }
+
+    [Fact(DisplayName = "092 must-fire: no staged blob is Refused file_unservable before anything is written (no invoice)")]
+    public async Task NoStagedBlob_IsRefused_BeforeAnyWrite()
+    {
+        var outcome = await new ProcessorHarness().RunAsync();
+        var store = new Store { Staged = false };
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Refused);
+        result.ReasonCode.Should().Be(SubmissionReasonCodes.FileUnservable).And.Be("ebilling.submission.file_unservable");
+        result.InvoiceId.Should().BeNull("nothing was committed");
+        store.Transactions.Should().BeEmpty();
+        store.TotalsCalls.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "092 must-fire: a definitive flip failure after the commit (bytes changed) is Refused file_unservable WITH the invoice; no totals; the row stays Not yet servable")]
+    public async Task DefinitiveFlipFailure_IsRefusedWithTheInvoice_NoTotals()
+    {
+        var outcome = await new ProcessorHarness().RunAsync();
+        var store = new Store
+        {
+            AfterCommit = s => s.Files.Gateway.Overwrite(
+                s.StagedBlob!.Container, s.StagedBlob.BlobPath, "%PDF-tampered"u8.ToArray(), s.Files.Gateway.Now.AddMinutes(5)),
+        };
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Refused);
+        result.ReasonCode.Should().Be(SubmissionReasonCodes.FileUnservable);
+        result.InvoiceId.Should().Be(InvoiceId, "the invoice is committed; the handler marks the submission Failed (the FileUnservable exception)");
+        store.TotalsCalls.Should().BeEmpty("nothing runs after a definitive flip failure");
+        store.FileStatus.Should().Be(StoredFileStatus.NotYetServable, "left for 090's detector");
+        store.Submission.GetAttributeValue<EntityReference>("sprk_invoice").Id.Should().Be(InvoiceId);
+    }
+
+    [Fact(DisplayName = "092: a flip fault after the commit throws (the job retries) before the totals; the retry is a resume with nothing created again")]
+    public async Task FlipFault_Throws_BeforeTheTotals_RetryResumes()
+    {
+        var outcome = await new ProcessorHarness().RunAsync();
+        var store = new Store { AfterCommit = s => s.Files.Gateway.FailEverything = new Azure.RequestFailedException(503, "storage unavailable") };
+
+        await FluentActions.Invoking(() => store.Build().PersistAsync(outcome, null)).Should().ThrowAsync<Azure.RequestFailedException>();
+
+        store.TotalsCalls.Should().BeEmpty();
+        store.FileStatus.Should().Be(StoredFileStatus.NotYetServable);
+        store.Submission.GetAttributeValue<EntityReference>("sprk_invoice").Id.Should().Be(InvoiceId, "the commit stands");
+
+        store.Files.Gateway.FailEverything = null;
+        var retry = await store.Build().PersistAsync(outcome, null);
+
+        retry.Status.Should().Be(SubmissionPersistStatus.Resumed, "the after-steps' resume flips before anything else (InvoiceSubmissionAfterStepsTests)");
+        store.Transactions.Should().ContainSingle("nothing is created twice");
+    }
+
+    [Fact(DisplayName = "092: a row changed under the flip is flipped once more and the commit completes")]
+    public async Task FlipConcurrency_IsRetriedOnce()
+    {
+        var outcome = await new ProcessorHarness().RunAsync();
+        var store = new Store { AfterCommit = s => s.Files.Dataverse.BumpVersionBeforeNextUpdate = true };
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Committed);
+        store.FileStatus.Should().Be(StoredFileStatus.Servable);
+        store.FileStatusAtTotals.Should().Equal([StoredFileStatus.Servable]);
+    }
+
+    [Fact(DisplayName = "092 must-fire: an outcome naming a document that is not its 050a confirm is Refused document_unavailable, nothing read or written")]
+    public async Task DocumentThatIsNotAConfirm_IsRefused_NothingWritten()
+    {
+        var outcome = await new ProcessorHarness().RunAsync();
+        outcome = outcome with { Submission = outcome.Submission! with { DocumentId = Document } };
+        var store = new Store();
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Refused);
+        result.ReasonCode.Should().Be(SubmissionReasonCodes.DocumentUnavailable);
+        store.DocumentReads.Should().BeEmpty();
+        store.Transactions.Should().BeEmpty();
+        store.OwnerContexts.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "092 must-not-fire: a confirm submission (050a) builds no Stored File row and reads no staged blob")]
+    public async Task ConfirmSubmission_HasNoStoredFile()
+    {
+        var outcome = AsConfirmSubmission(await new ProcessorHarness().RunAsync());
+        var store = new Store { Staged = false };
+
+        (await store.Build().PersistAsync(outcome, null)).Status.Should().Be(SubmissionPersistStatus.Committed);
+
+        store.Transactions.Single().Select(Describe).Should().NotContain("Create sprk_storedfile");
+        store.Files.Gateway.StorageCalls.Should().Be(0);
     }
 
     private sealed class Store
@@ -1200,7 +1335,6 @@ public class InvoiceSubmissionPersisterTests
             ["sprk_firminvoicenumber"] = "INV-100",
             ["sprk_vendororg"] = new EntityReference("sprk_organization", Firm),
             ["sprk_regardingmatter"] = new EntityReference("sprk_matter", Matter),
-            ["sprk_document"] = new EntityReference("sprk_document", Document),
             ["createdon"] = new DateTime(2026, 6, 5, 23, 30, 0, DateTimeKind.Utc),
             ["sprk_channel"] = new OptionSetValue((int)InvoiceSubmissionChannel.Spa),
             ["sprk_processingstatus"] = new OptionSetValue((int)InvoiceSubmissionStatus.Processing),
@@ -1245,8 +1379,41 @@ public class InvoiceSubmissionPersisterTests
         /// <summary>The column set of every submission re-read.</summary>
         public List<string[]> SubmissionReadColumns { get; } = [];
 
+        /// <summary>Task 092: the Finance file store (real service, in-memory blob gateway and Dataverse).</summary>
+        public StoredFileRig Files { get; } = new();
+
+        /// <summary>Task 092: false, the intake's staged blob is not there (nothing was staged, or it was removed).</summary>
+        public bool Staged { get; init; } = true;
+
+        /// <summary>The blob staged for the upload of <see cref="InvoiceSubmissionPersisterTests.Submission"/> (null until <see cref="Build"/>).</summary>
+        public StagedBlob? StagedBlob { get; private set; }
+
+        /// <summary>The Stored File's status each time the totals ran (the flip must already have run).</summary>
+        public List<StoredFileStatus?> FileStatusAtTotals { get; } = [];
+
+        /// <summary>The Stored File's status now (null: no row).</summary>
+        public StoredFileStatus? FileStatus => Files.Dataverse.Rows.TryGetValue(FileId, out var row)
+            ? (StoredFileStatus)row.GetAttributeValue<OptionSetValue>(StoredFileSchema.Status).Value
+            : null;
+
+        /// <summary>Runs after the transaction committed (before the flip): another writer's slot.</summary>
+        public Action<Store>? AfterCommit { get; init; }
+
+        private void StageOnce()
+        {
+            if (!Staged || StagedBlob is not null)
+            {
+                return;
+            }
+
+            var spec = InvoiceSubmissionService.UploadFileSpec(InvoiceSubmissionPersisterTests.Submission, "invoice.pdf", InvoiceSubmissionChannel.Spa);
+            StagedBlob = Files.Service.StageAsync(spec, new MemoryStream("%PDF-1.7 persister test"u8.ToArray()), CancellationToken.None)
+                .GetAwaiter().GetResult().Blob!;
+        }
+
         public InvoiceSubmissionPersister Build()
         {
+            StageOnce();
             var entities = new Mock<IGenericEntityService>(MockBehavior.Strict);
             entities.Setup(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string entity, Guid id, string[] columns, CancellationToken _) => entity switch
@@ -1281,6 +1448,7 @@ public class InvoiceSubmissionPersisterTests
                     if (TransactionFault is null || CommitDespiteFault)
                     {
                         Apply(requests);
+                        AfterCommit?.Invoke(this);
                     }
 
                     return TransactionFault is null ? Task.CompletedTask : Task.FromException(TransactionFault);
@@ -1300,6 +1468,7 @@ public class InvoiceSubmissionPersisterTests
                 .Returns((Guid invoiceId, CancellationToken _) =>
                 {
                     TotalsCalls.Add(invoiceId);
+                    FileStatusAtTotals.Add(FileStatus);
                     return TotalsFault is { } fault
                         ? Task.FromException<InvoiceTotalsCalculation>(fault)
                         : Task.FromResult(new InvoiceTotalsCalculation(0m, 0m, 0m, 0m, 0m, new Dictionary<Guid, decimal>(), null));
@@ -1312,12 +1481,21 @@ public class InvoiceSubmissionPersisterTests
                 new InvoiceLifecycleService(new Mock<IFieldMappingDataverseService>().Object, NullLogger<InvoiceLifecycleService>.Instance),
                 totals.Object,
                 InvoiceSubmissionServiceTests.IsolationOver(() => Isolation),
+                Files.Service,
                 Logger);
         }
 
-        /// <summary>The committed transaction's effect on the submission row (the only row a later read looks at).</summary>
+        /// <summary>
+        /// The committed transaction's effect on the submission row (the only row a later read looks at) and, task 092, on the file store's
+        /// Dataverse: the Stored File create lands there (one Dataverse in production), so the flip finds its row.
+        /// </summary>
         private void Apply(IReadOnlyList<OrganizationRequest> requests)
         {
+            foreach (var create in requests.OfType<CreateRequest>().Where(c => c.Target.LogicalName == StoredFileSchema.Entity))
+            {
+                Files.Dataverse.AddRow(Copy(create.Target));
+            }
+
             foreach (var update in requests.OfType<UpdateRequest>().Where(u => u.Target.LogicalName == "sprk_invoicesubmission"))
             {
                 foreach (var (column, value) in update.Target.Attributes)

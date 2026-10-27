@@ -315,7 +315,6 @@ public class InvoiceSubmissionProcessorTests
     [InlineData("sprk_vendororg", SubmissionReasonCodes.FirmMissing)]
     [InlineData("sprk_regardingmatter", SubmissionReasonCodes.CoreRecordMissing)]
     [InlineData("sprk_firminvoicenumber", SubmissionReasonCodes.FirmInvoiceNumberMissing)]
-    [InlineData("sprk_document", SubmissionReasonCodes.DocumentMissing)]
     [InlineData("sprk_channel", SubmissionReasonCodes.ChannelUnsupported)]
     public async Task MissingColumn_FailsClosed_BeforeTheRead(string column, string code)
     {
@@ -341,6 +340,49 @@ public class InvoiceSubmissionProcessorTests
 
         outcome.ReasonCode.Should().Be(SubmissionReasonCodes.ReceivedOnMissing);
         h.Reads.Should().Be(0);
+    }
+
+    [Fact(DisplayName = "092: a submission with no document is an upload; its staged PDF is loaded and read")]
+    public async Task NoDocument_IsAnUpload_AndIsRead()
+    {
+        var h = new Harness();
+
+        var outcome = await h.RunAsync();
+
+        outcome.Kind.Should().NotBe(SubmissionEvaluationKind.Failed);
+        outcome.Submission!.IsUpload.Should().BeTrue();
+        outcome.Submission.DocumentId.Should().BeNull();
+        h.DocumentLoads.Should().Be(1);
+        h.Reads.Should().Be(1);
+    }
+
+    [Fact(DisplayName = "092 must-fire: a submission naming a document that is not its 050a confirm (the retired SPE intake shape) fails closed DocumentUnavailable before the read")]
+    public async Task OtherDocument_FailsClosed_DocumentUnavailable()
+    {
+        var h = new Harness();
+        h.Row["sprk_document"] = new EntityReference("sprk_document", Document);
+
+        var outcome = await h.RunAsync();
+
+        outcome.Kind.Should().Be(SubmissionEvaluationKind.Failed);
+        outcome.ReasonCode.Should().Be(SubmissionReasonCodes.DocumentUnavailable);
+        h.DocumentLoads.Should().Be(0);
+        h.Reads.Should().Be(0);
+    }
+
+    [Fact(DisplayName = "092 must-not-fire: the 050a confirm of a document keeps its document (read from SPE by the job)")]
+    public async Task ConfirmedDocument_IsKept()
+    {
+        var h = new Harness();
+        h.Row.Id = InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(Document);
+        h.Row["sprk_document"] = new EntityReference("sprk_document", Document);
+
+        var outcome = await h.RunAsync();
+
+        outcome.Kind.Should().NotBe(SubmissionEvaluationKind.Failed);
+        outcome.Submission!.DocumentId.Should().Be(Document);
+        outcome.Submission.IsUpload.Should().BeFalse();
+        h.DocumentLoads.Should().Be(1);
     }
 
     [Fact(DisplayName = "049 B: a createdon late in the UTC day stays on that UTC day")]
@@ -622,7 +664,6 @@ public class InvoiceSubmissionProcessorTests
                 ["sprk_firminvoicenumber"] = "INV-100",
                 ["sprk_vendororg"] = new EntityReference("sprk_organization", Firm),
                 ["sprk_regardingmatter"] = new EntityReference("sprk_matter", Matter),
-                ["sprk_document"] = new EntityReference("sprk_document", Document),
                 ["createdon"] = CreatedOn,
                 ["sprk_channel"] = new OptionSetValue((int)InvoiceSubmissionChannel.Spa),
             };
@@ -634,7 +675,11 @@ public class InvoiceSubmissionProcessorTests
         public Task<InvoiceReadRequest> LoadDocument(SubmissionSnapshot snapshot, CancellationToken _)
         {
             DocumentLoads++;
-            return Task.FromResult(new InvoiceReadRequest { Content = new byte[] { 1 }, DocumentId = snapshot.DocumentId });
+            return Task.FromResult(new InvoiceReadRequest
+            {
+                Content = new byte[] { 1 },
+                DocumentId = snapshot.DocumentId ?? Sprk.Bff.Api.Services.Finance.Files.StoredFileIds.ForUpload(snapshot.SubmissionId),
+            });
         }
 
         /// <summary>The real processor over this harness's fakes (049 part E drives it through the job handler).</summary>

@@ -3,15 +3,14 @@ using Microsoft.Extensions.Options;
 namespace Sprk.Bff.Api.Configuration;
 
 /// <summary>
-/// Start-up validator for the two eBilling SPE container ids on <see cref="FinanceOptions"/> (ebilling-r1 task 028, FR-16, D-55):
-/// the Procedure Library and E-Billing Output Files containers must be distinct from each other and from the two
-/// containers other features already index into (<c>EmailProcessing:DefaultContainerId</c>, <c>Communication:ArchiveContainerId</c>).
+/// Start-up validator for the eBilling SPE container id on <see cref="FinanceOptions"/> (ebilling-r1 task 028, FR-16, D-55): the
+/// Procedure Library container must be distinct from the two containers other features already store into
+/// (<c>EmailProcessing:DefaultContainerId</c>, <c>Communication:ArchiveContainerId</c>).
 /// </summary>
 /// <remarks>
-/// A pasted default id is otherwise silent: <c>FileIndexingService</c> skips every file whose drive equals
-/// <c>Finance:EbillingOutputContainerId</c>, so reusing the email or archive container there stops all indexing for that
-/// container with no error. Empty values stay allowed (the keys are optional at start-up), and an empty value never
-/// counts as a collision. The comparison is ordinal (container ids are case-sensitive) on trimmed values. The other
+/// <para>ebilling-r1 task 092 retired <c>Finance:EbillingOutputContainerId</c> (export files are Stored Files) and its checks. The
+/// Procedure Library key stays while <c>RuleSetService</c> and <c>RateCardImportService</c> read it (the 092 escalation).</para>
+/// Empty values stay allowed (the key is optional at start-up), and an empty value never counts as a collision. The comparison is ordinal (container ids are case-sensitive) on trimmed values. The other
 /// sections are read from <see cref="IConfiguration"/> rather than bound, because neither options class is validated at start
 /// (precedent: <see cref="CustomerOptionsValidator"/>).
 /// <para>ebilling-r1 task 090 adds the <c>Finance:FileStore</c> rules (<see cref="ValidateFileStore"/>).</para>
@@ -19,7 +18,6 @@ namespace Sprk.Bff.Api.Configuration;
 public sealed class FinanceOptionsValidator : IValidateOptions<FinanceOptions>
 {
     private const string ProcedureLibraryKey = "Finance:ProcedureLibraryContainerId";
-    private const string OutputKey = "Finance:EbillingOutputContainerId";
     private const string EmailDefaultKey = "EmailProcessing:DefaultContainerId";
     private const string ArchiveKey = "Communication:ArchiveContainerId";
 
@@ -33,29 +31,17 @@ public sealed class FinanceOptionsValidator : IValidateOptions<FinanceOptions>
     public ValidateOptionsResult Validate(string? name, FinanceOptions options)
     {
         var procedureLibrary = options.ProcedureLibraryContainerId?.Trim();
-        var output = options.EbillingOutputContainerId?.Trim();
 
         var failures = new List<string>();
 
-        if (!string.IsNullOrEmpty(procedureLibrary) && string.Equals(procedureLibrary, output, StringComparison.Ordinal))
+        if (!string.IsNullOrEmpty(procedureLibrary))
         {
-            failures.Add($"{ProcedureLibraryKey} and {OutputKey} must be different containers, but both are '{procedureLibrary}'. "
-                + "The output container is never AI-indexed, so sharing it would stop indexing of the Procedure Library.");
-        }
-
-        foreach (var (key, value) in new[] { (ProcedureLibraryKey, procedureLibrary), (OutputKey, output) })
-        {
-            if (string.IsNullOrEmpty(value))
-            {
-                continue;
-            }
-
             foreach (var otherKey in new[] { EmailDefaultKey, ArchiveKey })
             {
                 var other = _configuration[otherKey]?.Trim();
-                if (!string.IsNullOrEmpty(other) && string.Equals(value, other, StringComparison.Ordinal))
+                if (!string.IsNullOrEmpty(other) && string.Equals(procedureLibrary, other, StringComparison.Ordinal))
                 {
-                    failures.Add($"{key} must not equal {otherKey} ('{value}'): that container already holds other documents, "
+                    failures.Add($"{ProcedureLibraryKey} must not equal {otherKey} ('{procedureLibrary}'): that container already holds other documents, "
                         + "and the eBilling container settings must name containers of their own.");
                 }
             }

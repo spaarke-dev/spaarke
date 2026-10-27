@@ -176,11 +176,9 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
 
     private void NothingWritten()
     {
-        _h.Uploads.Should().BeEmpty("a refused submission uploads nothing");
+        _h.Stages.Should().BeEmpty("a refused submission stages nothing");
         _h.Allocations.Should().BeEmpty("a refused submission creates no row");
         _h.JobsSent.Should().BeEmpty("a refused submission enqueues nothing");
-        _h.DocumentCreates.Should().BeEmpty();
-        _h.ExternalCreates.Should().BeEmpty();
     }
 
     private void GrantInternalSubmit()

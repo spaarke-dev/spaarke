@@ -63,9 +63,7 @@ public sealed class InvoiceSubmissionExistingDocumentTests
     {
         h.Allocations.Should().BeEmpty("no submission may be created");
         h.JobsSent.Should().BeEmpty("no job may be queued");
-        h.Uploads.Should().BeEmpty();
-        h.DocumentCreates.Should().BeEmpty();
-        h.ExternalCreates.Should().BeEmpty();
+        h.Stages.Should().BeEmpty();
         h.Deleted.Should().BeEmpty();
     }
 
@@ -84,9 +82,7 @@ public sealed class InvoiceSubmissionExistingDocumentTests
         h.OwnerContexts.Should().ContainSingle();
 
         // D-134: no second copy of the PDF.
-        h.Uploads.Should().BeEmpty();
-        h.DocumentCreates.Should().BeEmpty();
-        h.ExternalCreates.Should().BeEmpty();
+        h.Stages.Should().BeEmpty();
 
         var allocation = h.Allocations.Should().ContainSingle().Subject;
         allocation.SubmissionId.Should().Be(SubmissionId, "the dedupe key: the submission id is derived from the document");

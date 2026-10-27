@@ -65,16 +65,9 @@ public class FinanceOptions
     [RegularExpression(ContainerIdPattern, ErrorMessage = "Finance:ProcedureLibraryContainerId must be a SharePoint Embedded container id starting with 'b!', or empty.")]
     public string ProcedureLibraryContainerId { get; set; } = string.Empty;
 
-    /// <summary>
-    /// SPE container id of <b>E-Billing Output Files</b> (ebilling-r1 FR-16, D-55): AP export files and adjustment reports.
-    /// Files in this container are documents but are never AI-indexed (<c>FileIndexingService</c> skips them).
-    /// </summary>
-    /// <remarks>
-    /// Optional at start-up, same rules as <see cref="ProcedureLibraryContainerId"/>. App setting
-    /// <c>Finance__EbillingOutputContainerId</c> (D-67).
-    /// </remarks>
-    [RegularExpression(ContainerIdPattern, ErrorMessage = "Finance:EbillingOutputContainerId must be a SharePoint Embedded container id starting with 'b!', or empty.")]
-    public string EbillingOutputContainerId { get; set; } = string.Empty;
+    // ebilling-r1 task 092 (procedure-and-file-model 12, row 028): Finance:EbillingOutputContainerId (E-Billing Output Files) is retired.
+    // Export files are Stored Files in the Finance file store (FileStore below, purpose Export file), not SPE documents, so no container
+    // is configured for them and indexing skips none. An App Service setting left behind binds to nothing (079 removes it).
 
     /// <summary>
     /// The Finance file store (ebilling-r1 task 090, procedure-and-file-model section 4.2): Azure Blob with managed identity,

@@ -83,8 +83,7 @@ public class InvoiceReviewWritePathTests
         // ADR-002 / D-19: the job creates the invoice; confirm queues the submission job and NEVER InvoiceExtraction.
         _intake.JobsSent.Should().ContainSingle().Which.JobType.Should().Be(InvoiceSubmissionService.JobType);
         _intake.JobsSent.Should().NotContain(j => j.JobType == "InvoiceExtraction");
-        _intake.Uploads.Should().BeEmpty("D-134: no second copy of the PDF");
-        _intake.DocumentCreates.Should().BeEmpty();
+        _intake.Stages.Should().BeEmpty("D-134: no second copy of the PDF");
 
         // Confirm's own writes: ONLY the document's review stamp — no invoice create, no link.
         var write = _records.Writes.Should().ContainSingle().Subject;
@@ -1180,8 +1179,7 @@ public class InvoiceReviewWritePathTests
     {
         _intake.Allocations.Should().BeEmpty();
         _intake.JobsSent.Should().BeEmpty();
-        _intake.Uploads.Should().BeEmpty();
-        _intake.DocumentCreates.Should().BeEmpty();
+        _intake.Stages.Should().BeEmpty();
         _records.Writes.Should().BeEmpty();
         _records.StatusOf(documentId).Should().Be(ToReview);
     }

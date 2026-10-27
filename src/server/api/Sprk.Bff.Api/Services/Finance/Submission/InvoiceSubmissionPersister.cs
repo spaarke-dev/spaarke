@@ -27,6 +27,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance.Coding;
+using Sprk.Bff.Api.Services.Finance.Files;
 using Sprk.Bff.Api.Services.Finance.Resolution;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Billing;
@@ -37,11 +38,13 @@ namespace Sprk.Bff.Api.Services.Finance.Submission;
 /// <see cref="IInvoiceSubmissionPersister"/>: step 6 of the Processing Pipeline, all-or-nothing.
 /// </summary>
 /// <remarks>
-/// <para><b>One transaction</b> (FR-20), in this order: the invoice create(s) from 014, one create per line, the approval portion (not for an
-/// automatic rejection), the document's <c>sprk_invoice</c> link (an intake document only: a confirmed EXISTING document, 050a, is checked
-/// on its live row here, guarded in the transaction by an update conditional on the row version read (<see cref="BuildExistingDocumentGuard"/>,
-/// no link), and linked after the commit by its re-file, <see cref="InvoiceDocumentRefile"/>, the link's one writer), and the submission update (<c>sprk_invoice</c>, the reason code,
-/// <c>sprk_findingsjson</c>). A linked <c>sprk_invoice</c> therefore proves the commit; it is the resume marker. <b>The status is not
+/// <para><b>One transaction</b> (FR-20), in this order: the invoice create(s) from 014, for an upload the invoice PDF's Stored File row
+/// (ebilling-r1 task 092: <see cref="StoredFileService.BuildRow"/>, Not yet servable, built from the blob the intake staged; ADR-002: this
+/// transaction is the row's one writer), one create per line, the approval portion (not for an automatic rejection), for a confirmed
+/// EXISTING document (050a) a guard on its live row, an update conditional on the row version read (<see cref="BuildExistingDocumentGuard"/>,
+/// no link; it is linked after the commit by its re-file, <see cref="InvoiceDocumentRefile"/>, the link's one writer), and the submission
+/// update (<c>sprk_invoice</c>, the reason code, <c>sprk_findingsjson</c>). <b>Right after the commit, before the totals and every
+/// after-step</b>, the upload's row is flipped to Servable (<see cref="FlipUploadFileAsync"/>; model 9.1 steps 5-6). A linked <c>sprk_invoice</c> therefore proves the commit; it is the resume marker. <b>The status is not
 /// written here (D-130 a):</b> the submission stays Processing, and part D writes <see cref="SubmissionPersistResult.TerminalStatus"/> last.
 /// Every created row carries the submitter as <c>sprk_createdbyperson</c> (D-130 3), read from the submission's own stamp, and the invoice
 /// also carries the external submitter's contact as <c>sprk_submittedby</c> (D-131), read from the submission's <c>sprk_submitter</c>.
@@ -162,6 +165,7 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
     private readonly IInvoiceLifecycleService _lifecycle;
     private readonly IInvoiceTotalsService _totals;
     private readonly ExistingDocumentIsolationCheck _isolation;
+    private readonly StoredFileService _files;
     private readonly ILogger<InvoiceSubmissionPersister> _logger;
 
     public InvoiceSubmissionPersister(
@@ -171,6 +175,7 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         IInvoiceLifecycleService lifecycle,
         IInvoiceTotalsService totals,
         ExistingDocumentIsolationCheck isolation,
+        StoredFileService files,
         ILogger<InvoiceSubmissionPersister> logger)
     {
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
@@ -179,7 +184,39 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         _lifecycle = lifecycle ?? throw new ArgumentNullException(nameof(lifecycle));
         _totals = totals ?? throw new ArgumentNullException(nameof(totals));
         _isolation = isolation ?? throw new ArgumentNullException(nameof(isolation));
+        _files = files ?? throw new ArgumentNullException(nameof(files));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 092 (procedure-and-file-model 9.1 steps 5-6): flips the upload's Stored File row (<see cref="StoredFileIds.ForUpload"/>
+    /// of <paramref name="submissionId"/>) to Servable. Returns <c>null</c> when it is Servable (flipped now or already), or
+    /// <see cref="SubmissionReasonCodes.FileUnservable"/> on a definitive failure (blob missing, hash mismatch, row not flippable), which
+    /// leaves the row Not yet servable for 090's detector. A row changed under the flip is flipped once more; a second change, or a fault,
+    /// throws (the job retries, and its resume flips before any after-step). Shared by the persister (after its commit) and the after-steps'
+    /// resume, so both run the same gate before anything else.
+    /// </summary>
+    internal static async Task<string?> FlipUploadFileAsync(StoredFileService files, Guid submissionId, ILogger logger, CancellationToken ct)
+    {
+        var fileId = StoredFileIds.ForUpload(submissionId);
+        var flip = await files.FlipToServableAsync(fileId, ct).ConfigureAwait(false);
+        if (flip.Outcome == StoredFileFlipOutcome.Concurrency)
+        {
+            flip = await files.FlipToServableAsync(fileId, ct).ConfigureAwait(false);
+        }
+
+        switch (flip.Outcome)
+        {
+            case StoredFileFlipOutcome.Flipped or StoredFileFlipOutcome.AlreadyServable:
+                return null;
+            case StoredFileFlipOutcome.Definitive:
+                logger.LogWarning("Invoice submission {SubmissionId}: its Stored File {FileId} cannot be made servable ({Code}); no after-step runs",
+                    submissionId, fileId, flip.RefusalCode);
+                return SubmissionReasonCodes.FileUnservable;
+            default:
+                throw new InvalidOperationException(
+                    $"The Stored File {fileId} of submission {submissionId} changed twice during its flip ({flip.Outcome}); retry.");
+        }
     }
 
     /// <summary>The submission columns the persister re-reads: the snapshot's (core record, link, status), the correlation id and the submitters.</summary>
@@ -262,13 +299,22 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         // 050a review round 2, item 2(a): the transaction carries a guard on the document, conditional on the row version this check read
         // (BuildExistingDocumentGuard), so a filing, a reject or a delete that lands between this check and the commit rolls the whole
         // transaction back instead of committing an invoice whose document the re-file must then refuse.
+        // ebilling-r1 task 092: a submission names a document only for the existing-document entry. Any other document is the retired intake
+        // shape (SubmissionSnapshot.Read refuses it before the job gets here); refused here too, so no caller can link one.
         var documentId = outcome.Submission!.DocumentId;
-        var existingDocument = InvoiceDocumentRefile.AppliesTo(submissionId, documentId);
+        if (documentId is { } namedDocument && !InvoiceDocumentRefile.AppliesTo(submissionId, namedDocument))
+        {
+            _logger.LogWarning("Invoice submission {SubmissionId}: it names document {DocumentId}, which is not an existing-document confirm; nothing persisted",
+                submissionId, namedDocument);
+            return Result(SubmissionPersistStatus.Refused, submissionId, SubmissionReasonCodes.DocumentUnavailable);
+        }
+
+        var existingDocument = documentId is not null;
         Entity? checkedDocument = null;
         if (existingDocument)
         {
             var (documentRefusal, document) = await CheckExistingDocumentAsync(
-                submissionId, documentId, InvoiceIdFor(submissionId), outcome.CoreRecord!, ct).ConfigureAwait(false);
+                submissionId, documentId!.Value, InvoiceIdFor(submissionId), outcome.CoreRecord!, ct).ConfigureAwait(false);
             if (documentRefusal is not null)
             {
                 return documentRefusal;
@@ -327,6 +373,24 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             return Result(SubmissionPersistStatus.Refused, submissionId, owner.RefusalCode ?? OwnerUnresolvedCode);
         }
 
+        // ── The upload's file (task 092; model 9.1 step 4): the blob the intake staged, found by its deterministic name ──
+        // The job runs in another process than the intake, so the stage's answer is read back from the blob (its recorded hash and length;
+        // the flip after the commit recomputes the hash by streaming). No usable blob: no invoice (nothing written yet).
+        StoredFileRowSpec? fileSpec = null;
+        StagedBlob? stagedFile = null;
+        if (!existingDocument)
+        {
+            fileSpec = InvoiceSubmissionService.UploadFileSpec(
+                submissionId, clientFileName: null, outcome.Submission.Channel, outcome.Submission.TrackingNumber);
+            stagedFile = await _files.GetStagedAsync(fileSpec, ct).ConfigureAwait(false);
+            if (stagedFile is null)
+            {
+                _logger.LogWarning("Invoice submission {SubmissionId}: its staged PDF {FileId} is missing or unusable; nothing persisted",
+                    submissionId, fileSpec.FileId);
+                return Result(SubmissionPersistStatus.Refused, submissionId, SubmissionReasonCodes.FileUnservable);
+            }
+        }
+
         // ── Rows ──
         var resolverFields = decided.ResolverFields.ToFields();
         var correlation = Cap(correlationId ?? current.GetAttributeValue<string>(SubmissionCorrelationId));
@@ -379,27 +443,22 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         }
 
         var requests = new List<OrganizationRequest>(create.Requests);
+        if (fileSpec is not null)
+        {
+            // Task 092 (model 4.1, 9.1 step 4): the invoice PDF's row, right after the invoice it hangs under. Not yet servable; owned like the
+            // invoice (the same ForParents resolution over its core record); the creator person is the submitter, none for a contact (K6).
+            requests.Add(_files.BuildRow(fileSpec, stagedFile!, owner, submitter));
+        }
+
         requests.AddRange(lines.Select(line => new CreateRequest { Target = line }));
         if (approval is not null)
         {
             requests.Add(new CreateRequest { Target = approval });
         }
 
-        if (!existingDocument)
+        if (existingDocument)
         {
-            // An intake document (created by the intake under the core record): linked here, in the transaction. A confirmed existing
-            // document is linked by its re-file instead (see the check above).
-            requests.Add(new UpdateRequest
-            {
-                Target = new Entity(DocumentEntity, documentId)
-                {
-                    [DocumentInvoice] = new EntityReference(InvoiceReviewService.InvoiceEntity, invoiceId),
-                },
-            });
-        }
-        else
-        {
-            // The guard: no link, only the version check (see BuildExistingDocumentGuard).
+            // The guard: no link, only the version check (see BuildExistingDocumentGuard). The confirmed document is linked by its re-file.
             requests.Add(BuildExistingDocumentGuard(checkedDocument!));
         }
 
@@ -456,7 +515,7 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             // 050a review round 2, item 2(a): the transaction rolled back. For a confirm submission the likely cause is the document guard (a
             // filing, a reject or a delete since the check), so the live row is checked again now: a refusal is answered in this delivery
             // (the submission is Failed, no invoice), anything else is the transaction's own Retry, as for every other fault.
-            if (existingDocument && await RecheckExistingDocumentAsync(submissionId, documentId, invoiceId, core, ct).ConfigureAwait(false) is { } refusedNow)
+            if (existingDocument && await RecheckExistingDocumentAsync(submissionId, documentId!.Value, invoiceId, core, ct).ConfigureAwait(false) is { } refusedNow)
             {
                 return refusedNow;
             }
@@ -466,6 +525,20 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
 
         _logger.LogInformation("Invoice submission {SubmissionId}: committed invoice {InvoiceId} ({Kind}) with {LineCount} lines in {RequestCount} requests",
             submissionId, invoiceId, outcome.Kind, lines.Count, requests.Count);
+
+        // Task 092 (model 9.1 steps 5-6): the flip, immediately after the commit and before the totals and every after-step. A fault throws
+        // (the job retries; the submission now links its invoice, so the retry is a resume, which flips first). A definitive failure ends the
+        // submission Failed with FileUnservable (the handler's one exception to "a linked submission is never Failed") and nothing else runs.
+        if (fileSpec is not null && await FlipUploadFileAsync(_files, submissionId, _logger, ct).ConfigureAwait(false) is { } unservable)
+        {
+            return new SubmissionPersistResult
+            {
+                Status = SubmissionPersistStatus.Refused,
+                SubmissionId = submissionId,
+                InvoiceId = invoiceId,
+                ReasonCode = unservable,
+            };
+        }
 
         var committedTerminal = TerminalFor(outcome);
         return await WithTotalsAsync(new SubmissionPersistResult
@@ -681,7 +754,11 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         invoice[InvoiceReviewService.InvInvoiceNumber] = snapshot.FirmInvoiceNumber;
         invoice[InvoiceReviewService.InvTrackingNumber] = snapshot.TrackingNumber;
         invoice[InvoiceVendorOrg] = new EntityReference("sprk_organization", snapshot.FirmId);
-        invoice[InvoiceDocument] = new EntityReference(DocumentEntity, snapshot.DocumentId);
+        if (snapshot.DocumentId is { } document)
+        {
+            // The confirmed existing document (050a). An upload (task 092) has no document: its PDF is the invoice's Stored File.
+            invoice[InvoiceDocument] = new EntityReference(DocumentEntity, document);
+        }
         if (header.InvoiceDate.Value is { } invoiceDate)
         {
             invoice[InvoiceReviewService.InvInvoiceDate] = Utc(invoiceDate);

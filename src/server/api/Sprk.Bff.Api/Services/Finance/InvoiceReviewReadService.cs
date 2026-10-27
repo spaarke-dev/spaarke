@@ -6,6 +6,7 @@ using Spaarke.Core.Auth;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Services.Finance.Files;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Signals;
 using FindingGroup = Sprk.Bff.Api.Services.Finance.DuplicateDetailGate.FindingGroup;
@@ -20,6 +21,11 @@ namespace Sprk.Bff.Api.Services.Finance;
 
 /// <summary>The Invoice Review read model of one invoice (FR-31): header, totals, lines with status and findings, invoice-level findings, Decision Record history.</summary>
 /// <param name="LineCounts">Lines by status name (every status, zeros included), for the totals strip.</param>
+/// <param name="InvoicePdfFileId">
+/// ebilling-r1 task 092 (model 9.2, 108): the id of the invoice's Servable Invoice PDF Stored File, which the review page loads through
+/// <c>GET /api/finance/files/{fileId}/content</c> (that route makes its own checks); <c>null</c> when the invoice has none that is Servable
+/// (an existing-document confirm, or an upload whose file is not yet, or never, servable).
+/// </param>
 public sealed record InvoiceReviewDto(
     ReviewHeaderDto Header,
     ReviewTotalsDto Totals,
@@ -28,7 +34,8 @@ public sealed record InvoiceReviewDto(
     ReviewSubmissionDto? Submission,
     IReadOnlyList<ReviewDecisionRecordDto> DecisionHistory,
     IReadOnlyDictionary<string, int> LineCounts,
-    ReviewFlagsDto Flags);
+    ReviewFlagsDto Flags,
+    Guid? InvoicePdfFileId);
 
 /// <param name="Status">The lifecycle status name (<c>InReview</c>, <c>Approved</c>, ...); <c>Unknown</c> for a statuscode the lifecycle does not know.</param>
 /// <param name="Held">True for a blocked internal submission awaiting Override / Return (D-101): In Review and the submission is Rejected with the blocked reason.</param>
@@ -409,9 +416,10 @@ public sealed class InvoiceReviewReadService
         var historyTask = ReadHistoryAsync(invoiceId, lineIds, ct);
         var rosterTask = ReadRosterAsync(roster, ct);
         var thresholdTask = ReadThresholdAsync(ct);
+        var pdfTask = ReadInvoicePdfFileIdAsync(_entities, invoiceId, ct);
         var canWriteTask = CallerReadCheck.CheckAsync(
             _authorization, caller, FinanceAuthorizationFilter.InvoiceEntitySet, "ebilling.invoice.decide", invoiceId, _logger, "Invoice review", ct);
-        await Task.WhenAll(submissionTask, historyTask, rosterTask, thresholdTask, canWriteTask).ConfigureAwait(false);
+        await Task.WhenAll(submissionTask, historyTask, rosterTask, thresholdTask, pdfTask, canWriteTask).ConfigureAwait(false);
 
         var submission = submissionTask.Result;
         var history = historyTask.Result;
@@ -450,7 +458,8 @@ public sealed class InvoiceReviewReadService
             Enum.GetValues<InvoiceLineStatus>().ToDictionary(s => s.ToString(), s => lines.Count(l => l.Status == s.ToString()), StringComparer.Ordinal),
             new ReviewFlagsDto(
                 CanRead: true,
-                CanDecide: canWriteTask.Result == CallerReadOutcome.Readable && known && lifecycle == InvoiceLifecycleStatus.InReview));
+                CanDecide: canWriteTask.Result == CallerReadOutcome.Readable && known && lifecycle == InvoiceLifecycleStatus.InReview),
+            pdfTask.Result);
     }
 
     // ── Reads ──
@@ -483,6 +492,26 @@ public sealed class InvoiceReviewReadService
     }
 
     private sealed record SubmissionRead(ReviewSubmissionDto Dto, bool Held, ParsedFindings? Findings);
+
+    /// <summary>
+    /// ebilling-r1 task 092: the newest Servable Invoice PDF Stored File of the invoice (app-only, after the route's checks), or <c>null</c>. Ids
+    /// only; the row's other columns are the file route's to judge. A read fault propagates, as every other read here.
+    /// </summary>
+    internal static async Task<Guid?> ReadInvoicePdfFileIdAsync(IGenericEntityService entities, Guid invoiceId, CancellationToken ct)
+    {
+        var query = new QueryExpression(StoredFileSchema.Entity)
+        {
+            ColumnSet = new ColumnSet(StoredFileSchema.IdColumn),
+            Criteria = new FilterExpression(LogicalOperator.And),
+            TopCount = 1,
+        };
+        query.Criteria.AddCondition(StoredFileSchema.InvoiceTable, ConditionOperator.Equal, invoiceId);
+        query.Criteria.AddCondition(StoredFileSchema.Purpose, ConditionOperator.Equal, (int)StoredFilePurpose.InvoicePdf);
+        query.Criteria.AddCondition(StoredFileSchema.Status, ConditionOperator.Equal, (int)StoredFileStatus.Servable);
+        query.AddOrder(StoredFileSchema.CreatedOn, OrderType.Descending);
+        var page = await entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+        return page.Entities.FirstOrDefault() is { Id: var id } && id != Guid.Empty ? id : null;
+    }
 
     private async Task<SubmissionRead?> ReadSubmissionAsync(Guid invoiceId, CancellationToken ct)
     {

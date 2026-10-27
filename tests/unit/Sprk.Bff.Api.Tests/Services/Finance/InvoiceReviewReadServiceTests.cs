@@ -12,6 +12,7 @@ using Spaarke.Core.Auth.Rules;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
+using Sprk.Bff.Api.Services.Finance.Files;
 using Sprk.Bff.Api.Services.Finance.Models;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Signals;
@@ -57,6 +58,9 @@ public sealed class InvoiceReviewReadServiceTests
         public Entity? Submission;
         public List<Entity> History = [];
         public List<Entity> Roster = [];
+
+        /// <summary>Task 092: the Servable Invoice PDF Stored Files the query returns (Dataverse applies the filter; the query shape is asserted).</summary>
+        public List<Entity> Files = [];
         public readonly List<QueryExpression> Queries = [];
         public readonly Rights Access = new();
         public decimal Threshold = 0.90m;
@@ -104,6 +108,7 @@ public sealed class InvoiceReviewReadServiceTests
                         "sprk_invoicesubmission" => new EntityCollection(Submission is null ? [] : [Requested(Submission, query.ColumnSet)]),
                         "sprk_decisionrecord" => new EntityCollection(History.ToList()),
                         "sprk_timekeeper" => new EntityCollection(Roster.ToList()),
+                        "sprk_storedfile" => new EntityCollection(Files.ToList()),
                         _ => throw new InvalidOperationException($"Unexpected read of {query.EntityName}"),
                     };
                 });
@@ -303,6 +308,37 @@ public sealed class InvoiceReviewReadServiceTests
         review.Lines[2].ApprovedAmount.Should().Be(60m);
     }
 
+    // -- ebilling-r1 task 092 (model 9.2): the invoice PDF the review page loads is the invoice's Servable Stored File --
+
+    [Fact(DisplayName = "092: the review carries the id of the invoice's Servable Invoice PDF Stored File, asked by invoice, purpose and status, newest first")]
+    public async Task InvoicePdfFileId_IsTheServableInvoicePdf()
+    {
+        var fileId = Guid.Parse("10000000-0000-4000-8000-0000000000aa");
+        var w = new World { Files = [new Entity(StoredFileSchema.Entity, fileId)] };
+
+        var review = await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None);
+
+        review!.InvoicePdfFileId.Should().Be(fileId);
+        var query = w.Queries.Single(q => q.EntityName == StoredFileSchema.Entity);
+        query.TopCount.Should().Be(1);
+        query.ColumnSet.Columns.Should().Equal(StoredFileSchema.IdColumn);
+        query.Criteria.Conditions.Select(c => (c.AttributeName, c.Operator, c.Values.Single())).Should().BeEquivalentTo(new (string, ConditionOperator, object)[]
+        {
+            (StoredFileSchema.InvoiceTable, ConditionOperator.Equal, InvoiceId),
+            (StoredFileSchema.Purpose, ConditionOperator.Equal, (int)StoredFilePurpose.InvoicePdf),
+            (StoredFileSchema.Status, ConditionOperator.Equal, (int)StoredFileStatus.Servable),
+        });
+        query.Orders.Should().ContainSingle(o => o.AttributeName == StoredFileSchema.CreatedOn && o.OrderType == OrderType.Descending);
+    }
+
+    [Fact(DisplayName = "092 must-not-fire: no Servable Invoice PDF (an existing-document confirm, or a file not yet servable) gives a null id")]
+    public async Task InvoicePdfFileId_IsNull_WithoutAServableFile()
+    {
+        var review = await new World().Service().GetAsync(InvoiceId, Caller, CancellationToken.None);
+
+        review!.InvoicePdfFileId.Should().BeNull();
+    }
+
     [Fact(DisplayName = "100: a Pending line is shown as Processing (D-58) and the stored status name is kept")]
     public async Task PendingIsShownAsProcessing()
     {
@@ -462,7 +498,8 @@ public sealed class InvoiceReviewReadServiceTests
         var review = await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None);
 
         review!.Lines.Should().HaveCount(lineCount);
-        w.Queries.Should().HaveCount(5, "invoice, lines, submission, history, roster - whatever the line count");
+        w.Queries.Should().HaveCount(6, "invoice, lines, submission, history, roster, invoice PDF (task 092) - whatever the line count");
+        w.Reads("sprk_storedfile").Should().Be(1);
         w.Reads("sprk_billingevent").Should().Be(1);
         w.Reads("sprk_decisionrecord").Should().Be(1);
         w.Reads("sprk_timekeeper").Should().Be(1);

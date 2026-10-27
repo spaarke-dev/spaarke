@@ -912,19 +912,8 @@ public class SpeWriteSinkContainerProvenanceGuardTests
             + "correct source and a missing value THROWS rather than defaulting (ADR-003; ADR-045). This is "
             + "the one config read the model blesses; the others in this section are the stamp default, not archive."),
 
-        new SinkSite("Services/Finance/Submission/InvoiceSubmissionService.cs", "UploadSmallAsync", 1,
-            Provenance.ServerDerivedRecord, "",
-            "RecordContainerResolver.ResolveForRecordAsync(core record) (ResolveContainerAsync)",
-            "ebilling-r1 task 044 (FR-17, D-44): the submitted invoice PDF is stored in the container of the core record (matter, "
-            + "project or work assignment) the route names and the route's filter authorized; Unresolved / FailClosed / an empty id "
-            + "refuses (422) before the upload, so a secure record never falls back to another container (ADR-007)."),
-
-        new SinkSite("Services/Finance/Submission/InvoiceSubmissionService.cs", "DeleteFileAsync", 1,
-            Provenance.ServerDerivedRecord, "",
-            "the same RecordContainerResolver decision as the upload",
-            "ebilling-r1 task 044: compensation only. It deletes the file this same call uploaded (the item id is the upload result, "
-            + "never client input) from the same record-derived drive when a later write fails, so a failed submission leaves no file "
-            + "(ADR-003; ADR-007)."),
+        // ebilling-r1 task 092 deleted InvoiceSubmissionService's UploadSmallAsync and DeleteFileAsync sites (task 044): the submitted
+        // invoice PDF is staged in the Finance file store (a Stored File, procedure-and-file-model 9.1), never an SPE document.
 
         new SinkSite("Services/Finance/RateCardImportService.cs", "UploadSmallAsync", 1,
             Provenance.ServerDerivedConfig, "",

@@ -50,7 +50,12 @@ public enum SubmissionPersistStatus
     /// </summary>
     Retry,
 
-    /// <summary>Nothing was written and a retry will not change that (<see cref="SubmissionPersistResult.ReasonCode"/>): the job marks the submission Failed.</summary>
+    /// <summary>
+    /// A retry will not change the result (<see cref="SubmissionPersistResult.ReasonCode"/>): the job marks the submission Failed. Nothing was
+    /// written, except in one case (ebilling-r1 task 092): <see cref="SubmissionReasonCodes.FileUnservable"/> with
+    /// <see cref="SubmissionPersistResult.InvoiceId"/> set means the transaction committed but the upload's Stored File could not be flipped to
+    /// Servable (definitively), so no totals and no after-step ran and the submission is Failed although it links its invoice.
+    /// </summary>
     Refused,
 
     /// <summary>The submission row no longer exists (044 K4): nothing was written.</summary>

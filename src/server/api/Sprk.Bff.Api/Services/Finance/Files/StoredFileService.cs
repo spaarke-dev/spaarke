@@ -415,7 +415,116 @@ public sealed class StoredFileService
             return new StoredFileProcessingRead(StoredFileProcessingOutcome.Missing);
         }
 
-        var scan = await _blobs.GetScanStateAsync(row.Container!, row.BlobPath!, ct).ConfigureAwait(false);
+        return await ReadVerifiedAsync(fileId, row.Container!, row.BlobPath!, expectedSha256: _ => row.Sha256, row.ContentType, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The job read of a file STAGED under a deterministic id whose row is written later, in the caller's own transaction (ebilling-r1
+    /// task 092: a firm upload is staged at intake, and its row is created with the invoice the job commits). When the row exists the
+    /// answer is <see cref="OpenForProcessingAsync"/>'s. Otherwise the blob is found by its name (built from the typed purpose, parent
+    /// and id, never read back), its scan verdict is read as for a row, and its bytes must match the SHA-256 the stage recorded in the
+    /// blob's metadata; no metadata hash, a mismatch or no blob is <see cref="StoredFileProcessingOutcome.Missing"/>. A fault throws.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The store is not configured (an operator fault; the job retries).</exception>
+    public async Task<StoredFileProcessingRead> OpenStagedForProcessingAsync(
+        StoredFilePurpose purpose, StoredFileParent parent, Guid fileId, CancellationToken ct)
+    {
+        if (await ReadRowAsync(fileId, ct).ConfigureAwait(false) is not null)
+        {
+            return await OpenForProcessingAsync(fileId, ct).ConfigureAwait(false);
+        }
+
+        if (!Enum.IsDefined(purpose) || StoredFileSchema.ParentKindOf(purpose) != parent.Kind || parent.Id == Guid.Empty || fileId == Guid.Empty)
+        {
+            return new StoredFileProcessingRead(StoredFileProcessingOutcome.Missing);
+        }
+
+        if (!_blobs.IsConfigured)
+        {
+            throw new InvalidOperationException("The Finance file store is not configured; a staged file cannot be read.");
+        }
+
+        var name = StoredFileBlobName.Build(_blobs.TenantId, parent, fileId);
+        return await ReadVerifiedAsync(fileId, StoredFileSchema.ContainerOf(purpose), name, StagedSha256Of, contentType: null, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The facts of the blob staged for <paramref name="spec"/> (ebilling-r1 task 092), read back where the stage's answer is not at
+    /// hand: the job that writes the row runs in another process than the intake that staged the bytes. The SHA-256 is the one the
+    /// stage recorded in the blob's metadata; <see cref="FlipToServableAsync"/> later recomputes it by streaming before the row is
+    /// served. <c>null</c> when no blob is there, its metadata hash is not 64 lower-case hex characters or its length does not fit
+    /// the size column. A fault throws.
+    /// </summary>
+    /// <exception cref="ArgumentException">An invalid spec.</exception>
+    /// <exception cref="InvalidOperationException">The store is not configured.</exception>
+    public async Task<StagedBlob?> GetStagedAsync(StoredFileRowSpec spec, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(spec);
+        if (spec.Invalid() is { } reason)
+        {
+            throw new ArgumentException($"Invalid Stored File spec: {reason}.", nameof(spec));
+        }
+
+        if (!_blobs.IsConfigured)
+        {
+            throw new InvalidOperationException("The Finance file store is not configured; a staged file cannot be read.");
+        }
+
+        var container = StoredFileSchema.ContainerOf(spec.Purpose);
+        var name = StoredFileBlobName.Build(_blobs.TenantId, spec.Parent, spec.FileId);
+        var properties = await _blobs.GetPropertiesAsync(container, name, ct).ConfigureAwait(false);
+        if (properties is null
+            || StagedSha256Of(properties) is not { } sha
+            || !StoredFileSize.TryToColumnValue(properties.ContentLength, out _))
+        {
+            _logger.LogWarning("Stored file {FileId}: no usable staged blob at {BlobName}", spec.FileId, name);
+            return null;
+        }
+
+        return new StagedBlob(container, name, sha, properties.ContentLength, Reused: true);
+    }
+
+    /// <summary>
+    /// The compensation of a stage whose caller then failed before any row could reference it (ebilling-r1 task 092: the intake's
+    /// submission create or job enqueue failed). Deletes the blob of <paramref name="spec"/>, found by its name, only when Dataverse
+    /// answers that no row with the file id exists; a row (or a row read that faulted) keeps the blob. False when nothing was deleted.
+    /// </summary>
+    /// <exception cref="RequestFailedException">A storage fault.</exception>
+    public async Task<bool> DeleteStagedAsync(StoredFileRowSpec spec, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(spec);
+        if (spec.Invalid() is not null || !_blobs.IsConfigured)
+        {
+            return false;
+        }
+
+        var (known, row) = await TryReadRowAsync(spec.FileId, ct).ConfigureAwait(false);
+        if (!known || row is not null)
+        {
+            _logger.LogWarning("Stored file {FileId}: the staged blob is kept (rowKnown={Known}, rowExists={Exists})", spec.FileId, known, row is not null);
+            return false;
+        }
+
+        var name = StoredFileBlobName.Build(_blobs.TenantId, spec.Parent, spec.FileId);
+        var deleted = await _blobs.DeleteAsync(StoredFileSchema.ContainerOf(spec.Purpose), name, ct).ConfigureAwait(false);
+        _logger.LogInformation("Stored file {FileId}: staged blob {BlobName} removed by compensation (deleted={Deleted})", spec.FileId, name, deleted);
+        return deleted;
+    }
+
+    /// <summary>The SHA-256 the stage wrote to the blob's metadata, when it is 64 lower-case hex characters.</summary>
+    private static string? StagedSha256Of(Infrastructure.Storage.BlobPropertiesInfo properties) =>
+        properties.Metadata.TryGetValue(StoredFileBlobs.MetadataSha256, out var sha) && StoredFileRowSpec.IsSha256Hex(sha) ? sha : null;
+
+    /// <summary>
+    /// The verdict-gated, hash-checked read shared by <see cref="OpenForProcessingAsync"/> (hash from the row) and
+    /// <see cref="OpenStagedForProcessingAsync"/> (hash from the staged blob's metadata). The bytes are read pinned to the ETag whose
+    /// verdict was read; a change since then is Pending.
+    /// </summary>
+    private async Task<StoredFileProcessingRead> ReadVerifiedAsync(
+        Guid fileId, string container, string blobPath, Func<Infrastructure.Storage.BlobPropertiesInfo, string?> expectedSha256,
+        string? contentType, CancellationToken ct)
+    {
+        var scan = await _blobs.GetScanStateAsync(container, blobPath, ct).ConfigureAwait(false);
         switch (scan)
         {
             case null:
@@ -426,10 +535,17 @@ public sealed class StoredFileService
                 return new StoredFileProcessingRead(StoredFileProcessingOutcome.Pending);
         }
 
+        var expected = expectedSha256(scan.Value.Properties);
+        if (expected is null)
+        {
+            _logger.LogWarning("Stored file {FileId}: no SHA-256 to check the bytes against; not processed ({Code})", fileId, StoredFileRefusal.HashMismatch);
+            return new StoredFileProcessingRead(StoredFileProcessingOutcome.Missing);
+        }
+
         BinaryData? bytes;
         try
         {
-            bytes = await _blobs.ReadAllAsync(row.Container!, row.BlobPath!, scan.Value.Properties.ETag, ct).ConfigureAwait(false);
+            bytes = await _blobs.ReadAllAsync(container, blobPath, scan.Value.Properties.ETag, ct).ConfigureAwait(false);
         }
         catch (RequestFailedException ex) when (ex.Status == StatusCodes.Status412PreconditionFailed)
         {
@@ -443,13 +559,13 @@ public sealed class StoredFileService
         }
 
         var sha = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes.ToMemory().Span));
-        if (!string.Equals(sha, row.Sha256, StringComparison.Ordinal))
+        if (!string.Equals(sha, expected, StringComparison.Ordinal))
         {
-            _logger.LogWarning("Stored file {FileId}: the blob's bytes do not match the row's SHA-256; not processed ({Code})", fileId, StoredFileRefusal.HashMismatch);
+            _logger.LogWarning("Stored file {FileId}: the blob's bytes do not match the recorded SHA-256; not processed ({Code})", fileId, StoredFileRefusal.HashMismatch);
             return new StoredFileProcessingRead(StoredFileProcessingOutcome.Missing);
         }
 
-        return new StoredFileProcessingRead(StoredFileProcessingOutcome.Ok, bytes, row.ContentType);
+        return new StoredFileProcessingRead(StoredFileProcessingOutcome.Ok, bytes, contentType ?? scan.Value.Properties.ContentType);
     }
 
     /// <summary>Opens the stream of a file <see cref="JudgeServableAsync"/> decided to serve, pinned to the version it judged.</summary>

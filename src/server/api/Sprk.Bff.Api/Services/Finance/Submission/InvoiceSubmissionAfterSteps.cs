@@ -113,6 +113,7 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
     private readonly Action<BillingDecision> _preflight;
     private readonly Func<JobContract, CancellationToken, Task> _submitJob;
     private readonly Func<Guid, Guid?, Guid, CancellationToken, Task<InvoiceDocumentRefileResult>> _refileDocument;
+    private readonly Func<Guid, CancellationToken, Task<string?>> _makeUploadServable;
 
     public InvoiceSubmissionAfterSteps(
         IGenericEntityService entities,
@@ -123,6 +124,7 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         IInvoiceTotalsService totals,
         IEbillingNotificationSink sink,
         InvoiceDocumentRefile refile,
+        Files.StoredFileService files,
         ILogger<InvoiceSubmissionAfterSteps> logger)
         : this(
             entities,
@@ -137,7 +139,10 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
             (recorder ?? throw new ArgumentNullException(nameof(recorder))).RecordAsync,
             recorder.Preflight,
             (jobs ?? throw new ArgumentNullException(nameof(jobs))).SubmitJobAsync,
-            refileDocument: (refile ?? throw new ArgumentNullException(nameof(refile))).RefileAsync)
+            refileDocument: (refile ?? throw new ArgumentNullException(nameof(refile))).RefileAsync,
+            makeUploadServable: files is null
+                ? throw new ArgumentNullException(nameof(files))
+                : (submissionId, ct) => InvoiceSubmissionPersister.FlipUploadFileAsync(files, submissionId, logger, ct))
     {
     }
 
@@ -155,7 +160,8 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         Action<BillingDecision> preflight,
         Func<JobContract, CancellationToken, Task> submitJob,
         TimeProvider? time = null,
-        Func<Guid, Guid?, Guid, CancellationToken, Task<InvoiceDocumentRefileResult>>? refileDocument = null)
+        Func<Guid, Guid?, Guid, CancellationToken, Task<InvoiceDocumentRefileResult>>? refileDocument = null,
+        Func<Guid, CancellationToken, Task<string?>>? makeUploadServable = null)
     {
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _idempotency = idempotency ?? throw new ArgumentNullException(nameof(idempotency));
@@ -173,6 +179,9 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         // The unit-test seam defaults to "no existing document" (every 049 test submission was created by intake with an upload).
         _refileDocument = refileDocument
             ?? ((_, _, _, _) => Task.FromResult(new InvoiceDocumentRefileResult(InvoiceDocumentRefileStatus.NotApplicable)));
+
+        // Task 092: the resume's flip gate (InvoiceSubmissionPersister.FlipUploadFileAsync). The seam defaults to "servable".
+        _makeUploadServable = makeUploadServable ?? ((_, _) => Task.FromResult<string?>(null));
     }
 
     /// <summary>The automatic rejection's decision id: deterministic from the submission id, so a retry or a resume reuses it (notes section 7).</summary>
@@ -250,6 +259,15 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
             {
                 Status = SubmissionAfterStepsStatus.Refused, SubmissionId = submissionId, ReasonCode = InvoiceLinkMismatchCode,
             };
+        }
+
+        // Task 092 (model 9.1 steps 5-6): an upload (no document) flips its Stored File FIRST, before the totals and every after-step: the
+        // commit that linked the invoice may have been followed by a flip fault. A fault throws (the job retries); a definitive failure is a
+        // FileUnservable refusal (the handler marks the submission Failed) and nothing else runs.
+        if (submission.GetAttributeValue<EntityReference>("sprk_document") is null
+            && await _makeUploadServable(submissionId, ct).ConfigureAwait(false) is { } unservable)
+        {
+            return Stop(SubmissionAfterStepsStatus.Refused, submissionId, invoiceId, unservable);
         }
 
         // 016 again (idempotent; the persister's Resumed path re-runs it too). A fault is a totals Retry after the Signals and the record.
@@ -492,7 +510,11 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
             var correlation = correlationId ?? submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionCorrelationId) ?? submissionId.ToString("D");
             if (documentId is not { } document || document == Guid.Empty)
             {
-                _logger.LogWarning("Invoice submission {SubmissionId}: no document to index for invoice {InvoiceId}; indexing skipped", submissionId, invoiceId);
+                // Task 092 (model 9.2, D-44 second half): an upload's PDF is a Stored File, not a document, and the indexing job is keyed by a
+                // document (InvoiceIndexingJobHandler). No bytes are taken from a Stored File; the invoice is not indexed (recorded in the task
+                // notes as a known gap of the document-keyed invoice index).
+                _logger.LogInformation("Invoice submission {SubmissionId}: invoice {InvoiceId} has no document (an uploaded PDF is a Stored File); indexing skipped",
+                    submissionId, invoiceId);
             }
             else
             {

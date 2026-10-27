@@ -369,8 +369,12 @@ public class InvoiceSubmissionAfterStepsTests
                     return Task.CompletedTask;
                 },
                 Clock,
-                refileDocument: Refile);
+                refileDocument: Refile,
+                makeUploadServable: MakeUploadServable);
         }
+
+        /// <summary>Task 092: the resume's flip gate for an upload (null: the test seam's default, "servable").</summary>
+        public Func<Guid, CancellationToken, Task<string?>>? MakeUploadServable { get; set; }
 
         /// <summary>050a: the re-file step (null: the production default for a test seam, "no existing document").</summary>
         public Func<Guid, Guid?, Guid, CancellationToken, Task<InvoiceDocumentRefileResult>>? Refile { get; set; }
@@ -1449,6 +1453,86 @@ public class InvoiceSubmissionAfterStepsTests
         refused.ReasonCode.Should().Be(InvoiceSubmissionAfterSteps.InvoiceLinkMismatchCode);
         (await missing.Build().ResumeAsync(Submission, null)).Status.Should().Be(SubmissionAfterStepsStatus.SubmissionMissing);
         unlinked.Totals.Verify(t => t.RecalculateAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // ── ebilling-r1 task 092: an upload's resume runs the Stored File flip before anything else ──
+
+    /// <summary>A world whose submission is an upload (no document), with the gate and the totals recorded in <paramref name="order"/>.</summary>
+    private static World UploadWorld(SubmissionEvaluationOutcome outcome, List<string> order, Func<Task<string?>> gate)
+    {
+        var world = new World(outcome);
+        world.Row.Attributes.Remove("sprk_document");
+        world.MakeUploadServable = (id, _) =>
+        {
+            id.Should().Be(Submission);
+            order.Add("flip");
+            return gate();
+        };
+        world.Totals.Setup(t => t.RecalculateAsync(InvoiceId, It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                order.Add("totals");
+                return Task.FromResult(world.TotalsResult);
+            });
+        return world;
+    }
+
+    [Fact(DisplayName = "092 (model 9.1 step 5): an upload's resume flips its Stored File FIRST, before the totals and every after-step, then completes")]
+    public async Task ResumeAsync_Upload_FlipsFirst_ThenCompletes()
+    {
+        var order = new List<string>();
+        var world = UploadWorld(await Accepted(), order, () => Task.FromResult<string?>(null));
+
+        var resumed = await world.Build().ResumeAsync(Submission, null);
+
+        resumed.Status.Should().Be(SubmissionAfterStepsStatus.Completed);
+        order.Should().StartWith(["flip", "totals"]);
+        order.Count(o => o == "flip").Should().Be(1);
+        world.TerminalWrites.Should().ContainSingle();
+    }
+
+    [Fact(DisplayName = "092 must-fire: an upload's resume whose flip is definitively refused stops with FileUnservable: no totals, Signals, record, job, notification or terminal write")]
+    public async Task ResumeAsync_Upload_Unservable_RunsNothing()
+    {
+        var order = new List<string>();
+        var world = UploadWorld(await AutoRejected(), order, () => Task.FromResult<string?>(SubmissionReasonCodes.FileUnservable));
+
+        var resumed = await world.Build().ResumeAsync(Submission, null);
+
+        resumed.Status.Should().Be(SubmissionAfterStepsStatus.Refused);
+        resumed.ReasonCode.Should().Be(SubmissionReasonCodes.FileUnservable);
+        resumed.InvoiceId.Should().Be(InvoiceId);
+        order.Should().Equal("flip");
+        world.Writes.Should().BeEmpty();
+        world.RecordCreates.Should().Be(0);
+        world.Jobs.Should().BeEmpty();
+        world.Notified.Should().BeEmpty();
+        world.TerminalWrites.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "092: a flip fault on resume throws (the job retries) and nothing after it runs")]
+    public async Task ResumeAsync_Upload_FlipFault_Throws()
+    {
+        var order = new List<string>();
+        var world = UploadWorld(await Accepted(), order, () => Task.FromException<string?>(new TimeoutException("storage")));
+
+        await FluentActions.Invoking(() => world.Build().ResumeAsync(Submission, null)).Should().ThrowAsync<TimeoutException>();
+
+        order.Should().Equal("flip");
+        world.TerminalWrites.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "092 must-not-fire: a submission with a document (050a) runs no flip gate on resume; RunAsync after a commit runs none either (the persister flipped)")]
+    public async Task NoFlipGate_ForADocument_OrOnRunAsync()
+    {
+        var outcome = await Accepted();
+        var withDocument = new World(outcome) { MakeUploadServable = (_, _) => throw new InvalidOperationException("no gate for a document") };
+        (await withDocument.Build().ResumeAsync(Submission, null)).Status.Should().Be(SubmissionAfterStepsStatus.Completed);
+
+        var order = new List<string>();
+        var upload = UploadWorld(outcome, order, () => throw new InvalidOperationException("RunAsync must not flip"));
+        (await upload.Build().RunAsync(Persisted(outcome), null)).Status.Should().Be(SubmissionAfterStepsStatus.Completed);
+        order.Should().NotContain("flip");
     }
 
     // ── 13a B: the terminal is written only while Processing, on the row version (F4-2) ──

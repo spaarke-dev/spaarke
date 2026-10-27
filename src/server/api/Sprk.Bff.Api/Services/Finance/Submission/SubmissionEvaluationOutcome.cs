@@ -79,8 +79,15 @@ public sealed record SubmissionSnapshot
     /// <summary>The firm invoice number as typed at upload (D-91).</summary>
     public required string FirmInvoiceNumber { get; init; }
 
-    /// <summary><c>sprk_document</c>.</summary>
-    public required Guid DocumentId { get; init; }
+    /// <summary>
+    /// <c>sprk_document</c>: set only for the existing-document entry (050a, <see cref="InvoiceDocumentRefile.AppliesTo"/>), whose bytes are
+    /// read from SharePoint Embedded. <c>null</c> for an upload (ebilling-r1 task 092): its PDF is staged in the Finance file store under
+    /// <see cref="Files.StoredFileIds.ForUpload"/> of the submission.
+    /// </summary>
+    public Guid? DocumentId { get; init; }
+
+    /// <summary>True when the PDF is the upload staged in the Finance file store (no document; task 092).</summary>
+    public bool IsUpload => DocumentId is null;
 
     /// <summary><c>createdon</c> in UTC.</summary>
     public required DateTime CreatedOnUtc { get; init; }
@@ -90,8 +97,12 @@ public sealed record SubmissionSnapshot
 
     /// <summary>
     /// Reads a submission row. Fails closed: a missing tracking number, <c>createdon</c>, firm, core record (or more than one), typed
-    /// firm invoice number, document or supported channel gives a <see cref="SubmissionEvaluationKind.Failed"/> reason code, never a default.
+    /// firm invoice number or supported channel gives a <see cref="SubmissionEvaluationKind.Failed"/> reason code, never a default.
     /// </summary>
+    /// <remarks>ebilling-r1 task 092: no document is an upload (its PDF is in the file store). A document is read only for the
+    /// existing-document entry (050a); a submission that names any other document has the retired intake shape (an SPE upload with a
+    /// document per submission) and is refused with <see cref="SubmissionReasonCodes.DocumentUnavailable"/> (dev data is recreated, not
+    /// migrated: O-13).</remarks>
     public static (SubmissionSnapshot? Snapshot, string? FailureReasonCode) Read(Entity row)
     {
         ArgumentNullException.ThrowIfNull(row);
@@ -125,9 +136,10 @@ public sealed record SubmissionSnapshot
             return (null, SubmissionReasonCodes.FirmInvoiceNumberMissing);
         }
 
-        if (view.DocumentId is not { } documentId || documentId == Guid.Empty)
+        var documentId = view.DocumentId is { } linkedDocument && linkedDocument != Guid.Empty ? linkedDocument : (Guid?)null;
+        if (documentId is { } document && !InvoiceDocumentRefile.AppliesTo(row.Id, document))
         {
-            return (null, SubmissionReasonCodes.DocumentMissing);
+            return (null, SubmissionReasonCodes.DocumentUnavailable);
         }
 
         var channel = row.GetAttributeValue<OptionSetValue>("sprk_channel")?.Value;

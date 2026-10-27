@@ -13,14 +13,16 @@ using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Finance.Files;
 using Sprk.Bff.Api.Services.Jobs;
 
 namespace Sprk.Bff.Api.Services.Finance.Submission;
 
 /// <summary>
-/// The one server-side invoice intake (ebilling-r1 FR-17, Processing Pipeline step 0, ADR-002): validates the request, stores the PDF in the core
-/// record's container, creates the <c>sprk_document</c> (type Invoice) and the <c>sprk_invoicesubmission</c> (Received, with its tracking number),
-/// and enqueues <see cref="JobType"/>. Both entry points call it: the external SPA route and the internal route (D-24: the same checks).
+/// The one server-side invoice intake (ebilling-r1 FR-17, Processing Pipeline step 0, ADR-002): validates the request, stages the PDF in the
+/// Finance file store (task 092: <see cref="StoredFileService.StageAsync"/> under <see cref="StoredFileIds.ForUpload"/> of the submission, parent
+/// the invoice the job will create), creates the <c>sprk_invoicesubmission</c> (Received, with its tracking number) and enqueues
+/// <see cref="JobType"/>. Both entry points call it: the external SPA route and the internal route (D-24: the same checks).
 /// </summary>
 /// <remarks>
 /// <para><b>Authorization of the CALLER is the routes' job.</b> Each route's endpoint filter decides the caller, the firm and the core record
@@ -33,13 +35,18 @@ namespace Sprk.Bff.Api.Services.Finance.Submission;
 /// is read. It reuses <see cref="ExternalParticipationService.GetReferencedOrganizationIdsAsync"/> (the access model's own record-to-organization
 /// read): that class lives in the external-access infrastructure namespace this service already depends on (<see cref="ExternalDataService"/>,
 /// <see cref="CallerPrincipal"/>), and the read is app-only and channel-neutral, so no new seam or interface is needed (ADR-010).</para>
-/// <para><b>Order (copied from the external upload, <c>ExternalProjectDataEndpoints.UploadDocumentForParent</c>):</b> every check and read first
-/// (number, file, firm, core-record fields, owner, container), then the bytes, then the rows, then the job. A failure after the upload is
-/// compensated in reverse order with its own token, so it leaves no Received submission behind (acceptance criterion 7). A compensation that
+/// <para><b>Order:</b> every check and read first (number, file, firm, core-record fields, owner), then the bytes, then the submission row, then
+/// the job. A failure after the stage is compensated in reverse order with its own token (the submission row, then the staged blob through
+/// <see cref="StoredFileService.DeleteStagedAsync"/>), so it leaves no Received submission behind (acceptance criterion 7). A compensation that
 /// itself fails is logged and never masks the original failure.</para>
-/// <para><b>The writes ignore the caller's token.</b> From the upload to the enqueue every call runs under <see cref="CancellationToken.None"/>:
-/// Graph, Dataverse and Service Bus finish a request they received even when the caller abandons it, and the abandoned call's reply (the id
-/// compensation needs) is lost. A client that disconnects mid-write therefore gets a complete submission it never hears about, not orphans.
+/// <para><b>The file store, not SharePoint Embedded (ebilling-r1 task 092; procedure-and-file-model 9.1, D-44 second half).</b> No
+/// <c>sprk_document</c> is created and the submission names none: the bytes are staged as a blob only. The job (049) reads the staged blob
+/// (<see cref="StoredFileService.OpenStagedForProcessingAsync"/>), writes the <c>sprk_storedfile</c> row inside its commit transaction (ADR-002:
+/// the row's one writer is that transaction) and flips it to Servable before its after-commit steps. The invoice PDF therefore no longer
+/// appears among the core record's Documents; the review reads it by its Stored File id.</para>
+/// <para><b>The writes ignore the caller's token.</b> From the stage to the enqueue every call runs under <see cref="CancellationToken.None"/>:
+/// Blob storage, Dataverse and Service Bus finish a request they received even when the caller abandons it, and the abandoned call's reply is
+/// lost. A client that disconnects mid-write therefore gets a complete submission it never hears about, not orphans.
 /// A caller already gone before the first write writes nothing.</para>
 /// <para><b>Only creator of submissions.</b> The row is created by <see cref="ITrackingNumberAllocator"/> with its number already set (D-87); the
 /// submission id is minted here once per request and is also the job's idempotency key. This service never creates <c>sprk_invoice</c> (task 049
@@ -55,9 +62,6 @@ public class InvoiceSubmissionService
 {
     /// <summary>The ADR-004 job type of the processing job (handled by task 049).</summary>
     public const string JobType = "InvoiceSubmissionProcessing";
-
-    /// <summary><c>sprk_document.sprk_documenttype</c> option "Invoice" (SpaarkeMaster sprk_Document/Entity.xml).</summary>
-    internal const int InvoiceDocumentType = 100000001;
 
     internal const string PdfContentType = "application/pdf";
     internal const int MaxPoNumberLength = 100;
@@ -81,12 +85,9 @@ public class InvoiceSubmissionService
 
     private readonly ITrackingNumberAllocator _allocator;
     private readonly IGenericEntityService _entities;
-    private readonly IDocumentDataverseService _documents;
     private readonly ICommunicationDataverseService _recordTypes;
-    private readonly ExternalDataService _externalData;
     private readonly ExternalParticipationService _participations;
-    private readonly SpeFileStore _spe;
-    private readonly RecordContainerResolver _containers;
+    private readonly StoredFileService _files;
     private readonly IRecordOwnershipResolver _ownership;
     private readonly ExistingDocumentIsolationCheck _isolation;
     private readonly JobSubmissionService _jobs;
@@ -96,12 +97,9 @@ public class InvoiceSubmissionService
     public InvoiceSubmissionService(
         ITrackingNumberAllocator allocator,
         IGenericEntityService entities,
-        IDocumentDataverseService documents,
         ICommunicationDataverseService recordTypes,
-        ExternalDataService externalData,
         ExternalParticipationService participations,
-        SpeFileStore spe,
-        RecordContainerResolver containers,
+        StoredFileService files,
         IRecordOwnershipResolver ownership,
         ExistingDocumentIsolationCheck isolation,
         JobSubmissionService jobs,
@@ -110,12 +108,9 @@ public class InvoiceSubmissionService
     {
         _allocator = allocator ?? throw new ArgumentNullException(nameof(allocator));
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
-        _documents = documents ?? throw new ArgumentNullException(nameof(documents));
         _recordTypes = recordTypes ?? throw new ArgumentNullException(nameof(recordTypes));
-        _externalData = externalData ?? throw new ArgumentNullException(nameof(externalData));
         _participations = participations ?? throw new ArgumentNullException(nameof(participations));
-        _spe = spe ?? throw new ArgumentNullException(nameof(spe));
-        _containers = containers ?? throw new ArgumentNullException(nameof(containers));
+        _files = files ?? throw new ArgumentNullException(nameof(files));
         _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _isolation = isolation ?? throw new ArgumentNullException(nameof(isolation));
         _jobs = jobs ?? throw new ArgumentNullException(nameof(jobs));
@@ -169,27 +164,7 @@ public class InvoiceSubmissionService
             return refused;
         }
 
-        ContainerDecision container;
-        try
-        {
-            container = await ResolveContainerAsync(core, ct);
-        }
-        catch (SdapProblemException ex)
-        {
-            return InvoiceSubmissionOutcome.Refused(ex.StatusCode, InvoiceSubmissionErrors.StorageNotConfigured, ex.Detail ?? ex.Title);
-        }
-
-        if (container.Outcome is ContainerDecisionOutcome.Unresolved or ContainerDecisionOutcome.FailClosed
-            || string.IsNullOrWhiteSpace(container.ContainerId))
-        {
-            // Never substitute another container: for a secure record that substitution is the leak (D-44, ADR-007).
-            _logger.LogWarning("Invoice submission refused: no usable container for {Entity} {RecordId} ({Outcome})",
-                core.EntityLogicalName, core.RecordId, container.Outcome);
-            return InvoiceSubmissionOutcome.Refused(StatusCodes.Status422UnprocessableEntity, InvoiceSubmissionErrors.StorageNotConfigured,
-                "This record has no storage container configured, so the invoice cannot be stored.");
-        }
-
-        return await WriteAsync(request, number, file, decision.Row!, decision.ResolverFields!, decision.Owner!, container.ContainerId!, ct);
+        return await WriteAsync(request, number, file, decision.Row!, decision.ResolverFields!, ct);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════════
@@ -784,10 +759,6 @@ public class InvoiceSubmissionService
         return new(null, row, decided.ResolverFields, owner);
     }
 
-    /// <summary>The container of the core record (D-44: secure when secure; fail closed). Virtual so a test can stand in for the resolver.</summary>
-    internal virtual Task<ContainerDecision> ResolveContainerAsync(InvoiceCoreRecord core, CancellationToken ct) =>
-        _containers.ResolveForRecordAsync(core.EntityLogicalName, core.RecordId, ct);
-
     private InvoiceSubmissionOutcome? Validate(InvoiceSubmissionRequest request)
     {
         if (ValidateFields(request) is { } invalid)
@@ -970,19 +941,17 @@ public class InvoiceSubmissionService
     // ── Writes, in order, each compensated on a later failure ──
 
     private async Task<InvoiceSubmissionOutcome> WriteAsync(
-        InvoiceSubmissionRequest request, string number, InvoiceSubmissionFile file, Entity row,
-        InvoiceFamilyResolverFields resolverFields, RecordOwnerResolution owner, string driveId, CancellationToken ct)
+        InvoiceSubmissionRequest request, string number, InvoiceSubmissionFile file, Entity row, InvoiceFamilyResolverFields resolverFields,
+        CancellationToken ct)
     {
         var core = request.CoreRecord;
         var submissionId = Guid.NewGuid();
         var jobId = Guid.NewGuid();
+        var spec = UploadFileSpec(submissionId, file.FileName, request.Channel);
 
-        // 1. The bytes go under a flat name unique to this submission (two firms' "invoice.pdf" never collide; Fail never overwrites). The
-        //    name carries the submission id, so whatever sits at it can only be this request's own upload.
-        var uploadPath = SpeUploadPath.SanitizeFileName(UploadName(file.FileName, submissionId));
-        string? uploadAttemptedAt = null;
-        string? uploadedItemId = null;
-        Guid? documentId = null;
+        // True from the moment the stage is asked: a stage whose reply is lost may have written the blob, so compensation removes it by its
+        // deterministic name whenever it MAY exist (an absent blob is ignored).
+        var blobMayExist = false;
         // True from the moment the allocator is asked: a create whose reply is lost (a timeout) may have committed the row, so compensation
         // deletes it by its id whenever it MAY exist (a delete of an absent row is ignored).
         var submissionMayExist = false;
@@ -993,28 +962,28 @@ public class InvoiceSubmissionService
 
         try
         {
-            FileHandleDto? uploaded;
+            // 1. The bytes, staged under the submission's deterministic file id with the invoice the job will create as the parent
+            //    (procedure-and-file-model 9.1 step 2). The row is written by the job, in its commit (step 4).
+            StageResult stage;
             await using (var content = new MemoryStream(file.Content, writable: false))
             {
-                uploadAttemptedAt = uploadPath;
-                uploaded = await _spe.UploadSmallAsync(driveId, uploadPath, content, ConflictBehavior.Fail, write);
+                blobMayExist = true;
+                stage = await _files.StageAsync(spec, content, write);
             }
 
-            if (uploaded is null)
+            if (!stage.IsStaged)
             {
-                throw new InvalidOperationException("The invoice upload returned no file handle.");
+                // A refusal wrote nothing (StoredFileBlobs.StageAsync). An unconfigured store keeps the 422 storage_not_configured the
+                // route answered when no SPE container resolved (044), so the external route contract and 051's message are unchanged.
+                _logger.LogWarning("Invoice submission {SubmissionId}: the file store refused the PDF ({Code})", submissionId, stage.RefusalCode);
+                return stage.RefusalCode == StoredFileRefusal.NotConfigured
+                    ? InvoiceSubmissionOutcome.Refused(StatusCodes.Status422UnprocessableEntity, InvoiceSubmissionErrors.StorageNotConfigured,
+                        "Invoice file storage is not configured, so the invoice cannot be stored. Nothing was saved.")
+                    : InvoiceSubmissionOutcome.Refused(StatusCodes.Status500InternalServerError, InvoiceSubmissionErrors.Failed,
+                        "The invoice could not be stored. Nothing was saved; try again.");
             }
 
-            uploadedItemId = uploaded.Id;
-
-            // 2. The document row, linked to the core record, then typed Invoice. Internal: the id is chosen here and sent with the create,
-            //    so a create whose reply is lost is still deleted by it. SPA: the external create mints the id; a lost reply is found by
-            //    the uploaded item instead (CompensateAsync). Either way a failed follow-up update is compensated too.
-            documentId = request.Channel == InvoiceSubmissionChannel.Spa ? null : Guid.NewGuid();
-            documentId = await CreateDocumentRowAsync(request, documentId, uploaded, driveId, file, owner, write);
-            await CompleteDocumentRowAsync(request, documentId.Value, uploaded, driveId, file, write);
-
-            // 3. The submission, created with its tracking number (D-87).
+            // 2. The submission, created with its tracking number (D-87). It names no document: the job finds the file by the submission id.
             foreach (var (column, value) in resolverFields.ToFields())
             {
                 row[column] = value;
@@ -1023,7 +992,6 @@ public class InvoiceSubmissionService
             row["sprk_name"] = number;
             row["sprk_processingstatus"] = new OptionSetValue((int)InvoiceSubmissionStatus.Received);
             row["sprk_channel"] = new OptionSetValue((int)request.Channel);
-            row["sprk_document"] = new EntityReference(DocumentEntity, documentId.Value);
             row["sprk_receivedon"] = DateTime.UtcNow;
             if (!string.IsNullOrWhiteSpace(request.PoNumber))
             {
@@ -1052,101 +1020,49 @@ public class InvoiceSubmissionService
             {
                 _logger.LogWarning("Invoice submission {SubmissionId}: no tracking number could be allocated ({Reason})", submissionId, allocation.Reason);
                 // A refusal creates nothing (TrackingNumberAllocator: the bound was reached without a create).
-                await CompensateAsync(submissionId, submissionMayExist: false, documentId, driveId, uploadedItemId, uploadAttemptedAt);
+                await CompensateAsync(submissionId, submissionMayExist: false, spec);
                 return InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, TrackingNumberReasons.Unavailable,
                     "A tracking number could not be assigned right now, so nothing was saved. Try again shortly.");
             }
 
-            // 4. The job (ADR-004): payload { submissionId }, idempotency key = the submission id.
+            // 3. The job (ADR-004): payload { submissionId }, idempotency key = the submission id.
             await _jobs.SubmitJobAsync(BuildJob(jobId, submissionId, request.CorrelationId), write);
 
             _logger.LogInformation(
-                "Invoice submission {SubmissionId} received through {Channel} for {Entity} {RecordId}; job {JobId} enqueued",
-                submissionId, request.Channel, core.EntityLogicalName, core.RecordId, jobId);
+                "Invoice submission {SubmissionId} received through {Channel} for {Entity} {RecordId}; file {FileId} staged; job {JobId} enqueued",
+                submissionId, request.Channel, core.EntityLogicalName, core.RecordId, spec.FileId, jobId);
             _logger.LogDebug("Invoice submission {SubmissionId} tracking number {TrackingNumber}", submissionId, allocation.TrackingNumber);
 
-            return InvoiceSubmissionOutcome.Received(new InvoiceSubmissionReceipt(submissionId, jobId, allocation.TrackingNumber!, documentId.Value));
-        }
-        catch (SpaarkeStorageException ex) when (ex.StatusCode == StatusCodes.Status409Conflict && uploadedItemId is null)
-        {
-            // The name carries this submission's id, so the file holding it is this request's own: the PUT committed, its reply was lost
-            // and the Graph handler's retry was answered 409. Remove it (found by its path) and refuse; nothing else was written yet.
-            _logger.LogWarning("Invoice submission {SubmissionId}: the upload was answered 409 (a retried PUT); removing the file it left", submissionId);
-            await CompensateAsync(submissionId, submissionMayExist: false, documentId: null, driveId, itemId: null, uploadAttemptedAt);
-            return InvoiceSubmissionOutcome.Refused(StatusCodes.Status409Conflict, InvoiceSubmissionErrors.Failed,
-                "The invoice could not be stored. Nothing was saved; try again.");
+            return InvoiceSubmissionOutcome.Received(new InvoiceSubmissionReceipt(submissionId, jobId, allocation.TrackingNumber!, DocumentId: null));
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Invoice submission {SubmissionId} failed; removing what it wrote", submissionId);
-            await CompensateAsync(submissionId, submissionMayExist, documentId, driveId, uploadedItemId, uploadAttemptedAt);
+            await CompensateAsync(submissionId, submissionMayExist, blobMayExist ? spec : null);
             return InvoiceSubmissionOutcome.Refused(StatusCodes.Status500InternalServerError, InvoiceSubmissionErrors.Failed,
                 "The invoice could not be submitted and nothing was saved. Try again; if it keeps failing, contact support.");
         }
     }
 
     /// <summary>
-    /// Creates the document row. SPA: the external surface's create (<see cref="ExternalDataService.CreateDocumentAsync"/>), which binds the core
-    /// record, the owner team and the FR-25 creator stamp of the resolved principal. Internal: the shared document seam with the creator person
-    /// and the id this service chose (<see cref="CreateDocumentRequest.Id"/>).
+    /// The Stored File spec of the PDF uploaded with <paramref name="submissionId"/> (ebilling-r1 task 092): id
+    /// <see cref="StoredFileIds.ForUpload"/>, purpose Invoice PDF, parent the invoice the job creates
+    /// (<see cref="InvoiceSubmissionPersister.InvoiceIdFor"/>), Firm-visible only when the firm uploaded it through the SPA (section 4.1).
+    /// The intake stages under it and the job builds the row from it, so both derive the same id, parent and path.
     /// </summary>
-    private async Task<Guid> CreateDocumentRowAsync(
-        InvoiceSubmissionRequest request, Guid? presetId, FileHandleDto uploaded, string driveId, InvoiceSubmissionFile file,
-        RecordOwnerResolution owner, CancellationToken ct)
-    {
-        var core = request.CoreRecord;
-        if (request.Channel == InvoiceSubmissionChannel.Spa)
+    /// <param name="clientFileName">The client's file name (intake only). Neither the blob's name nor its metadata carries it, so the job,
+    /// which never sees it, names the row by <paramref name="trackingNumber"/> instead.</param>
+    internal static StoredFileRowSpec UploadFileSpec(
+        Guid submissionId, string? clientFileName, InvoiceSubmissionChannel channel, string? trackingNumber = null) => new()
         {
-            var created = await _externalData.CreateDocumentAsync(
-                core.DocumentParentKind,
-                core.RecordId,
-                new ExternalUploadedFilePointers(uploaded.DriveId ?? driveId, uploaded.Id, uploaded.Name, uploaded.Size ?? file.Content.LongLength, uploaded.WebUrl),
-                owner.OwningTeamId!.Value,
-                request.ExternalCaller!,
-                ct);
-            return Guid.Parse(created.SprkDocumentid);
-        }
-
-        return Guid.Parse(await _documents.CreateDocumentAsync(new CreateDocumentRequest
-        {
-            Id = presetId,
-            Name = uploaded.Name,
-            ContainerId = driveId,
-            OwningTeamId = owner.OwningTeamId,
-            CreatedByPersonId = owner.CreatedByPerson,
-        }, ct));
-    }
-
-    /// <summary>
-    /// Types the document Invoice with the PDF MIME type. The internal row also gets its file pointers and its core-record lookup here (the SPA
-    /// create already set both).
-    /// </summary>
-    private Task CompleteDocumentRowAsync(
-        InvoiceSubmissionRequest request, Guid documentId, FileHandleDto uploaded, string driveId, InvoiceSubmissionFile file, CancellationToken ct)
-    {
-        var core = request.CoreRecord;
-        var update = request.Channel == InvoiceSubmissionChannel.Spa
-            ? new UpdateDocumentRequest
-            {
-                DocumentType = InvoiceDocumentType,
-                MimeType = PdfContentType,
-            }
-            : new UpdateDocumentRequest
-            {
-                GraphDriveId = uploaded.DriveId ?? driveId,
-                GraphItemId = uploaded.Id,
-                FileName = uploaded.Name,
-                FileSize = uploaded.Size ?? file.Content.LongLength,
-                MimeType = PdfContentType,
-                HasFile = true,
-                FilePath = uploaded.WebUrl,
-                DocumentType = InvoiceDocumentType,
-                MatterLookup = core.Kind == InvoiceCoreRecordKind.Matter ? core.RecordId : null,
-                ProjectLookup = core.Kind == InvoiceCoreRecordKind.Project ? core.RecordId : null,
-                WorkAssignmentLookup = core.Kind == InvoiceCoreRecordKind.WorkAssignment ? core.RecordId : null,
-            };
-        return _documents.UpdateDocumentAsync(documentId.ToString(), update, ct);
-    }
+            FileId = StoredFileIds.ForUpload(submissionId),
+            Purpose = StoredFilePurpose.InvoicePdf,
+            Parent = new StoredFileParent(StoredFileParentKind.Invoice, InvoiceSubmissionPersister.InvoiceIdFor(submissionId)),
+            Name = UploadName(clientFileName, trackingNumber),
+            ContentType = PdfContentType,
+            FirmVisible = channel == InvoiceSubmissionChannel.Spa,
+            SubmissionId = submissionId,
+        };
 
     internal static JobContract BuildJob(Guid jobId, Guid submissionId, string? correlationId) => new()
     {
@@ -1158,10 +1074,15 @@ public class InvoiceSubmissionService
         Payload = JsonSerializer.SerializeToDocument(new { submissionId }, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }),
     };
 
-    /// <summary><c>{client name without extension}-{submission id}.pdf</c>, so each submission's file name is its own.</summary>
-    internal static string UploadName(string? clientFileName, Guid submissionId)
+    /// <summary>
+    /// The display name of the uploaded PDF (<c>sprk_storedfile.sprk_name</c>): the tracking number when given (the job, which writes the
+    /// row), else the client's file name without its extension, else <c>invoice</c>; at most 100 characters, then <c>.pdf</c>.
+    /// </summary>
+    internal static string UploadName(string? clientFileName, string? trackingNumber)
     {
-        var stem = Path.GetFileNameWithoutExtension(clientFileName ?? string.Empty);
+        var stem = !string.IsNullOrWhiteSpace(trackingNumber)
+            ? trackingNumber.Trim()
+            : Path.GetFileNameWithoutExtension(clientFileName ?? string.Empty);
         if (string.IsNullOrWhiteSpace(stem))
         {
             stem = "invoice";
@@ -1172,27 +1093,14 @@ public class InvoiceSubmissionService
             stem = stem[..100];
         }
 
-        return $"{stem}-{submissionId:N}.pdf";
+        return $"{stem}.pdf";
     }
 
     /// <summary>Best effort, reverse order, own token: a failed compensation is logged and never masks the original failure.</summary>
-    /// <param name="uploadPath">The path an upload was attempted at (null when none was). With no <paramref name="itemId"/> the upload's reply
-    /// never arrived, so the item is looked up by this path: the name carries the submission id, so anything there is this request's own.</param>
-    private async Task CompensateAsync(
-        Guid submissionId, bool submissionMayExist, Guid? documentId, string driveId, string? itemId, string? uploadPath)
+    /// <param name="stagedSpec">The spec a stage was attempted under (null when none was). Its blob is removed by its deterministic name, and
+    /// only while no Stored File row references it (<see cref="StoredFileService.DeleteStagedAsync"/>).</param>
+    private async Task CompensateAsync(Guid submissionId, bool submissionMayExist, StoredFileRowSpec? stagedSpec)
     {
-        if (itemId is null && uploadPath is not null)
-        {
-            try
-            {
-                itemId = (await _spe.GetDriveItemByPathAsync(driveId, uploadPath, CancellationToken.None))?.Id;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Invoice submission {SubmissionId}: cleanup could not look up the uploaded file by its path", submissionId);
-            }
-        }
-
         if (submissionMayExist)
         {
             try
@@ -1209,55 +1117,16 @@ public class InvoiceSubmissionService
             }
         }
 
-        if (documentId is { } doc)
-        {
-            await DeleteDocumentAsync(submissionId, doc);
-        }
-        else if (itemId is not null)
-        {
-            // No id came back from the document create (a lost reply on the SPA path, which mints the id itself): the row, if it was
-            // committed, carries the uploaded item in sprk_graphitemid.
-            try
-            {
-                var query = new QueryExpression(DocumentEntity) { ColumnSet = new ColumnSet(false), TopCount = 5 };
-                query.Criteria.AddCondition("sprk_graphitemid", ConditionOperator.Equal, itemId);
-                foreach (var row in (await _entities.RetrieveMultipleAsync(query, CancellationToken.None)).Entities)
-                {
-                    await DeleteDocumentAsync(submissionId, row.Id);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Invoice submission {SubmissionId}: cleanup could not look up a document for the uploaded file", submissionId);
-            }
-        }
-
-        if (itemId is not null)
+        if (stagedSpec is not null)
         {
             try
             {
-                await _spe.DeleteFileAsync(driveId, itemId, CancellationToken.None);
+                await _files.DeleteStagedAsync(stagedSpec, CancellationToken.None);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Invoice submission {SubmissionId}: cleanup could not delete the uploaded file {ItemId}", submissionId, itemId);
+                _logger.LogError(ex, "Invoice submission {SubmissionId}: cleanup could not delete the staged file {FileId}", submissionId, stagedSpec.FileId);
             }
-        }
-    }
-
-    private async Task DeleteDocumentAsync(Guid submissionId, Guid documentId)
-    {
-        try
-        {
-            await _entities.DeleteAsync(DocumentEntity, documentId, CancellationToken.None);
-        }
-        catch (Exception ex) when (IsNotFound(ex))
-        {
-            // A create whose reply was lost went the other way (the preset id was never committed). Nothing to remove.
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Invoice submission {SubmissionId}: cleanup could not delete document {DocumentId}", submissionId, documentId);
         }
     }
 

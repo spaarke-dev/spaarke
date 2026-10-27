@@ -8,6 +8,7 @@ using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Finance;
+using Sprk.Bff.Api.Services.Finance.Files;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Signals;
 
@@ -43,7 +44,16 @@ namespace Sprk.Bff.Api.Services.Jobs.Handlers;
 /// marking a linked submission Failed would strand an invoice that has no Signals, record or notification, make every replay after a code fix a
 /// no-op, and could overwrite a reviewer's decision made since the read. An after-steps <c>Refused</c> (the stored state, the signal plan or the
 /// link does not match, a bug; or, for a confirmed document, its re-file was refused after the commit, a real outcome the administrator must
-/// resolve, 050a) therefore leaves the submission Processing, logs the id and code, sets the administrator's attention text and returns Poisoned.</para>
+/// resolve, 050a) therefore leaves the submission Processing, logs the id and code, sets the administrator's attention text and returns Poisoned.
+/// <b>The one exception (ebilling-r1 task 092; procedure-and-file-model 9.1 step 6):</b> a <see cref="SubmissionReasonCodes.FileUnservable"/>
+/// refusal, from the persister after its commit or from the resume's flip gate, means the invoice's uploaded PDF can never be served; the
+/// submission is marked Failed with that code although it links its invoice, no after-step runs, and the Stored File row stays Not yet
+/// servable for the file store's detector.</para>
+/// <para><b>The PDF (task 092).</b> An upload's bytes are the blob the intake staged in the Finance file store
+/// (<see cref="StoredFileService.OpenStagedForProcessingAsync"/>): no scan verdict yet is transient, Malicious is Failed
+/// <see cref="SubmissionReasonCodes.FileMalicious"/>, missing (or bytes that do not match the staged hash) is Failed
+/// <see cref="SubmissionReasonCodes.DocumentUnavailable"/>. Only an existing-document submission (050a) still reads its SharePoint Embedded
+/// document.</para>
 /// <para><b>Logging (ADR-015).</b> Submission id, invoice id, attempt and reason codes only; never a value read from the invoice.</para>
 /// <para>§11: <i>Existing</i> - <c>InvoiceExtractionJobHandler</c> (payload, document read, pointer-container check, download) and
 /// <c>BillingRuleDraftJobHandler</c> (lock, final-delivery rule); the pipeline components are 049 parts B-D. <i>Extension</i> - the extraction
@@ -80,6 +90,7 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
     private readonly IEbillingNotificationSink _sink;
     private readonly IIdempotencyService _idempotency;
     private readonly IOptionsMonitor<EbillingOptions> _ebilling;
+    private readonly StoredFileService _files;
     private readonly ILogger<InvoiceSubmissionProcessingJobHandler> _logger;
 
     public InvoiceSubmissionProcessingJobHandler(
@@ -93,6 +104,7 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
         IEbillingNotificationSink sink,
         IIdempotencyService idempotency,
         IOptionsMonitor<EbillingOptions> ebilling,
+        StoredFileService files,
         ILogger<InvoiceSubmissionProcessingJobHandler> logger)
     {
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
@@ -105,6 +117,7 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
         _sink = sink ?? throw new ArgumentNullException(nameof(sink));
         _idempotency = idempotency ?? throw new ArgumentNullException(nameof(idempotency));
         _ebilling = ebilling ?? throw new ArgumentNullException(nameof(ebilling));
+        _files = files ?? throw new ArgumentNullException(nameof(files));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -297,6 +310,11 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
                 case SubmissionPersistStatus.Retry:
                     return await TransientAsync(job, submissionId, persisted.ReasonCode ?? SubmissionReasonCodes.ProcessingFailed, stopwatch, ct).ConfigureAwait(false);
 
+                case SubmissionPersistStatus.Refused when persisted.InvoiceId is not null:
+                    // Task 092: the only refusal that carries an invoice: the commit landed but its Stored File cannot be made servable.
+                    return await FailUnservableAsync(job, submissionId, persisted.ReasonCode ?? SubmissionReasonCodes.FileUnservable, stopwatch, ct)
+                        .ConfigureAwait(false);
+
                 case SubmissionPersistStatus.Refused:
                     return await FailAsync(job, submissionId, persisted.ReasonCode ?? SubmissionReasonCodes.ProcessingFailed, linked, stopwatch, ct).ConfigureAwait(false);
 
@@ -336,6 +354,10 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
             case SubmissionAfterStepsStatus.SubmissionMissing:
                 _logger.LogInformation("Invoice submission job {JobId}: submission {SubmissionId} vanished during the after-steps; nothing to do", job.JobId, submissionId);
                 return Done(job, stopwatch);
+
+            case SubmissionAfterStepsStatus.Refused when result.ReasonCode == SubmissionReasonCodes.FileUnservable:
+                // Task 092: the resume's flip gate found the invoice's PDF unservable for good. Failed, the one exception (see the remarks).
+                return await FailUnservableAsync(job, submissionId, SubmissionReasonCodes.FileUnservable, stopwatch, ct).ConfigureAwait(false);
 
             case SubmissionAfterStepsStatus.Refused:
                 // Both callers reach here only with the invoice linked (Committed / Retry-with-invoice / Resumed / a Processing+link resume).
@@ -398,6 +420,20 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
         }
 
         _logger.LogWarning("Invoice submission job {JobId}: submission {SubmissionId} Failed ({ReasonCode})", job.JobId, submissionId, reasonCode);
+        await MarkFailedAsync(submissionId, reasonCode, ct).ConfigureAwait(false);
+        return JobOutcome.Poisoned(job.JobId, JobType, reasonCode, job.Attempt, stopwatch.Elapsed);
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 092 (procedure-and-file-model 9.1 step 6): the invoice is committed but its uploaded PDF's Stored File could not be
+    /// flipped to Servable, definitively. The ONE case in which a submission that links its invoice is marked Failed: the model ends it Failed
+    /// with <see cref="SubmissionReasonCodes.FileUnservable"/> and runs no after-step; the row stays Not yet servable for the file store's
+    /// detector. A redelivery finds it Failed (terminal) and does nothing.
+    /// </summary>
+    private async Task<JobOutcome> FailUnservableAsync(JobContract job, Guid submissionId, string reasonCode, Stopwatch stopwatch, CancellationToken ct)
+    {
+        _logger.LogError("Invoice submission job {JobId}: submission {SubmissionId} links its invoice but its PDF cannot be made servable ({ReasonCode}); Failed",
+            job.JobId, submissionId, reasonCode);
         await MarkFailedAsync(submissionId, reasonCode, ct).ConfigureAwait(false);
         return JobOutcome.Poisoned(job.JobId, JobType, reasonCode, job.Attempt, stopwatch.Elapsed);
     }
@@ -479,8 +515,9 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
     }
 
     /// <summary>
-    /// Invariant: only called before an invoice is linked (every caller checks, or runs before the persister); a linked submission is never marked
-    /// Failed, so this write is unconditional - it carries no status or version condition because nothing else may have decided the submission.
+    /// Invariant: only called before an invoice is linked (every caller checks, or runs before the persister), or by
+    /// <see cref="FailUnservableAsync"/> (task 092), whose submission no after-step has finished (it never left Processing). The write is
+    /// unconditional - it carries no status or version condition.
     /// </summary>
     private Task MarkFailedAsync(Guid submissionId, string reasonCode, CancellationToken ct) =>
         _entities.UpdateAsync(FinanceBaseValues.SubmissionEntity, submissionId, new Dictionary<string, object>
@@ -525,12 +562,19 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
         status is (int)InvoiceSubmissionStatus.Accepted or (int)InvoiceSubmissionStatus.Rejected or (int)InvoiceSubmissionStatus.Failed;
 
     /// <summary>
-    /// Step 1a, as <c>InvoiceExtractionJobHandler</c> does it: the document row, its pointer's container verified FIRST (the download follows
-    /// the pointer as the application; fail closed, permanent), then the bytes. Called by the processor only after the flag and the row passed.
+    /// Step 1a. An upload (task 092): the blob the intake staged in the Finance file store, read through
+    /// <see cref="StoredFileService.OpenStagedForProcessingAsync"/> (scan verdict and staged hash checked there). An existing-document
+    /// submission (050a), as <c>InvoiceExtractionJobHandler</c> does it: the document row, its pointer's container verified FIRST (the
+    /// download follows the pointer as the application; fail closed, permanent), then the bytes. Called by the processor only after the flag
+    /// and the row passed.
     /// </summary>
     private async Task<InvoiceReadRequest> LoadDocumentAsync(SubmissionSnapshot snapshot, CancellationToken ct)
     {
-        var documentId = snapshot.DocumentId;
+        if (snapshot.DocumentId is not { } documentId)
+        {
+            return await LoadUploadAsync(snapshot, ct).ConfigureAwait(false);
+        }
+
         var document = await _documents.GetDocumentAsync(documentId.ToString(), ct).ConfigureAwait(false);
         if (document is null || string.IsNullOrEmpty(document.GraphDriveId) || string.IsNullOrEmpty(document.GraphItemId))
         {
@@ -559,6 +603,40 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
             return string.IsNullOrWhiteSpace(document.MimeType)
                 ? new InvoiceReadRequest { Content = buffer.ToArray(), DocumentId = documentId }
                 : new InvoiceReadRequest { Content = buffer.ToArray(), DocumentId = documentId, ContentType = document.MimeType };
+        }
+    }
+
+    /// <summary>
+    /// Task 092 (model 4.2, 9.2): the upload's bytes from the file store, by the deterministic id and parent the intake staged them under.
+    /// The bytes go inline to the reader as before; the reader's document id (logged only) is the Stored File id.
+    /// </summary>
+    private async Task<InvoiceReadRequest> LoadUploadAsync(SubmissionSnapshot snapshot, CancellationToken ct)
+    {
+        var fileId = StoredFileIds.ForUpload(snapshot.SubmissionId);
+        var parent = new StoredFileParent(StoredFileParentKind.Invoice, InvoiceSubmissionPersister.InvoiceIdFor(snapshot.SubmissionId));
+        var read = await _files.OpenStagedForProcessingAsync(StoredFilePurpose.InvoicePdf, parent, fileId, ct).ConfigureAwait(false);
+        switch (read.Outcome)
+        {
+            case StoredFileProcessingOutcome.Ok when read.Content is { } content:
+                return new InvoiceReadRequest
+                {
+                    Content = content.ToArray(),
+                    ContentType = string.IsNullOrWhiteSpace(read.ContentType) ? InvoiceSubmissionService.PdfContentType : read.ContentType,
+                    DocumentId = fileId,
+                };
+
+            case StoredFileProcessingOutcome.Pending:
+                // No scan verdict yet (or the blob changed since its verdict): the broker redelivers and the scan catches up.
+                _logger.LogInformation("Invoice submission {SubmissionId}: its PDF {FileId} has no scan verdict yet; retry", snapshot.SubmissionId, fileId);
+                throw new SubmissionStepFailure(SubmissionReasonCodes.ProcessingFailed, permanent: false);
+
+            case StoredFileProcessingOutcome.Malicious:
+                _logger.LogWarning("Invoice submission {SubmissionId}: its PDF {FileId} was scanned Malicious; not read", snapshot.SubmissionId, fileId);
+                throw new SubmissionStepFailure(SubmissionReasonCodes.FileMalicious, permanent: true);
+
+            default:
+                _logger.LogError("Invoice submission {SubmissionId}: its PDF {FileId} is missing or does not match its staged hash", snapshot.SubmissionId, fileId);
+                throw new SubmissionStepFailure(SubmissionReasonCodes.DocumentUnavailable, permanent: true);
         }
     }
 

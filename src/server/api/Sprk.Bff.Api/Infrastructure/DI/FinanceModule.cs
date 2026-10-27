@@ -29,10 +29,10 @@ public static class FinanceModule
         //           ExtractionDeploymentName
         // task 061 fail-fast sweep: canonical AddOptions chain with ValidateOnStart. No member is required (all have
         // safe defaults; InvoiceExtractionPlaybookId is intentionally empty in lower envs, so it is NOT [Required]).
-        // ebilling-r1 task 028: the two eBilling container ids are format-checked only ([RegularExpression], b!…) —
-        // empty passes, so no stamp fails to boot and IOptionsDriftTests demands no key.
-        // The two container ids must also be distinct from each other and from the email/archive containers
-        // (FinanceOptionsValidator; fails start-up naming both keys).
+        // ebilling-r1 task 028: the eBilling container id (Procedure Library) is format-checked only ([RegularExpression], b!…) —
+        // empty passes, so no stamp fails to boot and IOptionsDriftTests demands no key. It must also be distinct from the
+        // email/archive containers (FinanceOptionsValidator; fails start-up naming both keys). Task 092 retired the second key
+        // (Finance:EbillingOutputContainerId): export files are Stored Files in Finance:FileStore.
         services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<FinanceOptions>, FinanceOptionsValidator>();
         services.AddOptions<FinanceOptions>()
             .Bind(configuration.GetSection(FinanceOptions.SectionName))

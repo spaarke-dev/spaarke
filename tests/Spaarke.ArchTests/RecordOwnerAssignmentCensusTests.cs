@@ -244,7 +244,8 @@ public class RecordOwnerAssignmentCensusTests
         new CensusEntry("InvoiceSubmissionService.cs", "sprk_invoicesubmission", 1, Disposition.Routed,
             "ebilling-r1 task 044 (FR-17): the submission row is built here and created by TrackingNumberAllocator with its number "
             + "(D-87). Its owner is ResolveOwnerAsync ForParents over the one core record it is filed against (secure-if-any) and "
-            + "applied with RecordOwnerResolution.ApplyTo; an unresolved owner refuses (409) before the upload or any write."),
+            + "applied with RecordOwnerResolution.ApplyTo; an unresolved owner refuses (409) before the PDF is staged (task 092: to "
+            + "the Finance file store, no SPE document) or any write."),
         new CensusEntry("SignalEvaluationService.cs", "sprk_spendsignal", 1, Disposition.Routed,
             "Spend signals: a deterministic-id PATCH (idempotent upsert) whose field map binds the matter's team, "
             + "resolved by the caller of UpsertSignalAsync; a refusal skips the evaluation."),
@@ -320,9 +321,11 @@ public class RecordOwnerAssignmentCensusTests
             "ebilling-r1 050a (D-134, moved from InvoiceReviewService with its calls): a reparent (task 146) with the invoice as the "
             + "inherited parent, after the persister's transaction linked the document; a refusal writes nothing."),
         new UnscannedWriter("InvoiceSubmissionPersister.cs",
-            "transaction CreateRequests of sprk_invoice (via 014's BuildCreateRequest), sprk_billingevent and sprk_invoiceapproval rows built with deterministic ids",
+            "transaction CreateRequests of sprk_invoice (via 014's BuildCreateRequest), sprk_billingevent and sprk_invoiceapproval rows built with deterministic ids, "
+            + "and (task 092) an upload's sprk_storedfile row (via StoredFileService.BuildRow, deterministic id StoredFileIds.ForUpload)",
             "ebilling-r1 task 049 part C: ResolveOwnerAsync ForParents over the submission's one core record (secure-if-any), applied with "
-            + "RecordOwnerResolution.ApplyTo to every row; an unresolved owner refuses before the transaction, so nothing is created."),
+            + "RecordOwnerResolution.ApplyTo to every row (BuildRow applies the same owner to the Stored File); an unresolved owner refuses "
+            + "before the transaction, so nothing is created."),
         new UnscannedWriter("InvoiceLineDecisionService.cs",
             "transaction UpsertRequests of sprk_invoicecorrection rows built with deterministic ids (the Accepted-in-bulk rows)",
             "ebilling-r1 task 100: ResolveOwnerAsync ForParents over the invoice's one core record (secure-if-any), applied with "
@@ -2396,8 +2399,8 @@ public class RecordOwnerAssignmentCensusTests
         new PersonBearingWriter("DataverseDocumentsEndpoints.cs", "CreateDocumentAsync", "POST /api/v1/documents caller (oid)"),
         new PersonBearingWriter("InvoiceSubmissionService.cs", "DecideAsync",
             "the submitter of an invoice (ebilling-r1 task 044; the one decision both SubmitAsync and 050a's SubmitExistingDocumentAsync "
-            + "call): the internal caller (oid) or a workforce SPA caller (systemuser); a CIAM contact is recorded as sprk_submitter and "
-            + "the document's sprk_createdbycontact"),
+            + "call): the internal caller (oid) or a workforce SPA caller (systemuser); a CIAM contact is recorded as sprk_submitter "
+            + "(task 092: an upload creates no document; the Stored File the persister creates carries the workforce submitter as its creator person, none for a contact)"),
         new PersonBearingWriter("EventEndpoints.cs", "OwnershipContextFor", "POST /api/v1/events caller (oid)"),
         new PersonBearingWriter("EventEndpoints.cs", "CreateEventInDataverseAsync", "the event and its creation log row"),
         new PersonBearingWriter("EventEndpoints.cs", "ResolveEventLogOwnerAsync", "the caller whose change a log row records"),

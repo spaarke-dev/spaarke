@@ -72,14 +72,21 @@ public static class SubmissionReasonCodes
     /// <summary>The submission's channel is not SPA or Internal, so a rejection could not be classified as rejected or blocked.</summary>
     public const string ChannelUnsupported = "ebilling.submission.channel_unsupported";
 
-    /// <summary>The submission names no document (<c>sprk_document</c>).</summary>
+    /// <summary>
+    /// The submission names no document (<c>sprk_document</c>). Not written since ebilling-r1 task 092 (an upload names no document: its PDF
+    /// is in the file store); kept so a stored value still reads as what it meant.
+    /// </summary>
     public const string DocumentMissing = "ebilling.submission.document_missing";
 
     /// <summary>047: no code set resolved for the submission's core record. Since D-126 not a failure: the cause recorded on
     /// <see cref="CodingNoCodeSetHold"/>.</summary>
     public const string NoCodeSet = LineCodingException.NoCodeSet;
 
-    /// <summary>Part E: the submission's document row is gone or has no SharePoint Embedded file pointer. Permanent.</summary>
+    /// <summary>
+    /// Part E: the submission's document row is gone or has no SharePoint Embedded file pointer. Permanent. Since ebilling-r1 task 092 also: the
+    /// uploaded PDF staged in the file store is missing or its bytes do not match the staged hash, or the submission names a document that is
+    /// not an existing-document confirm (the retired intake shape).
+    /// </summary>
     public const string DocumentUnavailable = "ebilling.submission.document_unavailable";
 
     /// <summary>Part E: the document pointer's container could not be verified (<c>RecordContainerResolver</c>'s check, fail closed). Permanent.</summary>
@@ -87,6 +94,17 @@ public static class SubmissionReasonCodes
 
     /// <summary>Part E: a transient fault outlived the job's last delivery and no invoice was committed.</summary>
     public const string ProcessingFailed = "ebilling.submission.processing_failed";
+
+    /// <summary>
+    /// ebilling-r1 task 092 (procedure-and-file-model 9.1 step 6): the uploaded invoice PDF could not be made servable. Before the commit
+    /// its staged blob is gone or unusable, so no invoice is created; after the commit the flip of its Stored File row failed
+    /// definitively (blob missing, hash mismatch, row not flippable), so the row stays Not yet servable for the reconcile detector and
+    /// the submission is marked Failed although an invoice is linked (the one exception to "a linked submission is never Failed").
+    /// </summary>
+    public const string FileUnservable = "ebilling.submission.file_unservable";
+
+    /// <summary>ebilling-r1 task 092: the uploaded invoice PDF's malware scan said Malicious; it is never read. Permanent; no invoice.</summary>
+    public const string FileMalicious = "ebilling.submission.file_malicious";
 
     // ── Rejected, not read: no invoice (FR-21, D-101) ──
 

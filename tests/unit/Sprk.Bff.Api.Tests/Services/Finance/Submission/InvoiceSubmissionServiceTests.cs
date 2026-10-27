@@ -20,22 +20,25 @@ using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Finance.Files;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Tests.AccessControl;
 using Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
+using Sprk.Bff.Api.Tests.Finance.Files;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Finance.Submission;
 
 /// <summary>
-/// <see cref="InvoiceSubmissionService"/> (ebilling-r1 task 044, FR-17): payload validation (D-91 first), the write order, the row and
-/// job contract task 049 relies on, and compensation (a failure after the upload leaves no Received submission behind).
+/// <see cref="InvoiceSubmissionService"/> (ebilling-r1 task 044, FR-17; task 092 moved the bytes to the Finance file store): payload
+/// validation (D-91 first), the write order, the row and job contract task 049 relies on, and compensation (a failure after the stage
+/// leaves no Received submission and no staged file behind).
 /// </summary>
 /// <remarks>
-/// Maintain-class (ADR-038): these are the intake guarantees every channel relies on. Dataverse, SPE, the allocator and the queue are
-/// substituted at their narrow seams; the validation, the 013 guard and the orchestration are real. Each write double behaves like the
+/// Maintain-class (ADR-038): these are the intake guarantees every channel relies on. Dataverse, the allocator and the queue are
+/// substituted at their narrow seams, and the file store is the real one over an in-memory blob gateway (<see cref="StoredFileRig"/>); the validation, the 013 guard and the orchestration are real. Each write double behaves like the
 /// real service it stands in for: it commits first, then fails or honours the token, so a "failure" can leave a committed write behind
 /// whose reply never arrived.
 /// </remarks>
@@ -46,9 +49,7 @@ public sealed class InvoiceSubmissionServiceTests
     internal static readonly Guid ContactId = Guid.NewGuid();
     private static readonly Guid TeamId = Guid.NewGuid();
     private static readonly Guid RecordTypeId = Guid.NewGuid();
-    private static readonly Guid DocumentId = Guid.NewGuid();
     private static readonly Guid CallerOid = Guid.NewGuid();
-    private const string Drive = "b!matterdrive";
 
     internal static byte[] Pdf(int size = 64)
     {
@@ -62,29 +63,34 @@ public sealed class InvoiceSubmissionServiceTests
     internal sealed class Harness
     {
         public readonly Mock<IGenericEntityService> Entities = new();
-        public readonly Mock<IDocumentDataverseService> Documents = new();
         public readonly Mock<ICommunicationDataverseService> RecordTypes = new();
-        public readonly Mock<ExternalDataService> ExternalData;
-        public readonly Mock<SpeFileStore> Spe;
         public readonly Mock<IRecordOwnershipResolver> Ownership = new();
         public readonly Mock<ITrackingNumberAllocator> Allocator = new();
         public readonly Mock<JobSubmissionService> Jobs;
         public readonly EbillingOptions Options = new() { Enabled = true, MaxSubmissionFileSizeMb = 1 };
 
-        public readonly List<(string Drive, string Name, ConflictBehavior Conflict)> Uploads = new();
-        public readonly List<(string Drive, string Item)> FileDeletes = new();
+        /// <summary>
+        /// ebilling-r1 task 092: the Finance file store the uploads stage into (the real <see cref="StoredFileService"/> over an in-memory
+        /// blob gateway and Dataverse). Replace it before <see cref="Build"/> for an unconfigured store.
+        /// </summary>
+        public StoredFileRig Files { get; set; } = new();
+
         public readonly List<(string Entity, Guid Id)> Deleted = new();
-        public readonly List<CreateDocumentRequest> DocumentCreates = new();
-        public readonly List<(string Id, UpdateDocumentRequest Request)> DocumentUpdates = new();
-        public readonly List<(ExternalDataService.DocumentParentKind Kind, Guid Parent, ExternalUploadedFilePointers Pointers, Guid Team)> ExternalCreates = new();
         public readonly List<(Guid SubmissionId, Guid FirmId, string Number, IReadOnlyDictionary<string, object>? Fields)> Allocations = new();
         public readonly List<JobContract> JobsSent = new();
         public readonly List<RecordOwnershipContext> OwnerContexts = new();
-        public readonly List<string> PathLookups = new();
         public readonly List<CancellationToken> WriteTokens = new();
 
+        /// <summary>Every stage the intake asked the file store for (one write-once blob create each), as "container/name".</summary>
+        public IReadOnlyList<string> Stages => BlobCalls("create");
+
+        /// <summary>Every staged-blob delete (compensation), as "container/name".</summary>
+        public IReadOnlyList<string> BlobDeletes => BlobCalls("delete");
+
+        private List<string> BlobCalls(string op) =>
+            Files.Gateway.Calls.Where(c => c.StartsWith(op + " ", StringComparison.Ordinal)).Select(c => c[(op.Length + 1)..]).ToList();
+
         public RecordOwnerResolution OwnerAnswer = RecordOwnerResolution.Owned(TeamId);
-        public ContainerDecision Container = new(ContainerDecisionOutcome.ResolvedFallback, Drive);
         public TrackingNumberResult Allocation = TrackingNumberResult.Created("INV-1.1", 1);
         public Entity? Firm = new("sprk_organization", FirmId) { ["statecode"] = new OptionSetValue(0) };
         public Entity? Matter = new("sprk_matter", MatterId) { ["sprk_mattername"] = "Acme v. Roe", ["sprk_matternumber"] = "M-1" };
@@ -153,13 +159,8 @@ public sealed class InvoiceSubmissionServiceTests
         public Exception? SubmissionReadFailure;
         public Exception? MatterReadFailure;
         public Exception? JobFailure;
-        public Exception? DocumentCreateFailure;
-        public Exception? DocumentUpdateFailure;
         public Exception? AllocatorFailure;
-        public Exception? UploadFailure;
-        public Exception? ExternalCreateFailure;
         public Exception? FirmReadFailure;
-        public Action? OnUpload;
 
         /// <summary>
         /// The assigned law firms (<c>sprk_assignedlawfirm1/2</c>) of each core record, by (table, id) - D-106/D-110. By default the test matter is
@@ -182,7 +183,7 @@ public sealed class InvoiceSubmissionServiceTests
         /// </summary>
         public ExternalParticipationService Participations { get; set; } = null!;
 
-        public int Writes => Uploads.Count + DocumentCreates.Count + ExternalCreates.Count + Allocations.Count + JobsSent.Count;
+        public int Writes => Stages.Count + Allocations.Count + JobsSent.Count;
 
         public Harness()
         {
@@ -208,90 +209,6 @@ public sealed class InvoiceSubmissionServiceTests
                 });
             Participations = participations.Object;
 
-            var gcf = Mock.Of<IGraphClientFactory>();
-            Spe = new Mock<SpeFileStore>(
-                MockBehavior.Strict,
-                new ContainerOperations(gcf, TestSpeOwnership.AllowAll(gcf), Mock.Of<ILogger<ContainerOperations>>()),
-                new DriveItemOperations(gcf, TestSpeOwnership.AllowAll(gcf), Mock.Of<ILogger<DriveItemOperations>>()),
-                new UploadSessionManager(gcf, TestSpeOwnership.AllowAll(gcf), Mock.Of<IHttpClientFactory>(), Mock.Of<ILogger<UploadSessionManager>>()),
-                new UserOperations(gcf, Mock.Of<ILogger<UserOperations>>()),
-                null!);
-            Spe.Setup(s => s.UploadSmallAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<ConflictBehavior>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((string drive, string name, Stream content, ConflictBehavior conflict, CancellationToken ct) =>
-                {
-                    Uploads.Add((drive, name, conflict));
-                    WriteTokens.Add(ct);
-                    OnUpload?.Invoke();
-                    if (UploadFailure is not null)
-                    {
-                        throw UploadFailure;
-                    }
-
-                    ct.ThrowIfCancellationRequested();
-                    return new FileHandleDto("item-1", name, null, content.Length, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, null, false, "https://web/item-1", drive);
-                });
-            Spe.Setup(s => s.DeleteFileAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((string drive, string item, CancellationToken _) =>
-                {
-                    FileDeletes.Add((drive, item));
-                    return true;
-                });
-            // The item an upload committed sits at its path whether or not the upload's reply arrived.
-            Spe.Setup(s => s.GetDriveItemByPathAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((string drive, string path, CancellationToken _) =>
-                {
-                    PathLookups.Add(path);
-                    return Uploads.Any(u => u.Drive == drive && u.Name == path)
-                        ? new SpeDriveItemSummary("item-1", path, null, null, null, "application/pdf", null, null, null)
-                        : null;
-                });
-
-            ExternalData = new Mock<ExternalDataService>(
-                new HttpClient(), new ConfigurationBuilder().Build(), Mock.Of<TokenCredential>(), NullLogger<ExternalDataService>.Instance, null!, null!,
-                null!); // Moq matches every constructor parameter, the optional ones included (task 188 added the identity resolver)
-            ExternalData.Setup(x => x.CreateDocumentAsync(
-                    It.IsAny<ExternalDataService.DocumentParentKind>(), It.IsAny<Guid>(), It.IsAny<ExternalUploadedFilePointers>(), It.IsAny<Guid>(),
-                    It.IsAny<CallerPrincipal>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((ExternalDataService.DocumentParentKind kind, Guid parent, ExternalUploadedFilePointers pointers, Guid team, CallerPrincipal _, CancellationToken ct) =>
-                {
-                    ExternalCreates.Add((kind, parent, pointers, team));
-                    WriteTokens.Add(ct);
-                    if (ExternalCreateFailure is not null)
-                    {
-                        throw ExternalCreateFailure;
-                    }
-
-                    ct.ThrowIfCancellationRequested();
-                    return new ExternalDocumentDto { SprkDocumentid = DocumentId.ToString() };
-                });
-
-            Documents.Setup(d => d.CreateDocumentAsync(It.IsAny<CreateDocumentRequest>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((CreateDocumentRequest r, CancellationToken ct) =>
-                {
-                    DocumentCreates.Add(r);
-                    WriteTokens.Add(ct);
-                    if (DocumentCreateFailure is not null)
-                    {
-                        throw DocumentCreateFailure;
-                    }
-
-                    ct.ThrowIfCancellationRequested();
-                    return DocumentId.ToString();
-                });
-            Documents.Setup(d => d.UpdateDocumentAsync(It.IsAny<string>(), It.IsAny<UpdateDocumentRequest>(), It.IsAny<CancellationToken>()))
-                .Returns((string id, UpdateDocumentRequest r, CancellationToken ct) =>
-                {
-                    WriteTokens.Add(ct);
-                    if (DocumentUpdateFailure is not null)
-                    {
-                        throw DocumentUpdateFailure;
-                    }
-
-                    DocumentUpdates.Add((id, r));
-                    ct.ThrowIfCancellationRequested();
-                    return Task.CompletedTask;
-                });
-
             RecordTypes.Setup(r => r.QueryRecordTypeRefAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new Entity("sprk_recordtype_ref", RecordTypeId) { [RegardingRecordType.RecordNumberFieldColumn] = "sprk_matternumber" });
 
@@ -314,19 +231,8 @@ public sealed class InvoiceSubmissionServiceTests
                         : Threads.TryGetValue(id, out var thread) ? OnlyColumns(thread, columns) : throw NotFound(),
                     _ => null!,
                 });
-            // The SPA document create stamps the uploaded item on the row (sprk_graphitemid): a committed row is found by it.
             Entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((QueryExpression q, CancellationToken _) =>
-                {
-                    var collection = new EntityCollection();
-                    if (q.EntityName == "sprk_document"
-                        && q.Criteria.Conditions.Any(c => c.AttributeName == "sprk_graphitemid" && c.Values.Contains("item-1")))
-                    {
-                        collection.Entities.AddRange(ExternalCreates.Select(_ => new Entity("sprk_document", DocumentId)));
-                    }
-
-                    return collection;
-                });
+                .ReturnsAsync(new EntityCollection());
             Entities.Setup(e => e.DeleteAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
                 .Callback((string entity, Guid id, CancellationToken _) => Deleted.Add((entity, id)))
                 .Returns(Task.CompletedTask);
@@ -393,34 +299,15 @@ public sealed class InvoiceSubmissionServiceTests
 
         public IOptionsMonitor<EbillingOptions> Monitor => Mock.Of<IOptionsMonitor<EbillingOptions>>(m => m.CurrentValue == Options);
 
-        public InvoiceSubmissionService Build()
-        {
-            var monitor = Monitor;
-            var containers = new RecordContainerResolver(
-                Mock.Of<ISecurableEntityRegistry>(), Mock.Of<IGenericEntityService>(), NullLogger<RecordContainerResolver>.Instance);
-            return new TestableService(this, Allocator.Object, Entities.Object, Documents.Object, RecordTypes.Object, ExternalData.Object,
-                Participations, Spe.Object, containers, Ownership.Object, IsolationOver(() => Isolation), Jobs.Object, monitor);
-        }
+        public InvoiceSubmissionService Build() =>
+            new(Allocator.Object, Entities.Object, RecordTypes.Object, Participations, Files.Service, Ownership.Object,
+                IsolationOver(() => Isolation), Jobs.Object, Monitor, NullLogger<InvoiceSubmissionService>.Instance);
 
-        private sealed class TestableService(
-            Harness harness,
-            ITrackingNumberAllocator allocator,
-            IGenericEntityService entities,
-            IDocumentDataverseService documents,
-            ICommunicationDataverseService recordTypes,
-            ExternalDataService externalData,
-            ExternalParticipationService participations,
-            SpeFileStore spe,
-            RecordContainerResolver containers,
-            IRecordOwnershipResolver ownership,
-            ExistingDocumentIsolationCheck isolation,
-            JobSubmissionService jobs,
-            IOptionsMonitor<EbillingOptions> ebilling)
-            : InvoiceSubmissionService(allocator, entities, documents, recordTypes, externalData, participations, spe, containers, ownership, isolation,
-                jobs, ebilling, NullLogger<InvoiceSubmissionService>.Instance)
+        /// <summary>The container and name the upload of <paramref name="submissionId"/> is staged under (the job derives the same).</summary>
+        public (string Container, string Name) StagedName(Guid submissionId)
         {
-            internal override Task<ContainerDecision> ResolveContainerAsync(InvoiceCoreRecord core, CancellationToken ct) =>
-                Task.FromResult(harness.Container);
+            var spec = InvoiceSubmissionService.UploadFileSpec(submissionId, null, InvoiceSubmissionChannel.Spa);
+            return (StoredFileSchema.ContainerOf(spec.Purpose), StoredFileBlobName.Build(Files.TenantId, spec.Parent, spec.FileId));
         }
     }
 
@@ -465,7 +352,7 @@ public sealed class InvoiceSubmissionServiceTests
     // ═══════════════════════════════════════════════════════════════════════════
 
     [Fact]
-    public async Task Spa_submission_is_received_with_document_row_and_one_job()
+    public async Task Spa_submission_is_received_with_a_staged_file_no_document_and_one_job()
     {
         var h = new Harness();
 
@@ -474,30 +361,30 @@ public sealed class InvoiceSubmissionServiceTests
         outcome.Kind.Should().Be(InvoiceSubmissionOutcomeKind.Received);
         var receipt = outcome.Receipt!;
         receipt.TrackingNumber.Should().Be("INV-1.1");
-        receipt.DocumentId.Should().Be(DocumentId);
+        receipt.DocumentId.Should().BeNull("an upload creates no sprk_document (ebilling-r1 task 092)");
 
-        // The bytes: once, into the core record's container, under a flat name unique to this submission, never overwriting.
-        h.Uploads.Should().ContainSingle();
-        h.Uploads[0].Drive.Should().Be(Drive);
-        h.Uploads[0].Conflict.Should().Be(ConflictBehavior.Fail);
-        h.Uploads[0].Name.Should().Be($"May invoice-{receipt.SubmissionId:N}.pdf");
+        // The bytes: staged once in the Finance file store, under the submission's upload id with the invoice the job creates as parent,
+        // carrying the submission id. No Stored File row yet: the job writes it in its commit transaction.
+        var (container, name) = h.StagedName(receipt.SubmissionId);
+        name.Should().Contain(StoredFileIds.ForUpload(receipt.SubmissionId).ToString("D"))
+            .And.Contain(InvoiceSubmissionPersister.InvoiceIdFor(receipt.SubmissionId).ToString("D"));
+        h.Stages.Should().Equal($"{container}/{name}");
+        var blob = h.Files.Gateway.Get(container, name)!;
+        blob.Content.Should().Equal(Pdf());
+        blob.ContentType.Should().Be("application/pdf");
+        blob.Metadata[StoredFileBlobs.MetadataSubmission].Should().Be(receipt.SubmissionId.ToString("D"));
+        h.Files.Dataverse.Writes.Should().Be(0, "the Stored File row is written only inside the job's commit transaction (ADR-002)");
+        h.Entities.Verify(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never, "no document row is created");
 
-        // The document: the external create bound to the matter with the resolved team, then typed Invoice.
-        h.ExternalCreates.Should().ContainSingle().Which.Should().Match<(ExternalDataService.DocumentParentKind Kind, Guid Parent, ExternalUploadedFilePointers Pointers, Guid Team)>(
-            c => c.Kind == ExternalDataService.DocumentParentKind.Matter && c.Parent == MatterId && c.Team == TeamId && c.Pointers.ItemId == "item-1");
-        h.DocumentUpdates.Should().ContainSingle().Which.Request.Should().Match<UpdateDocumentRequest>(
-            u => u.DocumentType == InvoiceSubmissionService.InvoiceDocumentType && u.MimeType == "application/pdf");
-        h.DocumentCreates.Should().BeEmpty();
-
-        // The submission: created through the allocator with the minted id, the firm and the trimmed number (D-87, D-91).
+        // The submission: created through the allocator with the minted id, the firm and the trimmed number (D-87, D-91); no document.
         var allocation = h.Allocations.Should().ContainSingle().Subject;
         allocation.SubmissionId.Should().Be(receipt.SubmissionId);
         allocation.FirmId.Should().Be(FirmId);
         allocation.Number.Should().Be("INV-1");
         var fields = allocation.Fields!;
+        fields.Keys.Should().NotContain("sprk_document", "the upload path's submission names no document");
         ((OptionSetValue)fields["sprk_processingstatus"]).Value.Should().Be((int)InvoiceSubmissionStatus.Received);
         ((OptionSetValue)fields["sprk_channel"]).Value.Should().Be((int)InvoiceSubmissionChannel.Spa);
-        ((EntityReference)fields["sprk_document"]).Id.Should().Be(DocumentId);
         ((EntityReference)fields["sprk_regardingmatter"]).Id.Should().Be(MatterId);
         ((EntityReference)fields["sprk_submitter"]).Should().Match<EntityReference>(r => r.LogicalName == "contact" && r.Id == ContactId);
         ((EntityReference)fields["ownerid"]).Id.Should().Be(TeamId);
@@ -515,31 +402,74 @@ public sealed class InvoiceSubmissionServiceTests
         job.IdempotencyKey.Should().Be(receipt.SubmissionId.ToString());
         job.Payload!.RootElement.GetProperty("submissionId").GetGuid().Should().Be(receipt.SubmissionId);
         h.Deleted.Should().BeEmpty();
-        h.FileDeletes.Should().BeEmpty();
+        h.BlobDeletes.Should().BeEmpty();
     }
 
     private static string[] InvoiceFamilyResolverFieldNames() =>
         new[] { "sprk_regardingrecordtype", "sprk_regardingrecordid", "sprk_regardingrecordname", "sprk_regardingrecordnumber", "sprk_regardingrecordurl" };
 
     [Fact]
-    public async Task Internal_submission_creates_the_document_through_the_shared_seam_and_names_the_caller()
+    public async Task Internal_submission_stages_the_same_way_and_names_the_caller()
     {
         var h = new Harness();
 
         var outcome = await h.Build().SubmitAsync(Internal(), CancellationToken.None);
 
         outcome.Kind.Should().Be(InvoiceSubmissionOutcomeKind.Received);
-        h.ExternalCreates.Should().BeEmpty();
-        h.DocumentCreates.Should().ContainSingle().Which.OwningTeamId.Should().Be(TeamId);
-        h.DocumentUpdates.Should().ContainSingle().Which.Request.Should().Match<UpdateDocumentRequest>(u =>
-            u.MatterLookup == MatterId && u.ProjectLookup == null && u.DocumentType == InvoiceSubmissionService.InvoiceDocumentType
-            && u.GraphItemId == "item-1" && u.HasFile == true);
+        outcome.Receipt!.DocumentId.Should().BeNull();
+        var (container, name) = h.StagedName(outcome.Receipt.SubmissionId);
+        h.Stages.Should().Equal($"{container}/{name}");
         h.OwnerContexts.Should().ContainSingle().Which.RequestedBy!.ObjectId.Should().Be(CallerOid);
         var fields = h.Allocations.Should().ContainSingle().Subject.Fields!;
         ((OptionSetValue)fields["sprk_channel"]).Value.Should().Be((int)InvoiceSubmissionChannel.Internal);
-        fields.Keys.Should().NotContain("sprk_submitter");
+        fields.Keys.Should().NotContain(new[] { "sprk_submitter", "sprk_document" });
         h.JobsSent.Should().ContainSingle();
     }
+
+    [Fact]
+    public void The_intake_has_no_way_to_reach_SharePoint_Embedded_or_create_a_document()
+    {
+        // Task 092: the upload channels stage through the file store only. The type takes none of the SPE / document seams it used to.
+        var parameters = typeof(InvoiceSubmissionService).GetConstructors().SelectMany(c => c.GetParameters()).Select(p => p.ParameterType).ToList();
+
+        parameters.Should().Contain(typeof(StoredFileService));
+        parameters.Should().NotContain(new[]
+        {
+            typeof(SpeFileStore), typeof(IDocumentDataverseService), typeof(ExternalDataService), typeof(RecordContainerResolver),
+        });
+    }
+
+    [Theory]
+    [InlineData(InvoiceSubmissionChannel.Spa, true)]
+    [InlineData(InvoiceSubmissionChannel.Internal, false)]
+    public void The_upload_spec_is_the_invoice_pdf_of_the_invoice_to_be_and_firm_visible_only_from_the_spa(InvoiceSubmissionChannel channel, bool firmVisible)
+    {
+        var submissionId = Guid.NewGuid();
+
+        var spec = InvoiceSubmissionService.UploadFileSpec(submissionId, "May invoice.pdf", channel, "INV-1.1");
+
+        spec.Invalid().Should().BeNull();
+        spec.FileId.Should().Be(StoredFileIds.ForUpload(submissionId));
+        spec.Purpose.Should().Be(StoredFilePurpose.InvoicePdf);
+        spec.Parent.Should().Be(new StoredFileParent(StoredFileParentKind.Invoice, InvoiceSubmissionPersister.InvoiceIdFor(submissionId)));
+        spec.FirmVisible.Should().Be(firmVisible);
+        spec.SubmissionId.Should().Be(submissionId);
+        spec.ContentType.Should().Be("application/pdf");
+        spec.Name.Should().Be("INV-1.1.pdf", "the job, which writes the row, names it by the tracking number");
+        spec.SourceDocumentId.Should().BeNull("an upload has no source document");
+    }
+
+    [Theory]
+    [InlineData(null, "May invoice.pdf", "May invoice.pdf")]
+    [InlineData(" INV-7.2 ", "May invoice.pdf", "INV-7.2.pdf")]
+    [InlineData(null, null, "invoice.pdf")]
+    [InlineData("", ".pdf", "invoice.pdf")]
+    public void The_upload_name_is_the_tracking_number_else_the_client_stem_else_invoice(string? trackingNumber, string? clientFileName, string expected) =>
+        InvoiceSubmissionService.UploadName(clientFileName, trackingNumber).Should().Be(expected);
+
+    [Fact]
+    public void A_long_upload_name_is_cut_to_100_characters_before_the_extension() =>
+        InvoiceSubmissionService.UploadName(new string('a', 150) + ".pdf", null).Should().Be(new string('a', 100) + ".pdf");
 
     [Theory]
     [InlineData(true)]
@@ -560,7 +490,7 @@ public sealed class InvoiceSubmissionServiceTests
         outcome.Should().Match<InvoiceSubmissionOutcome>(o =>
             o.StatusCode == StatusCodes.Status403Forbidden && o.ErrorCode == InvoiceSubmissionErrors.UseInternalRoute);
         h.Writes.Should().Be(0);
-        h.DocumentUpdates.Should().BeEmpty();
+        h.Files.Gateway.StorageCalls.Should().Be(0);
         h.Entities.Invocations.Should().BeEmpty("a systemuser costs no read on the external entry point");
         h.LinkReads.Should().BeEmpty();
     }
@@ -688,17 +618,41 @@ public sealed class InvoiceSubmissionServiceTests
         h.Writes.Should().Be(0);
     }
 
-    [Theory]
-    [InlineData(ContainerDecisionOutcome.FailClosed)]
-    [InlineData(ContainerDecisionOutcome.Unresolved)]
-    public async Task No_usable_container_is_422_storage_not_configured(ContainerDecisionOutcome decision)
+    [Fact]
+    public async Task An_unconfigured_file_store_is_422_storage_not_configured_and_nothing_is_written()
     {
-        var h = new Harness { Container = new ContainerDecision(decision, null) };
+        // The status and code the route answered when no SPE container resolved (044), so the external route contract is unchanged.
+        var h = new Harness { Files = new StoredFileRig(configured: false) };
 
         var outcome = await h.Build().SubmitAsync(Spa(), CancellationToken.None);
 
         outcome.Should().Match<InvoiceSubmissionOutcome>(o => o.StatusCode == 422 && o.ErrorCode == InvoiceSubmissionErrors.StorageNotConfigured);
         h.Writes.Should().Be(0);
+        h.Files.Gateway.StorageCalls.Should().Be(0);
+        h.Deleted.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task A_stage_the_store_refuses_is_500_and_leaves_the_blob_already_there_untouched()
+    {
+        // Another blob already holds the name with other bytes (ContentConflict): the stage writes nothing and nothing of it is ours to delete.
+        var h = new Harness();
+        h.Files.Gateway.BeforeOp = (op, path) =>
+        {
+            if (op == "create" && h.Files.Gateway.Get(path[..path.IndexOf('/')], path[(path.IndexOf('/') + 1)..]) is null)
+            {
+                h.Files.Gateway.Seed(path[..path.IndexOf('/')], path[(path.IndexOf('/') + 1)..], "%PDF-other"u8.ToArray(),
+                    new Dictionary<string, string> { [StoredFileBlobs.MetadataSha256] = new string('0', 64) });
+            }
+        };
+
+        var outcome = await h.Build().SubmitAsync(Spa(), CancellationToken.None);
+
+        outcome.Should().Match<InvoiceSubmissionOutcome>(o => o.StatusCode == 500 && o.ErrorCode == InvoiceSubmissionErrors.Failed);
+        h.Allocations.Should().BeEmpty();
+        h.JobsSent.Should().BeEmpty();
+        h.BlobDeletes.Should().BeEmpty("a refused stage wrote nothing, so there is nothing of this request's to remove");
+        h.Files.Gateway.Names.Should().ContainSingle("the other blob is left as it was");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -905,65 +859,55 @@ public sealed class InvoiceSubmissionServiceTests
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // Compensation: a failure after the upload leaves no Received submission, document or file
+    // Compensation: a failure after the stage leaves no Received submission and no staged file
     // ═══════════════════════════════════════════════════════════════════════════
 
     [Fact]
-    public async Task No_tracking_number_removes_the_document_and_the_file_and_enqueues_nothing()
+    public async Task No_tracking_number_removes_the_staged_file_and_enqueues_nothing()
     {
         var h = new Harness { Allocation = TrackingNumberResult.Refused(TrackingNumberReasons.Unavailable) };
 
         var outcome = await h.Build().SubmitAsync(Spa(), CancellationToken.None);
 
         outcome.Should().Match<InvoiceSubmissionOutcome>(o => o.StatusCode == 503 && o.ErrorCode == TrackingNumberReasons.Unavailable);
-        h.Deleted.Should().Equal(("sprk_document", DocumentId));
-        h.FileDeletes.Should().Equal((Drive, "item-1"));
+        var (container, name) = h.StagedName(h.Allocations.Single().SubmissionId);
+        h.Deleted.Should().BeEmpty("a refused allocation created no row");
+        h.BlobDeletes.Should().Equal($"{container}/{name}");
+        h.Files.Gateway.Names.Should().BeEmpty();
         h.JobsSent.Should().BeEmpty();
     }
 
     [Fact]
-    public async Task A_failed_enqueue_removes_the_submission_the_document_and_the_file_in_reverse_order()
+    public async Task A_failed_enqueue_removes_the_submission_then_the_staged_file()
     {
         var h = new Harness { JobFailure = new ServiceBusException("queue down", ServiceBusFailureReason.ServiceCommunicationProblem) };
+        var order = new List<string>();
+        h.Entities.Setup(e => e.DeleteAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Callback((string entity, Guid id, CancellationToken _) =>
+            {
+                order.Add(entity);
+                h.Deleted.Add((entity, id));
+            })
+            .Returns(Task.CompletedTask);
+        h.Files.Gateway.BeforeOp = (op, _) =>
+        {
+            if (op == "delete")
+            {
+                order.Add("blob");
+            }
+        };
 
         var outcome = await h.Build().SubmitAsync(Spa(), CancellationToken.None);
 
         outcome.Should().Match<InvoiceSubmissionOutcome>(o => o.StatusCode == 500 && o.ErrorCode == InvoiceSubmissionErrors.Failed);
         var submissionId = h.Allocations.Single().SubmissionId;
-        h.Deleted.Should().Equal(("sprk_invoicesubmission", submissionId), ("sprk_document", DocumentId));
-        h.FileDeletes.Should().Equal((Drive, "item-1"));
+        h.Deleted.Should().Equal(("sprk_invoicesubmission", submissionId));
+        order.Should().Equal("sprk_invoicesubmission", "blob");
+        h.Files.Gateway.Names.Should().BeEmpty();
     }
 
     [Fact]
-    public async Task A_failed_document_create_removes_the_file_and_never_creates_a_submission()
-    {
-        var h = new Harness { DocumentCreateFailure = new InvalidOperationException("dataverse down") };
-
-        var outcome = await h.Build().SubmitAsync(Internal(), CancellationToken.None);
-
-        outcome.ErrorCode.Should().Be(InvoiceSubmissionErrors.Failed);
-        h.Allocations.Should().BeEmpty();
-        h.FileDeletes.Should().Equal((Drive, "item-1"));
-        h.JobsSent.Should().BeEmpty();
-    }
-
-    [Theory]
-    [InlineData(InvoiceSubmissionChannel.Spa)]
-    [InlineData(InvoiceSubmissionChannel.Internal)]
-    public async Task A_failed_document_update_removes_the_document_row_it_created_and_the_file(InvoiceSubmissionChannel channel)
-    {
-        var h = new Harness { DocumentUpdateFailure = new TimeoutException("throttled") };
-
-        var outcome = await h.Build().SubmitAsync(channel == InvoiceSubmissionChannel.Spa ? Spa() : Internal(), CancellationToken.None);
-
-        outcome.ErrorCode.Should().Be(InvoiceSubmissionErrors.Failed);
-        h.Deleted.Should().Equal(("sprk_document", DocumentId));
-        h.FileDeletes.Should().Equal((Drive, "item-1"));
-        h.Allocations.Should().BeEmpty();
-    }
-
-    [Fact]
-    public async Task A_submission_create_whose_reply_is_lost_is_deleted_by_its_id()
+    public async Task A_submission_create_whose_reply_is_lost_is_deleted_by_its_id_and_its_file_removed()
     {
         // The allocator's create may have committed before the timeout: the row would be Received with no job.
         var h = new Harness { AllocatorFailure = new TimeoutException("the create timed out after Dataverse committed it") };
@@ -972,65 +916,58 @@ public sealed class InvoiceSubmissionServiceTests
 
         outcome.ErrorCode.Should().Be(InvoiceSubmissionErrors.Failed);
         var submissionId = h.Allocations.Single().SubmissionId;
-        h.Deleted.Should().Equal(("sprk_invoicesubmission", submissionId), ("sprk_document", DocumentId));
+        h.Deleted.Should().Equal(("sprk_invoicesubmission", submissionId));
+        h.Files.Gateway.Names.Should().BeEmpty();
         h.JobsSent.Should().BeEmpty();
     }
 
     [Fact]
-    public async Task An_internal_document_create_carries_its_id_so_a_create_whose_reply_is_lost_is_deleted_by_it()
+    public async Task A_stage_fault_creates_no_submission()
     {
-        var h = new Harness { DocumentCreateFailure = new TimeoutException("the create timed out after Dataverse committed it") };
+        var h = new Harness();
+        h.Files.Gateway.FailOp["create"] = new Azure.RequestFailedException(503, "storage unavailable");
 
         var outcome = await h.Build().SubmitAsync(Internal(), CancellationToken.None);
 
-        outcome.ErrorCode.Should().Be(InvoiceSubmissionErrors.Failed);
-        var presetId = h.DocumentCreates.Should().ContainSingle().Subject.Id;
-        presetId.Should().NotBeNull().And.NotBe(Guid.Empty);
-        h.Deleted.Should().Equal(("sprk_document", presetId!.Value));
-        h.FileDeletes.Should().Equal((Drive, "item-1"));
+        outcome.Should().Match<InvoiceSubmissionOutcome>(o => o.StatusCode == 500 && o.ErrorCode == InvoiceSubmissionErrors.Failed);
+        h.Allocations.Should().BeEmpty();
+        h.JobsSent.Should().BeEmpty();
+        h.Files.Gateway.Names.Should().BeEmpty();
     }
 
     [Fact]
-    public async Task A_spa_document_create_whose_reply_is_lost_is_found_by_its_file_and_deleted()
+    public async Task A_stage_whose_reply_is_lost_is_removed_by_its_name()
     {
-        // The external create mints the id itself; the committed row carries the uploaded item.
-        var h = new Harness { ExternalCreateFailure = new TimeoutException("the create timed out after Dataverse committed it") };
+        // The create committed the blob, then the reply was lost: compensation removes it by its deterministic name.
+        var h = new Harness();
+        h.Files.Gateway.BeforeOp = (op, path) =>
+        {
+            if (op == "create")
+            {
+                h.Files.Gateway.Seed(path[..path.IndexOf('/')], path[(path.IndexOf('/') + 1)..], Pdf());
+            }
+        };
+        h.Files.Gateway.FailOp["create"] = new TimeoutException("the PUT timed out after storage committed it");
 
         var outcome = await h.Build().SubmitAsync(Spa(), CancellationToken.None);
 
         outcome.ErrorCode.Should().Be(InvoiceSubmissionErrors.Failed);
-        h.Deleted.Should().Equal(("sprk_document", DocumentId));
-        h.FileDeletes.Should().Equal((Drive, "item-1"));
+        h.BlobDeletes.Should().ContainSingle();
+        h.Files.Gateway.Names.Should().BeEmpty();
         h.Allocations.Should().BeEmpty();
     }
 
     [Fact]
-    public async Task An_upload_whose_reply_is_lost_is_found_by_its_path_and_deleted()
+    public async Task A_cleanup_that_fails_never_masks_the_original_failure()
     {
-        var h = new Harness { UploadFailure = new TimeoutException("the PUT timed out after Graph stored the bytes") };
+        var h = new Harness { JobFailure = new ServiceBusException("queue down", ServiceBusFailureReason.ServiceCommunicationProblem) };
+        h.Files.Gateway.FailOp["delete"] = new Azure.RequestFailedException(503, "storage unavailable");
 
         var outcome = await h.Build().SubmitAsync(Spa(), CancellationToken.None);
 
         outcome.Should().Match<InvoiceSubmissionOutcome>(o => o.StatusCode == 500 && o.ErrorCode == InvoiceSubmissionErrors.Failed);
-        h.PathLookups.Should().Equal(h.Uploads.Single().Name);
-        h.FileDeletes.Should().Equal((Drive, "item-1"));
-        h.ExternalCreates.Should().BeEmpty();
-        h.Allocations.Should().BeEmpty();
-    }
-
-    [Fact]
-    public async Task An_upload_answered_409_by_a_retried_put_removes_its_own_file_and_refuses()
-    {
-        // The name carries the submission id, so a 409 means this request's own first PUT committed and the handler's retry collided with it.
-        var h = new Harness { UploadFailure = new SpaarkeStorageException("nameAlreadyExists", 409) };
-
-        var outcome = await h.Build().SubmitAsync(Spa(), CancellationToken.None);
-
-        outcome.Should().Match<InvoiceSubmissionOutcome>(o => o.StatusCode == 409 && o.ErrorCode == InvoiceSubmissionErrors.Failed);
-        h.PathLookups.Should().Equal(h.Uploads.Single().Name);
-        h.FileDeletes.Should().Equal((Drive, "item-1"));
-        h.ExternalCreates.Should().BeEmpty();
-        h.Allocations.Should().BeEmpty();
+        h.Deleted.Should().ContainSingle("the submission is still removed");
+        h.Files.Gateway.Names.Should().ContainSingle("the blob the failed delete kept is left for the reconcile job");
     }
 
     [Theory]
@@ -1038,23 +975,30 @@ public sealed class InvoiceSubmissionServiceTests
     [InlineData(InvoiceSubmissionChannel.Internal)]
     public async Task A_caller_who_disconnects_mid_write_gets_a_complete_submission_not_orphans(InvoiceSubmissionChannel channel)
     {
-        // The tab closes while the bytes upload. Every later write still runs to the end: an abandoned write may commit with its reply
-        // (the id compensation would need) lost.
+        // The tab closes while the bytes are staged. Every later write still runs to the end: an abandoned write may commit with its reply
+        // lost. The in-memory stage copies the bytes under the token it was given, so a stage that observed the caller's token would fail here.
         var h = new Harness();
         using var cts = new CancellationTokenSource();
-        h.OnUpload = cts.Cancel;
+        h.Files.Gateway.BeforeOp = (op, _) =>
+        {
+            if (op == "create")
+            {
+                cts.Cancel();
+            }
+        };
 
         var outcome = await h.Build().SubmitAsync(channel == InvoiceSubmissionChannel.Spa ? Spa() : Internal(), cts.Token);
 
         outcome.Kind.Should().Be(InvoiceSubmissionOutcomeKind.Received);
         h.JobsSent.Should().ContainSingle();
         h.Deleted.Should().BeEmpty();
-        h.FileDeletes.Should().BeEmpty();
-        h.WriteTokens.Should().HaveCount(5).And.OnlyContain(t => !t.CanBeCanceled, "no write observes the caller's token");
+        h.BlobDeletes.Should().BeEmpty();
+        h.Files.Gateway.Names.Should().ContainSingle();
+        h.WriteTokens.Should().HaveCount(2).And.OnlyContain(t => !t.CanBeCanceled, "no write observes the caller's token");
     }
 
     [Fact]
-    public async Task A_caller_already_gone_before_the_upload_writes_nothing()
+    public async Task A_caller_already_gone_before_the_stage_writes_nothing()
     {
         var h = new Harness();
         using var cts = new CancellationTokenSource();

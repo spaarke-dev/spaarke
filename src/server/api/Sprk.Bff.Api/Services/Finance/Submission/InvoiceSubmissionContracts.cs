@@ -138,7 +138,11 @@ public sealed record InvoiceSubmissionRequest
 }
 
 /// <summary>A submission that was received: the row exists with its tracking number and the processing job is enqueued.</summary>
-public sealed record InvoiceSubmissionReceipt(Guid SubmissionId, Guid JobId, string TrackingNumber, Guid DocumentId);
+/// <param name="DocumentId">
+/// The confirmed document of the existing-document entry (050a). <c>null</c> for an upload: since ebilling-r1 task 092 an uploaded PDF
+/// is staged in the Finance file store (<c>sprk_storedfile</c>, created with the invoice by the job), and no document is created.
+/// </param>
+public sealed record InvoiceSubmissionReceipt(Guid SubmissionId, Guid JobId, string TrackingNumber, Guid? DocumentId);
 
 /// <summary>How a submission ended.</summary>
 public enum InvoiceSubmissionOutcomeKind
