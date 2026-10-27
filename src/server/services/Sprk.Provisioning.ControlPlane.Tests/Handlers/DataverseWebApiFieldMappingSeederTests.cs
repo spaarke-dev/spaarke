@@ -111,14 +111,24 @@ public sealed class DataverseWebApiFieldMappingSeederTests
 
         using var firstProfileBody = JsonDocument.Parse(profilePosts[0].Body!);
         firstProfileBody.RootElement.GetProperty("sprk_name").GetString().Should().NotBeNullOrEmpty();
-        firstProfileBody.RootElement.GetProperty("sprk_sourcerecordtype@odata.bind").GetString()
+        // T186 L40: the bind names are $metadata's navigation properties, case and all (a lowercase bind is a 400).
+        firstProfileBody.RootElement.GetProperty("sprk_SourceRecordType@odata.bind").GetString()
             .Should().Be($"/sprk_recordtype_refs({RecordTypeIds["sprk_matter"]})");
-        firstProfileBody.RootElement.TryGetProperty("sprk_targetrecordtype@odata.bind", out _).Should().BeTrue();
+        firstProfileBody.RootElement.TryGetProperty("sprk_TargetRecordType@odata.bind", out _).Should().BeTrue();
+        firstProfileBody.RootElement.EnumerateObject().Select(p => p.Name)
+            .Should().NotContain(["sprk_sourcerecordtype@odata.bind", "sprk_targetrecordtype@odata.bind"]);
 
         using var firstRuleBody = JsonDocument.Parse(rulePosts[0].Body!);
         firstRuleBody.RootElement.GetProperty("sprk_mapping_type").GetInt32().Should().Be(0, "Copy");
         firstRuleBody.RootElement.GetProperty("sprk_sourcefieldtype").GetInt32().Should().Be(1, "Lookup");
-        firstRuleBody.RootElement.GetProperty("sprk_targetfieldtype").GetInt32().Should().Be(1, "Lookup");
+        // T186 L57: the target type's option set is 100000000-based (Lookup = 100000001); 1 is refused by Dataverse.
+        firstRuleBody.RootElement.GetProperty("sprk_targetfieldtype").GetInt32().Should().Be(100000001, "Lookup in the target-type option set");
+
+        // T186 L57: a lookup is filtered by _<name>_value; filtering by the logical name is a 400.
+        var ruleGet = fake.Requests.First(r => r.Method == HttpMethod.Get && r.Uri.AbsolutePath.Contains("sprk_fieldmappingrules"));
+        var ruleFilter = Uri.UnescapeDataString(ruleGet.Uri.Query);
+        ruleFilter.Should().Contain("_sprk_fieldmappingprofile_value eq ");
+        ruleFilter.Replace("_sprk_fieldmappingprofile_value", string.Empty).Should().NotContain("sprk_fieldmappingprofile eq");
         firstRuleBody.RootElement.GetProperty("sprk_isactive").GetBoolean().Should().BeTrue();
         firstRuleBody.RootElement.TryGetProperty("sprk_FieldMappingProfile@odata.bind", out var bindEl).Should().BeTrue();
         bindEl.GetString().Should().StartWith("/sprk_fieldmappingprofiles(");

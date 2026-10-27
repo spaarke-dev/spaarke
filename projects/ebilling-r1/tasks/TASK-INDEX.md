@@ -105,11 +105,13 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 115 | 🟡 [wip] | AddedFee (100000015) and Discount (100000016) billing rule types: options, domain, schemas, validator refusals, handlers | FULL | opus / high | P3-A | none |
 | 116 | 🔲 [open] | Procedure Version documents: drafting and readers keyed per version on its Stored File; sprk_sourcedocument retired | FULL | opus / high | P3-F (p-safe false) | 081, 085, 090 |
 | 117 | 🔲 [open] | Core-record delete and Procedures: retire sweep for unlinked record-scoped rule sets; delete lists agreed with uac-r2 | FULL | opus / high | P3-D (p-safe false) | 089 |
-| 118 | 🔲 [open] | Submit Invoice in the email UI: toolbar button (replaces Link Invoice), flagged attachments, Email Review Invoice tab | FULL | sonnet / high | P3-F | 094 |
+| 118 | 🔲 [open] | Submit Invoice in the email UI: toolbar button (replaces Link Invoice), flagged attachments, Email Review Invoice tab | FULL | sonnet / high | P3-F | 094, 118a |
+| 118a | ✅ [done] | InvoiceAttachmentMarking shared component, split out of 118 for word-add-in-r1 (EB-D-159) | FULL | sonnet / high | P3-F | none |
 | 119 | ✅ [done] | Read-time Duplicate withholding on /review: hide an earlier invoice the reader cannot read (D-176, #2118) | FULL | opus / high | P4-A | 100 |
 | 120 | ✅ [done] | Spaarke Billing Administrator role; D-185: Basic/Core User lose prvReadsprk_ruleset; guard test | FULL | opus / high | P3-R (p-safe false) | 081 |
 | 121 | 🔲 [open] | Procedure-table role grants after uac-r2 191: O-6 org Read, Billing Administrator Create/Write on sprk_procedure; flip UntilTask191 | FULL | opus / high | P3-R (p-safe false) | 120 |
 | 122 | ✅ | #2235 fix: field-secure sprk_findingsjson (BFF-only), off the form; Decision Records store the generic Duplicate sentence | FULL | opus / high | P4-A | 119 |
+| 123 | 🔲 [open] | Internal upload of supporting files to an existing invoice: POST /api/finance/invoices/{invoiceId}/files (EB-D-161) | FULL | opus / high | P3-F | 090, 092, 086 |
 
 ### Phase 4 — Review and approval (WP4)
 
@@ -266,5 +268,5 @@ joined at 049 by `029 → 070 → 071 → 072 → 073 → 049`, and WP1 `029` ga
 | 120 | Live dev role change: owner's DIRECT OK (D-185 came via ontology-r1) + notices to ontology-r1 and uac-r2 before/after; send ontology-r1 the role-XML diff (overlaps their #2298) |
 | 121 (external gate) | uac-r2 task 191 merged and deployed on dev, and uac-r2's written agreement to flip UntilTask191; live run with owner OK + notices |
 | 122 | ✅ done 2026-10-26: ontology-r1 PASS, notices before/after, owner OK (EB-D-149); live on dev, -Verify 0 |
-| 118 | Builds the shared InvoiceAttachmentMarking component (file subpath export, agreed with word-add-in-r1 2026-10-21); word-add-in-r1 reviews that PR |
+| 118a | Builds the shared InvoiceAttachmentMarking component (file subpath export, agreed with word-add-in-r1 2026-10-21); word-add-in-r1 reviews that PR. 118 consumes it |
 | 163 | UAT sign-off |

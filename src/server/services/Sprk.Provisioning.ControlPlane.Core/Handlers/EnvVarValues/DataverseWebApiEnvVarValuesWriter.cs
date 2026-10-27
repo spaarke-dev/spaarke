@@ -37,10 +37,11 @@
 // rules (LinkCustomerBusinessUnitContainerAsync). Every user and BFF application user lives in that unit, so the records
 // they own are owned there — without the link every non-secure record of a T259 stamp resolves to no container.
 //
-// NOT under test in the CI unit suite. Integration coverage lives in an
-// env-guarded smoke test, parity with the H5 health-probe note. (The FR-39
-// selection itself IS CI-unit-tested at the factory boundary —
-// WorkerDataverseCredentialFactoryTests.)
+// T186 audit: the first token exchange and the first Dataverse call wait out Entra FIC / application-user propagation
+// (EntraPropagationRetry / DataverseAppUserPropagationGate, Handlers/Credentials/PropagationWait.cs) — unit-tested by
+// DataverseWebApiEnvVarValuesWriterPropagationTests through the internal credential-provider constructor. The rest of
+// the write path has integration coverage in an env-guarded smoke test, parity with the H5 health-probe note. (The
+// FR-39 selection itself IS CI-unit-tested at the factory boundary — WorkerDataverseCredentialFactoryTests.)
 // -----------------------------------------------------------------------------
 
 using System.Net;
@@ -59,6 +60,13 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.EnvVarValues;
 /// </summary>
 public sealed class DataverseWebApiEnvVarValuesWriter : IEnvVarValuesWriter
 {
+    /// <summary>
+    /// The collection-valued navigation property from <c>environmentvariabledefinition</c> to its values. T186 L38: it is
+    /// NOT <c>environmentvariablevalues</c> (that is the entity-set name) — Dataverse answers 400 "Could not find a
+    /// property named 'environmentvariablevalues'" (verified live on spaarke-acme, 2026-10-16).
+    /// </summary>
+    internal const string ValuesNavigationProperty = "environmentvariabledefinition_environmentvariablevalue";
+
     /// <summary>Named HttpClient for outbound Dataverse Web API calls.</summary>
     public const string HttpClientName = "H7.DataverseWebApiEnvVarValuesWriter";
 
@@ -66,8 +74,9 @@ public sealed class DataverseWebApiEnvVarValuesWriter : IEnvVarValuesWriter
 
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly EnvVarValuesOptions _options;
-    private readonly WorkerDataverseCredentialFactory _credentialFactory;
+    private readonly Func<string, string, string?, TokenCredential> _credentialProvider;
     private readonly ILogger<DataverseWebApiEnvVarValuesWriter> _logger;
+    private readonly TimeProvider _timeProvider;
 
     /// <summary>
     /// Constructs the writer bound to the named HttpClient + configured
@@ -79,16 +88,44 @@ public sealed class DataverseWebApiEnvVarValuesWriter : IEnvVarValuesWriter
         IHttpClientFactory httpClientFactory,
         IOptions<EnvVarValuesOptions> options,
         WorkerDataverseCredentialFactory credentialFactory,
-        ILogger<DataverseWebApiEnvVarValuesWriter> logger)
+        ILogger<DataverseWebApiEnvVarValuesWriter> logger,
+        TimeProvider? timeProvider = null)
+        : this(
+            httpClientFactory,
+            options,
+            logger,
+            timeProvider,
+            // FR-39 ordered selection (A44.5): MI-FIC first on secret-free chains; ClientSecret only for prong-3
+            // unmigrated envs. An exhausted chain throws (fail-closed) and classifies AuthFailure → §4C Resumable at
+            // the handler — the correct failure boundary for a per-run collaborator (see factory file header for the
+            // documented narrowing vs the BFF's hot-path provider).
+            (tenantId, clientId, clientSecret) => credentialFactory
+                .Create(options.Value.Credentials, EnvVarValuesOptions.SectionName, tenantId, clientId, clientSecret)
+                .Credential)
+    {
+        ArgumentNullException.ThrowIfNull(credentialFactory);
+    }
+
+    /// <summary>
+    /// Test seam constructor — injects the credential provider so tests never reach a real credential (parity with the
+    /// H6 importer/applier seams). Its third parameter is the secret slot value — null/empty on secret-free envs.
+    /// </summary>
+    internal DataverseWebApiEnvVarValuesWriter(
+        IHttpClientFactory httpClientFactory,
+        IOptions<EnvVarValuesOptions> options,
+        ILogger<DataverseWebApiEnvVarValuesWriter> logger,
+        TimeProvider? timeProvider,
+        Func<string, string, string?, TokenCredential> credentialProvider)
     {
         ArgumentNullException.ThrowIfNull(httpClientFactory);
         ArgumentNullException.ThrowIfNull(options);
-        ArgumentNullException.ThrowIfNull(credentialFactory);
         ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(credentialProvider);
         _httpClientFactory = httpClientFactory;
         _options = options.Value;
-        _credentialFactory = credentialFactory;
         _logger = logger;
+        _timeProvider = timeProvider ?? TimeProvider.System;
+        _credentialProvider = credentialProvider;
     }
 
     /// <inheritdoc/>
@@ -118,20 +155,12 @@ public sealed class DataverseWebApiEnvVarValuesWriter : IEnvVarValuesWriter
         AccessToken token;
         try
         {
-            // FR-39 ordered selection (A44.5): MI-FIC first on secret-free
-            // chains; ClientSecret only for prong-3 unmigrated envs. An
-            // exhausted chain throws (fail-closed) and classifies AuthFailure
-            // → §4C Resumable at the handler — the correct failure boundary
-            // for a per-run collaborator (see factory file header for the
-            // documented narrowing vs the BFF's hot-path provider).
-            var selected = _credentialFactory.Create(
-                _options.Credentials,
-                EnvVarValuesOptions.SectionName,
-                request.TenantId,
-                request.ClientId,
-                request.ClientSecret);
-            token = await selected.Credential.GetTokenAsync(
-                new TokenRequestContext(new[] { scope }), cancellationToken).ConfigureAwait(false);
+            // FR-39 ordered selection happens inside the provider (see the production constructor).
+            var credential = _credentialProvider(request.TenantId, request.ClientId, request.ClientSecret);
+            // T186 audit: H7's first token exchange for the just-created BFF app / FIC — wait out Entra propagation.
+            token = await EntraPropagationRetry.GetTokenAsync(
+                credential, new TokenRequestContext(new[] { scope }), _options.Credentials, _timeProvider,
+                _logger, "H7 writer", cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -149,11 +178,16 @@ public sealed class DataverseWebApiEnvVarValuesWriter : IEnvVarValuesWriter
         var httpClient = _httpClientFactory.CreateClient(HttpClientName);
         httpClient.Timeout = _options.RequestTimeout;
 
+        // T186 audit: the first Dataverse call below (root business unit read, else the first definition lookup) may meet
+        // an H10 application user / role that is not effective yet; ONE gate = one shared budget for the whole write.
+        var propagationGate = new DataverseAppUserPropagationGate(_options.Credentials, _timeProvider, _logger, "H7 writer");
+
         Guid? linkedRootBusinessUnitId = null;
         if (!string.IsNullOrWhiteSpace(request.RootBusinessUnitContainerId))
         {
             var link = await LinkRootBusinessUnitContainerAsync(
-                httpClient, envUri, token.Token, request.RootBusinessUnitContainerId.Trim(), _logger, cancellationToken)
+                httpClient, envUri, token.Token, request.RootBusinessUnitContainerId.Trim(), _logger, cancellationToken,
+                propagationGate)
                 .ConfigureAwait(false);
             if (link.Failure is not null)
             {
@@ -178,7 +212,7 @@ public sealed class DataverseWebApiEnvVarValuesWriter : IEnvVarValuesWriter
         var written = new List<KeyValuePair<string, string>>(request.Values.Count);
         foreach (var (schemaName, value) in request.Values)
         {
-            var outcome = await UpsertOneAsync(httpClient, envUri, token.Token, schemaName, value, cancellationToken)
+            var outcome = await UpsertOneAsync(httpClient, envUri, token.Token, schemaName, value, propagationGate, cancellationToken)
                 .ConfigureAwait(false);
             if (outcome is not null)
             {
@@ -206,13 +240,14 @@ public sealed class DataverseWebApiEnvVarValuesWriter : IEnvVarValuesWriter
         string bearerToken,
         string containerId,
         ILogger logger,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        DataverseAppUserPropagationGate? propagationGate = null)
     {
         // (1) The root unit and its current container — the query H8's root-unit reader uses; $top=2 so a second root is
         // seen rather than ignored.
         var (rows, readFailure) = await GetJsonAsync(httpClient,
             new Uri(envUri, "/api/data/v9.2/businessunits?$filter=parentbusinessunitid eq null&$select=businessunitid,sprk_containerid&$top=2"),
-            bearerToken, "Reading the root business unit", logger, cancellationToken).ConfigureAwait(false);
+            bearerToken, "Reading the root business unit", logger, cancellationToken, propagationGate).ConfigureAwait(false);
         if (readFailure is not null)
         {
             return new RootBusinessUnitLinkResult(null, readFailure);
@@ -385,12 +420,15 @@ public sealed class DataverseWebApiEnvVarValuesWriter : IEnvVarValuesWriter
             : null;
 
     private static async Task<(JsonDocument? Document, EnvVarValuesWriteOutcome.Failure? Failure)> GetJsonAsync(
-        HttpClient httpClient, Uri uri, string bearerToken, string what, ILogger logger, CancellationToken cancellationToken)
+        HttpClient httpClient, Uri uri, string bearerToken, string what, ILogger logger, CancellationToken cancellationToken,
+        DataverseAppUserPropagationGate? propagationGate = null)
     {
         try
         {
-            using var request = BuildRequest(HttpMethod.Get, uri, bearerToken);
-            using var response = await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            using var response = propagationGate is null
+                ? await SendOnceAsync(httpClient, HttpMethod.Get, uri, bearerToken, cancellationToken).ConfigureAwait(false)
+                : await propagationGate.SendAsync(
+                    httpClient, () => BuildRequest(HttpMethod.Get, uri, bearerToken), cancellationToken).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
                 return (null, NonSuccess(response.StatusCode, what));
@@ -403,6 +441,13 @@ public sealed class DataverseWebApiEnvVarValuesWriter : IEnvVarValuesWriter
             logger.LogWarning(ex, "H7 root business unit link: {What} failed", what);
             return (null, Transport(what, ex));
         }
+    }
+
+    private static async Task<HttpResponseMessage> SendOnceAsync(
+        HttpClient httpClient, HttpMethod method, Uri uri, string bearerToken, CancellationToken cancellationToken)
+    {
+        using var request = BuildRequest(method, uri, bearerToken);
+        return await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>A transport fault or a timeout — never the caller's own cancellation, which propagates.</summary>
@@ -438,20 +483,22 @@ public sealed class DataverseWebApiEnvVarValuesWriter : IEnvVarValuesWriter
         string bearerToken,
         string schemaName,
         string value,
+        DataverseAppUserPropagationGate propagationGate,
         CancellationToken cancellationToken)
     {
         // (1) Find the definition by schema name, expanding its current values.
         var filter = Uri.EscapeDataString($"schemaname eq '{schemaName}'");
         var defUri = new Uri(envUri,
             $"/api/data/v9.2/environmentvariabledefinitions?$filter={filter}" +
-            "&$expand=environmentvariablevalues($select=environmentvariablevalueid,value)" +
+            $"&$expand={ValuesNavigationProperty}($select=environmentvariablevalueid,value)" +
             "&$select=environmentvariabledefinitionid,schemaname,defaultvalue");
 
         JsonDocument defDoc;
         try
         {
-            using var defRequest = BuildRequest(HttpMethod.Get, defUri, bearerToken);
-            using var defResponse = await httpClient.SendAsync(defRequest, cancellationToken).ConfigureAwait(false);
+            using var defResponse = await propagationGate
+                .SendAsync(httpClient, () => BuildRequest(HttpMethod.Get, defUri, bearerToken), cancellationToken)
+                .ConfigureAwait(false);
             if (!defResponse.IsSuccessStatusCode)
             {
                 // ALWAYS return here — never fall through to body parsing on a
@@ -494,7 +541,7 @@ public sealed class DataverseWebApiEnvVarValuesWriter : IEnvVarValuesWriter
 
             var definition = valueArray[0];
             var definitionId = definition.GetProperty("environmentvariabledefinitionid").GetString()!;
-            var hasExistingValue = definition.TryGetProperty("environmentvariablevalues", out var existingValues)
+            var hasExistingValue = definition.TryGetProperty(ValuesNavigationProperty, out var existingValues)
                 && existingValues.ValueKind == JsonValueKind.Array
                 && existingValues.GetArrayLength() > 0;
 

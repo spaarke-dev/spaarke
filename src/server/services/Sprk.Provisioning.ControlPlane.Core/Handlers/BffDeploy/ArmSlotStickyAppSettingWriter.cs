@@ -1,4 +1,4 @@
-// -----------------------------------------------------------------------------
+﻿// -----------------------------------------------------------------------------
 // ArmSlotStickyAppSettingWriter.cs
 //
 // Production <see cref="ISlotStickyAppSettingWriter"/> — GitHub #987 (ADR-036
@@ -12,13 +12,16 @@
 // version Sprk.Provisioning.ControlPlane.Core.csproj references — member names
 // checked against the package's XML documentation and by compiling; the HTTP
 // verbs + paths they issue are exercised in ArmSlotStickyAppSettingWriterTests):
-//   - WebSiteResource.GetSlotConfigNamesResource() -> SlotConfigNamesResource
-//       .GetAsync(ct)                                  GET  .../sites/{app}/config/slotConfigNames
-//       .CreateOrUpdateAsync(WaitUntil, SlotConfigNamesResourceData, ct)
+//   - slotConfigNames is RAW JSON over ArmClient.Pipeline, not the typed
+//     SlotConfigNamesResource (T186 L43): on a site with no sticky names ARM
+//     answers `"id": null` and SDK 1.5.0's deserializer throws
+//     ArgumentNullException('resourceId').
+//                                                      GET  .../sites/{app}/config/slotConfigNames
 //                                                      PUT  .../sites/{app}/config/slotConfigNames
-//     SlotConfigNamesResourceData carries AppSettingNames, ConnectionStringNames
-//     and AzureStorageConfigNames. The PUT replaces the whole object, so the
-//     data the GET returned is written back with only AppSettingNames changed.
+//     The body carries appSettingNames, connectionStringNames and
+//     azureStorageConfigNames (each may be null). The PUT replaces the whole
+//     object, so every property the GET returned is written back with only
+//     appSettingNames changed.
 //   - WebSiteResource.GetWebSiteSlotAsync(slot, ct)    GET  .../sites/{app}/slots/{slot}
 //     (the accessor ArmSlotSwapper uses — a missing slot fails here, clearly).
 //   - WebSiteSlotResource.GetApplicationSettingsSlotAsync(ct)
@@ -31,7 +34,9 @@
 // Python dict assignment + list-membership test.
 // -----------------------------------------------------------------------------
 
+using System.Text.Json.Nodes;
 using Azure;
+using Azure.Core;
 using Azure.ResourceManager;
 using Azure.ResourceManager.AppService;
 using Azure.ResourceManager.AppService.Models;
@@ -40,9 +45,9 @@ using Microsoft.Extensions.Options;
 namespace Sprk.Provisioning.ControlPlane.Handlers.BffDeploy;
 
 /// <summary>
-/// Sets one app setting on a deployment slot and marks it slot-sticky on the
-/// parent site via Azure.ResourceManager.AppService — merge, never replace;
-/// sticky name first; no write when already in place.
+/// Prepares a deployment slot's app settings for a deploy + swap via Azure.ResourceManager.AppService: marks
+/// one setting slot-sticky on the parent site (sticky name first), then makes the slot carry production's
+/// non-sticky settings plus its own sticky ones and that setting (T186 L46); no write when already in place.
 /// </summary>
 /// <remarks>
 /// <b>Component justification (CLAUDE.md §11).</b>
@@ -57,10 +62,18 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.BffDeploy;
 /// the same per-call ceiling (<see cref="BffDeployOptions.SlotSwapTimeout"/>). <i>Cost of doing nothing:</i>
 /// after an H9 deploy the staging slot runs the BFF's scheduled jobs against the customer's production data —
 /// competing for the scheduler lease when it shares production's Redis, running every tick twice when it does
-/// not (ADR-036 A1 rule 2, GitHub #987).
+/// not (ADR-036 A1 rule 2, GitHub #987). The production-settings mirror (T186 L46) extends the same
+/// read-merge-write of the same slot rather than adding a collaborator: without it, settings only customer.bicep
+/// writes (production site only — Redis, the UAMI pin, AI endpoints) are absent on staging, the BFF there aborts at
+/// startup, and a swap would strip them from production. H4b's own staging write covers only H4b's settings.
 /// </remarks>
 public sealed class ArmSlotStickyAppSettingWriter : ISlotStickyAppSettingWriter
 {
+    private static readonly Uri ArmEndpoint = new("https://management.azure.com");
+
+    /// <summary>Microsoft.Web api-version for the raw slotConfigNames calls (GA; read live against an ACME stamp site 2026-10-16).</summary>
+    internal const string SlotConfigNamesApiVersion = "2024-11-01";
+
     private readonly ArmClient _armClient;
     private readonly BffDeployOptions _options;
     private readonly ILogger<ArmSlotStickyAppSettingWriter> _logger;
@@ -97,33 +110,48 @@ public sealed class ArmSlotStickyAppSettingWriter : ISlotStickyAppSettingWriter
 
         bool stickyNameAdded;
         bool settingWritten;
+        IReadOnlyList<string> mirroredNames = [];
         try
         {
             // (1) STICKY FIRST (see ISlotStickyAppSettingWriter): make the name
             //     slot-sticky on the parent site before any value exists on the
             //     slot, so no intermediate state lets a swap carry it.
-            var slotConfigNames = siteResource.GetSlotConfigNamesResource();
-            var namesResponse = await WithTimeoutAsync(
-                ct => slotConfigNames.GetAsync(ct), timeout, cancellationToken).ConfigureAwait(false);
-            var namesData = namesResponse.Value.Data;
+            //     Raw JSON, not SlotConfigNamesResource (T186 L43): on a site that
+            //     has never had a sticky name ARM answers `"id": null`, and the
+            //     SDK's SlotConfigNamesResourceData deserializer (1.5.0, the latest)
+            //     builds a ResourceIdentifier from it and throws
+            //     ArgumentNullException('resourceId') — so the typed GET can never
+            //     succeed on a new customer site.
+            var slotConfigNamesUri = new Uri(
+                ArmEndpoint, $"{siteResource.Id}/config/slotConfigNames?api-version={SlotConfigNamesApiVersion}");
+            var namesObject = await WithTimeoutAsync(
+                ct => SendSlotConfigNamesAsync(siteResource.Id, RequestMethod.Get, slotConfigNamesUri, null, ct),
+                timeout, cancellationToken).ConfigureAwait(false);
+            var namesProperties = namesObject["properties"] as JsonObject ?? new JsonObject();
 
-            var mergedNames = MergeStickyAppSettingNames(namesData.AppSettingNames, request.SettingName);
+            var mergedNames = MergeStickyAppSettingNames(ReadStringArray(namesProperties["appSettingNames"]), request.SettingName);
             stickyNameAdded = mergedNames.Changed;
             if (stickyNameAdded)
             {
-                // Only AppSettingNames changes; ConnectionStringNames and
-                // AzureStorageConfigNames go back exactly as read.
-                namesData.AppSettingNames.Clear();
-                foreach (var name in mergedNames.Names)
+                // The PUT replaces the whole object: only appSettingNames changes;
+                // connectionStringNames and azureStorageConfigNames go back exactly as read.
+                var putProperties = new JsonObject();
+                foreach (var property in namesProperties)
                 {
-                    namesData.AppSettingNames.Add(name);
+                    putProperties[property.Key] = property.Value?.DeepClone();
                 }
+                putProperties["appSettingNames"] = new JsonArray(mergedNames.Names.Select(n => (JsonNode?)JsonValue.Create(n)).ToArray());
+                var putBody = new JsonObject { ["properties"] = putProperties };
                 await WithTimeoutAsync(
-                    ct => slotConfigNames.CreateOrUpdateAsync(WaitUntil.Completed, namesData, ct),
+                    ct => SendSlotConfigNamesAsync(siteResource.Id, RequestMethod.Put, slotConfigNamesUri, putBody, ct),
                     timeout, cancellationToken).ConfigureAwait(false);
             }
 
-            // (2) The value on the slot — read, merge, write back whole.
+            // (2) The slot's settings: production's non-sticky settings (what a swap carries into production),
+            //     the slot's own sticky settings, and the guard — read both, build, write back whole (T186 L46).
+            var productionSettings = await WithTimeoutAsync(
+                ct => siteResource.GetApplicationSettingsAsync(ct), timeout, cancellationToken).ConfigureAwait(false);
+
             var slotResponse = await WithTimeoutAsync(
                 ct => siteResource.GetWebSiteSlotAsync(request.SlotName, ct), timeout, cancellationToken).ConfigureAwait(false);
             var slotResource = slotResponse.Value;
@@ -131,12 +159,15 @@ public sealed class ArmSlotStickyAppSettingWriter : ISlotStickyAppSettingWriter
             var settingsResponse = await WithTimeoutAsync(
                 ct => slotResource.GetApplicationSettingsSlotAsync(ct), timeout, cancellationToken).ConfigureAwait(false);
 
-            var mergedSettings = MergeAppSetting(settingsResponse.Value.Properties, request.SettingName, request.SettingValue);
-            settingWritten = mergedSettings.Changed;
+            var staged = BuildStagingSettings(
+                productionSettings.Value.Properties, settingsResponse.Value.Properties,
+                mergedNames.Names, request.SettingName, request.SettingValue);
+            settingWritten = staged.ChangedNames.Count > 0;
+            mirroredNames = staged.ChangedNames;
             if (settingWritten)
             {
                 var update = new AppServiceConfigurationDictionary();
-                foreach (var (key, value) in mergedSettings.Settings)
+                foreach (var (key, value) in staged.Settings)
                 {
                     update.Properties[key] = value;
                 }
@@ -158,8 +189,9 @@ public sealed class ArmSlotStickyAppSettingWriter : ISlotStickyAppSettingWriter
         // Setting names + flags only — app-setting VALUES are never logged (they include Key Vault references).
         _logger.LogInformation(
             "H9 slot-sticky app setting in place: appService={AppService} slot={Slot} setting={SettingName} " +
-            "stickyNameAdded={StickyNameAdded} settingWritten={SettingWritten}",
-            request.AppServiceName, request.SlotName, request.SettingName, stickyNameAdded, settingWritten);
+            "stickyNameAdded={StickyNameAdded} settingWritten={SettingWritten} changedSettingNames={ChangedSettingNames}",
+            request.AppServiceName, request.SlotName, request.SettingName, stickyNameAdded, settingWritten,
+            string.Join(",", mirroredNames));
 
         return new SlotStickyAppSettingResult.Success(stickyNameAdded, settingWritten);
     }
@@ -186,25 +218,104 @@ public sealed class ArmSlotStickyAppSettingWriter : ISlotStickyAppSettingWriter
     }
 
     /// <summary>
-    /// Pure merge of a slot's app settings: every existing setting is kept;
-    /// <paramref name="settingName"/> is set to <paramref name="settingValue"/>.
-    /// <c>Changed</c> is <c>false</c> when it already held exactly that value
-    /// (ordinal), so a re-run writes nothing. The one merge rule is
-    /// <see cref="BulkAppSettings.ArmAppServiceSettingsWriter.MergeAppSettings"/> (H4b's, task 253).
+    /// Pure build of the staging slot's app settings before a deploy + swap (T186 L46): every NON-sticky
+    /// production setting with production's value (a swap carries the slot's non-sticky settings into
+    /// production, so anything else changes production's config — live, settings only Bicep wrote reached
+    /// production alone, and the BFF on staging refused to start without <c>Redis__Enabled</c>); every sticky
+    /// setting the slot already holds, kept; and <paramref name="settingName"/> = <paramref name="settingValue"/>.
+    /// A non-sticky setting only the slot holds is dropped. <c>ChangedNames</c> (added, changed or removed;
+    /// ordinal) is empty when the slot already matches, so a re-run writes nothing.
     /// </summary>
-    internal static (IReadOnlyDictionary<string, string> Settings, bool Changed) MergeAppSetting(
-        IEnumerable<KeyValuePair<string, string>>? currentSettings,
+    internal static (IReadOnlyDictionary<string, string> Settings, IReadOnlyList<string> ChangedNames) BuildStagingSettings(
+        IEnumerable<KeyValuePair<string, string>>? productionSettings,
+        IEnumerable<KeyValuePair<string, string>>? slotSettings,
+        IReadOnlyCollection<string> stickyNames,
         string settingName,
         string settingValue)
     {
+        ArgumentNullException.ThrowIfNull(stickyNames);
         ArgumentException.ThrowIfNullOrWhiteSpace(settingName);
         ArgumentNullException.ThrowIfNull(settingValue);
 
-        var (settings, changedNames) = BulkAppSettings.ArmAppServiceSettingsWriter.MergeAppSettings(
-            currentSettings,
-            new Dictionary<string, string>(StringComparer.Ordinal) { [settingName] = settingValue });
-        return (settings, changedNames.Count > 0);
+        var sticky = new HashSet<string>(stickyNames, StringComparer.Ordinal);
+        var current = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var (key, value) in slotSettings ?? [])
+        {
+            current[key] = value;
+        }
+
+        var target = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var (key, value) in productionSettings ?? [])
+        {
+            if (!sticky.Contains(key))
+            {
+                target[key] = value;
+            }
+        }
+        foreach (var (key, value) in current)
+        {
+            if (sticky.Contains(key))
+            {
+                target[key] = value;
+            }
+        }
+        target[settingName] = settingValue;
+
+        var changed = target
+            .Where(t => !current.TryGetValue(t.Key, out var existing) || !string.Equals(existing, t.Value, StringComparison.Ordinal))
+            .Select(t => t.Key)
+            .Concat(current.Keys.Where(k => !target.ContainsKey(k)))
+            .OrderBy(k => k, StringComparer.Ordinal)
+            .ToList();
+        return (target, changed);
     }
+
+    /// <summary>
+    /// GET or PUT <c>.../config/slotConfigNames</c> as raw JSON over the ArmClient's
+    /// own pipeline (same credential, retries and transport as every typed call),
+    /// reached through <see cref="SitePipeline"/> because <c>ArmClient.Pipeline</c> is internal.
+    /// A non-2xx answer throws <see cref="RequestFailedException"/>, which
+    /// <see cref="EnsureAsync"/> maps to a <see cref="SlotStickyAppSettingResult.Failure"/>.
+    /// </summary>
+    private async Task<JsonObject> SendSlotConfigNamesAsync(
+        ResourceIdentifier siteId, RequestMethod method, Uri uri, JsonObject? body, CancellationToken cancellationToken)
+    {
+        var pipeline = new SitePipeline(_armClient, siteId).HttpPipeline;
+        using var message = pipeline.CreateMessage();
+        message.Request.Method = method;
+        message.Request.Uri.Reset(uri);
+        message.Request.Headers.Add("Accept", "application/json");
+        if (body is not null)
+        {
+            message.Request.Headers.Add("Content-Type", "application/json");
+            message.Request.Content = RequestContent.Create(BinaryData.FromString(body.ToJsonString()));
+        }
+
+        await pipeline.SendAsync(message, cancellationToken).ConfigureAwait(false);
+        var response = message.Response;
+        if (response.Status is < 200 or > 299)
+        {
+            throw new RequestFailedException(response);
+        }
+
+        return JsonNode.Parse(response.Content.ToString()) as JsonObject ?? new JsonObject();
+    }
+
+    /// <summary>
+    /// The SDK's own extension point for a resource it has no usable client for:
+    /// an <see cref="ArmResource"/> bound to the site, whose <c>Pipeline</c> is the
+    /// ArmClient's pipeline (credential, retry and transport policies included).
+    /// </summary>
+    private sealed class SitePipeline(ArmClient client, ResourceIdentifier siteId) : ArmResource(client, siteId)
+    {
+        public Azure.Core.Pipeline.HttpPipeline HttpPipeline => Pipeline;
+    }
+
+    /// <summary>A JSON string array, or <c>null</c> for a JSON <c>null</c> / absent property (a site with no sticky names).</summary>
+    internal static IReadOnlyList<string>? ReadStringArray(JsonNode? node)
+        => node is JsonArray array
+            ? array.Select(item => item?.GetValue<string>()).OfType<string>().ToList()
+            : null;
 
     private static async Task<T> WithTimeoutAsync<T>(
         Func<CancellationToken, Task<T>> action, TimeSpan timeout, CancellationToken cancellationToken)

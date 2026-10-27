@@ -1,42 +1,39 @@
 # Current Task State
 
-> **Last Updated**: 2026-10-26 (after the master 58ffc37da3 merge, the task 122 live run and merge, and owner decisions EB-D-149..152)
+> **Last Updated**: 2026-10-27, after word-add-in-r1's review of #2342. The 095 path is urgent (EB-D-158). The 095 contract is agreed with word-add-in-r1. 118a is done.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Branch** | work/ebilling-r1, draft PR #1911. Tip: bed558cb33 (master merge) + the task 122 merge + bookkeeping. Push only after the background build/test run is green. |
-| **Running** | Background: build of the BFF and 5 test projects, ArchTests, the unit broad filter (Finance, Billing, Signals, RuleSet, Invoice, Compliance, Rejection, Decision, AccessTable, ParentLineage, Ebilling, Procedure, SecureChild, Submission) and integration, on the tip after the 122 merge. |
-| **Next Action** | When green: commit the bookkeeping (TASK-INDEX 122 ✅, DEF-029 and DEF-035 closed, decisions-log EB-D-149..152, this file), push, send ontology the merge SHA (bed558cb33) for its scoped EarlierInvoiceReadability check (F1), then close GitHub #2235 and #2144 with the run evidence. Then: optional RuleSetRolePrivilegeGuardTests controls (Billing Admin exact set: a wrong depth, an extra privilege; Violations skips Billing Admin). |
+| **Branch** | work/ebilling-r1, draft PR #1911. Master de38296499 (uac 194) merged in at ffe7ee3a2f; gates green (broad 9,473 / Arch 1,557). Invoice-family move test at 730b7a654d, sent to uac-r2 for review. |
+| **092 built** | task/ebill-092-submission-files at bbf9cd04e8 (pushed, NOT merged). Gates green in the agent. Its adversarial review has NOT run (it hit the cap): run one adversarial-reviewer when a slot frees, then merge. On merge, the main session must also update `.claude/constraints/provisioning.md:269` (retired `Finance__EbillingOutputContainerId`). Its 3 new StoredFileService methods need 090-owner acceptance (us). Escalation for the owner: the 3 `ProcedureLibraryContainerId` readers (RuleSetService.cs:406, :655; RateCardImportService.cs:158) have no owning task. DEF-047 / #2351 filed. 095 was told 092's SubmissionSnapshot rule means from-email stages its PDF and leaves sprk_document empty. |
+| **089 built + live** | task/ebill-089-assignments at 8f4920ce0c (pushed, NOT merged). Live on dev 2026-10-27 (uac-r2 ACCEPTED): probes refused 0x80040299 (quoted into role JSON evidence), role 41→43, -Verify 38/38, creator-person PASS; live NFR-05 = 99 known §5.2 core-table lines, none on the 5 child tables. uac-r2 accepted item 5 (Read on procedureassignment/ruleset, Secure Record Owner only) and RemoveLink (fix POML Q10 'Restrict' → §14). ontology AGREED BRR-{policyId} (condition: code immutable — add a pinning test), waiver Permanent, scope guard. Before merge, in order: (a) merge uac 194b head into 089 when uac sends it; (b) answer uac on sprk_policy primary parent [matter, ruleset]; (c) immutability test; (d) TWO adversarial passes; (e) merge into work (expect conflicts in 7 uac files; role JSON then lists BudgetBucket → re-run -Verify, expect 39/39). Owner decision pending: Billing Admin Global Read on ruleset/policy/policyversion (ontology+uac: lower to Deep); Ontology Admin Deep stays Critical until §5.2. Probe evidence: scratchpad 089-live-probes / 089-nfr05-live. |
+| **098 built** | task/ebill-098-external-marker at 2f50cddec9 (pushed, NOT merged); gates green in agent; adversarial review NOT run (cap) — launch on 786d1ea17a..2f50cddec9 at next slot, then uac-r2 request (text in agent report; incl. accepting `AppOnlyInvoiceFamilyHiding`, a 2nd app-only AI-tools exception). 094 told to merge it now. |
+| **Queue for free slots (in order)** | (1) 098 adversarial review; (2) resume 089 agent: merge uac 194b when sent, answer sprk_policy primary parent, BRR immutability test (ontology condition), must-fire evidence for the NFR-05 guarded-child branch (ontology challenge: dev's only Ontology Admin holder is also SysAdmin → excluded; Billing Admin has no holders), fix POML Q10 Restrict→RemoveLink; (3) two adversarial passes on 089. |
+| **Running (4 agents, the cap)** | **092 adversarial review**, **086** (task/ebill-086-storedfile-secure-child from 089's tip + work; NO live steps — main session runs them), **094** (task/ebill-094-submit-invoice, from 092's tip plus work; 098 and 086 merge later), **095** (task/ebill-095-from-email; early start with a seam into 094, adapter onto today's intake or NotYetAvailable; includes the §8 firms route and EB-D-160 retry-after-Failed). uac-r2's conditions went to 089 and 098. 095 was told to merge fd70b8e1f6 and build marks_invalid `invoice_not_pdf`. |
+| **Master PR #2342** | MERGED 2026-10-27 as 5911eba1ff (word-add-in-r1 approved when green). Worktree and branch removed. |
+| **word-add-in-r1** | AGREED the 123 contract (notes/123-upload-contract.md), `invoice_not_pdf` and EB-D-160. Their condition: any renamed code goes to them before merge. They have 118a on master for slice B. |
+| **Next actions** | (1) As agents report: review, send uac-r2 the review request, merge after review, build the 5 test projects plus the broad filter. (2) Launch **086** at the next free slot (live steps pre-approved, EB-D-158). Then resume the 089 agent for (a)-(c) above. (3) Adversarial review of 092 when a slot frees, then merge 092. When 098 lands, tell 094 to merge it. (4) After 086 and 092: launch **123**. (5) When sprk_invoicelineitem (uac #2348) reaches our lineage, add it to TheInvoiceFamily_FollowsAnOrdinaryMove_ThroughTheInvoice. |
 
-## Full unit suite note
-After the master merge, Sprk.Bff.Api.Tests holds 34,908 tests (it was 11,408). One full run took 86 minutes and ended with 225 WebApplicationFactory tests timing out (3-6 min each) under machine load, all in areas ebilling doesn't touch. Those classes run alone pass (99/0). Use the broad filter plus ArchTests and integration as the gate; run the full suite only when the machine is quiet.
+## 095 contract
+`notes/095-from-email-contract.md`. word-add-in-r1 AGREED the whole file (§1-§9, OP-1..OP-8) at 717cf238d9. Since then: EB-D-160 (§5, re-attempt after Failed), not yet sent to them. Their task 133 releases in slices: A (client plus view), B (adopts 118a; needs it on master), and C (removes Invoice from Save; only after from-email works on dev, with the owner's go; 096 follows one release later). G3 (correction prefill) is deferred to 097.
+
+## Owner decisions 2026-10-27
+EB-D-153 (schema run, done, -Verify 0), 154 (dev uses sysadmin; Billing Admin gets the Procedure tables in 121), 155 (corrections like new versions; flagged, applied on re-check unless pinned), 156 (suppression kept), 157 (visibility follows type), 158 (urgency; chain overlap; 089 and 086 live steps pre-approved), 159 (118a split), 160 (retry after Failed on from-email), 161 (task 123 upload route). Open: whether the explicit re-check button (R2) should come into R1 — asked, no answer yet.
 
 ## Status
-- **Done:** 080, 081, 088, 090, 091, 099, 119, 120, 122 ✅.
-  - **122 (2026-10-26, EB-D-149):** live on dev. The submission form no longer shows sprk_findingsjson; the column is field-secured to Spaarke BFF-Managed Field Writers (read, create, update), with no reader profile. The second run wrote nothing, -Verify exits 0, and -Revert is available. Notices went to ontology and uac.
-- **Owner decisions 2026-10-26:** EB-D-150 (Billing Admin keeps Global Read on policy and policy version; accepted census exception in uac #2322, valid for a DIRECT user assignment only), EB-D-151 (D-90 stands for Core User; known limit recorded), EB-D-152 (#2310 accepted as is, closed; ontology records DI-126 only after the owner confirms it in their session).
-- **Master merge (bed558cb33):** Core User.xml keeps both lines; EarlierInvoiceReadability takes master's doc comment; the CS0105 duplicate using was dropped. #2301 and #2303 are now in.
-- **Basic User policy Read:** removed on the branch (b1fe73bd13), matching master accfc2d2f7 (D-185).
+- **Done:** 080, 081, 088, 090, 091, 099, 118a (merged into work at cd10657469), 119, 120, 122 ✅. 118a is also on master (#2342, 5911eba1ff).
+- Creator-person schema live on dev (notes/creator-person-dev-run-2026-10-27.md); uac-r2 closed 090 K1; the HARD RULE is met on dev.
+- ontology DI-128 / #2336: ontology-authored policies record no creator person (deferred, theirs).
 
-## Open owner asks
-- Dev schema run of Set-ChildRecordCreatorPersonSchema.ps1 for 081 and 090: dry run, -Apply, -Verify, with notices to ontology-r1 and uac-r2 before and after. **HARD RULE:** -Verify exits 0 in an environment before any BFF carrying ebilling 081+ deploys there.
-- 082 business rules: retroactive Procedure corrections; clean slate vs D-11 suppression; whether firm visibility can be set on its own.
-- Assign Spaarke Billing Administrator to users (directly, not through a team), then do a browser check of the billing-admin routes.
-- Owner machine: reinstall Pester 6.2.0. Leftover conflict markers on master in projects/ai-advanced-capabilities-agreements-r1/notes/uat4-execution-notes.md (not ours).
-
-## Tasks queued
-- **121** (Procedure grants): blocked on uac-r2 191 plus their written agreement.
-- **Filed:** DEF-044 #2296 (fix before StoredFileReconcileJob is enabled), DEF-045 #2297, DEF-046 #2312 (forms script full run crashes on the dev sitemap; use -FormsOnly).
+## Unit suite
+Gate: ArchTests, integration and the broad filter (Finance, Billing, Signals, RuleSet, Invoice, Compliance, Rejection, Decision, AccessTable, ParentLineage, Ebilling, Procedure, SecureChild, Submission). The full 35k suite times out under load.
 
 ## Peer state
-- **R3:** ebilling OK given for dev BFF 58ffc37da3, bc99fc3e6b and f183dd9c92 (uac census and proof code; no finance writes). The census reports human reach to the secure BU on sprk_invoice, event and memo. uac says the cause is user placement in the root BU and the fix is the decided BU layout (§5.2); nothing for ebilling. Expect the same finding on our four family tables after #1911 merges.
-- **Unexplained (recorded in notes/120):** live Basic User lost its ruleset and Policy Reads before task 120. Ebilling never calls ReplacePrivilegesRole and never did a real solution import (answered to R3).
+- **uac-r2:** turns reviews around quickly, 095's path first. Reviews owed: 086, 089, 094, 095, 098, 117, 123; and the 091 items (what-if, live Test-EbillingFileStoreRole.ps1, tag-write proof). Invoice family follows BU moves via SecureChildLineage; no CoreAncestorResolver change.
+- **word-add-in-r1:** builds against the contract (task 133). Waiting for the 118a PR and the EB-D-160 note.
+- **R3:** ebilling OK given for dev BFF 3ff2c04bf5.
 
-## Standing rules (unchanged; see project CLAUDE.md)
-- No bare git stash, no --no-verify.
-- Agents work in their own worktree; remove one only with Remove-WorktreeSafe.ps1.
-- Live writes and role changes need the owner's OK; schema runs need notices.
-- StoredFileReconcileJob is not enabled anywhere before F4 merges and DEF-044 is fixed.
-- After merges: build the 5 test projects and run the broad filter before pushing.
+## Standing rules (see project CLAUDE.md)
+No bare git stash, no --no-verify. Live writes and role changes need the owner's OK; schema runs need notices. StoredFileReconcileJob is not enabled anywhere before F4 merges and DEF-044 is fixed. After merges: build the 5 test projects and run the broad filter before pushing. Remove worktrees only with Remove-WorktreeSafe.ps1.

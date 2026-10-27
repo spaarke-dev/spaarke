@@ -378,9 +378,7 @@ public sealed class H12cRuntimeReferencesHandler : IProvisioningHandler
     {
         // Every H12c failure mode is Resumable — see file header ROLLBACK
         // CLASSIFICATION table.
-        run.Status = RunStatus.Failed;
-        run.CurrentPhase = HandlerIdentifier;
-        run.ErrorDetail = $"[{rejectionCode}] {diagnostic}";
+        run.MarkPhaseFailed(HandlerIdentifier, RunStatus.Failed, $"[{rejectionCode}] {diagnostic}"); // T186 L41
 
         run.GateStates[$"h12c-{rejectionCode}"] = new GateEntry
         {
@@ -417,8 +415,7 @@ public sealed class H12cRuntimeReferencesHandler : IProvisioningHandler
         var completedAt = DateTimeOffset.UtcNow;
         var startedAt = completedAt - TimeSpan.FromMilliseconds(1);
 
-        run.Status = RunStatus.Running;
-        run.CurrentPhase = HandlerIdentifier; // Reconciler observes + fans out
+        run.MarkPhaseSucceeded(HandlerIdentifier); // Reconciler observes + fans out
         run.CompletedPhases.Add(new CompletedPhase
         {
             Phase = HandlerIdentifier,

@@ -37,4 +37,24 @@ public sealed class H10DataverseAppUserGraphParityOptions
 
     /// <summary>Task 261: delay before each re-read after the first (multiplied by the attempt number).</summary>
     public TimeSpan ExtrasRecheckDelay { get; set; } = TimeSpan.FromSeconds(4);
+
+    /// <summary>
+    /// T186 audit: how many times H10 looks for an object it (or the platform) created seconds earlier before judging it
+    /// absent — a just-granted Graph app role in the T3 parity read, a just-created application user in the T2 re-query,
+    /// the System Administrator copy in a just-created business unit (Dataverse copies roles in asynchronously). Applies to
+    /// "not visible yet" answers only; a real mismatch is reported unchanged once the attempts are used.
+    /// </summary>
+    public int PropagationRetryAttempts { get; set; } = 6;
+
+    /// <summary>T186 audit: delay before each further look, multiplied by the attempt number (3s, 6s, 9s, … by default).</summary>
+    public TimeSpan PropagationRetryDelay { get; set; } = TimeSpan.FromSeconds(3);
+
+    /// <summary>
+    /// T186 audit: how many times a verification read is attempted while the platform answers 429, 5xx, times out or drops
+    /// the connection. A 401 / 403 / 400 is never retried.
+    /// </summary>
+    public int TransientRetryAttempts { get; set; } = 4;
+
+    /// <summary>T186 audit: delay before each retry of a transient fault, multiplied by the attempt number.</summary>
+    public TimeSpan TransientRetryDelay { get; set; } = TimeSpan.FromSeconds(2);
 }

@@ -47,6 +47,7 @@ public sealed class DataverseWebApiAppUserCreator : IDataverseAppUserCreator
     private const string Api = "/api/data/v9.2/";
 
     private readonly HttpClient _httpClient;
+    private readonly H10DataverseAppUserGraphParityOptions _options;
     private readonly ILogger<DataverseWebApiAppUserCreator> _logger;
     private readonly Func<string, TokenCredential> _credentialFactory;
 
@@ -72,6 +73,7 @@ public sealed class DataverseWebApiAppUserCreator : IDataverseAppUserCreator
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(credentialFactory);
         _httpClient = httpClient;
+        _options = options.Value;
         _logger = logger;
         _credentialFactory = credentialFactory;
         _httpClient.Timeout = options.Value.DataverseRequestTimeout;
@@ -254,9 +256,7 @@ public sealed class DataverseWebApiAppUserCreator : IDataverseAppUserCreator
             }
 
             // (3) The role's copy IN the user's unit — exactly one.
-            var roles = Values(await GetAsync(envUri, token,
-                $"roles?$filter=name eq '{Literal(request.SecurityRoleName)}' and _businessunitid_value eq {request.BusinessUnitId:D}" +
-                "&$select=roleid&$top=2", cancellationToken).ConfigureAwait(false));
+            var roles = await FindRoleCopiesAsync(envUri, token, request, cancellationToken).ConfigureAwait(false);
             if (roles.Count != 1)
             {
                 return new DataverseAppUserCreationOutcome.Failure(roles.Count == 0
@@ -298,6 +298,45 @@ public sealed class DataverseWebApiAppUserCreator : IDataverseAppUserCreator
         }
     }
 
+    /// <summary>
+    /// The role's copy in the user's business unit. T186 audit: Dataverse copies the security roles into a business unit
+    /// asynchronously after the unit is created, so the lookup right after H10 created the customer's unit can come back
+    /// empty (or 404) although the copy lands seconds later. An empty result is looked up again with a growing delay,
+    /// bounded by <c>PropagationRetryAttempts</c>; "more than one" is a real answer and returned at once, and any other
+    /// failure propagates unchanged.
+    /// </summary>
+    private async Task<List<JsonElement>> FindRoleCopiesAsync(
+        Uri envUri, AccessToken token, DataverseAppUserCreationRequest request, CancellationToken ct)
+    {
+        var attempts = Math.Max(1, _options.PropagationRetryAttempts);
+        var relative =
+            $"roles?$filter=name eq '{Literal(request.SecurityRoleName)}' and _businessunitid_value eq {request.BusinessUnitId:D}" +
+            "&$select=roleid&$top=2";
+        for (var attempt = 1; ; attempt++)
+        {
+            List<JsonElement>? roles = null;
+            try
+            {
+                roles = Values(await GetAsync(envUri, token, relative, ct).ConfigureAwait(false));
+            }
+            catch (H10HttpException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound && attempt < attempts)
+            {
+                // The unit's role set is not addressable yet — same lag as an empty result.
+            }
+
+            if (roles is { Count: > 0 } || attempt >= attempts)
+            {
+                return roles ?? [];
+            }
+
+            _logger.LogInformation(
+                "H10 role lookup in business unit {BusinessUnitId} found no '{Role}' copy yet (attempt {Attempt}/{Max}) — " +
+                "Dataverse copies roles into a new unit asynchronously; looking again",
+                request.BusinessUnitId, request.SecurityRoleName, attempt, attempts);
+            await H10Propagation.DelayAsync(_options.PropagationRetryDelay, attempt, ct).ConfigureAwait(false);
+        }
+    }
+
     private async Task<AccessToken> AcquireTokenAsync(Uri envUri, string tenantId, CancellationToken ct)
     {
         var scope = $"{new Uri(envUri, "/").ToString().TrimEnd('/')}/.default";
@@ -310,7 +349,7 @@ public sealed class DataverseWebApiAppUserCreator : IDataverseAppUserCreator
         var text = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
         {
-            throw new InvalidOperationException(
+            throw new H10HttpException(response.StatusCode,
                 $"GET {relative.Split('?')[0]} failed: {(int)response.StatusCode} {response.StatusCode}. Body: {Truncate(text, 400)}");
         }
         return JsonDocument.Parse(string.IsNullOrWhiteSpace(text) ? "{}" : text);
@@ -322,7 +361,7 @@ public sealed class DataverseWebApiAppUserCreator : IDataverseAppUserCreator
         if (!response.IsSuccessStatusCode)
         {
             var text = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-            throw new InvalidOperationException(
+            throw new H10HttpException(response.StatusCode,
                 $"{method} {relative} failed: {(int)response.StatusCode} {response.StatusCode}. Body: {Truncate(text, 400)}");
         }
     }
@@ -334,7 +373,7 @@ public sealed class DataverseWebApiAppUserCreator : IDataverseAppUserCreator
         if (!response.IsSuccessStatusCode)
         {
             var text = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-            throw new InvalidOperationException(
+            throw new H10HttpException(response.StatusCode,
                 $"POST {entitySet} failed: {(int)response.StatusCode} {response.StatusCode}. Body: {Truncate(text, 400)}");
         }
 

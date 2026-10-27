@@ -104,6 +104,12 @@ public static class H11Rejections
     public const string GuestHoldsRoleOutsideCustomerUnit = "userprov-guest-holds-role-outside-customer-unit";
 
     /// <summary>
+    /// #2034: the guest's Dataverse systemuser is disabled, so the guest cannot use the environment. H11 writes nothing and
+    /// never re-enables a user — an owner decision (QuarantineRequired).
+    /// </summary>
+    public const string GuestDisabled = "userprov-guest-disabled";
+
+    /// <summary>
     /// Task 232 (R7 "validated but not wired"): a NativeAccount run with no licence SKU configured
     /// (<c>H11UserProvisioningOptions</c>) — refused before any user is created, instead of creating unlicensed users.
     /// </summary>

@@ -178,6 +178,24 @@ public sealed class GraphAppRoleParityT3ProbeTests
         outcome.Should().BeOfType<TrapVerificationOutcome.InfraFault>().Which.Diagnostic.Should().Contain("503");
     }
 
+    // ---------- T186 audit: an unreadable assignments list has no verdict ----------
+
+    [Fact]
+    public async Task ProbeAsync_ParityUnverified_ReturnsInfraFault_NotFailed()
+    {
+        var registry = FakeGraphAppRolesRegistry.WithFullCatalog();
+        var verifier = new FakeParityVerifier(
+            result: new GraphAppRoleParityResult.Unverified("HTTP 429 after 4 attempt(s).", registry.GetAll().Count));
+        var probe = BuildProbe(registry, verifier, FakeGraphSpHandler.ReturnsSp(UamiSpObjectId));
+
+        var outcome = await probe.ProbeAsync(BuildRequest(), CancellationToken.None);
+
+        var infra = outcome.Should().BeOfType<TrapVerificationOutcome.InfraFault>(
+            "Failed is QuarantineRequired — an outage is not a T3 trap").Subject;
+        infra.Kind.Should().Be(TrapKind.T3GraphAppRoleParity);
+        infra.Diagnostic.Should().Contain("HTTP 429");
+    }
+
     // ---------- T3 parity mismatch (silent-fail catch) ----------
 
     [Fact]

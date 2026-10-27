@@ -81,6 +81,11 @@ internal static class SecureChildLineage
         // matter, so it is a child of its budget and its matter (live: sprk_budgetrevision.sprk_budget, .sprk_matter).
         T("sprk_budgetrevision", "sprk_budgetrevisions",
             ("sprk_budget", "sprk_budget"), ("sprk_matter", Matter)),
+        // unified-access-control-r2 task 194 F1-b: a budget's buckets are its children (solution XML,
+        // sprk_BudgetBucket/Entity.xml: lookup sprk_budget; entity set sprk_budgetbuckets). Without this row a Secure
+        // budget was isolated and its buckets were not. No core stamp (CoreAncestorResolver): a bucket files nothing.
+        T("sprk_budgetbucket", "sprk_budgetbuckets",
+            ("sprk_budget", "sprk_budget")),
         T("sprk_communication", "sprk_communications",
             new[] { ("sprk_communicationthread", "sprk_communicationthread") }
                 .Concat(Regarding("sprk_analysis", "sprk_budget", "sprk_event", "sprk_invoice", Matter, Project, "sprk_reportcard", WorkAssignment))

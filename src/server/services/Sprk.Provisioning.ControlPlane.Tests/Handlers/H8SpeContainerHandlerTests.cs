@@ -221,6 +221,27 @@ public sealed class H8SpeContainerHandlerTests
         provisioner.BindRequests.Should().BeEmpty();
     }
 
+    // ---------- T186 audit: verifier TransientFailure -> Resumable ----------
+
+    [Fact]
+    public async Task VerifierTransientFailure_FailsResumable_NotQuarantine_ContainerStaysOnRecord()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-6t");
+        var provisioner = FakeProvisioner.Success(ContainerId);
+        var verifier = FakeVerifier.Result(new SpeContainerVerificationResult.TransientFailure("GET got 503 on every attempt"));
+        var handler = BuildHandler(repo, provisioner, verifier);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable, "a 429/5xx/timeout says nothing about the container");
+        failure.RejectionCode.Should().Be(SpeContainerRejectionCodes.ContainerVerificationTransient);
+        repo.LastWrittenRun!.Status.Should().NotBe(RunStatus.Quarantined);
+        repo.LastWrittenRun.InterStepState.SpeContainerCreation!.RootContainerId.Should().Be(ContainerId);
+        provisioner.BindRequests.Should().BeEmpty("an unverified container is not bound");
+    }
+
     // ---------- AC-7 verifier infra fault ----------
 
     [Fact]
@@ -1782,6 +1803,8 @@ public sealed class H8SpeContainerHandlerTests
 
         public static FakeVerifier ReplicationPending(string diagnostic)
             => new(new SpeContainerVerificationResult.ReplicationPending(diagnostic), null);
+
+        public static FakeVerifier Result(SpeContainerVerificationResult result) => new(result, null);
 
         public static FakeVerifier Throws(Exception ex) => new(null, ex);
 

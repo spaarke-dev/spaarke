@@ -84,7 +84,17 @@ param keyVaultSku string = 'standard'
 param serviceBusSku string = 'Standard'
 
 @description('Service Bus queue names to create')
-param serviceBusQueues array = ['sdap-jobs', 'document-indexing', 'ai-indexing', 'sdap-communication']
+// T186 L47: the BFF's Office workers hard-code office-upload-finalization / office-profile / office-indexing;
+// H4bBulkAppSettingsHandlerTests.T186_L47_… fails when a BFF queue constant is missing here.
+param serviceBusQueues array = [
+  'sdap-jobs'
+  'document-indexing'
+  'ai-indexing'
+  'sdap-communication'
+  'office-upload-finalization'
+  'office-profile'
+  'office-indexing'
+]
 
 @description('Principal ID of the platform BFF App Service Managed Identity (granted Sender on membership topic + Receiver on recon subscription per R3 D3 / FR-2P2.3). Leave empty to skip RBAC assignment — operator must grant manually.')
 param bffPrincipalId string = ''
@@ -677,6 +687,11 @@ module bffApi 'modules/app-service.bicep' = {
       // Monitoring (per-customer App Insights, task 128b)
       APPLICATIONINSIGHTS_CONNECTION_STRING: monitoring.outputs.connectionString
       ApplicationInsightsAgent_EXTENSION_VERSION: '~3'
+
+      // T186 L48: on the stamp's S1 plan the BFF needs ~220 s from container start to listening (live, ACME);
+      // App Service's default startup limit is 230 s, so a slot deploy failed the startup probe. Non-sticky, so H9
+      // gives the staging slot the same value (L46).
+      WEBSITES_CONTAINER_START_TIME_LIMIT: '600'
     }
     tags: tags
   }

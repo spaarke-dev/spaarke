@@ -220,6 +220,12 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
         RegexOptions.CultureInvariant | RegexOptions.Compiled,
         matchTimeout: TimeSpan.FromSeconds(1));
 
+    /// <summary>A host followed by a numeric port (<c>sprk-acme-prod-redis.westus2.redis.azure.net:10000</c>) — T186 L25.</summary>
+    private static readonly Regex DnsHostWithPort = new(
+        @"^(?<host>[^:]+):[0-9]{1,5}$",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled,
+        matchTimeout: TimeSpan.FromSeconds(1));
+
     private readonly IProvisioningRunRepository _repository;
     private readonly IKvSecretManifest _manifest;
     private readonly IKvSecretsWriter _writer;
@@ -847,7 +853,8 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
     /// references. A DNS host name — bare (<c>ServiceBusFullyQualifiedNamespace</c>) or as an
     /// http(s) URI's host (the endpoint fields) — is not secret-shaped: real Azure host names run past
     /// 40 characters (<c>spaarke-acme-prod-cosmos.documents.azure.com</c> is 44), and before task 245a
-    /// that tripped the guard on every real run. A URI's user-info, path, query and fragment are still
+    /// that tripped the guard on every real run. So is a host with a numeric port (the Redis endpoint, T186 L25).
+    /// A URI's user-info, path, query and fragment are still
     /// checked — a credential can ride there (a SAS <c>sig=</c>, a token in a webhook path).
     /// </summary>
     internal static bool IsCleartextSecretPattern(string? value)
@@ -858,6 +865,12 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
         try
         {
             if (DnsHostName.IsMatch(value)) return false;
+            // T186 L25: Azure Managed Redis's endpoint is 'host:port' (customer.bicep redisEndpoint, Redis__Endpoint) —
+            // a DNS host plus a numeric port carries nothing a credential could ride in.
+            if (DnsHostWithPort.Match(value) is { Success: true } hostPort && DnsHostName.IsMatch(hostPort.Groups["host"].Value))
+            {
+                return false;
+            }
 
             var checkedPart = value;
             if (Uri.TryCreate(value, UriKind.Absolute, out var uri)
@@ -999,8 +1012,7 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
         var completedAt = DateTimeOffset.UtcNow;
         var startedAt = completedAt - TimeSpan.FromMilliseconds(1);
 
-        run.Status = RunStatus.Running;
-        run.CurrentPhase = HandlerIdentifier; // Reconciler observes + fans out to H7.
+        run.MarkPhaseSucceeded(HandlerIdentifier); // Reconciler observes + fans out to H7.
         run.CompletedPhases.Add(new CompletedPhase
         {
             Phase = HandlerIdentifier,

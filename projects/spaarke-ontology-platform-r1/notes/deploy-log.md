@@ -347,6 +347,40 @@ Criterion 89 (blank the writer client id, expect the writer-failure alert to fir
 - **Smoke:** PASS. Validate on Secure PAT-908068 (`5d46df87`) returns `valid:false` / `scope_matter_secured`; on Standard REAL-2026-123456.01 (`2444af6d`) it returns `valid:true`.
 - **Nightly sweep:** `[SIGNAL-EVALUATOR] heartbeat outcome=succeeded` at 02:30:29Z with policies=6 hits=142 written=0 closed=0, the same as 2026-10-21. Since 21:45:37Z the only 503xx trace is the heartbeat, with 0 Signals/Ontology/Gate exceptions.
 
+## 2026-10-26 — ebilling task 122 on dev: `sprk_invoicesubmission.sprk_findingsjson` field-secured (owner OK in ebilling's session + ontology PASS)
+
+- `Deploy-EbillingFormsViews.ps1 -FormsOnly`: removed the column from the submission "Information" form (c412f942); published `sprk_invoicesubmission` only.
+- `Set-EbillingFindingsJsonFieldSecurity.ps1`:
+  - The column is secured; "Spaarke BFF-Managed Field Writers" gets read, create and update; Readers has no row.
+  - The second run wrote nothing; `-Verify` exits 0.
+  - The masked window was 16.3 s, but the BFF app users hold System Administrator, so they were never masked.
+  - 0 submission rows carry findings; no role change.
+- **Ontology impact:** none. No ontology code reads the column; `mi-ontology-writer-dev` is not and must not be in the profile.
+
+## 2026-10-23 — dev BFF `58ffc37da3` (R3) + D-185 live order on spaarkedev1 (worklist config, POL-MATTER-NOBUDGET v2, Console User)
+
+- **BFF:** R3 deployed master `58ffc37da3` at 11:18:12Z (owner approved in R3's session). Ontology read-back at about 11:20Z: `Sprk.Bff.Api.dll` ProductVersion `1.0.0+58ffc37da303a6b169b9b6b3d4d1ad6539dfc94b`, `/healthz` 200. It carries 158, 159, 161, 162, 163, 164 (#2303), 160 + #2314 (#2313) and R3 077.
+- **(1) Worklist config** (owner approved in this session): `Apply-WorklistGridConfiguration.ps1`.
+  - `-WhatIf`: one UPDATE of row `…5010`.
+  - Apply at 11:20:10Z: UPDATED, READ-BACK OK.
+  - `-Verify -RequireRow`: IN SYNC. Lane counts: decide 56, do 84, closedToday 4, suppressed 0, closedEarlier 8.
+- **(2) POL-MATTER-NOBUDGET v2** (D-186): `Apply-DoLanePolicies.ps1 -DefinitionPath config/know-promotion.policies.json`, run 11:20:38Z.
+  - Created v2 `…6312` (plan `assign-task`; next steps `add-todo`, `assign-work`).
+  - Ended v1 `sprk_inforceto` 2026-10-22T00:00:00Z.
+  - Current version now points at v2. The enabled flag is unchanged (True).
+  - `-Verify -RequireRows`: all IN SYNC.
+- **(3) D-185 role change**: `RemovePrivilegeRole` on root-BU Spaarke Console User `51c924e2-bdbe-f111-a05b-3833c5e9614d`.
+  - Removed `prvReadsprk_Policy` (`eda1df58-…`, HTTP 204, 11:21:51Z) and `prvReadsprk_PolicyVersion` (`22640ee9-…`, HTTP 204, 11:21:53Z).
+  - Read-back: 21 → 19 privileges. Neither Read is left; `prvReadsprk_Signal` is kept.
+  - A first attempt at 11:21:18Z used the wrong payload (`PrivilegeId`). It was rejected with 0x80048d19, and the read-back confirmed nothing had changed. The working payload is `{"Privilege":{"@odata.type":"Microsoft.Dynamics.CRM.privilege","privilegeid":…}}`, as in `Remove-ConsoleSignalWriteAndDecisionRecordCreate.ps1:307`.
+  - Spaarke Basic User was not changed (see security-roles §19).
+- **uac-r2 server gate: PASS** (window 11:18:00–11:51:05Z):
+  - 77 requests: 0 403, 0 5xx; the 9 failures are all 401 probes.
+  - 0 `worklist_unavailable`, 0 `signal_unreadable`.
+  - No new exception class (one restart-class Redis lease exception at 11:21:20Z).
+  - Not covered: no traffic reached the worklist or the inquiry routes, so the owner's browser checks cover them.
+  - Evidence: `projects/unified-access-control-r2/notes/deploy-gate-2026-10-23-58ffc37da3.md`.
+
 ## 2026-10-23 — Spaarke Core User: AppendTo on `sprk_eventtype_ref` (D-110, task 159), spaarkedev1
 
 - 00:32:20Z, root role `75e1b627-…`: `prvAppendTosprk_EventType_Ref` at Global. Read-back 784 → 785, exact. Details in security-roles.md §18. uac-r2 told on #1355.
@@ -375,3 +409,16 @@ Criterion 89 (blank the writer client id, expect the writer-failure alert to fir
   - Marker `sprk_document.sprk_restrictedbysubmission` secured, default No, 0 Yes rows.
   - 6 relationships: RemoveLink ×4 (procedureversion, invoice, billingexport, createdbyperson) and Restrict ×2 (sourcedocument, sourcecommunication). All have NoCascade for assign/share/unshare/reparent and Related menu DoNotDisplay.
   - `sprk_invoice` statuscode 659490005 Superseded at statecode 1, 0 invoices.
+
+## 2026-10-27 01:29:15Z — dev BFF `3ff2c04bf5` (R3 deploy, uac-r2 only)
+
+- Range from `bc99fc3e6b`: #2322 (census accepted exceptions), #2323 and #2324 (access-record proof sees team-held grants). No ontology file. Ontology OK given 2026-10-26.
+- R3 verified DLL ProductVersion `1.0.0+3ff2c04bf5a516a314e4aecae41b4308148c5627`. The 30-minute gate was clean: 0 5xx, 0 403, 0 `worklist_unavailable`, 0 `signal_unreadable`, 0 `access_record_hidden`. The census lines are unchanged (Console User and Ontology Administrator stay Critical until UAC §5.2; security-roles §20).
+- Rollback snapshot: `bc99fc3e6b` at `deploy/rollback/wwwroot-20261027T012731Z`.
+
+## 2026-10-27 — ebilling `Set-ChildRecordCreatorPersonSchema.ps1` on dev (`842c0be38d`, owner-approved for ebilling 081/090)
+
+- Ran dry run, -Apply and -Verify, all exit 0 (VERIFY PASS). It created or secured `sprk_createdbyperson` on procedure, procedureversion, policy, policyversion, ruleset and procedureassignment. Publish was entity-scoped: one PublishXml over the script's 35 child tables, including ours and the two policy tables.
+- Ontology tables were checked only, all OK: the writer profile's only member is `mi-ontology-writer-dev`; it holds field permission on `sprk_createdbyperson` for budgetrevision, decisionrecord and signal, and nothing else.
+- Policy tables: only the BFF-Managed Field Writers may set `sprk_createdbyperson`. Ontology authoring never references the column (checked on master and ebilling), so nothing breaks. The missing creator stamp is DI-128 (#2336).
+

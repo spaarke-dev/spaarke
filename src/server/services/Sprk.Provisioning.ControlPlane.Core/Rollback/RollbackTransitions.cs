@@ -72,6 +72,13 @@ public static class RollbackTransitions
         };
 
     /// <summary>
+    /// Consecutive automatic re-dispatches a <see cref="FailureClass.RetryableWithCleanup"/> failure gets before the
+    /// run stops for an operator (T186 L44 — unbounded, H9 re-ran ~370 times in 12 minutes, downloading its artifact
+    /// each time). Counted in <c>ProvisioningRun.HandlerAutoRetries</c>.
+    /// </summary>
+    public const int MaxAutoRetries = 3;
+
+    /// <summary>
     /// Returns true when the reconciler should re-enqueue the failed handler
     /// automatically (§4C RetryableWithCleanup — handler's own idempotency
     /// handles partial write). Resumable requires operator action (POST resume);
