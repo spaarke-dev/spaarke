@@ -350,3 +350,26 @@ Asked at the owner's direction ("consult with uac-r2 directly"). Nothing applied
   - A null value falls back to the tenant default (`SearchIndexResolver` and `SearchIndexNameResolver`).
   - Left as is: "Spaarke Business Unit 1" points at the canonical `spaarke-files-index` row (fdcc183b, default), which is harmless. The catalog rows were not deleted; they stay Inactive.
   - Not verified: whether those 77 documents are present in `spaarke-files-index`, because there is no data-plane read on the search service. They may need re-indexing.
+
+## 2026-10-27 — 4a: opt-in Assigned-To re-push on "Push Updates" (owner proposal; UAC-r2 design; pending owner OK of the design)
+
+Owner proposal: an ordinary push leaves Assigned-To rules One-time. A checkbox in the Matter/Project "Push Updates" ribbon dialog, "Update all related 'Assigned To' contacts", also re-pushes them. UAC-r2 accepts this from the access side, with this shape:
+
+1. `/push` gains `includeAssignedTo`, false when absent. Filing columns are never pushed; invariant columns are never copied.
+2. **Preview first.** `/push` with `preview: true` runs the same enumeration and rights checks with no writes. It returns, per child whose Assigned value would change: name, column, from → to, and the Secure (suggestion only) or Restricted (no contact grant) flag. It also counts the children skipped because the caller lacks Write. The dialog shows the list and this line: "Replaces the assignee on these N records. Their automatic access moves to the new assignee; access staff set by hand is kept."
+3. **Gate:** Write on the SOURCE record when `includeAssignedTo` is true, asked through the equalised gate probe. Per child, the caller's own impersonated Write applies, as today. There is no Share/Assign or role gate.
+4. **Hand-changed assignees:** the person unticks them in the preview, and the confirmed push takes an explicit child-id list. The server re-checks each id: it must be a child of the source under the rule's relationship, and writable by the caller. Any other id is refused per id. A child already equal to the parent is not listed.
+
+Unchanged: `SecureRootFilingGate` per child; `AssignedAccessMaterializer.RunAfterWriteAsync` after each child write.
+
+Expected tests:
+- preview writes nothing;
+- absent flag → Assigned columns untouched;
+- Read-only source + flag → 403;
+- an unticked child keeps its value and grants;
+- a foreign id is refused;
+- a Secure child gets a suggestion, not a grant.
+
+Placement: task 040 (push on the canonical engine). The dialog replaces `openConfirmDialog` in `sprk_fieldmapping_push.js` with a small custom dialog (MODAL-DECISION-CRITERIA). It is new surface on an existing endpoint, so the §11 three questions are answered at task-create time.
+
+Sync-mode migration (UAC-r2 4a): class-aware. Assigned-To targets stay 0; filing targets are never re-pushable; plain data → 1. The values ship with 040 after the owner reviews the dry-run list.
