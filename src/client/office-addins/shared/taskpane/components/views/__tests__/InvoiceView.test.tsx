@@ -531,6 +531,125 @@ describe('InvoiceView — review fixes (task 133)', () => {
     );
   });
 
+  describe('the size budget follows the live marking', () => {
+    // Two files of 15,000,000 bytes each (base64 20,000,000): only one fits the 28,000,000 budget at a time.
+    const BIG = 15_000_000;
+    const twoBigFiles: AttachmentInfo[] = [
+      { id: 'a-1', name: 'timesheet.csv', contentType: 'text/csv', size: BIG, isInline: false, attachmentType: 'file' },
+      {
+        id: 'a-2',
+        name: 'INV-9.pdf',
+        contentType: 'application/pdf',
+        size: BIG,
+        isInline: false,
+        attachmentType: 'file',
+      },
+    ];
+    const host = (list: AttachmentInfo[]) =>
+      ({
+        getCapabilities: () => ({ canGetAttachments: true }),
+        getAttachments: jest.fn(async () => list),
+      }) as unknown as IHostAdapter;
+
+    it(
+      "must-fire: the PDF the budget holds back becomes markable once the large Supporting file is set to Don't save",
+      async () => {
+        renderView({ hostAdapter: host(twoBigFiles) });
+        const pdfRow = await findRow('INV-9.pdf');
+        // The csv is marked Supporting by default and takes the budget: the PDF is locked, with the reason.
+        expect(within(pdfRow).queryByRole('radio', { name: 'Invoice' })).toBeNull();
+        expect(pdfRow.textContent).toMatch(/does not fit with the other marked files/);
+        expect(screen.getByText(/The invoice PDF does not fit with the other marked files/)).toBeInTheDocument();
+
+        await userEvent.click(within(await findRow('timesheet.csv')).getByRole('radio', { name: "Don't save" }));
+
+        const unlocked = await findRow('INV-9.pdf');
+        await waitFor(() => expect(within(unlocked).getByRole('radio', { name: 'Invoice' })).toBeEnabled());
+        await userEvent.click(within(unlocked).getByRole('radio', { name: 'Invoice' }));
+        expect(screen.queryByTestId('invoice-over-budget')).toBeNull();
+      },
+      TIMEOUT
+    );
+
+    it(
+      'must-fire: a mark change that leaves a marked file past the budget names it, keeps its mark and blocks Submit',
+      async () => {
+        const { onSubmit } = renderView({ hostAdapter: host(twoBigFiles) });
+        await findRow('INV-9.pdf');
+        await chooseMatter();
+        await userEvent.type(screen.getByRole('textbox', { name: /Firm invoice number/ }), 'INV-9');
+        // csv Don't save -> the PDF unlocks -> mark it Invoice.
+        await userEvent.click(within(await findRow('timesheet.csv')).getByRole('radio', { name: "Don't save" }));
+        const pdfRow = await findRow('INV-9.pdf');
+        await waitFor(() => expect(within(pdfRow).getByRole('radio', { name: 'Invoice' })).toBeEnabled());
+        await userEvent.click(within(pdfRow).getByRole('radio', { name: 'Invoice' }));
+        await waitFor(() => expect(submitButton()).toBeEnabled());
+
+        // The csv comes BEFORE the PDF in the email, so it fits when marked again; the capture then leaves the
+        // PDF out. The PDF is not unmarked behind the user's back: it is named, and Submit is blocked.
+        const csvRow = await findRow('timesheet.csv');
+        await waitFor(() => expect(within(csvRow).getByRole('radio', { name: 'Supporting' })).toBeEnabled());
+        await userEvent.click(within(csvRow).getByRole('radio', { name: 'Supporting' }));
+        const notice = await screen.findByTestId('invoice-over-budget');
+        expect(notice.textContent).toMatch(/INV-9\.pdf.*doesn't fit with the other marked files/);
+        expect(within(await findRow('INV-9.pdf')).getByRole('radio', { name: 'Invoice' })).toBeChecked();
+        expect(submitButton()).toBeDisabled();
+
+        // Setting the csv to Don't save makes room again: the notice goes and Submit works.
+        await userEvent.click(within(await findRow('timesheet.csv')).getByRole('radio', { name: "Don't save" }));
+        await waitFor(() => expect(screen.queryByTestId('invoice-over-budget')).toBeNull());
+        await waitFor(() => expect(submitButton()).toBeEnabled());
+        await userEvent.click(submitButton());
+        await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+        const input = (
+          onSubmit.mock.calls[0] as unknown as [{ marks: Array<{ attachmentId: string; mark: string }> }]
+        )[0];
+        expect(input.marks.map(m => [m.attachmentId, m.mark])).toEqual([
+          ['a-1', 'DontSave'],
+          ['a-2', 'Invoice'],
+        ]);
+      },
+      TIMEOUT
+    );
+
+    it(
+      'must-not-fire: files that fit together are all markable and Submit is not blocked',
+      async () => {
+        renderView();
+        await findRow('INV-4711.pdf');
+        await chooseMatter();
+        await userEvent.type(screen.getByRole('textbox', { name: /Firm invoice number/ }), 'INV-4711');
+        await waitFor(() => expect(submitButton()).toBeEnabled());
+        expect(screen.queryByTestId('invoice-over-budget')).toBeNull();
+      },
+      TIMEOUT
+    );
+
+    it(
+      'a cloud link stays disabled whatever else is marked, and says why',
+      async () => {
+        const withCloud: AttachmentInfo[] = [
+          ...twoBigFiles,
+          {
+            id: 'a-3',
+            name: 'shared.pdf',
+            contentType: 'application/pdf',
+            size: 10,
+            isInline: false,
+            attachmentType: 'cloud',
+          },
+        ];
+        renderView({ hostAdapter: host(withCloud) });
+        await findRow('shared.pdf');
+        await userEvent.click(within(await findRow('timesheet.csv')).getByRole('radio', { name: "Don't save" }));
+        const cloudRow = await findRow('shared.pdf');
+        expect(within(cloudRow).queryByRole('radio', { name: 'Invoice' })).toBeNull();
+        expect(cloudRow.textContent).toMatch(/cloud/);
+      },
+      TIMEOUT
+    );
+  });
+
   describe('results after the server accepted the submission', () => {
     it(
       'Rejected is titled "The invoice was rejected", keeps the tracking number, and is not "not submitted"',

@@ -26,6 +26,9 @@ import {
   buildInvoiceSubmissionInput,
   normalizeFirmInvoiceNumber,
   toInvoiceMarkingAttachments,
+  applyMarkingBudget,
+  describeOverBudget,
+  isPdfAttachment,
   FIRM_INVOICE_NUMBER_MAX,
   type InvoiceCoreRecordType,
   type InvoiceFirmOption,
@@ -131,6 +134,7 @@ function isCoreRecordType(type: EntityType): type is InvoiceCoreRecordType {
 }
 
 const NO_CANDIDATES: never[] = [];
+const NO_ATTACHMENTS: InvoiceListedAttachment[] = [];
 
 type MarkingProblem = 'no-invoice' | 'more-than-one-invoice' | 'invoice-not-allowed' | 'disabled-attachment-marked';
 
@@ -138,12 +142,12 @@ type MarkingProblem = 'no-invoice' | 'more-than-one-invoice' | 'invoice-not-allo
 function describeMarkingProblem(reason: MarkingProblem, attachments: readonly InvoiceListedAttachment[]): string {
   switch (reason) {
     case 'no-invoice':
-      // The marking component's PDF rule (content type says PDF, else a .pdf name).
-      return attachments.some(
-        a => !a.disabledReason && (/pdf/i.test(a.contentType) || /\.pdf$/i.test(a.fileName.trim()))
-      )
-        ? 'Mark the PDF that is the invoice.'
-        : 'The invoice must be a PDF attached to this email, and this email has none that can be submitted.';
+      if (attachments.some(a => !a.disabledReason && isPdfAttachment(a))) return 'Mark the PDF that is the invoice.';
+      // A PDF held back only by the size budget can be marked once another file is set to Don't save.
+      if (attachments.some(a => a.budgetDisabled && isPdfAttachment(a))) {
+        return "The invoice PDF does not fit with the other marked files. Set another file to Don't save to make room.";
+      }
+      return 'The invoice must be a PDF attached to this email, and this email has none that can be submitted.';
     case 'more-than-one-invoice':
       return 'Only one file can be the invoice.';
     case 'invoice-not-allowed':
@@ -288,7 +292,13 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
     [apiBaseUrl, getAccessToken]
   );
 
-  const attachments = load.status === 'ready' ? load.attachments : [];
+  const listedAttachments = load.status === 'ready' ? load.attachments : NO_ATTACHMENTS;
+  // The size budget follows the LIVE marking: a file the budget held back becomes markable when others are set to
+  // Don't save, and a marked file a mark change leaves past the budget is named (never silently unmarked) and blocks Submit.
+  const { attachments, overBudget } = useMemo(
+    () => applyMarkingBudget(listedAttachments, marking),
+    [listedAttachments, marking]
+  );
   const markingMode = mode === 'existing' ? 'correction' : 'new';
   // Always with `attachments`, so a non-PDF or disabled Invoice and a disabled attachment marked to be saved are refused.
   const markingCheck = validateInvoiceMarking(marking, markingMode, attachments);
@@ -329,6 +339,7 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
     firmId.length > 0 &&
     normalizedNumber !== null &&
     markingCheck.ok &&
+    overBudget.length === 0 &&
     !locked;
 
   const runAttempt = async (input: InvoiceSubmissionInput, actionId: string): Promise<void> => {
@@ -611,6 +622,11 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
                 {markingProblem}
               </Text>
             )}
+            {overBudget.map(a => (
+              <Text key={a.id} size={200} className={styles.note} role="status" data-testid="invoice-over-budget">
+                {describeOverBudget(a)}
+              </Text>
+            ))}
           </>
         )}
       </div>

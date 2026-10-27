@@ -119,7 +119,26 @@ export const FIRM_INVOICE_NUMBER_MAX = 100;
  * One listed attachment: the marking component's {@link MarkableAttachment} with the content type and size Outlook
  * gave (always present here; the wire marks carry them).
  */
-export type InvoiceListedAttachment = MarkableAttachment & { contentType: string; sizeBytes: number };
+export type InvoiceListedAttachment = MarkableAttachment & {
+  contentType: string;
+  sizeBytes: number;
+  /** Set with a `disabledReason` that is only about the size budget (not a cloud link or a file over 20 MB). */
+  budgetDisabled?: true;
+};
+
+const PDF_NAME = /\.pdf$/i;
+
+/** The marking component's PDF rule (an Invoice must be a PDF): the content type says PDF, else the name ends .pdf. */
+export function isPdfAttachment(a: { fileName: string; contentType?: string }): boolean {
+  return /pdf/i.test(a.contentType ?? '') || PDF_NAME.test(a.fileName.trim());
+}
+
+function doesNotFitReason(budget: number): string {
+  return (
+    `It does not fit with the other marked files: one submission can carry about ${formatSize(Math.floor((budget * 3) / 4))} ` +
+    "of attachments together. Set another file to Don't save to make room."
+  );
+}
 
 /** The marking: one role per listed attachment id (the component's `value`; it holds every non-inline id). */
 export type InvoiceMarkingValue = Readonly<Record<string, InvoiceAttachmentRole>>;
@@ -131,11 +150,12 @@ export type InvoiceMarkingValue = Readonly<Record<string, InvoiceAttachmentRole>
  * Limits:
  * - a cloud link (no file in the email);
  * - larger than {@link MAX_ATTACHMENT_BYTES} (20 MB);
- * - past the {@link EMAIL_CONTENT_BUDGET_BYTES} budget once the listed attachments before it are counted. That is
- *   the order the capture spends the budget in: the marked files first, in the email's order (the view starts with
- *   every sendable attachment marked), and only then the rest. Inline pictures are never marked, so the capture
- *   sends them last and they are NOT counted here: a PDF the capture would send is never disabled because of a
- *   picture in the email text. The email's text is not counted here; the capture at submit re-checks with it.
+ * - past the {@link EMAIL_CONTENT_BUDGET_BYTES} budget once the listed attachments before it are counted. This is the
+ *   STARTING list, for the view's initial marking (every sendable attachment marked, in the email's order); the
+ *   budget reason is then recomputed from the live marking by {@link applyMarkingBudget}. Inline pictures are never
+ *   marked, so the capture sends them last and they are NOT counted: a PDF the capture would send is never disabled
+ *   because of a picture in the email text. The email's text is not counted here; the capture at submit re-checks
+ *   with it.
  */
 export function toInvoiceMarkingAttachments(
   attachments: readonly AttachmentInfo[],
@@ -148,14 +168,14 @@ export function toInvoiceMarkingAttachments(
       continue;
     }
     let disabledReason: string | undefined;
+    let budgetDisabled = false;
     if (attachment.attachmentType === 'cloud') {
       disabledReason = 'It is a link to a file stored in the cloud (for example OneDrive), not a file in the email.';
     } else if (attachment.size > MAX_ATTACHMENT_BYTES) {
       disabledReason = `It is larger than ${formatSize(MAX_ATTACHMENT_BYTES)}, the most one submission can carry.`;
     } else if (used + base64Length(attachment.size) > budget) {
-      disabledReason =
-        `It does not fit: one submission can carry about ${formatSize(Math.floor((budget * 3) / 4))} of ` +
-        'attachments together.';
+      disabledReason = doesNotFitReason(budget);
+      budgetDisabled = true;
     } else {
       used += base64Length(attachment.size);
     }
@@ -165,9 +185,85 @@ export function toInvoiceMarkingAttachments(
       contentType: attachment.contentType,
       sizeBytes: attachment.size,
       ...(disabledReason ? { disabledReason } : {}),
+      ...(budgetDisabled ? { budgetDisabled: true as const } : {}),
     });
   }
   return result;
+}
+
+/** One attachment's cost against the request budget: its base64 length. */
+function costOf(attachment: InvoiceListedAttachment): number {
+  return base64Length(attachment.sizeBytes);
+}
+
+/** The ids the capture would leave out: files in this order, each kept only if it fits in what is left. */
+function overflowOf(ordered: readonly InvoiceListedAttachment[], budget: number): Set<string> {
+  const over = new Set<string>();
+  let used = 0;
+  for (const attachment of ordered) {
+    if (used + costOf(attachment) > budget) over.add(attachment.id);
+    else used += costOf(attachment);
+  }
+  return over;
+}
+
+/**
+ * The capture's order for a marking. `captureEmailContent` spends the budget on the ticked files (here: every file
+ * marked Invoice or Supporting, from `toSubmissionMarks`) in the EMAIL's order, Invoice and Supporting alike; a file
+ * marked Don't save is unticked, so it is sent after these and takes no part in the budget here.
+ */
+function captureOrder(
+  sendable: readonly InvoiceListedAttachment[],
+  marking: InvoiceMarkingValue
+): InvoiceListedAttachment[] {
+  return sendable.filter(a => (marking[a.id] ?? 'skip') !== 'skip');
+}
+
+/**
+ * The listing for the CURRENT marking: which files can be marked, and which marked files no longer fit.
+ *
+ * - A cloud link or a file over 20 MB stays disabled whatever the marking.
+ * - A file marked Don't save is disabled for the budget only if it would not fit when marked, with the other marks as
+ *   they are now, in the capture's order (the marked files in the email's order). So a file disabled only for the budget becomes markable as soon as the user
+ *   sets other files to Don't save.
+ * - A file that is already marked is never disabled or unmarked here. When a mark change leaves it past the budget
+ *   it is returned in `overBudget`: the view says why and blocks Submit, so the user decides what to drop.
+ */
+export function applyMarkingBudget(
+  listed: readonly InvoiceListedAttachment[],
+  marking: InvoiceMarkingValue,
+  budget: number = EMAIL_CONTENT_BUDGET_BYTES
+): { attachments: InvoiceListedAttachment[]; overBudget: InvoiceListedAttachment[] } {
+  const base = listed.map(a => {
+    if (!a.budgetDisabled) return a;
+    const copy = { ...a };
+    delete copy.disabledReason;
+    delete copy.budgetDisabled;
+    return copy;
+  });
+  const sendable = base.filter(a => !a.disabledReason);
+
+  const current = overflowOf(captureOrder(sendable, marking), budget);
+  const overBudget = sendable.filter(a => current.has(a.id));
+
+  const attachments = base.map(a => {
+    if (a.disabledReason || (marking[a.id] ?? 'skip') !== 'skip') return a;
+    // Marked as either role the file takes the same place in the capture's order, so one check covers both.
+    const fits = !overflowOf(captureOrder(sendable, { ...marking, [a.id]: 'supporting' }), budget).has(a.id);
+    return fits ? a : { ...a, disabledReason: doesNotFitReason(budget), budgetDisabled: true as const };
+  });
+  return { attachments, overBudget };
+}
+
+/** The sentence for a marked file the budget no longer holds. */
+export function describeOverBudget(
+  attachment: InvoiceListedAttachment,
+  budget: number = EMAIL_CONTENT_BUDGET_BYTES
+): string {
+  return (
+    `"${attachment.fileName}" doesn't fit with the other marked files: one submission can carry about ` +
+    `${formatSize(Math.floor((budget * 3) / 4))} of attachments together. Set a file to Don't save to make room.`
+  );
 }
 
 /** The contract's `marks[]`: one per listed (non-inline) attachment; a disabled or unmarked one is `DontSave`. */
