@@ -1259,3 +1259,26 @@ Only the newest saved copy is authorized (`ResolveByEmailMessageIdAsync`, `TopCo
 | **GitHub Issue** | [#2307](https://github.com/spaarke-dev/spaarke/issues/2307) |
 
 A communication filed only to a type outside matter/project/invoice/work assignment (an event, a service request) gives the archive no derived record, so the pane offers "File to record". Harmless. Fix: treat a filled regarding outside the four as withheld (`ResolveDerivedRelatedRecordAsync`).
+
+
+## ISS-025 — Outlook add-in: inline images lose their cid link in the saved .eml
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-27 (task 133 review, found in passing; pre-existing) |
+| **GitHub Issue** | [#2355](https://github.com/spaarke-dev/spaarke/issues/2355) |
+
+Capture never carries `contentId` (`emailContentCapture.ts`, `OutlookAdapter.ts:388`), and the enricher's light path does not read Graph's, so the .eml builder adds inline images as plain attachments and `cid:` references break. Affects /office/save and ebilling from-email. Fix: map Office.js `contentId` (preview API), with a server fallback to Graph `ContentId`.
+
+## ISS-026 — Office quick-create: entity type parsing accepts numbers and comma-joined names
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-27 (task 133 review, found in passing; pre-existing) |
+| **GitHub Issue** | [#2356](https://github.com/spaarke-dev/spaarke/issues/2356) |
+
+`QuickCreateFieldRequirements.TryParse` uses `Enum.TryParse`. The filter and the endpoint share it, so they agree on the type, but undefined values are not refused at the boundary. Fix: exact name match, as in task 133's search fix. Kept out of task 133 because that task allows only one server change.
