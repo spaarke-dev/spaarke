@@ -473,7 +473,8 @@ public sealed class ExternalInviteService
     /// answers "ExistingAccount" — no account, the contact kept pending, the sign-in email sent — when the person already
     /// has a CIAM account. Answers a retryable 503 (<see cref="ContactBindingDecision.InviteMarkerNotWritten"/>, no email)
     /// when the marker write failed, or when the contact is left with no oid (ExistingAccount, a failed oid write) and the
-    /// marker did not land. Throws on any other hard failure (Contact create, CIAM create, oid bind). Shared
+    /// marker did not land. Throws on any other hard failure (Contact create, CIAM create, oid bind); a throw after the marker
+    /// landed first retracts the invite this call wrote, so no invite stays pending without its email (C5). Shared
     /// by <c>/invite</c>, <c>/invite-and-grant</c> (task 029) and the grant flows (task 185).
     /// </summary>
     /// <param name="resolution">
@@ -687,105 +688,116 @@ public sealed class ExternalInviteService
                 return MarkerNotWritten(contactId);
         }
 
-        // Create the CIAM local account (broker-only; no B2B guest).
-        string rawOid;
+        // C5: a pending invite exists only if its email went out. Once the marker has landed, anything that throws before
+        // the email is sent (the CIAM create, the bind, a cancellation) retracts the invite this request wrote (its own
+        // stamp only; a newer invite is never cleared), on CancellationToken.None, and the failure propagates unchanged.
         try
         {
-            rawOid = await ciamProvisioner.CreateCiamUserAsync(request.Email, request.FirstName, request.LastName, ct);
-        }
-        catch (CiamAccountAlreadyExistsException)
-        {
-            // Task 184 — the person already has a CIAM account (Graph 400 ObjectConflict on proxyAddresses). The invite
-            // succeeds: the contact stays PENDING (marker set, no oid), and the first sign-in email-binds it under E11's
-            // intent gate. The existing account's oid is deliberately NOT looked up here (no User.Read.All on any stamp).
-            // The marker is this contact's only evidence, so without it there is no success to report: 503, no email.
-            if (!markerLanded)
+            // Create the CIAM local account (broker-only; no B2B guest).
+            string rawOid;
+            try
             {
+                rawOid = await ciamProvisioner.CreateCiamUserAsync(request.Email, request.FirstName, request.LastName, ct);
+            }
+            catch (CiamAccountAlreadyExistsException)
+            {
+                // Task 184 — the person already has a CIAM account (Graph 400 ObjectConflict on proxyAddresses). The invite
+                // succeeds: the contact stays PENDING (marker set, no oid), and the first sign-in email-binds it under E11's
+                // intent gate. The existing account's oid is deliberately NOT looked up here (no User.Read.All on any stamp).
+                // The marker is this contact's only evidence, so without it there is no success to report: 503, no email.
+                if (!markerLanded)
+                {
+                    logger.LogWarning(
+                        "[EXT-INVITE] {Email} already has a CIAM account, but contact {ContactId} carries no pending-invite marker "
+                        + "({Status}) — answered 503, no email sent. Retry once the column is provisioned.",
+                        request.Email, contactId, mark.Status);
+                    return MarkerNotWritten(contactId);
+                }
+
+                // §12 I-10: this operator log line is the ONLY place the branch is named; the inviter's response never says it.
+                logger.LogInformation(
+                    "[EXT-INVITE] {Email} already has a CIAM account ({InviteOutcome}) — contact {ContactId} kept pending; the first "
+                    + "sign-in binds it.",
+                    request.Email, ExistingAccountStatus, contactId);
+                var existingAccountEmailFailed = false;
+                try
+                {
+                    await emailService.SendCiamExistingAccountEmailAsync(
+                        request.Email, request.FirstName ?? string.Empty, portalUrl, inviteUrl, ct);
+                }
+                catch (Exception ex)
+                {
+                    existingAccountEmailFailed = true;
+                    logger.LogWarning(ex, "[EXT-INVITE] Contact {ContactId} for {Email}: the sign-in email failed to send.",
+                        contactId, request.Email);
+                }
+
+                // Slice C2b: a pending invite exists only if its email went out. Nobody holds this code, so the invite this
+                // request wrote is retracted (never a newer one): the next invite, staff or automatic, writes and sends a new one.
+                if (existingAccountEmailFailed)
+                {
+                    await RetractUnsentInviteAsync(binder, contactId, mark.WrittenEmailHash, logger).ConfigureAwait(false);
+                }
+
+                return new ProvisionOutcome(contactId, ExistingAccountStatus, EmailFailed: existingAccountEmailFailed);
+            }
+
+            if (!Guid.TryParse(rawOid, out var ciamOid) || ciamOid == Guid.Empty)
+            {
+                throw new InvalidOperationException($"CIAM returned an object id that is not a GUID for '{request.Email}'.");
+            }
+
+            // Persist the oid (D format) + plane External, conditional on the row version read with it. If the bind
+            // does not land, no email is sent, so nobody holds a code: a retried invite (ExistingAccount, a new code) repairs it.
+            // Task 185 (owner Q5): when the marker and its code hash landed, the same bind PATCH clears the now-inert hash.
+            var bind = await binder.BindInvitedContactAsync(contactId, etag, ciamOid, consumeInviteCode: markerLanded, ct);
+            if (bind.Status != StoreWriteStatus.Written && !markerLanded)
+            {
+                // Task 184 — the repair path needs the marker: without it the first sign-in finds no intent (unless a grant
+                // follows, which this failure prevents). Retryable: a retry finds the account and answers "ExistingAccount"
+                // once the marker can land. No email.
                 logger.LogWarning(
-                    "[EXT-INVITE] {Email} already has a CIAM account, but contact {ContactId} carries no pending-invite marker "
-                    + "({Status}) — answered 503, no email sent. Retry once the column is provisioned.",
-                    request.Email, contactId, mark.Status);
+                    "[EXT-INVITE] CIAM account {Oid} was created for {Email} but neither its oid ({BindStatus}) nor the pending-invite "
+                    + "marker landed on contact {ContactId} — answered 503, no email sent.",
+                    ciamOid, request.Email, bind.Status, contactId);
                 return MarkerNotWritten(contactId);
             }
 
-            // §12 I-10: this operator log line is the ONLY place the branch is named; the inviter's response never says it.
-            logger.LogInformation(
-                "[EXT-INVITE] {Email} already has a CIAM account ({InviteOutcome}) — contact {ContactId} kept pending; the first "
-                + "sign-in binds it.",
-                request.Email, ExistingAccountStatus, contactId);
-            var existingAccountEmailFailed = false;
+            if (bind.Status != StoreWriteStatus.Written)
+            {
+                throw new InvalidOperationException(
+                    $"CIAM account {ciamOid:D} was created for '{request.Email}' but its oid could not be bound to contact " +
+                    $"{contactId:D} ({bind.Status}). No email was sent: retry the invite, which sends a new invite code that binds " +
+                    "the contact at its first sign-in.");
+            }
+
+            // Send the onboarding email (task 024; task 185: its links open the invite link).
+            // Non-fatal: the account + oid are persisted. But the link carries the invite code, which exists only in this email,
+            // so a failed send leaves nobody holding the code: sending the portal URL out of band does not help. The person needs
+            // a re-invite, which sends a new code. EmailFailed reports it (the routes' emailSent, the grant flows' email_not_sent).
+            var onboardingEmailFailed = false;
             try
             {
-                await emailService.SendCiamExistingAccountEmailAsync(
+                await emailService.SendCiamOnboardingEmailAsync(
                     request.Email, request.FirstName ?? string.Empty, portalUrl, inviteUrl, ct);
             }
             catch (Exception ex)
             {
-                existingAccountEmailFailed = true;
-                logger.LogWarning(ex, "[EXT-INVITE] Contact {ContactId} for {Email}: the sign-in email failed to send.",
-                    contactId, request.Email);
+                onboardingEmailFailed = true;
+                logger.LogWarning(ex, "[EXT-INVITE] CIAM account created for {Email} but onboarding email failed to send.", request.Email);
             }
 
-            // Slice C2b: a pending invite exists only if its email went out. Nobody holds this code, so the invite this
-            // request wrote is retracted (never a newer one): the next invite, staff or automatic, writes and sends a new one.
-            if (existingAccountEmailFailed)
-            {
-                await RetractUnsentInviteAsync(binder, contactId, mark.WrittenEmailHash, logger).ConfigureAwait(false);
-            }
+            logger.LogInformation(
+                "[EXT-INVITE] Provisioned CIAM user {Oid} for {Email} — Contact: {ContactId}",
+                ciamOid, request.Email, contactId);
 
-            return new ProvisionOutcome(contactId, ExistingAccountStatus, EmailFailed: existingAccountEmailFailed);
+            return new ProvisionOutcome(contactId, ProvisionedStatus, EmailFailed: onboardingEmailFailed);
         }
-
-        if (!Guid.TryParse(rawOid, out var ciamOid) || ciamOid == Guid.Empty)
+        catch (Exception)
         {
-            throw new InvalidOperationException($"CIAM returned an object id that is not a GUID for '{request.Email}'.");
+            await RetractUnsentInviteAsync(binder, contactId, mark.WrittenEmailHash, logger).ConfigureAwait(false);
+            throw;
         }
-
-        // Persist the oid (D format) + plane External, conditional on the row version read with it. If the bind
-        // does not land, no email is sent, so nobody holds a code: a retried invite (ExistingAccount, a new code) repairs it.
-        // Task 185 (owner Q5): when the marker and its code hash landed, the same bind PATCH clears the now-inert hash.
-        var bind = await binder.BindInvitedContactAsync(contactId, etag, ciamOid, consumeInviteCode: markerLanded, ct);
-        if (bind.Status != StoreWriteStatus.Written && !markerLanded)
-        {
-            // Task 184 — the repair path needs the marker: without it the first sign-in finds no intent (unless a grant
-            // follows, which this failure prevents). Retryable: a retry finds the account and answers "ExistingAccount"
-            // once the marker can land. No email.
-            logger.LogWarning(
-                "[EXT-INVITE] CIAM account {Oid} was created for {Email} but neither its oid ({BindStatus}) nor the pending-invite "
-                + "marker landed on contact {ContactId} — answered 503, no email sent.",
-                ciamOid, request.Email, bind.Status, contactId);
-            return MarkerNotWritten(contactId);
-        }
-
-        if (bind.Status != StoreWriteStatus.Written)
-        {
-            throw new InvalidOperationException(
-                $"CIAM account {ciamOid:D} was created for '{request.Email}' but its oid could not be bound to contact " +
-                $"{contactId:D} ({bind.Status}). No email was sent: retry the invite, which sends a new invite code that binds " +
-                "the contact at its first sign-in.");
-        }
-
-        // Send the onboarding email (task 024; task 185: its links open the invite link).
-        // Non-fatal: the account + oid are persisted. But the link carries the invite code, which exists only in this email,
-        // so a failed send leaves nobody holding the code: sending the portal URL out of band does not help. The person needs
-        // a re-invite, which sends a new code. EmailFailed reports it (the routes' emailSent, the grant flows' email_not_sent).
-        var onboardingEmailFailed = false;
-        try
-        {
-            await emailService.SendCiamOnboardingEmailAsync(
-                request.Email, request.FirstName ?? string.Empty, portalUrl, inviteUrl, ct);
-        }
-        catch (Exception ex)
-        {
-            onboardingEmailFailed = true;
-            logger.LogWarning(ex, "[EXT-INVITE] CIAM account created for {Email} but onboarding email failed to send.", request.Email);
-        }
-
-        logger.LogInformation(
-            "[EXT-INVITE] Provisioned CIAM user {Oid} for {Email} — Contact: {ContactId}",
-            ciamOid, request.Email, contactId);
-
-        return new ProvisionOutcome(contactId, ProvisionedStatus, EmailFailed: onboardingEmailFailed);
     }
 
     /// <summary>

@@ -422,7 +422,9 @@ public class ExistingCiamAccountInviteTests
     /// nobody holds a code and the first sign-in is denied <c>contact_not_invited</c>; a RETRIED invite answers
     /// ExistingAccount (the CIAM account exists) with a NEW code, and that code repairs the binding. Before 185 this test was
     /// <c>AFailedOidWrite_WithTheMarker_KeepsThe500_AndTheFirstSignInRepairsIt</c>. Slice D: the 500's logged reason says
-    /// "retry the invite" (it said "The first CIAM sign-in repairs the binding").
+    /// "retry the invite" (it said "The first CIAM sign-in repairs the binding"). C5: a pending invite exists only if its
+    /// email went out, so the throw after the marker retracts the invite this call wrote (it was kept before, and a grant
+    /// then answered AlreadyPending for 30 days).
     /// </summary>
     [Fact]
     public async Task AFailedOidWrite_WithTheMarker_KeepsThe500_AndARetriedInviteWithANewCodeRepairsIt()
@@ -433,7 +435,7 @@ public class ExistingCiamAccountInviteTests
         var result = await InviteAndGrant();
 
         result.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(StatusCodes.Status500InternalServerError);
-        _h.Identities.Contacts[contact].InvitedOn.Should().NotBeNull();
+        ShouldHaveNoPendingInvite(contact);
         _h.Emails.Onboarding.Should().BeEmpty("no email was sent, so no code is in anyone's hands");
         _h.Identities.FailBind = false;
         var created = _ciam.Created.Single().Oid;
@@ -1665,6 +1667,80 @@ public class ExistingCiamAccountInviteTests
         var body = (await InviteAndGrant()).Should().BeOfType<Ok<InviteAndGrantResponse>>().Subject.Value!;
 
         (body.EmailSent, body.EmailErrorCode).Should().Be(((bool?)true, (string?)null));
+    }
+
+    // ── C5: a failure after the marker leaves no pending invite ──────────────────────────────────────────────────────
+
+    private void ShouldHaveNoPendingInvite(Guid contact)
+    {
+        var row = _h.Identities.Contacts[contact];
+        (row.InvitedOn, row.InviteCodeHash, row.InvitedEmailHash, row.InvitedTenantId)
+            .Should().Be(((DateTimeOffset?)null, (string?)null, (string?)null, (string?)null),
+                "a pending invite exists only if its email went out");
+    }
+
+    /// <summary>
+    /// MUST FIRE: the CIAM create throws after the marker landed (a Graph fault that is not "the account already exists", or
+    /// a cancellation): the invite this call wrote is retracted and the failure propagates unchanged. The next invite then
+    /// writes a new one and sends it.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Invite_TheCiamCreateThrowsAfterTheMarker_TheInviteIsRetracted(bool cancelled)
+    {
+        var contact = UnboundContact();
+        _ciam.Failure = cancelled
+            ? new OperationCanceledException("the request was cancelled")
+            : GraphError(503, "ServiceUnavailable", "The service is temporarily unavailable.");
+
+        var act = () => Invite();
+
+        if (cancelled)
+            await act.Should().ThrowAsync<OperationCanceledException>();
+        else
+            await act.Should().ThrowAsync<ODataError>();
+        ShouldHaveNoPendingInvite(contact);
+        _h.Emails.InviteUrls.Should().BeEmpty();
+
+        _ciam.Failure = null;
+        (await Invite()).Status.Should().Be(InviteExternalUserEndpoint.ProvisionedStatus);
+        _h.Emails.Onboarding.Should().ContainSingle("the next invite writes a new code and sends it");
+    }
+
+    /// <summary>MUST FIRE: the oid bind throws after the marker landed: the invite this call wrote is retracted.</summary>
+    [Fact]
+    public async Task Invite_TheBindThrowsAfterTheMarker_TheInviteIsRetracted()
+    {
+        var contact = UnboundContact();
+        _h.Identities.BeforeBind = _ => throw new HttpRequestException("the bind could not be written");
+
+        var act = () => Invite();
+
+        await act.Should().ThrowAsync<HttpRequestException>();
+        ShouldHaveNoPendingInvite(contact);
+        _h.Emails.InviteUrls.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// MUST NOT FIRE: a newer invite written while this one was failing is never cleared; only this call's own stamp is.
+    /// </summary>
+    [Fact]
+    public async Task Invite_TheCiamCreateThrows_AfterANewerInviteWasWritten_TheNewerInviteSurvives()
+    {
+        var contact = UnboundContact();
+        _ciam.OnCreate = () =>
+        {
+            var row = _h.Identities.Contacts[contact];
+            row.InvitedEmailHash = "v1:newer-invite";
+            row.Version += 1000;
+        };
+        _ciam.Failure = GraphError(503, "ServiceUnavailable", "The service is temporarily unavailable.");
+
+        var act = () => Invite();
+
+        await act.Should().ThrowAsync<ODataError>();
+        _h.Identities.Contacts[contact].InvitedEmailHash.Should().Be("v1:newer-invite");
     }
 
     // ── Doubles ─────────────────────────────────────────────────────────────────────────────────────────────

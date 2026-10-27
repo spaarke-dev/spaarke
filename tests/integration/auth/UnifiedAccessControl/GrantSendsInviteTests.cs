@@ -464,6 +464,10 @@ public class GrantSendsInviteTests
         _h.InviteLogger = log;
         _h.Ciam.Failure = new HttpRequestException("Simulated Graph outage.");
 
+        // C5: the throw after the marker retracts the invite this call wrote; the hash it wrote is captured as it is cleared.
+        string? stored = null;
+        _h.Identities.BeforePendingInviteClear = c => stored = c.InviteCodeHash;
+
         var body = OkBody(await Grant(contact));
 
         body.Invite.Should().Be(new GrantInviteResult(GrantInviteStatus.Failed, GrantInviteStatus.InviteFailedReasonCode));
@@ -472,8 +476,9 @@ public class GrantSendsInviteTests
         _h.Emails.InviteUrls.Should().BeEmpty();
         log.Entries.Should().Contain(e => e.Level == LogLevel.Warning);
 
-        var stored = _h.Identities.Contacts[contact].InviteCodeHash!;
-        foreach (var part in new[] { stored }.Concat(stored.Split(':', '.').Where(p => p.Length >= 16)))
+        stored.Should().NotBeNull("the invite wrote a code hash, then retracted it");
+        _h.Identities.Contacts[contact].InviteCodeHash.Should().BeNull("a pending invite exists only if its email went out");
+        foreach (var part in new[] { stored! }.Concat(stored!.Split(':', '.').Where(p => p.Length >= 16)))
             log.Messages.Should().NotContain(m => m.Contains(part, StringComparison.Ordinal), "never log a hash");
     }
 
