@@ -348,6 +348,32 @@ public class PersonAccessAdministrationTests
         _h.Identities.Contacts[contact].InviteCodeHash.Should().BeNull("the later steps still run");
     }
 
+    // ── Slice C5: a grant row that names no record ─────────────────────────────────────────────────────────────
+
+    /// <summary>A person grant row whose record was deleted: it names no root and confers nothing.</summary>
+    private ExternalGrantRow RecordlessGrant(Guid contactId)
+    {
+        var row = GrantOnMatter(contactId);
+        row.MatterId = null;
+        return row;
+    }
+
+    [Fact]
+    public async Task Remove_AGrantRowThatNamesNoRecord_IsDeactivatedByItsId_AndTheRemovalCompletes()
+    {
+        var (contact, _) = BoundPerson();
+        var recordless = RecordlessGrant(contact);
+        var grant = GrantOnMatter(contact);
+
+        var result = await Remove(contact);
+
+        var ok = result.Should().BeOfType<Ok<RemovePersonResponse>>().Subject.Value!;
+        ok.Steps.Should().OnlyContain(s => s.Completed);
+        ok.GrantsNotCompleted.Should().BeEmpty();
+        _h.Grants.Rows.Single(r => r.Id == recordless.Id).IsActive.Should().BeFalse("a row naming no record is ended by its id");
+        _h.Grants.Rows.Single(r => r.Id == grant.Id).IsActive.Should().BeFalse();
+    }
+
     // ── Slice C2b: the grant read is bounded; a read above the bound is never reported complete ──────────────────
 
     private void GrantRowsOnMatter(Guid contactId, int count)

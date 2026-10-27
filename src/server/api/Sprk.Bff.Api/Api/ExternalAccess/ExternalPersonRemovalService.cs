@@ -53,7 +53,8 @@ internal sealed record PersonAdministrationOutcome(
 /// <item>the removed marker (kept as it is when it is already set);</item>
 /// <item>every active grant the contact holds as its grantee, revoked through the ONE revoke
 /// (<see cref="ExternalGrantRevocationService"/>: the row sweep, the SPE container cleanup, the grant-cache invalidation for
-/// the root, the Assigned-To marking);</item>
+/// the root, the Assigned-To marking); a row that names no record (its record was deleted) confers nothing and is
+/// deactivated by its id;</item>
 /// <item>the person's own container permission on every secure root an organization they belong to is granted
 /// (<see cref="ExternalGrantRevocationService.RemovePersonOrganizationGrantPermissionsAsync"/>; the organization grants and
 /// the other members are untouched);</item>
@@ -306,9 +307,20 @@ internal sealed class ExternalPersonRemovalService
         var seen = new HashSet<ExternalGrantKey>();
         foreach (var row in rows)
         {
-            if (row.Id == Guid.Empty || ExternalGrantLifecycle.DeriveKey(row) is not { } key)
+            if (row.Id == Guid.Empty)
             {
                 notCompleted.Add(row.Id);
+                continue;
+            }
+
+            if (ExternalGrantLifecycle.DeriveKey(row) is not { } key)
+            {
+                // A row naming no record confers nothing and has no logical grant to revoke, so the person-wide removal
+                // deactivates that row itself, by its id.
+                if (await DeactivateRecordlessRowAsync(row.Id, ct).ConfigureAwait(false))
+                    revoked++;
+                else
+                    notCompleted.Add(row.Id);
                 continue;
             }
 
@@ -357,6 +369,32 @@ internal sealed class ExternalPersonRemovalService
             ? new ExternalPersonStepResult(GrantsStep, true, $"{revoked} grant(s) revoked.")
             : new ExternalPersonStepResult(GrantsStep, false,
                 $"{revoked} grant(s) revoked; {notCompleted.Count} did not complete. The person stays removed; retry the removal."));
+    }
+
+    /// <summary>
+    /// Slice C5: deactivates one of the person's grant rows that names no record (its record was deleted). The row confers
+    /// nothing, so ending it needs no container cleanup and no cache eviction; leaving it active would keep the removal from
+    /// ever completing. True when the row was deactivated.
+    /// </summary>
+    private async Task<bool> DeactivateRecordlessRowAsync(Guid accessRecordId, CancellationToken ct)
+    {
+        try
+        {
+            await ExternalGrantLifecycle.DeactivateAsync(_dataverse, new[] { accessRecordId }, _logger, ct).ConfigureAwait(false);
+            _logger.LogInformation(
+                "[EXT-REMOVE-PERSON] Access record {AccessRecordId} names no record; it was deactivated by its id.", accessRecordId);
+            return true;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "[EXT-REMOVE-PERSON] Access record {AccessRecordId} names no record and could not be deactivated.", accessRecordId);
+            return false;
+        }
     }
 
     private async Task<ExternalPersonStepResult> RemoveOrganizationGrantPermissionsAsync(

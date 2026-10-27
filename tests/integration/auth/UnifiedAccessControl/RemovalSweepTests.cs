@@ -280,6 +280,30 @@ public class RemovalSweepTests
             .Should().Be(nameof(RemovalSweepAction.RerunRemoval));
     }
 
+    /// <summary>
+    /// Slice C5: a marked contact whose only active grant row names no record (its record was deleted). The removal ends that
+    /// row by its id and completes, so the next run no longer selects the contact.
+    /// </summary>
+    [Fact]
+    public async Task AMarkedContact_WhoseOnlyActiveRowNamesNoRecord_IsCleanedOnce_AndNotSelectedAgain()
+    {
+        var (contact, _) = Person(stateCode: 1);
+        _h.Identities.Contacts[contact].RemovedOn = _h.Time.Now.AddDays(-1);
+        var recordless = GrantOnMatter(contact);
+        recordless.MatterId = null;
+
+        var first = await RunAsync(linkWrites: true, sweepWrites: true);
+
+        Sweep(first).GetProperty("completed").GetInt32().Should().Be(1);
+        Sweep(first).GetProperty("incomplete").GetInt32().Should().Be(0);
+        _h.Grants.Rows.Single(r => r.Id == recordless.Id).IsActive.Should().BeFalse();
+
+        var second = await RunAsync(linkWrites: true, sweepWrites: true);
+
+        Sweep(second).GetProperty("candidates").GetInt32().Should().Be(0, "a cleaned contact is not selected again");
+        SweepAudit.Should().ContainSingle("only the first run removed anything");
+    }
+
     [Fact]
     public async Task AMarkedContact_ThatIsClean_IsUntouched_EvenWhenTheScanReturnsIt()
     {
