@@ -1056,11 +1056,31 @@ public sealed class SecureRecordSetupProcedureTests
         dv.Writes.Should().BeEmpty();
     }
 
-    /// <summary>A resume does not re-run a completed H6, so the remedy names the script for an environment past it.</summary>
+    /// <summary>
+    /// A resume does not re-run a completed H6, so the remedy names the script for an environment past it. C5: -Apply, then
+    /// resume; -Verify runs after H7b (which adds the BFF to Standing Grant Administrators), before the BFF deploy.
+    /// </summary>
     private const string ResumeRemedy =
         "a new run imports it at H6 once it is published; in an environment already past H6 (a resume does not re-run a " +
-        "completed H6) run scripts/Set-ExternalAccessContactSecuritySchema.ps1 -Apply, then -Verify (exit 0), then resume. " +
-        "Nothing was written.";
+        "completed H6) run scripts/Set-ExternalAccessContactSecuritySchema.ps1 -Apply, then resume. H7b re-checks the locks " +
+        "itself and adds the BFF to Standing Grant Administrators. Run -Verify (exit 0) after H7b completes, before the BFF " +
+        "deploy. Nothing was written.";
+
+    /// <summary>
+    /// C5: the contact-locks remedy never asks for -Verify before the resume (it cannot pass until H7b has added the BFF to
+    /// Standing Grant Administrators), and names no manual membership step.
+    /// </summary>
+    [Fact]
+    public void TheContactLocksRemedy_ResumesAfterApply_AndVerifiesAfterH7b()
+    {
+        var remedy = SecureRecordSetupProcedure.LocksRemedy("1.2.4.0");
+
+        remedy.Should().Contain(ResumeRemedy)
+            .And.NotContain("-Verify (exit 0), then resume")
+            .And.NotContain("S20");
+        remedy.IndexOf("-Apply, then resume", StringComparison.Ordinal).Should()
+            .BeLessThan(remedy.IndexOf("Run -Verify (exit 0) after H7b completes", StringComparison.Ordinal));
+    }
 
     /// <summary>
     /// The standing-grant field and its profile ship only in the package, so the remedy for an environment past H6 is a hand

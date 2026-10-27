@@ -1000,7 +1000,9 @@ five `sprk_identitycollision*` columns, and creates three BFF-only columns secur
 
 No other profile (System Administrator excepted) may read, create or update these columns. Run it with the same
 `-BffApplicationIds` as above — dry run, then `-Apply`, then `-Verify`, which checks every column is secured and every
-profile x column pair, and **must exit 0** before a BFF that writes the new columns is deployed. A new stamp receives
+profile x column pair, and **must exit 0** before a BFF that writes the new columns is deployed. `-Verify` also checks
+that each BFF application user is a direct member of Standing Grant Administrators, which H7b adds (§7.11), so run it
+after H7b completes. A new stamp receives
 the columns, the field security and the profile permissions through the SpaarkeMaster import (H6) — that path applies
 only once SpaarkeMaster 1.2.4.0 is published (1.2.3.1 and earlier do not secure these columns; until then run the
 script on a new stamp too). H7b's identity-link check (S18) covers the plane and collision columns, and its
@@ -1780,8 +1782,9 @@ no solution import can create. Since T256, **H7b creates it on every run**, afte
 control plane is deployed. SpaarkeMaster 1.2.3.1 and earlier do not secure the identity plane, collision and access-level
 columns, so against such an environment S18 refuses `secure_setup.identity_link_lock_incomplete` and S19
 `secure_setup.access_level_lock_incomplete`, each naming 1.2.4.0. A new stamp imports 1.2.4.0 or later (H6) and the run
-is resumed; in an existing environment run `scripts/Set-ExternalAccessContactSecuritySchema.ps1 -Apply` (then
-`-Verify`, exit 0, §6.5.2), then resume.
+is resumed; in an existing environment run `scripts/Set-ExternalAccessContactSecuritySchema.ps1 -Apply`, then resume.
+H7b re-checks the locks itself and adds the BFF to Standing Grant Administrators. Run `-Verify` (exit 0, §6.5.2) after
+H7b completes, before the BFF deploy.
 
 An intake `secureRecordSetupDryRun: true` makes H7b read only. It records its plan in gate `h7b-secure-setup-plan` and
 stops the run.

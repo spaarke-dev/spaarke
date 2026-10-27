@@ -228,12 +228,15 @@ public sealed class SecureRecordSetupProcedure
 
     /// <summary>
     /// The remedy an incomplete contact lock names. A new run imports the release at H6; a resume does not re-run a
-    /// completed H6, so an environment already past it applies the locks with the script, verifies, then resumes.
+    /// completed H6, so an environment already past it applies the locks with the script, then resumes. C5: -Verify is not
+    /// run before the resume: its standing-grant step needs the BFF's direct Standing Grant Administrators membership, which
+    /// H7b itself adds (S20) after it re-checks the locks. -Verify runs after H7b completes, before the BFF deploy.
     /// </summary>
-    private static string LocksRemedy(string minimumVersion) =>
+    internal static string LocksRemedy(string minimumVersion) =>
         "It requires SpaarkeMaster " + minimumVersion + " or later: a new run imports it at H6 once it is published; in an " +
         "environment already past H6 (a resume does not re-run a completed H6) run " + ContactSecuritySchemaScript +
-        " -Apply, then -Verify (exit 0), then resume. Nothing was written.";
+        " -Apply, then resume. H7b re-checks the locks itself and adds the BFF to Standing Grant Administrators. Run " +
+        "-Verify (exit 0) after H7b completes, before the BFF deploy. Nothing was written.";
 
     /// <summary>S18/S19: the remedy an incomplete contact lock names.</summary>
     private static readonly string ContactLocksRemedy = LocksRemedy(ContactLocksMinimumSpaarkeMasterVersion);
