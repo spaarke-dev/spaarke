@@ -965,6 +965,9 @@ public class IdentityLinkReconciliationTests
         var services = new ServiceCollection();
         var ownBinder = ownerAwareBinder ?? Binder(_store);
         services.AddSingleton(ownBinder);
+        // C4: the removal sweep reads the own environment's grants and contacts; none here is inactive or marked.
+        services.AddSingleton<Spaarke.Dataverse.DataverseWebApiClient>(
+            new RemovalSweepWorld(new AssignedAccessTestDoubles.GrantTable(), _store));
         if (targets is not null)
         {
             services.AddSingleton(new RegistrationDataverseService(

@@ -1,7 +1,11 @@
 using System.Globalization;
 using System.Text.Json;
 using Spaarke.Scheduling;
+using Spaarke.Dataverse;
+using Sprk.Bff.Api.Api.ExternalAccess;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Registration;
 
 namespace Sprk.Bff.Api.Services.ExternalAccess;
@@ -61,6 +65,11 @@ namespace Sprk.Bff.Api.Services.ExternalAccess;
 /// <para><b>Cheap when nothing changed.</b> The scan expands each user's linked contact, so a verified user costs
 /// no query beyond its page. Every 5 minutes because the owner's rule for access changes is "minutes, never
 /// hourly" (round 3 R3/R4) and Assigned-To grants depend on this link.</para>
+///
+/// <para><b>The removal sweep</b> (C4, <see cref="ExternalAccessRemovalSweep"/>): in the own environment, after the probe, a
+/// contact staff deactivated while it still holds a binding or a grant is removed through the shared removal
+/// <c>POST /remove-person</c> uses. It has its own write switch, ANDed with the link switch, so a deploy to an environment
+/// where linking writes are on still only reports until that switch is set too.</para>
 ///
 /// <para><b>Placement</b> (ADR-052; CLAUDE.md §10): in the BFF on the in-process <c>Spaarke.Scheduling</c> host —
 /// BFF domain code (the binder), BFF-owned tables, BFF identity, low volume (B2/B3). The only Functions-leaning
@@ -141,7 +150,9 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
         + "identity collisions for an operator, and clears flags whose collision has been resolved — in this BFF's "
         + "own environment and in every environment it provisions users into (DATAVERSE_URL and the active, set-up "
         + "sprk_dataverseenvironment rows). Never re-points or clears an existing link. Report-only until "
-        + "IdentityLink:Reconciliation:WritesEnabled is true.";
+        + "IdentityLink:Reconciliation:WritesEnabled is true. In its own environment it also removes the external access "
+        + "of inactive contacts that still hold a binding or a grant (the removal sweep), which writes only when "
+        + "IdentityLink:Reconciliation:RemovalSweepWritesEnabled is true as well.";
 
     /// <summary>Report-only unless the switch parses to <c>true</c>.</summary>
     internal bool WritesEnabled => ContactIdentityBinder.LinkWritesEnabled(_configuration);
@@ -225,6 +236,9 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
         var mode = writes ? ModeWrite : ModeReportOnly;
         var own = new RunReport(Normalised(_configuration["Dataverse:ServiceUrl"]) ?? "(own environment)");
         var targets = new ProvisioningTargets();
+        var sweep = new SweepState(
+            ExternalAccessRemovalSweep.WritesEnabled(_configuration),
+            ExternalAccessRemovalSweep.MaxContactsPerRun(_configuration));
         var status = StatusOk;
         var problems = new List<string>();
 
@@ -233,6 +247,8 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
             using var scope = _scopeFactory.CreateScope();
             var binder = scope.ServiceProvider.GetRequiredService<ContactIdentityBinder>();
             await ReconcileEnvironmentAsync(binder, own, writes, mode, context, cancellationToken).ConfigureAwait(false);
+            await RunRemovalSweepAsync(scope.ServiceProvider, binder.Store, own, sweep, context, cancellationToken)
+                .ConfigureAwait(false);
             await ReconcileProvisioningTargetsAsync(scope.ServiceProvider, targets, writes, mode, context, cancellationToken)
                 .ConfigureAwait(false);
         }
@@ -269,6 +285,11 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
             }
         }
 
+        if (sweep.Assess(problems))
+        {
+            status = StatusError;
+        }
+
         if (status == StatusOk && problems.Count > 0)
         {
             status = StatusPartial;
@@ -283,9 +304,69 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
         return new JobRunResult(
             Success: status == StatusOk,
             ErrorMessage: problems.Count > 0 ? string.Join(" ", problems) : null,
-            ProcessedItems: own.Changed + targets.Environments.Sum(t => t.Changed),
+            ProcessedItems: own.Changed + targets.Environments.Sum(t => t.Changed) + (sweep.Report?.Changed ?? 0),
             Duration: duration,
-            ResultJson: JsonSerializer.Serialize(ToResult(own, targets, status, mode, writes), ResultJsonOptions));
+            ResultJson: JsonSerializer.Serialize(ToResult(own, targets, sweep, status, mode, writes), ResultJsonOptions));
+    }
+
+    /// <summary>
+    /// C4: the removal sweep (<see cref="ExternalAccessRemovalSweep"/>), in this BFF's own environment only, after its probe.
+    /// Not run when the binding column could not be read (a masked binding reads as "no binding", so the selection would be
+    /// made blind). Writes need both switches; otherwise it reports what it would do. A fault fails the run and never stops
+    /// the provisioning targets.
+    /// </summary>
+    private async Task RunRemovalSweepAsync(
+        IServiceProvider services, IContactIdentityStore store, RunReport own, SweepState sweep, JobRunContext context,
+        CancellationToken ct)
+    {
+        if (own.ProbeBlocked)
+        {
+            sweep.Skipped = true;
+            return;
+        }
+
+        try
+        {
+            var dataverse = services.GetService<DataverseWebApiClient>()
+                ?? throw new InvalidOperationException("DataverseWebApiClient is not registered; the removal sweep cannot read.");
+            var loggerFactory = services.GetService<ILoggerFactory>();
+            var auditLogger = loggerFactory?.CreateLogger(ExternalAccessAudit.Category) ?? (ILogger)_logger;
+            var removalSweep = new ExternalAccessRemovalSweep(
+                dataverse, store, () => BuildRemoval(services, dataverse, store), _logger, auditLogger);
+            sweep.Report = await removalSweep.RunAsync(
+                sweep.Writes, sweep.MaxContactsPerRun, own.Environment, context.CorrelationId, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            sweep.Fault = ex.Message;
+            _logger.LogError(ex, "[ID-LINK-RECON] removal-sweep failed; the next run retries it. correlationId={CorrelationId}",
+                context.CorrelationId);
+        }
+    }
+
+    /// <summary>
+    /// The shared removal <c>POST /remove-person</c> runs (<see cref="ExternalPersonRemovalService.RemoveAsync"/>), built from
+    /// this run's scope exactly as that handler builds it: the one revoke, then the removal over it.
+    /// </summary>
+    private ExternalPersonRemovalService BuildRemoval(IServiceProvider services, DataverseWebApiClient dataverse, IContactIdentityStore store)
+    {
+        var participations = services.GetRequiredService<ExternalParticipationService>();
+        var revocation = new ExternalGrantRevocationService(
+            dataverse,
+            services.GetRequiredService<SpeContainerMembershipService>(),
+            participations,
+            services.GetRequiredService<AssignedAccessMaterializer>(),
+            services.GetRequiredService<RecordContainerResolver>(),
+            _timeProvider,
+            store,
+            _logger);
+        return new ExternalPersonRemovalService(
+            dataverse, revocation, participations, store, services.GetRequiredService<IMembershipCacheInvalidator>(),
+            _timeProvider, _logger);
     }
 
     /// <summary>Probe, pass 1, pass 2 — for one environment.</summary>
@@ -612,7 +693,8 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
             report.UserScanTruncated, (long)duration.TotalMilliseconds, context.Attempt, context.Trigger,
             context.CorrelationId);
 
-    private static object ToResult(RunReport own, ProvisioningTargets targets, string status, string mode, bool writesEnabled) => new
+    private static object ToResult(
+        RunReport own, ProvisioningTargets targets, SweepState sweep, string status, string mode, bool writesEnabled) => new
     {
         status,
         mode,
@@ -621,6 +703,7 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
         readability = own.Readability,
         systemUsers = own.SystemUsersResult(),
         flags = own.FlagsResult(),
+        removalSweep = sweep.Result(),
         provisioningTargets = new
         {
             configured = targets.Configured,
@@ -638,6 +721,83 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
     };
 
     private static string? Normalised(string? url) => string.IsNullOrWhiteSpace(url) ? null : url.Trim().TrimEnd('/');
+
+    /// <summary>C4: the removal sweep's state for one run.</summary>
+    private sealed class SweepState
+    {
+        public SweepState(bool writes, int maxContactsPerRun)
+        {
+            Writes = writes;
+            MaxContactsPerRun = maxContactsPerRun;
+        }
+
+        public bool Writes { get; }
+        public int MaxContactsPerRun { get; }
+        public bool Skipped;
+        public string? Fault;
+        public RemovalSweepReport? Report;
+
+        /// <summary>Adds the sweep's problems; true when one of them makes the run a FAILED run.</summary>
+        public bool Assess(List<string> problems)
+        {
+            if (Fault is not null)
+            {
+                problems.Add($"The removal sweep failed ({Fault}); the next run retries it.");
+                return true;
+            }
+
+            if (Skipped)
+            {
+                problems.Add("The removal sweep did not run: the binding column could not be read, so no contact was decided.");
+                return false;
+            }
+
+            if (Report is not { } report)
+            {
+                return false;
+            }
+
+            if (report.ScanFailed)
+            {
+                problems.Add($"The removal sweep's candidate scan failed ({report.ScanError}); the run is NOT 'nothing to remove'.");
+                return true;
+            }
+
+            if (report.ScanTruncated)
+                problems.Add($"The removal sweep read more than {ExternalAccessRemovalSweep.MaxCandidatesPerQuery} candidates in a query; later ones wait for the next run.");
+            if (report.MarkerUnproven > 0)
+                problems.Add($"{report.MarkerUnproven} contact(s) skipped by the removal sweep: the removed marker's read is not proven. None was marked.");
+            if (report.ReadFailed > 0)
+                problems.Add($"{report.ReadFailed} contact(s) not decided by the removal sweep: a live read failed. The next run retries them.");
+            if (report.Incomplete > 0)
+                problems.Add($"{report.Incomplete} removal(s) by the sweep did not complete; the person stays marked, and the next run re-runs a removal while an active grant row remains.");
+            return false;
+        }
+
+        public object Result() => new
+        {
+            writesEnabled = Writes,
+            mode = Writes ? ModeWrite : ModeReportOnly,
+            maxContactsPerRun = MaxContactsPerRun,
+            skipped = Skipped,
+            fault = Fault,
+            scanFailed = Report?.ScanFailed ?? false,
+            scanTruncated = Report?.ScanTruncated ?? false,
+            candidates = Report?.Candidates ?? 0,
+            markerUnproven = Report?.MarkerUnproven ?? 0,
+            readFailed = Report?.ReadFailed ?? 0,
+            clean = Report?.Clean ?? 0,
+            deferredByCap = Report?.DeferredByCap ?? 0,
+            completed = Report?.Completed ?? 0,
+            incomplete = Report?.Incomplete ?? 0,
+            contacts = (Report?.Contacts ?? new List<RemovalSweepContact>()).Take(MaxSampledIds).Select(c => new
+            {
+                contactId = c.ContactId.ToString("D", CultureInfo.InvariantCulture),
+                action = c.Action.ToString(),
+                status = c.Status?.ToString(),
+            }).ToArray(),
+        };
+    }
 
     /// <summary>The provisioning-target pass's state.</summary>
     private sealed class ProvisioningTargets
