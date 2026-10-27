@@ -69,6 +69,17 @@ public static class RevokeExternalAccessEndpoint
     internal const string RevokePermissionAmbiguousReason = "sdap.revoke.incomplete.permission_ambiguous";
 
     /// <summary>
+    /// Slice C2b: the route's OpenAPI description, stating the rule the shared revoke
+    /// (<see cref="ExternalGrantRevocationService"/>) applies. No portal web role is involved.
+    /// </summary>
+    internal const string RouteDescription =
+        "Revokes one external grant (a contact's or an organization's, on one record): every active " +
+        "sprk_externalrecordaccess row of the grant is deactivated, the revoked grantee's SPE container permissions on " +
+        "the record's container are removed, the grantee's grant cache is invalidated, and an Assigned-To automatic " +
+        "grant is marked removed so it is not created again. No portal web role is assigned or removed. A container " +
+        "permission that could not be confirmed removed answers 500 (incomplete); the grant itself stays revoked.";
+
+    /// <summary>
     /// Registers the revoke endpoint on the external-access group.
     /// </summary>
     public static RouteGroupBuilder MapRevokeExternalAccessEndpoint(this RouteGroupBuilder group)
@@ -76,10 +87,7 @@ public static class RevokeExternalAccessEndpoint
         group.MapPost("/revoke", RevokeAccessAsync)
             .WithName("RevokeExternalAccess")
             .WithSummary("Revoke external access from a Contact for a Secure Project")
-            .WithDescription(
-                "Deactivates the sprk_externalrecordaccess record, removes the Contact from the SPE container, " +
-                "and optionally removes the Power Pages web role if no other active participations remain. " +
-                "Invalidates the contact's Redis participation cache after revoking.")
+            .WithDescription(RouteDescription)
             .Produces<RevokeAccessResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
