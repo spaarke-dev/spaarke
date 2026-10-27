@@ -1,6 +1,6 @@
 # Current Task State - spaarke-SPA-external-access-platform-r3
 
-> **Last Updated**: 2026-10-27 ~02:40Z. Dev BFF = 3ff2c04bf5 (gate passed); dev SPA = 1fa0cf5cb8.
+> **Last Updated**: 2026-10-27 ~03:20Z. Dev BFF = 3ff2c04bf5 (gate passed); dev SPA = 1fa0cf5cb8.
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -10,9 +10,9 @@
 | Field | Value |
 |-------|-------|
 | **Task** | **Contact identity hardening (security rework)** on branch `fix/r3-iss-005-combined` (worktree `C:/wtr3-005`). Tracked ONLY in private draft advisory GHSA-hq7m-w2pf-v8j7. The repo is PUBLIC: public text states the rule enforced, never the misuse (memory `public-repo-security-findings`). Before every push, scan commits for sensitive wording. |
-| **Step** | Pushed to origin at ec1bb26d83: slices A, B, B2, B3, all UAC-accepted (B3 accepted 2026-10-27; provisioning OK on F1 f0f90bce89). **Slice C implementer `r3-sec-slice-c` RUNNING in C:/wtr3-005** (opus). Its first commit is UAC's required B3 item (a): the modal shows the /grant invite Failed. |
+| **Step** | Pushed to origin at 424e95ebd5 (slices A, B, B2, B3 accepted; 424e95ebd5 = the modal shows the /grant invite Failed, UAC condition pending: prove Retry really invites). Slice C split into C2 (removed marker), C1 (shared revoke service), C3 (admin helper, /remove-person, /reinstate-person), C4 (sweep + -Verify/S19). **Implementer `r3-sec-slice-c` RUNNING: the Retry fix, C2, then C1; it stops before C3.** The C3/C4 decisions are in the private brief's last section. |
 | **Status** | in-progress |
-| **Next Action** | (1) Owner: confirm what "defers" means (Open owner items). (2) When slice C reports: review it, scan the commits for sensitive wording, push, tell UAC the final head (UAC runs its two security passes on the full combined diff). (3) The §10 publish-size delta against a fresh master build. (4) The PR (rule-level title; body carries SpaarkeMaster 1.2.4.0 ordering + schema-first), then update the advisory. |
+| **Next Action** | (1) When the agent reports: review, scan the wording, push, send the ranges to UAC. (2) Launch C3, then C4, from the brief's "Slice C decisions (2026-10-27)". (3) Final head to UAC for the two security passes. (4) The §10 publish-size delta vs a fresh master build. (5) The PR (rule-level title; body = SpaarkeMaster 1.2.4.0 ordering + schema-first), then the advisory. |
 
 ### Private files (scratchpad, NOT in repo)
 `C:\Users\RALPHS~1\AppData\Local\Temp\claude\c--code-files-spaarke-wt-SPA-external-access-platform-r3\15aa240f-634c-4332-99f6-382ebcb06a62\scratchpad\`
@@ -74,9 +74,8 @@
 - `[SECURE-CENSUS]` Critical "child tables" and "projects" lines are intended, per UAC; do not change the severity.
 
 ## Open owner items
-- **Confirm "defers":**
-  - Under option A, nothing retries automatically. The owed invite is visible to staff and cleared by a staff Invite.
-  - Ask: is that what "automatic invites check the organisation; if the lookup is down … marked 'not sent — retry'" meant?
+- Owner decided 2026-10-27: the admin check = the caller's id from WhoAmI over the staff OBO token, and the SGA membership (direct or team) read with the app credential. "Defers" = show it, staff retry (no automatic retry).
+- Later live item: add the BFF app user as a DIRECT SGA member on dev (provisioning S-step); needs the owner's go.
 - Field-mapping re-check (Create Project / Create Work Assignment from a matter, then send the record numbers). The owner said "later".
 - Optional: auditing on the role entity on dev.
 - Earlier items:
