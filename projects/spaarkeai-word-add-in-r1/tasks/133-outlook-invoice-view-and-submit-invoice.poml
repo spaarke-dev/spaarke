@@ -32,7 +32,7 @@ RELEASE RULE (binding). A push to master auto-deploys the add-in (deploy-office-
   </steps>
   <goal>An Outlook user submits an invoice from an email in one action: the email is saved as its .eml to the Matter, Project or Work Assignment and the marked attachments become the invoice's files; Invoice is no longer a Save target or a "+ New" record; and no deployed add-in is ever left without a way to file an invoice.</goal>
   <constraints>
-    <constraint>No server change in this task: the server legs are ebilling's (095 adds, 096 removes).</constraint>
+    <constraint>No server change in this task except ONE (amended 2026-10-27): Work Assignment added to `GET /api/office/search/entities` (OfficeSearchService's type map, OfficeSearchService.cs:298-300; today Matter, Project, Invoice, Account, Contact) so the core-record picker can find one. It must NOT make Work Assignment a new /office/save target or "+ New" type as a side effect. Its own PR with the §10 obligations (placement, publish-size delta vs fresh master, CVE check, tests); dev deploy via R3. The invoice server legs stay ebilling's (095 adds, 096 removes).</constraint>
     <constraint>Slice C never merges before from-email answers on dev with the owner's go. Slices A and B must be inert in the deployed taskpane (no link, tab or menu reaches the view without the new manifest).</constraint>
     <constraint>The request and response shapes are ebilling's pinned contract; a change goes through ebilling first (their 095 POML makes it binding).</constraint>
     <constraint>Reuse the /office/save payload builder and attachment capture; no second copy of email capture.</constraint>
