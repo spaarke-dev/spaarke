@@ -6,11 +6,11 @@
 
 | Field | Value |
 |-------|-------|
-| **Branch** | work/ebilling-r1, draft PR #1911. Tip 5a89ea5e2b (pushed). |
+| **Branch** | work/ebilling-r1, draft PR #1911. Master de38296499 (uac 194) merged in at ffe7ee3a2f; gates green (broad 9,473 / Arch 1,557). Invoice-family move test at 730b7a654d, sent to uac-r2 for review. |
 | **Running (4 agents, the cap)** | **089** (task/ebill-089-assignments), **092** (task/ebill-092-submission-files), **098** (task/ebill-098-external-marker), **095** (task/ebill-095-from-email; early start with a seam into 094, adapter onto today's intake or NotYetAvailable; includes the §8 firms route and EB-D-160 retry-after-Failed). uac-r2's conditions went to 089 and 098. 095 was told to merge fd70b8e1f6 and build marks_invalid `invoice_not_pdf`. |
 | **Master PR #2342** | MERGED 2026-10-27 as 5911eba1ff (word-add-in-r1 approved when green). Worktree and branch removed. |
 | **word-add-in-r1** | AGREED the 123 contract (notes/123-upload-contract.md), `invoice_not_pdf` and EB-D-160. Their condition: any renamed code goes to them before merge. They have 118a on master for slice B. |
-| **Next actions** | (1) As agents report: review, send uac-r2 the review request, merge after review, build the 5 test projects plus the broad filter. (2) 089 reports: run its live steps (owner pre-approved, EB-D-158; notices to uac-r2 before and after), then launch **086**. (3) 092 pushed: launch **094** from 092's result (it does not wait for 086); 094 plugs into 095's seam. (4) After 086 and 092: launch **123**. (5) After uac-r2 task 194 merges: add a test that a re-owned invoice's family rows reach the same BU through the SecureChildLineage walk (uac-r2's ask). |
+| **Next actions** | (1) As agents report: review, send uac-r2 the review request, merge after review, build the 5 test projects plus the broad filter. (2) 089 reports: run its live steps (owner pre-approved, EB-D-158; notices to uac-r2 before and after), then launch **086**. (3) 092 pushed: launch **094** from 092's result (it does not wait for 086); 094 plugs into 095's seam. (4) After 086 and 092: launch **123**. (5) When sprk_invoicelineitem (uac #2348) reaches our lineage, add it to TheInvoiceFamily_FollowsAnOrdinaryMove_ThroughTheInvoice. |
 
 ## 095 contract
 `notes/095-from-email-contract.md`. word-add-in-r1 AGREED the whole file (§1-§9, OP-1..OP-8) at 717cf238d9. Since then: EB-D-160 (§5, re-attempt after Failed), not yet sent to them. Their task 133 releases in slices: A (client plus view), B (adopts 118a; needs it on master), and C (removes Invoice from Save; only after from-email works on dev, with the owner's go; 096 follows one release later). G3 (correction prefill) is deferred to 097.
