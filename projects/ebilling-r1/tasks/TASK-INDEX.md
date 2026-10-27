@@ -111,6 +111,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 120 | ✅ [done] | Spaarke Billing Administrator role; D-185: Basic/Core User lose prvReadsprk_ruleset; guard test | FULL | opus / high | P3-R (p-safe false) | 081 |
 | 121 | 🔲 [open] | Procedure-table role grants after uac-r2 191: O-6 org Read, Billing Administrator Create/Write on sprk_procedure; flip UntilTask191 | FULL | opus / high | P3-R (p-safe false) | 120 |
 | 122 | ✅ | #2235 fix: field-secure sprk_findingsjson (BFF-only), off the form; Decision Records store the generic Duplicate sentence | FULL | opus / high | P4-A | 119 |
+| 123 | 🔲 [open] | Internal upload of supporting files to an existing invoice: POST /api/finance/invoices/{invoiceId}/files (EB-D-161) | FULL | opus / high | P3-F | 090, 092, 086 |
 
 ### Phase 4 — Review and approval (WP4)
 

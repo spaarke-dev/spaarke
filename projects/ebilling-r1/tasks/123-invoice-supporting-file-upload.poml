@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="123" project="ebilling-r1">
+  <metadata>
+    <title>Internal upload of supporting files to an existing invoice: POST /api/finance/invoices/{invoiceId}/files</title>
+    <phase>3 Rules (WP3) — Procedure model (EB-D-148); added 2026-10-27 (EB-D-161)</phase>
+    <gate>090 merged (done); 092 merged (the stage-then-row pattern on submissions); 086 merged (sprk_storedfile is a secure child of sprk_invoice, so the census and role cover the new create); uac-r2 reviews before merge</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>A new BFF upload route that writes file bytes and a secure child row under a caller check.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Caller authorization on a secure-family parent plus byte handling (scan, size, staging) on a new route.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3-F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>090, 092, 086</deps>
+    <tags>bff-api, api, auth, testing</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Model 9.1 says supporting files for an EXISTING invoice go through "the internal upload route (Firm-visible = No)", and 097's notes assume 090 built it, but 090 built only the service (StoredFileService, UploadForCallerAsync) and no route. The owner decided on 2026-10-27 (EB-D-161) that R1 gets this route as an upload only: the Outlook add-in uploads an attachment's bytes through it like any other client. No from-email variant.</prompt>
+
+  <role>SPAARKE platform developer. Expert in 090's StoredFileService, Minimal API filters, Finance step 0 and caller access checks.</role>
+
+  <goal>An internal caller with Write on an Active invoice can add one supporting file to it; the file becomes a Stored File (purpose Invoice supporting file, Firm-visible No) through 090's caller upload; every refusal stores nothing.</goal>
+
+  <context>
+    <background>Model 9.1 table row "Internal upload" and "Existing invoice"; model 4.x (Stored File rows, staging, verified flip, scan); 090 notes (UploadForCallerAsync, the internal download route StoredFileEndpoints.cs GET /files/{fileId}/content as the route-shape reference); 097 notes (an Inactive invoice — Rejected, Returned to Firm, Cancelled, Superseded — cannot be changed; owner 2026-10-21).</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Finance/StoredFileEndpoints.cs (add the POST route beside the GET)</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Finance/Files/ (StoredFileService, UploadForCallerAsync; exact path at HEAD)</file>
+      <file role="new">tests for the route: unit beside the existing StoredFile endpoint tests, and a contract test under tests/integration/contract/Api/Finance/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="EB-D-161">Upload only: multipart/form-data, one file per request, field name "file". No email, attachment-id or document-id input; no from-email variant.</constraint>
+    <constraint source="model 9.1">The Stored File is purpose Invoice supporting file, Firm-visible = No, parent sprk_invoice = {invoiceId}, created through StoredFileService.UploadForCallerAsync (staged, row Not yet servable, verified flip). Never a sprk_document.</constraint>
+    <constraint source="Finance step 0, ADR-008">The route is in the /api/finance group and gets step 0 (internal callers only) and the group's filters. The caller needs Write on the invoice, asked as the caller (CallerRecordAccessProbe / the equalised gate call GetCallerRightsForAuthorizationGateAsync if present), never app-only: no Write or not found gives 404 sdap.access.deny.record_unavailable (one body for both); unknown rights give 403 sdap.access.error.system_failure.</constraint>
+    <constraint source="owner 2026-10-21 (097)">An Inactive invoice (Rejected, Returned to Firm, Cancelled, Superseded) refuses with 409 ebilling.invoice.inactive before any byte is staged.</constraint>
+    <constraint source="090, 091">Size limit and content checks are 090's; the malware-scan path is 090/092's (a file found malicious never becomes servable). An empty file or one over the limit is 400 before staging. No new configuration.</constraint>
+    <constraint source="CLAUDE.md §11">Justify the new route in the notes: existing (090's service with no route; the GET download route); extension (added beside the GET in StoredFileEndpoints); cost of doing nothing (no way to add a supporting file to an existing invoice; model 9.1 and 097 point at a route that does not exist).</constraint>
+    <constraint source="bff-extensions.md">No package; publish-size delta recorded; no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/ebilling-r1/notes/procedure-and-file-model.md (4, 9.1)</file>
+      <file>projects/ebilling-r1/notes/090-file-store-service.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Route, filters and caller Write check; the Inactive refusal.</step>
+    <step order="2">Call UploadForCallerAsync with the invoice parent, purpose and Firm-visible No; map its outcomes.</step>
+    <step order="3">Tests and the contract test; seeding proof on the caller Write check (drop it: the no-Write test must fail; restore).</step>
+    <step order="4">Notes with the §11 justification and the response shape; update TASK-INDEX row 123.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If UploadForCallerAsync cannot take an sprk_invoice parent without a logic change, or uac-r2 wants a different caller check, STOP and agree it.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">StoredFileEndpoints.cs (POST)</output>
+    <output type="test">route unit tests; contract test</output>
+    <output type="docs">projects/ebilling-r1/notes/123-invoice-supporting-file-upload.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">201 with { fileId, fileName, sizeBytes } for a caller with Write on an Active invoice; the Stored File has purpose Invoice supporting file, Firm-visible No, parent the invoice; no sprk_document is created.</criterion>
+    <criterion testable="true">No Write and a missing invoice both give 404 sdap.access.deny.record_unavailable with byte-identical bodies; unknown rights give 403 sdap.access.error.system_failure; a flagged-external caller is refused by step 0; unauthenticated is 401. None of them stages bytes.</criterion>
+    <criterion testable="true">Each Inactive status gives 409 ebilling.invoice.inactive and stages nothing; an empty file, a missing "file" field, two files, or an oversize file give 400 and stage nothing.</criterion>
+    <criterion testable="true">A staging or flip failure leaves no servable row (090's undo), and the answer is 503.</criterion>
+    <criterion testable="true">Seeding proof recorded; §11 justification in the notes; publish-size delta; no package; no new HIGH CVE.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Added 2026-10-27 (EB-D-161) after word-add-in-r1 asked how the add-in adds supporting files to an existing invoice. Not on 095's critical path. Once built, send word-add-in-r1 the route shape.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

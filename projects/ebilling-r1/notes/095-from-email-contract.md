@@ -1,5 +1,7 @@
 # 095 from-email: wire contract (pinned 2026-10-27 for word-add-in-r1)
 
+> **Agreed by word-add-in-r1 at 717cf238d9 (2026-10-27).** Changes since: EB-D-160 (re-attempt after Failed, section 5), sent to word-add-in-r1 for agreement.
+
 Binding for 095 and word-add-in-r1; changes need word-add-in-r1's agreement first. Behaviour is model §9.1 (v5.9 FINAL); this pins names, statuses and codes only. Citations: `work/ebilling-r1` @ 786d1ea17a, under `src/server/api/Sprk.Bff.Api/` unless shown. NEW = no existing code to follow.
 
 ## 1. Route
@@ -87,9 +89,10 @@ The firm fields are part of the idempotency key K (section 4): the same email, r
 
 | Case | Answer |
 |---|---|
-| Same caller, same K, earlier not Failed/Rejected | 202 with the identical body (same `submissionId`, `jobId`, `trackingNumber`, `emlDocumentId`); a Received row is re-queued (InvoiceSubmissionService.cs:454-490) |
+| Same caller, same K, latest not Failed/Rejected | 202 with the identical body (same `submissionId`, `jobId`, `trackingNumber`, `emlDocumentId`); a Received row is re-queued (InvoiceSubmissionService.cs:454-490) |
 | The same, from the response cache | 202 with the identical body plus `X-Idempotency-Status: cached` (IdempotencyFilter.cs:113) |
-| Same K, earlier ended Failed or Rejected | 409 `ebilling.submission.submission_already_ended` (D-139, :469-476); see OP-4 |
+| Same K, latest submission ended **Failed** | **A new attempt** (EB-D-160): 202 with a NEW `submissionId`, `jobId` and `trackingNumber` (`{firmInvoiceNumber}.{n+1}` through the allocator). Ids derive from K plus a generation; generation 1 is the first attempt's derivation. Two concurrent retries of one Failed K create exactly one new attempt; the other gets its 202 replay |
+| Same K, latest submission ended **Rejected** | 409 `ebilling.submission.submission_already_ended` (D-139 stands for Rejected) |
 | Same K, other details differ (Invoice part SHA-256; firm or number after OP-1) | 409 `ebilling.submission.document_already_submitted` (:457-467) |
 | Same header, different K | Not a replay: handled as its own operation |
 | Same header, first request still running | 409 `OFFICE_IDEMPOTENCY_CONFLICT`; retry shortly (IdempotencyFilter.cs:255-272) |
@@ -136,7 +139,7 @@ Field names and codes in this file are binding once word-add-in-r1 agrees (095 P
 - **OP-1 firm fields:** added above (`firmId`, `firmInvoiceNumber`, `poNumber`), following D-91 and D-106. Not a new behaviour: the internal intake already requires them.
 - **OP-2:** `email.internetMessageId` is required; a missing or non-RFC value is the 400 body-shape refusal, and Graph is not asked.
 - **OP-3:** marks match attachments on (`fileName`, `size`, `contentType`); K uses (fileName, size, contentType, mark), sorted. Two non-inline attachments equal on all three are 400 `marks_invalid` reason `ambiguous_attachment`.
-- **OP-4:** D-139 stands: the same K after the submission ended Failed or Rejected answers 409 `ebilling.submission.submission_already_ended`. A new attempt on the same email is a later feature (owner question raised 2026-10-27; a change would add a generation to K and needs word-add-in-r1's agreement).
+- **OP-4 (owner, EB-D-160, 2026-10-27):** a re-attempt after **Failed** is allowed on this route (a generation in the id derivation, a new tracking suffix); after **Rejected** D-139 stands (409 `submission_already_ended`). The 050a confirm route keeps D-139 unchanged.
 - **OP-5:** K has no caller. The same email, record, firm, number and marks from a second user is the same submission and answers 409 `document_already_submitted`; it prevents a second invoice for one email.
 - **OP-6:** the in-process save keeps `/office/save`'s AI defaults; the .eml is an ordinary Document under its own Restricted narrowing, and D7 rules govern its indexing. Channel: `Internal` (R1 supports SPA and Internal; the reserved Outlook value is not enabled in R1).
 - **OP-7:** until task 097 merges, `mode: "Correction"` answers 409 `ebilling.submission.correction_not_allowed` with `reason: "not_available"` before any write. After 097 the reasons are `invoice_status`, `different_firm`, `different_core_record`.
@@ -175,4 +178,4 @@ Field names and codes in this file are binding once word-add-in-r1 agrees (095 P
 | Rejected | `ebilling.submission.blocked` | A blocking rule rejected the invoice |
 | Rejected | `ebilling.submission.returned` | Returned to the firm |
 
-Replay after `Failed` or `Rejected` follows section 5 (OP-4: an open owner question may later allow a new attempt after `Failed`).
+Replay after `Failed` or `Rejected` follows section 5: after `Failed` the same request makes a new attempt; after `Rejected` it is 409 `submission_already_ended` (EB-D-160).

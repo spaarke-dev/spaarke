@@ -51,7 +51,7 @@
     <constraint source="model 9.1 Idempotency key">Message-ID + core record + mode + invoice id + the sorted (file name, mark) list; a different marking is a different operation. Mode values: New, and Correction with a required invoice id (400 when missing); 097 implements Correction in the operation, this task only carries it.</constraint>
     <constraint source="CLAUDE.md §10">BFF hygiene per .claude/constraints/bff-extensions.md: placement stated, publish-size delta against a fresh master build, no new package, no new HIGH CVE.</constraint>
     <constraint source="live data">No live Dataverse writes and no deploys.</constraint>
-    <constraint source="095 contract, pinned 2026-10-27 for word-add-in-r1">The wire contract in projects/ebilling-r1/notes/095-from-email-contract.md (request fields, idempotency rule, 202 body, replay rules, error statuses and codes) is binding. Any change to it, including resolving its open points OP-1 to OP-8, needs word-add-in-r1's agreement before it merges.</constraint>
+    <constraint source="095 contract, pinned 2026-10-27 for word-add-in-r1">The wire contract in projects/ebilling-r1/notes/095-from-email-contract.md (request fields, idempotency rule, 202 body, replay rules, error statuses and codes) is binding. Any change to it, including resolving its open points OP-1 to OP-8, needs word-add-in-r1's agreement before it merges. word-add-in-r1 AGREED the whole file (sections 1-9, OP-1 to OP-8) at 717cf238d9 on 2026-10-27; their task 133 builds against it. EB-D-160 (re-attempt after Failed) was added after that agreement and is sent to them.</constraint>
   </constraints>
 
   <knowledge>
