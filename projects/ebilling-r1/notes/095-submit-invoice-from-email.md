@@ -167,3 +167,23 @@ ADR-010: the ceiling goes 169 → 171, for `ISubmitInvoiceFromEmail` and `IOffic
 - Q1 (OP-5, owner): should a Failed attempt by another user let this user re-attempt? Today the answer is 409 `document_already_submitted`.
 - Q2 (094): confirm the Supporting Stored File id derivation, `ForAttachment(submissionId, "eml-part-{ordinal}")`.
 - Q3 (094): where `EmlMarkedPartReader` runs (intake or job), and so how its outcomes surface.
+
+## 9. Gates (2026-10-27)
+
+- Builds: all 5 test projects succeed (Sprk.Bff.Api.Tests, Spaarke.ArchTests, Sprk.Bff.Api.IntegrationTests, Spaarke.Core.Tests, Spe.Integration.Tests).
+- ArchTests 1562/1562 passed. Integration 199 passed, 8 skipped.
+- The broad unit filter (the brief's filter plus EmlMarkedPart, DocumentCommunicationFieldsStaging, EntityAccess and Idempotency): 10687 passed and 14 skipped, out of 10702.
+  - 1 failed: `ProvisionProjectIdempotencyTests.ProvisionProject_WhenRecordingTheContainerTimesOut_FailsLoudlyAndLogsTheContainerId`. It was not touched by 095; it timed out while two Release publishes were running.
+  - Re-run alone, its class passed 55/55.
+- The route contract suite passed 65/65, 5 consecutive runs (including the concurrent-retry test).
+- **Publish size.** `dotnet publish -c Release`, framework-dependent linux-x64, PDBs included, `Compress-Archive -CompressionLevel Optimal`. Each side is a fresh short-path worktree, 192 files.
+
+  | Build | Size |
+  |---|---|
+  | master 68048b83d5 | 37.79 MB |
+  | merge-base with work/ebilling-r1 (8c076f972d) | 38.63 MB |
+  | branch 4d78a0545c | 38.68 MB |
+
+  - 095's own delta: **+0.05 MB**.
+  - Delta against master: +0.89 MB. That is all ebilling-r1 work not yet on master.
+- No package or csproj change, so no new CVE surface.
