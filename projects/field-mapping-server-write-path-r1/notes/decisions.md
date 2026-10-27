@@ -373,3 +373,20 @@ Expected tests:
 Placement: task 040 (push on the canonical engine). The dialog replaces `openConfirmDialog` in `sprk_fieldmapping_push.js` with a small custom dialog (MODAL-DECISION-CRITERIA). It is new surface on an existing endpoint, so the §11 three questions are answered at task-create time.
 
 Sync-mode migration (UAC-r2 4a): class-aware. Assigned-To targets stay 0; filing targets are never re-pushable; plain data → 1. The values ship with 040 after the owner reviews the dry-run list.
+
+## 2026-10-27 — New scope: record family service + TrackingFieldTrio "Family" tool (W7, in this project)
+
+- **Owner decision:**
+  - Build a shared, read-only "record family" service.
+  - Add a Family tool to the TrackingFieldTrio PCF on the Matter, Project, Work Assignment and Event forms. (The WA main form already hosts the PCF: `sprk_WorkAssignment/FormXml/main/{7e578eef-…}.xml`.)
+  - The tool opens a modal listing the family, with an action toolbar. The first actions are "Push field updates" and "Update Assigned To", using UAC's /push preview → confirmed id list. More actions later.
+- **Procedure:**
+  1. design.md addendum, including Placement Justification, §11, hot-path and ADR tensions;
+  2. UAC-r2 review (canonical family definition and access) and ontology review (hierarchy and terminology);
+  3. spec amendment (new FRs);
+  4. `task-create` for the new tasks;
+  5. TASK-INDEX.
+- **Canonical family definition:** the owner says alignment with UAC-r2 is "very important". Asked on 2026-10-27 (definition, canonical registry and owner, read identity, hidden-member counts, limits).
+  - Today there is no single family service: about 8 separate enumerations with their own registries (see the code-map summary in the UAC message).
+- **5c:** see the task-006 notes (name maps deleted; the system map can't be deleted; handed to UAC).
+- **77 documents:** no re-index (owner).

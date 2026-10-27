@@ -62,3 +62,9 @@ rework: none task 006
   above `1.0.0.0` for the upgrade to delete them. Re-check after it. The same map also carries two UNMANAGED maps,
   `businessunitid → sprk_securitybu` and `name → sprk_securitybuname`, the same live drift as dev; an upgrade does not
   remove unmanaged components.
+- **Security BU maps (owner-approved delete, 2026-10-27):**
+  - Deleted with HTTP 204: `name → sprk_securitybuname` on dev (`6a550c83-b621-f111-88b5-7ced8d1dc988`) and on prod (`13e640b9-359f-f111-b8db-70a8a5b2b6b0`).
+  - Not deletable: `businessunitid → sprk_securitybu` (dev `68550c83-…`, prod `12e640b9-…`). It is the SYSTEM attribute map of the `sprk_securitybu` lookup relationship (0x80046205).
+  - Consequence: a matter created from a BU's related view gets `sprk_securitybu` filled, and Make Secure then refuses it (409 `sdap.provision.legacy_per_project_bu`).
+  - Dev has 0 such matters; prod has 0 matters.
+  - Handed to UAC-r2: retire or hide the relationship, or clear the field server-side.
