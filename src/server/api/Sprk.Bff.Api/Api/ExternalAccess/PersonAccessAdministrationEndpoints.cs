@@ -70,6 +70,19 @@ public static class PersonAccessAdministrationEndpoints
     internal const string GrantsPendingRevokeStaffMessage =
         "This person still holds external access that the removal has not revoked. Run the removal again, then reinstate the person.";
 
+    /// <summary>
+    /// Slice C5: the reason code of a reinstatement refused because the contact changed between its read and the marker clear
+    /// (412 on the row version); nothing was written and the person is still removed. CLAUDE.md §11: Existing — the reinstate
+    /// incomplete code (500). Extension — that code reports a failed write, and this is a retryable conflict with a fresh read.
+    /// Cost of doing nothing: a changed row is reported as a server fault, or the clear is sent unconditionally on a state it
+    /// did not read.
+    /// </summary>
+    internal const string ContactChangedReasonCode = "sdap.access.person.contact_changed_retry";
+
+    /// <summary>What staff are told when the contact changed while it was being reinstated.</summary>
+    internal const string ContactChangedStaffMessage =
+        "This contact changed while it was being reinstated, so nothing was changed. Try the reinstatement again.";
+
     /// <summary>What staff are told when a reinstatement is refused because the contact is inactive.</summary>
     internal const string ContactInactiveStaffMessage =
         "This contact is inactive. Reactivate the contact first, then reinstate the person.";
@@ -106,7 +119,8 @@ public static class PersonAccessAdministrationEndpoints
                 "Clears the contact's removed marker and nothing else: no grant is restored and no invite is sent. A contact " +
                 "that is not removed is left unchanged. Only an active contact is reinstated: an inactive one is refused (409) " +
                 "with nothing changed; reactivate it first. A person who still holds an active grant is refused (409) with " +
-                "nothing changed; run the removal again first.")
+                "nothing changed; run the removal again first. The contact is read once and the marker cleared only on that " +
+                "read; a contact that changed in between is refused (409) with nothing changed; retry.")
             .Produces<ReinstatePersonResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -196,7 +210,9 @@ public static class PersonAccessAdministrationEndpoints
     /// Handles <c>POST /reinstate-person</c>: clears the removed marker only. The marker alone refuses the person whatever the
     /// contact's statecode, and reinstatement does not change that state either; no grant is restored and no invite is sent.
     /// Only an active contact is reinstated: an inactive one is a 409 with nothing written (the audit still records the
-    /// refusal), and a statecode that cannot be read is a 503.
+    /// refusal), and a statecode that cannot be read is a 503. Slice C5: the statecode, the marker and the row version come
+    /// from one read, and the marker is cleared only on that row version (a contact changed since is a 409, never an
+    /// unconditional clear).
     /// </summary>
     internal static async Task<IResult> ReinstatePersonAsync(
         ExternalPersonRequest request,
@@ -236,6 +252,17 @@ public static class PersonAccessAdministrationEndpoints
                 {
                     ["reasonCode"] = ContactInactiveReasonCode,
                     ["staffMessage"] = ContactInactiveStaffMessage,
+                    ["contactId"] = request.ContactId,
+                    ["traceId"] = httpContext.TraceIdentifier,
+                }),
+            PersonAdministrationStatus.RowChangedSinceRead => Results.Problem(
+                statusCode: StatusCodes.Status409Conflict,
+                title: "Contact changed",
+                detail: ContactChangedStaffMessage,
+                extensions: new Dictionary<string, object?>
+                {
+                    ["reasonCode"] = ContactChangedReasonCode,
+                    ["staffMessage"] = ContactChangedStaffMessage,
                     ["contactId"] = request.ContactId,
                     ["traceId"] = httpContext.TraceIdentifier,
                 }),

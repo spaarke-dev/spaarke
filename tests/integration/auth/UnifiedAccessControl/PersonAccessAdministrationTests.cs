@@ -687,6 +687,43 @@ public class PersonAccessAdministrationTests
             .Which.Message.Should().Contain($"status {PersonAdministrationStatus.RefusedGrantsPendingRevoke}");
     }
 
+    /// <summary>
+    /// Slice C5: the reinstatement clears the marker only on the row version it read. A contact that changes after that read
+    /// (here, between the read and the clear) is a 409 contact_changed_retry: the marker is kept and nothing is written.
+    /// </summary>
+    [Fact]
+    public async Task Reinstate_AContactChangedAfterItsRead_Is409_AndTheMarkerIsNotCleared()
+    {
+        var (contact, _) = BoundPerson();
+        var marked = _h.Time.Now.AddDays(-1);
+        _h.Identities.Contacts[contact].RemovedOn = marked;
+        _h.Grants.BeforeGrantQuery = _ => _h.Identities.Touch(_h.Identities.Contacts[contact]); // a concurrent writer
+
+        var result = await Reinstate(contact);
+
+        Problem(result).StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        ReasonCode(result).Should().Be("sdap.access.person.contact_changed_retry");
+        _h.Identities.Contacts[contact].RemovedOn.Should().Be(marked, "the clear is never sent on a row it did not read");
+        _h.Identities.Writes.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Slice C5: the statecode, the marker and the row version come from ONE contact read; the reinstatement makes no
+    /// separate marker read.
+    /// </summary>
+    [Fact]
+    public async Task Reinstate_ReadsTheContactOnce_AndMakesNoSeparateMarkerRead()
+    {
+        var (contact, _) = BoundPerson();
+        _h.Identities.Contacts[contact].RemovedOn = _h.Time.Now.AddDays(-1);
+        _h.Identities.Reads.Clear();
+
+        var result = await Reinstate(contact);
+
+        result.Should().BeOfType<Ok<ReinstatePersonResponse>>().Subject.Value!.MarkerCleared.Should().BeTrue();
+        _h.Identities.Reads.Should().Equal("contact");
+    }
+
     [Fact]
     public async Task Reinstate_AGrantReadThatFails_Is503_AndTheMarkerIsKept()
     {

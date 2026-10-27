@@ -45,7 +45,8 @@ internal enum PersonAdministrationStatus
 
     /// <summary>
     /// Slice C5: a conditional marker write found the contact changed since the caller read it (HTTP 412), so nothing was
-    /// written. The caller does not retry blindly: the removal sweep reports the contact and decides it again on its next run.
+    /// written. The caller does not retry blindly: the removal sweep reports the contact and decides it again on its next run;
+    /// a reinstatement is refused and staff retry it.
     /// CLAUDE.md §11: Existing — <see cref="Incomplete"/>. Extension — Incomplete means "marked, retry"; this contact was not
     /// marked at all and must be decided again from a fresh read. Cost of doing nothing: a stale decision is counted as a
     /// failed removal, or retried on a row whose state it no longer knows.
@@ -102,7 +103,9 @@ internal sealed record PersonAdministrationOutcome(
 /// </list>
 /// <para>The binding (the object id, its plane and its key mirror) is never cleared: the person is still found by their object
 /// id and refused, and the same object id can never be keyed onto another contact.</para>
-/// <para><b>Reinstatement</b> clears the marker and nothing else: no grant is restored (staff grant again) and no invite is
+/// <para><b>Reinstatement</b> reads the contact ONCE (statecode, marker and row version from the same row) and clears the
+/// marker with <c>If-Match</c> on that row version; a row changed since is refused, never cleared unconditionally. It clears
+/// the marker and nothing else: no grant is restored (staff grant again) and no invite is
 /// sent. A contact that carries no marker is a no-op. A person who still holds an active grant row is refused with nothing
 /// written (re-run the removal first), so a reinstatement never makes a leftover grant effective. Only an ACTIVE contact is
 /// reinstated: the statecode is read live first,
@@ -176,10 +179,11 @@ internal sealed class ExternalPersonRemovalService
         // A wiring fault, thrown before anything is read or written.
         var revocation = _revocation ?? throw new InvalidOperationException("A removal needs the shared grant revoke.");
 
-        var (found, stateCode) = await ReadContactAsync(contactId, ct).ConfigureAwait(false);
+        var (found, contact) = await ReadContactAsync(contactId, ct).ConfigureAwait(false);
         if (found is not PersonAdministrationStatus.Completed)
             return PersonAdministrationOutcome.Refused(found);
 
+        var stateCode = contact!.StateCode;
         var steps = new List<ExternalPersonStepResult>();
 
         // ── 1. The marker FIRST: from here on every path refuses the person, whatever else completes ─────────────────
@@ -267,9 +271,13 @@ internal sealed class ExternalPersonRemovalService
     /// </summary>
     public async Task<PersonAdministrationOutcome> ReinstateAsync(Guid contactId, CancellationToken ct)
     {
-        var (found, stateCode) = await ReadContactAsync(contactId, ct).ConfigureAwait(false);
+        // Slice C5: ONE read. The statecode, the marker and the row version all come from this row, and the clear below is
+        // made only on this row version, so the reinstatement never acts on a state it did not read.
+        var (found, contact) = await ReadContactAsync(contactId, ct).ConfigureAwait(false);
         if (found is not PersonAdministrationStatus.Completed)
             return PersonAdministrationOutcome.Refused(found);
+
+        var stateCode = contact!.StateCode;
 
         // Reinstate only an active contact: the removal sweep marks an inactive one again, so clearing its marker would not hold.
         if (stateCode is null)
@@ -280,8 +288,8 @@ internal sealed class ExternalPersonRemovalService
                 Array.Empty<ExternalPersonStepResult>());
         }
 
-        var marker = await ReadMarkerAsync(contactId, ct).ConfigureAwait(false);
-        if (marker == RemovedMarkerRead.NotRemoved)
+        // The marker as read with the row: empty on a proven read is "not removed"; set, or empty without that proof, is removed.
+        if (!contact.IsRemoved)
         {
             return new PersonAdministrationOutcome(PersonAdministrationStatus.Completed, stateCode,
                 new[] { new ExternalPersonStepResult(MarkerClearedStep, true, "The person was not marked as removed; nothing was changed.") });
@@ -299,8 +307,20 @@ internal sealed class ExternalPersonRemovalService
                 Array.Empty<ExternalPersonStepResult>());
         }
 
-        // Removed, or a marker that cannot be read: the administrator asked to reinstate, so the clear is sent either way.
-        var written = await _identityStore.WriteRemovedMarkerAsync(contactId, null, ct).ConfigureAwait(false);
+        // Removed, or a marker whose read is not proven: the administrator asked to reinstate, so the clear is sent either way,
+        // but only on the row version read above (never If-Match: *).
+        var written = await _identityStore.WriteRemovedMarkerIfUnchangedAsync(contactId, contact.ETag, null, ct)
+            .ConfigureAwait(false);
+        if (written.Status == StoreWriteStatus.PreconditionFailed)
+        {
+            _logger.LogWarning(
+                "[EXT-REINSTATE-PERSON] Contact {ContactId} changed since it was read; the marker was not cleared. Retry.",
+                contactId);
+            return new PersonAdministrationOutcome(PersonAdministrationStatus.RowChangedSinceRead, stateCode,
+                new[] { new ExternalPersonStepResult(MarkerClearedStep, false,
+                    "The contact changed while it was being reinstated, so the person is still removed. Retry the reinstatement.") });
+        }
+
         if (written.Status != StoreWriteStatus.Written)
         {
             _logger.LogError(
@@ -315,7 +335,9 @@ internal sealed class ExternalPersonRemovalService
             new[] { new ExternalPersonStepResult(MarkerClearedStep, true) }, MarkerCleared: true);
     }
 
-    private async Task<(PersonAdministrationStatus Status, int? StateCode)> ReadContactAsync(Guid contactId, CancellationToken ct)
+    /// <summary>The contact's row, read once. <see cref="PersonAdministrationStatus.Completed"/> carries the row.</summary>
+    private async Task<(PersonAdministrationStatus Status, ContactBindingRow? Row)> ReadContactAsync(
+        Guid contactId, CancellationToken ct)
     {
         ContactLookup lookup;
         try
@@ -336,7 +358,7 @@ internal sealed class ExternalPersonRemovalService
             return (PersonAdministrationStatus.ContactUnreadable, null);
 
         return lookup.Rows.FirstOrDefault(r => r.ContactId == contactId) is { } row
-            ? (PersonAdministrationStatus.Completed, row.StateCode)
+            ? (PersonAdministrationStatus.Completed, row)
             : (PersonAdministrationStatus.NotFound, null);
     }
 
