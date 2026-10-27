@@ -43,13 +43,22 @@ export function defaultInvoiceMarking(
 
 /**
  * Validate a marking. Counts and mode are checked from `value` alone; pass `attachments`
- * (optional third argument) to also refuse a non-PDF or disabled attachment marked 'invoice'.
+ * (optional third argument) to also refuse a disabled attachment marked anything but 'skip'
+ * ('disabled-attachment-marked') and a non-PDF marked 'invoice' ('invoice-not-allowed').
+ *
+ * `value` must hold every attachment id: `defaultInvoiceMarking` does. The component shows an id
+ * missing from `value` as 'supporting', but validation and a host's wire marks read `value` only.
  */
 export function validateInvoiceMarking(
   value: Record<string, InvoiceAttachmentRole>,
   mode: Mode,
   attachments?: readonly MarkableAttachment[]
-): { ok: true } | { ok: false; reason: 'no-invoice' | 'more-than-one-invoice' | 'invoice-not-allowed' } {
+):
+  | { ok: true }
+  | { ok: false; reason: 'no-invoice' | 'more-than-one-invoice' | 'invoice-not-allowed' | 'disabled-attachment-marked' } {
+  if (attachments?.some(a => a.disabledReason && value[a.id] !== undefined && value[a.id] !== 'skip')) {
+    return { ok: false, reason: 'disabled-attachment-marked' };
+  }
   const invoiceIds = Object.keys(value).filter(id => value[id] === 'invoice');
   if (mode === 'supporting-only') {
     return invoiceIds.length > 0 ? { ok: false, reason: 'invoice-not-allowed' } : { ok: true };
