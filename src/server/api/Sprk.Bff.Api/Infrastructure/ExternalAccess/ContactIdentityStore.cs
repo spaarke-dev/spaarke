@@ -217,6 +217,30 @@ public interface IContactIdentityStore
     /// </summary>
     Task<RemovedMarkerRead> ReadRemovedMarkerAsync(Guid contactId, CancellationToken ct);
 
+    /// <summary>
+    /// Slice C (administrator removal and reinstatement): writes the removed marker
+    /// (<c>sprk_externalaccessremovedon</c> = <paramref name="removedOn"/>, UTC), or clears it when <paramref name="removedOn"/>
+    /// is null. One PATCH naming that column only, <c>If-Match: *</c>, so a missing row is never created. Nothing else on the
+    /// row is written: the binding, the statecode and every other column are left as they are.
+    /// </summary>
+    Task<StoreWriteResult> WriteRemovedMarkerAsync(Guid contactId, DateTimeOffset? removedOn, CancellationToken ct);
+
+    /// <summary>
+    /// Slice C (administrator removal): clears the invite state (<c>sprk_externalinvitedon</c>,
+    /// <c>sprk_externalinvitecodehash</c>, <c>sprk_externalinvitedemailhash</c>, <c>sprk_externalinvitedtenantid</c>) and
+    /// <c>sprk_accesspermissiongrant</c> in ONE PATCH, <c>If-Match: *</c>, so no outstanding invite link or stamp can bind.
+    /// The binding columns (the object id, its plane and its key mirror) are never named, so the person is still found by
+    /// their object id and refused.
+    /// </summary>
+    Task<StoreWriteResult> ClearRemovedPersonAccessStateAsync(Guid contactId, CancellationToken ct);
+
+    /// <summary>
+    /// Slice C (administrator removal): clears <c>sprk_standinggrant</c> in a PATCH of its own, <c>If-Match: *</c>. The
+    /// application user may update that column only through its direct membership of the standing-grant administrators
+    /// profile; without it Dataverse refuses the write and the result says so (never reported as written).
+    /// </summary>
+    Task<StoreWriteResult> ClearStandingGrantAsync(Guid contactId, CancellationToken ct);
+
     /// <summary>Systemusers (any state) whose <c>sprk_primarycontact</c> is one of <paramref name="contactIds"/>.</summary>
     Task<ReferenceLookup> FindSystemUsersLinkingAsync(IReadOnlyCollection<Guid> contactIds, CancellationToken ct);
 
@@ -1463,6 +1487,48 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
             ? RemovedMarkerRead.Removed
             : RemovedMarkerFrom(null, await _removedMarkerProof.ProveAsync(ct).ConfigureAwait(false));
     }
+
+    /// <inheritdoc />
+    public Task<StoreWriteResult> WriteRemovedMarkerAsync(Guid contactId, DateTimeOffset? removedOn, CancellationToken ct)
+        => WriteAsync(HttpMethod.Patch, $"contacts({contactId:D})", RemovedMarkerPayload(removedOn), ("If-Match", "*"), ct);
+
+    /// <inheritdoc />
+    public Task<StoreWriteResult> ClearRemovedPersonAccessStateAsync(Guid contactId, CancellationToken ct)
+        => WriteAsync(HttpMethod.Patch, $"contacts({contactId:D})", RemovedPersonAccessStatePayload(), ("If-Match", "*"), ct);
+
+    /// <inheritdoc />
+    public Task<StoreWriteResult> ClearStandingGrantAsync(Guid contactId, CancellationToken ct)
+        => WriteAsync(HttpMethod.Patch, $"contacts({contactId:D})", StandingGrantClearPayload(), ("If-Match", "*"), ct);
+
+    /// <summary>Slice C: the removed-marker write: that one column, set (UTC) or cleared (null). Pure.</summary>
+    public static Dictionary<string, object?> RemovedMarkerPayload(DateTimeOffset? removedOn) => new()
+    {
+        [ContactBindingDecision.ExternalAccessRemovedOnColumn] =
+            removedOn?.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture),
+    };
+
+    /// <summary>
+    /// Slice C: the columns an administrator removal clears in one write: the invite state and the access permission
+    /// baseline. Never a binding column (<see cref="BindingColumns"/>, the key mirror) and never the statecode.
+    /// </summary>
+    public static readonly IReadOnlyList<string> RemovedPersonAccessStateColumns = new[]
+    {
+        ContactBindingDecision.ExternalInvitedOnColumn,
+        ContactBindingDecision.ExternalInviteCodeHashColumn,
+        ContactBindingDecision.ExternalInvitedEmailHashColumn,
+        ContactBindingDecision.ExternalInvitedTenantIdColumn,
+        SubjectStandingGrantReader.BaselineAttribute,
+    };
+
+    /// <summary>Slice C: every <see cref="RemovedPersonAccessStateColumns"/> column set to null. Pure.</summary>
+    public static Dictionary<string, object?> RemovedPersonAccessStatePayload()
+        => RemovedPersonAccessStateColumns.ToDictionary(column => column, _ => (object?)null);
+
+    /// <summary>Slice C: the standing grant cleared, in a write of its own. Pure.</summary>
+    public static Dictionary<string, object?> StandingGrantClearPayload() => new()
+    {
+        [SubjectStandingGrantReader.StandingGrantAttribute] = null,
+    };
 
     /// <summary>Slice C: one contact's removed marker, by id, in a query of its own. Any state: a row is never filtered out.</summary>
     public static string BuildRemovedMarkerReadPath(Guid contactId)

@@ -82,6 +82,12 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
         /// <summary>Slice C: <c>sprk_externalaccessremovedon</c> — an administrator removed the person's external access.</summary>
         public DateTimeOffset? RemovedOn { get; set; }
 
+        /// <summary>Slice C3: <c>sprk_accesspermissiongrant</c> — the contact's access permission baseline (cleared by a removal).</summary>
+        public int? AccessPermissionGrant { get; set; }
+
+        /// <summary>Slice C3: <c>sprk_standinggrant</c> — the contact's standing grant (cleared by a removal).</summary>
+        public int? StandingGrant { get; set; }
+
         /// <summary>A9 (r3 task 047): <c>ownerid</c> when a team owns the row (the registration create).</summary>
         public Guid? OwnerTeamId { get; set; }
 
@@ -513,6 +519,77 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
     /// administrator's removal landing between a binding read and the grant core's own live read.
     /// </summary>
     public RemovedMarkerRead? LiveRemovedMarkerOverride { get; set; }
+
+    /// <summary>Slice C3: a removed-marker write answers this instead of writing.</summary>
+    public StoreWriteStatus? RemovedMarkerWriteFailure { get; set; }
+
+    /// <summary>Slice C3: the invite-state and access-permission clear answers this instead of writing.</summary>
+    public StoreWriteStatus? AccessStateClearFailure { get; set; }
+
+    /// <summary>
+    /// Slice C3: the standing-grant clear answers this instead of writing — <see cref="StoreWriteStatus.Forbidden"/> is how
+    /// Dataverse answers an application user that may not update the column.
+    /// </summary>
+    public StoreWriteStatus? StandingGrantClearFailure { get; set; }
+
+    public Task<StoreWriteResult> WriteRemovedMarkerAsync(Guid contactId, DateTimeOffset? removedOn, CancellationToken ct)
+    {
+        lock (_gate)
+        {
+            if (RemovedMarkerWriteFailure is { } failure) return Task.FromResult(new StoreWriteResult(failure, Error: "simulated"));
+            if (!Contacts.TryGetValue(contactId, out var c)) return Task.FromResult(new StoreWriteResult(StoreWriteStatus.NotFound));
+            c.RemovedOn = removedOn;
+            c.Version = NextVersion();
+            Writes.Add((removedOn is null ? "removed-marker-clear" : "removed-marker", contactId, string.Empty));
+            return Task.FromResult(StoreWriteResult.Written);
+        }
+    }
+
+    public Task<StoreWriteResult> ClearRemovedPersonAccessStateAsync(Guid contactId, CancellationToken ct)
+    {
+        lock (_gate)
+        {
+            if (AccessStateClearFailure is { } failure) return Task.FromResult(new StoreWriteResult(failure, Error: "simulated"));
+            if (!Contacts.TryGetValue(contactId, out var c)) return Task.FromResult(new StoreWriteResult(StoreWriteStatus.NotFound));
+
+            // The PRODUCTION payload, column by column, so a column added to (or dropped from) it changes this double too.
+            foreach (var column in DataverseContactIdentityStore.RemovedPersonAccessStatePayload().Keys)
+            {
+                switch (column)
+                {
+                    case ContactBindingDecision.ExternalInvitedOnColumn: c.InvitedOn = null; break;
+                    case ContactBindingDecision.ExternalInviteCodeHashColumn: c.InviteCodeHash = null; break;
+                    case ContactBindingDecision.ExternalInvitedEmailHashColumn: c.InvitedEmailHash = null; break;
+                    case ContactBindingDecision.ExternalInvitedTenantIdColumn: c.InvitedTenantId = null; break;
+                    case "sprk_accesspermissiongrant": c.AccessPermissionGrant = null; break;
+                    case "sprk_standinggrant": c.StandingGrant = null; break;
+                    case ContactBindingDecision.ExternalObjectIdColumn: c.Oid = null; break;
+                    case ContactBindingDecision.IdentityPlaneColumn: c.Plane = null; break;
+                    case "sprk_externalobjectidkey": c.KeyMirror = null; break;
+                    case ContactBindingDecision.ExternalAccessRemovedOnColumn: c.RemovedOn = null; break;
+                    case "statecode": c.StateCode = 0; break;
+                    default: throw new InvalidOperationException($"The in-memory store does not model the column {column}.");
+                }
+            }
+
+            c.Version = NextVersion();
+            Writes.Add(("removed-person-access-state-clear", contactId, string.Empty));
+            return Task.FromResult(StoreWriteResult.Written);
+        }
+    }
+
+    public Task<StoreWriteResult> ClearStandingGrantAsync(Guid contactId, CancellationToken ct)
+    {
+        lock (_gate)
+        {
+            if (StandingGrantClearFailure is { } failure) return Task.FromResult(new StoreWriteResult(failure, Error: "simulated"));
+            if (!Contacts.TryGetValue(contactId, out var c)) return Task.FromResult(new StoreWriteResult(StoreWriteStatus.NotFound));
+            c.StandingGrant = null;
+            c.Version = NextVersion();
+            Writes.Add(("standing-grant-clear", contactId, string.Empty));
+            return Task.FromResult(StoreWriteResult.Written);
+        }
+    }
 
     public Task<ReferenceLookup> FindSystemUsersLinkingAsync(IReadOnlyCollection<Guid> contactIds, CancellationToken ct)
     {

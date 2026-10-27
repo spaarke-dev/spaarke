@@ -769,8 +769,20 @@ internal static class AssignedAccessTestDoubles
                 return Enumerable.Empty<ExternalGrantRow>();
 
             var root = Regex.Match(filter, @"_sprk_(project|matter|workassignment)_value eq ([0-9a-fA-F-]{36})");
-            var rootId = Guid.Parse(root.Groups[2].Value);
             var activeOnly = filter.Contains("statecode eq 0", StringComparison.Ordinal);
+
+            // Slice C3: a person's grants across every root (ExternalGrantLifecycle.ActiveRowsForContactFilter) name no root.
+            if (!root.Success)
+            {
+                var person = Regex.Match(filter, @"_sprk_contact_value eq ([0-9a-fA-F-]{36})");
+                if (!person.Success)
+                    throw new InvalidOperationException($"Unexpected grant filter: {filter}");
+                var personId = Guid.Parse(person.Groups[1].Value);
+                lock (_gate)
+                    return _rows.Where(r => r.ContactId == personId && (!activeOnly || r.IsActive)).ToList();
+            }
+
+            var rootId = Guid.Parse(root.Groups[2].Value);
 
             lock (_gate)
             {

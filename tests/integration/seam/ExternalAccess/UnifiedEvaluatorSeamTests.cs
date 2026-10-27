@@ -1634,6 +1634,46 @@ public sealed class UnifiedEvaluatorSeamTests
     }
 
     /// <summary>
+    /// Slice C3: an administrator's removal (the PRODUCTION <c>/remove-person</c> handler) makes the person compose the EMPTY
+    /// set on both contact planes through the marker alone — the participation world here still answers the grant (as a grant
+    /// the removal could not revoke would), and the contact stays active. Control: the same world before the removal.
+    /// </summary>
+    [Fact]
+    public async Task AfterAnAdministratorRemoval_TheContactComposesToNothing_ByTheMarkerAlone()
+    {
+        var root = RootId(ProjectEntity, 96);
+        var participations = new ParticipationWorld();
+        participations.SetGrants(GrantsOn(ProjectEntity, Direct(root, ExternalAccessLevel.FullAccess)));
+        var membership = new Mock<IMembershipResolverService>(MockBehavior.Strict).Object;
+        var harness = new Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles.Harness();
+        harness.Identities.AddContact(ContactId, oid: Oid.ToString("D"), plane: IdentityPlaneMarker.External);
+        var evaluator = BuildSut(BuildDataverse(contactHeld: false), membership, participations, identityStore: harness.Identities);
+
+        (await evaluator.ComposeForCiamContactAsync(ContactId, ProjectEntity, CancellationToken.None))
+            .Rights.Should().ContainKey(root, "control: before the removal the contact holds its grant");
+
+        var http = new DefaultHttpContext { TraceIdentifier = "trace-c3-seam" };
+        Sprk.Bff.Api.Api.Filters.ExternalAccessAdministratorAuthorizationFilter.SetDecision(http,
+            new AdministratorAuthorityDecision(Guid.NewGuid(), AdministratorAuthorityLeg.Direct, AdministratorAuthorityReason.Granted));
+        await Sprk.Bff.Api.Api.ExternalAccess.PersonAccessAdministrationEndpoints.RemovePersonAsync(
+            new Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalPersonRequest(ContactId),
+            harness.Grants,
+            new SpeContainerMembershipService(
+                Sprk.Bff.Api.Tests.TestInfrastructure.TestSpeOwnership.AllowAll(Mock.Of<Sprk.Bff.Api.Infrastructure.Graph.IGraphClientFactory>()),
+                NullLogger<SpeContainerMembershipService>.Instance),
+            harness.Participations, harness.Materializer,
+            TestRecordContainerResolver.ForNonSecureRecord(ProjectEntity, root),
+            harness.Identities, Mock.Of<IMembershipCacheInvalidator>(), harness.Time, http, NullLogger<Program>.Instance,
+            CancellationToken.None);
+
+        harness.Identities.Contacts[ContactId].StateCode.Should().Be(0, "the contact stays active");
+        (await evaluator.ComposeForCiamContactAsync(ContactId, ProjectEntity, CancellationToken.None))
+            .Rights.Should().BeEmpty("CIAM: the removed marker alone refuses the person, whatever the statecode");
+        (await evaluator.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None))
+            .Rights.Should().BeEmpty("workforce contact plane: the same");
+    }
+
+    /// <summary>
     /// C5: a systemuser's INACTIVE linked contact contributes no grant, while the systemuser's own membership is
     /// unchanged — internal access is Dataverse's answer, never the contact's. Positive twin: the active contact's
     /// grant on a record the membership does not reach.
