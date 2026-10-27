@@ -72,7 +72,17 @@ Also outside this task's write boundary: `.claude/constraints/provisioning.md:26
 
 Unit / contract / seam (Sprk.Bff.Api.Tests): new and rewritten tests in `InvoiceSubmissionServiceTests` (stage once under ForUpload, no SPE / document, compensation, refusals stage nothing, 422 not configured), `InvoiceSubmissionProcessorTests`, `InvoiceSubmissionPersisterTests` (one Stored File create, Firm-visible by channel, no staged blob, definitive flip failure, flip fault then resume, concurrency retry, non-confirm document refused, confirm has no file, transaction failure leaves no row), `InvoiceSubmissionAfterStepsTests` (resume flips first, unservable runs nothing, fault throws, no gate for a document or on `RunAsync`), `InvoiceSubmissionProcessingJobHandlerTests` (file-store read, pending, malicious, missing / changed, FileUnservable with and without the invoice, resume unservable), `InvoiceSubmissionProcessingFlowTests` (end to end: Servable file, no document, no indexing), `InvoiceReviewReadServiceTests` (file id set / null, query shape, read count 6), `StoredFileServiceTests` (staged read, staged facts, delete guarded by the row), `FinanceContainerIdOptionsTests`, `FileIndexingServiceTests`, `SpeAppOnlyContainerIsolationTests` and `RefileFileRelocationTests` (retired key admits nothing / declares no home), `VersionSaveAiRefreshSeamTests`, `InvoiceReviewWritePathTests`, `InvoiceSubmissionEndpointsContractTests`, `InvoiceSubmissionExistingDocumentTests`. ArchTests: the two stale `InvoiceSubmissionService` SPE sink sites removed; census texts updated.
 
-Results and seeding proofs: see the task's final report (branch commit message and the main session's merge note).
+Results (tip `7db7517c17`): all five test projects build; ArchTests 1553/1553; Sprk.Bff.Api.IntegrationTests 199 passed / 8 skipped; Spe.Integration.Tests 353 passed / 23 skipped; unit broad filter plus touched classes 9873 passed / 7 skipped / 0 failed; adjacent areas (tenant SPE, Office, indexing, container resolver, document container, options validation, startup, Finance contract) 1805 passed / 7 skipped.
+
+Seeding proofs (each defect applied, the unit project rebuilt, the guarding tests run, then reverted): (S1) no post-commit flip → 6 tests fail (ordering `FileStatusAtTotals`, one Stored File create, definitive failure, fault-then-resume, concurrency, flow end-to-end); (S2) no resume gate → 3 fail (resume-first, resume-unservable, resume fault); (S3) Firm-visible for every channel → spec and transaction tests fail; (S4) compensation keeps the staged blob → 4 intake compensation tests fail; (S5) the retired key re-added to `StampContainerSettingKeys` → the retired-key must-not-fire fails. 16 failures in total; all green after the revert.
+
+Publish size (`dotnet publish -c Release -r linux-x64 --self-contained false`, deflate-compressed): master `1243eee69a` 36.86 MB; base `786d1ea17a` 37.68 MB; tip 37.68 MB (**+4.7 KB vs base**; +0.82 MB vs master is the rest of ebilling-r1). No package added.
+
+## 9. Coordination
+
+- **095 (from-email, in progress on `task/ebill-095-from-email`)**: no textual conflict (merge-tree clean), but `SubmissionSnapshot.Read` now refuses any `sprk_document` that is not a 050a confirm with `document_unavailable`. If 095's submissions set `sprk_document` (e.g. the `.eml`), 095 must stage its marked PDF under the file store and leave `sprk_document` empty, or extend the snapshot rule.
+- **098** edits `InvoiceSubmissionContracts.cs` and `InvoiceSubmissionService.cs` (status view `InvoiceId`): merge-tree clean.
+- `work/ebilling-r1` has moved since the base (master merge, 118a): merge-tree clean.
 
 ## 8. Live steps (none done here)
 
