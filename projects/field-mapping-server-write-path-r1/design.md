@@ -545,6 +545,10 @@ describe.
 - **Signature:** `ReadAsync(table, id, direction, continuation)`.
 - **Identity:** walks AS THE CALLER (OBO), level by level, with one batched query per (child table, lookup) per level (no N+1).
 - **Unreadable records:** the walk never passes through one. It never returns an unreadable member, and never counts or hints at hidden ones.
+  - **Up:** the walk stops at the first ancestor the caller cannot read. Nothing above it is returned, and there is no hint that it exists (UAC review F2).
+- **Continuation (UAC review F1):** opaque and integrity-protected. It is protected with ASP.NET Data Protection and bound to the caller's `oid` and the root.
+  - Every parent id it carries is re-checked as caller-readable before use, so a caller can never steer the walk through a record they cannot read.
+  - A tampered continuation answers exactly like an invalid one.
 - **Root probe:** uses the equalised gate call, so an unknown root and a denied root look the same.
 - **Caps:** depth 4; 500 members per view and a per-level cap. Past a cap it returns `truncated = true`, per-table counts of what IS shown, and a per-level continuation. It never truncates silently.
 - **Fields returned:** id, table, primary name, parent edge, depth. No access metadata (grants, No Access, sharees, owner team).
@@ -552,14 +556,15 @@ describe.
 
 **C. `GET /api/v1/records/{table}/{id}/family`**
 
-- Lives in the existing `/api/v1/records` group (`RecordNoAccessEndpoint.cs`), with auth required.
+- Lives in the existing `/api/v1/records` group, with auth required, in its OWN file, `Api/Records/RecordFamilyEndpoints.cs`. `RecordNoAccessEndpoint.cs` stays one cohesive No Access responsibility (§11.5).
+- It is registered in the route-authorization ledger (`RouteAuthorizationGuardTests.Ledger`) with its mechanism, and the governed-file census is updated (UAC review F2).
 - Takes `direction` (down by default; up returns the ancestors to the root) and `continuation`.
 - An unknown or unreadable root gets one uniform 404.
 
 **D. `/push` extensions (task 040; UAC 4a design)**
 
 - `includeAssignedTo` defaults to false when absent.
-- `preview: true` writes nothing. It returns, per child whose value would change: id, name, column, from → to, and the Secure (suggestion only) and Restricted (no contact grant) flags. It also returns a skipped-for-no-Write count and `truncated`.
+- `preview: true` writes nothing. It returns, per child whose value would change: id, name, column, from → to, and the flag for each Assigned-To policy it will meet: Secure (suggestion only), Restricted (no contact grant) and Limited (no organization grant) (UAC review F2). It also returns a skipped-for-no-Write count and `truncated`.
 - `childIds` is the confirmed list. The server re-derives the children as the caller and intersects them with the list; any other id is refused per id.
 - With `includeAssignedTo`, the caller needs Write on the SOURCE (equalised probe).
 - The profile's parent lookup must be a `RecordFamilyEdges` filing edge, or the push is refused.
@@ -629,6 +634,8 @@ None needs path A or B.
 1. One edge registry. The parity test lists every disagreement with the existing registries, and a new one fails the build.
 2. The family view shows only caller-readable members. A readable record below an unreadable one is absent, and nothing reveals hidden members (tested with a Secure family).
 3. A truncated family says so and can load more. Nothing is dropped silently.
+   - A tampered continuation naming an unreadable parent returns nothing under it, and answers the same as an invalid continuation.
+   - With direction=up, a readable project under an unreadable Secure matter shows no ancestors.
 4. **Push:**
    - preview writes nothing;
    - an absent `includeAssignedTo` leaves Assigned columns untouched;
@@ -648,3 +655,16 @@ None needs path A or B.
 
 - **UAC-r2:** the registry (A), read identity and limits (B, C), push extensions (D).
 - **Ontology-r1:** the hierarchy vocabulary and the term "family" (terminology changes originate in its component model, root CLAUDE.md §1.1).
+
+**UAC-r2 review (2026-10-27, at eec7704ec4):** accepted with four fix-now items, all applied above:
+- F1: the continuation is integrity-protected and its parent ids are re-checked;
+- F2: up-walk pruning;
+- F2: the Limited flag in the preview;
+- F2: own endpoint file, plus the route-authorization ledger and census.
+
+A, B, D, E, F, §12.5 and §12.7 were accepted as written. Ontology's review is pending.
+
+### 12.11 Known limits (one line each in the PR)
+
+- **Query count:** the worst case is about (edges per level × 4 levels) batched reads per view, 100 or more for a big matter. Measure p95 on dev and record it. Narrow each level to the edges whose parent table is present only if it hurts in practice.
+- **Permissiveness:** the view is exactly as permissive as Dataverse read for the caller, never more. Gaps Dataverse itself has today (e.g. the flagged-external systemuser reading Restricted rows, UAC task 191) show here as they do in the MDA.
