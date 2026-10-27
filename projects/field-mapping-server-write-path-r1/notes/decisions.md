@@ -330,3 +330,23 @@ Asked at the owner's direction ("consult with uac-r2 directly"). Nothing applied
   - Do not stamp the index from the owning BU at create. Route by kind (files → spaarke-files-index, records → spaarke-records-index) through the tenant default.
   - The original 4d precedence question goes away.
   - Data clean-up for the owner: the singular `spaarke-file-index` catalog row, and the BU and document stamps on knowledge-index-v2 / spaarke-file-index.
+
+## 2026-10-27 — Owner decisions on 4b/4c and 4d; dev search-index cleanup done
+
+- **4b/4c: accepted as UAC-r2 recommended.**
+  - A mapped filing lookup keeps the caller's AppendTo check (refused, 403), and the K-2 field-security refusal stays.
+  - Ordinary mapped lookups and values are copied regardless of the caller's AppendTo or target field security. This reverses the #1617 drop and the per-value field-security drop.
+  - Never copied: BFF-owned invariant columns (refused when a rule is authored, skipped at copy time), and a field-secured SOURCE value into a non-field-secured target (dropped with a warning).
+  - The FR-04 source Read check stays, as the caller.
+  - Lands with 017, the create re-point, unless sequenced otherwise.
+- **4d: accepted.**
+  - Do not stamp `sprk_ai_search_index` from the owning BU at create. Route by kind through the tenant default (files → `spaarke-files-index`, records → `spaarke-records-index`). Secure isolation does not depend on the index.
+  - The 015 step-8 BU stamp is removed in code; tracked for 017.
+- **Dev cleanup (owner-approved 2026-10-27), done and verified:**
+  - Two catalog rows point at Azure indexes that do not exist on `spaarke-search-dev`, and both rows were already Inactive:
+    - `spaarke-file-index` (dd04e55f, "Development Files 2");
+    - `spaarke-knowledge-index-v2` (c104e55f, "Development Files 1").
+  - Set `sprk_ai_search_index` to null on every record that pointed at them: BUs "Spaarke" and "Spaarke Demo", 28 matters, 8 projects, 8 work assignments, 16 events, 4 invoices and 77 documents (143 rows). The re-query shows 0 left.
+  - A null value falls back to the tenant default (`SearchIndexResolver` and `SearchIndexNameResolver`).
+  - Left as is: "Spaarke Business Unit 1" points at the canonical `spaarke-files-index` row (fdcc183b, default), which is harmless. The catalog rows were not deleted; they stay Inactive.
+  - Not verified: whether those 77 documents are present in `spaarke-files-index`, because there is no data-plane read on the search service. They may need re-indexing.
