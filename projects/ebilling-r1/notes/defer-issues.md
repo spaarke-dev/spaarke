@@ -54,7 +54,7 @@
 
 | Field | Value |
 |---|---|
-| **Status** | Open - handed off |
+| **Status** | Open - handed off; **partly superseded by task 092** (output-files half; see Update below) |
 | **Urgency** | before eBilling is enabled on any customer stamp (blocks FR-16 outside dev) |
 | **Filed** | 2026-10-15 |
 | **Source** | ebilling-r1 task 028 |
@@ -63,6 +63,8 @@
 **Description**: dev has both containers (D-55, owner-created). Each customer environment needs: two containers of the stamp's EXISTING container type (no new type); both marked `spaarkeCustomerId` = `Customer__Id`; neither stamped on a business unit; two app settings written by H4b from new `per_env_settings` entries in `scripts/canonical-secret-catalog/manifest.yaml`: `Finance__ProcedureLibraryContainerId`, `Finance__EbillingOutputContainerId` (dev examples in task 028 notes). Repeatable per environment.
 
 **Fails without it**: on a customer stamp the keys stay empty, so the consumers (075, 078, 133, 150) refuse with "container not configured" and guidelines and exports have nowhere to go (D-35). The BFF still boots: the keys are optional at start-up.
+
+**Update (task 092, 2026-10-27)**: the E-Billing Output Files half is **superseded** by task 091's storage hand-off (Finance file store, `Finance__FileStore__*`): 092 retired `Finance:EbillingOutputContainerId` from the BFF, so customer environments need neither that container nor its setting, and no manifest entry should be added for it. The Procedure Library half stays open: `Finance:ProcedureLibraryContainerId` is still read by `RuleSetService.cs:406` (CreateAsync upload), `RuleSetService.cs:655` (draft source) and `RateCardImportService.cs:158` (workbook), and retires only when those move to Procedure Version Stored Files (no task owns that yet; escalated in `notes/092-submission-on-files.md` §6). Comment on #1967.
 
 ### DEF-014 — The document-pointer check refuses app-only reads of `sprk_document` rows whose file is in an eBilling container
 
@@ -1205,5 +1207,22 @@ K1 (ontology): a D-96 re-file across core records withholds line Duplicates perm
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2312 |
 
 **Description**: A full run fails in step 3 (Navigation) with InsertAfter "The reference node is not a child of this node". The live sprk_MatterManagement sitemap has sprk_invoice in two areas. It fails after the forms/views steps and before publish. Fix: a deterministic anchor or an early refusal, and/or correct the sitemap (check first who added the second entry).
+
+---
+### DEF-047 — Uploaded invoices are not indexed (the invoice index is document-keyed)
+
+| Field | Value |
+|---|---|
+| **Status** | Open: known limit of task 092 (K1) |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-27 |
+| **Source** | ebilling-r1 task 092 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2351 |
+
+*(ID is provisional: other worktrees may allocate DEF-047 in parallel; renumber on merge.)*
+
+**Description**: since 092 an upload (SPA or internal) is a Stored File, not a `sprk_document`. The `InvoiceIndexing` job is keyed by a document (`InvoiceIndexingJobHandler`), so `InvoiceSubmissionAfterSteps` skips it for uploads (logged). 050a confirms are still indexed until 094. Per D-44 (second half) indexing takes no bytes from a Stored File. Fix: key the job on the invoice id and index the structured record for every invoice In Review.
+
+**Fails without it**: invoice search and AI retrieval over invoices miss every uploaded invoice.
 
 ---
