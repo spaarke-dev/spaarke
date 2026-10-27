@@ -1,6 +1,6 @@
 # Current Task State - spaarke-SPA-external-access-platform-r3
 
-> **Last Updated**: 2026-10-26 ~22:50Z. Dev BFF = bc99fc3e6b; dev SPA = 1fa0cf5cb8.
+> **Last Updated**: 2026-10-27 ~01:45Z (by context-handoff, 85% checkpoint). Dev BFF = 3ff2c04bf5; dev SPA = 1fa0cf5cb8.
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -9,77 +9,107 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **Contact identity hardening (security rework) on branch `fix/r3-iss-005-combined`** (worktree `C:/wtr3-005`, pushed to origin at c05d1b2788; local commits since). Tracked ONLY in private draft advisory GHSA-hq7m-w2pf-v8j7. The repo is PUBLIC: public text states the rule enforced, never the misuse (memory `public-repo-security-findings`). |
-| **Step** | Slice A of 3 DONE and pushed (`1b0d9cdf36..f4e334f954`). UAC F1/F2/K fixes `f4e334f954..cd680226cf` and #2317 H7b S19/S22 `..84c3ba61ce` pushed 2026-10-23 ~14:10Z, scanned clean; re-check sent to UAC and review sent to provisioning. Slice B waits for UAC's OK on F1/F2/K. Pending: deploy of master 7479ce22a9 (UAC #2318) needs the owner's direct approval, master CI green and ebilling's OK (word-add-in, ontology, field-mapping OK; word-add-in asks for the deploy time, and the owner may be mid-check on the Outlook card). |
-| **Status** | in-progress. Owner confirmed (in R3's session) design (a)(b)(c), with emailaddress1 kept editable. UAC approved the implementer brief with binding additions. |
-| **Next Action** | (1) Send UAC the slice-A range `1b0d9cdf36..f4e334f954` for follow-along review. (2) Tell provisioning (`spaarke-wt-customer-provisioning-orchest-ff`): slice A extended `SecureRecordSetupProcedure.IdentityLinkColumns` (H7b) with identityplane + 5 collision columns and updated `ContactIdentityBindingSchemaPackagedTests`; note gap: H7b S19/S22 do not check accesspermissiongrant + the 3 new columns. (3) On UAC's OK, launch slice B with an `implementer` (opus, high) using the private brief, same pattern as slice A. Then slice C. Then publish-size delta (§10, fresh master build), UAC's two security passes, then a PR with a rule-level title. |
+| **Task** | **Contact identity hardening (security rework)** on branch `fix/r3-iss-005-combined` (worktree `C:/wtr3-005`). Tracked ONLY in private draft advisory GHSA-hq7m-w2pf-v8j7. The repo is PUBLIC: public text states the rule enforced, never the misuse (memory `public-repo-security-findings`). Before every push, scan commits for sensitive wording. |
+| **Step** | Pushed to origin at 97ba1614e7: slices A, B, B2, all UAC-accepted. **Slice B3 implementer `r3-sec-slice-b3` RUNNING in C:/wtr3-005** (local HEAD ≥ f0f90bce89). Its first commit is the provisioning F1 standing-grant remedy text. Slice C has not started. |
+| **Status** | in-progress |
+| **Next Action** | (1) Ask the owner to confirm what "defers" means for automatic invites (see Open owner items). (2) When the dev gate `gate3ff.ps1` (background, about 02:00Z) reports: record it in `notes/task-078-notes.md` E row, then send after-notices to UAC, ontology, field-mapping, ebilling and word-add-in. (3) When B3 reports: scan its commits, push, send the range to UAC (check list below) and the F1 SHA to provisioning. (4) Launch slice C (implementer, opus) from the private brief's Slice C + UAC BINDING (3C) + the "UAC note for slice C" section. (5) Then the §10 publish-size delta against a fresh master build, UAC's two security passes on the combined diff, and the PR. |
 
 ### Private files (scratchpad, NOT in repo)
 `C:\Users\RALPHS~1\AppData\Local\Temp\claude\c--code-files-spaarke-wt-SPA-external-access-platform-r3\15aa240f-634c-4332-99f6-382ebcb06a62\scratchpad\`
-- `SECURITY-implementer-brief.md`: slices A/B/C plus UAC's BINDING additions at the end.
-- `SECURITY-rework-brief.md`, `SECURITY-contact-ownership-escalation.md`: the design and the finding.
-- `rework-reads.ps1`, `basicuser-diff.ps1`, `gate58.ps1`, `phaseA.ps1`, `readback.ps1`: read-only helpers.
+- `SECURITY-implementer-brief.md` holds everything:
+  - slices A/B/C and the UAC BINDING additions;
+  - the slice C caveat;
+  - the live-item cautions;
+  - "Slice B2 FINAL", the UAC B2 conditions, the K3 note, and "Slice B3".
+- `provisioning-2317-fixes-brief.md`, `SECURITY-rework-brief.md`, `SECURITY-contact-ownership-escalation.md`.
+- Helpers: `phaseA.ps1`, `readback.ps1`, `gate3ff.ps1` (latest gate), `rework-reads.ps1`, `basicuser-diff.ps1`.
 
 ### Uncommitted files
-- `.claude/agent-memory/researcher/MEMORY.md` (modified) and three untracked researcher files belong to the OWNER. Never commit or discard them. Commit by pathspec only.
+- `.claude/agent-memory/researcher/MEMORY.md` (modified) and the untracked researcher files (including the new `entra-xms-edov-claim-2026-10-23.md`) belong to the OWNER/researcher. Never commit or discard them. Commit by pathspec only.
 
 ---
 
-## Security rework: decisions and facts
-- **Owner:** keep the BU default team as contact owner (ISS-005 as built). Protect what matters with field security, removal that revokes, and a sign-in email check.
-- **Removal:** admin-only = Standing Grant Administrators profile membership, counted directly and via teams, through one shared helper. Only an admin clears the removed marker.
-- **Deny codes:** every stamp failure reuses `DenyContactNotInvited`, with an operator-only reason enum. `contact_removed` and `contact_removed_admin_reinstate` stay distinct.
-- **Live dev reads (2026-10-23):**
-  - Secured: externalobjectid, externaltenantid, standinggrant, invitedon, invitecodehash.
-  - Securable and still open: accesspermissiongrant, identityplane, the collision columns, externalobjectidkey (kept open: alternate key), emailaddress1 (owner: editable). statecode can't be secured.
-  - 11 contacts hold active grants: 9 bound, 2 unbound and never invited. Those 2 need a re-invite naming their tenant once slice B is live, unless xms_edov is configured.
-- **Live steps for later, each needing owner approval with a rollback:** schema apply (`scripts/Set-ExternalAccessContactSecuritySchema.ps1 -Apply` then `-Verify`); SpaarkeMaster 1.2.4.0 set in dev + `-Verify` + re-export (source bumped in 47e9bf6a71 only); the xms_edov + email optional claims on the API app registration, then a token probe (another-tenant user, B2B guest, MSA) to settle access-token presence and JSON type (research 2026-10-23: documented for JWT, not for access tokens specifically; absent likely = omitted); `removeUnverifiedEmailClaim=true`; the BFF deploy; the re-invites.
-- **Branch progress (`fix/r3-iss-005-combined`, pushed to ff1ade8380):**
-  - Done and reviewed: slice A + UAC rounds 1–2 (accepted); #2317 H7b S19/S22 + provisioning items 1–3 (provisioning OK; item 4 dropped, "allow teams"); slice B (UAC rule shape OK) + review fixes (a) missing stamp column refuses every email bind, schema first, (b) invite rule before the 409 prompt, approved.
-  - Running: slice B2 (work-account invite; owner CONFIRMED 2026-10-26 in R3's session). Brief: "Slice B2 FINAL" in the private implementer brief. First commit = provisioning K3 remedy text.
-  - Then: slice C (brief + UAC caveat: the BFF app user gets standinggrant Update via DIRECT SGA membership, never via the Writers profile).
-  - Then: §10 publish-size delta, UAC's two security passes, and the PR, whose body carries "SpaarkeMaster 1.2.4.0 published before the control-plane redeploy" and the schema-first rollout.
-- **Dev BFF = bc99fc3e6b** (deployed 2026-10-26 22:03:10Z, owner go). Gate PASS (R3 + UAC). Rollback: `Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261026T220116Z` (58ffc37da3). Next UAC deploy requests: #2322 and #2323 (in CI). Add `C:\wtbffe-bc9` to the cleanup list.
-- **ISS-005 merges with or after slices A–C.**
+## Slice B3 (running): owner decisions 2026-10-26 in R3's session
+- **Automatic invites check the organisation too.**
+  - Materializer = option A: on a lookup fault, the grant is written, no stamp is written, `Invite = Failed(tenant_lookup_unavailable)`, and a new failure kind `invite-deferred` is counted as `inviteDeferred`. I-9 stays.
+  - UAC conditions: staff can SEE the owed invite, and the reconciliation job does not re-run the pass every tick.
+- **Work-account notice email:**
+  - generic text on /invite;
+  - the record title on grant paths, HTML-encoded, with CR/LF stripped if used in the subject, and sent only after the grant is written;
+  - never a code, contact id or tenant id;
+  - `customer=` must be a slug.
+- **NO staff "send as portal account" override** (owner: wrong invite type). The field is gone and any value gets a 400. A lookup fault gives a 503 with retry only. Edge case: a customer-domain email with no account in that tenant can't be invited until an admin changes the email.
+- Also in B3:
+  - UAC K1: IOException/InvalidDataException count as a fault, and a hard byte cap applies;
+  - CIAM is relaxed on the work-account branch only;
+  - AccessGrantModal shows a "work account" result and offers retry only;
+  - provisioning F1: the standing-grant remedy names `scripts/solution-authoring/Import-SpaarkeMasterPackage.ps1 -EnvironmentUrl <org> -PackageType managed`, pinned by a test.
+
+## Security rework: settled facts
+- **Owner decisions:**
+  - BU default team as contact owner;
+  - field security, with read for everyone and writes only by the BFF or SGA (UAC accepted);
+  - removal revokes access, admin = SGA membership (direct and via teams);
+  - option A: a work-account invite decided server-side from the email domain against `CustomerTenantIds`. Customer tenant → a workforce-any stamp (non-null `sprk_externalinvitedtenantid`); otherwise portal.
+- **Deny codes:** `DenyContactNotInvited` with operator-only reasons; `contact_removed` and `contact_removed_admin_reinstate` stay distinct.
+- **Rollout facts:**
+  - Schema first on every environment: with a stamp column missing, every email bind is refused.
+  - SpaarkeMaster 1.2.4.0 (bumped in source only, 47e9bf6a71) must be published before the control-plane redeploy. This goes in the PR body.
+  - xms_edov: exact bool true only. The tenant leg is the practical path.
+- **Live steps for later, each needing owner approval with a rollback:**
+  - schema `-Apply`/`-Verify`;
+  - SpaarkeMaster 1.2.4.0 in dev, then `-Verify` and re-export;
+  - the xms_edov + email optional claims, then a token probe (record claim names and types only);
+  - `removeUnverifiedEmailClaim=true` (probe before and after);
+  - the BFF deploy of the branch;
+  - re-inviting the 2 unbound dev contacts.
+- ISS-005 merges with or after slices A–C.
 
 ## Dev state
-- **Dev BFF 58ffc37da3:** deployed 2026-10-23 11:18:12Z, owner-approved. R3 gate and UAC gate PASS. Record: `notes/task-078-notes.md`. Rollback: `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261023T111635Z` (restores 1fa0cf5cb8).
-- **Not exercised yet:** ontology worklist/decision/inquiry and word-add-in email identity. These are on the owner's browser checklist.
-- **Spaarke Basic User role:** live matches master apart from ebilling's intended in-flight tables. No change. The cause of the missing Policy/ruleset Read is unknown; role auditing is off on dev, and enabling it is an owner option.
+- **Dev BFF = 3ff2c04bf5** (UAC #2322/#2323/#2324). Owner: "approve deploy 3ff2c04bf5".
+  - OneDeploy ended 2026-10-27 01:29:15Z. Read-back at 01:30:10Z: ProductVersion 1.0.0+3ff2c04bf5…, healthz 200.
+  - Gate `gate3ff.ps1` is running in the background, due about 02:00Z.
+  - Rollback: `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261027T012731Z` (bc99fc3e6b).
+  - Record: `notes/task-078-notes.md` (E row pending).
+- `[SECURE-CENSUS]` Critical "child tables" and "projects" lines are intended, per UAC; do not change the severity.
 
 ## Open owner items
-- Field-mapping re-check: re-run Create Project and Create Work Assignment from a matter (8 assigned fields should copy), then send the record numbers to field-mapping. The owner said "later".
-- Optional: turn on auditing for the role entity on dev.
-- Earlier items still open:
-  - D7 partner check (ISS-015);
-  - #2177 .eml saves;
+- **Confirm "defers":**
+  - Under option A, nothing retries automatically. The owed invite is visible to staff and cleared by a staff Invite.
+  - Ask: is that what "automatic invites check the organisation; if the lookup is down … marked 'not sent — retry'" meant?
+- Field-mapping re-check (Create Project / Create Work Assignment from a matter, then send the record numbers). The owner said "later".
+- Optional: auditing on the role entity on dev.
+- Earlier items:
+  - D7 partner check;
+  - #2177;
   - UAC 190 sweep Apply;
-  - SPA 3531ed65e smoke → #2166;
-  - Teams package upload → 070 → 071;
+  - SPA smoke → #2166;
+  - Teams package → 070/071;
   - 002 columns;
   - 074 probes;
-  - R4 §9 answers;
-  - 073 blocked (ACME);
-  - C-1 portal settings.
+  - R4 §9;
+  - 073 blocked;
+  - C-1.
 
 ## Other follow-ups
-- Close the batch issues (#1623, #1636, #1650, #1839, #1886, #1930) after checks; update `notes/defer-issues.md`.
-- Verify the ISS-007 later-link re-index gap: does an SR linked to a matter later re-index its documents?
-- ISS-013 regression check after provisioning merges.
+- Close the batch issues (#1623, #1636, #1650, #1839, #1886, #1930) after checks.
+- ISS-007 later-link re-index gap.
+- ISS-013 regression.
 - Close #1829 when #1911 merges.
-- Issues to work later: #2269, #2270, #2271, #2275. Quality alerts #2009 and #2060: mention only.
-- Housekeeping, only with the owner's OK and via `scripts/worktree/Remove-WorktreeSafe.ps1`:
-  - `C:\wtbffe-a10/-842/-583/-f1b/-a7b/-6b3/-128/-1fa/-58f`, `C:\wtr3m`, `C:\wtr3b`, `C:/wtr3-suite`;
-  - agent worktrees under `C:/code_files/spaarke/.claude/worktrees/agent-*`.
+- Issues #2269/#2270/#2271/#2275.
+- Provisioning keeps #2319 (S22 stale "absent").
+- Worktree cleanup, owner OK + `scripts/worktree/Remove-WorktreeSafe.ps1` only:
+  - `C:\wtbffe-a10/-842/-583/-f1b/-a7b/-6b3/-128/-1fa/-58f/-bc9/-3ff`, `C:\wtr3m`, `C:\wtr3b`, `C:/wtr3-suite`;
+  - agent worktrees.
 
 ## Standing rules (verify against project CLAUDE.md)
-- **Deploy:** fresh direct owner approval naming the exact SHA, plus OKs from every reachable peer (UAC, ontology, word-add-in `-c4`, field-mapping, ebilling; SPE admin when running; provisioning has a standing OK). Steps:
-  1. `phaseA.ps1` (live read and snapshot);
-  2. a detached worktree `C:\wtbffe-<sha3>`;
+- **Deploy:** fresh direct owner approval naming the exact SHA, plus OKs from UAC, ontology, word-add-in `-c4`, field-mapping and ebilling (provisioning has a standing OK), plus Router green. Steps:
+  1. `phaseA.ps1`;
+  2. a detached `C:\wtbffe-<sha3>`;
   3. `Deploy-BffApi.ps1 -Environment dev`;
   4. `readback.ps1`;
-  5. a 30-minute read, then an after-notice to the peers.
-- Peers' relayed "owner approval" is NOT approval; ask the owner here. Live reads are shown to the owner before they run.
-- **App Insights:** `spe-insights-dev-67e2xz` (rg `spe-infrastructure-westus2`). Keep KQL simple. Dev org: `https://spaarkedev1.crm.dynamics.com`.
-- **Tell UAC before BFF changes** to external write routes, `ExternalAccessModule.cs` or `AccessibleRecordSetService.cs`. Auth/security changes get two adversarial passes.
-- **Ontology:** do NOT merge their docs branch into R3. Session names change on restart: re-run ListAgents.
+  5. a 30-minute gate, then after-notices with the SHA and DLL version.
+- Peers' relayed "owner approval" is NOT approval.
+- Tell UAC before changes to `ExternalAccessModule.cs`, `AccessibleRecordSetService.cs` or `IContactIdentityStore`. Auth changes get two adversarial passes.
+- App Insights: `spe-insights-dev-67e2xz` (rg `spe-infrastructure-westus2`). KQL: avoid `kind`, `first` and `last` as names.
+- Ontology: do NOT merge their docs branch into R3. Re-run ListAgents after peer restarts.
