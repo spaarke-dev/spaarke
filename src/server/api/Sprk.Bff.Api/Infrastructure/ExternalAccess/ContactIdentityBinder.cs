@@ -558,16 +558,35 @@ public sealed class ContactIdentityBinder
 
         var emailLookup = await _store.FindActiveContactsByEmailAsync(email, ct).ConfigureAwait(false);
         var resolution = await DecideInviteContactAsync(emailLookup, ct).ConfigureAwait(false);
-        if (resolution.Action != InviteContactAction.CreateContact)
+        if (resolution.Action is not (InviteContactAction.CreateContact or InviteContactAction.ProvisionExisting))
         {
             return resolution;
         }
 
         // Slice C: no active contact carries the email. A new contact is never created around a removal: an inactive contact
-        // for the email whose external access an administrator removed refuses the invite.
-        var inactiveLookup = await _store.FindInactiveContactsByEmailAsync(email, ct).ConfigureAwait(false);
+        // for the email whose external access an administrator removed refuses the invite. C5: the same holds for an unbound
+        // active contact that shares the email: it is never invited while a removed contact carries that email.
+        return await InviteRemovedSameEmailRefusalAsync(email, ct).ConfigureAwait(false) ?? resolution;
+    }
+
+    /// <summary>
+    /// C5: the invite's answer when an INACTIVE contact for <paramref name="email"/> is one whose external access an
+    /// administrator removed (409 <see cref="ContactBindingDecision.InviteContactRemovedAdminReinstate"/>), or whether it is
+    /// cannot be established (a retryable failure); <c>null</c> when the invite may go ahead. Runs
+    /// <see cref="ContactBindingDecision.DecideCreateAroundRemoval"/>, the one rule, before an invite creates a contact or
+    /// provisions an existing unbound one. Read-only; nothing is flagged.
+    /// <para>§11. Existing: the same check was inline here and in <see cref="CreateInviteContactGuardedAsync"/>, for a create
+    /// only. Extension: it is that check, lifted so the provision of an existing contact runs it too. Cost of doing nothing:
+    /// an unbound active contact that shares a removed person's email is invited and bound, so the removal no longer holds
+    /// for that email.</para>
+    /// </summary>
+    internal async Task<InviteContactResolution?> InviteRemovedSameEmailRefusalAsync(string email, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(email);
+
+        var inactiveLookup = await _store.FindInactiveContactsByEmailAsync(email.Trim(), ct).ConfigureAwait(false);
         var removal = ContactBindingDecision.DecideCreateAroundRemoval(inactiveLookup);
-        return removal.MayCreate ? resolution : InviteRemovalRefusal(removal);
+        return removal.MayCreate ? null : InviteRemovalRefusal(removal);
     }
 
     /// <summary>
@@ -1047,6 +1066,15 @@ public sealed class ContactIdentityBinder
                 case RegistrationEmailAction.BindExisting:
                 {
                     var target = known[decision.ContactId!.Value];
+
+                    // C5: never bound while an inactive contact for the same email is one whose external access an
+                    // administrator removed. Checked before the confirmation prompt, as the invite stamp is.
+                    if (await EmailBindAroundRemovalAsync(request.Email, "Registration", who, target.ContactId, ct)
+                            .ConfigureAwait(false) is { } removal)
+                    {
+                        return HomeRegistrationResult.Denied(removal.DenyCode ?? ContactBindingDecision.DenyContactLookupFailed)
+                            with { RemovedMarkerUnproven = removal.MarkerUnproven };
+                    }
 
                     // The email-bind rule (as the Workforce token plane, E11): binding an existing contact needs a current
                     // invite stamp whose recorded address is the token's email and the contact's emailaddress1, and whose
@@ -1856,7 +1884,72 @@ public sealed class ContactIdentityBinder
         }
 
         LogRemovedDeny(decision, request.Plane);
+
+        // C5: an email bind onto an existing contact is refused while an inactive contact for the same email is one whose
+        // external access an administrator removed (or whether it is cannot be established), as a create is.
+        if (decision.Action == BindingAction.BindByEmail
+            && await EmailBindAroundRemovalAsync(request.Email, $"{request.Plane} sign-in", $"oid#{HashForLog(request.CallerOid)}",
+                    decision.ContactId, ct).ConfigureAwait(false) is { } removal)
+        {
+            decision = new BindingDecision(BindingAction.Deny, DenyCode: removal.DenyCode)
+            {
+                RemovedMarkerUnproven = removal.MarkerUnproven,
+            };
+        }
+
         return (decision, emailLookup, stamped);
+    }
+
+    /// <summary>
+    /// C5: the refusing <see cref="CreateAroundRemovalDecision"/> (logged here) when an email bind onto existing contact
+    /// <paramref name="contactId"/> may not go ahead because an INACTIVE contact for <paramref name="email"/> is one whose
+    /// external access an administrator removed, whether it is cannot be established, or the inactive contacts could not be
+    /// read; <c>null</c> when the bind may go ahead. Runs <see cref="ContactBindingDecision.DecideCreateAroundRemoval"/>, the
+    /// one rule a create already runs. Read-only; nothing is flagged.
+    /// <para>§11. Existing: <see cref="CreateAroundRemovalRefusalDecisionAsync"/> runs the same rule before a create. Extension:
+    /// this reuses that rule and its decision; it is separate only so its log names a bind, not a create. Cost of doing
+    /// nothing: an unbound active contact that shares a removed person's email is bound at sign-in or registration, so the
+    /// removal no longer holds for that email.</para>
+    /// </summary>
+    private async Task<CreateAroundRemovalDecision?> EmailBindAroundRemovalAsync(
+        string? email, string operation, string who, Guid? contactId, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(email))
+        {
+            return null;
+        }
+
+        var inactiveLookup = await _store.FindInactiveContactsByEmailAsync(email.Trim(), ct).ConfigureAwait(false);
+        var removal = ContactBindingDecision.DecideCreateAroundRemoval(inactiveLookup);
+        if (removal.MayCreate)
+        {
+            return null;
+        }
+
+        if (removal.MarkerUnproven)
+        {
+            _logger.LogError(
+                "[ID-BIND] {Operation} for {Who} REFUSED ({DenyCode}): the removed marker of inactive contact {RemovedContactId} " +
+                "for the email could not be proven empty, so a removal cannot be ruled out. Contact {ContactId} was not bound; " +
+                "retryable.",
+                operation, who, removal.DenyCode, removal.RemovedContactId, contactId);
+        }
+        else if (removal.IsRemoval)
+        {
+            _logger.LogWarning(
+                "[ID-BIND] {Operation} for {Who} REFUSED ({DenyCode}): inactive contact {RemovedContactId} for the email is one " +
+                "whose external access an administrator removed. Contact {ContactId} was not bound.",
+                operation, who, removal.DenyCode, removal.RemovedContactId, contactId);
+        }
+        else
+        {
+            _logger.LogWarning(
+                "[ID-BIND] {Operation} for {Who} REFUSED ({DenyCode}): the inactive contacts for the email could not be read, so " +
+                "a removal cannot be ruled out. Contact {ContactId} was not bound; retryable.",
+                operation, who, removal.DenyCode, contactId);
+        }
+
+        return removal;
     }
 
     /// <summary>

@@ -1640,6 +1640,48 @@ public class ExistingCiamAccountInviteTests
         _h.Emails.InviteUrls.Should().BeEmpty();
     }
 
+    /// <summary>
+    /// C5, MUST FIRE: an invite (/invite and /invite-and-grant) to an unbound active contact is refused 409 while an inactive
+    /// contact for the same email is one whose external access an administrator removed, and a read of the inactive contacts
+    /// that fails is the retryable 503. Nothing is created, written, granted or sent. MUST NOT FIRE: an unmarked inactive
+    /// contact for the email does not stop the invite.
+    /// </summary>
+    [Theory]
+    [InlineData("removed", 409, ContactBindingDecision.InviteContactRemovedAdminReinstate)]
+    [InlineData("read-fails", 503, ContactBindingDecision.InviteContactLookupFailed)]
+    [InlineData("unmarked", 200, null)]
+    public async Task AnInvite_ToAnUnboundContact_WhoseEmailARemovedInactiveContactCarries_IsRefused(
+        string how, int status, string? code)
+    {
+        var active = UnboundContact();
+        var inactive = Guid.NewGuid();
+        _h.Identities.AddContact(inactive, email: Email, stateCode: 1);
+        if (how == "removed")
+            _h.Identities.Contacts[inactive].RemovedOn = DateTimeOffset.UtcNow;
+        _h.Identities.FailInactiveEmailLookup = how == "read-fails";
+
+        if (status == 200)
+        {
+            (await InviteRoute()).Should().BeOfType<Ok<InviteExternalUserResponse>>();
+            _h.Identities.Contacts[active].InvitedOn.Should().NotBeNull();
+            return;
+        }
+
+        foreach (var result in new[] { await InviteRoute(), await InviteAndGrant() })
+        {
+            var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
+            problem.StatusCode.Should().Be(status);
+            problem.ProblemDetails.Extensions["reasonCode"].Should().Be(code);
+        }
+
+        _h.Identities.Contacts[active].InvitedOn.Should().BeNull();
+        _h.Identities.Contacts[active].Oid.Should().BeNull();
+        _h.Identities.Writes.Should().BeEmpty();
+        _h.Grants.Rows.Should().BeEmpty();
+        _ciam.Created.Should().BeEmpty();
+        _h.Emails.InviteUrls.Should().BeEmpty();
+    }
+
     /// <summary>Slice C, MUST NOT FIRE: the unmarked twin of the test above is invited exactly as before.</summary>
     [Fact]
     public async Task AnInvite_ToAnUnmarkedContact_IsNotRefused()

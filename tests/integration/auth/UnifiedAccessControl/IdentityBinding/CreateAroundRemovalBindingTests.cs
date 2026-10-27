@@ -30,6 +30,84 @@ public class CreateAroundRemovalBindingTests
         => Binder(_store).ResolveWorkforceCallerAsync(
             WorkforceUser(oid, tid: CustomerTenant, email: email), oid, stampTenantId: null, CancellationToken.None);
 
+    // ── C5: the email bind onto an existing contact ─────────────────────────────────────────────────────────────
+
+    private static readonly Guid InvitedContact = Guid.Parse("eeeeeeee-8888-4888-8888-00000000000b");
+
+    /// <summary>An unbound ACTIVE contact for the email, invited for a work-account sign-in from the customer tenant.</summary>
+    private void InvitedActiveContactForTheEmail()
+    {
+        _store.AddContact(InvitedContact, email: Email);
+        _store.StampInvite(InvitedContact, Email, CustomerTenant);
+    }
+
+    /// <summary>
+    /// MUST FIRE: a sign-in whose email bind would land on an invited active contact is denied while an inactive contact for
+    /// the same email is one whose external access an administrator removed; nothing is bound.
+    /// </summary>
+    [Fact]
+    public async Task AWorkforceEmailBind_WithTheEmailOfARemovedInactiveContact_IsDenied_AndNothingIsBound()
+    {
+        InactiveContactForTheEmail(removed: true);
+        InvitedActiveContactForTheEmail();
+        var oid = Guid.NewGuid();
+
+        var result = await FirstSignIn(oid);
+
+        result.DenyCode.Should().Be(ContactBindingDecision.DenyContactRemoved);
+        result.IsResolved.Should().BeFalse();
+        _store.ContactsBoundTo(oid).Should().BeEmpty();
+        _store.Contacts[InvitedContact].Oid.Should().BeNull();
+        _store.Writes.Should().BeEmpty();
+    }
+
+    /// <summary>MUST FIRE: the CIAM plane's email bind (an invite code) is denied the same way.</summary>
+    [Fact]
+    public async Task ACiamEmailBind_WithTheEmailOfARemovedInactiveContact_IsDenied_AndNothingIsBound()
+    {
+        InactiveContactForTheEmail(removed: true);
+        var invite = InviteCode.Create(InvitedContact);
+        _store.AddContact(InvitedContact, email: Email, invitedOn: Now, inviteCodeHash: invite.StoredValue);
+        _store.StampInvite(InvitedContact, Email);
+        var oid = Guid.NewGuid();
+
+        var result = await Binder(_store).ResolveCiamCallerAsync(oid.ToString(), Email, invite.Code, CancellationToken.None);
+
+        result.DenyCode.Should().Be(ContactBindingDecision.DenyContactRemoved);
+        _store.Contacts[InvitedContact].Oid.Should().BeNull();
+        _store.Contacts[InvitedContact].InviteCodeHash.Should().Be(invite.StoredValue, "a refused bind consumes nothing");
+        _store.Writes.Should().BeEmpty();
+    }
+
+    /// <summary>MUST FIRE: an email bind is denied, retryably, while the inactive contacts cannot be read.</summary>
+    [Fact]
+    public async Task AnEmailBind_WhenTheInactiveContactsCannotBeRead_IsDenied_AndNothingIsBound()
+    {
+        InvitedActiveContactForTheEmail();
+        _store.FailInactiveEmailLookup = true;
+
+        var result = await FirstSignIn(Guid.NewGuid());
+
+        result.DenyCode.Should().Be(ContactBindingDecision.DenyContactLookupFailed);
+        _store.Contacts[InvitedContact].Oid.Should().BeNull();
+        _store.Writes.Should().BeEmpty();
+    }
+
+    /// <summary>MUST NOT FIRE: an unmarked inactive contact for the email does not stop the bind.</summary>
+    [Fact]
+    public async Task AnEmailBind_WithTheEmailOfAnUnmarkedInactiveContact_StillBinds()
+    {
+        InactiveContactForTheEmail(removed: false);
+        InvitedActiveContactForTheEmail();
+        var oid = Guid.NewGuid();
+
+        var result = await FirstSignIn(oid);
+
+        result.Action.Should().Be(BindingAction.BindByEmail);
+        result.ContactId.Should().Be(InvitedContact);
+        _store.Contacts[InvitedContact].Oid.Should().Be(oid.ToString("D"));
+    }
+
     // ── The first sign-in create ────────────────────────────────────────────────────────────────────────────────
 
     [Fact]

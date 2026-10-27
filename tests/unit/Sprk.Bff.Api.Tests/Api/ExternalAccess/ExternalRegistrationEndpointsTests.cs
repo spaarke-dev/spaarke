@@ -437,8 +437,36 @@ public sealed class ExternalRegistrationEndpointsTests : IClassFixture<ExternalR
         active.Oid.Should().Be(_oid.ToString("D"));
         inactive.Flag.Should().BeNull();
         inactive.Oid.Should().BeNull();
-        _store.Reads.Should().NotContain("inactive-email", "an active match decides; the inactive read is not reached");
+        _store.Reads.Should().Contain("inactive-email",
+            "C5: the bind checks the inactive contacts for a removal; an unmarked one does not stop it");
         _store.Writes.Select(w => w.Op).Should().Equal("bind");
+    }
+
+    /// <summary>
+    /// C5, MUST FIRE: an invited, unbound active contact is never bound while an inactive contact for the same email is one
+    /// whose external access an administrator removed: the final 403 a removed person's registration answers, asked before
+    /// the confirmation prompt, nothing written. A read of the inactive contacts that fails refuses retryably (503).
+    /// </summary>
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    public async Task AnActiveBindableMatch_WhoseEmailARemovedInactiveContactCarries_IsNeverBound(bool confirm, bool readFails)
+    {
+        var removed = _store.AddContact(Guid.NewGuid(), email: Email, stateCode: 1);
+        removed.RemovedOn = DateTimeOffset.Parse("2026-10-01T00:00:00Z");
+        var active = Invited(_store.AddContact(Guid.NewGuid(), email: Email));
+        _store.FailInactiveEmailLookup = readFails;
+
+        var response = await Post(Body(confirm: confirm ? true : null));
+
+        if (readFails)
+            await ShouldBeProblem(response, HttpStatusCode.ServiceUnavailable, ExternalRegistrationEndpoints.ErrorUnavailable);
+        else
+            await ShouldBeProblem(response, HttpStatusCode.Forbidden, ContactBindingDecision.DenyContactRemoved);
+        active.Oid.Should().BeNull();
+        removed.Oid.Should().BeNull();
+        _store.Writes.Should().BeEmpty();
     }
 
     [Fact]

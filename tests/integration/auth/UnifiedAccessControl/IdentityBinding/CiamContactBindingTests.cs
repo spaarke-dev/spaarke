@@ -185,7 +185,8 @@ public class CiamContactBindingTests
         var result = await Binder(_store).ResolveCiamCallerAsync(CiamOid.ToString(), Email, code, CancellationToken.None);
 
         result.Action.Should().Be(BindingAction.BindByEmail);
-        _store.Reads.Should().Equal("oid", "email", "references", "intent", "probe");
+        // C5: an email bind also reads the inactive contacts for the email, for a removal.
+        _store.Reads.Should().Equal("oid", "email", "references", "intent", "inactive-email", "probe");
     }
 
     /// <summary>

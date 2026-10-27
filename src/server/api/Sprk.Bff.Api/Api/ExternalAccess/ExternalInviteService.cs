@@ -553,9 +553,20 @@ public sealed class ExternalInviteService
                 return new ProvisionOutcome(resolution.ContactId!.Value, AlreadyProvisionedStatus);
 
             case InviteContactAction.ProvisionExisting:
-                contactId = resolution.ContactId!.Value;
-                etag = resolution.ETag;
-                break;
+                {
+                    // C5: an existing contact is never invited while a removed contact carries its email. Re-checked here,
+                    // immediately before the marker write, because the resolution may have been read earlier or handed in
+                    // (/invite-and-grant's pre-check, a grant's invite, an assignment's invite), as the guarded create does.
+                    if (await binder.InviteRemovedSameEmailRefusalAsync(request.Email, ct).ConfigureAwait(false) is { } removed)
+                    {
+                        return NotProvisionable(removed, request.Email, logger)
+                               ?? throw new InvalidOperationException("A removed-email invite refusal must not provision.");
+                    }
+
+                    contactId = resolution.ContactId!.Value;
+                    etag = resolution.ETag;
+                    break;
+                }
 
             case InviteContactAction.CreateContact:
                 {

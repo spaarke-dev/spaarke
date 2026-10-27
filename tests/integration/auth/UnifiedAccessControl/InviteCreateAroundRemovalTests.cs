@@ -86,6 +86,44 @@ public class InviteCreateAroundRemovalTests
         AssertNothingCreatedOrSent();
     }
 
+    /// <summary>
+    /// C5, MUST FIRE: a handed-in "provision this existing contact" (a grant's or an assignment's invite, or
+    /// /invite-and-grant's pre-check) is refused 409 when an inactive contact for the email is one whose external access an
+    /// administrator removed: no marker, no account, no email.
+    /// </summary>
+    [Fact]
+    public async Task AHandedInProvisionExisting_IsRefused409_WhenARemovedInactiveContactCarriesTheEmail()
+    {
+        var existing = Guid.NewGuid();
+        _h.Identities.AddContact(existing, email: Email);
+        RemovedInactiveContactAppears();
+
+        var outcome = await Invite(new InviteContactResolution(InviteContactAction.ProvisionExisting, existing, null, null, null));
+
+        outcome.Refusal!.ReasonCode.Should().Be(ContactBindingDecision.InviteContactRemovedAdminReinstate);
+        _h.Identities.Contacts[existing].InvitedOn.Should().BeNull();
+        AssertNothingCreatedOrSent();
+    }
+
+    /// <summary>
+    /// C5, MUST FIRE: the resolution itself refuses an unbound active contact whose email a removed inactive contact carries,
+    /// so /invite-and-grant's pre-check answers the refusal before any grant check is made.
+    /// </summary>
+    [Fact]
+    public async Task TheResolution_OfAnExistingContact_IsARefusal_WhenARemovedInactiveContactCarriesTheEmail()
+    {
+        var existing = Guid.NewGuid();
+        _h.Identities.AddContact(existing, email: Email);
+        RemovedInactiveContactAppears();
+
+        var resolution = await IdentityBindingTestKit.OwnerAwareBinder(_h.Identities, CustomerBu)
+            .ResolveInviteContactAsync(Email, CancellationToken.None);
+
+        resolution.Action.Should().Be(InviteContactAction.Refuse);
+        resolution.ReasonCode.Should().Be(ContactBindingDecision.InviteContactRemovedAdminReinstate);
+        _h.Identities.Writes.Should().BeEmpty();
+    }
+
     // ── Must not fire ─────────────────────────────────────────────────────────────────────────────────────────────
 
     [Fact]
