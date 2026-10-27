@@ -548,14 +548,23 @@ describe.
 
 **A. `RecordFamilyEdges` — the canonical edge registry (data, `Services/Dataverse`, beside `CoreAncestorResolver`)**
 
-- **Rows:** `(ChildTable, LookupColumn, ParentTable, EdgeKind = FilingCore | Stamp | LineageHop, InSecureFamily, …)`.
+- **One concept, with kinds (ontology, 2026-10-27; the term itself waits on the owner's component-model §3 row):**
+  - A **family** is a set of records joined by typed edges of ONE kind. W7 builds one kind only: **Filing**, a tree with one root (the core ancestor).
+  - A later peer kind for IP (for example **Priority**: continuation, divisional, foreign counterpart) is a graph with no root. It is labelled by its term of art ("Patent family"), and W7 builds nothing for it.
+  - "Secure family" is NOT a kind. It is the Filing family of a Secure root (`InSecureFamily`), and stays a qualifier.
+- **Rows:** `(FamilyKind, ChildTable, LookupColumn, ParentTable, EdgeKind = FilingCore | Stamp | LineageHop, InSecureFamily, RecordNumberColumn?, …)`. Every row is `FamilyKind = Filing` in W7.
+- **Edge TYPES live in code; edge INSTANCES live in Dataverse (ontology).**
+  - Filing edges are schema facts that UAC's isolation walks depend on. An editable table would let configuration change an access boundary, and the parity ratchet can only guard code.
+  - A future IP kind keeps its instances (matter A claims priority from matter B) in a link table, and adds ONE registry row pointing at that table.
 - **Seed:** from `SecureChildLineage`, `TypedFilingColumns` / `IntermediateFilingColumns` / pair, and `StampSourceColumns`, AFTER UAC task 194 merges. Never written from scratch.
 - **Parity test:** each existing registry is a checked view of this one, with a ratchet baseline. A new disagreement fails the build; the known ones are listed and worked down by UAC. Migrating UAC's walks onto it is UAC's call.
 - **Content ownership:** UAC-r2. Enforced by a content-pin test. Changing an edge fails the test, and its message requires a UAC review line in the PR (enforcement ladder: a test, not prose).
 
 **B. `RecordFamilyReader` — read-only, scoped**
 
-- **Signature:** `ReadAsync(table, id, direction, continuation)`.
+- **Signature:** `ReadAsync(kind, table, id, direction, continuation)`. `kind` defaults to Filing.
+- **One kind per walk (ontology 3a):** a walk never mixes kinds. A priority edge crosses separate matters, possibly Secure ones. A Filing walk that followed one would spread push and Assigned To across matters and through the isolation boundary.
+- **Generic over edges:** the walk is driven by registry rows and keeps a visited set, even for Filing. This handles a bad data loop, so a later peer kind is a data change, not a rewrite.
 - **Identity:** walks AS THE CALLER (OBO), level by level, with one batched query per (child table, lookup) per level (no N+1).
 - **Unreadable records:** the walk never passes through one. It never returns an unreadable member, and never counts or hints at hidden ones.
   - **Up:** the walk stops at the first ancestor the caller cannot read. Nothing above it is returned, and there is no hint that it exists (UAC review F2).
@@ -573,7 +582,11 @@ describe.
 - Lives in the existing `/api/v1/records` group, with auth required, in its OWN file, `Api/Records/RecordFamilyEndpoints.cs`. `RecordNoAccessEndpoint.cs` stays one cohesive No Access responsibility (§11.5).
 - It is registered in the route-authorization ledger (`RouteAuthorizationGuardTests.Ledger`) with its mechanism, and the governed-file census is updated (UAC review F2).
 - Takes `direction` and `continuation`. The default is the FULL family (owner, 2026-10-27): up to the root, then down from the root, so siblings and cousins are included. The walk's pruning rules apply to both directions. `direction=down` remains available for the push preview, which only acts below the source.
-- An unknown or unreadable root gets one uniform 404.
+- Takes `kind` (default Filing; any other value is refused with 400 in W7).
+- **Response shape (ontology 3c):**
+  - The walk is described from an `anchor` (the record opened). `root` is optional, because a peer family has none.
+  - Every member carries `kind` and `edgeKind`.
+- An unknown or unreadable anchor gets one uniform 404.
 
 **D. `/push` extensions (task 040; UAC 4a design)**
 
@@ -582,6 +595,9 @@ describe.
 - `childIds` is the confirmed list. The server re-derives the children as the caller and intersects them with the list; any other id is refused per id.
 - With `includeAssignedTo`, the caller needs Write on the SOURCE (equalised probe).
 - The profile's parent lookup must be a `RecordFamilyEdges` filing edge, or the push is refused.
+- **Actions are per kind (ontology 3b):**
+  - Push field updates and Update Assigned To are defined for the Filing kind only.
+  - The server refuses them for any other kind; hiding them in the UI is not enough.
 - Unchanged: filing columns are never pushed, invariant columns are never copied, `SecureRootFilingGate` and `AssignedAccessMaterializer` run per child.
 - Sync mode becomes class-aware: Assigned-To targets 0, filing targets never, plain data 1. The values ship with 040 after the owner reviews the dry run.
 
@@ -691,6 +707,18 @@ A, B, D, E, F, §12.5 and §12.7 were accepted as written.
 - the term guidance.
 
 Still open: classify `sprk_procedureassignment` and record-scoped ruleset rules (§12.2).
+
+**Ontology-r1, round 2 (2026-10-27, family as a data-model concept):**
+- Nothing about a family component is recorded in ontology R1 or R2: no design, no D-number, no patent or trademark family model. Ontology is asking the owner directly.
+- Recommendations applied in §12.3 A–D:
+  - one concept with kinds (Filing now; a peer IP kind later; Secure is a qualifier, not a kind);
+  - one kind per walk;
+  - actions per kind, refused server-side;
+  - anchor and optional root;
+  - `kind` and `edgeKind` on every member;
+  - a visited set;
+  - edge types in code, edge instances in Dataverse.
+- Term: ontology is putting the component-model §3 row to the owner. Until then, "Family" is the UI word for the Filing view.
 
 ### 12.11 Known limits (one line each in the PR)
 
