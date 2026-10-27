@@ -347,6 +347,13 @@ public static class InviteAndGrantExternalUserEndpoint
             // Adversarial pass 2, F2: an invite email that did not send is reported (the grant still proceeds), the same
             // way on the new-account and the existing-account branch (§12 I-10).
             (emailSent, emailErrorCode) = InviteExternalUserEndpoint.InviterVisibleEmail(outcome);
+
+            // Slice C2c: a contact that already has an account is due no invite email (the grant email below is its notice,
+            // reported as notificationFailed), so emailSent is false, never null, with its own code, as on /invite.
+            if (string.Equals(outcome.Status, InviteExternalUserEndpoint.AlreadyProvisionedStatus, StringComparison.Ordinal))
+            {
+                (emailSent, emailErrorCode) = (false, ContactBindingDecision.InviteContactAlreadyHasAccount);
+            }
         }
         catch (Exception ex)
         {

@@ -1606,6 +1606,42 @@ public class ExistingCiamAccountInviteTests
         _h.Emails.InviteUrls.Should().BeEmpty();
     }
 
+    // ── Slice C2c: /invite-and-grant to a person who already has an account ──────────────────────────────────────────
+
+    /// <summary>
+    /// MUST FIRE: /invite-and-grant on a contact already bound to a portal account writes the grant and sends no invite
+    /// email: emailSent is false (never null) with the already-has-account code, alongside the grant result and its
+    /// notification status (the grant email is the person's notice).
+    /// </summary>
+    [Fact]
+    public async Task InviteAndGrant_ToAPersonWhoAlreadyHasAnAccount_IsGranted_WithEmailSentFalse_AndItsCode()
+    {
+        var contact = Guid.NewGuid();
+        _h.Identities.AddContact(contact, email: Email, oid: Guid.NewGuid().ToString("D"), plane: IdentityPlaneMarker.External);
+
+        var body = (await InviteAndGrant()).Should().BeOfType<Ok<InviteAndGrantResponse>>().Subject.Value!;
+
+        body.OnboardStatus.Should().Be(InviteExternalUserEndpoint.AlreadyProvisionedStatus);
+        body.EmailSent.Should().Be(false, "emailSent is never null for a person who already has an account");
+        body.EmailErrorCode.Should().Be(ContactBindingDecision.InviteContactAlreadyHasAccount);
+        body.GrantedAccessLevel.Should().Be(ExternalAccessLevel.Collaborate);
+        body.NotificationFailed.Should().BeFalse("the grant email, the person's notice, was sent");
+        _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle();
+        _h.Emails.InviteUrls.Should().BeEmpty("no invite email");
+        _ciam.Created.Should().BeEmpty();
+    }
+
+    /// <summary>MUST NOT FIRE: an unbound contact on /invite-and-grant is invited as before (no already-has-account code).</summary>
+    [Fact]
+    public async Task InviteAndGrant_ToAnUnboundContact_IsInvitedAsBefore()
+    {
+        UnboundContact();
+
+        var body = (await InviteAndGrant()).Should().BeOfType<Ok<InviteAndGrantResponse>>().Subject.Value!;
+
+        (body.EmailSent, body.EmailErrorCode).Should().Be(((bool?)true, (string?)null));
+    }
+
     // ── Doubles ─────────────────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>A caller who holds every right on the record, so the grant ceiling passes.</summary>
