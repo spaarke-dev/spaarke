@@ -1062,8 +1062,17 @@ public sealed class SecureRecordSetupProcedureTests
         "completed H6) run scripts/Set-ExternalAccessContactSecuritySchema.ps1 -Apply, then -Verify (exit 0), then resume. " +
         "Nothing was written.";
 
+    /// <summary>
+    /// The standing-grant field and its profile ship only in the package, so the remedy for an environment past H6 is a hand
+    /// import of the release, never the contact schema script (which writes neither).
+    /// </summary>
+    private const string StandingGrantRemedy =
+        "It requires SpaarkeMaster 1.2.0.0 or later: a new run imports it at H6; in an environment already past H6 (a resume " +
+        "does not re-run a completed H6), import it by hand with scripts/solution-authoring/Import-SpaarkeMasterPackage.ps1 " +
+        "-EnvironmentUrl <org> -PackageType managed, then resume. Nothing was written.";
+
     [Fact]
-    public async Task StandingGrantLockIncomplete_NamesTheMinimumVersionAndTheScriptForAnEnvironmentPastH6()
+    public async Task StandingGrantLockIncomplete_NamesTheMinimumVersionAndTheImportScriptForAnEnvironmentPastH6()
     {
         var dv = NewEnv();
         dv.SecuredColumns[FakeSecureRecordSetupDataverse.ColumnKey("contact", "sprk_standinggrant")] = false;
@@ -1071,8 +1080,8 @@ public sealed class SecureRecordSetupProcedureTests
         var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.StandingGrantLockIncomplete, FailureClass.Resumable);
 
         refused.Diagnostic.Should().Contain("contact.sprk_standinggrant")
-            .And.Contain("SpaarkeMaster 1.2.0.0 or later")
-            .And.Contain(ResumeRemedy);
+            .And.Contain(StandingGrantRemedy)
+            .And.NotContain(SecureRecordSetupProcedure.ContactSecuritySchemaScript);
         dv.Writes.Should().BeEmpty();
     }
 

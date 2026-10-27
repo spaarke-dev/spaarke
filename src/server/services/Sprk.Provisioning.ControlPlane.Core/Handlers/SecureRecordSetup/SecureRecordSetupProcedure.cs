@@ -227,7 +227,7 @@ public sealed class SecureRecordSetupProcedure
     public const string StandingGrantMinimumSpaarkeMasterVersion = "1.2.0.0";
 
     /// <summary>
-    /// The remedy an incomplete package lock names. A new run imports the release at H6; a resume does not re-run a
+    /// The remedy an incomplete contact lock names. A new run imports the release at H6; a resume does not re-run a
     /// completed H6, so an environment already past it applies the locks with the script, verifies, then resumes.
     /// </summary>
     private static string LocksRemedy(string minimumVersion) =>
@@ -238,8 +238,20 @@ public sealed class SecureRecordSetupProcedure
     /// <summary>S18/S19: the remedy an incomplete contact lock names.</summary>
     private static readonly string ContactLocksRemedy = LocksRemedy(ContactLocksMinimumSpaarkeMasterVersion);
 
-    /// <summary>S19: the remedy an incomplete standing-grant lock names.</summary>
-    private static readonly string StandingGrantLocksRemedy = LocksRemedy(StandingGrantMinimumSpaarkeMasterVersion);
+    /// <summary>
+    /// S19: the script that imports a SpaarkeMaster release by hand. The standing-grant field and its profile ship only in
+    /// the package; <see cref="ContactSecuritySchemaScript"/> never writes either, so it is not this lock's remedy.
+    /// </summary>
+    public const string SpaarkeMasterImportScript = "scripts/solution-authoring/Import-SpaarkeMasterPackage.ps1";
+
+    /// <summary>
+    /// S19: the remedy an incomplete standing-grant lock names. A new run imports the release at H6; an environment already
+    /// past H6 imports it by hand with <see cref="SpaarkeMasterImportScript"/>, then resumes.
+    /// </summary>
+    private static readonly string StandingGrantLocksRemedy =
+        "It requires SpaarkeMaster " + StandingGrantMinimumSpaarkeMasterVersion + " or later: a new run imports it at H6; in " +
+        "an environment already past H6 (a resume does not re-run a completed H6), import it by hand with " +
+        SpaarkeMasterImportScript + " -EnvironmentUrl <org> -PackageType managed, then resume. Nothing was written.";
 
     /// <summary>S22 (#2317): the BFF-only columns, checked as <see cref="InviteCodeHashColumn"/> is.</summary>
     public static readonly IReadOnlyList<string> BffOnlyColumns = [InvitedEmailHashColumn, InvitedTenantIdColumn];
