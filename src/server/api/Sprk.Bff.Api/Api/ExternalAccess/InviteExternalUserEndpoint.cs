@@ -172,17 +172,18 @@ public static class InviteExternalUserEndpoint
             // §12 I-10: an existing CIAM account is answered as a new one (the operator log keeps the difference), and an
             // email that did not send is reported the same way on both branches (adversarial pass 2, F2).
             var (emailSent, emailErrorCode) = InviterVisibleEmail(outcome);
+            var status = InviterVisibleStatus(outcome.Status);
 
             // Slice B3: a work-account stamp landed, so the notice goes to the stamped address. /invite writes no grant, so
             // the notice is the fixed text and names no record. Slice C2b: a notice that did not send retracts the stamp
-            // ("email not sent"), so the next invite stamps and sends again.
+            // ("email not sent"), so the next invite stamps and sends again. C5: that invite is then answered as not sent.
             if (outcome.Status == WorkAccountInvitedStatus)
             {
-                (emailSent, emailErrorCode) = await ExternalInviteService.SendWorkAccountNoticeAsync(
+                (status, emailSent, emailErrorCode) = await ExternalInviteService.SendWorkAccountNoticeAsync(
                         emailService, request.Email, portalUrl, InviteLinkCustomerKey(customer), record: null, outcome.ContactId,
                         logger, binder, outcome.WrittenInviteStamp)
-                    ? (true, null)
-                    : (false, GrantInviteStatus.EmailNotSentReasonCode);
+                    ? (status, true, (string?)null)
+                    : (InviteNotSentStatus, false, GrantInviteStatus.EmailNotSentReasonCode);
             }
 
             // Slice C2b: the person already has an account. No invite email is due, none is sent and nothing was written:
@@ -193,7 +194,7 @@ public static class InviteExternalUserEndpoint
             }
 
             return TypedResults.Ok(new InviteExternalUserResponse(
-                outcome.ContactId, portalUrl, InviterVisibleStatus(outcome.Status), emailSent, emailErrorCode));
+                outcome.ContactId, portalUrl, status, emailSent, emailErrorCode));
         }
         catch (Exception ex)
         {
@@ -285,6 +286,15 @@ public static class InviteExternalUserEndpoint
     /// or WorkforceHome sign-in from its organisation's tenant; no CIAM account was created and no invite email was sent.
     /// </summary>
     internal const string WorkAccountInvitedStatus = "WorkAccountInvited";
+
+    /// <summary>
+    /// C5: the onboarding status <c>/invite</c> and <c>/invite-and-grant</c> answer for a work-account invite whose notice did
+    /// not send and was therefore retracted: an invite is reported as made only when its email went out. It is the value the
+    /// grant response's <c>invite</c> field reports for an invite that did not complete (<see cref="GrantInviteStatus.Failed"/>),
+    /// always with <c>emailSent: false</c> and <see cref="GrantInviteStatus.EmailNotSentReasonCode"/>. No new value: the
+    /// existing one, named for these routes.
+    /// </summary>
+    internal const string InviteNotSentStatus = GrantInviteStatus.Failed;
 
     /// <summary>
     /// Slice B2: a work-account invite whose contact already carries a sign-in is refused (409,

@@ -1850,16 +1850,21 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       return {
         notificationFailed: data.notificationFailed === true,
         narrowed: data.narrowed === true,
+        // C5: "invited" only when the invite email was not reported as unsent; one that did not send is never "invited".
         workAccountInvited:
-          data.onboardStatus === WORK_ACCOUNT_INVITED_STATUS || data.invite?.status === WORK_ACCOUNT_INVITED_STATUS,
+          data.emailSent !== false &&
+          (data.onboardStatus === WORK_ACCOUNT_INVITED_STATUS || data.invite?.status === WORK_ACCOUNT_INVITED_STATUS),
         // C2d: `/invite-and-grant` whose invite email was attempted and not sent takes the same path as `/grant`'s failed
         // invite (the not-sent notice, and Retry through `/invite`). Already-has-account, sent, or not reported: none.
+        // C5: an email reported sent never offers Retry.
         inviteFailed:
-          data.invite?.status === GRANT_INVITE_FAILED_STATUS
-            ? { errorCode: data.invite.errorCode ?? undefined }
-            : data.emailSent === false && data.emailErrorCode === INVITE_EMAIL_NOT_SENT_REASON_CODE
-              ? { errorCode: data.emailErrorCode }
-              : undefined,
+          data.emailSent === true
+            ? undefined
+            : data.invite?.status === GRANT_INVITE_FAILED_STATUS
+              ? { errorCode: data.invite.errorCode ?? undefined }
+              : data.emailSent === false && data.emailErrorCode === INVITE_EMAIL_NOT_SENT_REASON_CODE
+                ? { errorCode: data.emailErrorCode }
+                : undefined,
       };
     },
     [isInternalContact, postJson, recordId, recordType, addExpiryDate]
@@ -1900,7 +1905,12 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
               signInUrl: data.signInUrl || undefined,
             }
           : undefined;
-      return { sent, workAccountInvited: data.status === WORK_ACCOUNT_INVITED_STATUS, alreadyHasAccount };
+      // C5: a work-account invite whose notice was not sent is not "invited"; it stays staged for Retry.
+      return {
+        sent,
+        workAccountInvited: data.status === WORK_ACCOUNT_INVITED_STATUS && data.emailSent !== false,
+        alreadyHasAccount,
+      };
     },
     [postJson, recordId, recordType]
   );

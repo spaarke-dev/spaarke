@@ -1088,7 +1088,8 @@ public class ExistingCiamAccountInviteTests
 
     /// <summary>
     /// MUST FIRE: the response says "email not sent" in its existing emailSent / emailErrorCode fields when the notice fails
-    /// to send. Slice C2b: a pending invite exists only if its email went out, so the stamp is cleared.
+    /// to send. Slice C2b: a pending invite exists only if its email went out, so the stamp is cleared. C5: an invite is
+    /// reported as made only when its email went out, so the status is the not-sent one, never WorkAccountInvited.
     /// </summary>
     [Fact]
     public async Task Invite_WorkAccount_ANoticeThatFails_ClearsTheStamp_AndIsReportedEmailNotSent()
@@ -1101,10 +1102,34 @@ public class ExistingCiamAccountInviteTests
         var body = (await InviteRoute(organizations: Organizations(handler)))
             .Should().BeOfType<Ok<InviteExternalUserResponse>>().Subject.Value!;
 
-        body.Status.Should().Be(InviteExternalUserEndpoint.WorkAccountInvitedStatus);
+        body.Status.Should().Be(InviteExternalUserEndpoint.InviteNotSentStatus)
+            .And.NotBe(InviteExternalUserEndpoint.WorkAccountInvitedStatus);
         (body.EmailSent, body.EmailErrorCode).Should().Be(((bool?)false, (string?)GrantInviteStatus.EmailNotSentReasonCode));
         _h.Identities.Contacts[contact].InvitedTenantId.Should().BeNull("the stamp of an invite whose notice did not send is cleared");
         _h.Identities.Contacts[contact].InvitedEmailHash.Should().BeNull();
+    }
+
+    /// <summary>
+    /// MUST FIRE (C5): /invite-and-grant whose work-account notice fails to send writes the grant, clears the stamp and answers
+    /// the not-sent status with emailSent false, never WorkAccountInvited: an invite is reported as made only when its email
+    /// went out.
+    /// </summary>
+    [Fact]
+    public async Task InviteAndGrant_WorkAccount_ANoticeThatFails_IsAnsweredNotSent_NeverWorkAccountInvited()
+    {
+        var contact = UnboundContact();
+        _h.Emails.Failure = new InvalidOperationException("mailbox refused");
+        var handler = new InviteOrganizationTestKit.DiscoveryHandler()
+            .Answer(HttpStatusCode.OK, InviteOrganizationTestKit.DiscoveryBody(PartnerTenant));
+
+        var body = (await InviteAndGrant(organizations: Organizations(handler)))
+            .Should().BeOfType<Ok<InviteAndGrantResponse>>().Subject.Value!;
+
+        body.OnboardStatus.Should().Be(InviteExternalUserEndpoint.InviteNotSentStatus)
+            .And.NotBe(InviteExternalUserEndpoint.WorkAccountInvitedStatus);
+        (body.EmailSent, body.EmailErrorCode).Should().Be(((bool?)false, (string?)GrantInviteStatus.EmailNotSentReasonCode));
+        _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle("the grant stands");
+        _h.Identities.Contacts[contact].InvitedEmailHash.Should().BeNull("the stamp of an invite whose notice did not send is cleared");
     }
 
     /// <summary>MUST FIRE: /invite-and-grant's notice is sent after the grant is written and names the granted record.</summary>

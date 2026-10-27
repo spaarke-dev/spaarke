@@ -482,11 +482,12 @@ public static class InviteAndGrantExternalUserEndpoint
             var record = new ExternalInviteService.WorkAccountNoticeRecord(
                 ExternalGrantRoot.LabelFor(grantRoot.Type),
                 await GrantAccessNotifier.ReadRecordNameAsync(dataverseClient, logger, grantRoot.Type, grantRoot.Id));
-            (emailSent, emailErrorCode) = await ExternalInviteService.SendWorkAccountNoticeAsync(
+            (onboardStatus, emailSent, emailErrorCode) = await ExternalInviteService.SendWorkAccountNoticeAsync(
                     emailService, request.Email, portalUrl, InviteExternalUserEndpoint.InviteLinkCustomerKey(customer), record,
                     contactId, logger, binder, writtenInviteStamp)
-                ? (true, null)
-                : (false, GrantInviteStatus.EmailNotSentReasonCode);
+                ? (onboardStatus, true, (string?)null)
+                // C5: the notice did not send, so the stamp was retracted: the invite is answered as not sent, never as made.
+                : (InviteExternalUserEndpoint.InviteNotSentStatus, false, GrantInviteStatus.EmailNotSentReasonCode);
         }
 
         // Task 185 §12 I-10: the inviter is never told that the email already had a CIAM account (the log above keeps it).
