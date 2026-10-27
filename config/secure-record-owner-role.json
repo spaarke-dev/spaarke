@@ -298,7 +298,7 @@
       "privilegeName": "prvReadsprk_procedureassignment",
       "kind": "child",
       "reason": "ebilling-r1 task 089 (EB-D-148, uac-r2 F1-a): ProcedureAssignmentService creates an assignment or override row (pin, exclude, exclude rule, change rule) owned through RecordOwnershipResolver with parents [its core record], so a Secure record's row is owned by the Secure Record Owners team. SecureChildLineage lists it as the core record's child, so SecureChildReconciler re-owns existing rows on Make Secure.",
-      "evidence": "PENDING-LIVE-PROBE: no refusal recorded yet (owner EB-D-158: the main session runs the probe). Read-only, spaarkedev1 2026-10-27: the privilege exists (prvReadsprk_procedureassignment, Id=287f9674-9656-4006-9eda-ad999cbc69a0). To record: create a probe sprk_procedureassignment with ownerid bound to the Secure Record Owners team 6eabc7f9-13be-f111-a05b-0022482913fc BEFORE -Apply and quote the 0x80040299 'Read Privilege Check For Owner failed ... is missing prvReadsprk_procedureassignment privilege' refusal verbatim here.",
+      "evidence": "Refusal probe, spaarkedev1 2026-10-27 (main session, owner EB-D-158): POST sprk_procedureassignments with ownerid@odata.bind=/teams(6eabc7f9-13be-f111-a05b-0022482913fc) -> HTTP 403 0x80040299 'Read Privilege Check For Owner failed with exception: Principal team (Id=6eabc7f9-13be-f111-a05b-0022482913fc, type=9, teamType=0, privilegeCount=41, MetadataCachePrivilegesCount=7474, businessUnitId=d9ec0b6f-80a0-f111-aaac-000d3a99d1d7), is missing prvReadsprk_procedureassignment privilege (Id=287f9674-9656-4006-9eda-ad999cbc69a0) on OTC=11028 for entity 'sprk_procedureassignment' (LocalizedName='Procedure Assignment').' No row created.",
       "addedBy": "ebilling-r1 task 089"
     },
     {
@@ -306,7 +306,7 @@
       "privilegeName": "prvReadsprk_ruleset",
       "kind": "child",
       "reason": "ebilling-r1 task 089 (model 6.3, uac-r2 F1-a): a changed rule lives in its core record's record-scoped rule set (sprk_scope Record or Firm record), created by ProcedureAssignmentService owned through RecordOwnershipResolver with parents [the core record]; its record rules (sprk_policy.sprk_ruleset) and their versions take the set's owner. A Secure record's set is owned by the Secure Record Owners team. A client, firm-wide or Procedure set has no core lookup and is never reached.",
-      "evidence": "PENDING-LIVE-PROBE: no refusal recorded yet (owner EB-D-158: the main session runs the probe). Read-only, spaarkedev1 2026-10-27: the privilege exists (prvReadsprk_ruleset, Id=717306f0-6f28-42d0-83ca-5ce3a9fe8e42). To record: create a probe sprk_ruleset with ownerid bound to the Secure Record Owners team 6eabc7f9-13be-f111-a05b-0022482913fc BEFORE -Apply and quote the 0x80040299 'Read Privilege Check For Owner failed ... is missing prvReadsprk_ruleset privilege' refusal verbatim here.",
+      "evidence": "Refusal probe, spaarkedev1 2026-10-27 (main session, owner EB-D-158): POST sprk_rulesets with ownerid@odata.bind=/teams(6eabc7f9-13be-f111-a05b-0022482913fc) -> HTTP 403 0x80040299 'Read Privilege Check For Owner failed with exception: Principal team (Id=6eabc7f9-13be-f111-a05b-0022482913fc, type=9, teamType=0, privilegeCount=41, MetadataCachePrivilegesCount=7474, businessUnitId=d9ec0b6f-80a0-f111-aaac-000d3a99d1d7), is missing prvReadsprk_ruleset privilege (Id=717306f0-6f28-42d0-83ca-5ce3a9fe8e42) on OTC=11013 for entity 'sprk_ruleset' (LocalizedName='Rule Set').' No row created.",
       "addedBy": "ebilling-r1 task 089"
     },
     {
