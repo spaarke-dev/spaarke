@@ -31,15 +31,16 @@ import {
   type InvoiceFirmOption,
   type InvoiceSubmissionInput,
   type InvoiceSubmissionOutcome,
+  type InvoiceListedAttachment,
+  type InvoiceMarkingValue,
   type InvoiceSubmitHandler,
   type LoadInvoiceFirms,
 } from '../../services/invoiceSubmissionSeam';
+// INTERIM: slice B points this import at ebilling's shared InvoiceAttachmentMarking (PR #2342); same names and props.
 import {
-  InterimInvoiceAttachmentMarking,
+  InvoiceAttachmentMarking,
   defaultInvoiceMarking,
   validateInvoiceMarking,
-  type InvoiceMarking,
-  type InvoiceMarkingAttachment,
 } from './InterimInvoiceAttachmentMarking';
 
 /**
@@ -92,7 +93,7 @@ type AttachmentLoad =
   | { status: 'loading' }
   | { status: 'unsupported' }
   | { status: 'error'; message: string }
-  | { status: 'ready'; attachments: InvoiceMarkingAttachment[] };
+  | { status: 'ready'; attachments: InvoiceListedAttachment[] };
 
 type FirmLoad =
   | { status: 'none' }
@@ -113,6 +114,27 @@ function isCoreRecordType(type: EntityType): type is InvoiceCoreRecordType {
 }
 
 const NO_CANDIDATES: never[] = [];
+
+type MarkingProblem = 'no-invoice' | 'more-than-one-invoice' | 'invoice-not-allowed' | 'disabled-attachment-marked';
+
+/** The marking component's validation reason, for the user. */
+function describeMarkingProblem(reason: MarkingProblem, attachments: readonly InvoiceListedAttachment[]): string {
+  switch (reason) {
+    case 'no-invoice':
+      // The marking component's PDF rule (content type says PDF, else a .pdf name).
+      return attachments.some(
+        a => !a.disabledReason && (/pdf/i.test(a.contentType) || /\.pdf$/i.test(a.fileName.trim()))
+      )
+        ? 'Mark the PDF that is the invoice.'
+        : 'The invoice must be a PDF attached to this email, and this email has none that can be submitted.';
+    case 'more-than-one-invoice':
+      return 'Only one file can be the invoice.';
+    case 'invoice-not-allowed':
+      return 'Only a PDF that can be submitted can be the invoice.';
+    case 'disabled-attachment-marked':
+      return "A file that can't be submitted is marked to be saved. Mark it Don't save.";
+  }
+}
 
 const useStyles = makeStyles({
   container: {
@@ -140,7 +162,7 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
   const { announce, liveRegion } = useAnnounce();
 
   const [load, setLoad] = useState<AttachmentLoad>({ status: 'loading' });
-  const [marking, setMarking] = useState<InvoiceMarking>({});
+  const [marking, setMarking] = useState<InvoiceMarkingValue>({});
   const [mode, setMode] = useState<InvoiceMode>('new');
   const [correctionChosen, setCorrectionChosen] = useState(false);
   const [coreRecord, setCoreRecord] = useState<EntitySearchResult | null>(null);
@@ -225,7 +247,9 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
 
   const attachments = load.status === 'ready' ? load.attachments : [];
   const markingMode = mode === 'existing' ? 'correction' : 'new';
-  const markingCheck = validateInvoiceMarking(attachments, marking, markingMode);
+  // Always with `attachments`, so a non-PDF or disabled Invoice and a disabled attachment marked to be saved are refused.
+  const markingCheck = validateInvoiceMarking(marking, markingMode, attachments);
+  const markingProblem = markingCheck.ok ? null : describeMarkingProblem(markingCheck.reason, attachments);
   const normalizedNumber = normalizeFirmInvoiceNumber(firmInvoiceNumber);
   const numberTooLong = firmInvoiceNumber.trim().length > FIRM_INVOICE_NUMBER_MAX;
   const succeeded = outcome?.kind === 'success';
@@ -250,7 +274,7 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
     isCoreRecordType(coreRecord.entityType) &&
     firmId.length > 0 &&
     normalizedNumber !== null &&
-    markingCheck.valid &&
+    markingCheck.ok &&
     !locked;
 
   const runAttempt = async (input: InvoiceSubmissionInput, actionId: string): Promise<void> => {
@@ -451,16 +475,16 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
         )}
         {load.status === 'ready' && attachments.length > 0 && (
           <>
-            <InterimInvoiceAttachmentMarking
+            <InvoiceAttachmentMarking
               attachments={attachments}
               value={marking}
               onChange={setMarking}
               mode={markingMode}
               disabled={locked}
             />
-            {!markingCheck.valid && (
+            {markingProblem && (
               <Text size={200} className={styles.note} role="status">
-                {markingCheck.reason}
+                {markingProblem}
               </Text>
             )}
           </>

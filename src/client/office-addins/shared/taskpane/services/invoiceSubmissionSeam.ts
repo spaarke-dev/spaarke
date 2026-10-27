@@ -21,11 +21,7 @@ import type { AttachmentInfo } from '@shared/adapters/types';
 import { cleanGuid } from '@spaarke/ui-components/guid';
 import type { EntityType } from '../hooks/useEntitySearch';
 import { EMAIL_CONTENT_BUDGET_BYTES, MAX_ATTACHMENT_BYTES, base64Length, formatSize } from './emailContentCapture';
-import type {
-  InvoiceAttachmentMark,
-  InvoiceMarking,
-  InvoiceMarkingAttachment,
-} from '../components/views/InterimInvoiceAttachmentMarking';
+import type { InvoiceAttachmentRole, MarkableAttachment } from '../components/views/InterimInvoiceAttachmentMarking';
 
 /** The core records an invoice is submitted against (owner decision 2026-10-21 item 5; the contract's targetEntity). */
 export type InvoiceCoreRecordType = Extract<EntityType, 'Matter' | 'Project' | 'WorkAssignment'>;
@@ -34,7 +30,7 @@ export const INVOICE_CORE_RECORD_TYPES: InvoiceCoreRecordType[] = ['Matter', 'Pr
 /** A mark as the contract spells it (exact case). */
 export type InvoiceWireMark = 'Invoice' | 'Supporting' | 'DontSave';
 
-const WIRE_MARK: Record<InvoiceAttachmentMark, InvoiceWireMark> = {
+const WIRE_MARK: Record<InvoiceAttachmentRole, InvoiceWireMark> = {
   invoice: 'Invoice',
   supporting: 'Supporting',
   skip: 'DontSave',
@@ -106,13 +102,20 @@ export type LoadInvoiceFirms = (target: InvoiceSubmissionTarget) => Promise<Invo
 /** The contract's `firmInvoiceNumber` bound: trimmed, 1-100 characters. */
 export const FIRM_INVOICE_NUMBER_MAX = 100;
 
-function isPdfAttachment(attachment: AttachmentInfo): boolean {
-  return attachment.contentType.toLowerCase() === 'application/pdf' || attachment.name.toLowerCase().endsWith('.pdf');
-}
+/**
+ * One listed attachment: the marking component's {@link MarkableAttachment} with the content type and size Outlook
+ * gave (always present here; the wire marks carry them).
+ */
+export type InvoiceListedAttachment = MarkableAttachment & { contentType: string; sizeBytes: number };
+
+/** The marking: one role per listed attachment id (the component's `value`; it holds every non-inline id). */
+export type InvoiceMarkingValue = Readonly<Record<string, InvoiceAttachmentRole>>;
 
 /**
  * The marking list for an email: every NON-inline attachment (the contract marks those and only those), each with a
- * `disabledReason` when the add-in cannot send it, using the save's own limits (`emailContentCapture.ts`):
+ * `disabledReason` when the add-in cannot send it, using the save's own limits (`emailContentCapture.ts`). No
+ * `suggestedInvoice`: Outlook gives no hint beyond the PDF rule, which the marking component applies itself.
+ * Limits:
  * - a cloud link (no file in the email);
  * - larger than {@link MAX_ATTACHMENT_BYTES} (20 MB);
  * - past the {@link EMAIL_CONTENT_BUDGET_BYTES} budget once the attachments before it (in the email's order, inline
@@ -122,8 +125,8 @@ function isPdfAttachment(attachment: AttachmentInfo): boolean {
 export function toInvoiceMarkingAttachments(
   attachments: readonly AttachmentInfo[],
   budget: number = EMAIL_CONTENT_BUDGET_BYTES
-): InvoiceMarkingAttachment[] {
-  const result: InvoiceMarkingAttachment[] = [];
+): InvoiceListedAttachment[] {
+  const result: InvoiceListedAttachment[] = [];
   let used = 0;
   for (const attachment of attachments) {
     let disabledReason: string | undefined;
@@ -146,7 +149,6 @@ export function toInvoiceMarkingAttachments(
       fileName: attachment.name,
       contentType: attachment.contentType,
       sizeBytes: attachment.size,
-      ...(isPdfAttachment(attachment) && !disabledReason ? { suggestedInvoice: true } : {}),
       ...(disabledReason ? { disabledReason } : {}),
     });
   }
@@ -155,8 +157,8 @@ export function toInvoiceMarkingAttachments(
 
 /** The contract's `marks[]`: one per listed (non-inline) attachment; a disabled or unmarked one is `DontSave`. */
 export function toSubmissionMarks(
-  attachments: readonly InvoiceMarkingAttachment[],
-  marking: InvoiceMarking
+  attachments: readonly InvoiceListedAttachment[],
+  marking: InvoiceMarkingValue
 ): InvoiceSubmissionMark[] {
   return attachments.map(attachment => ({
     attachmentId: attachment.id,
@@ -176,8 +178,8 @@ export function normalizeFirmInvoiceNumber(raw: string): string | null {
 /** Builds the seam input. GUIDs are canonicalized (ADR-044); a blank PO number is null. */
 export function buildInvoiceSubmissionInput(args: {
   target: InvoiceSubmissionTarget;
-  attachments: readonly InvoiceMarkingAttachment[];
-  marking: InvoiceMarking;
+  attachments: readonly InvoiceListedAttachment[];
+  marking: InvoiceMarkingValue;
   firmId: string;
   firmInvoiceNumber: string;
   poNumber: string;

@@ -1,204 +1,184 @@
 import React from 'react';
-import { Radio, RadioGroup, Text, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
-import { InfoRegular } from '@fluentui/react-icons';
-import { formatSize } from '../../services/emailContentCapture';
+import { Radio, RadioGroup, Text, makeStyles, mergeClasses, tokens, useId } from '@fluentui/react-components';
 
 /**
- * InterimInvoiceAttachmentMarking — INTERIM, local stand-in for ebilling-r1 task 118's shared
- * `InvoiceAttachmentMarking` (`@spaarke/communication-components/invoice-attachment-marking`), task 133 slice A.
+ * INTERIM — a local copy of ebilling-r1's shared `InvoiceAttachmentMarking` (ebilling task 118a, PR #2342,
+ * `src/client/shared/Spaarke.Communication.Components/src/components/InvoiceAttachmentMarking/`), task 133 slice A.
  *
- * Slice B replaces this file with the shared component (webpack + jest alias and a type shim, never the barrel —
- * task 100 rule). So the props and the two pure functions below are EXACTLY the contract agreed with ebilling-r1
- * (notes/ebilling-r1-review-2026-10-21.md, "Shared attachment-marking component"): controlled and free of I/O,
- * `attachments` / `value` / `onChange` / `mode` / `disabled`, no submit callback (each host owns its route).
- * Do not grow this file's API: anything added here is something slice B would lose.
+ * It is a DROP-IN: the exported names, props, pure functions and their results are the ones #2342 exports from its
+ * folder's `index.ts` (`InvoiceAttachmentMarking`, `InvoiceAttachmentMarkingProps`, `defaultInvoiceMarking`,
+ * `validateInvoiceMarking`, `InvoiceAttachmentRole`, `MarkableAttachment`), and the rules are #2342's. Slice B deletes
+ * this file and points the import at the shared component (webpack + jest alias and a type shim, never the barrel —
+ * task 100 rule). It does NOT import #2342 (not on master yet). Do not grow or change its API: anything that differs
+ * from #2342 is something slice B would silently change.
  *
- * Rules (owner decisions 2026-10-21):
- * - exactly one attachment is the Invoice (except when only adding supporting files); it is pre-selected when there
- *   is exactly one PDF the add-in can send;
- * - every other attachment defaults to Supporting; the user can choose Don't save;
- * - an attachment the add-in cannot send (it carries a `disabledReason`) is Don't save and cannot be changed.
+ * Rules (owner decisions 2026-10-21; model 9.1):
+ * - Invoice is PDF only (content type says PDF, else a `.pdf` file name); a non-PDF row offers no Invoice choice;
+ * - pre-select: exactly one `suggestedInvoice` PDF, else (none suggested) exactly one PDF; every other attachment is
+ *   Supporting; the user can choose Don't save;
+ * - an attachment with a `disabledReason` is Don't save and cannot be changed.
  */
 
-/** One attachment as the marking list shows it. `id` is opaque to the component. */
-export interface InvoiceMarkingAttachment {
+export type InvoiceAttachmentRole = 'invoice' | 'supporting' | 'skip';
+
+export interface MarkableAttachment {
+  /** Opaque: sprk_document id in the email UI, Office attachment id in the add-in. */
   id: string;
   fileName: string;
-  contentType: string;
-  sizeBytes: number;
-  /** The host's hint that this is probably the invoice (shown as a hint only; the default rule is the PDF rule). */
+  contentType?: string;
+  sizeBytes?: number;
   suggestedInvoice?: boolean;
-  /** Why this attachment cannot be submitted. Present → the row is disabled and its mark is always 'skip'. */
   disabledReason?: string;
 }
 
-/** What happens to one attachment. 'skip' is shown as "Don't save". */
-export type InvoiceAttachmentMark = 'invoice' | 'supporting' | 'skip';
+type Mode = 'new' | 'correction' | 'supporting-only';
 
-/** 'new' and 'correction' need exactly one Invoice; 'supporting-only' offers no Invoice choice at all. */
-export type InvoiceMarkingMode = 'new' | 'correction' | 'supporting-only';
+const PDF_NAME = /\.pdf$/i;
 
-/** The mark per attachment id. An id with no entry counts as 'skip'. */
-export type InvoiceMarking = Readonly<Record<string, InvoiceAttachmentMark>>;
+/** Invoice is PDF only (model 9.1). Content type wins when it says PDF; the file name is the fallback. */
+function isPdf(a: MarkableAttachment): boolean {
+  return /pdf/i.test(a.contentType ?? '') || PDF_NAME.test(a.fileName.trim());
+}
 
-export interface InterimInvoiceAttachmentMarkingProps {
-  attachments: readonly InvoiceMarkingAttachment[];
-  value: InvoiceMarking;
-  onChange: (next: InvoiceMarking) => void;
-  mode: InvoiceMarkingMode;
+/** Pre-select an invoice only when exactly one candidate exists; everything else is 'supporting' (or 'skip' when disabled). */
+export function defaultInvoiceMarking(
+  attachments: readonly MarkableAttachment[],
+  mode: Mode
+): Record<string, InvoiceAttachmentRole> {
+  const next: Record<string, InvoiceAttachmentRole> = {};
+  for (const a of attachments) next[a.id] = a.disabledReason ? 'skip' : 'supporting';
+  if (mode === 'supporting-only') return next;
+
+  const pdfs = attachments.filter(a => !a.disabledReason && isPdf(a));
+  const suggested = pdfs.filter(a => a.suggestedInvoice);
+  const pick =
+    suggested.length === 1 ? suggested[0] : suggested.length === 0 && pdfs.length === 1 ? pdfs[0] : undefined;
+  if (pick) next[pick.id] = 'invoice';
+  return next;
+}
+
+/**
+ * Validate a marking. Counts and mode are checked from `value` alone; pass `attachments` (optional third argument) to
+ * also refuse a disabled attachment marked anything but 'skip' ('disabled-attachment-marked') and a non-PDF marked
+ * 'invoice' ('invoice-not-allowed').
+ *
+ * `value` must hold every attachment id: `defaultInvoiceMarking` does. The component shows an id missing from `value`
+ * as 'supporting', but validation and a host's wire marks read `value` only.
+ */
+export function validateInvoiceMarking(
+  value: Record<string, InvoiceAttachmentRole>,
+  mode: Mode,
+  attachments?: readonly MarkableAttachment[]
+):
+  | { ok: true }
+  | {
+      ok: false;
+      reason: 'no-invoice' | 'more-than-one-invoice' | 'invoice-not-allowed' | 'disabled-attachment-marked';
+    } {
+  if (attachments?.some(a => a.disabledReason && value[a.id] !== undefined && value[a.id] !== 'skip')) {
+    return { ok: false, reason: 'disabled-attachment-marked' };
+  }
+  const invoiceIds = Object.keys(value).filter(id => value[id] === 'invoice');
+  if (mode === 'supporting-only') {
+    return invoiceIds.length > 0 ? { ok: false, reason: 'invoice-not-allowed' } : { ok: true };
+  }
+  if (attachments) {
+    const byId = new Map(attachments.map(a => [a.id, a] as const));
+    for (const id of invoiceIds) {
+      const a = byId.get(id);
+      if (a && (!isPdf(a) || a.disabledReason)) return { ok: false, reason: 'invoice-not-allowed' };
+    }
+  }
+  if (invoiceIds.length === 0) return { ok: false, reason: 'no-invoice' };
+  if (invoiceIds.length > 1) return { ok: false, reason: 'more-than-one-invoice' };
+  return { ok: true };
+}
+
+/** Whether a row offers the Invoice choice. Not exported (#2342 keeps it internal to its folder). */
+function canBeInvoice(a: MarkableAttachment, mode: Mode): boolean {
+  return mode !== 'supporting-only' && !a.disabledReason && isPdf(a);
+}
+
+export interface InvoiceAttachmentMarkingProps {
+  attachments: MarkableAttachment[];
+  value: Record<string, InvoiceAttachmentRole>;
+  onChange: (next: Record<string, InvoiceAttachmentRole>) => void;
+  mode: 'new' | 'correction' | 'supporting-only';
   disabled?: boolean;
 }
 
-/** The outcome of {@link validateInvoiceMarking}: valid, or the first rule broken, written for the user. */
-export type InvoiceMarkingValidation = { valid: true } | { valid: false; reason: string };
-
-function isPdf(attachment: InvoiceMarkingAttachment): boolean {
-  return (
-    attachment.contentType.toLowerCase() === 'application/pdf' || attachment.fileName.toLowerCase().endsWith('.pdf')
-  );
-}
-
-function markOf(marking: InvoiceMarking, id: string): InvoiceAttachmentMark {
-  return marking[id] ?? 'skip';
-}
-
-/**
- * The marking a list starts with. An attachment with a `disabledReason` is 'skip'. Of the rest: when exactly one is a
- * PDF (and the mode needs an Invoice) it is 'invoice'; every other one is 'supporting'.
- */
-export function defaultInvoiceMarking(
-  attachments: readonly InvoiceMarkingAttachment[],
-  mode: InvoiceMarkingMode = 'new'
-): InvoiceMarking {
-  const sendable = attachments.filter(a => !a.disabledReason);
-  const pdfs = sendable.filter(isPdf);
-  const invoiceId = mode !== 'supporting-only' && pdfs.length === 1 ? pdfs[0]!.id : undefined;
-  const marking: Record<string, InvoiceAttachmentMark> = {};
-  for (const attachment of attachments) {
-    marking[attachment.id] = attachment.disabledReason
-      ? 'skip'
-      : attachment.id === invoiceId
-        ? 'invoice'
-        : 'supporting';
-  }
-  return marking;
-}
-
-/**
- * Whether a marking may be submitted:
- * - an attachment with a `disabledReason` cannot be Invoice or Supporting;
- * - 'new' / 'correction': exactly one Invoice;
- * - 'supporting-only': no Invoice, and at least one Supporting (otherwise there is nothing to add).
- */
-export function validateInvoiceMarking(
-  attachments: readonly InvoiceMarkingAttachment[],
-  marking: InvoiceMarking,
-  mode: InvoiceMarkingMode
-): InvoiceMarkingValidation {
-  for (const attachment of attachments) {
-    if (attachment.disabledReason && markOf(marking, attachment.id) !== 'skip') {
-      return { valid: false, reason: `"${attachment.fileName}" can't be submitted: ${attachment.disabledReason}` };
-    }
-  }
-  const invoices = attachments.filter(a => markOf(marking, a.id) === 'invoice').length;
-  if (mode === 'supporting-only') {
-    if (invoices > 0) {
-      return { valid: false, reason: 'Adding supporting files: no file can be marked as the invoice.' };
-    }
-    if (!attachments.some(a => markOf(marking, a.id) === 'supporting')) {
-      return { valid: false, reason: 'Mark at least one file as supporting.' };
-    }
-    return { valid: true };
-  }
-  if (invoices === 0) {
-    return { valid: false, reason: 'Mark one file as the invoice.' };
-  }
-  if (invoices > 1) {
-    return { valid: false, reason: 'Only one file can be the invoice.' };
-  }
-  return { valid: true };
-}
-
 const useStyles = makeStyles({
-  list: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalS },
+  root: { display: 'flex', flexDirection: 'column', rowGap: tokens.spacingVerticalS },
   row: {
     display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalXXS,
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    columnGap: tokens.spacingHorizontalM,
     padding: tokens.spacingVerticalS,
     borderRadius: tokens.borderRadiusMedium,
-    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    border: `${tokens.strokeWidthThin} solid ${tokens.colorNeutralStroke2}`,
+    backgroundColor: tokens.colorNeutralBackground1,
   },
   rowDisabled: { backgroundColor: tokens.colorNeutralBackground3 },
-  name: { overflow: 'hidden', textOverflow: 'ellipsis', wordBreak: 'break-word' },
+  info: { display: 'flex', flexDirection: 'column', minWidth: 0 },
+  name: { overflowWrap: 'anywhere', color: tokens.colorNeutralForeground1 },
   meta: { color: tokens.colorNeutralForeground3 },
-  reason: {
-    display: 'flex',
-    alignItems: 'flex-start',
-    gap: tokens.spacingHorizontalXS,
-    color: tokens.colorNeutralForeground2,
-  },
-  reasonIcon: { flexShrink: 0, marginTop: tokens.spacingVerticalXXS },
-  radios: { flexWrap: 'wrap' },
+  reason: { color: tokens.colorNeutralForeground3, fontStyle: 'italic' },
 });
 
-export const InterimInvoiceAttachmentMarking: React.FC<InterimInvoiceAttachmentMarkingProps> = ({
+function formatSize(bytes?: number): string | undefined {
+  if (bytes === undefined || bytes < 0) return undefined;
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+export const InvoiceAttachmentMarking: React.FC<InvoiceAttachmentMarkingProps> = ({
   attachments,
   value,
   onChange,
   mode,
-  disabled = false,
+  disabled,
 }) => {
   const styles = useStyles();
-
-  const setMark = (id: string, mark: InvoiceAttachmentMark): void => {
-    const next: Record<string, InvoiceAttachmentMark> = { ...value };
-    // One Invoice at a time: choosing a new one makes the previous one Supporting (its default).
-    if (mark === 'invoice') {
-      for (const attachment of attachments) {
-        if (attachment.id !== id && next[attachment.id] === 'invoice') {
-          next[attachment.id] = 'supporting';
-        }
-      }
-    }
-    next[id] = mark;
-    onChange(next);
-  };
+  const baseId = useId('invoice-marking');
 
   return (
-    <div className={styles.list} role="list" aria-label="Attachments to submit">
-      {attachments.map(attachment => {
-        const rowDisabled = disabled || Boolean(attachment.disabledReason);
-        const mark = attachment.disabledReason ? 'skip' : markOf(value, attachment.id);
+    <div className={styles.root} role="list">
+      {attachments.map((a, i) => {
+        const locked = !!a.disabledReason;
+        const role: InvoiceAttachmentRole = locked ? 'skip' : (value[a.id] ?? 'supporting');
+        const size = formatSize(a.sizeBytes);
+        const nameId = `${baseId}-${i}`;
         return (
-          <div
-            key={attachment.id}
-            role="listitem"
-            aria-label={attachment.fileName}
-            className={mergeClasses(styles.row, attachment.disabledReason ? styles.rowDisabled : undefined)}
-          >
-            <Text weight="semibold" className={styles.name}>
-              {attachment.fileName}
-            </Text>
-            <Text size={200} className={styles.meta}>
-              {formatSize(attachment.sizeBytes)}
-              {attachment.suggestedInvoice && !attachment.disabledReason ? ' · looks like the invoice' : ''}
-            </Text>
-            {attachment.disabledReason && (
-              <Text size={200} className={styles.reason}>
-                <InfoRegular className={styles.reasonIcon} aria-hidden="true" />
-                <span>{attachment.disabledReason}</span>
+          <div key={a.id} role="listitem" className={mergeClasses(styles.row, locked && styles.rowDisabled)}>
+            <div className={styles.info}>
+              <Text className={styles.name} id={nameId}>
+                {a.fileName}
               </Text>
-            )}
+              {size && (
+                <Text size={200} className={styles.meta}>
+                  {size}
+                </Text>
+              )}
+              {locked && (
+                <Text size={200} className={styles.reason}>
+                  {a.disabledReason}
+                </Text>
+              )}
+            </div>
             <RadioGroup
               layout="horizontal"
-              className={styles.radios}
-              value={mark}
-              disabled={rowDisabled}
-              aria-label={`What to do with ${attachment.fileName}`}
-              onChange={(_, data) => setMark(attachment.id, data.value as InvoiceAttachmentMark)}
+              aria-labelledby={nameId}
+              value={role}
+              disabled={disabled || locked}
+              onChange={(_e, data) => {
+                if (disabled || locked) return;
+                onChange({ ...value, [a.id]: data.value as InvoiceAttachmentRole });
+              }}
             >
-              {mode !== 'supporting-only' && <Radio value="invoice" label="Invoice" />}
+              {canBeInvoice(a, mode) && <Radio value="invoice" label="Invoice" />}
               <Radio value="supporting" label="Supporting" />
               <Radio value="skip" label="Don't save" />
             </RadioGroup>

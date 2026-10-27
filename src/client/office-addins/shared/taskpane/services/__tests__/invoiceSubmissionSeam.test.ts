@@ -33,9 +33,9 @@ describe('toInvoiceMarkingAttachments', () => {
       fileName: 'INV-4711.pdf',
       contentType: 'application/pdf',
       sizeBytes: 1000,
-      suggestedInvoice: true,
     });
-    expect(listed[1]!.suggestedInvoice).toBeUndefined();
+    // No suggestedInvoice: Outlook has no hint beyond the PDF rule, which the marking component applies itself.
+    expect(listed.every(a => a.suggestedInvoice === undefined)).toBe(true);
   });
 
   it('must-fire: a cloud link, a file over 20 MB and a file past the budget are disabled with a reason', () => {
@@ -52,8 +52,6 @@ describe('toInvoiceMarkingAttachments', () => {
     expect(listed.find(a => a.id === 'big')!.disabledReason).toMatch(/larger than 20 MB/);
     expect(listed.find(a => a.id === 'fits')!.disabledReason).toBeUndefined();
     expect(listed.find(a => a.id === 'past')!.disabledReason).toMatch(/does not fit/);
-    // A disabled PDF is never suggested as the invoice.
-    expect(listed.find(a => a.id === 'big')!.suggestedInvoice).toBeUndefined();
   });
 
   it('inline attachments count against the budget (they travel in the same request)', () => {

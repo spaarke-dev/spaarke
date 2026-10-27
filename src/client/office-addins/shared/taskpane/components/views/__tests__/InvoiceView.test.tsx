@@ -73,6 +73,12 @@ async function chooseMatter() {
   await userEvent.click(await screen.findByRole('button', { name: 'Select this record' }));
 }
 
+/** The marking list's row for a file (the row has no accessible name of its own; its radio group is named by it). */
+async function findRow(fileName: string): Promise<HTMLElement> {
+  const name = await screen.findByText(fileName);
+  return name.closest('[role="listitem"]') as HTMLElement;
+}
+
 const submitButton = () => screen.getByRole('button', { name: /^(Submit|Submitting…|Submitted)$/ });
 
 beforeEach(() => {
@@ -84,7 +90,7 @@ describe('InvoiceView — New invoice (task 133)', () => {
     'must-fire: Submit stays disabled without a Matter, Project or Work Assignment',
     async () => {
       renderView();
-      await screen.findByRole('listitem', { name: 'INV-4711.pdf' });
+      await findRow('INV-4711.pdf');
       await userEvent.type(screen.getByRole('textbox', { name: /Firm invoice number/ }), 'INV-4711');
       expect(submitButton()).toBeDisabled();
       expect(screen.getByText(/Still needed: the matter, project or work assignment, the firm\./)).toBeInTheDocument();
@@ -115,7 +121,7 @@ describe('InvoiceView — New invoice (task 133)', () => {
     'with the record, firm, number and a valid marking, Submit sends the contract input and shows the result',
     async () => {
       const { onSubmit, loadFirms } = renderView();
-      await screen.findByRole('listitem', { name: 'INV-4711.pdf' });
+      await findRow('INV-4711.pdf');
       await chooseMatter();
       await waitFor(() => expect(loadFirms).toHaveBeenCalledWith({ entityType: 'Matter', entityId: MATTER_ID }));
       await userEvent.type(screen.getByRole('textbox', { name: /Firm invoice number/ }), ' INV-4711 ');
@@ -161,13 +167,83 @@ describe('InvoiceView — New invoice (task 133)', () => {
     'must-not-fire: an invalid marking (no Invoice) keeps Submit disabled',
     async () => {
       renderView();
-      const invoiceRow = await screen.findByRole('listitem', { name: 'INV-4711.pdf' });
+      const invoiceRow = await findRow('INV-4711.pdf');
       await chooseMatter();
       await userEvent.type(screen.getByRole('textbox', { name: /Firm invoice number/ }), 'INV-4711');
       await waitFor(() => expect(submitButton()).toBeEnabled());
       await userEvent.click(within(invoiceRow).getByRole('radio', { name: 'Supporting' }));
       expect(submitButton()).toBeDisabled();
-      expect(screen.getByText('Mark one file as the invoice.')).toBeInTheDocument();
+      expect(screen.getByText('Mark the PDF that is the invoice.')).toBeInTheDocument();
+    },
+    TIMEOUT
+  );
+
+  it(
+    'must-fire: a non-PDF offers no Invoice choice; with no sendable PDF the view says the invoice must be a PDF',
+    async () => {
+      const csvAndCloudPdf: AttachmentInfo[] = [
+        { ...ATTACHMENTS[1]! },
+        {
+          id: 'att-9',
+          name: 'shared.pdf',
+          contentType: 'application/pdf',
+          size: 10,
+          isInline: false,
+          attachmentType: 'cloud',
+        },
+      ];
+      renderView({
+        hostAdapter: {
+          getCapabilities: () => ({ canGetAttachments: true }),
+          getAttachments: jest.fn(async () => csvAndCloudPdf),
+        } as unknown as IHostAdapter,
+      });
+      const csvRow = await findRow('timesheet.csv');
+      expect(within(csvRow).queryByRole('radio', { name: 'Invoice' })).toBeNull();
+      expect(within(await findRow('shared.pdf')).queryByRole('radio', { name: 'Invoice' })).toBeNull();
+      expect(
+        screen.getByText(
+          'The invoice must be a PDF attached to this email, and this email has none that can be submitted.'
+        )
+      ).toBeInTheDocument();
+    },
+    TIMEOUT
+  );
+
+  it(
+    'wire marks: a disabled attachment is DontSave; inline attachments get no mark',
+    async () => {
+      const withCloud: AttachmentInfo[] = [
+        ...ATTACHMENTS,
+        {
+          id: 'att-9',
+          name: 'shared.pdf',
+          contentType: 'application/pdf',
+          size: 10,
+          isInline: false,
+          attachmentType: 'cloud',
+        },
+      ];
+      const { onSubmit } = renderView({
+        hostAdapter: {
+          getCapabilities: () => ({ canGetAttachments: true }),
+          getAttachments: jest.fn(async () => withCloud),
+        } as unknown as IHostAdapter,
+      });
+      await findRow('shared.pdf');
+      await chooseMatter();
+      await userEvent.type(screen.getByRole('textbox', { name: /Firm invoice number/ }), 'INV-4711');
+      await waitFor(() => expect(submitButton()).toBeEnabled());
+      await userEvent.click(submitButton());
+      await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+      const input = (
+        onSubmit.mock.calls[0] as unknown as [{ marks: Array<{ attachmentId: string; mark: string }> }]
+      )[0];
+      expect(input.marks.map(m => [m.attachmentId, m.mark])).toEqual([
+        ['att-1', 'Invoice'],
+        ['att-2', 'Supporting'],
+        ['att-9', 'DontSave'],
+      ]);
     },
     TIMEOUT
   );
@@ -176,7 +252,7 @@ describe('InvoiceView — New invoice (task 133)', () => {
     'no firm linked to the record: the empty state, and Submit stays disabled',
     async () => {
       renderView({ loadFirms: jest.fn(async () => []) });
-      await screen.findByRole('listitem', { name: 'INV-4711.pdf' });
+      await findRow('INV-4711.pdf');
       await chooseMatter();
       expect(await screen.findByText('No firm is linked to this record')).toBeInTheDocument();
       await userEvent.type(screen.getByRole('textbox', { name: /Firm invoice number/ }), 'INV-4711');
@@ -190,7 +266,7 @@ describe('InvoiceView — New invoice (task 133)', () => {
     async () => {
       renderView({ onSubmit: undefined });
       expect(screen.getByText("Submitting invoices from Outlook isn't available yet.")).toBeInTheDocument();
-      await screen.findByRole('listitem', { name: 'INV-4711.pdf' });
+      await findRow('INV-4711.pdf');
       await chooseMatter();
       await userEvent.type(screen.getByRole('textbox', { name: /Firm invoice number/ }), 'INV-4711');
       expect(submitButton()).toBeDisabled();
@@ -207,7 +283,7 @@ describe('InvoiceView — New invoice (task 133)', () => {
 
 describe('InvoiceView — results (task 133)', () => {
   async function fillAndSubmit() {
-    await screen.findByRole('listitem', { name: 'INV-4711.pdf' });
+    await findRow('INV-4711.pdf');
     await chooseMatter();
     await userEvent.type(screen.getByRole('textbox', { name: /Firm invoice number/ }), 'INV-4711');
     await waitFor(() => expect(submitButton()).toBeEnabled());
