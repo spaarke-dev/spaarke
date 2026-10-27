@@ -4,7 +4,7 @@
     <title>File store service: staged blob, Not yet servable row, verified flip; internal download route; orphan reconcile job</title>
     <phase>3 Rules (WP3) — Procedures and files (EB-D-148), wave W3-B</phase>
     <gate>088 merged and applied on dev; 099 merged (its step-0 definition is reused); uac-r2 reviews the route and copy rule before merge; no live writes</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New service, endpoint, endpoint filter, DI registrations and scheduled job; the route is an authorization gate on invoice files of Secure records.</rigor-reason>
     <model-tier>opus</model-tier>
