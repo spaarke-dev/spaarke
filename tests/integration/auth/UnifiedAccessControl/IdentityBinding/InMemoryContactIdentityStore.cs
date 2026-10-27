@@ -506,6 +506,7 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
         lock (_gate)
         {
             Reads.Add("removed-marker");
+            BeforeRemovedMarkerRead?.Invoke(contactId);
             if (LiveRemovedMarkerOverride is { } live)
                 return Task.FromResult(live);
             if (FailGetContact || !Contacts.TryGetValue(contactId, out var c))
@@ -521,6 +522,12 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
     /// administrator's removal landing between a binding read and the grant core's own live read.
     /// </summary>
     public RemovedMarkerRead? LiveRemovedMarkerOverride { get; set; }
+
+    /// <summary>
+    /// Slice C2c: runs at the start of every LIVE marker read (<see cref="ReadRemovedMarkerAsync"/>) with its contact id, so a
+    /// test can land an administrator's removal between two of a request's reads.
+    /// </summary>
+    public Action<Guid>? BeforeRemovedMarkerRead { get; set; }
 
     /// <summary>Slice C3: a removed-marker write answers this instead of writing.</summary>
     public StoreWriteStatus? RemovedMarkerWriteFailure { get; set; }

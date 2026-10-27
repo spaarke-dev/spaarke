@@ -402,26 +402,28 @@ public sealed class ExternalInviteService
     /// <summary>
     /// Slice C2b: retracts the invite this request wrote on <paramref name="contactId"/>, whose email did not send
     /// (<see cref="ContactIdentityBinder.RetractUnsentInviteAsync"/>). Runs on <see cref="CancellationToken.None"/>: the email
-    /// is already lost, so a cancelled request still clears what it wrote. No stamp written (null) is nothing to retract.
-    /// Never throws.
+    /// is already lost, so a cancelled request still clears what it wrote. No stamp written (null) is nothing to retract, and
+    /// answers null. Never throws: a throw answers <see cref="InviteRetractOutcome.Failed"/>, logged at Error.
     /// </summary>
-    internal static async Task RetractUnsentInviteAsync(
+    internal static async Task<InviteRetractOutcome?> RetractUnsentInviteAsync(
         ContactIdentityBinder binder, Guid contactId, string? writtenInviteStamp, ILogger logger)
     {
         if (string.IsNullOrEmpty(writtenInviteStamp))
         {
-            return;
+            return null;
         }
 
         try
         {
-            await binder.RetractUnsentInviteAsync(contactId, writtenInviteStamp, CancellationToken.None).ConfigureAwait(false);
+            return await binder.RetractUnsentInviteAsync(contactId, writtenInviteStamp, CancellationToken.None)
+                .ConfigureAwait(false);
         }
         catch (Exception ex)
         {
             logger.LogError(ex,
                 "[EXT-INVITE] The invite on contact {ContactId} whose email did not send could not be cleared; it may still be "
                 + "pending. Invite the person again.", contactId);
+            return InviteRetractOutcome.Failed;
         }
     }
 

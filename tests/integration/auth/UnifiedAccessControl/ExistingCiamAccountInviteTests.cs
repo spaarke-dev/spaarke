@@ -1141,6 +1141,116 @@ public class ExistingCiamAccountInviteTests
         _h.Emails.Sent.Should().BeEmpty();
     }
 
+    // ── Slice C2c: a grant that does not land after the stamp leaves no pending invite ────────────────────────────────
+
+    /// <summary>
+    /// The grant core's own removed-marker read answers "removed" once the invite has written its stamp or code (an
+    /// administrator's removal landing between the onboarding and the grant).
+    /// </summary>
+    private void TheGrantCoreRefusesAfterTheStamp(Guid contact)
+        => _h.Identities.BeforeRemovedMarkerRead = _ =>
+        {
+            var row = _h.Identities.Contacts[contact];
+            if (row.InvitedEmailHash is not null || row.InviteCodeHash is not null)
+                _h.Identities.LiveRemovedMarkerOverride = RemovedMarkerRead.Removed;
+        };
+
+    private static string? PendingInvite(IResult result)
+        => result.Should().BeOfType<ProblemHttpResult>().Subject.ProblemDetails.Extensions
+            .TryGetValue(InviteAndGrantExternalUserEndpoint.PendingInviteExtension, out var value) ? value as string : null;
+
+    /// <summary>
+    /// MUST FIRE: the grant core refuses after the work-account stamp landed, so no notice is sent and the stamp this request
+    /// wrote is cleared (reported "retracted"). The next invite stamps again and sends the notice.
+    /// </summary>
+    [Fact]
+    public async Task InviteAndGrant_WorkAccount_AGrantRefusedAfterTheStamp_ClearsTheStamp_AndTheNextInviteSends()
+    {
+        var contact = UnboundContact();
+        var handler = new InviteOrganizationTestKit.DiscoveryHandler()
+            .Answer(HttpStatusCode.OK, InviteOrganizationTestKit.DiscoveryBody(PartnerTenant))
+            .Answer(HttpStatusCode.OK, InviteOrganizationTestKit.DiscoveryBody(PartnerTenant));
+        var organizations = Organizations(handler);
+        TheGrantCoreRefusesAfterTheStamp(contact);
+
+        var refused = await InviteAndGrant(organizations: organizations);
+
+        refused.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(409);
+        PendingInvite(refused).Should().Be("retracted");
+        _h.Emails.Sent.Should().BeEmpty();
+        var row = _h.Identities.Contacts[contact];
+        (row.InvitedOn, row.InvitedEmailHash, row.InvitedTenantId).Should().Be(((DateTimeOffset?)null, (string?)null, (string?)null));
+
+        _h.Identities.BeforeRemovedMarkerRead = null;
+        _h.Identities.LiveRemovedMarkerOverride = null;
+        var next = await InviteAndGrant(organizations: organizations);
+
+        var body = next.Should().BeOfType<Ok<InviteAndGrantResponse>>().Subject.Value!;
+        (body.EmailSent, body.EmailErrorCode).Should().Be(((bool?)true, (string?)null));
+        _h.Emails.Sent.Should().ContainSingle("the next invite stamps again and sends the notice");
+        _h.Identities.Contacts[contact].InvitedTenantId.Should().Be(PartnerTenant.ToString("D"));
+    }
+
+    /// <summary>MUST FIRE: a grant that FAILS after the stamp clears the stamp too (reported "retracted").</summary>
+    [Fact]
+    public async Task InviteAndGrant_WorkAccount_AGrantThatFailsAfterTheStamp_ClearsTheStamp()
+    {
+        var contact = UnboundContact();
+        _h.Grants.GrantCreateFailure = new HttpRequestException("grant write refused");
+        var handler = new InviteOrganizationTestKit.DiscoveryHandler()
+            .Answer(HttpStatusCode.OK, InviteOrganizationTestKit.DiscoveryBody(PartnerTenant));
+
+        var result = await InviteAndGrant(organizations: Organizations(handler));
+
+        PendingInvite(result).Should().Be("retracted");
+        _h.Identities.Contacts[contact].InvitedEmailHash.Should().BeNull();
+        _h.Identities.Contacts[contact].InvitedTenantId.Should().BeNull();
+    }
+
+    /// <summary>
+    /// MUST NOT FIRE: a newer invite written between the refusal and the clear is never cleared (the clear is conditional on
+    /// the row version read with THIS request's stamp); reported "superseded".
+    /// </summary>
+    [Fact]
+    public async Task InviteAndGrant_WorkAccount_ANewerInviteWrittenBeforeTheClear_Survives()
+    {
+        var contact = UnboundContact();
+        var handler = new InviteOrganizationTestKit.DiscoveryHandler()
+            .Answer(HttpStatusCode.OK, InviteOrganizationTestKit.DiscoveryBody(PartnerTenant));
+        TheGrantCoreRefusesAfterTheStamp(contact);
+        _h.Identities.BeforePendingInviteClear = c =>
+        {
+            c.InvitedEmailHash = "a-newer-invite";
+            c.Version++;
+        };
+
+        var result = await InviteAndGrant(organizations: Organizations(handler));
+
+        PendingInvite(result).Should().Be("superseded");
+        var row = _h.Identities.Contacts[contact];
+        row.InvitedEmailHash.Should().Be("a-newer-invite", "a newer invite is never cleared");
+        row.InvitedOn.Should().NotBeNull();
+    }
+
+    /// <summary>
+    /// MUST NOT FIRE: a portal-account invite's email is sent before the grant, so a grant refused afterwards keeps that
+    /// invite pending and reports nothing to retract.
+    /// </summary>
+    [Fact]
+    public async Task InviteAndGrant_PortalAccount_AGrantRefusedAfterTheSentEmail_KeepsThePendingInvite()
+    {
+        var contact = UnboundContact();
+        _ciam.Failure = ObjectConflictOnProxyAddresses();
+        TheGrantCoreRefusesAfterTheStamp(contact);
+
+        var result = await InviteAndGrant();
+
+        result.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(409);
+        PendingInvite(result).Should().BeNull();
+        _h.Identities.Contacts[contact].InviteCodeHash.Should().NotBeNull("its email went out");
+        _h.Identities.Writes.Should().NotContain(w => w.Op == "invite-retract");
+    }
+
     /// <summary>
     /// MUST NOT FIRE: a portal-account invite sends no work-account notice (it keeps its own CIAM email), on both routes.
     /// </summary>

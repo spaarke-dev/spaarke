@@ -395,7 +395,10 @@ public static class InviteAndGrantExternalUserEndpoint
                     "[EXT-INVITE-GRANT] Onboarded Contact {ContactId} but the grant core refused the grant: {ReasonCode}.",
                     contactId, refusal.ReasonCode);
                 return GrantExternalAccessEndpoint.PolicyRefusalProblem(
-                    refusal, httpContext, new Dictionary<string, object?> { ["contactId"] = contactId });
+                    refusal, httpContext,
+                    await WithUnsentInviteRetractedAsync(
+                        new Dictionary<string, object?> { ["contactId"] = contactId }, binder, contactId, writtenInviteStamp,
+                        logger));
             }
 
             accessRecordId = grantOutcome.AccessRecordId;
@@ -414,13 +417,14 @@ public static class InviteAndGrantExternalUserEndpoint
                     statusCode: StatusCodes.Status409Conflict,
                     title: "Grant did not take effect",
                     detail: warning,
-                    extensions: new Dictionary<string, object?>
-                    {
-                        ["traceId"] = httpContext.TraceIdentifier,
-                        ["reasonCode"] = "sdap.grant.expired_not_restored",
-                        ["accessRecordId"] = accessRecordId,
-                        ["contactId"] = contactId,
-                    });
+                    extensions: await WithUnsentInviteRetractedAsync(
+                        new Dictionary<string, object?>
+                        {
+                            ["traceId"] = httpContext.TraceIdentifier,
+                            ["reasonCode"] = "sdap.grant.expired_not_restored",
+                            ["accessRecordId"] = accessRecordId,
+                            ["contactId"] = contactId,
+                        }, binder, contactId, writtenInviteStamp, logger));
             }
         }
         catch (Exception ex)
@@ -434,11 +438,12 @@ public static class InviteAndGrantExternalUserEndpoint
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Internal Server Error",
                 detail: "The external user was onboarded but granting project access failed. Re-run the action to retry the grant.",
-                extensions: new Dictionary<string, object?>
-                {
-                    ["traceId"] = httpContext.TraceIdentifier,
-                    ["contactId"] = contactId
-                });
+                extensions: await WithUnsentInviteRetractedAsync(
+                    new Dictionary<string, object?>
+                    {
+                        ["traceId"] = httpContext.TraceIdentifier,
+                        ["contactId"] = contactId
+                    }, binder, contactId, writtenInviteStamp, logger));
         }
 
         logger.LogInformation(
@@ -485,5 +490,36 @@ public static class InviteAndGrantExternalUserEndpoint
             NotificationFailed: notificationFailed,
             EmailSent: emailSent,
             EmailErrorCode: emailErrorCode));
+    }
+
+    /// <summary>The problem extension that reports what became of the invite a refused or failed grant left unsent.</summary>
+    internal const string PendingInviteExtension = "pendingInvite";
+
+    /// <summary>
+    /// Slice C2c: a pending invite exists only if its email went out. The work-account notice is sent only after the grant
+    /// is written, so when the grant is refused, confers nothing or fails AFTER this request wrote the stamp, the invite this
+    /// request wrote is retracted through <see cref="ExternalInviteService.RetractUnsentInviteAsync"/> (its own row version,
+    /// cleared only while the contact still carries this stamp: a newer invite is never cleared), and the next invite writes
+    /// and sends a new one. The outcome is reported in <see cref="PendingInviteExtension"/>: <c>retracted</c>,
+    /// <c>superseded</c> (a newer invite or a bind replaced it) or <c>retract_failed</c> (logged at Error; it may still be
+    /// pending). No stamp written (a portal-account invite, whose email was sent before the grant) adds nothing.
+    /// </summary>
+    private static async Task<Dictionary<string, object?>> WithUnsentInviteRetractedAsync(
+        Dictionary<string, object?> extensions, ContactIdentityBinder binder, Guid contactId, string? writtenInviteStamp,
+        ILogger logger)
+    {
+        var retract = await ExternalInviteService.RetractUnsentInviteAsync(binder, contactId, writtenInviteStamp, logger)
+            .ConfigureAwait(false);
+        if (retract is { } outcome)
+        {
+            extensions[PendingInviteExtension] = outcome switch
+            {
+                InviteRetractOutcome.Retracted => "retracted",
+                InviteRetractOutcome.Superseded => "superseded",
+                _ => "retract_failed",
+            };
+        }
+
+        return extensions;
     }
 }
