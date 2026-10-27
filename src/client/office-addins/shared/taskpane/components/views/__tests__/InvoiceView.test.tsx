@@ -703,6 +703,100 @@ describe('InvoiceView — review fixes (task 133)', () => {
     );
   });
 
+  describe('Done on a finished submission', () => {
+    const endedOutcome = () =>
+      jest.fn(async () => ({
+        kind: 'ended' as const,
+        status: 'Rejected' as const,
+        message: 'The invoice was rejected by a billing rule.',
+        trackingNumber: 'INV-4711.1',
+      }));
+
+    it(
+      'must-fire: after an ended result, Done clears it, frees the tabs and leaves the form as it was',
+      async () => {
+        const onBusyChange = jest.fn();
+        const onSubmit = endedOutcome();
+        renderView({ onSubmit, onBusyChange });
+        await fillAndSubmit('INV-4711');
+        await screen.findByText('The invoice was rejected');
+        expect(onBusyChange).toHaveBeenLastCalledWith(true);
+
+        await userEvent.click(screen.getByRole('button', { name: 'Done' }));
+
+        expect(screen.queryByText('The invoice was rejected')).toBeNull();
+        await waitFor(() => expect(onBusyChange).toHaveBeenLastCalledWith(false));
+        // Editable, with the values the user had.
+        expect(numberBox()).toHaveValue('INV-4711');
+        expect(numberBox()).toBeEnabled();
+        expect(submitButton()).toBeEnabled();
+        // The record and the firm are still chosen: submitting again sends the same request values.
+        await userEvent.click(submitButton());
+        await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
+        const calls = onSubmit.mock.calls as unknown as Array<
+          [{ firmInvoiceNumber: string; firmId: string; targetEntity: { entityId: string } }]
+        >;
+        expect(calls[1]![0]).toMatchObject({
+          firmInvoiceNumber: 'INV-4711',
+          firmId: FIRM_ID,
+          targetEntity: { entityId: MATTER_ID },
+        });
+      },
+      TIMEOUT
+    );
+
+    it(
+      'must-fire: after a successful submission, Done resets the form for a new one and keeps the same email',
+      async () => {
+        const onBusyChange = jest.fn();
+        const { onSubmit } = renderView({ onBusyChange });
+        await findRow('INV-4711.pdf');
+        await chooseMatter();
+        await userEvent.type(numberBox(), 'INV-4711');
+        await userEvent.type(screen.getByRole('textbox', { name: /PO number/ }), 'PO-1');
+        await userEvent.click(within(await findRow('timesheet.csv')).getByRole('radio', { name: "Don't save" }));
+        await waitFor(() => expect(submitButton()).toBeEnabled());
+        await userEvent.click(submitButton());
+        await screen.findByText('Invoice submitted');
+        expect(onBusyChange).toHaveBeenLastCalledWith(true);
+
+        await userEvent.click(screen.getByRole('button', { name: 'Done' }));
+
+        expect(screen.queryByText('Invoice submitted')).toBeNull();
+        await waitFor(() => expect(onBusyChange).toHaveBeenLastCalledWith(false));
+        expect(numberBox()).toHaveValue('');
+        expect(screen.getByRole('textbox', { name: /PO number/ })).toHaveValue('');
+        expect(screen.getByLabelText('Search Matter records')).toBeInTheDocument();
+        // The same email's attachments, marked as at the start (PDF is the invoice, the csv is saved again).
+        expect(within(await findRow('INV-4711.pdf')).getByRole('radio', { name: 'Invoice' })).toBeChecked();
+        expect(within(await findRow('timesheet.csv')).getByRole('radio', { name: 'Supporting' })).toBeChecked();
+        expect(submitButton()).toBeDisabled();
+
+        // A second submission works, as a new action.
+        await chooseMatter();
+        await userEvent.type(numberBox(), 'INV-4712');
+        await waitFor(() => expect(submitButton()).toBeEnabled());
+        await userEvent.click(submitButton());
+        await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
+        const calls = onSubmit.mock.calls as unknown as Array<[{ firmInvoiceNumber: string }, InvoiceSubmitAttempt]>;
+        expect(calls[1]![0].firmInvoiceNumber).toBe('INV-4712');
+        expect(calls[1]![1].actionId).not.toBe(calls[0]![1].actionId);
+      },
+      TIMEOUT
+    );
+
+    it(
+      'must-not-fire: a result that can be retried or fixed has no Done',
+      async () => {
+        renderView({ onSubmit: jest.fn(async () => ({ kind: 'refused' as const, message: 'Nope.' })) });
+        await fillAndSubmit();
+        await screen.findByText('The invoice was not submitted');
+        expect(screen.queryByRole('button', { name: 'Done' })).toBeNull();
+      },
+      TIMEOUT
+    );
+  });
+
   describe('attachments the capture left out', () => {
     const skippedOne = {
       attachmentId: 'att-9',

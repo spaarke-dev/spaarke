@@ -200,6 +200,8 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
   const [retryableInARow, setRetryableInARow] = useState(0);
   /** Bumped by the firm list's Retry; the firm effect runs again. */
   const [firmsReload, setFirmsReload] = useState(0);
+  /** Bumped when a finished submission is dismissed, so the record picker starts empty for the next one. */
+  const [formKey, setFormKey] = useState(0);
   const lastAttemptRef = useRef<{ input: InvoiceSubmissionInput; actionId: string } | null>(null);
   const firmRequestRef = useRef(0);
   /** The running submission's abort controller; aborted when the view unmounts. */
@@ -401,6 +403,35 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
     if (last) void runAttempt(last.input, last.actionId);
   };
 
+  // "Done" on a finished submission clears the result, which ends `busy` (the tabs come back).
+  // - After `ended` (Rejected / Failed) the form is left as it was, ready to edit and submit again.
+  // - After `success` the form starts over for the next submission; the open email stays (its attachments are re-marked).
+  const handleDone = (): void => {
+    if (outcome?.kind === 'success') {
+      lastAttemptRef.current = null;
+      setMode('new');
+      setCorrectionChosen(false);
+      setCoreRecord(null);
+      setInvoice(null);
+      setFirmId('');
+      setFirmInvoiceNumber('');
+      setPoNumber('');
+      setRetryableInARow(0);
+      if (load.status === 'ready') setMarking(defaultInvoiceMarking(load.attachments, 'new'));
+      setFormKey(k => k + 1);
+    }
+    setOutcome(null);
+    announce('Ready for another invoice.');
+  };
+
+  const doneAction = (
+    <MessageBarActions>
+      <Button appearance="outline" size="small" onClick={handleDone}>
+        Done
+      </Button>
+    </MessageBarActions>
+  );
+
   const renderOutcome = () => {
     if (processing) {
       return (
@@ -423,6 +454,7 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
               {outcome.trackingNumber ? `Tracking number ${outcome.trackingNumber}. ` : ''}
               {outcome.message ?? ''}
             </MessageBarBody>
+            {doneAction}
           </MessageBar>
         );
       case 'refused':
@@ -467,6 +499,7 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
               {outcome.trackingNumber ? `Tracking number ${outcome.trackingNumber}. ` : ''}
               {outcome.message}
             </MessageBarBody>
+            {doneAction}
           </MessageBar>
         );
     }
@@ -567,6 +600,7 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
           Matter, project or work assignment (required)
         </Text>
         <RelatedToPicker
+          key={formKey}
           value={coreRecord}
           onChange={setCoreRecord}
           candidates={NO_CANDIDATES}

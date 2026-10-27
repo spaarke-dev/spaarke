@@ -486,6 +486,66 @@ describe('review fixes (task 133) — reading the email', () => {
   });
 });
 
+describe('review fixes (task 133) — a capture error is worded for Submit Invoice, not for the Save view', () => {
+  const run = (reader: InvoiceEmailSource['reader']) =>
+    submitInvoiceFromEmail(INPUT, { config, email: { ...emailSource(), reader }, idempotencyKey: 'k' });
+
+  it("must-fire: a marked attachment that can't be read → \"Couldn't read '<file>'. Mark it Don't save…\"", async () => {
+    const result = await run({
+      getBody: async () => '<p>x</p>',
+      getAttachmentContent: async () => {
+        throw new Error('Outlook said 5001');
+      },
+    });
+    expect(result).toMatchObject({
+      kind: 'retryable',
+      detail: "Couldn't read 'INV-4711.pdf'. Mark it Don't save, or try again. Nothing was submitted.",
+    });
+    const detail = (result as { detail: string }).detail;
+    expect(detail).not.toMatch(/untick|saved|5001/);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('a body too large says "submit", with the sizes', async () => {
+    const result = await run({
+      getBody: async () => 'a'.repeat(28_100_000),
+      getAttachmentContent: async () => ({ content: '' }),
+    });
+    const detail = (result as { detail: string }).detail;
+    expect(detail).toMatch(/text is too large to submit/);
+    expect(detail).toMatch(/Nothing was submitted\.$/);
+    expect(detail).not.toMatch(/saved/);
+  });
+
+  it('a body that cannot be read is the generic read sentence, without the adapter text', async () => {
+    const result = await run({
+      getBody: async () => {
+        throw new Error('Office.js 5001');
+      },
+      getAttachmentContent: async () => ({ content: '' }),
+    });
+    expect(result).toMatchObject({
+      kind: 'retryable',
+      detail: "Couldn't read this email, so nothing was submitted. Try again.",
+    });
+  });
+
+  it("must-not-fire: the Save view's own text is unchanged", async () => {
+    const { captureEmailContent } = await import('../emailContentCapture');
+    const failing = captureEmailContent(
+      {
+        getBody: async () => 'x',
+        getAttachmentContent: async () => {
+          throw new Error('boom');
+        },
+      },
+      await emailSource().listAttachments(),
+      new Set(['AAMkAD...1'])
+    );
+    await expect(failing).rejects.toThrow(/nothing was saved.*untick it/);
+  });
+});
+
 describe('review fixes (task 133) — attachments the capture left out are carried, never dropped', () => {
   const withCloudLink = () => {
     const cloud: AttachmentInfo = {
@@ -522,6 +582,40 @@ describe('review fixes (task 133) — attachments the capture left out are carri
     const outcome = await createInvoiceSubmitHandler({ config, email: withCloudLink() })(INPUT, { actionId: 'a' });
     expect(outcome.kind).toBe('refused');
     expect(outcome.skipped).toHaveLength(1);
+  });
+
+  it('must-fire: a large body uses the budget, the capture skips the marked PDF as too large, and the local refusal carries that reason', async () => {
+    const email: InvoiceEmailSource = {
+      ...emailSource(),
+      // ~27.9 MB of text: what is left of the 28 MB budget cannot hold the marked PDF.
+      reader: {
+        getBody: async () => 'a'.repeat(27_900_000),
+        getAttachmentContent: async id => ({ content: `B64-${id}` }),
+      },
+    };
+    const result = await submitInvoiceFromEmail(INPUT, { config, email, idempotencyKey: 'k' });
+    expect(result).toMatchObject({
+      kind: 'refused',
+      code: 'ebilling.submission.marked_file_missing',
+      fileName: 'INV-4711.pdf',
+      local: true,
+    });
+    expect(mockFetch).not.toHaveBeenCalled();
+    // Only the PDF is too big for what is left; the small csv still fits.
+    expect(result.skipped?.map(k => k.attachmentId)).toEqual(['AAMkAD...1']);
+    expect(result.skipped![0]).toMatchObject({ reason: 'too-large', ticked: true });
+
+    const outcome = await createInvoiceSubmitHandler({ config, email })(INPUT, { actionId: 'a' });
+    expect(outcome.kind).toBe('refused');
+    expect(outcome.skipped?.map(k => k.attachmentId)).toEqual(['AAMkAD...1']);
+  });
+
+  it('a marked cloud link refused locally names itself in the skipped list too', async () => {
+    const cloud: AttachmentInfo = { ...ATTACHMENTS[1]!, attachmentType: 'cloud' };
+    const email = emailSource({ attachments: [ATTACHMENTS[0]!, cloud] });
+    const result = await submitInvoiceFromEmail(INPUT, { config, email, idempotencyKey: 'k' });
+    expect(result.skipped?.map(k => k.attachmentId)).toEqual(['AAMkAD...2']);
+    expect(result.skipped![0]).toMatchObject({ reason: 'cloud-link' });
   });
 
   it('must-not-fire: nothing left out means no skipped key at all', async () => {

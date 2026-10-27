@@ -32,6 +32,7 @@ import {
 import {
   captureEmailContent,
   EmailCaptureError,
+  formatSize,
   hostAdapterEmailReader,
   type EmailContentCapture,
   type EmailContentReader,
@@ -142,6 +143,25 @@ export const FROM_EMAIL_ROUTE = '/api/finance/invoice-submissions/from-email';
 
 /** Shown when the open email (its context, attachment list or content) could not be read. Nothing was sent. */
 export const EMAIL_READ_FAILED_MESSAGE = "Couldn't read this email, so nothing was submitted. Try again.";
+
+/**
+ * The capture's failure in Submit Invoice wording. {@link EmailCaptureError.message} is the Save view's text ("untick
+ * it", "nothing was saved"), which does not apply here; this one says what to do on this view.
+ */
+export function describeCaptureFailure(err: EmailCaptureError): string {
+  const failure = err.failure;
+  switch (failure?.kind) {
+    case 'attachment-unreadable':
+      return `Couldn't read '${failure.fileName}'. Mark it Don't save, or try again. Nothing was submitted.`;
+    case 'body-too-large':
+      return (
+        `This email's text is too large to submit (${formatSize(failure.sizeBytes)}; one submission can carry about ` +
+        `${formatSize(failure.budgetBytes)}). Nothing was submitted.`
+      );
+    default:
+      return EMAIL_READ_FAILED_MESSAGE;
+  }
+}
 
 /** Default polling: 2 s, doubling to at most 10 s, for up to 30 reads (about 4.5 minutes). */
 export const DEFAULT_POLL = { initialDelayMs: 2000, maxDelayMs: 10_000, maxAttempts: 30 } as const;
@@ -318,7 +338,7 @@ export async function submitInvoiceFromEmail(
       kind: 'retryable',
       status: 0,
       code: undefined,
-      detail: err instanceof EmailCaptureError ? err.message : EMAIL_READ_FAILED_MESSAGE,
+      detail: err instanceof EmailCaptureError ? describeCaptureFailure(err) : EMAIL_READ_FAILED_MESSAGE,
     };
   }
 
@@ -332,6 +352,9 @@ export async function submitInvoiceFromEmail(
       fileName: missing.fileName,
       mark: missing.mark,
       local: true,
+      // Never silent: why the capture left files out (a large body that used the budget, say) is the reason this
+      // marked file is missing, so it travels with the refusal.
+      ...(captured.skipped.length > 0 ? { skipped: captured.skipped } : {}),
     };
   }
 
