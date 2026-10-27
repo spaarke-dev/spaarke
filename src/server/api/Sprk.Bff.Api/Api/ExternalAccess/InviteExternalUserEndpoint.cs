@@ -185,6 +185,13 @@ public static class InviteExternalUserEndpoint
                     : (false, GrantInviteStatus.EmailNotSentReasonCode);
             }
 
+            // Slice C2b: the person already has an account. No invite email is due, none is sent and nothing was written:
+            // emailSent is false (never null) with its own code, and staff are given the sign-in link to pass on.
+            if (outcome.Status == AlreadyProvisionedStatus)
+            {
+                return TypedResults.Ok(AlreadyHasAccountResponse(outcome.ContactId, portalUrl, InviteLinkCustomerKey(customer)));
+            }
+
             return TypedResults.Ok(new InviteExternalUserResponse(
                 outcome.ContactId, portalUrl, InviterVisibleStatus(outcome.Status), emailSent, emailErrorCode));
         }
@@ -352,6 +359,18 @@ public static class InviteExternalUserEndpoint
 
         return outcome.Status is ProvisionedStatus or ExistingAccountStatus ? (true, null) : (null, null);
     }
+
+    /// <summary>
+    /// Slice C2b: <c>/invite</c>'s answer for a contact that already has an account ("AlreadyProvisioned"): no email was
+    /// due or sent, so <c>emailSent</c> is <c>false</c> with <see cref="ContactBindingDecision.InviteContactAlreadyHasAccount"/>,
+    /// the staff text, and the portal sign-in link the work-account notice carries (no code). Pure.
+    /// </summary>
+    internal static InviteExternalUserResponse AlreadyHasAccountResponse(Guid contactId, string portalUrl, string? customerKey)
+        => new(
+            contactId, portalUrl, AlreadyProvisionedStatus, EmailSent: false,
+            EmailErrorCode: ContactBindingDecision.InviteContactAlreadyHasAccount,
+            StaffMessage: ContactIdentityBinder.InviteMessage(ContactBindingDecision.InviteContactAlreadyHasAccount),
+            SignInUrl: BuildInviteLink(portalUrl, customerKey, inviteCode: null));
 
     /// <summary>The provisioning outcome: a contact and a status, or a refusal, or a lookup failure.</summary>
     /// <param name="EmailFailed">

@@ -925,6 +925,13 @@ public static class ContactBindingDecision
     public const string InviteContactAlreadyBound = "sdap.access.invite.contact_already_bound";
 
     /// <summary>
+    /// Slice C2b — a staff invite (<c>/invite</c>) whose contact already has a portal account (bound: "AlreadyProvisioned").
+    /// No invite email is due and none is sent; nothing is written. The response says <c>emailSent: false</c> with this code,
+    /// staff text and the portal sign-in link for staff to pass on.
+    /// </summary>
+    public const string InviteContactAlreadyHasAccount = "sdap.access.invite.contact_already_has_account";
+
+    /// <summary>
     /// ADR-028 A9 (r3 task 046): more than one ENABLED systemuser carries the same stored home link (<c>tid</c>, <c>oid</c>).
     /// Resolving to one of them would merge two people, so the caller is denied; an operator resolves it.
     /// </summary>

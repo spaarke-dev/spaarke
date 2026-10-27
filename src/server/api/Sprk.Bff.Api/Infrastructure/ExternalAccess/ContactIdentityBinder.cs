@@ -841,6 +841,9 @@ public sealed class ContactIdentityBinder
         ContactBindingDecision.InviteContactAlreadyBound =>
             "This email's contact already signs in with a portal account, so a work-account invite cannot be added to it. "
             + "Grant the access to that contact instead; they keep signing in as they do now.",
+        ContactBindingDecision.InviteContactAlreadyHasAccount =>
+            "This person already has an account, so no invite was sent and nothing was changed. They sign in at the link "
+            + "below; send it to them if they need it.",
         ContactBindingDecision.InviteContactRemovedAdminReinstate =>
             "An administrator removed this person's external access, so they cannot be invited. Nothing was created or "
             + "sent. Ask an administrator to reinstate them first.",

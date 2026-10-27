@@ -1513,6 +1513,46 @@ public class ExistingCiamAccountInviteTests
 
     /// <summary>The CIAM provisioner seam: answers a fresh oid, or throws <see cref="Failure"/> translated as the real service
     /// translates it. No Graph, no Key Vault.</summary>
+    // ── Slice C2b: /invite to a person who already has an account ───────────────────────────────────────────────
+
+    /// <summary>
+    /// MUST FIRE: /invite on a contact already bound to a portal account sends nothing and writes nothing. emailSent is false
+    /// (never null) with its own code, the staff text, and the portal sign-in link the work-account notice carries (no code).
+    /// </summary>
+    [Fact]
+    public async Task InviteRoute_ToAPersonWhoAlreadyHasAnAccount_SendsNothing_WritesNothing_AndSaysSo()
+    {
+        var contact = Guid.NewGuid();
+        _h.Identities.AddContact(contact, email: Email, oid: Guid.NewGuid().ToString("D"), plane: IdentityPlaneMarker.External);
+
+        var body = (await InviteRoute()).Should().BeOfType<Ok<InviteExternalUserResponse>>().Subject.Value!;
+
+        body.Status.Should().Be(InviteExternalUserEndpoint.AlreadyProvisionedStatus);
+        body.EmailSent.Should().Be(false, "emailSent is never null on /invite");
+        body.EmailErrorCode.Should().Be(ContactBindingDecision.InviteContactAlreadyHasAccount);
+        body.StaffMessage.Should().Contain("already has an account");
+        body.SignInUrl.Should().Be($"{PortalUrl}/?customer={CustomerKey}");
+        body.SignInUrl.Should().NotContain("invite=", "the sign-in link carries no code");
+        _h.Identities.Writes.Should().BeEmpty("nothing is written");
+        _h.Emails.InviteUrls.Should().BeEmpty("no invite email");
+        _h.Emails.Sent.Should().BeEmpty("no notice");
+        _ciam.Created.Should().BeEmpty();
+    }
+
+    /// <summary>MUST NOT FIRE: an unbound contact is invited as before (no already-has-account answer).</summary>
+    [Fact]
+    public async Task InviteRoute_ToAnUnboundContact_IsInvitedAsBefore()
+    {
+        UnboundContact();
+
+        var body = (await InviteRoute()).Should().BeOfType<Ok<InviteExternalUserResponse>>().Subject.Value!;
+
+        body.EmailSent.Should().Be(true);
+        body.EmailErrorCode.Should().BeNull();
+        body.StaffMessage.Should().BeNull();
+        body.SignInUrl.Should().BeNull();
+    }
+
     private sealed class StubCiamProvisioner : CiamUserProvisioningService
     {
         public StubCiamProvisioner()
