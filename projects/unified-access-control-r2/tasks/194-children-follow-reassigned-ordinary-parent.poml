@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="194" project="unified-access-control-r2">
+  <metadata>
+    <title>Children follow an ordinary parent reassigned to another business unit (I-6 drift, #2339)</title>
+    <phase>Session 28: UAC (owner round 128, 2026-10-27)</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes record ownership (MDA access) and file containers in a scheduled writer; .cs; access-control.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Extends the Secure-child reconcile engine without weakening its isolation guarantees; adds a relocation purpose for SPE files.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches Services/Access/SecureChild*, RecordOwnershipResolver (read only, unless a defect is found), DocumentContainerRelocator and their tests. No overlap with task 193 or R3's GHSA branch.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, access-control, background, dataverse, spe, testing</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+    <origin>
+      GitHub #2339; owner round 128 item 3. The owner said, verbatim: "yes this is a gap that should be closed; also note that e-billing-r1 is asking the same and related questions; i will refer that project to you in order to ensure consistency; this fix should be addressed in this project".
+    </origin>
+  </metadata>
+
+  <goal>
+When an ordinary (non-Secure) matter, project, work assignment or service request moves to another owner team or business unit, every team-owned child filed under it is re-owned within minutes. Each child moves to the owner RecordOwnershipResolver answers (rule I-6), and each re-owned document's file moves to its new business unit's container. Secure-team-owned rows are never touched, and nothing is moved into or out of isolation by this path.
+  </goal>
+
+  <component-justification>
+    1. Existing: SecureChildReconciler / SecureChildReconciliationJob (Services/Access) already walk a root's descendants and re-own them to a fixpoint through RecordOwnershipResolver. DocumentContainerRelocator already moves a document's file when it is queued in sprk_relocationpending. ReownOrdinaryRowAsync (:495) is an existing conditional (If-Match) ordinary re-own.
+    2. Extension: add an ordinary-move mode to the same engine and job, and a new RelocationPurpose. No new job class, no new table, no new column.
+    3. Cost of doing nothing: after an MDA reassignment, children stay in the old business unit. Model-driven-app users see the parent and its children by different business units, and files stay in the old business unit's container. Rule I-6 is breached indefinitely.
+  </component-justification>
+
+  <steps mode="directional">
+    1. Trigger. In the job's recent-changes pass, also list ordinary core records (matter, project, work assignment, service request; sprk_issecure not true) whose modifiedon is at or after the watermark. First verify on dev, read-only, that a platform Assign bumps modifiedon on the core record. If it does not, stop and report (escalation trigger).
+    2. Decide. For each listed root, walk its descendants with the existing pass (lineage tables, stamps, look-through). For each row OWNED BY A BUSINESS UNIT DEFAULT TEAM, ask RecordOwnershipResolver (ContextFor(row) → ResolveOwnerAsync).
+       - The answer is a different ordinary team → plan a move.
+       - The row is Secure-team-owned, or the answer is the Secure team, or the answer would release isolation → untouched in this mode (the existing Secure pass owns those).
+       - The row is user-owned → untouched and reported (outside-the-product creates stay user-owned, interim accepted under I-6).
+       - The resolver refuses → reported, not moved.
+       - A child filed under several core records in different business units takes the resolver's own deterministic answer (primary parent first).
+    3. Write. Each move is an Assign through the reconciler's existing assign-and-read-back (or ReownOrdinaryRowAsync's If-Match form, widened from its two-table allow-list to the lineage tables), with the previous owner logged first.
+       - For a sprk_document whose owning business unit changes, set sprk_relocationpending with a new RelocationPurpose.BusinessUnitMove in the same write.
+       - The existing 2-minute settle step relocates its file via DocumentContainerRelocator, capped by MaxRelocationsPerRun.
+       - The relocator must refuse a document under a Secure record (never move a Secure file by this purpose).
+    4. Switches and caps. A new switch, `SecureChild:Reconciliation:OrdinaryMovesWritesEnabled`, defaults to false: report-only. The report lists planned moves per root (counts, plus samples capped at MaxSampledChanges). Moves are capped per run (reuse MaxRootsPerRun; add MaxOrdinaryMovesPerRun, default 200). A capped or incomplete root is carried to the next run and reported, as the Secure pass does.
+    5. Lineage completeness: compare SecureChildLineage.Children with CoreAncestorResolver's child list and the I-6 census. Any child table that the census says is team-owned but that is missing from the walk is either added or listed in the PR as a known limit with a filed issue. The ebilling-r1 invoice-family tables are not on master yet; record in notes/task-194-ordinary-parent-move.md that ebilling adds them to SecureChildLineage / CoreAncestorResolver when it lands them, so they follow by the same mechanism.
+    6. Docs: update docs/guides/UAC-ACCESS-MODEL-GUIDE.md §7 (children now follow, within about 2 minutes plus the run) and the DATAVERSE-WRITE-PATH-ARCHITECTURE.md I-6 row (L4 owner for ordinary parent moves).
+    7. Tests:
+       - must-fire: a parent moved from business unit A to B gets its team-owned children re-owned to B's default team, read back, and its document queued and relocated.
+       - must-not-fire: Secure-team-owned children, user-owned children, a root whose children already match, and the switch off (report only, no write).
+       - never release: an ordinary-mode run never changes a Secure-team-owned row.
+       - multi-parent: the resolver's primary-parent answer is applied.
+       - Perturbation-check the must-fire tests.
+    8. Run the ArchTests (including RecordOwnerAssignmentCensusTests), the filtered unit tests, and both integration suites in full. Measure the BFF publish delta against a fresh master build. Open a PR; merge with both checks green. Deploy via R3 (owner go). First dev run is report-only. UAC reads the report and the owner gives the go before the switch is set. Then run the server gate.
+  </steps>
+
+  <acceptance-criteria>
+    - After the switch is on, an MDA reassignment of an ordinary matter, project or work assignment to another business unit re-owns its team-owned children to the new business unit's default team within 2 minutes plus the run, verified live on dev.
+    - The re-owned documents' files are in the new business unit's container (verified live, file count and container id).
+    - With the switch off, the run writes nothing and reports the planned moves.
+    - No Secure-team-owned row and no Secure file is changed by this mode (test plus the live census unchanged).
+    - User-owned children are reported, not moved.
+    - Negative: no new job class, no plugin, no change to the Secure pass's behaviour (existing SecureChild* tests unchanged).
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>A platform Assign does not bump the core record's modifiedon, so the recent-changes pass cannot see the move without a different detection design.</trigger>
+  </escalation>
+
+  <constraints>
+    - CLAUDE.md §9-§11, §10 (publish delta); ADR-002 (no plugins); ADR-036/052 (scheduled work stays in the existing IScheduledJob); I-2 and I-6 (DATAVERSE-WRITE-PATH-ARCHITECTURE.md).
+    - Never release a row from isolation; never touch a Secure-team-owned row in ordinary mode.
+    - Never purge or delete SPE containers. The relocator moves files only.
+    - Writes default off; turning them on in an environment needs the owner's go after UAC reads the report-only run.
+  </constraints>
+</task>
