@@ -219,6 +219,13 @@ public enum HomeRegistrationOutcome
 public sealed record HomeRegistrationResult(
     HomeRegistrationOutcome Outcome, Guid? ContactId = null, string? DenyCode = null, bool Wrote = false)
 {
+    /// <summary>
+    /// C5: with <see cref="ContactBindingDecision.DenyContactRemoved"/>, <c>true</c> when the removed marker that refused the
+    /// registration is not set but its empty read is not proven (the route answers a retryable 503), <c>false</c> for an
+    /// administrator's removal (a final 403).
+    /// </summary>
+    public bool RemovedMarkerUnproven { get; init; }
+
     internal static HomeRegistrationResult Denied(string denyCode, bool wrote = false)
         => new(HomeRegistrationOutcome.Denied, null, denyCode, wrote);
 }
@@ -1028,7 +1035,8 @@ public sealed class ContactIdentityBinder
             {
                 case RegistrationEmailAction.Deny:
                     _logger.LogWarning("[ID-BIND] Registration for {Who} DENIED ({DenyCode})", who, decision.DenyCode);
-                    return HomeRegistrationResult.Denied(decision.DenyCode ?? ContactBindingDecision.DenyContactLookupFailed);
+                    return HomeRegistrationResult.Denied(decision.DenyCode ?? ContactBindingDecision.DenyContactLookupFailed)
+                        with { RemovedMarkerUnproven = decision.RemovedMarkerUnproven };
 
                 case RegistrationEmailAction.Conflict:
                     return await RefuseAndFlagAsync(decision, known, oid, who, ct).ConfigureAwait(false);
@@ -1135,7 +1143,8 @@ public sealed class ContactIdentityBinder
                         // The inactive-contact read failed, or (slice C) an inactive match's external access was removed.
                         _logger.LogWarning("[ID-BIND] Registration for {Who} DENIED ({DenyCode}) at the inactive-contact check",
                             who, inactive.DenyCode);
-                        return HomeRegistrationResult.Denied(inactive.DenyCode ?? ContactBindingDecision.DenyContactLookupFailed);
+                        return HomeRegistrationResult.Denied(inactive.DenyCode ?? ContactBindingDecision.DenyContactLookupFailed)
+                            with { RemovedMarkerUnproven = inactive.RemovedMarkerUnproven };
                     }
 
                     return inactive.Action == RegistrationEmailAction.Conflict
@@ -1320,7 +1329,8 @@ public sealed class ContactIdentityBinder
     /// Slice C2b: <see cref="CreateContactGuardedAsync"/>'s answer: the refusal's deny code (nothing was written), or the
     /// store's create result.
     /// </summary>
-    private readonly record struct GuardedCreate(string? DenyCode, StoreWriteResult Write);
+    /// <param name="MarkerUnproven">C5: the refusal is a removed marker whose empty read is not proven (retryable).</param>
+    private readonly record struct GuardedCreate(string? DenyCode, StoreWriteResult Write, bool MarkerUnproven = false);
 
     /// <summary>
     /// Slice C2b: the ONE place this binder creates a contact (registration, the first sign-in create and the licensed-user
@@ -1333,9 +1343,10 @@ public sealed class ContactIdentityBinder
     private async Task<GuardedCreate> CreateContactGuardedAsync(
         Guid oid, IdentityPlaneMarker plane, NewContactDetails details, string operation, string who, CancellationToken ct)
     {
-        if (await CreateAroundRemovalRefusalAsync(details.Email, operation, who, ct).ConfigureAwait(false) is { } refused)
+        if (await CreateAroundRemovalRefusalDecisionAsync(details.Email, operation, who, ct).ConfigureAwait(false) is
+            { DenyCode: { } refused } removal)
         {
-            return new GuardedCreate(refused, new StoreWriteResult(StoreWriteStatus.Failed, Error: refused));
+            return new GuardedCreate(refused, new StoreWriteResult(StoreWriteStatus.Failed, Error: refused), removal.MarkerUnproven);
         }
 
         var write = await _store.CreateContactForOidAsync(oid, plane, details, ct).ConfigureAwait(false);
@@ -1352,6 +1363,15 @@ public sealed class ContactIdentityBinder
     /// create is considered.</para>
     /// </summary>
     private async Task<string?> CreateAroundRemovalRefusalAsync(
+        string? email, string operation, string who, CancellationToken ct)
+        => (await CreateAroundRemovalRefusalDecisionAsync(email, operation, who, ct).ConfigureAwait(false))?.DenyCode;
+
+    /// <summary>
+    /// <see cref="CreateAroundRemovalRefusalAsync"/>'s decision: the refusing <see cref="CreateAroundRemovalDecision"/> (logged
+    /// here), or <c>null</c> when the create may go ahead. C5: registration answers a removed marker whose empty read is not
+    /// proven as retryable, so it needs the decision, not only its code.
+    /// </summary>
+    private async Task<CreateAroundRemovalDecision?> CreateAroundRemovalRefusalDecisionAsync(
         string? email, string operation, string who, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(email))
@@ -1388,7 +1408,7 @@ public sealed class ContactIdentityBinder
                 operation, who, removal.DenyCode);
         }
 
-        return removal.DenyCode;
+        return removal;
     }
 
     private async Task<HomeRegistrationResult> CreateHomeContactAsync(HomeRegistrationRequest request, string who, CancellationToken ct)
@@ -1414,7 +1434,7 @@ public sealed class ContactIdentityBinder
             .ConfigureAwait(false);
         if (guarded.DenyCode is { } refused)
         {
-            return HomeRegistrationResult.Denied(refused);
+            return HomeRegistrationResult.Denied(refused) with { RemovedMarkerUnproven = guarded.MarkerUnproven };
         }
 
         var create = guarded.Write;

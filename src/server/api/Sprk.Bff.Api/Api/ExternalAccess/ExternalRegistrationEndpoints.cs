@@ -229,10 +229,10 @@ public static class ExternalRegistrationEndpoints
         HomeRegistrationOutcome.OwnerUnconfigured =>
             Problem(StatusCodes.Status500InternalServerError, ReasonOwnerUnconfigured,
                 "Registration is not configured for this organization. Nothing was created; contact your administrator."),
-        _ => DeniedResult(result.DenyCode),
+        _ => DeniedResult(result),
     };
 
-    private static IResult DeniedResult(string? denyCode) => denyCode switch
+    private static IResult DeniedResult(HomeRegistrationResult result) => result.DenyCode switch
     {
         // No current invite names this sign-in: a new invitation (naming their organization's tenant) is the fix, not a
         // retry. Nothing was bound or created. The answer says nothing about what records exist.
@@ -240,6 +240,13 @@ public static class ExternalRegistrationEndpoints
             Problem(StatusCodes.Status403Forbidden, ContactBindingDecision.DenyContactNotInvited,
                 "This sign-in cannot be registered until you are invited. Ask the person who invited you to send a new "
                 + "invitation."),
+
+        // C5: the email belongs to a person whose external access an administrator removed. Final, not a retry: only an
+        // administrator reinstates the person. The answer is neutral and says nothing about the record. A removed marker whose
+        // empty read is not proven is not a removal: it falls to the retryable 503 below.
+        ContactBindingDecision.DenyContactRemoved when !result.RemovedMarkerUnproven =>
+            Problem(StatusCodes.Status403Forbidden, ContactBindingDecision.DenyContactRemoved,
+                "Your account cannot be registered. Contact your administrator."),
 
         // A squatted uniqueness mirror: an administrator must resolve the record (the holder is flagged).
         ContactBindingDecision.DenyContactKeyConflict =>

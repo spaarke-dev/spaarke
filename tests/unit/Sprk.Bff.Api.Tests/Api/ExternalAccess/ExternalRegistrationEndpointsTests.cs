@@ -468,6 +468,55 @@ public sealed class ExternalRegistrationEndpointsTests : IClassFixture<ExternalR
         _store.Contacts.Should().ContainSingle();
     }
 
+    // ── C5: a removed person's registration is final, never "try again" ───────────────────────────────────────────
+
+    /// <summary>
+    /// MUST FIRE: the email belongs to a person whose external access an administrator removed (an active or an inactive
+    /// contact carrying the marker): a terminal 403 with the removed code and a neutral message, never the retryable 503.
+    /// Nothing is bound or created.
+    /// </summary>
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    public async Task ARemovedPersonsEmail_IsAFinal403_NeverRetryable_NothingWritten(int stateCode)
+    {
+        var removed = _store.AddContact(Guid.NewGuid(), email: Email, stateCode: stateCode);
+        removed.RemovedOn = DateTimeOffset.Parse("2026-10-01T00:00:00Z");
+
+        var response = await Post(Body(confirm: true));
+
+        await ShouldBeProblem(response, HttpStatusCode.Forbidden, ContactBindingDecision.DenyContactRemoved);
+        (await Json(response)).GetProperty("detail").GetString().Should().Contain("Contact your administrator")
+            .And.NotContain("removed", "the message is neutral");
+        _store.Writes.Should().BeEmpty();
+        _store.Contacts.Should().ContainSingle();
+    }
+
+    /// <summary>
+    /// MUST NOT FIRE: a removed marker whose empty read is not proven is not a removal: the registration stays the retryable
+    /// 503, nothing written.
+    /// </summary>
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    public async Task AnUnprovenRemovedMarker_StaysA503Unavailable_NothingWritten(int stateCode)
+    {
+        _store.AddContact(Guid.NewGuid(), email: Email, stateCode: stateCode);
+        _store.RemovedMarkerProof = ColumnReadProofOutcome.Unproven;
+        try
+        {
+            var response = await Post(Body(confirm: true));
+
+            await ShouldBeProblem(response, HttpStatusCode.ServiceUnavailable, ExternalRegistrationEndpoints.ErrorUnavailable);
+            _store.Writes.Should().BeEmpty();
+            _store.Contacts.Should().ContainSingle();
+        }
+        finally
+        {
+            _store.RemovedMarkerProof = ColumnReadProofOutcome.Proven;
+        }
+    }
+
     [Fact]
     public async Task InactiveMatchOnADifferentEmail_StillRegisters()
     {

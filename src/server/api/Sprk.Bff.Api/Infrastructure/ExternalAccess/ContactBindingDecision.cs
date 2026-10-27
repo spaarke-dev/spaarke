@@ -481,7 +481,14 @@ public sealed record RegistrationEmailDecision(
     Guid? ContactId = null,
     string? DenyCode = null,
     IReadOnlyList<Guid>? FlagContactIds = null,
-    IdentityCollisionReason? FlagReason = null);
+    IdentityCollisionReason? FlagReason = null)
+{
+    /// <summary>
+    /// C5: with <see cref="ContactBindingDecision.DenyContactRemoved"/>, <c>true</c> when the matched contact's removed marker
+    /// is not set but its empty read is not proven (retryable), <c>false</c> for an administrator's removal (final).
+    /// </summary>
+    public bool RemovedMarkerUnproven { get; init; }
+}
 
 /// <summary>A systemuser whose <c>sprk_primarycontact</c> points at a contact under consideration.</summary>
 public sealed record SystemUserReference(Guid SystemUserId, Guid? Oid, Guid LinkedContactId);
@@ -2173,7 +2180,10 @@ public static class ContactBindingDecision
         // Slice C — a removed contact is never registered onto, bound or created around.
         if (row.IsRemoved)
         {
-            return new RegistrationEmailDecision(RegistrationEmailAction.Deny, row.ContactId, DenyCode: DenyContactRemoved);
+            return new RegistrationEmailDecision(RegistrationEmailAction.Deny, row.ContactId, DenyCode: DenyContactRemoved)
+            {
+                RemovedMarkerUnproven = row.RemovedOn is null,
+            };
         }
 
         var binding = row.Binding;
@@ -2227,7 +2237,10 @@ public static class ContactBindingDecision
         var removal = DecideCreateAroundRemoval(inactiveLookup);
         if (!removal.MayCreate)
         {
-            return new RegistrationEmailDecision(RegistrationEmailAction.Deny, removal.RemovedContactId, DenyCode: removal.DenyCode);
+            return new RegistrationEmailDecision(RegistrationEmailAction.Deny, removal.RemovedContactId, DenyCode: removal.DenyCode)
+            {
+                RemovedMarkerUnproven = removal.MarkerUnproven,
+            };
         }
 
         var rows = inactiveLookup.Rows.Where(r => !r.IsActive && r.ContactId != Guid.Empty).ToList();
