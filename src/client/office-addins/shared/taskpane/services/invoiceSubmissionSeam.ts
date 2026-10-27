@@ -1,0 +1,197 @@
+/**
+ * invoiceSubmissionSeam.ts — what the Invoice view (task 133) hands to the from-email submission, and the pure rules
+ * that build it. NO I/O here.
+ *
+ * The client service itself (task 133 step A1, `invoiceSubmissionService.ts`) is NOT written yet: it waits on open
+ * gaps in ebilling-r1's pinned contract, `projects/ebilling-r1/notes/095-from-email-contract.md`
+ * (`POST /api/finance/invoice-submissions/from-email`). Until it lands, the view receives no `onSubmit` and says
+ * submitting is not available.
+ *
+ * TODO(task 133 A1, 095-from-email-contract.md): implement {@link InvoiceSubmitHandler} — capture the email with
+ * `captureEmailContent` (no second copy of capture), build the contract body from {@link InvoiceSubmissionInput}
+ * plus `email`, send `X-Idempotency-Key` per {@link InvoiceSubmitAttempt.actionId}, map the contract's codes to
+ * {@link InvoiceSubmissionOutcome}, and follow `statusUrl`.
+ * ⚠️ The contract matches a mark to an attachment by (fileName, size, contentType) AS SENT. Capture renames an
+ * attached Outlook item to `<name>.eml` and sends it as `application/octet-stream` (`emailContentCapture.ts`
+ * `toStoredAttachment`), so A1 must rewrite each mark from the captured attachment with the same `attachmentId`
+ * — the values here are the ones Outlook listed, before capture.
+ */
+
+import type { AttachmentInfo } from '@shared/adapters/types';
+import { cleanGuid } from '@spaarke/ui-components/guid';
+import type { EntityType } from '../hooks/useEntitySearch';
+import { EMAIL_CONTENT_BUDGET_BYTES, MAX_ATTACHMENT_BYTES, base64Length, formatSize } from './emailContentCapture';
+import type {
+  InvoiceAttachmentMark,
+  InvoiceMarking,
+  InvoiceMarkingAttachment,
+} from '../components/views/InterimInvoiceAttachmentMarking';
+
+/** The core records an invoice is submitted against (owner decision 2026-10-21 item 5; the contract's targetEntity). */
+export type InvoiceCoreRecordType = Extract<EntityType, 'Matter' | 'Project' | 'WorkAssignment'>;
+export const INVOICE_CORE_RECORD_TYPES: InvoiceCoreRecordType[] = ['Matter', 'Project', 'WorkAssignment'];
+
+/** A mark as the contract spells it (exact case). */
+export type InvoiceWireMark = 'Invoice' | 'Supporting' | 'DontSave';
+
+const WIRE_MARK: Record<InvoiceAttachmentMark, InvoiceWireMark> = {
+  invoice: 'Invoice',
+  supporting: 'Supporting',
+  skip: 'DontSave',
+};
+
+/** The contract's `targetEntity`. */
+export interface InvoiceSubmissionTarget {
+  entityType: InvoiceCoreRecordType;
+  entityId: string;
+}
+
+/**
+ * One contract `marks[]` entry, plus `attachmentId` (NOT on the wire) so the A1 service can rewrite fileName / size /
+ * contentType from the captured attachment — see the file header.
+ */
+export interface InvoiceSubmissionMark {
+  attachmentId: string;
+  fileName: string;
+  size: number;
+  contentType: string;
+  mark: InvoiceWireMark;
+}
+
+/** The contract body without `email` (A1 captures and adds it). */
+export interface InvoiceSubmissionInput {
+  targetEntity: InvoiceSubmissionTarget;
+  marks: InvoiceSubmissionMark[];
+  firmId: string;
+  firmInvoiceNumber: string;
+  poNumber: string | null;
+  mode: 'New' | 'Correction';
+  invoiceId: string | null;
+}
+
+/** One user action. A Retry of the same action reuses `actionId` (the contract's `X-Idempotency-Key` rule). */
+export interface InvoiceSubmitAttempt {
+  actionId: string;
+}
+
+/**
+ * What became of a submission, as the view shows it. Generic on purpose: the A1 service maps the contract's codes
+ * onto these four; the view never reads a code.
+ * - `success`: accepted (the contract's 202);
+ * - `refused`: the server said no and a retry will not help — `message` says why;
+ * - `retryable`: a transient failure — the view offers Retry (same `actionId`);
+ * - `permanent`: it cannot work from Outlook (e.g. the email can't be identified) — the view suggests uploading
+ *   the invoice in Spaarke instead.
+ */
+export type InvoiceSubmissionOutcome =
+  | { kind: 'success'; message?: string; trackingNumber?: string }
+  | { kind: 'refused'; message: string }
+  | { kind: 'retryable'; message: string }
+  | { kind: 'permanent'; message: string };
+
+export type InvoiceSubmitHandler = (
+  input: InvoiceSubmissionInput,
+  attempt: InvoiceSubmitAttempt
+) => Promise<InvoiceSubmissionOutcome>;
+
+/** One firm the invoice can be from (a `sprk_organization` linked to the core record). */
+export interface InvoiceFirmOption {
+  firmId: string;
+  name: string;
+}
+
+/** TODO(task 133, firm route not pinned yet): the firms linked to a core record. */
+export type LoadInvoiceFirms = (target: InvoiceSubmissionTarget) => Promise<InvoiceFirmOption[]>;
+
+/** The contract's `firmInvoiceNumber` bound: trimmed, 1-100 characters. */
+export const FIRM_INVOICE_NUMBER_MAX = 100;
+
+function isPdfAttachment(attachment: AttachmentInfo): boolean {
+  return attachment.contentType.toLowerCase() === 'application/pdf' || attachment.name.toLowerCase().endsWith('.pdf');
+}
+
+/**
+ * The marking list for an email: every NON-inline attachment (the contract marks those and only those), each with a
+ * `disabledReason` when the add-in cannot send it, using the save's own limits (`emailContentCapture.ts`):
+ * - a cloud link (no file in the email);
+ * - larger than {@link MAX_ATTACHMENT_BYTES} (20 MB);
+ * - past the {@link EMAIL_CONTENT_BUDGET_BYTES} budget once the attachments before it (in the email's order, inline
+ *   ones included, since they travel in the same request) are counted. The email's text is not counted here; the
+ *   capture at submit re-checks with it.
+ */
+export function toInvoiceMarkingAttachments(
+  attachments: readonly AttachmentInfo[],
+  budget: number = EMAIL_CONTENT_BUDGET_BYTES
+): InvoiceMarkingAttachment[] {
+  const result: InvoiceMarkingAttachment[] = [];
+  let used = 0;
+  for (const attachment of attachments) {
+    let disabledReason: string | undefined;
+    if (attachment.attachmentType === 'cloud') {
+      disabledReason = 'It is a link to a file stored in the cloud (for example OneDrive), not a file in the email.';
+    } else if (attachment.size > MAX_ATTACHMENT_BYTES) {
+      disabledReason = `It is larger than ${formatSize(MAX_ATTACHMENT_BYTES)}, the most one submission can carry.`;
+    } else if (used + base64Length(attachment.size) > budget) {
+      disabledReason =
+        `It does not fit: one submission can carry about ${formatSize(Math.floor((budget * 3) / 4))} of ` +
+        'attachments together.';
+    } else {
+      used += base64Length(attachment.size);
+    }
+    if (attachment.isInline) {
+      continue;
+    }
+    result.push({
+      id: attachment.id,
+      fileName: attachment.name,
+      contentType: attachment.contentType,
+      sizeBytes: attachment.size,
+      ...(isPdfAttachment(attachment) && !disabledReason ? { suggestedInvoice: true } : {}),
+      ...(disabledReason ? { disabledReason } : {}),
+    });
+  }
+  return result;
+}
+
+/** The contract's `marks[]`: one per listed (non-inline) attachment; a disabled or unmarked one is `DontSave`. */
+export function toSubmissionMarks(
+  attachments: readonly InvoiceMarkingAttachment[],
+  marking: InvoiceMarking
+): InvoiceSubmissionMark[] {
+  return attachments.map(attachment => ({
+    attachmentId: attachment.id,
+    fileName: attachment.fileName,
+    size: attachment.sizeBytes,
+    contentType: attachment.contentType,
+    mark: attachment.disabledReason ? 'DontSave' : WIRE_MARK[marking[attachment.id] ?? 'skip'],
+  }));
+}
+
+/** The trimmed firm invoice number, or null when it breaks the contract's 1-100 rule. */
+export function normalizeFirmInvoiceNumber(raw: string): string | null {
+  const trimmed = raw.trim();
+  return trimmed.length >= 1 && trimmed.length <= FIRM_INVOICE_NUMBER_MAX ? trimmed : null;
+}
+
+/** Builds the seam input. GUIDs are canonicalized (ADR-044); a blank PO number is null. */
+export function buildInvoiceSubmissionInput(args: {
+  target: InvoiceSubmissionTarget;
+  attachments: readonly InvoiceMarkingAttachment[];
+  marking: InvoiceMarking;
+  firmId: string;
+  firmInvoiceNumber: string;
+  poNumber: string;
+  mode: 'New' | 'Correction';
+  invoiceId?: string | null;
+}): InvoiceSubmissionInput {
+  const po = args.poNumber.trim();
+  return {
+    targetEntity: { entityType: args.target.entityType, entityId: cleanGuid(args.target.entityId) },
+    marks: toSubmissionMarks(args.attachments, args.marking),
+    firmId: cleanGuid(args.firmId),
+    firmInvoiceNumber: args.firmInvoiceNumber.trim(),
+    poNumber: po.length > 0 ? po : null,
+    mode: args.mode,
+    invoiceId: args.mode === 'Correction' && args.invoiceId ? cleanGuid(args.invoiceId) : null,
+  };
+}

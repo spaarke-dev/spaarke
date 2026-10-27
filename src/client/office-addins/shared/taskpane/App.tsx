@@ -14,6 +14,8 @@ import { ShareView } from './components/views/ShareView';
 import { StatusView } from './components/views/StatusView';
 import { SignInView } from './components/views/SignInView';
 import { CreateTodoView } from './components/views/CreateTodoView';
+import { InvoiceView } from './components/views/InvoiceView';
+import type { InitialAction } from './initialAction';
 import { FindView, type FindItemNoun } from './components/views/FindView';
 import type {
   SavedTodoContext,
@@ -182,9 +184,11 @@ export interface AppProps {
   /**
    * Initial action discriminator read from the host's URL / launch context.
    * 'createTodo' (from the ribbon `?action=createTodo` deep-link) selects the
-   * Create To Do tab on open. Default: undefined → the default `initialTab`.
+   * Create To Do tab on open. 'submitInvoice' (task 133, the Outlook ribbon's
+   * `?action=submitInvoice`) opens the Invoice view — the ONLY way to reach it.
+   * Default: undefined → the default `initialTab`.
    */
-  initialAction?: 'createTodo';
+  initialAction?: InitialAction;
 }
 
 export const App: React.FC<AppProps> = ({
@@ -210,7 +214,7 @@ export const App: React.FC<AppProps> = ({
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [, setHostContext] = useState<IHostContext | null>(null);
   const [currentTab, setCurrentTab] = useState<NavigationTab>(
-    initialAction === 'createTodo' ? 'createTodo' : initialTab
+    initialAction === 'createTodo' ? 'createTodo' : initialAction === 'submitInvoice' ? 'invoice' : initialTab
   );
 
   // The record this email is filed to — drives the inline "Create To Do" tool. Seeded from
@@ -862,6 +866,17 @@ export const App: React.FC<AppProps> = ({
             // decided from the live adapter's capabilities, never a hostType check. Gates the created-To-Do
             // confirmation's "Open in Spaarke" link.
             canOpenRecord={canOpenRecords}
+          />
+        )}
+
+        {/* Task 133: the Outlook "Submit Invoice" view — reached only from the ribbon (`?action=submitInvoice`), never
+            from a tab. Slice A: the submission (`onSubmit`, task 133 A1) and the firm list (`loadFirms`) are not wired
+            yet, so the view says submitting is not available; corrections stay off (`correctionAvailable`). */}
+        {currentTab === 'invoice' && (
+          <InvoiceView
+            hostAdapter={hostAdapter}
+            apiBaseUrl={apiBaseUrl}
+            getAccessToken={async () => (await authService.getAccessToken()) || ''}
           />
         )}
 
