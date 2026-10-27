@@ -1528,9 +1528,18 @@ public sealed partial class SecureRootInheritance
     }
 
     /// <summary>
+    /// The System Administrator role's TEMPLATE id (#2320). It is the same in every environment and every business unit's copy
+    /// of the role carries it, so the role is matched by this id — never by its display name, which an administrator can
+    /// change or give to another role (the same match as <c>SecuredColumnReadProof</c> and provisioning S8/S9).
+    /// </summary>
+    internal static readonly Guid SystemAdministratorRoleTemplateId = Guid.Parse("627090ff-40a3-4053-8790-584edc5be201");
+
+    /// <summary>
     /// F1 / F-a: the tables on which the platform says the BFF reads the column — both when the BFF application user holds the
-    /// System Administrator role; otherwise exactly the tables a field security profile it is a member of grants Read on. A
-    /// fault, or no answer, is no table (fail closed). Asked at most once per scope.
+    /// System Administrator role (by template id, directly or through a team it is a member of); otherwise exactly the tables a
+    /// field security profile it holds (directly or through a team) grants Read on (#2320). Team membership is joined
+    /// server-side (a nested <c>any()</c> over <c>teammembership_association</c>), so no request grows with the number of teams
+    /// the BFF's user is in. A fault, or no answer, is no table (fail closed). Asked at most once per scope.
     /// </summary>
     private async Task<HashSet<string>> PlatformReadableTablesAsync(CancellationToken ct)
     {
@@ -1542,16 +1551,22 @@ public sealed partial class SecureRootInheritance
             if (me is not { } user || user == Guid.Empty)
                 return Unproven("the BFF's own user could not be read");
 
-            var admin = await _webApi.QueryAsync<RoleIdRow>($"systemusers({user})/systemuserroles_association",
-                "name eq 'System Administrator'", "roleid", cancellationToken: ct).ConfigureAwait(false);
+            // #2320: System Administrator held directly or through a team the BFF's user is a member of, in one query.
+            var admin = await _webApi.QueryAsync<RoleIdRow>("roles",
+                $"_roletemplateid_value eq {SystemAdministratorRoleTemplateId} and (systemuserroles_association/any(u:u/systemuserid eq {user}) " +
+                $"or teamroles_association/any(t:t/teammembership_association/any(u:u/systemuserid eq {user})))",
+                "roleid", cancellationToken: ct).ConfigureAwait(false);
             if (admin.Count > 0)
                 return new HashSet<string>(new[] { WorkAssignment, Project }, StringComparer.OrdinalIgnoreCase);
 
-            var profiles = (await _webApi.QueryAsync<ProfileIdRow>($"systemusers({user})/systemuserprofiles_association", null,
+            // #2320: the field security profiles held directly or through a team, in one query.
+            var profiles = (await _webApi.QueryAsync<ProfileIdRow>("fieldsecurityprofiles",
+                $"systemuserprofiles_association/any(u:u/systemuserid eq {user}) " +
+                $"or teamprofiles_association/any(t:t/teammembership_association/any(u:u/systemuserid eq {user}))",
                 "fieldsecurityprofileid", cancellationToken: ct).ConfigureAwait(false))
                 .Select(p => p.FieldSecurityProfileId).Where(id => id != Guid.Empty).Distinct().ToList();
             if (profiles.Count == 0)
-                return Unproven("the BFF's user is in no field security profile");
+                return Unproven("the BFF's user is in no field security profile, directly or through a team");
 
             var grants = await _webApi.QueryAsync<FieldPermissionRow>("fieldpermissions",
                 $"attributelogicalname eq '{AccessInheritance.Column}' and canread eq 4 and (" +
