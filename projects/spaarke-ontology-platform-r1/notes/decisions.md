@@ -274,3 +274,15 @@ Sources: **design** = [`design.md`](../design.md) §8 (D-1..D-12, §8.0c) and §
 - **Unchanged:** the BFF Signal read route still withholds it (157, D-176). Options A, B and D are not pursued.
 - **Related:** #2310 is closed. DI-120 (#2118) stays open separately.
 
+## D-191 — One canonical "Family" concept, with kinds (owner, 2026-10-27)
+
+- **Decision:** a Family is a set of records joined by typed edges of ONE kind. **Filing** is the kind now: a record and everything filed under it, a tree with one root. It is what field-mapping-r1's W7 builds (`RecordFamilyEdges`, `RecordFamilyReader`, `GET /api/v1/records/{table}/{id}/family`, the Family modal), and unified-access-control-r2 owns the edge content. A peer kind for patent and trademark families (e.g. Priority) comes later, as a graph with no root. "Secure family" is a qualifier (the Filing family of a Secure root), not a kind. Recorded in component model §3.
+- **Why:** the owner wants one family concept, not two, with future value for IP families. "Patent family" is the industry term, so the IP concept keeps the word.
+- **Guidance given to W7 (not a decision, field-mapping's to apply):**
+  - walk one kind at a time;
+  - push and Assigned-To are defined for Filing only and refused server-side for any other kind;
+  - the response describes the walk from an anchor, with an optional root;
+  - members carry `kind` and `edgeKind`;
+  - edge TYPES stay in code (parity-ratcheted), edge INSTANCES of a future peer kind live in Dataverse.
+- **Open:** the owner recalls an earlier "family component" discussion. None is written in ontology R1/R2 or on master; project-coordination, unified-access-control-r2 and ebilling were asked on 2026-10-27, and any answer is folded in here.
+
