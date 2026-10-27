@@ -530,6 +530,19 @@ describe.
   - Depth is 4. The walk goes down from the record, plus up to its root.
 - **Not family:** citations, people and organization lookups, N:N associations, grant rows, system rows.
 - **Service requests:** a service request is a core record with its own family, outside the Secure family.
+  - Expected behaviour, not a bug: a budget inquiry creates a `sprk_servicerequest` regarding the matter. Because the service request is its own root, the matter's Family view does not list the inquiries sent from it.
+- **Ontology tables (ontology review, 2026-10-27; already in `SecureChildLineage`):**
+  - `sprk_signal` is a child of its typed `sprk_matter`, of its subject (the 8 `sprk_regarding*` lookups, excluding `sprk_regardingservicerequest`), and of its Decision Record (`sprk_signal.sprk_decisionrecord`). It is never a child of a policy, a policy version or a core record type.
+  - `sprk_decisionrecord` is a child of its typed core lookups (matter, project, work assignment) and of its subject's regarding lookups. It is never a child of `sprk_action` or a policy version.
+  - `sprk_budgetrevision` is a child of `sprk_budget` and `sprk_matter`.
+  - `sprk_policy` → `sprk_matter` and `sprk_policyversion` → `sprk_policy` (#2084): the EDGE always exists, but a policy is a MEMBER only when its `sprk_matter` is set (a matter-scoped rule). `sprk_policy.sprk_currentversion` is excluded (a loop).
+- **Terms (ontology):**
+  - "family", "member", "root" and "filing edge" are reuse, not invention ("Secure family", "a matter's family" #2084, "invoice family"). Ontology proposes a component-model §3 row.
+  - Keep three neighbours distinct: "subject" (what a Signal or Decision Record is about; never use it for root), "citation" (never filing), "filing" (consistent with ontology's File and File+Act dispositions).
+  - The UI word is "Family". Avoid "Related records", which reads as N:N associations.
+- **To classify before seeding** (owner, with UAC and ebilling):
+  - `sprk_procedureassignment` (one typed lookup per core record; configuration ABOUT the record, not filed content): in or out?
+  - A record-scoped ruleset's record rule is its own `sprk_policy`. It is a member only if it carries `sprk_matter`; ebilling owns that answer.
 
 ### 12.3 Components
 
@@ -551,6 +564,7 @@ describe.
   - A tampered continuation answers exactly like an invalid one.
 - **Root probe:** uses the equalised gate call, so an unknown root and a denied root look the same.
 - **Caps:** depth 4; 500 members per view and a per-level cap. Past a cap it returns `truncated = true`, per-table counts of what IS shown, and a per-level continuation. It never truncates silently.
+- **De-duplication (ontology review):** members are unique by (table, id), and the shallowest edge is kept. Example: a Signal reached from a matter both directly and through its Decision Record appears once. Counts and the 500 cap count unique members.
 - **Fields returned:** id, table, primary name, parent edge, depth. No access metadata (grants, No Access, sharees, owner team).
 - **Not an authorization input.** No cross-caller cache.
 
@@ -662,7 +676,16 @@ None needs path A or B.
 - F2: the Limited flag in the preview;
 - F2: own endpoint file, plus the route-authorization ledger and census.
 
-A, B, D, E, F, §12.5 and §12.7 were accepted as written. Ontology's review is pending.
+A, B, D, E, F, §12.5 and §12.7 were accepted as written.
+
+**Ontology-r1 review (2026-10-27, at eec7704ec4):** the terms and the hierarchy agree. Applied in §12.2 and §12.3 B:
+- the ontology table edges;
+- the policy membership rule;
+- de-duplication by (table, id);
+- the service-request note;
+- the term guidance.
+
+Still open: classify `sprk_procedureassignment` and record-scoped ruleset rules (§12.2).
 
 ### 12.11 Known limits (one line each in the PR)
 
