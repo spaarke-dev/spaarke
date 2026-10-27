@@ -24,6 +24,7 @@ using Sprk.Bff.Api.Tests.AccessControl;
 using Xunit;
 using R = Sprk.Bff.Api.Tests.DataMutation.DocumentContainer.RefileFileRelocationTests;
 using T = Sprk.Bff.Api.Tests.DataMutation.DocumentContainer.DocumentContainerRelocatorTests;
+using RefilePassRoundOneTests = Sprk.Bff.Api.Tests.DataMutation.DocumentContainer.RefilePassRoundOneTests;
 
 namespace Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
 
@@ -585,6 +586,73 @@ public class SecureChildOrdinaryParentMoveTests
         second.Success.Should().BeTrue(second.ErrorMessage);
     }
 
+    [Fact(DisplayName = "194b must fire: past the 60 s time slice the RECENT roots not reached are carried, none dropped, and the next run walks them")]
+    public async Task PastTheTimeSlice_RecentRootsAreCarried_AndWalkedNextRun()
+    {
+        var matters = new[] { Guid.Parse("3b000000-0000-4000-8000-000000194201"), Guid.Parse("3b000000-0000-4000-8000-000000194202"),
+            Guid.Parse("3b000000-0000-4000-8000-000000194203") };
+        var events = matters.Select(_ => Guid.NewGuid()).ToArray();
+        for (var i = 0; i < matters.Length; i++)
+        {
+            MatterMovedToB(matters[i]);
+            _world.Modified(Matter, matters[i], DateTime.UtcNow.AddMinutes(i - 10));
+            Row("sprk_event", events[i], TeamRef(GeneralTeam), ("sprk_regardingmatter", Matter, matters[i]));
+        }
+
+        // Every clock read is 35 s after the last: the first root is walked at 35 s, the slice is spent at 70 s.
+        var time = new RefilePassRoundOneTests.SteppingTime { Step = TimeSpan.FromSeconds(35) };
+        var harness = new JobHarness(_world, _webApi, time: time);
+
+        var (first, run1) = await harness.RunAsync(ordinaryWrites: "true");
+        foreach (var matter in matters)
+            _world.Modified(Matter, matter, SecureChildShareWorld.RecordsLastModified); // found next run only through the carry
+        time.Step = TimeSpan.Zero;
+        var (second, run2) = await harness.RunAsync(ordinaryWrites: "true");
+
+        SecureChildReconciliationJob.OrdinaryTimeSlice.Should().Be(TimeSpan.FromSeconds(60));
+        run1.GetProperty("timeSliceReached").GetBoolean().Should().BeTrue();
+        run1.GetProperty("moved").GetInt32().Should().Be(1, "only the first root was reached inside the slice");
+        run1.GetProperty("carriedRoots").GetInt32().Should().Be(2, "the roots not reached are carried, never dropped");
+        first.Success.Should().BeTrue("a root the slice stops is carried, not failed: " + first.ErrorMessage);
+        run2.GetProperty("timeSliceReached").GetBoolean().Should().BeFalse();
+        run2.GetProperty("retriedRoots").GetInt32().Should().Be(2);
+        run2.GetProperty("moved").GetInt32().Should().Be(2);
+        run2.GetProperty("carriedRoots").GetInt32().Should().Be(0);
+        foreach (var e in events)
+            _world.OwnerOf("sprk_event", e).Should().Be(DataversePrincipalRef.Team(TeamB));
+        second.Success.Should().BeTrue(second.ErrorMessage);
+    }
+
+    [Fact(DisplayName = "194b must fire: past the time slice a SWEPT root not reached holds the sweep cursor; later runs walk it, each once")]
+    public async Task PastTheTimeSlice_TheSweepCursorIsHeld_AndLaterRunsWalkTheRest()
+    {
+        var stale = new[] { Guid.Parse("3c000000-0000-4000-8000-000000194301"), Guid.Parse("3c000000-0000-4000-8000-000000194302"),
+            Guid.Parse("3c000000-0000-4000-8000-000000194303") };
+        var events = stale.Select(_ => Guid.NewGuid()).ToArray();
+        for (var i = 0; i < stale.Length; i++)
+        {
+            MatterMovedToB(stale[i]); // reassigned long ago: reached only by the catch-up sweep
+            Row("sprk_event", events[i], TeamRef(GeneralTeam), ("sprk_regardingmatter", Matter, stale[i]));
+        }
+
+        var time = new RefilePassRoundOneTests.SteppingTime { Step = TimeSpan.FromSeconds(35) };
+        var harness = new JobHarness(_world, _webApi, time: time);
+
+        var (_, run1) = await harness.RunAsync(ordinaryWrites: "true");
+        run1.GetProperty("timeSliceReached").GetBoolean().Should().BeTrue();
+        run1.GetProperty("moved").GetInt32().Should().BeLessThan(3, "the slice stopped the sweep before every root");
+        run1.GetProperty("sweep").GetProperty("complete").GetBoolean().Should().BeFalse("the cursor is held, not moved past");
+
+        time.Step = TimeSpan.Zero;
+        var moved = run1.GetProperty("moved").GetInt32();
+        for (var run = 0; run < 10 && !harness.Last.GetProperty("ordinaryMoves").GetProperty("sweep").GetProperty("complete").GetBoolean(); run++)
+            moved += (await harness.RunAsync(ordinaryWrites: "true")).Ordinary.GetProperty("moved").GetInt32();
+
+        moved.Should().Be(3, "each stale matter's event is moved exactly once: none was dropped, none walked twice");
+        foreach (var e in events)
+            _world.OwnerOf("sprk_event", e).Should().Be(DataversePrincipalRef.Team(TeamB));
+    }
+
     [Fact(DisplayName = "194 must fire: a re-owned document's file moves to the new business unit's container in the same run (the re-file pass)")]
     public async Task TheJob_ReownsTheDocument_AndItsFileFollows()
     {
@@ -767,7 +835,7 @@ public class SecureChildOrdinaryParentMoveTests
         private readonly IConfigurationRoot _configuration = new ConfigurationBuilder().AddInMemoryCollection().Build();
         private readonly SecureChildReconciliationJob _job;
 
-        public JobHarness(SecureChildShareWorld world, ConditionalOwnerWebApi webApi, T.Rig? rig = null)
+        public JobHarness(SecureChildShareWorld world, ConditionalOwnerWebApi webApi, T.Rig? rig = null, TimeProvider? time = null)
         {
             var services = new ServiceCollection();
             services.AddSingleton(SecureChildShareWorld.EntitiesOver(() => world).Object);
@@ -784,7 +852,7 @@ public class SecureChildOrdinaryParentMoveTests
             foreach (var (key, value) in SecureChildShareWorld.Configuration().AsEnumerable())
                 _configuration[key] = value;
             _job = new SecureChildReconciliationJob(
-                provider.GetRequiredService<IServiceScopeFactory>(), TimeProvider.System, _configuration,
+                provider.GetRequiredService<IServiceScopeFactory>(), time ?? TimeProvider.System, _configuration,
                 NullLogger<SecureChildReconciliationJob>.Instance);
         }
 

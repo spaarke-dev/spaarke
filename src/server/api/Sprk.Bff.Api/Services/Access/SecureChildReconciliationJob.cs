@@ -177,6 +177,12 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
     /// <summary>#2159 B2: the re-file pass stops examining this long after it started (the rest waits behind the cursor).</summary>
     internal static readonly TimeSpan RefileTimeSlice = TimeSpan.FromSeconds(60);
 
+    /// <summary>
+    /// UAC task 194b: the ordinary-parent-move pass stops walking roots this long after it started; a root not reached is carried
+    /// (recent) or holds the sweep cursor (swept), exactly as a root the write cap stops, and is walked first next run.
+    /// </summary>
+    internal static readonly TimeSpan OrdinaryTimeSlice = TimeSpan.FromSeconds(60);
+
     /// <summary>#2159 B6: an undecidable document is carried (and fails the run) for at most this many consecutive runs.</summary>
     internal const int MaxUndecidableRuns = 5;
 
@@ -749,6 +755,7 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                     reported = ordinary.Reported,
                     writesAttempted = ordinary.WritesAttempted,
                     capReached = ordinary.CapReached,
+                    timeSliceReached = ordinary.TimeSliceReached,
                     incompleteRoots = ordinary.IncompleteRoots.Take(50).ToArray(),
                     carriedRoots = ordinary.CarriedRoots,
                     // F1-a: the walk's document files handed to the re-file pass, and the roots deferred for want of room.
@@ -900,6 +907,9 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         public int WritesAttempted { get; set; }
         public bool CapReached { get; set; }
 
+        /// <summary>194b: the pass stopped at <see cref="OrdinaryTimeSlice"/>; the roots it did not reach are carried or held.</summary>
+        public bool TimeSliceReached { get; set; }
+
         /// <summary>Roots whose pass did not complete for a reason other than the write cap (a refusal, a failure).</summary>
         public List<string> IncompleteRoots { get; } = new();
         public int CarriedRoots { get; set; }
@@ -960,6 +970,7 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         SecureChildReconciler reconciler, IGenericEntityService dataverse, bool recentWrites, int rootCap,
         DateTimeOffset startedAt, Guid runId, CancellationToken ct)
     {
+        var passStart = _timeProvider.GetTimestamp();
         var writes = recentWrites
                      && bool.TryParse(_configuration[OrdinaryMovesWritesEnabledConfigKey], out var enabled) && enabled;
         var mode = writes ? SecureChildReconcileMode.Apply : SecureChildReconcileMode.ReportOnly;
@@ -1040,6 +1051,18 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                 // The write cap is spent: the rest are carried unread (each is walked again first next run).
                 carry.Add((table, id));
                 run.CapReached = true;
+                continue;
+            }
+
+            // 194b: the time slice is spent. A recent root is carried, a swept one holds the cursor (as a deferred one does);
+            // none is dropped. Report-only keeps no carry, and its window is listed again next run.
+            if (_timeProvider.GetElapsedTime(passStart) >= OrdinaryTimeSlice)
+            {
+                run.TimeSliceReached = true;
+                if (swept)
+                    firstDeferredSweep ??= (table, id);
+                else
+                    carry.Add((table, id));
                 continue;
             }
 
@@ -1167,11 +1190,11 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
             "[SECURE-CHILD-RECONCILE] ordinary-moves run={RunId} mode={Mode} since={Since:o} rootsListed={Listed} " +
             "rootsInRun={InRun} rootsOverflow={Overflow} examined={Examined} alreadyCorrect={AlreadyCorrect} moved={Moved} " +
             "wouldMove={WouldMove} reported={Reported} refused={Refused} failed={Failed} writesAttempted={Writes} " +
-            "capReached={CapReached} incompleteRoots={Incomplete} carriedRoots={Carried} sweepRan={SweepRan} " +
+            "capReached={CapReached} timeSliceReached={TimeSliceReached} incompleteRoots={Incomplete} carriedRoots={Carried} sweepRan={SweepRan} " +
             "sweepRoots={SweepRoots} sweepComplete={SweepComplete} documentsHandedOff={HandedOff} deferredRoots={Deferred}",
             runId, writes ? ModeWrite : ModeReportOnly, since, run.RootsListed, run.RootsInRun, run.RootsOverflow, run.Totals[0],
             run.Totals[1], run.Totals[2], run.Totals[3], run.Reported, run.Totals[5], run.Totals[6], run.WritesAttempted,
-            run.CapReached, run.IncompleteRoots.Count, run.CarriedRoots, run.SweepRan, run.SweepRoots, run.SweepComplete,
+            run.CapReached, run.TimeSliceReached, run.IncompleteRoots.Count, run.CarriedRoots, run.SweepRan, run.SweepRoots, run.SweepComplete,
             run.DocumentsHandedOff, run.DeferredRoots.Count);
         return run;
     }
