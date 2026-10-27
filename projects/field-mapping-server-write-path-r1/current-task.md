@@ -11,7 +11,7 @@
 | **Active task** | None. Every pending task goes through 019, which needs 017 (blocked) |
 | **HEAD** | work branch = master 1fa0cf5cb8 + this checkpoint. No task branches or agent worktrees open |
 | **Running** | Nothing |
-| **Next Action** | **W7 design addendum (in progress, nothing written to design.md yet).** Append to `design.md` a new section "12. W7 — Record family service and Family tool" in the existing section style. It covers:
+| **Next Action** | **W7 design §12 is WRITTEN and both reviews are applied** (UAC-r2 at 7c57ca9d8a, ontology at b6caab3af7). Waiting on the owner for: the §12.9 questions (ribbon button, columns, default view), and classifying sprk_procedureassignment (in or out). Then spec amendment (new FRs) → task-create → TASK-INDEX → owner approval. The text below is the original brief, kept for reference: **W7 design addendum.** Append to `design.md` a new section "12. W7 — Record family service and Family tool" in the existing section style. It covers:
 (a) a canonical edge registry per UAC's 2026-10-27 definition in notes/decisions.md (seeded after UAC task 194 merges);
 (b) a read-only caller-scoped family service plus `GET /api/v1/records/{table}/{id}/family`, following the `/api/v1/records` group in `RecordNoAccessEndpoint.cs`;
 (c) push: `preview`, `includeAssignedTo` and a confirmed `childIds` list (UAC 4a design; extends `Api/FieldMappings/Dtos/PushFieldMappingsRequest.cs`);
