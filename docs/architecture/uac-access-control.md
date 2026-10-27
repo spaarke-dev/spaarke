@@ -37,6 +37,8 @@
 
 **What a grant actually does** (corrected 2026-08-20 — the old "three-plane orchestration" was never built): granting external access = (1) create ONE `sprk_externalrecordaccess` record + (2) invalidate the contact's Redis participation cache (`Api/ExternalAccess/GrantExternalAccessEndpoint.cs:13-23, 98-117`). No web role is assigned (Power Pages retired), and no SPE container membership is written — `SpeContainerMembershipService.GrantMembershipAsync` exists but has NO production callers. Revoking = deactivate the record + invalidate the cache, plus a defensive removal of any stray SPE container permission when a `ContainerId` is supplied (`Api/ExternalAccess/RevokeExternalAccessEndpoint.cs:93-147`).
 
+**Known limit: person removal** (`POST /api/v1/external-access/remove-person`, `Api/ExternalAccess/ExternalPersonRemovalService.cs`): its cleanup of the person's own permission on the containers of their organizations' grants covers their ACTIVE organization memberships only, so a container permission created outside the BFF, on a root granted to an organization whose membership of that person is already inactive, is not removed.
+
 ---
 
 ## Dual-Mode DataverseAccessDataSource
