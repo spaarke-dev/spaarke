@@ -1750,8 +1750,8 @@ public sealed class ContactIdentityBinder
                         continue; // the row changed under us — re-decide against fresh rows
                     }
 
-                    // A failed bind is NOT "resolved anyway": an unbound contact resolved without its binding
-                    // leaves the hijack window open, and the next sign-in retries the bind.
+                    // A failed bind is NOT "resolved anyway": a contact is resolved only once its binding is
+                    // written, so the next sign-in retries the bind.
                     return ContactBindingResult.Denied(ContactBindingDecision.DenyContactBindFailed);
                 }
 
