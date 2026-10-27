@@ -986,6 +986,9 @@ export function tenantLookupRetrySentence(names: string[]): string {
 /** `/grant`'s `invite.status` when the automatic invite did not complete (the grant stands). */
 const GRANT_INVITE_FAILED_STATUS = 'Failed';
 
+/** C2d: `/invite-and-grant`'s `emailErrorCode` when the invite email was attempted and not sent (the grant stands). */
+export const INVITE_EMAIL_NOT_SENT_REASON_CODE = 'sdap.access.invite.email_not_sent';
+
 /** The batch notice's sentence for people granted by `/grant` whose invite was not sent; the notice offers Retry. */
 export function inviteNotSentRetrySentence(inviteNotSent: {
   names: string[];
@@ -1781,6 +1784,10 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     onboardStatus?: string;
     /** `/grant`: what the grant did about the person's invite (slice B3: `WorkAccountInvited`). */
     invite?: { status?: string; errorCode?: string | null } | null;
+    /** `/invite-and-grant`: whether the invite email was sent. Only `false` with `email_not_sent` is a send that did not
+     * happen; `contact_already_has_account` means none was due, and `null` or absent (an older server) reports nothing. */
+    emailSent?: boolean | null;
+    emailErrorCode?: string | null;
   }
 
   /**
@@ -1845,10 +1852,14 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         narrowed: data.narrowed === true,
         workAccountInvited:
           data.onboardStatus === WORK_ACCOUNT_INVITED_STATUS || data.invite?.status === WORK_ACCOUNT_INVITED_STATUS,
+        // C2d: `/invite-and-grant` whose invite email was attempted and not sent takes the same path as `/grant`'s failed
+        // invite (the not-sent notice, and Retry through `/invite`). Already-has-account, sent, or not reported: none.
         inviteFailed:
           data.invite?.status === GRANT_INVITE_FAILED_STATUS
             ? { errorCode: data.invite.errorCode ?? undefined }
-            : undefined,
+            : data.emailSent === false && data.emailErrorCode === INVITE_EMAIL_NOT_SENT_REASON_CODE
+              ? { errorCode: data.emailErrorCode }
+              : undefined,
       };
     },
     [isInternalContact, postJson, recordId, recordType, addExpiryDate]

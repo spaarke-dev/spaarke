@@ -344,6 +344,42 @@ public class GrantSendsInviteTests
     }
 
     /// <summary>
+    /// C2d F2: the same Retry on the WORK-ACCOUNT branch. The person's domain is the customer tenant, so the grant's invite is
+    /// a work-account stamp and notice; the notice did not send (email_not_sent, the stamp cleared). Retry through
+    /// <c>/invite</c> stamps and sends the notice, writes no grant, and creates no portal account.
+    /// </summary>
+    [Fact]
+    public async Task Invite_AfterAGrantWhoseWorkAccountNoticeFailed_SendsTheNotice_AndWritesNoGrant()
+    {
+        var customerTenant = Guid.NewGuid();
+        var discovery = new InviteOrganizationTestKit.DiscoveryHandler();
+        _h.Organizations = InviteOrganizationTestKit.Resolver(
+            discovery, new InviteOrganizationTestKit.RecordingTenantCache(), new[] { customerTenant });
+        discovery.Answer(System.Net.HttpStatusCode.OK, InviteOrganizationTestKit.DiscoveryBody(customerTenant));
+        var contact = UnboundContact();
+        _h.Emails.Failure = new InvalidOperationException("Simulated mailbox refusal.");
+
+        OkBody(await Grant(contact)).Invite.Should().Be(
+            new GrantInviteResult(GrantInviteStatus.Failed, GrantInviteStatus.EmailNotSentReasonCode));
+        var grantWrites = _h.Grants.WriteCount;
+        _h.Identities.Contacts[contact].InvitedTenantId.Should().BeNull("control: the stamp of a notice that did not send is cleared");
+
+        // The cause clears; staff press Retry. The domain is still the customer tenant.
+        _h.Emails.Failure = null;
+        discovery.Answer(System.Net.HttpStatusCode.OK, InviteOrganizationTestKit.DiscoveryBody(customerTenant));
+        var retried = await InviteRoute();
+
+        var body = retried.Should().BeOfType<Ok<InviteExternalUserResponse>>().Subject.Value!;
+        body.EmailSent.Should().BeTrue("Retry is what sends the work-account notice");
+        _h.Emails.Sent.Should().ContainSingle(e => e.To == Email);
+        _h.Identities.Contacts[contact].InvitedTenantId.Should().Be(customerTenant.ToString("D"));
+        _h.Grants.WriteCount.Should().Be(grantWrites, "the grant already exists, and /invite writes none");
+        _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle();
+        _h.Ciam.Attempts.Should().BeEmpty("a work-account invite creates no portal account");
+        _h.Emails.InviteUrls.Should().BeEmpty("and sends no portal-account invite");
+    }
+
+    /// <summary>
     /// The same Retry as a second <c>/grant</c> at the same level: it writes no grant, and it sends the invite only when the
     /// failure wrote nothing (the organisation check). That is why the modal's Retry calls <c>/invite</c> instead.
     /// </summary>
