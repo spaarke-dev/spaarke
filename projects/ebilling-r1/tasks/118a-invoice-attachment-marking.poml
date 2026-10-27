@@ -4,7 +4,7 @@
     <title>InvoiceAttachmentMarking: the shared, host-agnostic marking component (split out of 118 for word-add-in-r1)</title>
     <phase>3 Rules (WP3) — Procedure model (EB-D-148); split 2026-10-27 (EB-D-159)</phase>
     <gate>none. The component does no I/O and its contract was agreed with word-add-in-r1 on 2026-10-21. word-add-in-r1 reviews the PR.</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New .tsx in a shared client library consumed by two hosts (the email UI and the Outlook add-in).</rigor-reason>
     <model-tier>sonnet</model-tier>
