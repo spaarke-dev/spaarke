@@ -689,7 +689,10 @@ public sealed class ContactIdentityBinder
     /// Writes a newly created CIAM account's oid onto the invited contact, plane External — under the same guards
     /// as every other bind: the masking probe first, and a write conditional on the row version. A contact the
     /// invite just CREATED has no version yet, so it is re-read, and bound only if it is still active and unbound
-    /// (a concurrent first sign-in may have bound it in between; that binding is never overwritten).
+    /// (a concurrent first sign-in may have bound it in between; that binding is never overwritten). C5: nor if its external
+    /// access was removed meanwhile: then <see cref="StoreWriteStatus.PreconditionFailed"/> whose Error is the invite reason
+    /// code (<see cref="ContactBindingDecision.InviteContactRemovedAdminReinstate"/>, or
+    /// <see cref="ContactBindingDecision.InviteContactRemovedStateUnavailable"/> for a marker whose empty read is not proven).
     /// </summary>
     /// <param name="consumeInviteCode">
     /// Task 185 (owner Q5): true when this invite's marker-and-hash write landed, so the bind PATCH also clears the
@@ -711,6 +714,21 @@ public sealed class ContactIdentityBinder
             if (row is null)
             {
                 return new StoreWriteResult(StoreWriteStatus.Failed, Error: "the invited contact could not be re-read");
+            }
+
+            // C5: a person whose external access an administrator removed while the invite was in progress is never bound
+            // by it. The Error carries the invite's own reason code (a set marker, or one whose empty read is not proven), so
+            // the invite answers it as the removed refusal and sends nothing.
+            if (row.IsRemoved)
+            {
+                var removedCode = row.RemovedOn is not null
+                    ? ContactBindingDecision.InviteContactRemovedAdminReinstate
+                    : ContactBindingDecision.InviteContactRemovedStateUnavailable;
+                _logger.LogWarning(
+                    "[ID-BIND] Invited contact {ContactId} is not bound ({ReasonCode}): its external access was removed by an "
+                    + "administrator, or whether it was cannot be established, while the invite was in progress",
+                    contactId, removedCode);
+                return new StoreWriteResult(StoreWriteStatus.PreconditionFailed, Error: removedCode);
             }
 
             if (!row.IsActive || row.Binding.Kind != BindingKind.Unbound)

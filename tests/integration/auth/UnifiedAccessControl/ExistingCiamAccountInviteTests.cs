@@ -1743,6 +1743,57 @@ public class ExistingCiamAccountInviteTests
         _h.Identities.Contacts[contact].InvitedEmailHash.Should().Be("v1:newer-invite");
     }
 
+    // ── C5: an invite in progress never binds a person removed meanwhile ─────────────────────────────────────────────
+
+    /// <summary>
+    /// MUST FIRE: an administrator removes the person while the invite is in progress (between the marker and the bind):
+    /// the bind's re-read refuses the removed contact, nothing is bound, no email is sent, the invite this call wrote is
+    /// retracted, and /invite answers the removed refusal (409). A marker whose empty read is not proven is the retryable
+    /// 503 instead.
+    /// </summary>
+    [Theory]
+    [InlineData(true, 409, nameof(ContactBindingDecision.InviteContactRemovedAdminReinstate))]
+    [InlineData(false, 503, nameof(ContactBindingDecision.InviteContactRemovedStateUnavailable))]
+    public async Task Invite_ThePersonIsRemovedWhileTheInviteIsInProgress_IsNotBound_AndNothingIsSent(
+        bool markerSet, int status, string reasonCodeName)
+    {
+        var contact = UnboundContact();
+        _ciam.OnCreate = () =>
+        {
+            var row = _h.Identities.Contacts[contact];
+            if (markerSet)
+                row.RemovedOn = IdentityBindingTestKit.Now;
+            else
+                _h.Identities.RemovedMarkerProof = ColumnReadProofOutcome.Unproven;
+            row.Version += 1000;
+        };
+        var expectedCode = (string)typeof(ContactBindingDecision).GetField(reasonCodeName)!.GetValue(null)!;
+
+        var result = await InviteRoute();
+
+        var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
+        problem.StatusCode.Should().Be(status);
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(expectedCode);
+        var row = _h.Identities.Contacts[contact];
+        (row.Oid, row.Plane).Should().Be(((string?)null, (int?)null), "a removed person is never bound by the invite");
+        _h.Emails.Onboarding.Should().BeEmpty();
+        _h.Emails.InviteUrls.Should().BeEmpty();
+        (row.InvitedOn, row.InviteCodeHash, row.InvitedEmailHash).Should().Be(
+            ((DateTimeOffset?)null, (string?)null, (string?)null), "the invite this call wrote is retracted");
+    }
+
+    /// <summary>MUST NOT FIRE: a person not removed meanwhile is bound and emailed as before.</summary>
+    [Fact]
+    public async Task Invite_ThePersonIsNotRemoved_IsBoundAndEmailed()
+    {
+        var contact = UnboundContact();
+
+        (await InviteRoute()).Should().BeOfType<Ok<InviteExternalUserResponse>>();
+
+        _h.Identities.Contacts[contact].Oid.Should().NotBeNull();
+        _h.Emails.Onboarding.Should().ContainSingle();
+    }
+
     // ── Doubles ─────────────────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>A caller who holds every right on the record, so the grant ceiling passes.</summary>

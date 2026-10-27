@@ -751,6 +751,15 @@ public sealed class ExternalInviteService
             // does not land, no email is sent, so nobody holds a code: a retried invite (ExistingAccount, a new code) repairs it.
             // Task 185 (owner Q5): when the marker and its code hash landed, the same bind PATCH clears the now-inert hash.
             var bind = await binder.BindInvitedContactAsync(contactId, etag, ciamOid, consumeInviteCode: markerLanded, ct);
+            if (RemovedSinceTheInvite(bind, contactId) is { } removed)
+            {
+                // C5: an administrator removed the person while the invite was in progress. Nothing is bound and no email is
+                // sent; the invite this call wrote is retracted and the invite is answered as the removed refusal.
+                await RetractUnsentInviteAsync(binder, contactId, mark.WrittenEmailHash, logger).ConfigureAwait(false);
+                return NotProvisionable(removed, request.Email, logger)
+                       ?? throw new InvalidOperationException("A removed-contact refusal must not provision.");
+            }
+
             if (bind.Status != StoreWriteStatus.Written && !markerLanded)
             {
                 // Task 184 — the repair path needs the marker: without it the first sign-in finds no intent (unless a grant
@@ -799,6 +808,23 @@ public sealed class ExternalInviteService
             throw;
         }
     }
+
+    /// <summary>
+    /// C5: the invite resolution a bind refused because the contact's external access was removed while the invite was in
+    /// progress (<see cref="ContactIdentityBinder.BindInvitedContactAsync"/>: a precondition failure carrying the removed
+    /// reason code): a refusal for a set marker, a retryable failure for one whose empty read is not proven. <c>null</c> for
+    /// any other bind result. Pure.
+    /// </summary>
+    private static InviteContactResolution? RemovedSinceTheInvite(StoreWriteResult bind, Guid contactId)
+        => bind.Status == StoreWriteStatus.PreconditionFailed
+           && bind.Error is ContactBindingDecision.InviteContactRemovedAdminReinstate
+               or ContactBindingDecision.InviteContactRemovedStateUnavailable
+            ? new InviteContactResolution(
+                bind.Error == ContactBindingDecision.InviteContactRemovedAdminReinstate
+                    ? InviteContactAction.Refuse
+                    : InviteContactAction.Fail,
+                contactId, null, bind.Error, ContactIdentityBinder.InviteMessage(bind.Error))
+            : null;
 
     /// <summary>
     /// Task 184 — the retryable 503 of an invite whose contact needed the pending-invite marker as its only evidence and
