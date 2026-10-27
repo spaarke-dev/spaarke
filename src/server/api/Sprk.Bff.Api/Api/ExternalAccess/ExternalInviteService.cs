@@ -102,6 +102,10 @@ public sealed class ExternalInviteService
 
         if (contact.Rows.FirstOrDefault(r => r.ContactId == contactId) is not { } row)
             return GrantInviteAssessment.Done(Failed(GrantInviteStatus.ContactNotActiveReasonCode));
+        // Slice C: a contact whose external access an administrator removed (or whose marker cannot be read) is never
+        // invited, whatever its statecode or binding. Only an administrator reinstates the person.
+        if (row.IsRemoved)
+            return GrantInviteAssessment.Done(Failed(ContactBindingDecision.InviteContactRemovedAdminReinstate));
         if (!row.IsActive)
             return GrantInviteAssessment.Done(Failed(GrantInviteStatus.ContactNotActiveReasonCode));
 

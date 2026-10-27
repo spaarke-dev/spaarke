@@ -286,7 +286,8 @@ public static class InviteExternalUserEndpoint
     /// </summary>
     internal static ProvisionOutcome? WorkAccountNotProvisionable(InviteContactResolution resolution, string email, ILogger logger)
     {
-        // Seam (slice C): a contact carrying the removed marker is refused here with contact_removed_admin_reinstate.
+        // A contact carrying the removed marker never reaches here: the invite decision refused it
+        // (ContactBindingDecision.InviteContactRemovedAdminReinstate, through NotProvisionable).
         if (resolution.Action != InviteContactAction.AlreadyProvisioned)
         {
             return null;

@@ -79,6 +79,9 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
         /// <summary>A9 (r3 task 047): the registration form's department.</summary>
         public string? Department { get; set; }
 
+        /// <summary>Slice C: <c>sprk_externalaccessremovedon</c> — an administrator removed the person's external access.</summary>
+        public DateTimeOffset? RemovedOn { get; set; }
+
         /// <summary>A9 (r3 task 047): <c>ownerid</c> when a team owns the row (the registration create).</summary>
         public Guid? OwnerTeamId { get; set; }
 
@@ -182,6 +185,9 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
 
     /// <summary>The collision columns' readability proof outcome every read is marked by (the Dataverse store's proof).</summary>
     internal ColumnReadProofOutcome CollisionColumnsProof { get; set; } = ColumnReadProofOutcome.Proven;
+
+    /// <summary>Slice C: the removed marker's readability proof outcome every read is marked by (the Dataverse store's proof).</summary>
+    internal ColumnReadProofOutcome RemovedMarkerProof { get; set; } = ColumnReadProofOutcome.Proven;
 
     /// <summary>
     /// Both column sets' outcome: setting it sets both proofs; reading it gives the weaker of the two (Proven only when both
@@ -483,6 +489,20 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
             if (FailGetContact) return Task.FromResult(ContactLookup.Failed);
             if (GetContactStatus == LookupStatus.ColumnMissing) return Task.FromResult(ContactLookup.ColumnMissing);
             return Task.FromResult(Contacts.TryGetValue(contactId, out var c) ? ContactLookup.Of(Row(c)) : ContactLookup.Of());
+        }
+    }
+
+    /// <summary>Slice C: the live marker read, as the Dataverse store answers it (<see cref="RemovedMarkerProof"/>).</summary>
+    public Task<RemovedMarkerRead> ReadRemovedMarkerAsync(Guid contactId, CancellationToken ct)
+    {
+        lock (_gate)
+        {
+            Reads.Add("removed-marker");
+            if (FailGetContact || !Contacts.TryGetValue(contactId, out var c))
+                return Task.FromResult(RemovedMarkerRead.Unreadable);
+            return Task.FromResult(c.RemovedOn is not null
+                ? RemovedMarkerRead.Removed
+                : DataverseContactIdentityStore.RemovedMarkerFrom(null, RemovedMarkerProof));
         }
     }
 
@@ -1010,9 +1030,11 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
         var row = new ContactBindingRow(c.Id, c.StateCode, MaskBindingColumn ? null : c.Oid,
             MaskIdentityColumns ? null : c.Plane, $"W/\"{c.Version}\"", c.Email,
             MaskIdentityColumns || MaskCollisionColumns ? null : c.Flag,
-            c.KeyMirror, MaskHomeColumns ? null : c.ExternalTenantId);
-        return DataverseContactIdentityStore.WithIdentityColumnsProof(
-            ContactLookup.Of(row), BindingColumnsProof, CollisionColumnsProof).Rows[0];
+            c.KeyMirror, MaskHomeColumns ? null : c.ExternalTenantId) { RemovedOn = c.RemovedOn };
+        return DataverseContactIdentityStore.WithRemovedMarkerProof(
+            DataverseContactIdentityStore.WithIdentityColumnsProof(
+                ContactLookup.Of(row), BindingColumnsProof, CollisionColumnsProof),
+            RemovedMarkerProof).Rows[0];
     }
 
     private SystemUserIdentityRow UserRow(SystemUser u)

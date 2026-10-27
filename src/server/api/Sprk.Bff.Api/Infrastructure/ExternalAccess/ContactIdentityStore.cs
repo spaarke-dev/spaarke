@@ -171,6 +171,19 @@ public enum BindingReadability
 /// <summary>One page of a scan, and the continuation for the next page (null when done).</summary>
 public sealed record StorePage<T>(LookupStatus Status, IReadOnlyList<T> Rows, string? Continuation, string? Error = null);
 
+/// <summary>Slice C: what the live read of a contact's removed marker says. Only <see cref="NotRemoved"/> composes anything.</summary>
+public enum RemovedMarkerRead
+{
+    /// <summary>The marker, or the row, could not be read, or an empty marker's read is not proven. Composes nothing.</summary>
+    Unreadable = 0,
+
+    /// <summary>The marker read empty on a proven read: the person's external access was not removed.</summary>
+    NotRemoved = 1,
+
+    /// <summary>The marker is set: an administrator removed the person's external access. Composes nothing.</summary>
+    Removed = 2,
+}
+
 /// <summary>The identity-binding reads and writes. Testing seam (ADR-010).</summary>
 public interface IContactIdentityStore
 {
@@ -196,6 +209,13 @@ public interface IContactIdentityStore
 
     /// <summary>One contact by id; a missing row reads as zero rows.</summary>
     Task<ContactLookup> GetContactAsync(Guid contactId, CancellationToken ct);
+
+    /// <summary>
+    /// Slice C: whether an administrator removed <paramref name="contactId"/>'s external access, read LIVE. An empty marker is
+    /// <see cref="RemovedMarkerRead.NotRemoved"/> only on a proven read; an unproven or faulted read, or a missing row, is
+    /// <see cref="RemovedMarkerRead.Unreadable"/> (fail closed). The composition's check; it never caches an answer.
+    /// </summary>
+    Task<RemovedMarkerRead> ReadRemovedMarkerAsync(Guid contactId, CancellationToken ct);
 
     /// <summary>Systemusers (any state) whose <c>sprk_primarycontact</c> is one of <paramref name="contactIds"/>.</summary>
     Task<ReferenceLookup> FindSystemUsersLinkingAsync(IReadOnlyCollection<Guid> contactIds, CancellationToken ct);
@@ -373,7 +393,18 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
         "contactid", "statecode", "emailaddress1",
         ContactBindingDecision.ExternalObjectIdColumn, ContactBindingDecision.IdentityPlaneColumn,
         ContactBindingDecision.KeyMirrorColumn,
-        FlagOnColumn, FlagOidColumn, FlagPlaneColumn, FlagReasonColumn, FlagPartiesColumn);
+        FlagOnColumn, FlagOidColumn, FlagPlaneColumn, FlagReasonColumn, FlagPartiesColumn,
+        ContactBindingDecision.ExternalAccessRemovedOnColumn);
+
+    /// <summary>
+    /// Slice C: the removed marker's field-secured column (its own readability proof). An EMPTY marker is trusted only while
+    /// the BFF's read of it is proven; a row whose marker read empty without that proof is marked
+    /// (<see cref="ContactBindingRow.RemovedMarkerUnproven"/>) and counts as removed.
+    /// </summary>
+    public static readonly IReadOnlyList<string> RemovedMarkerColumns = new[]
+    {
+        ContactBindingDecision.ExternalAccessRemovedOnColumn,
+    };
 
     /// <summary>
     /// The field-secured binding columns: the binding and its plane. An EMPTY plane is trusted only while the BFF's read of
@@ -425,6 +456,10 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     // hidden one. Either way an empty stamp is no stamp (the bind is refused); the proof names the reason for the operator.
     private readonly SecuredColumnReadProof _inviteStampColumnsProof;
 
+    // Slice C: the proof that this store's identity can READ the removed marker. A marker read empty without it may be a
+    // hidden one, so the row counts as removed (fail closed).
+    private readonly SecuredColumnReadProof _removedMarkerProof;
+
     /// <summary>The store for an environment, authenticated by <paramref name="getToken"/>.</summary>
     public DataverseContactIdentityStore(
         IHttpClientFactory httpClientFactory,
@@ -459,6 +494,7 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
         _bindingColumnsProof = readProofs(source, ContactTable, BindingColumns);
         _collisionColumnsProof = readProofs(source, ContactTable, CollisionColumns);
         _inviteStampColumnsProof = readProofs(source, ContactTable, InviteStampColumns);
+        _removedMarkerProof = readProofs(source, ContactTable, RemovedMarkerColumns);
     }
 
     /// <summary>
@@ -979,6 +1015,25 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     }
 
     /// <summary>
+    /// Slice C: marks every row whose removed marker read EMPTY while <paramref name="proof"/> is not
+    /// <see cref="ColumnReadProofOutcome.Proven"/> (<see cref="ContactBindingRow.RemovedMarkerUnproven"/>): such a row counts as
+    /// removed. A marker that was read is a value and is kept. Pure.
+    /// </summary>
+    internal static ContactLookup WithRemovedMarkerProof(ContactLookup lookup, ColumnReadProofOutcome proof)
+        => lookup.Status != LookupStatus.Read || proof == ColumnReadProofOutcome.Proven
+            ? lookup
+            : lookup with { Rows = lookup.Rows.Select(RemovedMarked).ToList() };
+
+    /// <summary>The systemuser form of the marking above: its linked contact. Pure.</summary>
+    internal static SystemUserIdentityRow WithRemovedMarkerProof(SystemUserIdentityRow row, ColumnReadProofOutcome proof)
+        => row.LinkedContact is null || proof == ColumnReadProofOutcome.Proven
+            ? row
+            : row with { LinkedContact = RemovedMarked(row.LinkedContact) };
+
+    private static ContactBindingRow RemovedMarked(ContactBindingRow row)
+        => row.RemovedOn is not null ? row : row with { RemovedMarkerUnproven = true };
+
+    /// <summary>
     /// The interactive-systemuser scan: enabled, not an application user, and a human access mode —
     /// Read-Write (0), Administrative (1) or Read (2). Support User (3), Non-interactive (4) and Delegated
     /// Admin (5) are excluded. The linked contact is expanded so a verified user costs no further query.
@@ -1214,7 +1269,34 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
             StringOf(row, "emailaddress1"),
             flag,
             StringOf(row, ContactBindingDecision.KeyMirrorColumn),
-            StringOf(row, ContactBindingDecision.ExternalTenantIdColumn));
+            StringOf(row, ContactBindingDecision.ExternalTenantIdColumn))
+        {
+            RemovedOn = RemovedOnOf(row),
+        };
+    }
+
+    /// <summary>
+    /// Slice C: the removed marker as read from one contact row. A value that does not parse as a date is still a marker
+    /// (something wrote it), so it reads as <see cref="DateTimeOffset.MinValue"/>, never as "not removed".
+    /// </summary>
+    internal static DateTimeOffset? RemovedOnOf(JsonElement row)
+    {
+        if (!row.TryGetProperty(ContactBindingDecision.ExternalAccessRemovedOnColumn, out var value)
+            || value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+        {
+            return null;
+        }
+
+        if (value.ValueKind == JsonValueKind.String && string.IsNullOrWhiteSpace(value.GetString()))
+        {
+            return null;
+        }
+
+        return value.ValueKind == JsonValueKind.String
+               && DateTimeOffset.TryParse(value.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal,
+                   out var removedOn)
+            ? removedOn
+            : DateTimeOffset.MinValue;
     }
 
     /// <summary>Parses one systemuser row (with an optional expanded linked contact) from Web API JSON.</summary>
@@ -1366,6 +1448,52 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
         var row = doc is null ? null : ParseContactRow(doc.RootElement);
         return row is null ? ContactLookup.Failed : await ProvenAsync(ContactLookup.Of(row), ct).ConfigureAwait(false);
     }
+
+    /// <inheritdoc />
+    public async Task<RemovedMarkerRead> ReadRemovedMarkerAsync(Guid contactId, CancellationToken ct)
+    {
+        var (status, code, body, _) = await GetAsync(BuildRemovedMarkerReadPath(contactId), ct).ConfigureAwait(false);
+        var (readable, removedOn) = ParseRemovedMarkerResponse(status, code, body);
+        if (!readable)
+        {
+            return RemovedMarkerRead.Unreadable;
+        }
+
+        return removedOn is not null
+            ? RemovedMarkerRead.Removed
+            : RemovedMarkerFrom(null, await _removedMarkerProof.ProveAsync(ct).ConfigureAwait(false));
+    }
+
+    /// <summary>Slice C: one contact's removed marker, by id, in a query of its own. Any state: a row is never filtered out.</summary>
+    public static string BuildRemovedMarkerReadPath(Guid contactId)
+        => $"contacts({contactId:D})?$select={ContactBindingDecision.ExternalAccessRemovedOnColumn}";
+
+    /// <summary>
+    /// Slice C: the marker read's answer. Not <c>Readable</c> unless the read succeeded and returned the row as an object; a
+    /// missing row (404), a failed read or a body that is not JSON is unreadable (fail closed). Pure.
+    /// </summary>
+    internal static (bool Readable, DateTimeOffset? RemovedOn) ParseRemovedMarkerResponse(
+        LookupStatus status, HttpStatusCode code, string? body)
+    {
+        if (status != LookupStatus.Read || code == HttpStatusCode.NotFound || body is null)
+        {
+            return (false, null);
+        }
+
+        using var doc = TryParseJson(body);
+        return doc is null || doc.RootElement.ValueKind != JsonValueKind.Object
+            ? (false, null)
+            : (true, RemovedOnOf(doc.RootElement));
+    }
+
+    /// <summary>
+    /// Slice C: the live marker read's answer. A marker that was read is <see cref="RemovedMarkerRead.Removed"/>; an empty one is
+    /// <see cref="RemovedMarkerRead.NotRemoved"/> only on a proven read, else <see cref="RemovedMarkerRead.Unreadable"/>. Pure.
+    /// </summary>
+    internal static RemovedMarkerRead RemovedMarkerFrom(DateTimeOffset? removedOn, ColumnReadProofOutcome proof)
+        => removedOn is not null ? RemovedMarkerRead.Removed
+            : proof == ColumnReadProofOutcome.Proven ? RemovedMarkerRead.NotRemoved
+            : RemovedMarkerRead.Unreadable;
 
     /// <inheritdoc />
     public async Task<ReferenceLookup> FindSystemUsersLinkingAsync(IReadOnlyCollection<Guid> contactIds, CancellationToken ct)
@@ -1832,7 +1960,11 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
         }
 
         var (binding, collision) = await ProofsForAsync(linked, ct).ConfigureAwait(false);
-        return page with { Rows = page.Rows.Select(r => WithIdentityColumnsProof(r, binding, collision)).ToList() };
+        var removed = await RemovedMarkerProofForAsync(linked, ct).ConfigureAwait(false);
+        return page with
+        {
+            Rows = page.Rows.Select(r => WithRemovedMarkerProof(WithIdentityColumnsProof(r, binding, collision), removed)).ToList(),
+        };
     }
 
     /// <inheritdoc />
@@ -1861,7 +1993,8 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
         }
 
         var (binding, collision) = await ProofsForAsync(lookup.Rows, ct).ConfigureAwait(false);
-        return WithIdentityColumnsProof(lookup, binding, collision);
+        var marked = WithIdentityColumnsProof(lookup, binding, collision);
+        return WithRemovedMarkerProof(marked, await RemovedMarkerProofForAsync(marked.Rows, ct).ConfigureAwait(false));
     }
 
     private async Task<SystemUserIdentityRow> ProvenAsync(SystemUserIdentityRow row, CancellationToken ct)
@@ -1872,8 +2005,20 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
         }
 
         var (binding, collision) = await ProofsForAsync(new[] { row.LinkedContact }, ct).ConfigureAwait(false);
-        return WithIdentityColumnsProof(row, binding, collision);
+        var marked = WithIdentityColumnsProof(row, binding, collision);
+        return WithRemovedMarkerProof(marked,
+            await RemovedMarkerProofForAsync(new[] { marked.LinkedContact! }, ct).ConfigureAwait(false));
     }
+
+    /// <summary>
+    /// Slice C: the removed marker's proof for <paramref name="rows"/>. Needed only when a marker read empty, since a marker
+    /// that was read is a value. A fault or an unproven read is not <see cref="ColumnReadProofOutcome.Proven"/>.
+    /// </summary>
+    private async Task<ColumnReadProofOutcome> RemovedMarkerProofForAsync(
+        IReadOnlyCollection<ContactBindingRow> rows, CancellationToken ct)
+        => rows.Any(r => r.RemovedOn is null)
+            ? await _removedMarkerProof.ProveAsync(ct).ConfigureAwait(false)
+            : ColumnReadProofOutcome.Proven;
 
     private async Task<(ColumnReadProofOutcome Binding, ColumnReadProofOutcome Collision)> ProofsForAsync(
         IReadOnlyCollection<ContactBindingRow> rows, CancellationToken ct)

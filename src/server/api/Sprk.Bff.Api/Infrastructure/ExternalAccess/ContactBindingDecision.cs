@@ -301,6 +301,25 @@ public sealed record ContactBindingRow(
     public bool CollisionColumnsUnproven { get; init; }
 
     /// <summary>
+    /// Slice C: <c>contact.sprk_externalaccessremovedon</c> as read with the row (<see cref="ContactBindingDecision.ExternalAccessRemovedOnColumn"/>):
+    /// when an administrator removed the person's external access. <c>null</c> when it read empty.
+    /// </summary>
+    public DateTimeOffset? RemovedOn { get; init; }
+
+    /// <summary>
+    /// Slice C: <c>true</c> when this row's removed marker read EMPTY while the BFF's read of that column was NOT proven
+    /// (<see cref="SecuredColumnReadProof"/>, its own column set). A hidden marker reads empty, so the row counts as removed.
+    /// </summary>
+    public bool RemovedMarkerUnproven { get; init; }
+
+    /// <summary>
+    /// Slice C: the person's external access was removed by an administrator (<see cref="RemovedOn"/> set), or whether it was
+    /// cannot be read (<see cref="RemovedMarkerUnproven"/>). Either way the contact neither resolves, binds nor is invited
+    /// (fail closed), whatever its <c>statecode</c>.
+    /// </summary>
+    public bool IsRemoved => RemovedOn is not null || RemovedMarkerUnproven;
+
+    /// <summary>
     /// The binding, read by <see cref="ContactBindingDecision.ReadBinding"/>; <see cref="BindingKind.Unreadable"/> when the
     /// plane read empty and the identity columns' read is not proven (<see cref="IdentityColumnsUnproven"/>).
     /// </summary>
@@ -829,6 +848,20 @@ public static class ContactBindingDecision
     /// </summary>
     public const string DenyContactNotInvited = "sdap.access.deny.contact_not_invited";
 
+    /// <summary>
+    /// Slice C: an administrator removed this person's external access (<see cref="ExternalAccessRemovedOnColumn"/> is set),
+    /// or whether they did cannot be read (<see cref="ContactBindingRow.IsRemoved"/>). A removed contact neither resolves nor
+    /// binds, on any plane and whatever its <c>statecode</c>; nothing is written and nothing is flagged. Only an
+    /// administrator can reinstate the person.
+    /// </summary>
+    public const string DenyContactRemoved = "sdap.access.deny.contact_removed";
+
+    /// <summary>
+    /// Slice C: an invite (staff or automatic) to a contact whose external access an administrator removed, or whose removed
+    /// marker cannot be read. Refused (409, nothing written or sent): only an administrator can reinstate the person.
+    /// </summary>
+    public const string InviteContactRemovedAdminReinstate = "sdap.access.deny.contact_removed_admin_reinstate";
+
     // ── Invite reason codes ─────────────────────────────────────────────────────────────────────────
 
     /// <summary>The invite email matches a contact bound on the workforce plane.</summary>
@@ -1006,6 +1039,14 @@ public static class ContactBindingDecision
         }
 
         var row = rows[0];
+
+        // Slice C — a contact whose external access an administrator removed (or whose marker cannot be read) is never
+        // bound or resolved by email, and never created around.
+        if (row.IsRemoved)
+        {
+            return Deny(DenyContactRemoved);
+        }
+
         var binding = row.Binding;
 
         // E5
@@ -1289,6 +1330,12 @@ public static class ContactBindingDecision
         if (oidRows.Count == 1)
         {
             var carrier = oidRows[0];
+            if (carrier.IsRemoved)
+            {
+                // Slice C — a removed contact verifies no link and binds nothing.
+                return Deny(DenyContactRemoved);
+            }
+
             if (carrier.ContactId == linkedContactId)
             {
                 // L3 / L4
@@ -1316,6 +1363,12 @@ public static class ContactBindingDecision
         if (linked is null)
         {
             return Deny(DenyLinkedContactMissing);
+        }
+
+        // Slice C — a removed linked contact verifies no link and binds nothing.
+        if (linked.IsRemoved)
+        {
+            return Deny(DenyContactRemoved);
         }
 
         var binding = linked.Binding;
@@ -1401,6 +1454,14 @@ public static class ContactBindingDecision
         }
 
         var row = rows[0];
+
+        // Slice C — an ordinary invite never reaches a contact whose external access an administrator removed (or whose
+        // marker cannot be read). Refused, nothing flagged: only an administrator reinstates the person.
+        if (row.IsRemoved)
+        {
+            return new InviteDecision(InviteContactAction.Refuse, row.ContactId, InviteContactRemovedAdminReinstate);
+        }
+
         var binding = row.Binding;
         if (binding.Kind == BindingKind.Unreadable)
         {
@@ -1437,6 +1498,27 @@ public static class ContactBindingDecision
         return binding.Kind == BindingKind.Bound
             ? new InviteDecision(InviteContactAction.AlreadyProvisioned, row.ContactId)
             : new InviteDecision(InviteContactAction.ProvisionExisting, row.ContactId);
+    }
+
+    /// <summary>
+    /// Slice C: consulted only when <see cref="DecideInvite"/> would CREATE a contact (no active contact carries the email).
+    /// An INACTIVE contact for the email whose external access an administrator removed (or whose marker cannot be read)
+    /// refuses the invite with <see cref="InviteContactRemovedAdminReinstate"/>: a new contact is never created around a
+    /// removal. A read that failed is <see cref="InviteContactAction.Fail"/> (a create is never reached while a removed
+    /// contact cannot be ruled out). <c>null</c> when the create may go ahead. Nothing is flagged. Pure.
+    /// </summary>
+    public static InviteDecision? DecideInviteInactiveMatch(ContactLookup inactiveLookup)
+    {
+        ArgumentNullException.ThrowIfNull(inactiveLookup);
+
+        if (inactiveLookup.Status != LookupStatus.Read)
+        {
+            return new InviteDecision(InviteContactAction.Fail, ReasonCode: InviteContactLookupFailed);
+        }
+
+        return inactiveLookup.Rows.FirstOrDefault(r => r.ContactId != Guid.Empty && !r.IsActive && r.IsRemoved) is { } removed
+            ? new InviteDecision(InviteContactAction.Refuse, removed.ContactId, InviteContactRemovedAdminReinstate)
+            : null;
     }
 
     /// <summary>
@@ -1751,7 +1833,9 @@ public static class ContactBindingDecision
     /// <summary>
     /// <c>contact.sprk_externalaccessremovedon</c> — when an administrator removed all external access for the person (UTC).
     /// FIELD-SECURED: every user reads it, only the BFF writes it
-    /// (<c>scripts/Set-ExternalAccessContactSecuritySchema.ps1</c>). Created by the schema step; no BFF read or write yet.
+    /// (<c>scripts/Set-ExternalAccessContactSecuritySchema.ps1</c>). Slice C reads it with every binding row
+    /// (<see cref="ContactBindingRow.IsRemoved"/>) and in the live composition read; an empty value counts only on a proven
+    /// read. Nothing in the BFF writes it yet.
     /// </summary>
     public const string ExternalAccessRemovedOnColumn = "sprk_externalaccessremovedon";
 
@@ -1930,6 +2014,12 @@ public static class ContactBindingDecision
 
         if (matches.Count == 1)
         {
+            // Slice C — a removed contact resolves to nothing, whatever its statecode.
+            if (matches[0].IsRemoved)
+            {
+                return Deny(DenyContactRemoved);
+            }
+
             return matches[0].IsActive
                 ? new BindingDecision(BindingAction.ResolveByOid, matches[0].ContactId)
                 : Deny(DenyContactInactive);
@@ -2004,6 +2094,13 @@ public static class ContactBindingDecision
         }
 
         var row = rows[0];
+
+        // Slice C — a removed contact is never registered onto, bound or created around.
+        if (row.IsRemoved)
+        {
+            return new RegistrationEmailDecision(RegistrationEmailAction.Deny, row.ContactId, DenyCode: DenyContactRemoved);
+        }
+
         var binding = row.Binding;
         if (binding.Kind == BindingKind.Bound && callerOid != Guid.Empty && binding.Oid == callerOid)
         {
@@ -2056,6 +2153,13 @@ public static class ContactBindingDecision
         }
 
         var rows = inactiveLookup.Rows.Where(r => !r.IsActive && r.ContactId != Guid.Empty).ToList();
+
+        // Slice C — the person whose external access an administrator removed is told so, never flagged as a duplicate.
+        if (rows.FirstOrDefault(r => r.IsRemoved) is { } removed)
+        {
+            return new RegistrationEmailDecision(RegistrationEmailAction.Deny, removed.ContactId, DenyCode: DenyContactRemoved);
+        }
+
         return rows.Count == 0
             ? new RegistrationEmailDecision(RegistrationEmailAction.Create)
             : new RegistrationEmailDecision(RegistrationEmailAction.Conflict,
@@ -2090,6 +2194,13 @@ public static class ContactBindingDecision
 
         if (rows.Count == 1)
         {
+            // Slice C — a removed contact (or one whose removed marker cannot be read) resolves to nothing, whatever its
+            // statecode: reactivating the row does not reinstate the person.
+            if (rows[0].IsRemoved)
+            {
+                return Deny(DenyContactRemoved);
+            }
+
             // D3 — never falls through to the email bind and never creates a replacement: deactivating a
             // contact is how an operator removes a person, and auto-creation must not undo that.
             return rows[0].IsActive

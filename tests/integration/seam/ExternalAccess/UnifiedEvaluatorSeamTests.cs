@@ -1541,6 +1541,98 @@ public sealed class UnifiedEvaluatorSeamTests
         ciam.Rights.Should().BeEmpty($"CIAM: the same ({state})");
     }
 
+    /// <summary>Slice C: an identity store whose live removed-marker read answers <paramref name="answer"/> (or throws).</summary>
+    private static IContactIdentityStore MarkerStore(RemovedMarkerRead? answer, bool throws = false)
+    {
+        var store = new Mock<IContactIdentityStore>(MockBehavior.Strict);
+        store.Setup(s => s.GetSystemUserAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid id, CancellationToken _) =>
+                new SystemUserLookup(LookupStatus.Read, new SystemUserIdentityRow(id, null, null, null, null, null)));
+        if (throws)
+        {
+            store.Setup(s => s.ReadRemovedMarkerAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new HttpRequestException("marker read down"));
+        }
+        else
+        {
+            store.Setup(s => s.ReadRemovedMarkerAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(answer!.Value);
+        }
+
+        return store.Object;
+    }
+
+    public static TheoryData<string> RemovedOrUnreadableMarkers => new() { "removed", "unreadable", "read-throws" };
+
+    /// <summary>
+    /// Slice C, MUST FIRE: an ACTIVE contact (statecode 0, as a reactivated one is) whose removed marker is set, cannot be
+    /// read, or whose read throws composes the EMPTY set on both contact planes. MUST NOT FIRE: the same world with the
+    /// marker read empty on a proven read composes the grant as before.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(RemovedOrUnreadableMarkers))]
+    public async Task ActiveContact_RemovedOrUnreadableMarker_ComposesToNothing_OnBothContactPlanes(string marker)
+    {
+        var root = RootId(ProjectEntity, 97);
+        var participations = new ParticipationWorld();
+        participations.SetGrants(GrantsOn(ProjectEntity, Direct(root, ExternalAccessLevel.FullAccess)));
+        participations.ContactState.Should().Be(ContactRecordState.Active, "the contact row is active (or was reactivated)");
+        var membership = new Mock<IMembershipResolverService>(MockBehavior.Strict).Object;
+
+        var control = BuildSut(BuildDataverse(contactHeld: false), membership, participations,
+            identityStore: MarkerStore(RemovedMarkerRead.NotRemoved));
+        (await control.ComposeForCiamContactAsync(ContactId, ProjectEntity, CancellationToken.None))
+            .Rights.Should().ContainKey(root, "control: an unmarked contact holds its grant");
+        (await control.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None))
+            .Rights.Should().ContainKey(root, "control: the same on the workforce contact plane");
+
+        var store = marker switch
+        {
+            "removed" => MarkerStore(RemovedMarkerRead.Removed),
+            "unreadable" => MarkerStore(RemovedMarkerRead.Unreadable),
+            _ => MarkerStore(null, throws: true),
+        };
+        var evaluator = BuildSut(BuildDataverse(contactHeld: false), membership, participations, identityStore: store);
+
+        var ciam = await evaluator.ComposeForCiamContactAsync(ContactId, ProjectEntity, CancellationToken.None);
+        var workforce = await evaluator.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None);
+
+        ciam.Rights.Should().BeEmpty($"CIAM: a contact whose marker is {marker} confers nothing, whatever its statecode");
+        workforce.Rights.Should().BeEmpty($"workforce contact: the same ({marker})");
+    }
+
+    /// <summary>
+    /// Slice C: a systemuser's linked contact whose external access was removed contributes no grant; the systemuser's own
+    /// membership is unchanged. Control: the same world with the marker read empty.
+    /// </summary>
+    [Fact]
+    public async Task RemovedLinkedContact_OfASystemUser_ContributesNoGrant_TheMembershipIsUnchanged()
+    {
+        var memberRecord = RootId(ProjectEntity, 98);
+        var grantOnlyRecord = RootId(ProjectEntity, 99);
+
+        var membership = new Mock<IMembershipResolverService>();
+        membership.Setup(m => m.ResolveAsync(
+                SystemUserId, ProjectEntity, It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(ProjectEntity, memberRecord));
+
+        var participations = new ParticipationWorld();
+        participations.SetGrants(GrantsOn(ProjectEntity, Direct(grantOnlyRecord, ExternalAccessLevel.FullAccess)));
+
+        var unmarked = await BuildSut(BuildDataverse(contactHeld: false), membership.Object, participations,
+                identityStore: MarkerStore(RemovedMarkerRead.NotRemoved))
+            .ComposeAsync(SystemUserPrincipal(), ProjectEntity, CancellationToken.None);
+        unmarked.Rights.Should().ContainKey(grantOnlyRecord, "control: the unmarked linked contact's grant applies");
+
+        var removed = await BuildSut(BuildDataverse(contactHeld: false), membership.Object, participations,
+                identityStore: MarkerStore(RemovedMarkerRead.Removed))
+            .ComposeAsync(SystemUserPrincipal(), ProjectEntity, CancellationToken.None);
+
+        removed.Rights.Should().NotContainKey(grantOnlyRecord, "the removed linked contact's grant confers nothing");
+        removed.RightsFor(memberRecord).Should().Be(AccessibleRecordSetService.MembershipTermRights,
+            "the systemuser's own membership is unchanged");
+    }
+
     /// <summary>
     /// C5: a systemuser's INACTIVE linked contact contributes no grant, while the systemuser's own membership is
     /// unchanged — internal access is Dataverse's answer, never the contact's. Positive twin: the active contact's

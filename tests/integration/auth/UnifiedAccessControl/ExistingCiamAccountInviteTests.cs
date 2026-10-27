@@ -1415,6 +1415,52 @@ public class ExistingCiamAccountInviteTests
         _h.Grants.Rows.Should().BeEmpty();
     }
 
+    /// <summary>
+    /// Slice C, MUST FIRE: an ordinary invite (/invite and /invite-and-grant) to a contact whose external access an
+    /// administrator removed is refused with the endpoint's existing refusal shape (409 + reason code), active or inactive,
+    /// and an unreadable marker refuses too. Nothing is created, written, granted or sent. MUST NOT FIRE: the unmarked twin
+    /// is invited as before.
+    /// </summary>
+    [Theory]
+    [InlineData("active-removed")]
+    [InlineData("inactive-removed")]
+    [InlineData("active-unreadable")]
+    public async Task AnInvite_ToARemovedContact_IsRefused_ContactRemovedAdminReinstate(string how)
+    {
+        var contact = Guid.NewGuid();
+        _h.Identities.AddContact(contact, email: Email, stateCode: how.StartsWith("inactive", StringComparison.Ordinal) ? 1 : 0);
+        if (how.EndsWith("removed", StringComparison.Ordinal))
+        {
+            _h.Identities.Contacts[contact].RemovedOn = DateTimeOffset.UtcNow;
+        }
+        else
+        {
+            _h.Identities.RemovedMarkerProof = ColumnReadProofOutcome.Unproven;
+        }
+
+        foreach (var result in new[] { await InviteRoute(), await InviteAndGrant() })
+        {
+            var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
+            problem.StatusCode.Should().Be(409);
+            problem.ProblemDetails.Extensions["reasonCode"].Should().Be(ContactBindingDecision.InviteContactRemovedAdminReinstate);
+        }
+
+        _h.Identities.Contacts.Should().ContainSingle("no contact is created around a removal");
+        _h.Identities.Writes.Should().BeEmpty();
+        _h.Grants.Rows.Should().BeEmpty();
+        _ciam.Created.Should().BeEmpty();
+        _h.Emails.InviteUrls.Should().BeEmpty();
+    }
+
+    /// <summary>Slice C, MUST NOT FIRE: the unmarked twin of the test above is invited exactly as before.</summary>
+    [Fact]
+    public async Task AnInvite_ToAnUnmarkedContact_IsNotRefused()
+    {
+        UnboundContact();
+
+        (await InviteRoute()).Should().BeOfType<Ok<InviteExternalUserResponse>>();
+    }
+
     /// <summary>MUST FIRE: a work-account invite to a contact bound on a workforce plane is refused with the existing code.</summary>
     [Fact]
     public async Task AWorkAccountInvite_ToAWorkforceBoundContact_IsRefused_WithTheExistingCode()

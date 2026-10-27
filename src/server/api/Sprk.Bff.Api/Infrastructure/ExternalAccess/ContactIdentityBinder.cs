@@ -527,7 +527,29 @@ public sealed class ContactIdentityBinder
         ArgumentException.ThrowIfNullOrWhiteSpace(email);
 
         var emailLookup = await _store.FindActiveContactsByEmailAsync(email, ct).ConfigureAwait(false);
-        return await DecideInviteContactAsync(emailLookup, ct).ConfigureAwait(false);
+        var resolution = await DecideInviteContactAsync(emailLookup, ct).ConfigureAwait(false);
+        if (resolution.Action != InviteContactAction.CreateContact)
+        {
+            return resolution;
+        }
+
+        // Slice C: no active contact carries the email. A new contact is never created around a removal: an inactive contact
+        // for the email whose external access an administrator removed refuses the invite.
+        var inactiveLookup = await _store.FindInactiveContactsByEmailAsync(email, ct).ConfigureAwait(false);
+        if (ContactBindingDecision.DecideInviteInactiveMatch(inactiveLookup) is not { } inactive)
+        {
+            return resolution;
+        }
+
+        if (inactive.Action == InviteContactAction.Refuse)
+        {
+            _logger.LogWarning(
+                "[ID-BIND] Invite REFUSED ({ReasonCode}) — contact {ContactId}'s external access was removed by an administrator",
+                inactive.ReasonCode, inactive.ContactId);
+        }
+
+        return new InviteContactResolution(inactive.Action, inactive.ContactId, null, inactive.ReasonCode,
+            InviteMessage(inactive.ReasonCode));
     }
 
     /// <summary>
@@ -545,7 +567,15 @@ public sealed class ContactIdentityBinder
 
         var row = decision.ContactId is { } id ? emailLookup.Rows.FirstOrDefault(r => r.ContactId == id) : null;
 
-        if (decision.Action == InviteContactAction.Refuse)
+        if (decision.Action == InviteContactAction.Refuse
+            && decision.ReasonCode == ContactBindingDecision.InviteContactRemovedAdminReinstate)
+        {
+            // Slice C: not a collision; nothing is flagged. Only an administrator reinstates the person.
+            _logger.LogWarning(
+                "[ID-BIND] Invite REFUSED ({ReasonCode}) — contact {ContactId}'s external access was removed by an administrator",
+                decision.ReasonCode, decision.ContactId);
+        }
+        else if (decision.Action == InviteContactAction.Refuse)
         {
             var known = new Dictionary<Guid, ContactBindingRow>();
             Remember(known, emailLookup);
@@ -715,6 +745,9 @@ public sealed class ContactIdentityBinder
         ContactBindingDecision.InviteContactAlreadyBound =>
             "This email's contact already signs in with a portal account, so a work-account invite cannot be added to it. "
             + "Grant the access to that contact instead; they keep signing in as they do now.",
+        ContactBindingDecision.InviteContactRemovedAdminReinstate =>
+            "An administrator removed this person's external access, so they cannot be invited. Nothing was created or "
+            + "sent. Ask an administrator to reinstate them first.",
         _ => null,
     };
 
@@ -908,7 +941,8 @@ public sealed class ContactIdentityBinder
                     var inactive = ContactBindingDecision.DecideInactiveRegistrationEmail(inactiveLookup);
                     if (inactive.Action == RegistrationEmailAction.Deny)
                     {
-                        _logger.LogWarning("[ID-BIND] Registration for {Who} DENIED ({DenyCode}): the inactive-contact read failed",
+                        // The inactive-contact read failed, or (slice C) an inactive match's external access was removed.
+                        _logger.LogWarning("[ID-BIND] Registration for {Who} DENIED ({DenyCode}) at the inactive-contact check",
                             who, inactive.DenyCode);
                         return HomeRegistrationResult.Denied(inactive.DenyCode ?? ContactBindingDecision.DenyContactLookupFailed);
                     }

@@ -86,6 +86,45 @@ public class AutomaticInviteOrganizationTests
         _discovery.Requests.Should().ContainSingle();
     }
 
+    /// <summary>
+    /// Slice C, MUST FIRE: the automatic invite after a grant never reaches a contact whose external access an administrator
+    /// removed (bound or not), or whose marker cannot be read: Failed with the reinstate code, nothing looked up, written or
+    /// sent. The grant response reports it like any failed invite.
+    /// </summary>
+    [Theory]
+    [InlineData("removed-unbound")]
+    [InlineData("removed-bound")]
+    [InlineData("unreadable")]
+    public async Task InviteOnGrant_RemovedContact_IsFailed_ContactRemovedAdminReinstate_AndNothingIsWritten(string how)
+    {
+        var contact = UnboundContact();
+        switch (how)
+        {
+            case "removed-unbound":
+                _h.Identities.Contacts[contact].RemovedOn = DateTimeOffset.UtcNow;
+                break;
+            case "removed-bound":
+                _h.Identities.Contacts[contact].RemovedOn = DateTimeOffset.UtcNow;
+                _h.Identities.Contacts[contact].Oid = Guid.NewGuid().ToString("D");
+                _h.Identities.Contacts[contact].Plane = (int)IdentityPlaneMarker.External;
+                break;
+            default:
+                _h.Identities.RemovedMarkerProof = ColumnReadProofOutcome.Unproven;
+                break;
+        }
+
+        DomainIsTheCustomerTenant();
+
+        var result = await _h.Invites.InviteOnGrantAsync(contact, Matter, _matter);
+
+        result.Should().Be(new GrantInviteResult(GrantInviteStatus.Failed, ContactBindingDecision.InviteContactRemovedAdminReinstate));
+        _discovery.Requests.Should().BeEmpty("the organisation is not even looked up");
+        _h.Identities.Writes.Should().BeEmpty();
+        _h.Ciam.Attempts.Should().BeEmpty();
+        _h.Emails.Sent.Should().BeEmpty();
+        _h.Emails.InviteUrls.Should().BeEmpty();
+    }
+
     /// <summary>MUST NOT FIRE: any other domain gets the portal-account invite it got before.</summary>
     [Fact]
     public async Task InviteOnGrant_OtherDomain_SendsThePortalAccountInvite()

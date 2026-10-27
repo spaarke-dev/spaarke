@@ -1760,6 +1760,12 @@ internal sealed class HeaderDrivenIdentityStore : IContactIdentityStore
     public Task<ContactLookup> FindActiveContactsByEmailAsync(string email, CancellationToken ct) => _inner.FindActiveContactsByEmailAsync(email, ct);
     public Task<ContactLookup> FindInactiveContactsByEmailAsync(string email, CancellationToken ct) => _inner.FindInactiveContactsByEmailAsync(email, ct);
     public Task<ContactLookup> GetContactAsync(Guid contactId, CancellationToken ct) => _inner.GetContactAsync(contactId, ct);
+    // Slice C: a contact this double synthesizes from the header is active, bound and NOT removed (as described above); a
+    // contact the shared in-memory store holds answers as that store does.
+    public Task<RemovedMarkerRead> ReadRemovedMarkerAsync(Guid contactId, CancellationToken ct)
+        => _inner.Contacts.ContainsKey(contactId)
+            ? _inner.ReadRemovedMarkerAsync(contactId, ct)
+            : Task.FromResult(RemovedMarkerRead.NotRemoved);
     public Task<ReferenceLookup> FindSystemUsersLinkingAsync(IReadOnlyCollection<Guid> contactIds, CancellationToken ct) => _inner.FindSystemUsersLinkingAsync(contactIds, ct);
     public Task<SystemUserLookup> GetSystemUserAsync(Guid systemUserId, CancellationToken ct) => _inner.GetSystemUserAsync(systemUserId, ct);
     public Task<BindingReadability> ProbeBindingReadabilityAsync(CancellationToken ct) => _inner.ProbeBindingReadabilityAsync(ct);
