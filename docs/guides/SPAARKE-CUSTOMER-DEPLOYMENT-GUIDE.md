@@ -1085,8 +1085,10 @@ A repeated collision by the same identity does not write again; a different iden
    mirror and let that person's next sign-in, or the next reconciliation run, bind them again). Deactivating the
    contact does NOT free the slot — the unique index counts inactive rows — so the flag stays until the mirror is
    cleared.
-   Deactivating is how a person is removed: an oid on an inactive contact is denied, and no replacement is
-   created.
+   A person is removed by an administrator's **Remove person** (the contact stays as it is: its access is revoked and
+   it is marked removed). An oid on an inactive contact is also denied and no replacement is created; with the
+   removal sweep's write switch on, the reconciliation job marks such a contact removed and revokes its access the
+   same way. **Reinstate** applies only to an active contact: reactivate the contact first, then reinstate.
    **Several identities on one contact** — read `sprk_identitycollisionparties` and resolve each party; the
    summary columns name only the first.
 3. **Do not clear the flag by hand.** The next `identity-link-reconciliation` run re-evaluates every recorded
