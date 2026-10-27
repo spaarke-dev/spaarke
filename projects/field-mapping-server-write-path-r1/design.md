@@ -565,14 +565,14 @@ describe.
 - **Root probe:** uses the equalised gate call, so an unknown root and a denied root look the same.
 - **Caps:** depth 4; 500 members per view and a per-level cap. Past a cap it returns `truncated = true`, per-table counts of what IS shown, and a per-level continuation. It never truncates silently.
 - **De-duplication (ontology review):** members are unique by (table, id), and the shallowest edge is kept. Example: a Signal reached from a matter both directly and through its Decision Record appears once. Counts and the 500 cap count unique members.
-- **Fields returned:** id, table, primary name, parent edge, depth. No access metadata (grants, No Access, sharees, owner team).
+- **Fields returned:** id, table, primary name, record number (null for a table without a number column), status, modified on, parent edge, depth (owner, 2026-10-27). The record-number column per table comes from the registry. No access metadata (grants, No Access, sharees, owner team).
 - **Not an authorization input.** No cross-caller cache.
 
 **C. `GET /api/v1/records/{table}/{id}/family`**
 
 - Lives in the existing `/api/v1/records` group, with auth required, in its OWN file, `Api/Records/RecordFamilyEndpoints.cs`. `RecordNoAccessEndpoint.cs` stays one cohesive No Access responsibility (§11.5).
 - It is registered in the route-authorization ledger (`RouteAuthorizationGuardTests.Ledger`) with its mechanism, and the governed-file census is updated (UAC review F2).
-- Takes `direction` (down by default; up returns the ancestors to the root) and `continuation`.
+- Takes `direction` and `continuation`. The default is the FULL family (owner, 2026-10-27): up to the root, then down from the root, so siblings and cousins are included. The walk's pruning rules apply to both directions. `direction=down` remains available for the push preview, which only acts below the source.
 - An unknown or unreadable root gets one uniform 404.
 
 **D. `/push` extensions (task 040; UAC 4a design)**
@@ -661,9 +661,14 @@ None needs path A or B.
 
 ### 12.9 Open questions for the owner
 
-1. **The Push Updates ribbon button:** remove it once the Family tool ships (one entry point), or keep it and point it at the Family view?
-2. **Columns per member** in the list (proposal: name, record type, status, modified on).
-3. **Default view:** down only, or also show the ancestors to the root?
+Owner answers, 2026-10-27:
+
+1. **The Push Updates ribbon button:** keep it, and point it at the Family view. This is my reading of "yes push updates ribbon button"; the owner can correct it.
+2. **Columns per member:** name, **record number** (blank where a table has none), record type, status and modified on.
+3. **Default view:** the full family, all the way up and down (§12.3 C).
+4. **`sprk_procedureassignment`:** open. The owner asked for the implications first (recommendation sent 2026-10-27).
+
+The family as a data-model concept, including future patent and trademark families, has been raised with ontology-r1. See §12.10.
 
 ### 12.10 Reviews required before the spec amendment
 
