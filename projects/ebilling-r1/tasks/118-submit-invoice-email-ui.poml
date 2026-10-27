@@ -3,7 +3,7 @@
   <metadata>
     <title>Submit Invoice in the email UI: toolbar button (replaces Link Invoice), flagged attachments, Email Review Invoice tab</title>
     <phase>3 Rules (WP3) — Procedure model (EB-D-148), wave W3-12</phase>
-    <gate>094 merged (the from-document route). word-add-in-r1 agreed 2026-10-21 that this task builds the shared marking component; word-add-in-r1 reviews the PR that adds it</gate>
+    <gate>094 merged (the from-document route) and 118a merged (the shared marking component, split out 2026-10-27, EB-D-159)</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .tsx in two shared client libraries used by several surfaces, and replaces an existing toolbar action.</rigor-reason>
@@ -12,7 +12,7 @@
     <effort>high</effort>
     <parallel-group>P3-F</parallel-group>
     <parallel-safe>true</parallel-safe>
-    <deps>094</deps>
+    <deps>094, 118a</deps>
     <tags>frontend, react, fluent-ui, pcf, testing</tags>
     <estimated-effort>2 days</estimated-effort>
   </metadata>
@@ -70,7 +70,7 @@
 
   <steps mode="directional">
     <step order="0">Declare FULL. Read 094's notes for the final route name, request and error codes, and the file-subpath export precedent (lookup-field).</step>
-    <step order="1">InvoiceAttachmentMarking with its pure functions and the file-subpath export; then SubmitInvoiceFromEmail: the marking component, the host's Submit through an injected callback, outcome display.</step>
+    <step order="1">Consume 118a's InvoiceAttachmentMarking (do not rebuild it); SubmitInvoiceFromEmail: the marking component, the host's Submit through an injected callback, outcome display.</step>
     <step order="2">Toolbar: rename to "Submit Invoice", open the flow; remove the 'invoice' create kind from the email UI.</step>
     <step order="3">Attachments: sprk_documenttype in the existing read; badge and "Submit as invoice" action.</step>
     <step order="4">Email Review: InvoiceSubmitTab in ReconciliationWorkspace, shown only with a PDF attachment.</step>
