@@ -205,8 +205,9 @@ public sealed class ExternalInviteService
             }
 
             // Task 185 slice F: a host without Ciam:* constructs the provisioner but cannot create an account. Answered here,
-            // before anything is written (no marker, no code), as the invite core would refuse it.
-            if (!_ciam.IsConfigured)
+            // before anything is written (no marker, no code), as the invite core would refuse it. Slice B3: only a
+            // portal-account invite needs CIAM.
+            if (!organization.IsWorkAccount && !_ciam.IsConfigured)
                 return Logged(contactId, Failed(GrantInviteStatus.CiamNotConfiguredReasonCode));
 
             var (firstName, lastName) = await ReadNamesAsync(contactId).ConfigureAwait(false);
@@ -456,8 +457,12 @@ public sealed class ExternalInviteService
         }
 
         // Task 185 slice F: the CIAM configuration is validated at first use. On a host without Ciam:* this throws
-        // InvalidOperationException HERE, before any contact is resolved, created or marked.
-        ciamProvisioner.EnsureConfigured();
+        // InvalidOperationException HERE, before any contact is resolved, created or marked. Slice B3: only a portal-account
+        // invite needs CIAM; a work-account invite creates no account.
+        if (workAccountTenantId is null)
+        {
+            ciamProvisioner.EnsureConfigured();
+        }
 
         resolution ??= await binder.ResolveInviteContactAsync(request.Email, ct);
 

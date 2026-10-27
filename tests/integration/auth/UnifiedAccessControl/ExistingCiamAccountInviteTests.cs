@@ -89,14 +89,15 @@ public class ExistingCiamAccountInviteTests
 
     private Task<IResult> InviteAndGrant(
         ILogger<Program>? logger = null, ContactIdentityBinder? binder = null, string? invitedTenantId = null,
-        InviteOrganizationResolver? organizations = null, string email = Email, bool? sendAsPortalAccount = null) =>
+        InviteOrganizationResolver? organizations = null, string email = Email, bool? sendAsPortalAccount = null,
+        CiamUserProvisioningService? ciam = null) =>
         InviteAndGrantExternalUserEndpoint.InviteAndGrantAsync(
             Request() with
             {
                 RecordId = _matter, InvitedTenantId = invitedTenantId, Email = email, SendAsPortalAccount = sendAsPortalAccount,
             },
             _h.Grants, _h.Participations, _h.AccessibleRecords, new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), new EverythingProbe(),
-            _ciam, _h.Emails, binder ?? IdentityBindingTestKit.Binder(_h.Identities), organizations ?? InviteOrganizationTestKit.PortalOnly(),
+            ciam ?? _ciam, _h.Emails, binder ?? IdentityBindingTestKit.Binder(_h.Identities), organizations ?? InviteOrganizationTestKit.PortalOnly(),
             PortalConfig(), Sprk.Bff.Api.Tests.TestInfrastructure.TestSpeOwnership.Customer(CustomerKey),
             _h.Materializer, _h.Notifier, Context(), logger ?? NullLogger<Program>.Instance, _h.Time, CancellationToken.None);
 
@@ -113,7 +114,7 @@ public class ExistingCiamAccountInviteTests
     /// </summary>
     private async Task<IResult> InviteRoute(
         ILogger<Program>? logger = null, string? invitedTenantId = null, InviteOrganizationResolver? organizations = null,
-        string email = Email, bool? sendAsPortalAccount = null)
+        string email = Email, bool? sendAsPortalAccount = null, CiamUserProvisioningService? ciam = null)
     {
         var handler = typeof(InviteExternalUserEndpoint).GetMethod("InviteExternalUserAsync", BindingFlags.NonPublic | BindingFlags.Static)
             ?? throw new InvalidOperationException("The /invite handler was not found.");
@@ -123,7 +124,7 @@ public class ExistingCiamAccountInviteTests
             {
                 RecordId = _matter, InvitedTenantId = invitedTenantId, Email = email, SendAsPortalAccount = sendAsPortalAccount,
             },
-            _h.Grants, _h.Participations, _ciam, _h.Emails,
+            _h.Grants, _h.Participations, ciam ?? _ciam, _h.Emails,
             IdentityBindingTestKit.Binder(_h.Identities), organizations ?? InviteOrganizationTestKit.PortalOnly(), PortalConfig(),
             Sprk.Bff.Api.Tests.TestInfrastructure.TestSpeOwnership.Customer(CustomerKey), Context(),
             logger ?? NullLogger<Program>.Instance, CancellationToken.None,
@@ -1153,6 +1154,63 @@ public class ExistingCiamAccountInviteTests
 
         _h.Emails.Onboarding.Should().ContainSingle("the portal-account invite keeps its CIAM email");
         _h.Emails.Sent.Should().BeEmpty("no work-account notice");
+    }
+
+    // ── Slice B3: a host without Ciam:* ─────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// MUST NOT FIRE: a work-account invite creates no CIAM account, so a host without <c>Ciam:*</c> still sends it on both
+    /// routes: the stamp is written and the notice sent.
+    /// </summary>
+    [Fact]
+    public async Task NoCiamHost_AWorkAccountInvite_IsSent_OnBothRoutes()
+    {
+        var contact = UnboundContact();
+        var handler = new InviteOrganizationTestKit.DiscoveryHandler()
+            .Answer(HttpStatusCode.OK, InviteOrganizationTestKit.DiscoveryBody(PartnerTenant))
+            .Answer(HttpStatusCode.OK, InviteOrganizationTestKit.DiscoveryBody(PartnerTenant));
+        var organizations = Organizations(handler);
+        var noCiam = NoCiamProvisioner();
+
+        (await InviteRoute(organizations: organizations, ciam: noCiam)).Should().BeOfType<Ok<InviteExternalUserResponse>>()
+            .Which.Value!.Status.Should().Be(InviteExternalUserEndpoint.WorkAccountInvitedStatus);
+        (await InviteAndGrant(organizations: organizations, ciam: noCiam)).Should().BeOfType<Ok<InviteAndGrantResponse>>()
+            .Which.Value!.OnboardStatus.Should().Be(InviteExternalUserEndpoint.WorkAccountInvitedStatus);
+
+        _h.Identities.Contacts[contact].InvitedTenantId.Should().Be(PartnerTenant.ToString("D"));
+        _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle();
+        _h.Emails.Sent.Should().HaveCount(2, "one notice per invite");
+    }
+
+    /// <summary>
+    /// MUST FIRE: on a host without <c>Ciam:*</c>, a portal-account invite is still refused on both routes with 503
+    /// ciam_not_configured, and nothing is read, written or granted.
+    /// </summary>
+    [Fact]
+    public async Task NoCiamHost_APortalAccountInvite_IsStill503CiamNotConfigured()
+    {
+        var contact = UnboundContact();
+        var handler = new InviteOrganizationTestKit.DiscoveryHandler()
+            .Answer(HttpStatusCode.BadRequest, InviteOrganizationTestKit.TenantNotFoundBody)
+            .Answer(HttpStatusCode.BadRequest, InviteOrganizationTestKit.TenantNotFoundBody);
+        var organizations = Organizations(handler);
+        var noCiam = NoCiamProvisioner();
+
+        foreach (var result in new[]
+                 {
+                     await InviteRoute(organizations: organizations, ciam: noCiam),
+                     await InviteAndGrant(organizations: organizations, ciam: noCiam),
+                 })
+        {
+            var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
+            problem.StatusCode.Should().Be(503);
+            problem.ProblemDetails.Extensions["reasonCode"].Should().Be(GrantInviteStatus.CiamNotConfiguredReasonCode);
+        }
+
+        _h.Identities.Writes.Should().BeEmpty();
+        _h.Identities.Reads.Should().BeEmpty();
+        _h.Grants.Rows.Should().BeEmpty();
+        _h.Identities.Contacts[contact].InvitedOn.Should().BeNull();
     }
 
     /// <summary>

@@ -86,10 +86,19 @@ public static class InviteAndGrantExternalUserEndpoint
         CancellationToken ct)
     {
         // Task 185 slice F + §12 I-11: the CIAM provisioner constructs on a host without Ciam:* and validates at first use.
-        // This route needs CIAM for every request, so there it answers a 503 ProblemDetails with the same reason code /grant
-        // reports (ciam_not_configured), before anything is read or written: no contact, no account, no grant.
+        // A portal-account invite needs CIAM, so there it answers a 503 ProblemDetails with the same reason code /grant
+        // reports (ciam_not_configured), before anything else is read or written: no contact, no account, no grant. Slice
+        // B3: a work-account invite needs no CIAM, so on such a host the organisation is decided first and only a
+        // work-account invite goes on.
+        InviteOrganizationDecision? organizationWithoutCiam = null;
         if (!ciamProvisioner.IsConfigured)
-            return InviteExternalUserEndpoint.CiamNotConfiguredResult(httpContext);
+        {
+            var (decided, withoutCiamProblem) = await InviteExternalUserEndpoint.DecideOrganizationWithoutCiamAsync(
+                organizations, request, httpContext, ct);
+            if (withoutCiamProblem is not null)
+                return withoutCiamProblem;
+            organizationWithoutCiam = decided;
+        }
 
         // ── Validation ───────────────────────────────────────────────────────
         if (string.IsNullOrWhiteSpace(request.Email))
@@ -136,8 +145,9 @@ public static class InviteAndGrantExternalUserEndpoint
         // Slice B2: a work account (the email's organisation is a configured customer tenant) or a portal account, decided
         // before any contact is read, onboarded or granted. A malformed domain is a 400; a lookup with no definite answer
         // is a 503 with nothing written (retry).
-        var (organization, organizationProblem) = await InviteExternalUserEndpoint.DecideOrganizationAsync(
-            organizations, request, httpContext, ct);
+        var (organization, organizationProblem) = organizationWithoutCiam is not null
+            ? (organizationWithoutCiam, null)
+            : await InviteExternalUserEndpoint.DecideOrganizationAsync(organizations, request, httpContext, ct);
         if (organizationProblem is not null)
             return organizationProblem;
         var workAccountTenantId = organization!.WorkAccountTenantId;

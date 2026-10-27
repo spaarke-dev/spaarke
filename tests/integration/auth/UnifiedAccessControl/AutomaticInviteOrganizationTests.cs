@@ -217,4 +217,28 @@ public class AutomaticInviteOrganizationTests
             .Should().NotContain(l => l.Level >= LogLevel.Warning && l.Message.Contains("not sent"),
                 "the job repeats no failure line for the owed invite");
     }
+
+    // ── Slice B3: a host without Ciam:* ─────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// MUST NOT FIRE: an automatic work-account invite needs no CIAM; MUST FIRE: an automatic portal-account invite on the
+    /// same host is still Failed / ciam_not_configured with nothing written.
+    /// </summary>
+    [Fact]
+    public async Task InviteOnGrant_NoCiamHost_SendsAWorkAccountInvite_ButNotAPortalAccountInvite()
+    {
+        var invites = _h.InvitesOver(_h.Identities, NoCiamProvisioner());
+
+        var workContact = UnboundContact();
+        DomainIsTheCustomerTenant();
+        (await invites.InviteOnGrantAsync(workContact)).Should().Be(new GrantInviteResult(GrantInviteStatus.WorkAccountInvited));
+        _h.Identities.Contacts[workContact].InvitedTenantId.Should().Be(CustomerTenant.ToString("D"));
+
+        var portalContact = _h.Contact();
+        _h.Identities.Contacts[portalContact].Email = "person@elsewhere.example";
+        DomainHasNoTenant();
+        (await invites.InviteOnGrantAsync(portalContact))
+            .Should().Be(new GrantInviteResult(GrantInviteStatus.Failed, GrantInviteStatus.CiamNotConfiguredReasonCode));
+        _h.Identities.Contacts[portalContact].InvitedOn.Should().BeNull();
+    }
 }
