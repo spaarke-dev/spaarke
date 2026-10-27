@@ -453,7 +453,7 @@ public sealed class CallerPrincipalResolver : ICallerPrincipalResolver
 /// <para>Task 141: resolution moved from <c>ExternalParticipationService</c> (the grant-data reader) to
 /// <see cref="ContactIdentityBinder"/>, which runs the one binding decision both planes share. Each deny now
 /// carries the decision's OWN code — ambiguity, collision, unreadable binding, inactive contact — instead of
-/// one <c>contact_not_found</c> for all of them, so the audit trail can tell an outage from a hijack attempt.</para>
+/// one <c>contact_not_found</c> for all of them, so the audit trail can tell an outage from an identity conflict.</para>
 /// <para>Task 135: before it this strategy built the principal from <c>ExternalParticipationService.GetGrantSetAsync</c>
 /// alone, on each grant's all-sources level: none of the three rules ran, so a contact on the No Access
 /// List, holding a grant on a Restricted record, or inheriting an organization grant on a Secure record kept

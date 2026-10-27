@@ -10,7 +10,7 @@
 //
 // It grows out of task 013's DecideWorkforceEmailMatch / ReadOidBinding (A-18), which this file supersedes:
 // that decision compared a column that does not exist in dev (contact.azureactivedirectoryobjectid) and
-// never wrote a binding, so an unbound contact stayed hijackable forever. Here the binding key is the Entra
+// never wrote a binding, so a contact was never tied to one sign-in identity. Here the binding key is the Entra
 // oid in contact.sprk_externalobjectid — ONE field for both planes (SPA-r2 FR-11) — and the plane that wrote
 // it is recorded in contact.sprk_identityplane.
 //
@@ -788,7 +788,7 @@ public static class ContactBindingDecision
 {
     // ── Deny codes (auth.md: {domain}.{area}.{action}.{reason}) ─────────────────────────────────────
     // Each deny has its OWN code: on every plane the HTTP answer is the same 403, so the code is the only
-    // thing in the audit trail that tells an outage from a hijack attempt from an ordinary non-contact.
+    // thing in the audit trail that tells an outage from an identity conflict from an ordinary non-contact.
 
     /// <summary>The caller's own oid is unusable.</summary>
     public const string DenyUnidentifiableCaller = "sdap.access.deny.unidentifiable_caller";
@@ -808,7 +808,7 @@ public static class ContactBindingDecision
     /// <summary>More than one active contact carries the email.</summary>
     public const string DenyContactEmailAmbiguous = "sdap.access.deny.contact_email_ambiguous";
 
-    /// <summary>The email matched a contact bound to a different oid (the A-18 hijack).</summary>
+    /// <summary>The email matched a contact bound to a different oid (A-18: a contact is bound to one oid).</summary>
     public const string DenyContactBoundToDifferentOid = "sdap.access.deny.contact_bound_to_different_oid";
 
     /// <summary>The matched contact's binding cannot be read.</summary>
@@ -1124,7 +1124,7 @@ public static class ContactBindingDecision
                 return new BindingDecision(BindingAction.ResolveByOid, row.ContactId);
             }
 
-            // E7 — the A-18 hijack, on either plane.
+            // E7 — A-18, a contact bound to a different oid, on either plane.
             return Collide(IdentityCollisionReason.BoundToDifferentOid, DenyContactBoundToDifferentOid, row.ContactId);
         }
 
