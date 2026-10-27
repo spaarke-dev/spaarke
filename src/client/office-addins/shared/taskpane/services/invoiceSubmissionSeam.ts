@@ -13,7 +13,13 @@
 import type { AttachmentInfo } from '@shared/adapters/types';
 import { cleanGuid } from '@spaarke/ui-components/guid';
 import type { EntityType } from '../hooks/useEntitySearch';
-import { EMAIL_CONTENT_BUDGET_BYTES, MAX_ATTACHMENT_BYTES, base64Length, formatSize } from './emailContentCapture';
+import {
+  EMAIL_CONTENT_BUDGET_BYTES,
+  MAX_ATTACHMENT_BYTES,
+  base64Length,
+  formatSize,
+  type SkippedAttachment,
+} from './emailContentCapture';
 import type {
   InvoiceAttachmentRole,
   MarkableAttachment,
@@ -66,22 +72,31 @@ export interface InvoiceSubmitAttempt {
   actionId: string;
   /** Called once the server has accepted the submission (202), before its final status is known: "processing". */
   onAccepted?: (info: { trackingNumber?: string }) => void;
+  /** Aborted when the view goes away (unmount): the handler stops reading the submission's status. */
+  signal?: AbortSignal;
 }
 
 /**
  * What became of a submission, as the view shows it. Generic on purpose: the A1 service maps the contract's codes
- * onto these four; the view never reads a code.
+ * onto these five; the view never reads a code.
  * - `success`: accepted (the contract's 202);
- * - `refused`: the server said no and a retry will not help — `message` says why;
+ * - `refused`: the server said no and a retry will not help — `message` says why. Nothing was submitted;
  * - `retryable`: a transient failure — the view offers Retry (same `actionId`);
  * - `permanent`: it cannot work from Outlook (e.g. the email can't be identified) — the view suggests uploading
- *   the invoice in Spaarke instead.
+ *   the invoice in Spaarke instead;
+ * - `ended`: the server ACCEPTED the submission (it has a tracking number) and it then ended Rejected or Failed.
+ *   Not "not submitted": the view keeps the tracking number so the user can follow it in Spaarke.
+ *
+ * `skipped` (any kind sent after the email was read): attachments the capture left out of the saved email, each with
+ * the sentence that says why — the view shows them (`emailContentCapture.ts`: "the caller shows that").
  */
-export type InvoiceSubmissionOutcome =
+export type InvoiceSubmissionOutcome = (
   | { kind: 'success'; message?: string; trackingNumber?: string }
   | { kind: 'refused'; message: string }
   | { kind: 'retryable'; message: string }
-  | { kind: 'permanent'; message: string };
+  | { kind: 'permanent'; message: string }
+  | { kind: 'ended'; status: 'Rejected' | 'Failed'; message: string; trackingNumber?: string }
+) & { skipped?: readonly SkippedAttachment[] };
 
 export type InvoiceSubmitHandler = (
   input: InvoiceSubmissionInput,
@@ -116,9 +131,11 @@ export type InvoiceMarkingValue = Readonly<Record<string, InvoiceAttachmentRole>
  * Limits:
  * - a cloud link (no file in the email);
  * - larger than {@link MAX_ATTACHMENT_BYTES} (20 MB);
- * - past the {@link EMAIL_CONTENT_BUDGET_BYTES} budget once the attachments before it (in the email's order, inline
- *   ones included, since they travel in the same request) are counted. The email's text is not counted here; the
- *   capture at submit re-checks with it.
+ * - past the {@link EMAIL_CONTENT_BUDGET_BYTES} budget once the listed attachments before it are counted. That is
+ *   the order the capture spends the budget in: the marked files first, in the email's order (the view starts with
+ *   every sendable attachment marked), and only then the rest. Inline pictures are never marked, so the capture
+ *   sends them last and they are NOT counted here: a PDF the capture would send is never disabled because of a
+ *   picture in the email text. The email's text is not counted here; the capture at submit re-checks with it.
  */
 export function toInvoiceMarkingAttachments(
   attachments: readonly AttachmentInfo[],
@@ -127,6 +144,9 @@ export function toInvoiceMarkingAttachments(
   const result: InvoiceListedAttachment[] = [];
   let used = 0;
   for (const attachment of attachments) {
+    if (attachment.isInline) {
+      continue;
+    }
     let disabledReason: string | undefined;
     if (attachment.attachmentType === 'cloud') {
       disabledReason = 'It is a link to a file stored in the cloud (for example OneDrive), not a file in the email.';
@@ -138,9 +158,6 @@ export function toInvoiceMarkingAttachments(
         'attachments together.';
     } else {
       used += base64Length(attachment.size);
-    }
-    if (attachment.isInline) {
-      continue;
     }
     result.push({
       id: attachment.id,

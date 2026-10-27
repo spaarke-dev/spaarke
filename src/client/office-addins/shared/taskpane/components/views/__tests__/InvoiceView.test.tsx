@@ -60,12 +60,12 @@ function renderView(props: { [K in keyof InvoiceViewProps]?: InvoiceViewProps[K]
     loadFirms,
     ...props,
   } as InvoiceViewProps;
-  render(
+  const { unmount } = render(
     <FluentProvider theme={webLightTheme}>
       <InvoiceView {...all} />
     </FluentProvider>
   );
-  return { onSubmit: all.onSubmit as jest.Mock, loadFirms: all.loadFirms as jest.Mock };
+  return { onSubmit: all.onSubmit as jest.Mock, loadFirms: all.loadFirms as jest.Mock, unmount };
 }
 
 async function chooseMatter() {
@@ -399,10 +399,12 @@ describe('InvoiceView — results (task 133)', () => {
 });
 
 describe('InvoiceView — Existing invoice (task 133)', () => {
-  it('offers no "Add supporting files"; a correction is shown disabled with the note', async () => {
+  it('offers "Add supporting files" and a correction, both disabled with their reasons', async () => {
     renderView();
     await userEvent.click(screen.getByRole('radio', { name: 'Existing invoice' }));
-    expect(screen.queryByText(/supporting files/i)).toBeNull();
+    // ebilling 123's upload route is not built yet: shown, disabled, with the reason — and it submits nothing.
+    expect(screen.getByRole('radio', { name: 'Add supporting files' })).toBeDisabled();
+    expect(screen.getByText('Adding supporting files from Outlook is not available yet')).toBeInTheDocument();
     expect(screen.getByRole('radio', { name: 'Submit a corrected invoice' })).toBeDisabled();
     expect(screen.getByText('Corrections from Outlook are not available yet')).toBeInTheDocument();
     expect(screen.getByLabelText('Search Invoice records')).toBeInTheDocument();
@@ -414,6 +416,8 @@ describe('InvoiceView — Existing invoice (task 133)', () => {
     renderView({ correctionAvailable: true });
     await userEvent.click(screen.getByRole('radio', { name: 'Existing invoice' }));
     expect(screen.getByRole('radio', { name: 'Submit a corrected invoice' })).toBeEnabled();
+    // Supporting files stay off whatever the correction flag says: they depend on ebilling 123, not 097.
+    expect(screen.getByRole('radio', { name: 'Add supporting files' })).toBeDisabled();
     mockSearch.mockResolvedValue([]);
     await userEvent.type(screen.getByLabelText('Search Invoice records'), 'INV');
     await userEvent.click(screen.getByRole('button', { name: 'Search' }));
@@ -421,5 +425,318 @@ describe('InvoiceView — Existing invoice (task 133)', () => {
     const options = mockSearch.mock.calls[0]![2];
     expect(mockSearch.mock.calls[0]![1]).toBe('Invoice');
     expect(options.access).toBeUndefined();
+  });
+});
+
+describe('InvoiceView — review fixes (task 133)', () => {
+  const numberBox = () => screen.getByRole('textbox', { name: /Firm invoice number/ });
+
+  async function fillAndSubmit(number = 'INV-4711') {
+    await findRow('INV-4711.pdf');
+    await chooseMatter();
+    await userEvent.type(numberBox(), number);
+    await waitFor(() => expect(submitButton()).toBeEnabled());
+    await userEvent.click(submitButton());
+  }
+
+  type Call = [
+    { firmInvoiceNumber: string; poNumber: string | null; marks: Array<{ mark: string }> },
+    InvoiceSubmitAttempt,
+  ];
+  const callsOf = (onSubmit: jest.Mock) => onSubmit.mock.calls as unknown as Call[];
+
+  describe('Retry sends what is on screen', () => {
+    const retryable = () =>
+      jest.fn(async () => ({ kind: 'retryable' as const, message: 'Outlook is busy. Try again.' }));
+
+    it(
+      'must-fire: after a retryable failure, editing the invoice number ends the Retry; the next Submit carries the new value',
+      async () => {
+        const onSubmit = retryable();
+        renderView({ onSubmit });
+        await fillAndSubmit('INV-4711');
+        expect(await screen.findByRole('button', { name: 'Retry' })).toBeInTheDocument();
+
+        await userEvent.type(numberBox(), '-A');
+
+        // The stale outcome and its Retry are gone: Retry would have resent INV-4711.
+        expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+        // (The screen-reader live region still holds the earlier announcement; the visible bar is what goes.)
+        expect(screen.queryByText('The invoice was not submitted')).toBeNull();
+        await userEvent.click(submitButton());
+
+        await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
+        const calls = callsOf(onSubmit);
+        expect(calls[0]![0].firmInvoiceNumber).toBe('INV-4711');
+        expect(calls[1]![0].firmInvoiceNumber).toBe('INV-4711-A');
+        // A new attempt, not a retry of the first action.
+        expect(calls[1]![1].actionId).not.toBe(calls[0]![1].actionId);
+      },
+      TIMEOUT
+    );
+
+    it(
+      'editing the PO number or a mark also ends the Retry',
+      async () => {
+        const onSubmit = retryable();
+        renderView({ onSubmit });
+        await fillAndSubmit();
+        expect(await screen.findByRole('button', { name: 'Retry' })).toBeInTheDocument();
+
+        await userEvent.type(screen.getByRole('textbox', { name: /PO number/ }), 'PO-9');
+        expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+
+        await userEvent.click(submitButton());
+        await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
+        expect(callsOf(onSubmit)[1]![0].poNumber).toBe('PO-9');
+        expect(await screen.findByRole('button', { name: 'Retry' })).toBeInTheDocument();
+
+        const csvRow = await findRow('timesheet.csv');
+        await userEvent.click(within(csvRow).getByRole('radio', { name: "Don't save" }));
+        expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+        await userEvent.click(submitButton());
+        await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(3));
+        expect(callsOf(onSubmit)[2]![0].marks.map(m => m.mark)).toEqual(['Invoice', 'DontSave']);
+      },
+      TIMEOUT
+    );
+
+    it(
+      'must-not-fire: with nothing edited, Retry still resends the same request and action',
+      async () => {
+        const onSubmit = retryable();
+        renderView({ onSubmit });
+        await fillAndSubmit();
+        await userEvent.click(await screen.findByRole('button', { name: 'Retry' }));
+        await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
+        const calls = callsOf(onSubmit);
+        expect(calls[1]![1].actionId).toBe(calls[0]![1].actionId);
+        expect(calls[1]![0]).toEqual(calls[0]![0]);
+      },
+      TIMEOUT
+    );
+
+    it(
+      'must-not-fire: editing after a refusal keeps the refusal showing (only a retryable outcome is dropped)',
+      async () => {
+        renderView({
+          onSubmit: jest.fn(async () => ({ kind: 'refused' as const, message: 'That firm is not linked.' })),
+        });
+        await fillAndSubmit();
+        expect(await screen.findByText('The invoice was not submitted')).toBeInTheDocument();
+        await userEvent.type(numberBox(), 'x');
+        expect(screen.getByText('The invoice was not submitted')).toBeInTheDocument();
+      },
+      TIMEOUT
+    );
+  });
+
+  describe('results after the server accepted the submission', () => {
+    it(
+      'Rejected is titled "The invoice was rejected", keeps the tracking number, and is not "not submitted"',
+      async () => {
+        renderView({
+          onSubmit: jest.fn(async () => ({
+            kind: 'ended' as const,
+            status: 'Rejected' as const,
+            message: 'The invoice was rejected by a billing rule.',
+            trackingNumber: 'INV-4711.1',
+          })),
+        });
+        await fillAndSubmit();
+        expect(await screen.findByText('The invoice was rejected')).toBeInTheDocument();
+        expect(screen.getByText(/Tracking number INV-4711\.1\./)).toBeInTheDocument();
+        expect(screen.getAllByText(/rejected by a billing rule/).length).toBeGreaterThan(0);
+        expect(screen.queryByText('The invoice was not submitted')).toBeNull();
+        // It is a result of a submission that exists: Submit stays available (a Failed one can be sent again).
+        expect(submitButton()).toBeEnabled();
+      },
+      TIMEOUT
+    );
+
+    it(
+      'Failed is titled "The invoice could not be processed" with the tracking number',
+      async () => {
+        renderView({
+          onSubmit: jest.fn(async () => ({
+            kind: 'ended' as const,
+            status: 'Failed' as const,
+            message: "The invoice couldn't be processed.",
+            trackingNumber: 'INV-4711.2',
+          })),
+        });
+        await fillAndSubmit();
+        expect(await screen.findByText('The invoice could not be processed')).toBeInTheDocument();
+        expect(screen.getByText(/Tracking number INV-4711\.2\./)).toBeInTheDocument();
+        expect(screen.queryByText('The invoice was not submitted')).toBeNull();
+      },
+      TIMEOUT
+    );
+
+    it(
+      'must-not-fire: a refusal before acceptance is still "not submitted"',
+      async () => {
+        renderView({ onSubmit: jest.fn(async () => ({ kind: 'refused' as const, message: 'Nope.' })) });
+        await fillAndSubmit();
+        expect(await screen.findByText('The invoice was not submitted')).toBeInTheDocument();
+      },
+      TIMEOUT
+    );
+  });
+
+  describe('attachments the capture left out', () => {
+    const skippedOne = {
+      attachmentId: 'att-9',
+      name: 'shared.docx',
+      ticked: false,
+      reason: 'cloud-link' as const,
+      message: '"shared.docx" was not saved with the email: it is a link to a file stored in the cloud.',
+    };
+
+    it(
+      "must-fire: shows the Save view's warning, with each reason, next to a successful result",
+      async () => {
+        renderView({
+          onSubmit: jest.fn(async () => ({
+            kind: 'success' as const,
+            trackingNumber: 'INV-4711.1',
+            skipped: [skippedOne],
+          })),
+        });
+        await fillAndSubmit();
+        const warning = await screen.findByTestId('invoice-skipped-attachments');
+        expect(within(warning).getByText('One attachment was not saved')).toBeInTheDocument();
+        expect(within(warning).getByText(/"shared\.docx" was not saved with the email/)).toBeInTheDocument();
+        expect(screen.getByText('Invoice submitted')).toBeInTheDocument();
+      },
+      TIMEOUT
+    );
+
+    it(
+      'several are counted in the title',
+      async () => {
+        renderView({
+          onSubmit: jest.fn(async () => ({
+            kind: 'refused' as const,
+            message: 'Nope.',
+            skipped: [
+              skippedOne,
+              { ...skippedOne, attachmentId: 'att-10', name: 'b.docx', message: '"b.docx" was not saved.' },
+            ],
+          })),
+        });
+        await fillAndSubmit();
+        expect(await screen.findByText('2 attachments were not saved')).toBeInTheDocument();
+        expect(screen.getByText('"b.docx" was not saved.')).toBeInTheDocument();
+      },
+      TIMEOUT
+    );
+
+    it(
+      'must-not-fire: nothing left out, no warning',
+      async () => {
+        renderView();
+        await fillAndSubmit();
+        await screen.findByText('Invoice submitted');
+        expect(screen.queryByTestId('invoice-skipped-attachments')).toBeNull();
+      },
+      TIMEOUT
+    );
+  });
+
+  describe('the firm list', () => {
+    it(
+      'must-fire: a failed firm list offers Retry, which asks again and then lists the firms',
+      async () => {
+        const loadFirms = jest
+          .fn()
+          .mockRejectedValueOnce(
+            new Error("Spaarke couldn't list the firms for this record right now. Try again in a moment.")
+          )
+          .mockResolvedValue([{ firmId: FIRM_ID, name: 'Firm F' }]);
+        renderView({ loadFirms });
+        await findRow('INV-4711.pdf');
+        await chooseMatter();
+        expect(await screen.findByText(/couldn't list the firms/)).toBeInTheDocument();
+        expect(loadFirms).toHaveBeenCalledTimes(1);
+
+        await userEvent.click(screen.getByRole('button', { name: 'Retry loading the firms' }));
+
+        await waitFor(() => expect(loadFirms).toHaveBeenCalledTimes(2));
+        expect(loadFirms).toHaveBeenLastCalledWith({ entityType: 'Matter', entityId: MATTER_ID });
+        // One firm linked: it is chosen for the user, and the error is gone.
+        await waitFor(() => expect(screen.queryByText(/couldn't list the firms/)).toBeNull());
+        expect(screen.queryByRole('button', { name: 'Retry loading the firms' })).toBeNull();
+        expect(screen.getByRole('option', { name: 'Firm F' })).toBeInTheDocument();
+      },
+      TIMEOUT
+    );
+
+    it(
+      'must-not-fire: a loaded firm list shows no Retry',
+      async () => {
+        renderView();
+        await findRow('INV-4711.pdf');
+        await chooseMatter();
+        await screen.findByRole('option', { name: 'Firm F' });
+        expect(screen.queryByRole('button', { name: 'Retry loading the firms' })).toBeNull();
+      },
+      TIMEOUT
+    );
+  });
+
+  describe('leaving the view', () => {
+    it(
+      "must-fire: unmounting aborts the running submission's signal",
+      async () => {
+        let signal: AbortSignal | undefined;
+        const onSubmit = jest.fn(
+          (_input: unknown, attempt: InvoiceSubmitAttempt) =>
+            new Promise<InvoiceSubmissionOutcome>(() => {
+              signal = attempt.signal;
+              attempt.onAccepted?.({ trackingNumber: 'INV-4711.1' });
+            })
+        );
+        const { unmount } = renderView({ onSubmit });
+        await fillAndSubmit();
+        await screen.findByText('Processing the invoice');
+        expect(signal).toBeDefined();
+        expect(signal!.aborted).toBe(false);
+
+        unmount();
+
+        expect(signal!.aborted).toBe(true);
+      },
+      TIMEOUT
+    );
+
+    it(
+      'onBusyChange: true while submitting and while an accepted result shows, false after a refusal and on unmount',
+      async () => {
+        const onBusyChange = jest.fn();
+        const onSubmit = jest.fn(async () => ({ kind: 'success' as const, trackingNumber: 'INV-4711.1' }));
+        const { unmount } = renderView({ onSubmit, onBusyChange });
+        expect(onBusyChange).toHaveBeenLastCalledWith(false);
+        await fillAndSubmit();
+        await screen.findByText('Invoice submitted');
+        expect(onBusyChange).toHaveBeenCalledWith(true);
+        expect(onBusyChange).toHaveBeenLastCalledWith(true);
+        unmount();
+        expect(onBusyChange).toHaveBeenLastCalledWith(false);
+      },
+      TIMEOUT
+    );
+
+    it(
+      'must-not-fire: a refusal (nothing was submitted) is not busy, so the tabs stay available',
+      async () => {
+        const onBusyChange = jest.fn();
+        renderView({ onSubmit: jest.fn(async () => ({ kind: 'refused' as const, message: 'Nope.' })), onBusyChange });
+        await fillAndSubmit();
+        await screen.findByText('Nope.');
+        expect(onBusyChange).toHaveBeenLastCalledWith(false);
+      },
+      TIMEOUT
+    );
   });
 });

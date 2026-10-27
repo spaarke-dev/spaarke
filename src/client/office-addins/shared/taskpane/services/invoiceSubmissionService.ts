@@ -1,7 +1,7 @@
 /**
  * invoiceSubmissionService.ts — the add-in's client for ebilling's from-email invoice submission (task 133 A1).
  *
- * Contract: `projects/ebilling-r1/notes/095-from-email-contract.md`, agreed 2026-10-27 at 717cf238d9 (work/ebilling-r1):
+ * Contract: `projects/ebilling-r1/notes/095-from-email-contract.md`, agreed 2026-10-27 at 717cf238d9, current at fd70b8e1f6 (work/ebilling-r1):
  * - §2 `POST /api/finance/invoice-submissions/from-email` — {@link submitInvoiceFromEmail};
  * - §3 `GET statusUrl` until the status is final — {@link pollSubmission};
  * - §8 `GET /api/finance/core-records/{entityType}/{entityId}/firms` — {@link loadInvoiceFirms};
@@ -25,6 +25,7 @@ import {
   describeInvoiceOutcome,
   describeSubmissionRefusal,
   EMAIL_UNIDENTIFIABLE_CODE,
+  HELD_FOR_REVIEW_MESSAGE,
   isRetryableSubmissionRefusal,
   type InvoiceMessageContext,
 } from '../utils/invoiceSubmissionMessages';
@@ -34,6 +35,7 @@ import {
   hostAdapterEmailReader,
   type EmailContentCapture,
   type EmailContentReader,
+  type SkippedAttachment,
 } from './emailContentCapture';
 import { buildEmailSaveRequest, type OfficeSaveRequestBody, type QuickSaveEmailContext } from './quickSaveHelpers';
 import type {
@@ -104,8 +106,11 @@ export interface InvoiceRefusalExtras {
  * - `refused`: the server (or, with `local: true`, the add-in before sending) said no; retrying the same request
  *   will not help. `code` is `errorCode ?? reasonCode` (OP-8), undefined when the server sent neither;
  * - `retryable`: transient (503, 429, the access check's system failure, …) — retry the SAME action (same key).
+ *
+ * `skipped` (only when there are some): attachments the capture left out of the email it sent, each with the sentence
+ * that says why. Present on every result of a request that was actually sent (accepted, or answered by the server).
  */
-export type InvoiceSubmitResult =
+export type InvoiceSubmitResult = (
   | { kind: 'accepted'; accepted: InvoiceSubmissionAccepted; replayed: boolean }
   | ({
       kind: 'refused';
@@ -114,7 +119,8 @@ export type InvoiceSubmitResult =
       detail?: string;
       local?: true;
     } & InvoiceRefusalExtras)
-  | { kind: 'retryable'; status: number; code: string | undefined; retryAfterSeconds?: number; detail?: string };
+  | { kind: 'retryable'; status: number; code: string | undefined; retryAfterSeconds?: number; detail?: string }
+) & { skipped?: SkippedAttachment[] };
 
 /** §3 statuses. */
 export type InvoiceSubmissionStatus = 'Received' | 'Processing' | 'Accepted' | 'Rejected' | 'Failed';
@@ -128,9 +134,14 @@ export type InvoicePollResult =
   /** The cap was reached while the submission was still Received / Processing (or unreadable for a moment). */
   | { kind: 'pending'; status: string | undefined }
   /** The status cannot be read at all (404, or a refusal that will not change). */
-  | { kind: 'error'; status: number; code: string | undefined };
+  | { kind: 'error'; status: number; code: string | undefined }
+  /** The caller's `signal` was aborted (the view went away): nothing more was read. */
+  | { kind: 'aborted' };
 
 export const FROM_EMAIL_ROUTE = '/api/finance/invoice-submissions/from-email';
+
+/** Shown when the open email (its context, attachment list or content) could not be read. Nothing was sent. */
+export const EMAIL_READ_FAILED_MESSAGE = "Couldn't read this email, so nothing was submitted. Try again.";
 
 /** Default polling: 2 s, doubling to at most 10 s, for up to 30 reads (about 4.5 minutes). */
 export const DEFAULT_POLL = { initialDelayMs: 2000, maxDelayMs: 10_000, maxAttempts: 30 } as const;
@@ -168,6 +179,25 @@ async function readJson(response: Response): Promise<Record<string, unknown> | n
   } catch {
     return null;
   }
+}
+
+/** A timer that ends early when `signal` aborts (the caller then checks the signal). */
+function abortableSleep(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  return new Promise<void>(resolve => {
+    if (signal?.aborted) {
+      resolve();
+      return;
+    }
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
 function absoluteUrl(apiBaseUrl: string, url: string): string {
@@ -256,15 +286,22 @@ export function buildInvoiceFromEmailBody(
  * Refused locally, before anything is sent:
  * - no RFC `internetMessageId` (OP-2) — as the server's `email_unidentifiable` / `no_message_id`;
  * - an attachment marked Invoice or Supporting that the capture could not send — as `marked_file_missing`.
- * A capture that could not read the email is `retryable`.
+ * A context read or capture that could not read the email is `retryable`, with a sentence for the user (never the
+ * adapter's own text).
  */
 export async function submitInvoiceFromEmail(
   input: InvoiceSubmissionInput,
-  options: { config: InvoiceServiceConfig; email: InvoiceEmailSource; idempotencyKey: string }
+  options: { config: InvoiceServiceConfig; email: InvoiceEmailSource; idempotencyKey: string; signal?: AbortSignal }
 ): Promise<InvoiceSubmitResult> {
-  const { config, email, idempotencyKey } = options;
+  const { config, email, idempotencyKey, signal } = options;
 
-  const context = await email.readContext();
+  let context: QuickSaveEmailContext;
+  try {
+    context = await email.readContext();
+  } catch {
+    // An adapter error is Outlook's wording, not the user's: say the capture's kind of sentence instead.
+    return { kind: 'retryable', status: 0, code: undefined, detail: EMAIL_READ_FAILED_MESSAGE };
+  }
   if (!context.internetMessageId?.trim()) {
     return { kind: 'refused', status: 0, code: EMAIL_UNIDENTIFIABLE_CODE, reason: 'no_message_id', local: true };
   }
@@ -281,7 +318,7 @@ export async function submitInvoiceFromEmail(
       kind: 'retryable',
       status: 0,
       code: undefined,
-      detail: err instanceof EmailCaptureError ? err.message : "Couldn't read this email. Try again.",
+      detail: err instanceof EmailCaptureError ? err.message : EMAIL_READ_FAILED_MESSAGE,
     };
   }
 
@@ -299,7 +336,17 @@ export async function submitInvoiceFromEmail(
   }
 
   const body = buildInvoiceFromEmailBody(input, context, captured);
+  const result = await postFromEmail(body, { config, idempotencyKey, signal });
+  // Never silent: what the capture left out of the email travels with the answer, for the view to show.
+  return captured.skipped.length > 0 ? { ...result, skipped: captured.skipped } : result;
+}
 
+/** POSTs the §2 body and classifies the answer (§3, §5, §6). */
+async function postFromEmail(
+  body: InvoiceFromEmailRequestBody,
+  options: { config: InvoiceServiceConfig; idempotencyKey: string; signal: AbortSignal | undefined }
+): Promise<InvoiceSubmitResult> {
+  const { config, idempotencyKey, signal } = options;
   let response: Response;
   try {
     const token = await config.getAccessToken();
@@ -309,6 +356,7 @@ export async function submitInvoiceFromEmail(
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Idempotency-Key': idempotencyKey },
         body: JSON.stringify(body),
+        ...(signal ? { signal } : {}),
       },
       token,
       { getRetryToken: config.getAccessToken }
@@ -383,6 +431,8 @@ export async function pollSubmission(
     maxDelayMs?: number;
     maxAttempts?: number;
     sleep?: (ms: number) => Promise<void>;
+    /** Aborting stops the polling at once (no further read is made) and ends it as `aborted`. */
+    signal?: AbortSignal;
   }
 ): Promise<InvoicePollResult> {
   const {
@@ -390,20 +440,26 @@ export async function pollSubmission(
     initialDelayMs = DEFAULT_POLL.initialDelayMs,
     maxDelayMs = DEFAULT_POLL.maxDelayMs,
     maxAttempts = DEFAULT_POLL.maxAttempts,
-    sleep = ms => new Promise<void>(resolve => setTimeout(resolve, ms)),
+    signal,
+    sleep = ms => abortableSleep(ms, signal),
   } = options;
   const url = absoluteUrl(config.apiBaseUrl, statusUrl);
   let delay = initialDelayMs;
   let lastStatus: string | undefined;
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (signal?.aborted) return { kind: 'aborted' };
     await sleep(delay);
+    if (signal?.aborted) return { kind: 'aborted' };
     delay = Math.min(delay * 2, maxDelayMs);
 
     let response: Response;
     try {
       const token = await config.getAccessToken();
-      response = await authenticatedJsonFetch(url, { method: 'GET' }, token, { getRetryToken: config.getAccessToken });
+      if (signal?.aborted) return { kind: 'aborted' };
+      response = await authenticatedJsonFetch(url, { method: 'GET', ...(signal ? { signal } : {}) }, token, {
+        getRetryToken: config.getAccessToken,
+      });
     } catch {
       continue;
     }
@@ -426,7 +482,7 @@ export async function pollSubmission(
       };
     }
   }
-  return { kind: 'pending', status: lastStatus };
+  return signal?.aborted ? { kind: 'aborted' } : { kind: 'pending', status: lastStatus };
 }
 
 /**
@@ -490,32 +546,49 @@ export function createInvoiceSubmitHandler(deps: {
       config: deps.config,
       email: deps.email,
       idempotencyKey: attempt.actionId,
+      ...(attempt.signal ? { signal: attempt.signal } : {}),
     });
+    const skipped = result.skipped ? { skipped: result.skipped } : {};
 
     if (result.kind === 'retryable') {
       // A local capture failure (status 0, nothing sent) carries the capture's own sentence for the user.
       const message = result.status === 0 && result.detail ? result.detail : describeSubmissionRefusal(result, ctx);
-      return { kind: 'retryable', message };
+      return { kind: 'retryable', message, ...skipped };
     }
     if (result.kind === 'refused') {
       const message = describeSubmissionRefusal(result, ctx);
-      return result.code === EMAIL_UNIDENTIFIABLE_CODE ? { kind: 'permanent', message } : { kind: 'refused', message };
+      return result.code === EMAIL_UNIDENTIFIABLE_CODE
+        ? { kind: 'permanent', message, ...skipped }
+        : { kind: 'refused', message, ...skipped };
     }
 
     const { trackingNumber, statusUrl } = result.accepted;
     attempt.onAccepted?.({ trackingNumber });
-    const polled = await pollSubmission(statusUrl, { config: deps.config, ...deps.poll });
+    const polled = await pollSubmission(statusUrl, {
+      config: deps.config,
+      ...deps.poll,
+      ...(attempt.signal ? { signal: attempt.signal } : {}),
+    });
     const tracking = trackingNumber ? { trackingNumber } : {};
 
     if (polled.kind === 'final') {
       if (polled.status === 'Accepted') {
+        // An Accepted invoice with a code is HELD (§9): never the catalog's Failed / Rejected sentences.
         return {
           kind: 'success',
           ...tracking,
-          ...(polled.outcomeReasonCode ? { message: describeInvoiceOutcome(polled.outcomeReasonCode, ctx) } : {}),
+          ...(polled.outcomeReasonCode ? { message: HELD_FOR_REVIEW_MESSAGE } : {}),
+          ...skipped,
         };
       }
-      return { kind: 'refused', message: describeInvoiceOutcome(polled.outcomeReasonCode, ctx) };
+      // Rejected or Failed AFTER the 202: the submission exists (it has a tracking number), so it is not "not submitted".
+      return {
+        kind: 'ended',
+        status: polled.status,
+        message: describeInvoiceOutcome(polled.outcomeReasonCode, ctx, polled.status),
+        ...tracking,
+        ...skipped,
+      };
     }
     // Accepted for processing, but the final answer is not known here: it is not a failure.
     return {
@@ -524,7 +597,10 @@ export function createInvoiceSubmitHandler(deps: {
       message:
         polled.kind === 'pending'
           ? 'Spaarke is still processing it. You can follow it in Spaarke with the tracking number.'
-          : "Its progress couldn't be read here. You can follow it in Spaarke with the tracking number.",
+          : polled.kind === 'aborted'
+            ? 'You left this view before its result was known. You can follow it in Spaarke with the tracking number.'
+            : "Its progress couldn't be read here. You can follow it in Spaarke with the tracking number.",
+      ...skipped,
     };
   };
 }

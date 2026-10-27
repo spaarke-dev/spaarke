@@ -10,7 +10,7 @@ import {
   toInvoiceMarkingAttachments,
   toSubmissionMarks,
 } from '../invoiceSubmissionSeam';
-import { MAX_ATTACHMENT_BYTES } from '../emailContentCapture';
+import { MAX_ATTACHMENT_BYTES, captureEmailContent } from '../emailContentCapture';
 
 const att = (over: Partial<AttachmentInfo> & Pick<AttachmentInfo, 'id' | 'name'>): AttachmentInfo => ({
   contentType: 'application/pdf',
@@ -54,16 +54,46 @@ describe('toInvoiceMarkingAttachments', () => {
     expect(listed.find(a => a.id === 'past')!.disabledReason).toMatch(/does not fit/);
   });
 
-  it('inline attachments count against the budget (they travel in the same request)', () => {
+  it('must-not-fire: an inline picture before the PDF never disables it (capture sends marked files first, inline last)', () => {
     const listed = toInvoiceMarkingAttachments(
       [
         att({ id: 'logo', name: 'logo.png', isInline: true, size: 600 }),
         att({ id: 'inv', name: 'inv.pdf', size: 600 }),
       ],
-      1000
+      1000 // the picture's base64 (800) would leave no room for the PDF's (800) if it were counted first
     );
     expect(listed).toHaveLength(1);
-    expect(listed[0]!.disabledReason).toMatch(/does not fit/);
+    expect(listed[0]!.disabledReason).toBeUndefined();
+  });
+
+  it('agrees with the real capture: the PDF the pre-check leaves enabled is the one the capture sends', async () => {
+    const email = [
+      att({ id: 'logo', name: 'logo.png', isInline: true, size: 600 }),
+      att({ id: 'inv', name: 'inv.pdf', size: 600 }),
+    ];
+    const listed = toInvoiceMarkingAttachments(email, 1100);
+    const marked = new Set(listed.filter(a => !a.disabledReason).map(a => a.id));
+    const captured = await captureEmailContent(
+      { getBody: async () => 'x', getAttachmentContent: async () => ({ content: 'A'.repeat(800) }) },
+      email,
+      marked,
+      1100
+    );
+    expect(captured.attachments.map(a => a.attachmentId)).toEqual(['inv']);
+    expect(captured.skipped.map(k => k.attachmentId)).toEqual(['logo']);
+  });
+
+  it('the budget is spent on the listed (markable) attachments in the email order; the one past it is disabled', () => {
+    const listed = toInvoiceMarkingAttachments(
+      [
+        att({ id: 'logo', name: 'logo.png', isInline: true, size: 600 }),
+        att({ id: 'a', name: 'a.pdf', size: 600 }),
+        att({ id: 'b', name: 'b.csv', size: 600 }),
+      ],
+      1000
+    );
+    expect(listed.find(a => a.id === 'a')!.disabledReason).toBeUndefined();
+    expect(listed.find(a => a.id === 'b')!.disabledReason).toMatch(/does not fit/);
   });
 
   it('must-not-fire: small file attachments are all sendable', () => {

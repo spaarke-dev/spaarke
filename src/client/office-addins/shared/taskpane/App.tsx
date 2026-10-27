@@ -219,6 +219,9 @@ export const App: React.FC<AppProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [, setHostContext] = useState<IHostContext | null>(null);
+  // Task 133: true while the Invoice view runs a submission or shows a result that carries a tracking number. The tab
+  // bar is hidden then, so a tab press cannot unmount the view and lose either. Only the Invoice tab sets it.
+  const [invoiceBusy, setInvoiceBusy] = useState(false);
   const [currentTab, setCurrentTab] = useState<NavigationTab>(
     initialAction === 'createTodo' ? 'createTodo' : initialAction === 'submitInvoice' ? 'invoice' : initialTab
   );
@@ -829,7 +832,9 @@ export const App: React.FC<AppProps> = ({
         // from the shared tab-availability check (getAvailableTabs) rather than a
         // hostType conditional (NFR-10) — Word now gets Save + Find; Outlook keeps
         // Save + Create To Do + Find.
-        showNavigation={getAvailableTabs(hostType, tabCapabilities).length > 0}
+        showNavigation={
+          getAvailableTabs(hostType, tabCapabilities).length > 0 && !(currentTab === 'invoice' && invoiceBusy)
+        }
         tabCapabilities={tabCapabilities}
         selectedTab={currentTab}
         onTabChange={setCurrentTab}
@@ -901,6 +906,7 @@ export const App: React.FC<AppProps> = ({
             getAccessToken={getInvoiceAccessToken}
             onSubmit={submitInvoice}
             loadFirms={loadFirms}
+            onBusyChange={setInvoiceBusy}
           />
         )}
 

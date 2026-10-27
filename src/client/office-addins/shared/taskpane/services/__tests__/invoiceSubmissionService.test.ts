@@ -1,6 +1,6 @@
 /**
  * Task 133 A1: the from-email invoice submission client against ebilling's agreed contract
- * (projects/ebilling-r1/notes/095-from-email-contract.md @ 717cf238d9): the §2 body, the replay key, the §6 code rule
+ * (projects/ebilling-r1/notes/095-from-email-contract.md @ fd70b8e1f6): the §2 body, the replay key, the §6 code rule
  * (`errorCode ?? reasonCode`) and retry classes, §3 polling, and the §8 firm list.
  */
 import type { AttachmentInfo } from '@shared/adapters/types';
@@ -12,6 +12,7 @@ import {
   submitInvoiceFromEmail,
   type InvoiceEmailSource,
 } from '../invoiceSubmissionService';
+import { HELD_FOR_REVIEW_MESSAGE } from '../../utils/invoiceSubmissionMessages';
 import type { InvoiceSubmissionInput } from '../invoiceSubmissionSeam';
 
 const BASE = 'https://bff.example';
@@ -418,8 +419,9 @@ describe('createInvoiceSubmitHandler — submit, then follow the status', () => 
       .mockResolvedValueOnce(res(202, ACCEPTED))
       .mockResolvedValueOnce(res(200, { status: 'Failed', outcomeReasonCode: 'invoice.read.no_invoice' }));
     const outcome = await createInvoiceSubmitHandler({ config, email: emailSource(), poll })(INPUT, { actionId: 'a' });
-    expect(outcome.kind).toBe('refused');
-    expect(outcome.kind !== 'success' && outcome.message).toMatch(/^"INV-4711\.pdf" isn't an invoice/);
+    // Failed AFTER the 202: an accepted submission that ended, with its tracking number (not "not submitted").
+    expect(outcome).toMatchObject({ kind: 'ended', status: 'Failed', trackingNumber: 'INV-4711.1' });
+    expect(outcome.kind === 'ended' && outcome.message).toMatch(/^"INV-4711\.pdf" isn't an invoice/);
   });
 
   it('email_unidentifiable is permanent (the view offers uploading in Spaarke)', async () => {
@@ -441,5 +443,201 @@ describe('createInvoiceSubmitHandler — submit, then follow the status', () => 
       poll: { ...poll, maxAttempts: 2 },
     })(INPUT, { actionId: 'a' });
     expect(outcome).toMatchObject({ kind: 'success', trackingNumber: 'INV-4711.1' });
+  });
+});
+
+describe('review fixes (task 133) — reading the email', () => {
+  it('must-fire: readContext failing is a retryable sentence for the user, not the adapter text, and nothing is sent', async () => {
+    const email: InvoiceEmailSource = {
+      ...emailSource(),
+      readContext: async () => {
+        throw { code: 'InternalError', message: 'Office.context.mailbox.item is null (code 5001)' };
+      },
+    };
+    const result = await submitInvoiceFromEmail(INPUT, { config, email, idempotencyKey: 'k' });
+    expect(result).toEqual({
+      kind: 'retryable',
+      status: 0,
+      code: undefined,
+      detail: "Couldn't read this email, so nothing was submitted. Try again.",
+    });
+    expect(mockFetch).not.toHaveBeenCalled();
+
+    const outcome = await createInvoiceSubmitHandler({ config, email })(INPUT, { actionId: 'a' });
+    expect(outcome).toEqual({
+      kind: 'retryable',
+      message: "Couldn't read this email, so nothing was submitted. Try again.",
+    });
+    expect(JSON.stringify(outcome)).not.toMatch(/5001|mailbox/);
+  });
+
+  it('a failing attachment list is the same sentence (no raw adapter text)', async () => {
+    const email: InvoiceEmailSource = {
+      ...emailSource(),
+      listAttachments: async () => {
+        throw new Error('getAttachmentsAsync failed: 5001');
+      },
+    };
+    const result = await submitInvoiceFromEmail(INPUT, { config, email, idempotencyKey: 'k' });
+    expect(result).toMatchObject({
+      kind: 'retryable',
+      detail: "Couldn't read this email, so nothing was submitted. Try again.",
+    });
+  });
+});
+
+describe('review fixes (task 133) — attachments the capture left out are carried, never dropped', () => {
+  const withCloudLink = () => {
+    const cloud: AttachmentInfo = {
+      id: 'AAMkAD...9',
+      name: 'shared-notes.docx',
+      size: 10,
+      contentType: 'application/octet-stream',
+      isInline: false,
+      attachmentType: 'cloud',
+    };
+    return emailSource({ attachments: [...ATTACHMENTS, cloud] });
+  };
+
+  it("must-fire: the capture's skipped list travels on the accepted result and into the handler outcome", async () => {
+    mockFetch.mockResolvedValueOnce(res(202, ACCEPTED));
+    const result = await submitInvoiceFromEmail(INPUT, { config, email: withCloudLink(), idempotencyKey: 'k' });
+    expect(result.kind).toBe('accepted');
+    expect(result.skipped).toHaveLength(1);
+    expect(result.skipped![0]).toMatchObject({ attachmentId: 'AAMkAD...9', reason: 'cloud-link' });
+
+    mockFetch.mockResolvedValueOnce(res(202, ACCEPTED)).mockResolvedValueOnce(res(200, { status: 'Accepted' }));
+    const outcome = await createInvoiceSubmitHandler({
+      config,
+      email: withCloudLink(),
+      poll: { sleep: async () => undefined },
+    })(INPUT, { actionId: 'a' });
+    expect(outcome).toMatchObject({ kind: 'success', trackingNumber: 'INV-4711.1' });
+    expect(outcome.skipped?.map(k => k.attachmentId)).toEqual(['AAMkAD...9']);
+    expect(outcome.skipped![0]!.message).toMatch(/shared-notes\.docx" was not saved with the email/);
+  });
+
+  it('a server refusal after the capture still carries the skipped list', async () => {
+    mockFetch.mockResolvedValueOnce(res(409, { errorCode: 'ebilling.submission.document_already_submitted' }));
+    const outcome = await createInvoiceSubmitHandler({ config, email: withCloudLink() })(INPUT, { actionId: 'a' });
+    expect(outcome.kind).toBe('refused');
+    expect(outcome.skipped).toHaveLength(1);
+  });
+
+  it('must-not-fire: nothing left out means no skipped key at all', async () => {
+    mockFetch.mockResolvedValueOnce(res(202, ACCEPTED));
+    const result = await submitInvoiceFromEmail(INPUT, { config, email: emailSource(), idempotencyKey: 'k' });
+    expect(result).not.toHaveProperty('skipped');
+  });
+});
+
+describe('review fixes (task 133) — what the handler says after the 202', () => {
+  const poll = { sleep: async () => undefined };
+  const run = (statusBody: Record<string, unknown>) => {
+    mockFetch.mockResolvedValueOnce(res(202, ACCEPTED)).mockResolvedValueOnce(res(200, statusBody));
+    return createInvoiceSubmitHandler({ config, email: emailSource(), poll })(INPUT, { actionId: 'a' });
+  };
+
+  it('must-fire: Accepted with a code the catalog does not know is "held for review", never the refusal text', async () => {
+    const outcome = await run({ status: 'Accepted', outcomeReasonCode: 'ebilling.submission.held_for_review' });
+    expect(outcome).toEqual({ kind: 'success', trackingNumber: 'INV-4711.1', message: HELD_FOR_REVIEW_MESSAGE });
+    expect(JSON.stringify(outcome)).not.toMatch(/not accepted/);
+  });
+
+  it('Accepted with a catalog Failed code is still the neutral held sentence, not a failure sentence', async () => {
+    const outcome = await run({ status: 'Accepted', outcomeReasonCode: 'ebilling.submission.processing_failed' });
+    expect(outcome).toMatchObject({ kind: 'success', message: HELD_FOR_REVIEW_MESSAGE });
+  });
+
+  it('must-not-fire: Accepted with no code has no message', async () => {
+    expect(await run({ status: 'Accepted', outcomeReasonCode: null })).toEqual({
+      kind: 'success',
+      trackingNumber: 'INV-4711.1',
+    });
+  });
+
+  it('must-fire: Rejected after the 202 is its own outcome, with the tracking number and the reason', async () => {
+    expect(await run({ status: 'Rejected', outcomeReasonCode: 'ebilling.submission.blocked' })).toEqual({
+      kind: 'ended',
+      status: 'Rejected',
+      message: 'The invoice was rejected by a billing rule.',
+      trackingNumber: 'INV-4711.1',
+    });
+  });
+
+  it('must-fire: Failed after the 202 is its own outcome; an unknown code does not say "not accepted"', async () => {
+    expect(await run({ status: 'Failed', outcomeReasonCode: 'invoice.read.unreadable' })).toMatchObject({
+      kind: 'ended',
+      status: 'Failed',
+      trackingNumber: 'INV-4711.1',
+      message: '"INV-4711.pdf" couldn\'t be read: it may be damaged or password-protected.',
+    });
+    expect(await run({ status: 'Failed', outcomeReasonCode: 'something.new' })).toEqual({
+      kind: 'ended',
+      status: 'Failed',
+      message: "Spaarke couldn't process the invoice.",
+      trackingNumber: 'INV-4711.1',
+    });
+  });
+
+  it('a refusal BEFORE the 202 stays "refused" (nothing was submitted)', async () => {
+    mockFetch.mockResolvedValueOnce(res(409, { errorCode: 'ebilling.submission.document_already_submitted' }));
+    const outcome = await createInvoiceSubmitHandler({ config, email: emailSource(), poll })(INPUT, { actionId: 'a' });
+    expect(outcome.kind).toBe('refused');
+  });
+});
+
+describe('review fixes (task 133) — leaving the view stops the work', () => {
+  it('pollSubmission: an abort during the wait ends it as aborted, with no further read (injected sleep)', async () => {
+    const controller = new AbortController();
+    const result = await pollSubmission('/s', {
+      config,
+      signal: controller.signal,
+      sleep: async () => controller.abort(),
+    });
+    expect(result).toEqual({ kind: 'aborted' });
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('pollSubmission: the default wait ends the moment the signal aborts (not after the delay)', async () => {
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 20);
+    const started = Date.now();
+    const result = await pollSubmission('/s', { config, signal: controller.signal, initialDelayMs: 60_000 });
+    expect(result).toEqual({ kind: 'aborted' });
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('pollSubmission: an abort after the first read stops the next one', async () => {
+    const controller = new AbortController();
+    mockFetch.mockImplementation(async () => {
+      controller.abort();
+      return res(200, { status: 'Processing' });
+    });
+    const result = await pollSubmission('/s', { config, signal: controller.signal, sleep: async () => undefined });
+    expect(result).toEqual({ kind: 'aborted' });
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect((mockFetch.mock.calls[0]![1] as RequestInit).signal).toBe(controller.signal);
+  });
+
+  it('must-not-fire: without a signal, polling behaves as before', async () => {
+    mockFetch.mockResolvedValueOnce(res(200, { status: 'Accepted' }));
+    expect(await pollSubmission('/s', { config, sleep: async () => undefined })).toMatchObject({ kind: 'final' });
+    expect((mockFetch.mock.calls[0]![1] as RequestInit).signal).toBeUndefined();
+  });
+
+  it("the handler passes the attempt's signal to the request and the polling, and an abort stops it", async () => {
+    const controller = new AbortController();
+    mockFetch.mockResolvedValueOnce(res(202, ACCEPTED)).mockResolvedValue(res(200, { status: 'Processing' }));
+    const outcome = await createInvoiceSubmitHandler({
+      config,
+      email: emailSource(),
+      poll: { sleep: async () => controller.abort() },
+    })(INPUT, { actionId: 'a', signal: controller.signal });
+    expect((mockFetch.mock.calls[0]![1] as RequestInit).signal).toBe(controller.signal);
+    expect(mockFetch).toHaveBeenCalledTimes(1); // the POST only: the status was never read
+    expect(outcome).toMatchObject({ kind: 'success', trackingNumber: 'INV-4711.1' });
+    expect(outcome.kind === 'success' && outcome.message).toMatch(/left this view/);
   });
 });

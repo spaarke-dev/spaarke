@@ -1,13 +1,15 @@
 /**
- * Task 133 A1: every code pinned in ebilling's from-email contract (095-from-email-contract.md @ 717cf238d9, §5, §6,
+ * Task 133 A1: every code pinned in ebilling's from-email contract (095-from-email-contract.md @ fd70b8e1f6, §5, §6,
  * §9, and the §2 firm refusals) has its own sentence; unknown codes get the generic one. The lists below are copied
  * from the contract, not from the implementation, so a code dropped from the catalog fails here.
  */
 import {
   describeInvoiceOutcome,
   describeSubmissionRefusal,
+  GENERIC_FAILED_OUTCOME_MESSAGE,
   GENERIC_OUTCOME_MESSAGE,
   GENERIC_SUBMISSION_MESSAGE,
+  HELD_FOR_REVIEW_MESSAGE,
   isRetryableSubmissionRefusal,
 } from '../invoiceSubmissionMessages';
 
@@ -56,6 +58,7 @@ const MARKS_INVALID_REASONS = [
   'unmarked_attachment',
   'duplicate_mark',
   'ambiguous_attachment',
+  'invoice_not_pdf', // added to the contract at fd70b8e1f6 (the entry marked Invoice is not a PDF)
 ];
 const EMAIL_UNIDENTIFIABLE_REASONS = [
   'no_message_id',
@@ -138,6 +141,34 @@ describe('invoice submission messages — specifics', () => {
     expect(
       describeSubmissionRefusal({ kind: 'retryable', status: 429, code: 'OFFICE_015', retryAfterSeconds: 30 })
     ).toMatch(/Try again in 30 seconds\./);
+  });
+
+  it('marks_invalid / invoice_not_pdf names the file and says the invoice must be a PDF', () => {
+    expect(refusal('ebilling.submission.marks_invalid', { reason: 'invoice_not_pdf', fileName: 'scan.docx' })).toMatch(
+      /^"scan.docx" isn't a PDF. The invoice must be a PDF./
+    );
+    expect(refusal('ebilling.submission.marks_invalid', { reason: 'invoice_not_pdf' })).toMatch(
+      /^The file marked as the invoice isn't a PDF./
+    );
+  });
+
+  it('submission_already_ended (EB-D-160: Rejected only) says rejected and never tells the user to change and resubmit', () => {
+    const message = refusal('ebilling.submission.submission_already_ended');
+    expect(message).toMatch(/rejected/i);
+    expect(message).toMatch(/follow it in Spaarke/i);
+    expect(message).not.toMatch(/change the details|submit again|try again/i);
+  });
+
+  it('an unknown Failed code does not say "not accepted"; an unknown Rejected code does; the held sentence is neutral', () => {
+    expect(describeInvoiceOutcome('invoice.read.something_new', {}, 'Failed')).toBe(GENERIC_FAILED_OUTCOME_MESSAGE);
+    expect(describeInvoiceOutcome(null, {}, 'Failed')).toBe(GENERIC_FAILED_OUTCOME_MESSAGE);
+    expect(describeInvoiceOutcome('x.y', {}, 'Rejected')).toBe(GENERIC_OUTCOME_MESSAGE);
+    // A known code keeps its own sentence whatever the status.
+    expect(describeInvoiceOutcome('ebilling.submission.blocked', {}, 'Rejected')).toBe(
+      'The invoice was rejected by a billing rule.'
+    );
+    expect(HELD_FOR_REVIEW_MESSAGE).toMatch(/holding it for review/);
+    expect(HELD_FOR_REVIEW_MESSAGE).not.toMatch(/not accepted|rejected|refused/i);
   });
 
   it('retry classes follow §6', () => {

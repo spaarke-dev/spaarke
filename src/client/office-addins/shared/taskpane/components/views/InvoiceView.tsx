@@ -52,14 +52,17 @@ import {
  * - New invoice: the core record (Matter, Project or Work Assignment — required), the firm (required; its options
  *   come from {@link InvoiceViewProps.loadFirms}), the firm's invoice number (required, 1-100), an optional PO number,
  *   and the email's attachments marked Invoice / Supporting / Don't save.
- * - Existing invoice: pick the invoice, then submit a corrected invoice. Corrections are off until the server
- *   supports them ({@link InvoiceViewProps.correctionAvailable}); adding supporting files has no server route and is
- *   not offered.
+ * - Existing invoice: pick the invoice, then submit a corrected invoice or add supporting files. Both are shown
+ *   disabled with their reason: corrections until the server supports them ({@link InvoiceViewProps.correctionAvailable},
+ *   ebilling 097), supporting files until the upload route exists (ebilling 123; its contract is agreed, the route is
+ *   not built, so the add-in does not call it yet).
  *
  * Submit goes through the injected {@link InvoiceViewProps.onSubmit} seam (App wires `invoiceSubmissionService`);
  * without it the view says submitting is not available and Submit stays disabled. Once the server accepts the
  * submission the view shows it processing until the final status is known. Results are shown generically (success /
- * refused / retry / use Spaarke instead) from {@link InvoiceSubmissionOutcome}; the view never reads a reason code.
+ * refused / retry / use Spaarke instead / ended after acceptance) from {@link InvoiceSubmissionOutcome}; the view
+ * never reads a reason code. A Retry sends exactly what was last submitted: changing any field or mark ends the retry
+ * (the next Submit is a new attempt, with a new action id). Leaving the view aborts a running submission's polling.
  *
  * The attachment marking is ebilling's shared `InvoiceAttachmentMarking` (`value` always holds every listed id, seeded
  * from `defaultInvoiceMarking`; `validateInvoiceMarking` always gets the attachments).
@@ -81,6 +84,12 @@ export interface InvoiceViewProps {
   loadFirms?: LoadInvoiceFirms;
   /** Whether "Submit a corrected invoice" can be used (the server refuses corrections until ebilling 097). */
   correctionAvailable?: boolean;
+  /**
+   * Called with true while a submission is running, or its result (one the server accepted: submitted, rejected or
+   * failed, with its tracking number) is showing; false otherwise and on unmount. The pane hides its tab bar while
+   * true, so the user cannot walk away from a running submission or its tracking number.
+   */
+  onBusyChange?: (busy: boolean) => void;
 }
 
 /** The hint when Outlook cannot submit this invoice (permanent failure, or a retry that keeps failing). */
@@ -88,6 +97,11 @@ export const INVOICE_UPLOAD_HINT = 'You can still submit this invoice in Spaarke
 
 /** Retryable failures in a row before the view also suggests uploading in Spaarke. */
 const RETRIES_BEFORE_HINT = 2;
+
+const ENDED_TITLES: Record<'Rejected' | 'Failed', string> = {
+  Rejected: 'The invoice was rejected',
+  Failed: 'The invoice could not be processed',
+};
 
 type AttachmentLoad =
   | { status: 'loading' }
@@ -103,6 +117,9 @@ type FirmLoad =
   | { status: 'ready'; firms: InvoiceFirmOption[] };
 
 type InvoiceMode = 'new' | 'existing';
+
+/** Adding supporting files to an existing invoice needs ebilling 123's upload route, which is not built yet. */
+const SUPPORTING_FILES_AVAILABLE = false;
 
 function newActionId(): string {
   const random = globalThis.crypto?.randomUUID?.();
@@ -157,6 +174,7 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
   onSubmit,
   loadFirms,
   correctionAvailable = false,
+  onBusyChange,
 }) => {
   const styles = useStyles();
   const { announce, liveRegion } = useAnnounce();
@@ -176,8 +194,22 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
   /** Set between the server's 202 and the submission's final status. */
   const [processing, setProcessing] = useState<{ trackingNumber?: string } | null>(null);
   const [retryableInARow, setRetryableInARow] = useState(0);
+  /** Bumped by the firm list's Retry; the firm effect runs again. */
+  const [firmsReload, setFirmsReload] = useState(0);
   const lastAttemptRef = useRef<{ input: InvoiceSubmissionInput; actionId: string } | null>(null);
   const firmRequestRef = useRef(0);
+  /** The running submission's abort controller; aborted when the view unmounts. */
+  const abortRef = useRef<AbortController | null>(null);
+  const onBusyChangeRef = useRef(onBusyChange);
+  onBusyChangeRef.current = onBusyChange;
+
+  // Leaving the view (unmount) stops a running submission's status polling.
+  useEffect(
+    () => () => {
+      abortRef.current?.abort();
+    },
+    []
+  );
 
   // The open email's attachments, listed once (content is read at submit by the A1 service). Capability-gated, never
   // a hostType check (NFR-10): `canGetAttachments` is Outlook read mode.
@@ -235,7 +267,16 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
         });
       }
     );
-  }, [coreRecord, loadFirms]);
+  }, [coreRecord, loadFirms, firmsReload]);
+
+  // A Retry resends the LAST submitted request. Once the user changes anything the request was built from, that
+  // request is no longer what is on screen: drop the retryable outcome and the stored attempt, so the next Submit is
+  // a new attempt (new action id) with the values shown.
+  useEffect(() => {
+    lastAttemptRef.current = null;
+    setOutcome(prev => (prev?.kind === 'retryable' ? null : prev));
+    setRetryableInARow(0);
+  }, [coreRecord, invoice, mode, correctionChosen, firmId, firmInvoiceNumber, poNumber, marking]);
 
   const searchCoreRecords = useCallback(
     (query: string, type: EntityType) =>
@@ -256,6 +297,17 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
   const numberTooLong = firmInvoiceNumber.trim().length > FIRM_INVOICE_NUMBER_MAX;
   const succeeded = outcome?.kind === 'success';
   const locked = submitting || succeeded;
+  // Running, or showing the result of a submission the server accepted (it carries the tracking number).
+  const busy = submitting || outcome?.kind === 'success' || outcome?.kind === 'ended';
+  useEffect(() => {
+    onBusyChangeRef.current?.(busy);
+  }, [busy]);
+  useEffect(
+    () => () => {
+      onBusyChangeRef.current?.(false);
+    },
+    []
+  );
 
   // The submission form applies to a new invoice, or to a correction once corrections are available.
   const formActive = mode === 'new' || (correctionAvailable && correctionChosen && invoice !== null);
@@ -282,6 +334,8 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
   const runAttempt = async (input: InvoiceSubmissionInput, actionId: string): Promise<void> => {
     if (!onSubmit) return;
     lastAttemptRef.current = { input, actionId };
+    const controller = new AbortController();
+    abortRef.current = controller;
     setSubmitting(true);
     setProcessing(null);
     setOutcome(null);
@@ -289,6 +343,7 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
     try {
       result = await onSubmit(input, {
         actionId,
+        signal: controller.signal,
         // Accepted (202): the final answer comes from following its status — show that it is being processed.
         onAccepted: ({ trackingNumber }) => {
           setProcessing({ ...(trackingNumber ? { trackingNumber } : {}) });
@@ -299,12 +354,18 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
       // An unexpected throw says nothing about whether a retry helps; offer one (the same action).
       result = { kind: 'retryable', message: err instanceof Error ? err.message : "Couldn't submit the invoice." };
     }
+    // The view went away while this ran: there is nothing left to update.
+    if (controller.signal.aborted) return;
     setSubmitting(false);
     setProcessing(null);
     setOutcome(result);
     setRetryableInARow(prev => (result.kind === 'retryable' ? prev + 1 : 0));
     announce(
-      result.kind === 'success' ? 'Invoice submitted.' : result.message,
+      result.kind === 'success'
+        ? 'Invoice submitted.'
+        : result.kind === 'ended'
+          ? `${ENDED_TITLES[result.status]}. ${result.message}`
+          : result.message,
       result.kind === 'success' ? 'polite' : 'assertive'
     );
   };
@@ -386,7 +447,36 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
             </MessageBarBody>
           </MessageBar>
         );
+      case 'ended':
+        // The server accepted it (there is a tracking number) and it then ended: not "not submitted".
+        return (
+          <MessageBar intent="error" layout="multiline" role="alert">
+            <MessageBarBody>
+              <MessageBarTitle>{ENDED_TITLES[outcome.status]}</MessageBarTitle>
+              {outcome.trackingNumber ? `Tracking number ${outcome.trackingNumber}. ` : ''}
+              {outcome.message}
+            </MessageBarBody>
+          </MessageBar>
+        );
     }
+  };
+
+  /** Attachments the capture left out of the saved email, with why — the Save view's own wording (SaveView). */
+  const renderSkipped = () => {
+    const skipped = outcome?.skipped ?? [];
+    if (processing || skipped.length === 0) return null;
+    return (
+      <MessageBar intent="warning" layout="multiline" data-testid="invoice-skipped-attachments">
+        <MessageBarBody>
+          <MessageBarTitle>
+            {skipped.length === 1 ? 'One attachment was not saved' : `${skipped.length} attachments were not saved`}
+          </MessageBarTitle>
+          {skipped.map(s => (
+            <div key={s.attachmentId}>{s.message}</div>
+          ))}
+        </MessageBarBody>
+      </MessageBar>
+    );
   };
 
   const renderFirmField = () => {
@@ -417,11 +507,23 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
     }
     if (firms.status === 'error') {
       return (
-        <Field label="Firm" required validationState="error" validationMessage={firms.message}>
-          <Select disabled value="">
-            <option value="">Choose a firm</option>
-          </Select>
-        </Field>
+        <>
+          <Field label="Firm" required validationState="error" validationMessage={firms.message}>
+            <Select disabled value="">
+              <option value="">Choose a firm</option>
+            </Select>
+          </Field>
+          <div>
+            <Button
+              appearance="outline"
+              size="small"
+              aria-label="Retry loading the firms"
+              onClick={() => setFirmsReload(n => n + 1)}
+            >
+              Retry
+            </Button>
+          </div>
+        </>
       );
     }
     if (firms.firms.length === 0) {
@@ -514,6 +616,7 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
       </div>
 
       {renderOutcome()}
+      {renderSkipped()}
 
       <div className={styles.footer}>
         {!succeeded && missing.length > 0 && (
@@ -575,19 +678,27 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
                 defaultType="Invoice"
                 disabled={locked}
               />
-              {/* Adding supporting files is not offered: there is no server route for it (contract, "Not on this
-                  route"). A correction is offered once the server accepts one (ebilling 097). */}
+              {/* Both choices are shown disabled with their reason until the server can take them. A correction is
+                  offered once the server accepts one (ebilling 097). Adding supporting files is ebilling 123
+                  (POST /api/finance/invoices/{invoiceId}/files; contract 123-upload-contract.md, agreed) — the
+                  route is not built yet, so it is not wired here. */}
               <RadioGroup
                 value={correctionChosen ? 'correction' : ''}
                 onChange={(_, data) => setCorrectionChosen(data.value === 'correction')}
-                disabled={!correctionAvailable || locked}
+                disabled={locked}
                 aria-label="What to do with the invoice"
               >
-                <Radio value="correction" label="Submit a corrected invoice" />
+                <Radio value="correction" label="Submit a corrected invoice" disabled={!correctionAvailable} />
+                <Radio value="supporting" label="Add supporting files" disabled={!SUPPORTING_FILES_AVAILABLE} />
               </RadioGroup>
               {!correctionAvailable && (
                 <Text size={200} className={styles.note}>
                   Corrections from Outlook are not available yet
+                </Text>
+              )}
+              {!SUPPORTING_FILES_AVAILABLE && (
+                <Text size={200} className={styles.note}>
+                  Adding supporting files from Outlook is not available yet
                 </Text>
               )}
             </div>

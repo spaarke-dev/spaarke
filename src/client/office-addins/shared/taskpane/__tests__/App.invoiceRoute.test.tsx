@@ -4,7 +4,7 @@
  *
  * Views are doubled to see which one App renders (harness mirrors `App.emailIdentity.test.tsx`).
  */
-import { render, waitFor } from '@testing-library/react';
+import { act, render, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { App } from '../App';
 import type { IHostAdapter } from '@shared/adapters';
@@ -36,8 +36,13 @@ jest.mock('../hooks', () => ({
   ...jest.requireActual('../hooks'),
   useLinkedTodosForCommunication: () => ({ count: 0, isLoading: false, error: null }),
 }));
+// Records the shell's `showNavigation` on every render (the tab bar), to see when App hides it.
+const mockShellNavigation: Array<boolean | undefined> = [];
 jest.mock('../components/TaskPaneShell', () => ({
-  TaskPaneShell: ({ children }: { children: ReactNode }) => children,
+  TaskPaneShell: ({ children, showNavigation }: { children: ReactNode; showNavigation?: boolean }) => {
+    mockShellNavigation.push(showNavigation);
+    return children;
+  },
 }));
 jest.mock('../components/SaveFlow', () => ({
   DEFAULT_SAVED_DOCUMENT_PANE_STATE: { savedDocument: null, profileRefreshSignal: 0, contentChangedSinceSave: false },
@@ -93,6 +98,7 @@ function outlookAdapter(): IHostAdapter {
 let fetchSpy: jest.Mock;
 beforeEach(() => {
   jest.clearAllMocks();
+  mockShellNavigation.length = 0;
   fetchSpy = jest.fn(async () => ({ ok: true, status: 200, json: async () => ({}), text: async () => '{}' }));
   global.fetch = fetchSpy as unknown as typeof fetch;
 });
@@ -128,6 +134,31 @@ describe('App — the Invoice view is reachable only through ?action=submitInvoi
 
     await waitFor(() => expect(CreateTodoView).toHaveBeenCalled());
     expect(InvoiceView).not.toHaveBeenCalled();
+  });
+
+  it('hides the tab bar while the Invoice view is busy (a submission running, or its result showing), then shows it again', async () => {
+    render(<App hostAdapter={outlookAdapter()} initialAction="submitInvoice" />);
+    await waitFor(() => expect(InvoiceView).toHaveBeenCalled());
+    const lastNavigation = () => mockShellNavigation[mockShellNavigation.length - 1];
+    const onBusyChange = InvoiceView.mock.calls[InvoiceView.mock.calls.length - 1]![0].onBusyChange as (
+      busy: boolean
+    ) => void;
+    expect(typeof onBusyChange).toBe('function');
+    expect(lastNavigation()).toBe(true);
+
+    act(() => onBusyChange(true));
+    expect(lastNavigation()).toBe(false);
+
+    act(() => onBusyChange(false));
+    expect(lastNavigation()).toBe(true);
+  });
+
+  it('must-not-fire: the default pane (no action) always shows the tab bar', async () => {
+    render(<App hostAdapter={outlookAdapter()} />);
+    await waitFor(() => expect(SaveView).toHaveBeenCalled());
+    expect(InvoiceView).not.toHaveBeenCalled();
+    expect(mockShellNavigation.length).toBeGreaterThan(0);
+    expect(mockShellNavigation.every(shown => shown === true)).toBe(true);
   });
 
   it('no tab offers the Invoice view, in either host', () => {

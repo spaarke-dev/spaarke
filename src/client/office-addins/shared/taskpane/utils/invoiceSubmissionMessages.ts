@@ -1,7 +1,7 @@
 /**
  * invoiceSubmissionMessages.ts — user text for ebilling's from-email invoice submission (task 133 A1).
  *
- * Every code pinned in `projects/ebilling-r1/notes/095-from-email-contract.md` (agreed at 717cf238d9) §5 (replays),
+ * Every code pinned in `projects/ebilling-r1/notes/095-from-email-contract.md` (pinned at fd70b8e1f6) §5 (replays),
  * §6 (refusals, with the `marks_invalid`, `email_unidentifiable` and `correction_not_allowed` reasons) and §9 (final
  * outcomes) has its own sentence here, in the catalog pattern of `errorMessages.ts`. No server prose is pinned (§9:
  * "the add-in localises"), so the server's `detail` is never shown in place of these. A code this file does not know
@@ -34,6 +34,14 @@ type Entry = string | ((facts: Facts) => string);
 
 export const GENERIC_SUBMISSION_MESSAGE = "The invoice couldn't be submitted. Nothing was submitted.";
 export const GENERIC_OUTCOME_MESSAGE = 'The invoice was not accepted.';
+/** An unknown `Failed` code: the invoice was accepted for processing and then did not get through. */
+export const GENERIC_FAILED_OUTCOME_MESSAGE = "Spaarke couldn't process the invoice.";
+/**
+ * An Accepted invoice can be HELD for review (contract §9: `outcomeReasonCode` "while an Accepted invoice is held").
+ * The catalog's sentences describe a Failed or Rejected invoice, so none of them is used for an Accepted one.
+ */
+export const HELD_FOR_REVIEW_MESSAGE =
+  'Spaarke accepted it and is holding it for review. You can follow it in Spaarke with the tracking number.';
 
 const NOTHING = 'Nothing was submitted.';
 
@@ -62,6 +70,9 @@ export const MARKS_INVALID_REASON_MESSAGES: Readonly<Record<string, Entry>> = {
   ambiguous_attachment: f =>
     `${quoted(f.fileName, 'Two attachments')} can't be told apart: two attachments have the same name, size and ` +
     `type. Submit the invoice in Spaarke instead. ${NOTHING}`,
+  // The entry marked Invoice is not a PDF (the view stops this earlier; the server's own check is the backstop).
+  invoice_not_pdf: f =>
+    `${quoted(f.fileName ?? f.invoiceFileName, 'The file marked as the invoice')} isn't a PDF. The invoice must be a PDF. ${NOTHING}`,
 };
 
 /** §6 `email_unidentifiable` reasons (permanent; the view adds the upload-in-Spaarke alternative). */
@@ -98,9 +109,11 @@ function fromReasons(table: Readonly<Record<string, Entry>>, fallback: string): 
 /** §2, §5 and §6 codes. */
 export const SUBMISSION_ERROR_MESSAGES: Readonly<Record<string, Entry>> = {
   // §5 replays
+  // EB-D-160: the server answers this only when the earlier submission was Rejected (after a Failed one the same
+  // request is a new attempt), so it never tells the user to change the details and submit again.
   'ebilling.submission.submission_already_ended':
-    'This email was already submitted with these same details, and that submission has ended. Change the details ' +
-    '(for example which file is the invoice) to submit again, or follow the earlier submission in Spaarke.',
+    'This email was already submitted with these same details, and the invoice was rejected. You can follow it in ' +
+    `Spaarke. ${NOTHING}`,
   'ebilling.submission.document_already_submitted': `This invoice was already submitted from this email with different details. ${NOTHING}`,
   OFFICE_IDEMPOTENCY_CONFLICT: f => `This submission is still being sent. ${tryAgain(f)}`,
   // §6 access and filters
@@ -205,10 +218,17 @@ export function describeSubmissionRefusal(refusal: InvoiceRefusalLike, context: 
     : GENERIC_SUBMISSION_MESSAGE;
 }
 
-/** The sentence for a final outcome code (§9); unknown or absent codes get the generic sentence. */
-export function describeInvoiceOutcome(code: string | null | undefined, context: InvoiceMessageContext = {}): string {
+/**
+ * The sentence for a Failed or Rejected outcome code (§9); unknown or absent codes get a generic sentence (for a
+ * Failed invoice, one that does not call it "not accepted"). An ACCEPTED invoice that carries a
+ * code is described by {@link HELD_FOR_REVIEW_MESSAGE}, never by this catalog.
+ */
+export function describeInvoiceOutcome(
+  code: string | null | undefined,
+  context: InvoiceMessageContext = {},
+  status?: 'Rejected' | 'Failed'
+): string {
   const entry = code ? INVOICE_OUTCOME_MESSAGES[code] : undefined;
-  return entry === undefined
-    ? GENERIC_OUTCOME_MESSAGE
-    : render(entry, { kind: 'refused', status: 0, code: code ?? undefined, ...context });
+  if (entry === undefined) return status === 'Failed' ? GENERIC_FAILED_OUTCOME_MESSAGE : GENERIC_OUTCOME_MESSAGE;
+  return render(entry, { kind: 'refused', status: 0, code: code ?? undefined, ...context });
 }
