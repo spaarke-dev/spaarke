@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="075" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Push Updates ribbon opens the Family view (code-page dialog hosting RecordFamilyModal) (FR-35)</title>
+    <phase>7 W7 Record family service and Family tool</phase>
+    <gate>073 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New code page + ribbon web-resource change.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Follows the existing navigateTo code-page dialog pattern (sprk_wizard_commands.js) and an existing code-page scaffold.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W7-C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>073</deps>
+    <tags>frontend, react, fluent-ui, ribbon, dataverse, testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Change `Spaarke.FieldMapping.Push.pushUpdates` in `sprk_fieldmapping_push.js` so the Matter and Project "Push Updates" button opens a code-page dialog (`Xrm.Navigation.navigateTo`, pageType webresource) that hosts `RecordFamilyModal` for the current record, instead of pushing directly. Create the minimal code page that hosts the modal.</prompt>
+  <role>SPAARKE front-end developer, Dataverse ribbon web resources and React code pages.</role>
+  <goal>The button opens the Family view; no push happens unless the person confirms rows in the modal (after 040, through the modal's actions).</goal>
+
+  <context>
+    <background>spec.md FR-35 (owner: keep the button; it opens the Family view). Today pushUpdates → openConfirmDialog → POST /push for every target profile (sprk_fieldmapping_push.js ~:423-484). The enable rule `hasSourceProfile` stays. The ribbon RibbonDiff entries (sprk_Matter/RibbonDiff.xml ~:231, ~:455; sprk_Project) keep the same command and library — only the function body changes, so no ribbon XML change is expected.</background>
+    <relevant-files>
+      <file role="modify">src/client/webresources/js/sprk_fieldmapping_push.js</file>
+      <file role="canonical-reference">src/client/webresources/js/sprk_wizard_commands.js (~:156 navigateTo dialog pattern)</file>
+      <file role="new">src/solutions/RecordFamily/ (minimal code page: src/main.tsx rendering RecordFamilyModal from the dialog data (entity, id))</file>
+      <file role="canonical-reference">an existing small code page under src/solutions/ for the build/auth bootstrap (choose the smallest; name it in the notes)</file>
+      <file role="canonical-reference">docs/architecture/SPAARKE-SIDE-PANE-NAVIGATION.md (code-page build step; record whether ensureNavigatorSidePane applies to a dialog-only page)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-35">No direct /push call remains in pushUpdates; the old confirm dialog path is removed.</constraint>
+    <constraint source="ADR-050">Ribbon → code-page dialog is the sanctioned launch for a modal from a non-React surface.</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens; dark-mode safe.</constraint>
+    <constraint source="CLAUDE.md §12">Node install in src/solutions/*: `npm install --legacy-peer-deps --no-audit --no-fund`.</constraint>
+    <constraint source="project">Deployment is task 076 (code-page-deploy / dataverse-deploy skills).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>docs/architecture/SPAARKE-SIDE-PANE-NAVIGATION.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare FULL rigor; confirm 073 is merged.</step>
+    <step order="1">Scaffold the code page from the chosen reference; render RecordFamilyModal from the dialog data.</step>
+    <step order="2">Rewrite pushUpdates to navigateTo the code page with { entityName, id }; remove the direct push and openConfirmDialog.</step>
+    <step order="3">Build; run any web-resource tests; record the code page's size.</step>
+    <step order="4">Update TASK-INDEX.md to ✅ [done]; notes in notes/task-075-notes.md.</step>
+  </steps>
+
+  <justification>
+    <existing>sprk_fieldmapping_push.js (button), RecordFamilyModal (073); no code page hosts the modal.</existing>
+    <extension>The web resource is extended; a ribbon script cannot render the React modal itself, so a hosting code page is the minimum new surface.</extension>
+    <cost-of-doing-nothing>The owner's decision (button opens the Family view) cannot be met; the button keeps pushing without a preview.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/client/webresources/js/sprk_fieldmapping_push.js</output>
+    <output type="code">src/solutions/RecordFamily/src/main.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Clicking Push Updates on a Matter or Project opens the dialog showing that record's Family view.</criterion>
+    <criterion testable="true">pushUpdates contains no fetch to /field-mappings/push (grep).</criterion>
+    <criterion testable="true">The enable rule hasSourceProfile is unchanged.</criterion>
+    <criterion testable="true">Closing the dialog refreshes the form, as the wizard dialogs do.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Ribbon opens Family view">
+      <steps><step>Open a Matter; click Push Updates</step><step>Verify the Family dialog opens for that matter; check the console</step></steps>
+      <expected>Dialog shows the family; no push request is sent</expected>
+    </test>
+  </ui-tests>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

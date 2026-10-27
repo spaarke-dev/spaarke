@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="071" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>RecordFamilyReader — caller-scoped (OBO) family walk with pruning, primary-parent rule, caps and protected continuation (FR-30)</title>
+    <phase>7 W7 Record family service and Family tool</phase>
+    <gate>070 complete + UAC 194b merged (primary-parent order)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New BFF service; reads as the caller and must never reveal unreadable records (existence-leak class); Data Protection continuation.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive read path (no traversal through unreadable records, no hidden counts, tamper-proof continuation) with non-trivial walk semantics.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>W7-B</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on 070's registry and UAC 194b; 072 builds on it.</parallel-reason>
+    <deps>070</deps>
+    <tags>bff-api, auth, dataverse, testing</tags>
+    <estimated-effort>8-12 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Implement `RecordFamilyReader.ReadAsync(kind, table, id, direction, continuation)` in `Services/Dataverse`: a read-only walk of the Filing family AS THE CALLER (OBO), driven by `RecordFamilyEdges`, that follows the rules in spec FR-30 and design §12.3 B exactly.</prompt>
+  <role>SPAARKE platform developer, .NET 10 BFF, OBO Dataverse reads, access-safe enumeration.</role>
+  <goal>The reader returns exactly the family members the caller can read, through readable paths only, with no hint of hidden records, capped and resumable, and with one family per record.</goal>
+
+  <context>
+    <background>spec.md FR-30; design.md §12.3 B (UAC-r2 F1/F2/C1/C4, ontology dedupe, owner full-family default) and §12.11 known limits. One family per record: the primary parent comes from `RecordOwnershipContext.InPrimaryOrder` / `OrderedParentsOf` in RecordOwnershipResolver (UAC 194b) — never a second ordering. Isolation is NOT decided here (secure-if-any stays in UAC's walks); this reader is not an authorization input.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Dataverse/RecordFamilyReader.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Dataverse/RecordFamilyEdges.cs (task 070)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Dataverse/RecordOwnershipResolver.cs (InPrimaryOrder / OrderedParentsOf, UAC 194b)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/FieldMappings/FieldMappingEndpoints.cs (impersonated / caller-scoped query pattern used by /push)</file>
+      <file role="canonical-reference">CallerRecordAccessProbe.GetCallerRightsForAuthorizationGateAsync (equalised anchor probe, #2137)</file>
+      <file role="modify">the BFF module that registers Dataverse services (one scoped registration)</file>
+      <file role="new">tests/unit/domain/Dataverse/RecordFamilyReaderTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-30">Reads AS THE CALLER (OBO) for every member query; one batched query per (table, lookup) per level (no N+1); a visited set always.</constraint>
+    <constraint source="UAC F2">Never passes through an unreadable record; never returns, counts or hints at one. Up: stop at the first unreadable ancestor. Full view: walk down from the highest READABLE ancestor.</constraint>
+    <constraint source="UAC primary-parent rule">Up and down follow PRIMARY edges only (RecordOwnershipResolver order). A child is listed only under its primary parent.</constraint>
+    <constraint source="ontology 3a">One kind per walk; kind other than Filing is rejected before any read.</constraint>
+    <constraint source="FR-30 / UAC C4">Caps: depth 4, 500 unique members, a per-level cap; truncation keeps the anchor's ancestor chain and the anchor's own subtree before siblings'; returns truncated=true and a continuation. Never truncates silently.</constraint>
+    <constraint source="UAC F1 / C1">Continuation: ASP.NET Data Protection, bound to oid + anchor + kind + direction + top; every carried parent id re-checked as caller-readable; tampered = invalid (same answer).</constraint>
+    <constraint source="FR-30">Dedupe by (table, id), shallowest edge kept. Display columns (name, record number, status, modified on) read OBO only — field-secured values come back null; never read app-only.</constraint>
+    <constraint source="design §12.3 B">No access metadata in results (grants, No Access, sharees, owner team). No cross-caller cache. Not an authorization input.</constraint>
+    <constraint source="CLAUDE.md §10 / ADR-010">One scoped DI registration; Placement Justification; publish-size delta; CVE check.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/patterns/auth/obo-flow.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/field-mapping-server-write-path-r1/design.md (§12.3 B, §12.11)</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare FULL rigor; confirm 070 is merged and UAC 194b's merge sha is on master (UAC-r2 sends it).</step>
+    <step order="1">Write the tests first (criteria below) against a fake caller-scoped query seam; confirm they fail.</step>
+    <step order="2">Implement the walk, caps, dedupe, primary-parent filtering, continuation protection; register the service.</step>
+    <step order="3">Run the filtered suites and ArchTests; measure publish size; CVE check.</step>
+    <step order="4">Update TASK-INDEX.md to ✅ [done]; notes in notes/task-071-notes.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If UAC 194b's primary-parent order is not available on master, STOP — do not build a second ordering.</trigger>
+    <trigger>If any member query cannot be made as the caller, STOP and escalate (an app-only read here would break FR-30).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>UAC's access walks (SecureRootInheritance, SecureChildReconciler) are app-only and enforce invariants; /push's child query is private, one level and profile-bound.</existing>
+    <extension>No: the access walks must stay app-only for isolation (UAC), and the push query cannot walk depth or apply pruning without becoming this reader.</extension>
+    <cost-of-doing-nothing>The Family modal (073) and push preview (040) have no caller-safe way to list a family; each would build its own walk.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Dataverse/RecordFamilyReader.cs</output>
+    <output type="test">tests/unit/domain/Dataverse/RecordFamilyReaderTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Pruning: in a Secure family, a readable record below an unreadable one is absent; result, counts and truncation flags are identical to a family where that branch does not exist.</criterion>
+    <criterion testable="true">Up-walk stops at the first unreadable ancestor; the full view is rooted at the highest readable ancestor (root returned only when readable).</criterion>
+    <criterion testable="true">Primary parent: a record filed under matter A (primary) and project B (secondary) appears in A's family and not under B.</criterion>
+    <criterion testable="true">Dedupe: a Signal reachable at depth 1 and depth 2 appears once, at depth 1.</criterion>
+    <criterion testable="true">Caps: a family over 500 returns truncated=true with the anchor's chain and own subtree present; "load more" via the continuation returns the rest with no duplicates and no gaps.</criterion>
+    <criterion testable="true">Continuation: replayed under another oid, anchor, kind or direction, or tampered, it is refused exactly like an invalid one; a carried parent that became unreadable is not traversed.</criterion>
+    <criterion testable="true">Kind other than Filing is rejected before any Dataverse call; a bad-data loop terminates via the visited set.</criterion>
+    <criterion testable="true">Field-secured display columns come back null; no app-only read occurs (asserted on the query seam).</criterion>
+    <criterion testable="true">Test scope: the cases above only; anything beyond needs a one-line justification in the notes.</criterion>
+    <criterion testable="true">BFF build 0 errors; filtered suites and ArchTests green; publish-size delta and CVE recorded.</criterion>
+  </acceptance-criteria>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

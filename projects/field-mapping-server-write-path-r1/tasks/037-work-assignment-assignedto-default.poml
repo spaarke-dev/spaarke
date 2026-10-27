@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="037" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Work Assignment Assigned To defaults to its own Assigned To Internal at create (FR-36, #2354)</title>
+    <phase>3 W3 Product creators onto the service (create defaults amendment 2026-10-27)</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF .cs on the create path; writes an access-conferring column (sprk_assignedto); UAC-r2 review gate.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive: the defaulted value must take exactly the access path of a supplied value (AssignedAccessMaterializer, Assigned-To policy, task 142 ordering) on two create paths.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W7-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>bff-api, field-mapping, authorization, testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>When a `sprk_workassignment` is created and the request leaves `sprk_assignedto` unset, set it to the new record's own `sprk_assignedtointernal` (after mapping), declared once in `RecordTableRules` and applied on both server create paths (the child-records route through `OwnedChildWrite`, and `RecordCreationService`). The defaulted value must go through exactly the same access path as a caller-supplied `sprk_assignedto`.</prompt>
+  <role>SPAARKE platform developer, .NET 10 BFF, Dataverse record-creation write path and Assigned-To access materialisation.</role>
+  <goal>A work assignment created from a matter whose Assigned To Internal is contact X gets Assigned To = X, with access materialised exactly as for a supplied value; supplied values (including explicit null) are never replaced; updates and Repair never back-fill.</goal>
+
+  <context>
+    <background>spec.md FR-36; owner decision 2026-10-27 ("use the Assigned To Internal value"); issue #2354. Today nothing sets a work assignment's `sprk_assignedto`: the wizard payload omits it (`workAssignmentService.ts` ~:373-483), no mapping rule targets it, and `AssignedToDefaults` covers only sprk_todo / sprk_event (`RecordTableRules.cs` ~:160-179). `OwnedChildWrite.cs` ~:178-183 records that a work assignment's extra `sprk_assignedto` was "left to the model" — this task changes that, by owner decision. Types (dev, read-only, 2026-10-27): on sprk_workassignment both `sprk_assignedto` and `sprk_assignedtointernal` are CONTACT lookups (same contact id observed in both), so the default copies the EntityReference unchanged — no contact↔user conversion, no name or email matching. The wizard path today maps on the client and posts the mapped `sprk_assignedtointernal` in the payload to `POST /api/v1/child-records/sprk_workassignment`; task 017 later re-points that route onto `RecordCreationService` — the rule must hold on both paths, declared once.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordTableRules.cs (sprk_workassignment rule ~:140-155: declare the default once, next to its ForPerson)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Dataverse/OwnedChildWrite.cs (child-records create: apply the declared default before the Assigned-To policy / materialiser; update the ~:178-183 comment)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.Mapping.cs (post-mapping defaults step ~:651: apply the same declared default after mapping)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Dataverse/AssignedToDefaults.cs (fill-only precedence; never a team, never a name/email match)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/ExternalAccess/AssignedAccessMaterializer.cs (RunAfterWriteAsync — the one downstream path)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ChildRecordEndpoints.cs</file>
+      <file role="modify">tests/unit/domain/Dataverse/RecordCreation/RecordTableRulesTests.cs</file>
+      <file role="modify">tests/integration/seam/RecordCreation/RecordCreationServiceMappingSeamTests.PostMappingDefaults.cs</file>
+      <file role="modify">tests/Spaarke.ArchTests/RecordTableRulesRegistryGuardTests.cs (only if the registry guard needs the new default listed)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="UAC-r2 condition 1">Fill-only, server-side, once: the default applies only when the request leaves `sprk_assignedto` UNSET (absent / no bind). An explicit value AND an explicit null from the caller win. Create only — an update, a Repair pass or a push never back-fills it.</constraint>
+    <constraint source="UAC-r2 condition 2">Same downstream path: the defaulted value is set on the record BEFORE the Assigned-To policy and `AssignedAccessMaterializer` run, so it is treated exactly as a supplied value (Secure → suggestion only, Restricted → no contact grant, Limited → no organization grant). No separate grant path; no grant written before the record's secure flag is known (task 142 ordering).</constraint>
+    <constraint source="UAC-r2 condition 3">Types: copy the `sprk_assignedtointernal` contact EntityReference as-is into `sprk_assignedto` (both contact). State this in the PR. If either column turns out not to be a contact lookup on the live metadata, STOP (see escalation).</constraint>
+    <constraint source="CLAUDE.md §11 / spec FR-36">Declared once in `RecordTableRules`; both paths read that declaration. No second copy of the rule in either path.</constraint>
+    <constraint source="ADR-002">No plugin, business rule, flow or OOB relationship mapping.</constraint>
+    <constraint source="CLAUDE.md §10">BFF task: Placement Justification in the PR (modification inside BFF); publish-size delta vs a fresh master build; `dotnet list package --vulnerable --include-transitive`.</constraint>
+    <constraint source="ADR-038">Tests at KEEP paths (`tests/unit/domain/**`, `tests/integration/seam/**`); never run the unfiltered Sprk.Bff.Api.Tests (use `projects/field-mapping-server-write-path-r1/scripts/verify-suites.sh`).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>projects/field-mapping-server-write-path-r1/notes/task-018-notes.md (018a PostMappingDefaults)</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare FULL rigor. Re-grep `ForPerson`, `ServerDefault`, `PostMappingDefaults`, `AssignedAccessMaterializer`, `RunAfterWriteAsync` to find where each path applies defaults relative to the Assigned-To policy and materialiser.</step>
+    <step order="1">Write the tests first (acceptance criteria 2-7); confirm the must-fire cases fail.</step>
+    <step order="2">Declare the default on the sprk_workassignment rule in RecordTableRules (source column sprk_assignedtointernal, target sprk_assignedto, create-only, fill-only on UNSET).</step>
+    <step order="3">Apply it in OwnedChildWrite's create and in RecordCreationService's post-mapping step, before the policy/materialiser, reading the one declaration.</step>
+    <step order="4">Run the filtered suites, the ArchTests and the perturbation checks; measure publish size; run the CVE check.</step>
+    <step order="5">Send the diff to UAC-r2 (SendMessage) for its review gate before merge; address findings.</step>
+    <step order="6">Update TASK-INDEX.md: set this task to ✅ [done]; record deviations in notes/task-037-notes.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If live metadata shows `sprk_assignedto` or `sprk_assignedtointernal` on sprk_workassignment is not a contact lookup, STOP and escalate (CLAUDE.md §6) — a conversion needs the contact↔user resolver (UAC task 193), not a guess.</trigger>
+    <trigger>If either path runs the Assigned-To policy or materialiser BEFORE defaults can be applied, so the default would need its own grant path, STOP and escalate to UAC-r2 rather than adding one.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordTableRules.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Dataverse/OwnedChildWrite.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.Mapping.cs</output>
+    <output type="test">tests/unit/domain/Dataverse/RecordCreation/RecordTableRulesTests.cs</output>
+    <output type="test">tests/integration/seam/RecordCreation/RecordCreationServiceMappingSeamTests.PostMappingDefaults.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The default is declared exactly once, on the sprk_workassignment rule in RecordTableRules; both create paths read it (a test or arch check proves there is no second declaration).</criterion>
+    <criterion testable="true">Must-fire (child-records route): sprk_assignedto unset and sprk_assignedtointernal = X in the payload → the created record has sprk_assignedto = X, and AssignedAccessMaterializer receives X exactly as it would for a supplied value.</criterion>
+    <criterion testable="true">Must-fire (RecordCreationService): sprk_assignedto unset, mapping fills sprk_assignedtointernal = X → sprk_assignedto = X, materialised as for a supplied value.</criterion>
+    <criterion testable="true">Must-not-fire: a supplied sprk_assignedto = Y is kept (not X); an explicit null is kept (stays null); sprk_assignedtointernal unset → sprk_assignedto stays blank and a structured warning is logged.</criterion>
+    <criterion testable="true">Must-not-fire: an update of an existing work assignment, a Repair-mode run and a push never set sprk_assignedto from this rule.</criterion>
+    <criterion testable="true">Secure record: on a work assignment created into a Secure family the defaulted contact gets a suggestion, not a grant (same as a supplied value); Restricted gives no contact grant.</criterion>
+    <criterion testable="true">Perturbation: removing the default declaration turns the must-fire tests red; applying it after the materialiser turns the materialisation assertion red. Red counts recorded in the task notes.</criterion>
+    <criterion testable="true">Test scope: cover the contract and the cases above only; anything beyond needs a one-line justification in the notes.</criterion>
+    <criterion testable="true">BFF build 0 errors; filtered suites and ArchTests green; publish-size delta and CVE result recorded; UAC-r2 review recorded before merge.</criterion>
+  </acceptance-criteria>
+
+  <notes>Owner 2026-10-27; #2354. UAC-r2 conditions 1-4 (2026-10-27) are the constraints above. #2353 (Number) is not part of this task: it is a Dataverse autonumber WRK-{SEQNUM:6} (applied on dev, PR #2358).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
