@@ -559,6 +559,11 @@ describe.
 - **Seed:** from `SecureChildLineage`, `TypedFilingColumns` / `IntermediateFilingColumns` / pair, and `StampSourceColumns`, AFTER UAC task 194 merges. Never written from scratch.
 - **Parity test:** each existing registry is a checked view of this one, with a ratchet baseline. A new disagreement fails the build; the known ones are listed and worked down by UAC. Migrating UAC's walks onto it is UAC's call.
 - **Content ownership:** UAC-r2. Enforced by a content-pin test. Changing an edge fails the test, and its message requires a UAC review line in the PR (enforcement ladder: a test, not prose).
+  - **The pin covers the access-relevant columns only (UAC C3):** FamilyKind, ChildTable, LookupColumn, ParentTable, EdgeKind and InSecureFamily.
+  - `RecordNumberColumn` and other display fields change without a UAC review line.
+- **Isolation stays Filing-only (UAC C2):** every view of the registry that UAC's access walks use filters `FamilyKind == Filing`. That covers `SecureChildLineage` parity and the `CoreAncestorResolver` children.
+  - Enforced by a test that adds a synthetic non-Filing row and proves those views do not change.
+  - This is the guard that a later Priority row can never enter an isolation walk or I-6.
 
 **B. `RecordFamilyReader` — read-only, scoped**
 
@@ -568,11 +573,17 @@ describe.
 - **Identity:** walks AS THE CALLER (OBO), level by level, with one batched query per (child table, lookup) per level (no N+1).
 - **Unreadable records:** the walk never passes through one. It never returns an unreadable member, and never counts or hints at hidden ones.
   - **Up:** the walk stops at the first ancestor the caller cannot read. Nothing above it is returned, and there is no hint that it exists (UAC review F2).
-- **Continuation (UAC review F1):** opaque and integrity-protected. It is protected with ASP.NET Data Protection and bound to the caller's `oid` and the root.
+- **Continuation (UAC review F1, C1):** opaque and integrity-protected, using ASP.NET Data Protection.
+  - It is bound to the caller's `oid`, the anchor, the kind, the direction and the top it derived.
+  - A down-walk continuation cannot be replayed as a full-family walk, and a Filing one cannot be replayed as another kind.
   - Every parent id it carries is re-checked as caller-readable before use, so a caller can never steer the walk through a record they cannot read.
   - A tampered continuation answers exactly like an invalid one.
-- **Root probe:** uses the equalised gate call, so an unknown root and a denied root look the same.
+- **Anchor probe:** uses the equalised gate call, so an unknown anchor and a denied anchor look the same. Kind validation (400) may run before the probe; it reveals nothing (UAC).
 - **Caps:** depth 4; 500 members per view and a per-level cap. Past a cap it returns `truncated = true`, per-table counts of what IS shown, and a per-level continuation. It never truncates silently.
+- **Truncation keeps the anchor in view (UAC C4):** a truncated full-family view still includes the anchor's ancestor chain and the anchor itself. It fills the anchor's own subtree before its siblings' subtrees.
+  - Otherwise, opening a document under a large matter could truncate the document's own branch out of the view.
+  - Covered by a K line in §12.11 and a test.
+- **Field security:** because the walk is OBO, Dataverse applies field security. A field-secured record number or status comes back null. These columns are never read app-only (UAC).
 - **De-duplication (ontology review):** members are unique by (table, id), and the shallowest edge is kept. Example: a Signal reached from a matter both directly and through its Decision Record appears once. Counts and the 500 cap count unique members.
 - **Fields returned:** id, table, primary name, record number (null for a table without a number column), status, modified on, parent edge, depth (owner, 2026-10-27). The record-number column per table comes from the registry. No access metadata (grants, No Access, sharees, owner team).
 - **Not an authorization input.** No cross-caller cache.
@@ -581,7 +592,7 @@ describe.
 
 - Lives in the existing `/api/v1/records` group, with auth required, in its OWN file, `Api/Records/RecordFamilyEndpoints.cs`. `RecordNoAccessEndpoint.cs` stays one cohesive No Access responsibility (§11.5).
 - It is registered in the route-authorization ledger (`RouteAuthorizationGuardTests.Ledger`) with its mechanism, and the governed-file census is updated (UAC review F2).
-- Takes `direction` and `continuation`. The default is the FULL family (owner, 2026-10-27): up to the root, then down from the root, so siblings and cousins are included. The walk's pruning rules apply to both directions. `direction=down` remains available for the push preview, which only acts below the source.
+- Takes `direction` and `continuation`. The default is the FULL family (owner, 2026-10-27): up to the highest READABLE ancestor, then down from it. That ancestor is the root only when the root is readable (UAC T1). Siblings and cousins are included only when every record on the path down to them is readable. The walk's pruning rules apply to both directions. `direction=down` remains available for the push preview, which only acts below the source.
 - Takes `kind` (default Filing; any other value is refused with 400 in W7).
 - **Response shape (ontology 3c):**
   - The walk is described from an `anchor` (the record opened). `root` is optional, because a peer family has none.
@@ -682,7 +693,7 @@ Owner answers, 2026-10-27:
 1. **The Push Updates ribbon button:** keep it, and point it at the Family view. This is my reading of "yes push updates ribbon button"; the owner can correct it.
 2. **Columns per member:** name, **record number** (blank where a table has none), record type, status and modified on.
 3. **Default view:** the full family, all the way up and down (§12.3 C).
-4. **`sprk_procedureassignment`:** open. The owner asked for the implications first (recommendation sent 2026-10-27).
+4. **`sprk_procedureassignment`:** open with the owner. The recommendation is to keep it OUT of the view (billing configuration), and UAC-r2 agrees. Its access lineage is unchanged either way.
 
 The family as a data-model concept, including future patent and trademark families, has been raised with ontology-r1. See §12.10.
 
@@ -720,7 +731,20 @@ Still open: classify `sprk_procedureassignment` and record-scoped ruleset rules 
   - edge types in code, edge instances in Dataverse.
 - Term: ontology is putting the component-model §3 row to the owner. Until then, "Family" is the UI word for the Filing view.
 
+**UAC-r2, round 2 (2026-10-27, at 4d0bba20dd):**
+- Accepted: the `FamilyKind` column and the `kind` parameter. The full-family default is covered by the existing pruning rule.
+- Applied in §12.3 A–C and §12.11:
+  - T1: down from the highest readable ancestor;
+  - T2: the anchor in the 404 and in the probe;
+  - C1: continuation bound to oid, anchor, kind, direction and top;
+  - C2: isolation views filter Filing, with a synthetic-row test;
+  - C3: the pin covers the access columns only;
+  - C4: truncation keeps the anchor's chain and subtree;
+  - OBO field security on display columns.
+- Seed: UAC 194 is PR #2349. Its merge head is sent when it lands. It adds `sprk_budgetbucket` → `sprk_budget`, and service requests are walked in ordinary mode.
+
 ### 12.11 Known limits (one line each in the PR)
 
 - **Query count:** the worst case is about (edges per level × 4 levels) batched reads per view, 100 or more for a big matter. Measure p95 on dev and record it. Narrow each level to the edges whose parent table is present only if it hurts in practice.
+- **Truncation favours the anchor:** in a truncated full-family view, the anchor's ancestor chain and its own subtree are filled first. Siblings' branches are the ones cut, and "load more" reaches them (UAC C4; tested).
 - **Permissiveness:** the view is exactly as permissive as Dataverse read for the caller, never more. Gaps Dataverse itself has today (e.g. the flagged-external systemuser reading Restricted rows, UAC task 191) show here as they do in the MDA.
