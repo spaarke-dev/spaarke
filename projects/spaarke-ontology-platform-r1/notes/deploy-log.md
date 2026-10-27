@@ -409,3 +409,9 @@ Criterion 89 (blank the writer client id, expect the writer-failure alert to fir
   - Marker `sprk_document.sprk_restrictedbysubmission` secured, default No, 0 Yes rows.
   - 6 relationships: RemoveLink ×4 (procedureversion, invoice, billingexport, createdbyperson) and Restrict ×2 (sourcedocument, sourcecommunication). All have NoCascade for assign/share/unshare/reparent and Related menu DoNotDisplay.
   - `sprk_invoice` statuscode 659490005 Superseded at statecode 1, 0 invoices.
+
+## 2026-10-27 01:29:15Z — dev BFF `3ff2c04bf5` (R3 deploy, uac-r2 only)
+
+- Range from `bc99fc3e6b`: #2322 (census accepted exceptions), #2323 and #2324 (access-record proof sees team-held grants). No ontology file. Ontology OK given 2026-10-26.
+- R3 verified DLL ProductVersion `1.0.0+3ff2c04bf5a516a314e4aecae41b4308148c5627`. The 30-minute gate was clean: 0 5xx, 0 403, 0 `worklist_unavailable`, 0 `signal_unreadable`, 0 `access_record_hidden`. The census lines are unchanged (Console User and Ontology Administrator stay Critical until UAC §5.2; security-roles §20).
+- Rollback snapshot: `bc99fc3e6b` at `deploy/rollback/wwwroot-20261027T012731Z`.
