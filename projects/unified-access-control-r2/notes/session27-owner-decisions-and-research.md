@@ -1967,3 +1967,23 @@ Scheduled as task 193. This is in scope beyond the round-90 wrap-up because the 
 Reading:
 - UAC owns the fix. Scheduled as task 194.
 - ebilling-r1 is referred to UAC. Its child tables, the invoice family among them, follow the same rule and the same mechanism. ebilling does not build its own.
+
+### Round 129 (2026-10-27): the project's filing root (#2352) and one family per record (D-191)
+
+**1. #2352, how a project is filed under a matter.** The owner chose option (a) in field-mapping-r1's session and confirmed it in this session, verbatim: **"option (a) for the project-to-matter link (#2352) NOTE: there already exists a Project<>Matter N:N relationship if that has any effect on the solution approach"**.
+
+Reading:
+- A project has ONE filing root: its regarding pair (`sprk_regardingrecordid` + `sprk_regardingrecordtype`). The server writes it, never the wizard.
+- The existing Project ↔ Matter N:N stays as an association. It confers nothing and is not a Filing edge. Task 195's design note records the N:N cases: several matters on one project, a matter added through the subgrid, and the filing matter's N:N row removed.
+- UAC owns (i), the wizard write, and (ii), the dev backfill, as task 195. Field-mapping owns (iii), W7 and 040, which depend on 195.
+
+**2. One family per record.** The owner answered, verbatim: **"yes tell ontology that a record filed under several parents belongs to its primary parent's family"**.
+
+Reading (sent to ontology; recorded in ontology D-191 at 349ac7df2a, and in field-mapping FR-30 / design §12.3 B):
+- A record filed under several parents belongs to exactly ONE family, its primary parent's. The primary parent is the I-6 rule that decides ownership (`InPrimaryOrder` / `OrderedParentsOf`, task 194b).
+- The other filing edges are secondary: they can be navigated but confer no membership.
+- Isolation is decided separately: secure-if-any runs over all filing parents. Family is not the security boundary.
+
+**Recorded from peer sessions (the owner decided there):**
+- ebilling EB-D-162: Billing Administrator's Read on rule set, policy and policy version is Deep, not Global. The EB-D-150 accepted exception is removed from `SecureBuRoleDepthAssertion.AcceptedRoleExceptions` (UAC's condition). Live on dev 2026-10-27, -Verify PASS.
+- field-mapping #2354 (FR-36): a work assignment's `sprk_assignedto` defaults, fill-only at create, to its `sprk_assignedtointernal`. This is a UAC review gate; my conditions were sent.
