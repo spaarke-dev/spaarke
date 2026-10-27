@@ -28,7 +28,7 @@
       <file role="canonical-reference">.claude/skills/pcf-deploy/SKILL.md</file>
       <file role="canonical-reference">.claude/skills/code-page-deploy/SKILL.md</file>
       <file role="canonical-reference">.claude/skills/dataverse-deploy/SKILL.md</file>
-      <file role="new">projects/field-mapping-server-write-path-r1/notes/task-076-live-check.md</file>
+      <file role="notes">projects/field-mapping-server-write-path-r1/notes/task-076-live-check.md</file>
     </relevant-files>
   </context>
 
