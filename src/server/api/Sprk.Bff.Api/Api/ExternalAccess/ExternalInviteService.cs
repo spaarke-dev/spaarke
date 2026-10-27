@@ -82,6 +82,12 @@ public sealed class ExternalInviteService
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
+    /// <summary>
+    /// Slice C3: the identity store for THIS environment, the one the invite reads and writes through. <c>/grant</c> hands it
+    /// to the grant core, whose removed-marker check reads it.
+    /// </summary>
+    internal IContactIdentityStore IdentityStore => _binder.Store;
+
     // =========================================================================
     // The grant flows
     // =========================================================================

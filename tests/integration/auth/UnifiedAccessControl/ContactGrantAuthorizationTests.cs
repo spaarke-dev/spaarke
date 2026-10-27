@@ -876,7 +876,7 @@ public partial class ContactGrantAuthorizationTests
         var outcome = await GrantExternalAccessEndpoint.CreateGrantAsync(
             new GrantAccessRequest(Colleague, Guid.Empty, ExternalAccessLevel.Collaborate, null, null, "project", ProjectId),
             ExternalGrantRootType.Project, ProjectId, Today, GrantCeiling.FromGrantorRights(AccessRights.Read | AccessRights.Write | AccessRights.Delete),
-            callerOid: null, _dataverse, _participations, DenyList(), new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), NullLogger.Instance, CancellationToken.None);
+            callerOid: null, _dataverse, _participations, DenyList(), Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.UnlinkedIdentityStore(), new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), NullLogger.Instance, CancellationToken.None);
 
         outcome.Refusal.Should().BeNull();
         row.AccessLevel.Should().Be((int)ExternalAccessLevel.Collaborate);
@@ -901,7 +901,7 @@ public partial class ContactGrantAuthorizationTests
         var outcome = await GrantExternalAccessEndpoint.CreateGrantAsync(
             new GrantAccessRequest(Colleague, Guid.Empty, ExternalAccessLevel.Collaborate, null, null, "project", ProjectId),
             ExternalGrantRootType.Project, ProjectId, Today, GrantCeiling.FromGrantorRights(AccessRights.Read | AccessRights.Write | AccessRights.Delete),
-            callerOid: InternalUserOid.ToString(), _dataverse, _participations, DenyList(), new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), NullLogger.Instance, CancellationToken.None);
+            callerOid: InternalUserOid.ToString(), _dataverse, _participations, DenyList(), Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.UnlinkedIdentityStore(), new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), NullLogger.Instance, CancellationToken.None);
 
         outcome.Refusal.Should().BeNull();
         row.GrantedByContactProvenance.Should().BeNull();
@@ -942,7 +942,7 @@ public partial class ContactGrantAuthorizationTests
         await GrantExternalAccessEndpoint.CreateGrantAsync(
             new GrantAccessRequest(Colleague, Guid.Empty, ExternalAccessLevel.ViewOnly, null, null, "project", ProjectId),
             ExternalGrantRootType.Project, ProjectId, Today, GrantCeiling.FromGrantorRights(AccessRights.Read | AccessRights.Write),
-            callerOid: null, _dataverse, _participations, DenyList(), new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), NullLogger.Instance, CancellationToken.None);
+            callerOid: null, _dataverse, _participations, DenyList(), Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.UnlinkedIdentityStore(), new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), NullLogger.Instance, CancellationToken.None);
 
         row.GrantedByContactId.Should().Be(Grantor);
         _dataverse.Updates.Should().BeEmpty();
@@ -961,7 +961,7 @@ public partial class ContactGrantAuthorizationTests
         var outcome = await GrantExternalAccessEndpoint.CreateGrantAsync(
             new GrantAccessRequest(Colleague, Guid.Empty, ExternalAccessLevel.Collaborate, null, null, "project", ProjectId),
             ExternalGrantRootType.Project, ProjectId, Today, GrantCeiling.FromGrantorRights(AccessRights.Read | AccessRights.Write | AccessRights.Delete),
-            callerOid: InternalUserOid.ToString(), _dataverse, _participations, DenyList(), new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), NullLogger.Instance, CancellationToken.None);
+            callerOid: InternalUserOid.ToString(), _dataverse, _participations, DenyList(), Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.UnlinkedIdentityStore(), new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), NullLogger.Instance, CancellationToken.None);
 
         outcome.Refusal.Should().BeNull();
         row.GrantedByContactId.Should().BeNull();

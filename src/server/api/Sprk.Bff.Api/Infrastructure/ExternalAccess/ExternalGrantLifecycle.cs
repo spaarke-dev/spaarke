@@ -565,6 +565,26 @@ internal static class ExternalGrantLifecycle
             cancellationToken: ct);
 
     /// <summary>
+    /// Slice C3: the OData <c>$filter</c> selecting every ACTIVE row a CONTACT holds as its grantee, on every root. Organization
+    /// grants (no contact) are never selected: they belong to the organization, not to the person.
+    /// </summary>
+    internal static string ActiveRowsForContactFilter(Guid contactId)
+        => $"_sprk_contact_value eq {contactId} and statecode eq 0";
+
+    /// <summary>
+    /// Slice C3: every ACTIVE row <paramref name="contactId"/> holds as its grantee, on every root — what an administrator
+    /// removal revokes, one logical grant at a time. Rows without a usable id are kept (the caller reports them as not
+    /// revoked rather than skipping them). Exceptions propagate: a failed read is never "no grants".
+    /// </summary>
+    internal static Task<List<ExternalGrantRow>> QueryActiveRowsForContactAsync(
+        DataverseWebApiClient dataverseClient, Guid contactId, CancellationToken ct)
+        => dataverseClient.QueryAsync<ExternalGrantRow>(
+            EntitySet,
+            filter: ActiveRowsForContactFilter(contactId),
+            select: RowSelect,
+            cancellationToken: ct);
+
+    /// <summary>
     /// Shapes a <see cref="DateOnly"/> for an SDK write to <c>sprk_expiresdate</c> / <c>sprk_granteddate</c>:
     /// midnight, <see cref="DateTimeKind.Unspecified"/>.
     /// </summary>
@@ -1117,6 +1137,20 @@ internal sealed record GrantPolicyDecision(bool IsAllowed, string? ReasonCode, i
     {
         IsDenyListReadFault = true,
     };
+
+    /// <summary>
+    /// Slice C3: the grantee contact carries the removed marker (an administrator removed the person's external access), or
+    /// its marker could not be read. 409 <see cref="ContactBindingDecision.InviteContactRemovedAdminReinstate"/>, the code the
+    /// invite routes already answer for the same person; nothing is written. Every grant surface refuses through the grant core
+    /// (<c>/grant</c>, <c>/invite-and-grant</c>, the Assigned-To rule, contact-side grants), so only an administrator's
+    /// reinstatement lets the person be granted again.
+    /// </summary>
+    public static GrantPolicyDecision ContactRemoved { get; } = new(
+        false,
+        ContactBindingDecision.InviteContactRemovedAdminReinstate,
+        StatusCodes.Status409Conflict,
+        "An administrator removed this person's external access, so they cannot be given access. Nothing was granted. " +
+        "An administrator must reinstate the person first.");
 
     /// <summary>
     /// Task 140: a CONTACT grantor's request names a grantee who already holds an active row somebody else issued. 409;

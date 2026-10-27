@@ -1264,7 +1264,14 @@ internal static class AssignedAccessTestDoubles
     /// Task 185 slice E: an invite service over an EMPTY world, for handler tests that are not about the invite: no contact
     /// is found, so nothing is invited (it answers Failed, contact_not_active), and it never throws.
     /// </summary>
-    internal static Sprk.Bff.Api.Api.ExternalAccess.ExternalInviteService InertInvites() => new Harness().Invites;
+    /// <remarks>Slice C3: <c>/grant</c> reads the grantee's removed marker through this service's identity store; in this
+    /// empty world no contact was removed, so the live read answers "not removed" (a test about removal seeds its own).</remarks>
+    internal static Sprk.Bff.Api.Api.ExternalAccess.ExternalInviteService InertInvites()
+    {
+        var harness = new Harness();
+        harness.Identities.LiveRemovedMarkerOverride = RemovedMarkerRead.NotRemoved;
+        return harness.Invites;
+    }
 
     /// <summary>Task 185 slice F: the provisioner and its Graph client factory, REAL, over a configuration with no Ciam:*.</summary>
     internal static Sprk.Bff.Api.Services.Registration.CiamUserProvisioningService NoCiamProvisioner()

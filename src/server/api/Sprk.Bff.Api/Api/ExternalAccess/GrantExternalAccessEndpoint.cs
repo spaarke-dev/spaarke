@@ -159,7 +159,8 @@ public static class GrantExternalAccessEndpoint
             // call this route with no date, so a re-add over a lapsed grant is a SET — restored at the picked level.
             outcome = await CreateGrantAsync(
                 request, root.Type, root.Id, today, ceiling, callerSystemUserId,
-                dataverseClient, participations, accessibleRecords, ownership, ownerPrivileges, logger, ct, reAddRestoresLapsed: true);
+                dataverseClient, participations, accessibleRecords, invites.IdentityStore, ownership, ownerPrivileges, logger, ct,
+                reAddRestoresLapsed: true);
         }
         catch (Exception ex)
         {
@@ -360,6 +361,7 @@ public static class GrantExternalAccessEndpoint
         DataverseWebApiClient dataverseClient,
         ExternalParticipationService participations,
         IAccessibleRecordSetService accessibleRecords,
+        IContactIdentityStore identityStore,
         IRecordOwnershipResolver ownership,
         IDataversePrivilegeChecker ownerPrivileges,
         ILogger logger,
@@ -394,7 +396,7 @@ public static class GrantExternalAccessEndpoint
         // written (an OrganizationId beside a ContactId is the contact's firm — a deny subject, not the grantee).
         var check = await CheckGrantAsync(
             GrantGrantee.ForKey(key, request.OrganizationId), request.AccessLevel, rootType, rootId, ceiling,
-            dataverseClient, participations, accessibleRecords, logger, ct, contactIssuer);
+            dataverseClient, participations, accessibleRecords, identityStore, logger, ct, contactIssuer);
         if (check.Refusal is { } refusal)
             return GrantUpsertOutcome.Refused(refusal);
 
@@ -812,17 +814,32 @@ public static class GrantExternalAccessEndpoint
         DataverseWebApiClient dataverseClient,
         ExternalParticipationService participations,
         IAccessibleRecordSetService accessibleRecords,
+        IContactIdentityStore identityStore,
         ILogger logger,
         CancellationToken ct,
         ContactGrantIssuer? contactIssuer = null)
     {
         ArgumentNullException.ThrowIfNull(ceiling);
+        // Slice C3: the removed-marker check below has no fallback, so the store is never optional.
+        ArgumentNullException.ThrowIfNull(identityStore);
 
         // (1) Task 138 — the record's access policy.
         var policy = await ExternalGrantLifecycle.EvaluateGrantPolicyAsync(
             participations, rootType, rootId, grantee.Kind, logger, ct);
         if (!policy.IsAllowed)
             return GrantCheck.Refused(policy, requestedLevel);
+
+        // (1b) Slice C3 — a contact whose external access an administrator removed is never granted, by any grant surface
+        // (this core serves them all). The marker is read live; a marker that cannot be read refuses too (fail closed).
+        if (grantee.ContactId is { } granteeContactId
+            && await ReadGranteeRemovedMarkerAsync(identityStore, granteeContactId, logger, ct) is var marker
+            && marker != RemovedMarkerRead.NotRemoved)
+        {
+            logger.LogWarning(
+                "[EXT-GRANT] Refused: grantee contact {ContactId}'s removed marker reads {Marker}; a removed person (or one " +
+                "whose marker cannot be read) is never granted. Nothing was written.", granteeContactId, marker);
+            return GrantCheck.Refused(GrantPolicyDecision.ContactRemoved, requestedLevel);
+        }
 
         // (2) Task 139 — the grantor ceiling.
         if (ceiling.Level is not { } ceilingLevel)
@@ -913,6 +930,30 @@ public static class GrantExternalAccessEndpoint
                     "({Answer}); refusing (fail closed), reported as a fault, not as an entry on the list.",
                     rootType, rootId, noAccess);
                 return GrantCheck.Refused(GrantPolicyDecision.GranteeDenyListUnreadable, requestedLevel);
+        }
+    }
+
+    /// <summary>
+    /// Slice C3: the grantee's removed marker, read live through the identity store. A fault is
+    /// <see cref="RemovedMarkerRead.Unreadable"/> (fail closed); the caller's cancellation propagates.
+    /// </summary>
+    private static async Task<RemovedMarkerRead> ReadGranteeRemovedMarkerAsync(
+        IContactIdentityStore identityStore, Guid contactId, ILogger logger, CancellationToken ct)
+    {
+        try
+        {
+            return await identityStore.ReadRemovedMarkerAsync(contactId, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "[EXT-GRANT] The removed marker of grantee contact {ContactId} could not be read; refusing (fail closed).",
+                contactId);
+            return RemovedMarkerRead.Unreadable;
         }
     }
 
@@ -1024,6 +1065,8 @@ public static class GrantExternalAccessEndpoint
             statusCode: refusal.StatusCode,
             title: refusal.ReasonCode == ExternalGrantLifecycle.ContactGrantManagedElsewhereReasonCode
                 ? "Access is managed by someone else" // task 140: a 409 that is not about a higher level
+                : refusal.ReasonCode == ContactBindingDecision.InviteContactRemovedAdminReinstate
+                ? "External access removed" // slice C3: a 409 that is not about a higher level either
                 : refusal.StatusCode switch
             {
                 StatusCodes.Status503ServiceUnavailable => "Access settings unavailable",

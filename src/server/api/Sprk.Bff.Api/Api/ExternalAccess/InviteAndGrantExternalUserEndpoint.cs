@@ -244,7 +244,7 @@ public static class InviteAndGrantExternalUserEndpoint
         {
             preCheck = await GrantExternalAccessEndpoint.CheckGrantAsync(
                 preGrantee, requestedLevel, grantRoot.Type, grantRoot.Id, ceiling,
-                dataverseClient, participations, accessibleRecords, logger, ct);
+                dataverseClient, participations, accessibleRecords, binder.Store, logger, ct);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
@@ -382,7 +382,7 @@ public static class InviteAndGrantExternalUserEndpoint
             // not happen.
             grantOutcome = await GrantExternalAccessEndpoint.CreateGrantAsync(
                 grantRequest, grantRoot.Type, grantRoot.Id, today, ceiling, callerSystemUserId,
-                dataverseClient, participations, accessibleRecords, ownership, ownerPrivileges, logger, ct,
+                dataverseClient, participations, accessibleRecords, binder.Store, ownership, ownerPrivileges, logger, ct,
                 reAddRestoresLapsed: true, resolvedOwnerTeamId: ownerTeamId);
 
             // Task 138: the core's own policy check refused (the record changed after the pre-check above) — or, since

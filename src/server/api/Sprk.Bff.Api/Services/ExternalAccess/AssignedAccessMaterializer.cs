@@ -1763,7 +1763,7 @@ public sealed class AssignedAccessMaterializer
         // The ONE grant core (task 139, WP-1): policy, never-lower, No Access, expiry default, dedupe, invalidation.
         return GrantExternalAccessEndpoint.CreateGrantAsync(
             request, run.Request.RootType, run.RootId, run.Today, GrantCeiling.AssignedToRule, run.Request.GrantorOid,
-            _dataverse, _participations, _accessibleRecords, _ownership, _ownerPrivileges, _logger, ct);
+            _dataverse, _participations, _accessibleRecords, _identities, _ownership, _ownerPrivileges, _logger, ct);
     }
 
     /// <summary>

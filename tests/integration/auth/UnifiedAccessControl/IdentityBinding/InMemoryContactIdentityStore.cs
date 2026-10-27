@@ -498,6 +498,8 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
         lock (_gate)
         {
             Reads.Add("removed-marker");
+            if (LiveRemovedMarkerOverride is { } live)
+                return Task.FromResult(live);
             if (FailGetContact || !Contacts.TryGetValue(contactId, out var c))
                 return Task.FromResult(RemovedMarkerRead.Unreadable);
             return Task.FromResult(c.RemovedOn is not null
@@ -505,6 +507,12 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
                 : DataverseContactIdentityStore.RemovedMarkerFrom(null, RemovedMarkerProof));
         }
     }
+
+    /// <summary>
+    /// Slice C3: when set, the LIVE marker read (<see cref="ReadRemovedMarkerAsync"/>) answers this whatever the rows hold — an
+    /// administrator's removal landing between a binding read and the grant core's own live read.
+    /// </summary>
+    public RemovedMarkerRead? LiveRemovedMarkerOverride { get; set; }
 
     public Task<ReferenceLookup> FindSystemUsersLinkingAsync(IReadOnlyCollection<Guid> contactIds, CancellationToken ct)
     {

@@ -807,7 +807,7 @@ public class GrantorCeilingTests
         GrantAccessRequest request, GrantCeiling ceiling, IAccessibleRecordSetService? noAccessCheck = null) =>
         GrantExternalAccessEndpoint.CreateGrantAsync(
             request, ExternalGrantRootType.Project, ProjectId, Today, ceiling, callerOid: null,
-            _dataverse, _participations, noAccessCheck ?? DenyList(), new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), NullLogger.Instance,
+            _dataverse, _participations, noAccessCheck ?? DenyList(), Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.UnlinkedIdentityStore(), new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), NullLogger.Instance,
             CancellationToken.None);
 
     private void AssertNothingOnboardedOrWritten()
