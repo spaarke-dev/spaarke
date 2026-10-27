@@ -136,12 +136,21 @@ internal static class SecureChildLineage
             Regarding("sprk_agreement", "sprk_analysis", "sprk_budget", "sprk_communication", "sprk_document", "sprk_event",
                     "sprk_invoice", Matter, Project, WorkAssignment)
                 .Concat(new[] { ("sprk_reportcard", "sprk_reportcard") }).ToArray()),
+        // unified-access-control-r2 #2084 (owner round 102 item 4, agreed with spaarke-ontology-platform-r1): a rule scoped to a
+        // matter is that matter's child, and its versions are the rule's (solution XML: sprk_policy_matter, sprk_policyversion_policy).
+        // A rule with no matter has no lookup value, so it is never reached. sprk_policy.sprk_currentversion is left out: it names
+        // the rule's own version, whose only parent is this rule, so it can add no root (only a loop).
+        T("sprk_policy", "sprk_policies",
+            ("sprk_matter", Matter)),
+        T("sprk_policyversion", "sprk_policyversions",
+            ("sprk_policy", "sprk_policy")),
         T("sprk_reportcard", "sprk_reportcards",
             Regarding(Matter, Project)),
         // spaarke-ontology-platform-r1 task 039 (owner D-33/D-36; reviewed by unified-access-control-r2 on #1355). Lookups
         // read live, spaarkedev1 2026-10-07: the typed core lookup sprk_matter, the subject's regarding lookups and the
         // Decision Record. sprk_regardingservicerequest is left out (see the remarks); sprk_policy, sprk_policyversion and
-        // sprk_corerecordtype (a catalog row) are not filing parents.
+        // sprk_corerecordtype (a catalog row) are not filing parents. #2084: the rule and its version are family tables now, but a
+        // Signal CITES the rule that raised it and is not filed under it (RecordOwnershipResolver.CitationLookups).
         T("sprk_signal", "sprk_signals",
             new[] { ("sprk_matter", Matter), ("sprk_decisionrecord", "sprk_decisionrecord") }
                 .Concat(Regarding("sprk_communication", "sprk_document", "sprk_event", "sprk_invoice", Matter, Project,

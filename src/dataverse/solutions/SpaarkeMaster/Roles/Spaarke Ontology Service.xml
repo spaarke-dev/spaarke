@@ -9,12 +9,20 @@
     <RolePrivilege name="prvAppendsprk_BudgetRevision" level="Global" />
     <RolePrivilege name="prvAppendsprk_DecisionRecord" level="Global" />
     <RolePrivilege name="prvAppendsprk_Signal" level="Global" />
+    <RolePrivilege name="prvAppendTosprk_AnalysisAction" level="Global" />
+    <RolePrivilege name="prvAppendTosprk_BillingEvent" level="Global" />
     <RolePrivilege name="prvAppendTosprk_Budget" level="Global" />
     <RolePrivilege name="prvAppendTosprk_Communication" level="Global" />
     <RolePrivilege name="prvAppendTosprk_DecisionRecord" level="Global" />
+    <RolePrivilege name="prvAppendTosprk_Document" level="Global" />
     <RolePrivilege name="prvAppendTosprk_Event" level="Global" />
+    <RolePrivilege name="prvAppendTosprk_Invoice" level="Global" />
+    <RolePrivilege name="prvAppendTosprk_Matter" level="Global" />
     <RolePrivilege name="prvAppendTosprk_Policy" level="Global" />
     <RolePrivilege name="prvAppendTosprk_PolicyVersion" level="Global" />
+    <RolePrivilege name="prvAppendTosprk_Project" level="Global" />
+    <RolePrivilege name="prvAppendTosprk_RecordType_Ref" level="Global" />
+    <RolePrivilege name="prvAppendTosprk_ServiceRequest" level="Global" />
     <RolePrivilege name="prvAppendTosprk_Signal" level="Global" />
     <RolePrivilege name="prvAppendTosprk_Todo" level="Global" />
     <RolePrivilege name="prvAppendTosprk_WorkAssignment" level="Global" />

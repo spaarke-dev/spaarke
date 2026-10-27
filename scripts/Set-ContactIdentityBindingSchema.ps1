@@ -134,6 +134,7 @@ $ReasonOptions = [ordered]@{
     100000009 = 'Guest linked to an unbound contact'
     100000010 = 'Invite matches a workforce contact'
     100000011 = 'Key mirror held by another contact'
+    100000012 = 'Inactive contact email match'
 }
 $SecuredFields = @(
     @{ Entity = 'contact'; Attribute = $BindingColumn },

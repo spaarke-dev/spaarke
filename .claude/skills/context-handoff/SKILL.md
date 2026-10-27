@@ -70,7 +70,8 @@ This skill creates a checkpoint of working state that enables another Claude ins
 - User requests `/context-handoff` or `/checkpoint` (alias)
 
 ### Proactive Triggers (Claude Should Self-Invoke)
-- The user or harness reports that context is high, or a compaction notice appears (Claude cannot see its own usage — root CLAUDE.md §5)
+- The context-checkpoint hook (`scripts/quality/context-checkpoint.py`) says context is at 85% or 95% of the auto-compact window: checkpoint before any other work, then continue
+- The user reports that context is high, or a compaction notice appears (Claude cannot see its own usage — root CLAUDE.md §5)
 - Before a large operation that might push context over limits
 - After completing significant work that should be checkpointed
 - When switching between projects

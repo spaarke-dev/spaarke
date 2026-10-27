@@ -27,8 +27,8 @@ This runbook produces a correctly scoped owner team. It does **not** by itself i
 because isolation also depends on a property this runbook cannot set: **no ordinary user role may hold
 `Deep` or `Global` depth on `sprk_project`.**
 
-In `spaarkedev1` as of 2026-08-25 that condition is **NOT met**, and secure projects are therefore
-readable by ordinary users. See [§6 Blocking prerequisite](#6-blocking-prerequisite--role-depth) —
+In `spaarkedev1` as of 2026-08-25 that condition was **NOT met** (historical; see §6 for Fix A and its validation). Today
+the condition is checked continuously by the isolation census (`[SECURE-CENSUS]`, every 15 minutes). See [§6 Blocking prerequisite](#6-blocking-prerequisite--role-depth) —
 **do not report an environment as "secure-project ready" until §6 passes.**
 
 ---
@@ -266,7 +266,9 @@ There are two kinds:
   to the team when they are filed to a secure record. Examples are a document saved to a secure project, or a
   To Do regarding one. Owner decision C10 part 2 adds communications, events and memos. Added 2026-09-30 by
   `spaarkeai-word-add-in-r1` task 082, because the earlier premise that "nothing assigns children to this
-  team" stopped being true with task 080.
+  team" stopped being true with task 080. #2084 (owner round 102 item 4) adds a rule limited to a matter
+  (`sprk_policy`) and its versions (`sprk_policyversion`): only the reconciler moves them, with their matter, so
+  their `Read` must be in the role before a BFF carrying #2084 reconciles a Secure matter that has one.
 
 The refusal for a missing child privilege reads exactly like the root one: *"Read Privilege Check For Owner
 failed … Principal team (…) is missing prvReadsprk_Todo privilege"*.

@@ -56,6 +56,7 @@ public sealed class CommunicationAttachmentTextService
 {
     private readonly IImpersonatedCommunicationQuery _query;
     private readonly ICallerSystemUserResolver _callerResolver;
+    private readonly CommunicationThreadReadService _threadReadService;
     private readonly ISpeFileOperations _speFileStore;
     private readonly Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver _containerResolver;
     private readonly ITextExtractor _textExtractor;
@@ -79,6 +80,7 @@ public sealed class CommunicationAttachmentTextService
     public CommunicationAttachmentTextService(
         IImpersonatedCommunicationQuery query,
         ICallerSystemUserResolver callerResolver,
+        CommunicationThreadReadService threadReadService,
         ISpeFileOperations speFileStore,
         Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver containerResolver,
         ITextExtractor textExtractor,
@@ -86,6 +88,7 @@ public sealed class CommunicationAttachmentTextService
     {
         _query = query;
         _callerResolver = callerResolver;
+        _threadReadService = threadReadService ?? throw new ArgumentNullException(nameof(threadReadService));
         _speFileStore = speFileStore;
         _containerResolver = containerResolver ?? throw new ArgumentNullException(nameof(containerResolver));
         _textExtractor = textExtractor;
@@ -105,6 +108,13 @@ public sealed class CommunicationAttachmentTextService
     {
         var callerSystemUserId = await ResolveCallerOrThrowAsync(caller, cancellationToken).ConfigureAwait(false);
 
+        // 0) Task 065 fix round 6 (F1): the communication itself must be visible to this caller before any of its
+        //    attachments are listed. ReadVisibleCommunicationAsync is the one visibility decision (the shared flag rule,
+        //    and for an external caller D7: an internal-only email, or one whose thread is not explicitly Open, is
+        //    invisible). A row the caller may not see answers exactly like one with no attachments, so nothing leaks.
+        if (await _threadReadService.ReadVisibleCommunicationAsync(communicationId, caller, null, cancellationToken).ConfigureAwait(false) is null)
+            return Empty();
+
         // 1) IMPERSONATED attachment read — Dataverse returns only attachments this caller may see (NFR-06).
         var attachments = await QueryAttachmentsAsync(communicationId, callerSystemUserId, cancellationToken).ConfigureAwait(false);
         if (attachments.Count == 0)
@@ -113,6 +123,13 @@ public sealed class CommunicationAttachmentTextService
         // 2) IMPERSONATED document read for the referenced docs — only docs the caller may see resolve to an SPE
         //    pointer, so an attachment whose document is invisible to the caller degrades to not-extractable.
         var pointers = await QueryDocumentPointersAsync(attachments, callerSystemUserId, cancellationToken).ConfigureAwait(false);
+
+        // 2') uac-r2 task 188 round 4b (F1-4): THE external document narrowing over the documents the caller's own read
+        //     returned. For a caller who is not a resolved internal systemuser, a document it hides (own Restricted, a
+        //     Restricted ancestor, an internal-only communication) is dropped, so its attachment reads as
+        //     Extractable=false exactly like one whose document the caller cannot see; a narrowing fault drops them all
+        //     (fail closed). An internal systemuser: no narrowing call and no app-only read.
+        pointers = await NarrowForCallerAsync(pointers, httpContext).ConfigureAwait(false);
 
         // 3) Download + extract per attachment (app-only after the pointer check; the extractor's own Redis cache makes
         //    repeats cheap).
@@ -223,6 +240,34 @@ public sealed class CommunicationAttachmentTextService
                 "Impersonated document read failed while resolving {Count} attachment document(s); degrading to not-extractable", docIds.Count);
             return EmptyPointers;
         }
+    }
+
+    /// <summary>
+    /// Task 188 round 4b (F1-4): the pointers whose documents THE external document narrowing shows the caller
+    /// (<see cref="Sprk.Bff.Api.Api.Filters.InternalPlaneDocumentNarrowing.ForCallerAsync"/>: one call; an internal
+    /// systemuser is not narrowed and nothing is read; a fault shows none). Logs counts only.
+    /// </summary>
+    private async Task<IReadOnlyDictionary<Guid, DocPointer>> NarrowForCallerAsync(
+        IReadOnlyDictionary<Guid, DocPointer> pointers, HttpContext httpContext)
+    {
+        if (pointers.Count == 0)
+            return pointers;
+
+        var visibility = await Sprk.Bff.Api.Api.Filters.InternalPlaneDocumentNarrowing.ForCallerAsync(
+            httpContext, pointers.Keys.Select(id => (string?)id.ToString()), "communication-attachment-text", _logger)
+            .ConfigureAwait(false);
+        if (!visibility.Narrowed)
+            return pointers;
+
+        var shown = pointers.Where(p => visibility.IsShown(p.Key.ToString())).ToDictionary(p => p.Key, p => p.Value);
+        if (shown.Count != pointers.Count)
+        {
+            _logger.LogInformation(
+                "[ATTACHMENT-TEXT] {Hidden} of {Count} attachment document(s) withheld by the external document narrowing",
+                pointers.Count - shown.Count, pointers.Count);
+        }
+
+        return shown;
     }
 
     /// <summary>

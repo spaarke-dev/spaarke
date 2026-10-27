@@ -1582,7 +1582,8 @@ public class SignalWriterTests
             resolver,
             new Ownership.CoreAncestorResolver(sysadmin, StampColumnProbe, NullLogger<Ownership.CoreAncestorResolver>.Instance),
             sysadmin,
-            new RecordTypeCatalogStub(RecordTypeCatalogStub.SpaarkeDev1), new FakeTimeProvider(FirstRun), NullLogger<DecisionRecordWriter>.Instance);
+            new RecordTypeCatalogStub(RecordTypeCatalogStub.SpaarkeDev1), new FakeTimeProvider(FirstRun), NullLogger<DecisionRecordWriter>.Instance,
+            new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing);
         var review = new DecisionRecordRequest(Guid.NewGuid(), PolicyVersionId,
             filed ? new DecisionRecordCore("sprk_matter", MatterId, Guid.NewGuid()) : null,
             new Sprk.Bff.Api.Services.Signals.Actions.DecisionRecordRef("sprk_todo", TodoId), TestInfrastructure.OwnershipDirectory.CallerUserId,
@@ -2206,6 +2207,7 @@ public class SignalWriterTests
 
         public Task<Guid> CreateAsync(Entity entity, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<(Guid Id, bool Created)> UpsertAsync(Entity entity, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task UpdateIfRowVersionMatchesAsync(string entityLogicalName, Guid id, string rowVersion, Dictionary<string, object> fields, CancellationToken ct = default) => throw new NotImplementedException();
         public Task UpdateAsync(string entityLogicalName, Guid id, Dictionary<string, object> fields, CancellationToken ct = default) => throw new NotImplementedException();
         public Task BulkUpdateAsync(string entityLogicalName, List<(Guid id, Dictionary<string, object> fields)> updates, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<Entity> RetrieveByAlternateKeyAsync(string entityLogicalName, KeyAttributeCollection alternateKeyValues, string[]? columns = null, CancellationToken ct = default) => throw new NotImplementedException();

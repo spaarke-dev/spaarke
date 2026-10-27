@@ -145,6 +145,44 @@ public class IdentityLinkReconciliationTests
         beforeStates.Should().AllSatisfy(m => m.Should().Contain("mode=report-only"));
     }
 
+    /// <summary>
+    /// #2130 (CODE-QUALITY-RUBRIC D9) must-fire: the decision line named every scanned user's email, and the create
+    /// change's before-state line carried <c>emailaddress1=&lt;the email&gt;</c> and a last name that falls back to the
+    /// email's local part. Both now name ids, and the change says only that the columns are set. Report-only and write
+    /// runs log the same lines.
+    /// </summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData(true)]
+    public async Task NoLogLine_CarriesAScannedUsersEmail_AndTheCreateChangeSaysOnlyThatTheColumnsAreSet(bool? writes)
+    {
+        var probe = Guid.NewGuid();
+        _store.AddSystemUser(probe, Guid.NewGuid(), "pii.probe@example.test");
+
+        await RunAsync(writes);
+
+        _log.Messages.Should().Contain(m => m.Contains("decision") && m.Contains(probe.ToString()),
+            "the user is still logged, by systemuser id");
+        _log.Messages.Should().AllSatisfy(m => m.Should().NotContain("pii.probe"));
+        var create = _log.Messages.Where(m => m.Contains("before-state") && m.Contains(probe.ToString())
+                                              && m.Contains("create contact")).Should().ContainSingle().Subject;
+        create.Should().Contain("lastname=(set)").And.Contain("emailaddress1=(set)");
+    }
+
+    /// <summary>#2130: a created contact with no email says <c>emailaddress1=(none)</c>, so the change keeps its meaning.</summary>
+    [Fact]
+    public async Task TheCreateChange_OfAUserWithNoEmail_SaysEmailNone()
+    {
+        var user = Guid.NewGuid();
+        _store.AddSystemUser(user, Guid.NewGuid(), email: null);
+
+        var outcome = await Binder(_store).EnsureSystemUserLinkAsync(user, applyWrites: false, CancellationToken.None);
+
+        outcome.Outcome.Should().Be(SystemUserLinkOutcome.CreatedAndLinked);
+        outcome.Changes.Should().ContainSingle(c => c.Entity == "contact")
+            .Which.After.Should().Contain("emailaddress1=(none)").And.Contain("lastname=(set)");
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("yes")]
@@ -232,6 +270,37 @@ public class IdentityLinkReconciliationTests
 
         FlagCount(result, "cleared").Should().Be(0, "the slot is still held");
         _log.Messages.Should().NotContain(m => m.Contains("before-state") && m.Contains(holder.ToString()) && m.Contains("flag=(none)"));
+    }
+
+    [Fact]
+    public async Task AnInactiveContactEmailMatchFlag_IsKeptByTheJobWhileTheContactStaysInactive_AndClearedOnReactivation()
+    {
+        // r3 task 047 fix round 2: a registration refused because a DEACTIVATED contact carries the email flags that contact.
+        // Every other reason is cleared on an inactive contact (the person was removed); this one must survive the runs.
+        var registrant = Guid.NewGuid();
+        var contact = Guid.NewGuid();
+        _store.AddContact(contact, "mike.okafor@customer.example", stateCode: 1,
+            flag: Flag(IdentityCollisionReason.InactiveContactEmailMatch, registrant, IdentityPlaneMarker.WorkforceHome));
+
+        await RunAsync(writes: true);
+        await RunAsync(writes: true);
+        _store.Contacts[contact].Flag.Should().NotBeNull("it is still inactive and still carries the email");
+
+        _store.Contacts[contact].StateCode = 0;
+        await RunAsync(writes: true);
+        _store.Contacts[contact].Flag.Should().BeNull("an operator reactivated the contact: the job clears the flag");
+    }
+
+    [Fact]
+    public async Task Control_AnotherReasonOnAnInactiveContact_IsClearedByTheJob()
+    {
+        var contact = Guid.NewGuid();
+        _store.AddContact(contact, "mike.okafor@customer.example", stateCode: 1,
+            flag: Flag(IdentityCollisionReason.BindingUnreadable, Guid.NewGuid(), IdentityPlaneMarker.WorkforceHome));
+
+        await RunAsync(writes: true);
+
+        _store.Contacts[contact].Flag.Should().BeNull("without the dedicated reason the inactive contact's flag is moot");
     }
 
     [Fact]

@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="066" project="spaarke-SPA-external-access-platform-r3">
+  <metadata>
+    <title>Documents grid and document detail: download/open the file (check-3 items 2-3)</title>
+    <phase>5b Owner check fixes</phase>
+    <gate>startable (owner decision 2026-10-13: download/open is sufficient for R3)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags frontend; modifies .tsx</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Reuses the existing DocumentLibrary download path</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>CHK3</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>frontend, react, fluent-ui, testing</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Let an external user download or open a document from the Documents widget grid and from the document detail window, using the same download code the record's Documents section already uses.</prompt>
+  <role>SPAARKE platform developer. React and Fluent v9 in the external SPA. Follow ADRs strictly.</role>
+  <goal>Opening a document row shows a Download (or Open) action that streams the file through the existing external content route; a failed download shows a visible error.</goal>
+
+  <context>
+    <background>Owner check 3: document detail shows the header but no file; the Documents grid row cannot be selected and nothing downloads. Code map: GridWidgetBody.tsx:107-117 opens RecordDetailModal for a row; RecordDetailFields.tsx:120-134 renders sprk_document fields only; DocumentLibrary.tsx:720-741 downloads via bffApiBlob(documentContentPath(...)) and only console.errors a failure; BFF route GET .../{root}/{id}/documents/{documentId}/content exists (ExternalProjectDataEndpoints.cs:585-620, Read on the parent + document-to-parent scoping). Live read: grid config 3af4102c ("Outside Counsel — Documents (external widget)") has behavior.selectionMode "none", which is why rows cannot be ticked. The content route needs the parent root and id: a document row carries _sprk_matter_value / _sprk_project_value / _sprk_workassignment_value — pick the parent the caller can read in the same order the BFF uses.</background>
+    <relevant-files>
+      <file role="modify">src/client/external-spa/src/components/detail/RecordDetailModal.tsx</file>
+      <file role="modify">src/client/external-spa/src/components/detail/RecordDetailFields.tsx</file>
+      <file role="modify">src/client/external-spa/src/components/DocumentLibrary.tsx (extract the download helper so both use it; make failures visible)</file>
+      <file role="canonical-reference">src/client/external-spa/src/components/DocumentLibrary.tsx:720-741</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">No new BFF route; use the existing content route. No SPE URL or signed link is exposed.</constraint>
+    <constraint source="project">Grid selection stays as configured (selectionMode none) — download is an action in the document detail, not a selection command. Inline preview is out of scope (deferred to R4).</constraint>
+    <constraint source="ADR-021 / ADR-012">Fluent v9 tokens; mirror the DocumentLibrary download button (visual anchor).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load knowledge; declare rigor/tier.</step>
+    <step order="1">Tests first; extract the download helper; add the Download action to the document detail; surface failures (MessageBar).</step>
+    <step order="2">typecheck, lint, vitest, build, check:dist; notes/task-066-notes.md; status + drift check.</step>
+  </steps>
+
+  <ui-tests>
+    <test name="Download from document detail">
+      <url>https://{swa-host}/</url>
+      <steps><step>Open the Documents widget, click a document</step><step>Click Download</step></steps>
+      <expected>The file downloads; no console errors</expected>
+    </test>
+    <test name="Download failure is visible">
+      <steps><step>Simulate a 403/500 on the content route</step></steps>
+      <expected>An error message is shown</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps><step>Switch to dark theme</step><step>Open a document detail</step></steps>
+      <expected>Colours from Fluent v9 tokens</expected>
+    </test>
+  </ui-tests>
+
+  <outputs>
+    <output type="code">src/client/external-spa/src/components/ (files listed)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Document detail shows Download; clicking calls the content route for the readable parent and saves the blob with the document name.</criterion>
+    <criterion testable="true">A document with no readable parent link shows no Download action.</criterion>
+    <criterion testable="true">A failed download shows an error message in both the detail and DocumentLibrary.</criterion>
+    <criterion testable="true">typecheck 0, lint 0, vitest pass, build 0, check:dist clean.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Owner check 3 items 2-3; decision 3 (preview deferred to R4).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

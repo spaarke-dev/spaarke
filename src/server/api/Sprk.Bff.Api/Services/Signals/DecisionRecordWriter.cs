@@ -282,6 +282,14 @@ public static class DecisionRecordRefusalReason
     /// <summary>Task 142 (adversarial pass 1 F1): the subject cannot be filed for a reason a retry does not change (its lineage names
     /// two different records of one core table, or it no longer exists). A refusal, not an outage.</summary>
     public const string SubjectUnfileable = "decision_subject_unfileable";
+
+    /// <summary>Task 042b (D-169): a read or a grant of an unfiled communication's gate record participant share failed. Not a refusal: the
+    /// record is written and owner-visible; nothing is shared beyond the communication's sharees (<see cref="GateDecisionRecordSharing"/>).</summary>
+    public const string ParticipantShareFailed = "decision_participant_share_failed";
+
+    /// <summary>Task 042b (D-169): the gate record of a communication an Office save filed could not be re-owned, read back, or have its
+    /// shares revoked. The filing stands; a record not re-owned keeps its user owner and its participant shares (<see cref="GateDecisionRecordSharing"/>).</summary>
+    public const string FilingReownFailed = "decision_filing_reown_failed";
 }
 
 /// <summary>
@@ -364,6 +372,13 @@ public static class DecisionRecordEvents
     /// written (the subject no longer exists, cannot be filed or is not a table a record can be filed under). Counted on
     /// <c>ontology.writer.skips</c>, not retried. Ids and the reason only.</summary>
     public static readonly EventId ConditionClearedSkipped = new(50315, nameof(ConditionClearedSkipped));
+
+    /// <summary>Warning (task 042b, D-169): an unfiled communication's gate record participant share could not be read or made. Ids only.</summary>
+    public static readonly EventId ParticipantShareFailed = new(50316, nameof(ParticipantShareFailed));
+
+    /// <summary>Warning (task 042b, D-169): a filed communication's gate record could not be re-owned, read back, or have its shares
+    /// revoked. Ids only; the filing stands.</summary>
+    public static readonly EventId FilingReownFailed = new(50317, nameof(FilingReownFailed));
 }
 
 /// <summary>Thrown when the writer refuses a review. NOTHING was written. The commit route reports it and writes no record.</summary>
@@ -488,6 +503,7 @@ public sealed class DecisionRecordWriter
     private readonly TodoRegardingBuilder _regarding;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<DecisionRecordWriter> _logger;
+    private readonly GateDecisionRecordSharing _participantShares;
 
     /// <param name="writerClient">The ontology writer identity: the record's ONLY create, and the secure-owner read-back.</param>
     /// <param name="ownership">uac-r2's owner resolver (contract C3).</param>
@@ -497,6 +513,8 @@ public sealed class DecisionRecordWriter
     /// <param name="recordTypes">The <c>sprk_recordtype_ref</c> catalog the shared regarding builder types the pair from (task 141).</param>
     /// <param name="timeProvider">The decision time when the review gives none.</param>
     /// <param name="logger">Refusals and the secure-owner read-back.</param>
+    /// <param name="participantShares">Task 042b (D-169): shares an unfiled communication's gate record, Read only, with the communication's
+    /// internal sharees after the create (best-effort, never throws). Required (042b round 3, as uac-r2 required for its two consumers).</param>
     public DecisionRecordWriter(
         OntologyWriterDataverseClient writerClient,
         IRecordOwnershipResolver ownership,
@@ -504,8 +522,10 @@ public sealed class DecisionRecordWriter
         IGenericEntityService entities,
         ICommunicationDataverseService recordTypes,
         TimeProvider timeProvider,
-        ILogger<DecisionRecordWriter> logger)
+        ILogger<DecisionRecordWriter> logger,
+        GateDecisionRecordSharing participantShares)
     {
+        _participantShares = participantShares ?? throw new ArgumentNullException(nameof(participantShares));
         _writerClient = writerClient ?? throw new ArgumentNullException(nameof(writerClient));
         _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _coreAncestors = coreAncestors ?? throw new ArgumentNullException(nameof(coreAncestors));
@@ -1220,6 +1240,14 @@ public sealed class DecisionRecordWriter
             await VerifySecureOwnerAsync(recordId, expectedTeam, ct).ConfigureAwait(false);
         }
 
+        // Task 042b (D-169): a gate record owned by an unfiled communication's own user (the only record with a Principal owner, D-144) is
+        // also readable by the communication's internal sharees. After the create, never before; never throws (the record has landed). A
+        // team-owned record never reaches this (D-123).
+        if (recordOwner.Principal is { LogicalName: "systemuser", Id: var ownerUserId })
+        {
+            await _participantShares.ShareAtWriteAsync(recordId, SubjectOf(request).Id, ownerUserId).ConfigureAwait(false);
+        }
+
         _logger.LogInformation(
             "Decision Record {RecordId} written for review {ReviewId}: class {RecordClass}, {SignalCount} Signal(s).",
             recordId, request.ReviewId, plan.Class, request.ResolvedSignalIds.Count);
@@ -1448,7 +1476,7 @@ public sealed class DecisionRecordWriter
         owner.Resolution.ApplyTo(entity);
         if (owner.Principal is { } principal)
         {
-            entity["ownerid"] = principal; // D-144 as amended: the communication's own owning user; no team, no share
+            entity["ownerid"] = principal; // D-144 as amended: the communication's own owning user; D-169: shared after the create (CreateAsync)
         }
 
         return (entity, owner);

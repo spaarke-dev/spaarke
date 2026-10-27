@@ -322,7 +322,8 @@ public partial class RouteAuthorizationGuardTests
             + "handler's only I/O is one OntologyAdminAuthoringService call whose every read the caller acts on and every write runs AS THE "
             + "CALLER through IDataverseUserClient (WhoAmI first: unresolved is the single 403); a policy id is read as the caller through the "
             + "Ontology domain allow-list before any write (absent, unreadable or non-Ontology: the uniform 404). The dry run evaluates as the "
-            + "evaluator (#39) and returns only rows whose subject AND core record the caller's own read returns. HandlerDecisions below."),
+            + "evaluator (#39) and returns only rows whose subject AND core record the caller's own read returns. Task 102a adds "
+            + "POST /validate (compile only) to this file, gated exactly as the dry run. HandlerDecisions below."),
         new GovernedFile("Api/InquiryEndpoints.cs", Scope.RouteLevelGate,
             "POST /api/v1/inquiries/{serviceRequestId}/disposition (ontology platform R1 task 071, D-111) -- a person records how a "
             + "budget inquiry turned out. The route carries RecordRouteAccessAuthorizationFilter(\"write\", sprk_servicerequests, "
@@ -421,6 +422,18 @@ public partial class RouteAuthorizationGuardTests
             + "(ModuleEntitlementResolver.IsEntitledAsync — the /me/entitlements set, partner switch included) and has a "
             + "contact; the one row it writes app-only names that contact as sprk_requestedby, so it lands only in the "
             + "caller's own Service Requests set. Takes no record id."),
+        new GovernedFile("Api/ExternalAccess/ExternalRegistrationEndpoints.cs", Scope.RouteLevelGate,
+            "POST /api/v1/external/registration (spaarke-SPA-external-access-platform-r3 task 047, ADR-028 A9) on its OWN "
+            + "group: RequireAuthorization(ExternalCollaboration) WITHOUT CallerPrincipalAuthorizationFilter (the caller is "
+            + "not yet resolved). The handler admits a WorkforceHome identity only (:114) and registers only the caller "
+            + "itself, keyed by its own token tid/oid/email; it takes no record id."),
+        new GovernedFile("Api/ExternalAccess/ExternalWorkforceLinkEndpoints.cs", Scope.RouteLevelGate,
+            "POST /api/v1/external/workforce/link (spaarke-SPA-external-access-platform-r3 task 048, ADR-028 A9) on its OWN "
+            + "group: RequireAuthorization(ExternalCollaboration) WITHOUT CallerPrincipalAuthorizationFilter (a licensed "
+            + "user's home identity is not yet linked). The handler admits a WorkforceHome identity only (:107); the body's "
+            + "Spaarke-tenant guest token is validated with the default scheme's own parameters plus the A9 conditions (:133), "
+            + "and the link is written once onto THAT guest's enabled systemuser, keyed by the bearer's own tid/oid (:147). "
+            + "It takes no record or systemuser id."),
         new GovernedFile("Api/ExternalAccess/ExternalNotificationFeedEndpoints.cs", Scope.GroupGated,
             "GET /api/v1/external/notifications and POST /api/v1/external/notifications/seen "
             + "(spaarke-SPA-external-access-platform-r3 task 037, FR-08) on the COLLABORATION group. Neither takes an id: the "
@@ -434,6 +447,10 @@ public partial class RouteAuthorizationGuardTests
             "POST /set-record-share-expiry under the DelegationRuleFilter admin group (task 098)."),
         new GovernedFile("Api/ExternalAccess/RecordAccessGateEndpoint.cs", Scope.GroupGated,
             "GET /can-manage-access — its whole purpose is to be gated by DelegationRuleFilter (task 118)."),
+        new GovernedFile("Api/ExternalAccess/RecordGrantsEndpoint.cs", Scope.GroupGated,
+            "GET /record-grants under the DelegationRuleFilter admin group (task 099a, #1010(a)): the record's active grant rows "
+            + "for Manage Access's Current Access, behind the /can-manage-access rule (Write and Share on the record, as the "
+            + "caller); the row read is app-only, so the filter is the whole authorization."),
         new GovernedFile("Api/ExternalAccess/InternalShareEndpoints.cs", Scope.GroupGated,
             "internal POA share/unshare/list under the DelegationRuleFilter admin group (task 063)."),
         new GovernedFile("Api/ExternalAccess/InviteExternalUserEndpoint.cs", Scope.GroupGated,
@@ -824,9 +841,30 @@ public partial class RouteAuthorizationGuardTests
     // 124 -> 125 (2026-10-14, spaarke-ontology-platform-r1 task 038). Net +1: Api/Signals/SignalReadEndpoints.cs ADDED --
     // GET /api/v1/signals/worklist. Classified by GovernedFiles (RouteLevelGate) and HandlerDecisions below.
     //
+    // 125 -> 126 (2026-10-15, spaarke-SPA-external-access-platform-r3 task 047, ADR-028 A9):
+    //
+    //   047  +1  Api/ExternalAccess/ExternalRegistrationEndpoints.cs ADDED — POST /api/v1/external/registration, a
+    //            WorkforceHome caller's one-time registration, on its OWN /api/v1/external group (ExternalCollaboration,
+    //            no CallerPrincipalAuthorizationFilter). Governed RouteLevelGate; Permanent CallerScopedOnly (it registers
+    //            only the caller, from its own token). Pinned by
+    //            tests/unit/Sprk.Bff.Api.Tests/Api/ExternalAccess/ExternalRegistrationEndpointsTests.cs and by
+    //            AuthenticationSchemeCensusTests (the route pin and the only-caller rule).
+    //
+    // 126 -> 127 (2026-10-16, spaarke-SPA-external-access-platform-r3 task 048, ADR-028 A9):
+    //
+    //   048  +1  Api/ExternalAccess/ExternalWorkforceLinkEndpoints.cs ADDED — POST /api/v1/external/workforce/link, a
+    //            licensed user's stored home link (dual-token proof), on its OWN /api/v1/external group
+    //            (ExternalCollaboration, no CallerPrincipalAuthorizationFilter). Governed RouteLevelGate; Permanent
+    //            CallerScopedOnly (it links only the caller's own two identities, from its own two tokens). Pinned by
+    //            tests/integration/auth/ExternalAccess/ExternalWorkforceLinkEndpointsTests.cs and by
+    //            AuthenticationSchemeCensusTests (the route pin and the only-caller rule).
+    //
     // 125 -> 126 (2026-10-16, spaarke-ontology-platform-r1 task 104). Net +1: Api/Ontology/OntologyAdminEndpoints.cs ADDED --
     // GET /api/v1/ontology/admin/capabilities. Classified by GovernedFiles (RouteLevelGate) and a Permanent CallerScopedOnly waiver.
     // The main session reconciles the count with the other ontology routes at integration.
+    //
+    // 126 + 127 -> 128 (2026-10-16, merge of master into work/spaarke-SPA-external-access-platform-r3): the union of the
+    // two 125 -> sequences above (external-access-r3 047/048 + ontology 104). No route added or removed here.
     //
     // 126 -> 127 (2026-10-16, spaarke-ontology-platform-r1 task 100). Net +1: Api/Ontology/OntologyAdminRulesEndpoints.cs ADDED --
     // GET /api/v1/ontology/admin/rules, GET /rules/{policyId}, PUT /rules/{policyId}/enabled, POST /rules/{policyId}/retire. Bound by the
@@ -842,7 +880,23 @@ public partial class RouteAuthorizationGuardTests
     // Classified by GovernedFiles (RouteLevelGate, its own group) and one HandlerDecision per route below.
     //
     // Integration (2026-10-16): the 126 of task 104 + 100 + 101 + 103 = 129 (one file each; verified by the census pin test).
-    private const int ExpectedEndpointFileCount = 129;
+    //
+    // 128 + 129 -> 131 (2026-10-16, merge of master e702c3401 into work/spaarke-SPA-external-access-platform-r3): master's 129
+    // (ontology 104/100/101/103 on 125) plus external-access-r3's two (047 registration, 048 workforce link). No route added or removed here.
+    //
+    // 129 -> 130 (2026-10-16, unified-access-control-r2 task 099a, after ontology #2044 merged, #1010(a)):
+    //
+    //   099a +1  Api/ExternalAccess/RecordGrantsEndpoint.cs ADDED — GET /record-grants, the record's active
+    //            sprk_externalrecordaccess rows for Manage Access's Current Access (the PCF read them as the user, so a
+    //            Write-holder in a child business unit saw none of the root-owned rows). Governed GroupGated: it sits in
+    //            the external-access admin group and inherits AddDelegationRuleFilter(); DelegationRuleFilter's target map
+    //            gained the matching RecordGrantsQuery case in the same change (the /can-manage-access rule — Write and
+    //            Share on the RECORD; an unknown id and an unmanageable one are the same 403). Pinned through the real
+    //            pipeline by tests/integration/auth/UnifiedAccessControl/RecordGrantsEndpointTests.cs.
+    //
+    // 131 + 130 -> 132 (2026-10-17, merge of master 1d435e695 into work/spaarke-SPA-external-access-platform-r3): master's 130
+    // (129 + UAC 099a) plus external-access-r3's two (047 registration, 048 workforce link). No route added or removed here.
+    private const int ExpectedEndpointFileCount = 132;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision
@@ -1061,6 +1115,14 @@ public partial class RouteAuthorizationGuardTests
             "Resolves the caller principal (contact-plane identity) as the PRECONDITION of the per-record checks the handlers "
             + "make — by design, never a decision itself.",
             "the file references no decision service"),
+        // Task 186 (review round 1 F1): the workforce privilege ceiling on the /api/v1/external group. It only NARROWS — a
+        // workforce contact whose Workforce role lacks the route's declared table privileges is refused before the handler
+        // — and passes every other caller straight through. It never decides on a record, so it earns no Rule A credit; each
+        // route keeps the credit it had. Its coverage of the group is WorkforceCeilingCoverageTests.
+        new NonDecidingAttachment("AddWorkforceCeilingFilter", "Api/ExternalAccess/WorkforceCeilingEndpointFilter.cs", "-",
+            "A role-privilege ceiling by design (table x operation, never a record): a caller it does not apply to (a systemuser, "
+            + "a CIAM partner) goes straight to next, and a workforce contact the role allows goes to next too.",
+            "|| !WorkforceRoleCeilingGate.Applies(principal)) { ... return await next(context) (WorkforceCeilingEndpointFilter.cs, InvokeAsync)"),
         new NonDecidingAttachment("AddReportingAuthorizationFilter", "Api/Reporting/ReportingAuthorizationFilter.cs", "-",
             "A module gate plus the sprk_ReportingAccess role claim — a module role by design, not per-resource and not an "
             + "operator surface (sweep S-70, S-71, S-81).",
@@ -1106,6 +1168,10 @@ public partial class RouteAuthorizationGuardTests
             + "admin routes so that SpeAdminTenantScopeFilter, which decides, confines them to a root admin of a Spaarke-"
             + "operated environment (the platform-operator check that runs first in its InvokeAsync). It narrows an "
             + "AdminOnlyRoutes surface further and decides nothing itself."),
+        new NotAuthorizationForm("RequireWorkforceCeiling",
+            "Task 186 (review round 1 F1): endpoint METADATA, not a filter — the route's table x operation set for the "
+            + "workforce privilege ceiling, read by the group's AddWorkforceCeilingFilter (NonDecidingAttachments). It narrows "
+            + "what a workforce contact may do and decides nothing about any record."),
         new NotAuthorizationForm("AddEndpointFilter(ValidateFilingRequestAsync)",
             "Task 147 r1c: PATCH /api/v1/events/{id}/filing request SHAPE only (EventEndpoints.cs:172-177, "
             + "ChildRecordEndpoints.FilingShapeProblem, no I/O), before the route's RecordRouteAccessAuthorizationFilter(\"write\")."),
@@ -1630,21 +1696,22 @@ public partial class RouteAuthorizationGuardTests
         new HandlerDecision("GET /api/v1/external/projects/{id:guid}/todos", "GetTodos", "RightsForRoot", Array.Empty<string>(),
             "Delegates to ListTodosForRoot, which requires Read from RightsForRoot on the route project "
             + "(ExternalProjectDataEndpoints.cs:688-689)."),
-        new HandlerDecision("POST /api/v1/external/projects/{id:guid}/todos", "CreateTodo", "RightsForRoot", Array.Empty<string>(),
-            "Delegates to CreateTodoForRoot, which requires Create from RightsForRoot before any write "
-            + "(ExternalProjectDataEndpoints.cs:722-723)."),
+        new HandlerDecision("POST /api/v1/external/projects/{id:guid}/todos", "CreateTodo", "RightsForRoot", new[] { "ExternalProjectDataEndpoints.RightsForRootWriteAsync" },
+            "Delegates to CreateTodoForRoot, which requires Create from RightsForRoot before any write — through "
+            + "RightsForRootWriteAsync, which (task 036, FR-20) also confirms it against Dataverse for a Dataverse-decided "
+            + "caller (ExternalProjectDataEndpoints.cs:729-730, :930)."),
         new HandlerDecision("GET /api/v1/external/matters/{id:guid}/todos", "GetMatterTodos", "RightsForRoot", Array.Empty<string>(),
             "Delegates to ListTodosForRoot: Read from RightsForRoot on the route matter "
             + "(ExternalProjectDataEndpoints.cs:688-689)."),
-        new HandlerDecision("POST /api/v1/external/matters/{id:guid}/todos", "CreateMatterTodo", "RightsForRoot", Array.Empty<string>(),
-            "Delegates to CreateTodoForRoot: Create from RightsForRoot on the route matter "
-            + "(ExternalProjectDataEndpoints.cs:722-723)."),
+        new HandlerDecision("POST /api/v1/external/matters/{id:guid}/todos", "CreateMatterTodo", "RightsForRoot", new[] { "ExternalProjectDataEndpoints.RightsForRootWriteAsync" },
+            "Delegates to CreateTodoForRoot: Create from RightsForRoot on the route matter, through "
+            + "RightsForRootWriteAsync (ExternalProjectDataEndpoints.cs:729-730, :930)."),
         new HandlerDecision("GET /api/v1/external/workassignments/{id:guid}/todos", "GetWorkAssignmentTodos", "RightsForRoot", Array.Empty<string>(),
             "Delegates to ListTodosForRoot: Read from RightsForRoot on the route work assignment "
             + "(ExternalProjectDataEndpoints.cs:688-689)."),
-        new HandlerDecision("POST /api/v1/external/workassignments/{id:guid}/todos", "CreateWorkAssignmentTodo", "RightsForRoot", Array.Empty<string>(),
-            "Delegates to CreateTodoForRoot: Create from RightsForRoot on the route work assignment "
-            + "(ExternalProjectDataEndpoints.cs:722-723)."),
+        new HandlerDecision("POST /api/v1/external/workassignments/{id:guid}/todos", "CreateWorkAssignmentTodo", "RightsForRoot", new[] { "ExternalProjectDataEndpoints.RightsForRootWriteAsync" },
+            "Delegates to CreateTodoForRoot: Create from RightsForRoot on the route work assignment, through "
+            + "RightsForRootWriteAsync (ExternalProjectDataEndpoints.cs:729-730, :930)."),
         new HandlerDecision("POST /api/v1/external/projects/{id:guid}/documents", "UploadDocument", "AccessRights", Array.Empty<string>(),
             "Delegates to UploadDocumentForParent: requires Create on the route project from the caller principal's "
             + "rights before the upload (rights.HasFlag(AccessRights.Create), ExternalProjectDataEndpoints.cs:1269)."),
@@ -1720,7 +1787,8 @@ public partial class RouteAuthorizationGuardTests
             + "(ExternalProjectDataEndpoints.cs:1524) before any Dataverse read; an event also filed to a SECURE linked root the "
             + "caller cannot read is withheld, by effective status (ExternalDataService.ReadableEventsAsync, ExternalMultiRootRule; unknown counts as secure)."),
         new HandlerDecision("POST /api/v1/external/projects/{id:guid}/events", "CreateEvent", "AccessRights", Array.Empty<string>(),
-            "Requires Create on the route project (ExternalProjectDataEndpoints.cs:1570) before the write."),
+            "Requires Create on the route project (RightsForRootWriteAsync, ExternalProjectDataEndpoints.cs:1895-1897; "
+            + "task 036 confirms it against Dataverse for a Dataverse-decided caller) before the write."),
         new HandlerDecision("GET /api/v1/external/projects/{id:guid}/contacts", "GetContacts", "HoldsReadOnProject", Array.Empty<string>(),
             "Read on the route project (ExternalProjectDataEndpoints.cs:1612)."),
         new HandlerDecision("GET /api/v1/external/projects/{id:guid}/organizations", "GetOrganizations", "HoldsReadOnProject", Array.Empty<string>(),
@@ -1889,6 +1957,16 @@ public partial class RouteAuthorizationGuardTests
             + "non-Ontology: the uniform 404) before anything is evaluated. The draft is evaluated as the EVALUATOR (writes nothing, :358), then "
             + "every hit's subject and core record are re-read AS THE CALLER (:476, :493) and a row is returned only when both come back; the "
             + "policy's Signals are read AS THE CALLER (:544). Nothing the caller cannot read is returned or counted."),
+        new HandlerDecision("POST /api/v1/ontology/admin/authoring/validate", "ValidateAsync", "IDataverseUserClient",
+            new[] { "OntologyAdminAuthoringService.ValidateAsync" },
+            "Ontology task 102a: the handler's only I/O is OntologyAdminAuthoringService.ValidateAsync (OntologyAdminAuthoringEndpoints.cs:86). "
+            + "Gated exactly as the dry run: WhoAmI as the caller first (OntologyAdminAuthoringService.cs:720; unresolved: the single 403), "
+            + "then the caller's prvCreatesprk_PolicyVersion asked FRESH, AS THE CALLER (:726; not held: 403 ontology.admin.forbidden, "
+            + "nothing in the request is read). A body policyId is read AS THE CALLER through the Ontology domain allow-list (:741; absent, "
+            + "unreadable or non-Ontology: the uniform 404). The draft is then compiled only, through the same ValidateDraft save and "
+            + "publish use (:766, PolicyVersionValidator.ValidateForAuthoring, including the authorable-column allow-list): nothing is "
+            + "written, nothing is evaluated, and no dry-run proof is recorded. Lives in the already-governed "
+            + "OntologyAdminAuthoringEndpoints.cs, so the file count is unchanged."),
         new HandlerDecision("POST /api/v1/ontology/admin/authoring/policies", "SavePolicyAsync", "IDataverseUserClient",
             new[] { "OntologyAdminAuthoringService.SavePolicyAsync" },
             "Ontology task 101 (FR-10): the handler's only I/O is OntologyAdminAuthoringService.SavePolicyAsync (OntologyAdminAuthoringEndpoints.cs:77). "
@@ -1905,12 +1983,14 @@ public partial class RouteAuthorizationGuardTests
         new HandlerDecision("GET /api/v1/signals/worklist", "GetWorklistAsync", "IDataverseUserClient",
             new[] { "SignalReadService.ReadAsync" },
             "Ontology task 038: the handler's only I/O is SignalReadService.ReadAsync (SignalReadEndpoints.cs:60). It resolves the caller "
-            + "with WhoAmI AS THE CALLER (SignalReadService.cs:270, ResolveMineCallerAsync; WhoAmI at :813; unresolved: the single 403 at SignalReadEndpoints.cs:64), runs the "
-            + "worklist FetchXML as the caller (:515), keeps a row only when the caller's own batched read of its catalog-named core "
-            + "table returns its core id (:678; the table must be in CoreAncestorResolver.CoreRecordEntities), and keeps a Do-lane row "
-            + "only when the caller's own read of its subject, filtered to the caller's work, returns it (:732-733). Nothing app-only is "
+            + "with WhoAmI AS THE CALLER (SignalReadService.cs:310, ResolveMineCallerAsync; WhoAmI at :1035; unresolved: the single 403 at SignalReadEndpoints.cs:64), runs the "
+            + "worklist FetchXML as the caller (:333), keeps a row only when the caller's own batched read of its catalog-named core "
+            + "table returns its core id (:900; the table must be in CoreAncestorResolver.CoreRecordEntities), and keeps a Do-lane row "
+            + "only when the caller's own read of its subject, filtered to the caller's work, returns it (:954-955). Nothing app-only is "
             + "returned unless the caller's read admitted its row (the app-only secure-family placement only WITHHOLDS evidence detail, "
-            + "D-123); a fault is 503 (SignalReadEndpoints.cs:73), never a shorter list."),
+            + "D-123; the rule short name, work type and severity are read app-only from sprk_policy by id for the rows kept, D-185 task 163, "
+            + "so the worklist needs no caller Read on sprk_policy: configuration, not matter data); a fault is 503 (SignalReadEndpoints.cs:73), "
+            + "never a shorter list."),
         new HandlerDecision("GET /api/v1/ontology/admin/classification/categories", "ListCategoriesAsync", "IDataverseUserClient",
             new[] { "OntologyAdminClassificationService.ListAsync" },
             "Ontology task 103: the handler's only I/O is OntologyAdminClassificationService.ListAsync (OntologyAdminClassificationEndpoints.cs:111), "
@@ -2892,6 +2972,16 @@ public partial class RouteAuthorizationGuardTests
             + "(CallerPrincipal.RightsOn, ExternalNotificationFeedEndpoints.cs:277), and messages read only for its accessible "
             + "set (:288) and its own service requests (the module's ScopeRows, :313), under the external read rules (:328). "
             + "Takes no id."),
+        Permanent("POST /api/v1/external/registration", PermanentBasis.CallerScopedOnly, "r3-047",
+            "Registers ONLY the caller: a WorkforceHome identity (ExternalRegistrationEndpoints.cs:114), keyed by its own "
+            + "token tid/oid and email claim (:172), through ContactIdentityBinder.RegisterHomeContactAsync (:184). The "
+            + "closed body carries names only; it takes no record, owner or contact id."),
+        Permanent("POST /api/v1/external/workforce/link", PermanentBasis.CallerScopedOnly, "r3-048",
+            "Links ONLY the caller's own two identities: a WorkforceHome bearer (ExternalWorkforceLinkEndpoints.cs:107), keyed "
+            + "by its own token tid/oid (:121), and the same person's Spaarke-tenant guest token from the closed body, "
+            + "validated with the default scheme's parameters (:133, SpaarkeGuestTokenValidator). The write targets that "
+            + "guest token's own enabled systemuser, once, never re-pointed (ContactIdentityBinder.LinkHomeSystemUserAsync, "
+            + ":147). It takes no record, systemuser or contact id."),
         Permanent("POST /api/v1/external/notifications/seen", PermanentBasis.CallerScopedOnly, "r3-037",
             "Writes the caller principal's own last-seen marker, keyed by its own systemuser or contact id "
             + "(ExternalNotificationFeedEndpoints.cs:192, :218). Takes no id and no body."),

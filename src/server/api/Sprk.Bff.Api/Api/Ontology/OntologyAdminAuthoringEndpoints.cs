@@ -8,6 +8,8 @@ namespace Sprk.Bff.Api.Api.Ontology;
 /// <list type="bullet">
 /// <item><c>GET /authoring/catalog</c> — the authorable condition catalog, generated from the compiler (#46).</item>
 /// <item><c>POST /authoring/dry-run</c> — evaluate a draft over current data as the evaluator, rows filtered by the caller (#39).</item>
+/// <item><c>POST /authoring/validate</c> — compile a draft only (task 102a): field errors and the template-eligible fields; nothing is
+/// written or evaluated. Gated exactly as the dry run.</item>
 /// <item><c>POST /authoring/policies</c> — save a new rule, Off (FR-10), with its first version.</item>
 /// <item><c>POST /authoring/policies/{policyId}/versions</c> — publish a new version (supersede, re-raise, stamp; D-13, D-14).</item>
 /// </list>
@@ -45,6 +47,14 @@ public static class OntologyAdminAuthoringEndpoints
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
+        group.MapPost("/authoring/validate", ValidateAsync)
+            .WithName("ValidateOntologyRule")
+            .WithSummary("Compiles a draft rule only: field errors and the fields its message may name; writes and evaluates nothing")
+            .Produces<OntologyRuleValidation>(200)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+
         group.MapPost("/authoring/policies", SavePolicyAsync)
             .WithName("SaveOntologyPolicy")
             .WithSummary("Saves a new rule, Off, with its first version, as the caller")
@@ -73,6 +83,10 @@ public static class OntologyAdminAuthoringEndpoints
         HttpContext httpContext, OntologyDryRunRequest request, OntologyAdminAuthoringService authoring, CancellationToken ct) =>
         ToResult(httpContext, await authoring.DryRunAsync(httpContext.User, request, ct).ConfigureAwait(false));
 
+    internal static async Task<IResult> ValidateAsync(
+        HttpContext httpContext, OntologyValidateRequest request, OntologyAdminAuthoringService authoring, CancellationToken ct) =>
+        ToResult(httpContext, await authoring.ValidateAsync(request, ct).ConfigureAwait(false));
+
     internal static async Task<IResult> SavePolicyAsync(
         HttpContext httpContext, OntologyNewPolicyRequest request, OntologyAdminAuthoringService authoring, CancellationToken ct)
     {
@@ -94,7 +108,9 @@ public static class OntologyAdminAuthoringEndpoints
             OntologyAdminAuthoringOutcome.Invalid => Results.ValidationProblem(
                 result.Errors ?? new Dictionary<string, string[]>(),
                 title: "The rule cannot be saved",
-                detail: "Nothing was written. Fix the fields named below."),
+                detail: "Nothing was written. Fix the fields named below.",
+                // Task 102a: a refusal with a stable code (ontology.admin.column_not_authorable) carries it, as the validate route does.
+                extensions: result.ReasonCode is { } code ? new Dictionary<string, object?> { ["reasonCode"] = code } : null),
             OntologyAdminAuthoringOutcome.CallerUnresolved => Problem(httpContext, StatusCodes.Status403Forbidden, "Forbidden",
                 "The caller could not be resolved to a Dataverse user.", result.ReasonCode),
             OntologyAdminAuthoringOutcome.Refused => Problem(httpContext, StatusCodes.Status403Forbidden, "Forbidden",
@@ -117,6 +133,7 @@ public static class OntologyAdminAuthoringEndpoints
         OntologyAdminAuthoringService.ReasonDryRunRequired => "Run Test on this exact rule before saving it; any edit needs a new test run.",
         OntologyAdminAuthoringService.ReasonPolicyCodeTaken => "Another rule already uses this code.",
         OntologyAdminAuthoringService.ReasonPolicyRetired => "The rule is retired; a retired rule cannot be published.",
+        OntologyAdminAuthoringService.ReasonRuleHeldSecure => OntologyAdminAuthoringService.RuleHeldSecureMessage,
         _ => "The rule changed while this was being saved. Nothing new is in force; reload and try again.",
     };
 

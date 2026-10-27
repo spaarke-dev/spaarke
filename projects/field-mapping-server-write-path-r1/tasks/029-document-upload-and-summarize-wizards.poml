@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="029" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Migrate Document Upload and Summarize Files wizards to the server write path (FR-16)</title>
+    <phase>3 W3 Product creators onto the service</phase>
+    <gate>028 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .ts/.tsx in Spaarke.UI.Components and two code-page hosts; tags include frontend, documents, deploy, testing (TEST-MODIFYING override).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Both already create sprk_document through the BFF route; the work is removing client-side parent-value cascade and proving the payload.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W3-wizards</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Wizards migrate one at a time, each live-verified before the next (spec FR-16).</parallel-reason>
+    <deps>028</deps>
+    <tags>frontend, fluent-ui, documents, field-mapping, deploy, testing</tags>
+    <estimated-effort>6-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Migrate the Document Upload and Summarize Files wizards: sprk_document is created through the BFF route with only user-entered values (file name, description, chosen parent); parent-driven values (search index, mapped fields) come from the server, not a client cascade. Each wizard is deployed and live-verified separately.</prompt>
+  <role>SPAARKE platform developer, React 18 / Fluent UI v9 code pages, Dataverse. Follow ADRs strictly.</role>
+  <goal>Neither wizard computes or sends mapped or cascaded values (e.g. a client-resolved search-index id); both send user-entered values and the filing parent; documents show mapped fields and the owning-BU search index on first load; owner = team.</goal>
+
+  <context>
+    <background>spec.md FR-16, FR-10. DocumentRecordService.buildRecordPayload (UIC/services/document-upload/DocumentRecordService.ts ~:340) builds the sprk_document payload and takes a client-resolved search-index id (comments at ~:131 and ~:333 say the Matter to Document mapping cascades the value; searchIndexResolver.ts in DocumentUploadWizard resolves a fallback). Creation goes through BffChildRecordDataverseClient (route sprk_document) via withBffChildCreates in uploadOrchestrator.ts ~:221. Hosts: src/solutions/DocumentUploadWizard (sprk_documentuploadwizard) and src/solutions/SummarizeFilesWizard (sprk_summarizefileswizard). Neither calls applyFieldMappings today (grep confirmed); the work is removing the client cascade and proving the payload.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/services/document-upload/DocumentRecordService.ts (buildRecordPayload ~:340; create ~:97; remove client-resolved cascaded values)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/services/document-upload/BffChildRecordDataverseClient.ts (route create; pass mappingSource when the filed-under parent differs from the intended source)</file>
+      <file role="modify">src/solutions/DocumentUploadWizard/src/services/uploadOrchestrator.ts (withBffChildCreates ~:221; documentName/parent plumbing ~:344)</file>
+      <file role="modify">src/solutions/DocumentUploadWizard/src/components/searchIndexResolver.ts (retire client search-index resolution if the server fills it (FR-10); else document why it stays)</file>
+      <file role="modify">src/solutions/DocumentUploadWizard/src/services/uploadOrchestrator.test.ts (payload = user-entered values only)</file>
+      <file role="modify">src/solutions/SummarizeFilesWizard/src/main.tsx (uses the shared upload pipeline; confirm it reaches the BFF route and sends no cascaded values)</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/matterService.ts (reference migration (task 021))</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordTableRules.cs (created by task 012; Document row, search-indexed Y)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="028" status="complete">Analysis wizard migrated and live-verified.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: this wizard only. One wizard per task, live-verified on dev before the next starts (spec FR-16). Do not edit another wizard's files or bffChildWriteAdapter.ts beyond what task 020 delivered; if the adapter needs a change, stop and escalate.</constraint>
+    <constraint source="project">Scope: the create payload. The wizard sends ONLY values the user entered or picked (plus the filing/regarding keys the route needs). It must not call applyFieldMappings, read a mapping profile or pre-fill mapped fields; mapping, owner, search-index and I-1 stamp are applied by the server (FR-02, FR-06, FR-09, FR-10).</constraint>
+    <constraint source="ADR-012">Scope: the shared UI library. Edits stay in Spaarke.UI.Components (or the named package) and the wizard's code-page host; no copy of shared logic into the host.</constraint>
+    <constraint source="ADR-021">Scope: any UI touched by this task. Fluent v9 tokens only, no hard-coded colors, dark mode must render correctly.</constraint>
+    <constraint source="project">Scope: deployment. Deploy through the code-page-deploy skill (build with the host's own npm script, never a hand-edited web resource). Rollback is redeploying the previous bundle; no runtime flag is added (spec rollout decision).</constraint>
+    <constraint source="CLAUDE.md §9">Scope: auth. The wizard sends no owner, owning-team or impersonation value; the BFF decides ownership from the caller (FR-09). The route stays authenticated (existing authenticatedFetch).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Document upload pipeline; sprk_document create; search-index default from owning BU (FR-10)</topic>
+    <files>
+      <file>docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/webresource.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="entity-operations" location=".claude/patterns/dataverse/entity-operations.md">Lookup bind / option-set value shapes the payload still uses for user-entered fields.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor; read spec FR-16 (and FR-16 and FR-10), the create-surface inventory in notes/design-review-2026-10-19.md, services/document-upload/DocumentRecordService.ts, and the existing tests listed in relevant-files. Re-grep the line numbers cited here before editing (they are approximate).</step>
+    <step order="1">Trace the sprk_document payload end to end (DocumentRecordService.buildRecordPayload to BffChildRecordDataverseClient to the route); list every key and classify user-entered vs derived from the parent (search index, mapped fields, regarding cascade); record in task notes.</step>
+    <step order="2">Remove derived-from-parent keys from the client payload where the server now supplies them (FR-02 mapping, FR-10 search index from the owning BU); keep file, name, description and parent binding keys. If searchIndexResolver.ts becomes dead, delete its use (and the file only if nothing else imports it; grep first).</step>
+    <step order="3">Pass mappingSource only when the filed-under parent differs from the intended mapping source.</step>
+    <step order="4">Update uploadOrchestrator.test.ts and add or adjust DocumentRecordService tests (grep the tests dirs for DocumentRecordService) so the payload contains only user-entered keys.</step>
+    <step order="5">Build both host projects; deploy each separately via code-page-deploy (sprk_documentuploadwizard, then sprk_summarizefileswizard) and live-check each: upload under a Matter, mapped fields and search index present on first load, owner = team, user-typed description kept.</step>
+    <step order="6">Record which wizard was deployed and verified first and the previous bundle names for rollback.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="8">Document any deviation in projects/field-mapping-server-write-path-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the server does not yet fill the search index for sprk_document (task 015 gap), STOP and escalate; do not keep the client cascade as a silent fallback.</trigger>
+    <trigger>If SummarizeFilesWizard uses a different create path than the shared pipeline, STOP and report it before changing it.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Document Upload / Summarize Files wizard renders"><steps><step>Open the Document Upload / Summarize Files wizard code page on dev from its launch command</step><step>Step through to the last step</step></steps><expected>All steps render with no console errors; Fluent v9 styling intact.</expected></test>
+    <test name="Document Upload / Summarize Files create flow"><steps><step>Fill the required fields and click Finish</step></steps><expected>The record is created through POST /api/v1/child-records/{table}; the success state shows the new record; no direct Xrm.WebApi create call for the table.</expected></test>
+    <test name="Mapped values visible on first load"><steps><step>Create the record under a parent that has an active field-mapping profile</step><step>Open the new record immediately (first load, no refresh or save)</step></steps><expected>Every field the active Mapping Profile maps from the parent is populated on the new record at first load; no client write filled them. The search index is the owning BU's.</expected></test>
+    <test name="User value preserved"><steps><step>Type a value into a field the profile also maps</step><step>Finish and open the record</step></steps><expected>The user's own value is stored; the mapped value did not overwrite it (fill-only, FR-02).</expected></test>
+    <test name="ADR-021 dark mode"><steps><step>Switch the host to dark mode (theme toggle or prefers-color-scheme)</step><step>Open the wizard and step through every step</step></steps><expected>No unreadable text, no hard-coded light backgrounds, focus rings visible.</expected></test>
+  </ui-tests>
+
+  <tools><tool name="npm">Build/test the code page and shared library</tool><tool name="code-page-deploy">Deploy the wizard web resource to dev</tool><tool name="ui-test">Browser verification on dev</tool></tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/services/document-upload/DocumentRecordService.ts</output>
+    <output type="code">src/solutions/DocumentUploadWizard/src/services/uploadOrchestrator.ts</output>
+    <output type="test">src/solutions/DocumentUploadWizard/src/services/uploadOrchestrator.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">No derived-from-parent value (mapped field, search-index id) is computed or sent by either wizard; a jest test proves the payload is user-entered values plus the filing parent.</criterion>
+    <criterion testable="true">Both wizards create sprk_document through the BFF route (no direct Xrm create).</criterion>
+    <criterion testable="true">Both wizards are deployed and live-verified separately, each with the rollback bundle noted.</criterion>
+    <criterion testable="true">Negative: with a user value and a mapped value for the same field, the user value is stored; a mapped field the user never touched is populated on first load of the new record; the wizard payload contains no key the user did not enter.</criterion>
+    <criterion testable="true">Deployed to dev via code-page-deploy; live check recorded in the task notes (mapped fields present on first load, user values kept, owner = owning team per FR-09); rollback bundle noted.</criterion>
+    <criterion testable="true">Shared-library and host jest/builds pass; no existing test outside the document-upload pipeline changes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-16, FR-10. Last wizard before task 035 deletes the client mapping engine.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

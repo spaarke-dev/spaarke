@@ -20,9 +20,14 @@ const FABRIKAM = {
   bffAppId: 'bbbbbbbb-0000-0000-0000-00000000000b',
 };
 const REALM_KEY = 'spaarke.ext.realm';
+// Task 075: the Teams bootstrap picks the backend by the Teams context tenant id, so the Teams entries list it.
+const TEAMS_TID = 'c0c0c0c0-0000-4000-8000-000000000001';
+const TEAMS_CONTOSO = { ...CONTOSO, homeTenantIds: [TEAMS_TID] };
+const TEAMS_FABRIKAM = { ...FABRIKAM, homeTenantIds: [TEAMS_TID] };
 
 const h = vi.hoisted(() => ({
   teamsInitialize: vi.fn(),
+  getContext: vi.fn(),
   notifyAppLoaded: vi.fn(),
   notifyFailure: vi.fn(),
   // Every active-account callback the bootstrap registers on a fake PublicClientApplication.
@@ -32,7 +37,7 @@ const h = vi.hoisted(() => ({
 vi.mock('@microsoft/teams-js', () => ({
   app: {
     initialize: h.teamsInitialize,
-    getContext: vi.fn(),
+    getContext: h.getContext,
     notifyAppLoaded: h.notifyAppLoaded,
     notifySuccess: vi.fn(),
     notifyFailure: h.notifyFailure,
@@ -172,13 +177,15 @@ describe('Teams bootstrap pre-auth screens (main.tsx)', () => {
     // Inside Teams: detectTeamsHost()'s app.initialize() resolves.
     h.teamsInitialize.mockReset();
     h.teamsInitialize.mockResolvedValue(undefined);
+    h.getContext.mockReset();
+    h.getContext.mockResolvedValue({ app: { theme: 'default' }, user: { tenant: { id: TEAMS_TID } } });
   });
 
   it(
-    'several workforce backends: the picker is shown and Teams is told the app loaded (no second initialize)',
+    'several entries list the Teams tenant: the picker is shown and Teams is told the app loaded (no second initialize)',
     SLOW,
     async () => {
-      vi.stubEnv('VITE_BACKENDS', JSON.stringify([CONTOSO, FABRIKAM]));
+      vi.stubEnv('VITE_BACKENDS', JSON.stringify([TEAMS_CONTOSO, TEAMS_FABRIKAM]));
       await boot();
 
       expect(await screen.findByText('Choose an organization')).toBeTruthy();

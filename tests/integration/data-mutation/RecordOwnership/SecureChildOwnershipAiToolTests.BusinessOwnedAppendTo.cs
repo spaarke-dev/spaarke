@@ -82,7 +82,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
 
     /// <summary>The REAL G5 core's AppendTo answer on one business-owned record, as the caller.</summary>
     private Task<OwnedChildWrite.Outcome> AppendToAsTheCaller(string table, string entitySet, Guid id) =>
-        OwnedChildWrite.CheckCallerMayAppendToAsync(
+        CallerWriteAuthorization.CheckCallerMayAppendToAsync(
             _user, Caller, new[] { new DataverseWriteItemMapper.MappedLookup("sprk_x", table, entitySet, id) }, CancellationToken.None);
 
     // ── The harness models the refusal (so a pass below is the new branch, not RetrievePrincipalAccess) ─────────
@@ -400,10 +400,10 @@ public sealed partial class SecureChildOwnershipAiToolTests
             },
         });
 
-        OwnedChildWrite.PrivilegeGrantsIn(body, "prvAppendToUser").Should().Equal(
+        CallerWriteAuthorization.PrivilegeGrantsIn(body, "prvAppendToUser").Should().Equal(
             (PrivilegeDepth.Local, Directory.ChildBu),
             (PrivilegeDepth.Deep, Guid.Empty));
-        OwnedChildWrite.PrivilegeGrantsIn(JsonSerializer.SerializeToElement(new { value = 1 }), "prvAppendToUser").Should().BeEmpty();
-        OwnedChildWrite.PrivilegeGrantsIn(null, "prvAppendToUser").Should().BeEmpty();
+        CallerWriteAuthorization.PrivilegeGrantsIn(JsonSerializer.SerializeToElement(new { value = 1 }), "prvAppendToUser").Should().BeEmpty();
+        CallerWriteAuthorization.PrivilegeGrantsIn(null, "prvAppendToUser").Should().BeEmpty();
     }
 }

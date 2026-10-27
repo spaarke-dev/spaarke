@@ -171,6 +171,25 @@ public sealed class CallerPrincipal
     /// </summary>
     public IReadOnlySet<string> UndatedAccessTermEntityTypes { get; init; } = EmptyEntityTypes;
 
+    /// <summary>
+    /// FR-20 (unified-access-control-r2 task 036, owner round 59 item 2): <c>true</c> when this caller's own access was
+    /// decided by Dataverse — a workforce systemuser composed with <c>ExternalAccess:ImpersonatedRootSets:Enabled</c> on, whose
+    /// root ids came from the impersonated read at Read only. Every write route on <c>/api/v1/external</c> then asks
+    /// Dataverse, as the caller, for its rights on the target record before writing
+    /// (<c>ExternalProjectDataEndpoints.WithDataverseRightsAsync</c>), so no write rests on a constant.
+    /// <c>false</c> for every CIAM contact, every workforce contact and every systemuser composed with the flag off: their
+    /// routes decide exactly as before this property existed.
+    /// </summary>
+    public bool DataverseConfirmsWrites { get; init; }
+
+    /// <summary>
+    /// NFR-03 (task 036): the root entity types (logical names) whose accessible set is KNOWN INCOMPLETE — composition hit
+    /// a ceiling with more records available (<see cref="AccessibleRecordSet.Capped"/>, the impersonated read's row cap or
+    /// the membership walk's). A response listing records through this scope reports it (the module data fetch's
+    /// <c>truncated</c>), so a capped set is never presented as the whole truth. Empty when every set is complete.
+    /// </summary>
+    public IReadOnlySet<string> TruncatedRootEntityTypes { get; init; } = EmptyEntityTypes;
+
     private static readonly IReadOnlySet<string> EmptyEntityTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
     private IReadOnlySet<Guid>? _matterIds;
@@ -390,9 +409,16 @@ public sealed class CallerPrincipalResolver : ICallerPrincipalResolver
     /// the tenant (<c>tid</c>) equals the configured CIAM tenant; otherwise workforce. Deterministic —
     /// a token validates against exactly one authority (the multi-scheme policy authenticated whichever
     /// one matched), so exactly one plane applies.
+    /// A principal authenticated by the WorkforceHome scheme (ADR-028 A9, task 046) is ALWAYS the workforce plane, decided
+    /// by the scheme before any iss/tid test: a home principal never resolves on the CIAM plane.
     /// </summary>
     internal CallerPrincipalPlane DeterminePlane(ClaimsPrincipal user)
     {
+        if (WorkforcePrincipalResolver.IsWorkforceHomePrincipal(user))
+        {
+            return CallerPrincipalPlane.Workforce;
+        }
+
         var issuer = user.FindFirst("iss")?.Value;
         if (!string.IsNullOrEmpty(issuer) &&
             issuer.Contains("ciamlogin.com", StringComparison.OrdinalIgnoreCase))
@@ -627,6 +653,14 @@ public sealed class WorkforcePrincipalStrategy : ICallerPrincipalStrategy
     internal const string MatterEntity = "sprk_matter";
     internal const string WorkAssignmentEntity = "sprk_workassignment";
 
+    /// <summary>
+    /// The ProblemDetails detail for <see cref="WorkforceMembershipTest.DenyGuestUseHomeSignin"/> (#2128). It names no
+    /// tenant, id or address, and reads the same inside Teams, where the person cannot pick another account in place.
+    /// </summary>
+    internal const string GuestUseHomeSignInDetail =
+        "You're signed in as a guest of the Spaarke directory. Sign in with your own organization's work account instead: "
+        + "open the portal in a browser and choose your work or school account.";
+
     private readonly IWorkforcePrincipalResolver _resolver;
     private readonly IAccessibleRecordSetService _accessibleSet;
     private readonly ILogger<WorkforcePrincipalStrategy> _logger;
@@ -664,6 +698,35 @@ public sealed class WorkforcePrincipalStrategy : ICallerPrincipalStrategy
                         detail: "Identity token is missing required user identity claims",
                         type: "https://tools.ietf.org/html/rfc7235#section-3.1",
                         extensions: new Dictionary<string, object?> { ["reasonCode"] = resolution.DenyCode }));
+
+                case WorkforceDenyReason.PrincipalNotResolved
+                    when resolution.DenyCode == WorkforcePrincipalResolver.DenyRegistrationRequired:
+                    // ADR-028 A9 (task 046): the registration form's prefill, from the home token. Display data only —
+                    // nothing here is trusted for authorization, and nothing is written.
+                    _logger.LogInformation("[WF-AUTH] Denying request: {DenyCode}", resolution.DenyCode);
+                    var home = WorkforcePrincipalResolver.WorkforceHomeIdentity(httpContext.User) is { } homeIdentity
+                        ? new ClaimsPrincipal(homeIdentity)
+                        : httpContext.User;
+                    var prefill = WorkforceCallerClaims.From(home);
+                    return CallerPrincipalResolution.Denied(Results.Problem(
+                        statusCode: StatusCodes.Status403Forbidden,
+                        title: "Forbidden",
+                        detail: "Registration is required before this account can sign in.",
+                        extensions: new Dictionary<string, object?>
+                        {
+                            ["reasonCode"] = resolution.DenyCode,
+                            ["givenName"] = prefill.GivenName,
+                            ["familyName"] = prefill.FamilyName,
+                            ["email"] = prefill.Email,
+                        }));
+
+                case WorkforceDenyReason.PrincipalNotResolved
+                    when resolution.DenyCode == WorkforceMembershipTest.DenyGuestUseHomeSignin:
+                    // #2128: the customer-tenant guest is told where to sign in instead. Same shape as the CIAM plane's
+                    // contact_not_invited (ProblemDetailsHelper.Forbidden with a detail).
+                    _logger.LogWarning("[WF-AUTH] Denying request: {DenyCode}", resolution.DenyCode);
+                    return CallerPrincipalResolution.Denied(ProblemDetailsHelper.Forbidden(
+                        WorkforceMembershipTest.DenyGuestUseHomeSignin, GuestUseHomeSignInDetail));
 
                 case WorkforceDenyReason.PrincipalNotResolved:
                 default:
@@ -718,6 +781,18 @@ public sealed class WorkforcePrincipalStrategy : ICallerPrincipalStrategy
             // grant route caps an issued grant's expiry at the grantor's own only when their level rests on a dated grant.
             UndatedAccessTermEntityTypes = new[] { accessibleProjects, accessibleMatters, accessibleWorkAssignments }
                 .Where(set => set.Sources.StandingGrantMembership || set.Sources.OrgExpansionMembership)
+                .Select(set => set.EntityType)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase),
+            // Task 036 (FR-20): Dataverse decided this caller's own access, so its writes are confirmed against Dataverse.
+            // The flag is read once per composition, so the three sets agree; if flags ever become per type, decide this
+            // per entity type: the confirmation widens composed rights on the write routes, but delete-own then also needs
+            // Dataverse Delete, and /me switches the SPA's create controls to each list's canCreate.
+            DataverseConfirmsWrites = accessibleProjects.Sources.ImpersonatedRootSet
+                || accessibleMatters.Sources.ImpersonatedRootSet
+                || accessibleWorkAssignments.Sources.ImpersonatedRootSet,
+            // NFR-03 (task 036): a set known to be incomplete is carried to the responses that list through it.
+            TruncatedRootEntityTypes = new[] { accessibleProjects, accessibleMatters, accessibleWorkAssignments }
+                .Where(set => set.Capped)
                 .Select(set => set.EntityType)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase),
         });

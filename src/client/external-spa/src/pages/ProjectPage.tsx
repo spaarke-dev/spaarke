@@ -207,9 +207,16 @@ interface OverviewTabContentProps {
   project: ODataProject;
   projectId: string;
   accessLevel: AccessLevel;
+  /** Task 036 fix round 1: create/upload follow the record's list `canCreate`, not `accessLevel`. */
+  writeAccessPerRecord: boolean;
 }
 
-const OverviewTabContent: React.FC<OverviewTabContentProps> = ({ project, projectId, accessLevel }) => {
+const OverviewTabContent: React.FC<OverviewTabContentProps> = ({
+  project,
+  projectId,
+  accessLevel,
+  writeAccessPerRecord,
+}) => {
   const styles = useStyles();
 
   return (
@@ -242,7 +249,7 @@ const OverviewTabContent: React.FC<OverviewTabContentProps> = ({ project, projec
 
       {/* DOCUMENTS */}
       <SectionCard title="Documents">
-        <DocumentLibrary projectId={projectId} accessLevel={accessLevel} />
+        <DocumentLibrary projectId={projectId} accessLevel={accessLevel} writeAccessPerRecord={writeAccessPerRecord} />
       </SectionCard>
     </div>
   );
@@ -255,15 +262,17 @@ const OverviewTabContent: React.FC<OverviewTabContentProps> = ({ project, projec
 interface CalendarTabContentProps {
   projectId: string;
   accessLevel: AccessLevel;
+  /** Task 036 fix round 1: create follows the record's list `canCreate`, not `accessLevel`. */
+  writeAccessPerRecord: boolean;
 }
 
-const CalendarTabContent: React.FC<CalendarTabContentProps> = ({ projectId, accessLevel }) => {
+const CalendarTabContent: React.FC<CalendarTabContentProps> = ({ projectId, accessLevel, writeAccessPerRecord }) => {
   const styles = useStyles();
 
   return (
     <div className={styles.calendarTab}>
-      <EventsCalendar projectId={projectId} accessLevel={accessLevel} />
-      <SmartTodo projectId={projectId} accessLevel={accessLevel} />
+      <EventsCalendar projectId={projectId} accessLevel={accessLevel} writeAccessPerRecord={writeAccessPerRecord} />
+      <SmartTodo projectId={projectId} accessLevel={accessLevel} writeAccessPerRecord={writeAccessPerRecord} />
     </div>
   );
 };
@@ -355,7 +364,7 @@ export const ProjectPage: React.FC = () => {
   // Access level resolution
   // ---------------------------------------------------------------------------
 
-  const { accessLevel } = useAccessLevel(id);
+  const { accessLevel, writeAccessPerRecord } = useAccessLevel(id);
 
   // ---------------------------------------------------------------------------
   // State
@@ -566,8 +575,17 @@ export const ProjectPage: React.FC = () => {
       </TabList>
 
       <div className={styles.tabContentArea}>
-        {activeTab === 'overview' && <OverviewTabContent project={project} projectId={id} accessLevel={accessLevel} />}
-        {activeTab === 'calendar' && <CalendarTabContent projectId={id} accessLevel={accessLevel} />}
+        {activeTab === 'overview' && (
+          <OverviewTabContent
+            project={project}
+            projectId={id}
+            accessLevel={accessLevel}
+            writeAccessPerRecord={writeAccessPerRecord}
+          />
+        )}
+        {activeTab === 'calendar' && (
+          <CalendarTabContent projectId={id} accessLevel={accessLevel} writeAccessPerRecord={writeAccessPerRecord} />
+        )}
         {activeTab === 'contacts' && <ContactsTabContent projectId={id} accessLevel={accessLevel} />}
       </div>
     </PageContainer>

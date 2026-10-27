@@ -43,7 +43,6 @@
     <RolePrivilege name="prvWritesprk_BudgetRevision" level="Deep" />
     <RolePrivilege name="prvWritesprk_Policy" level="Deep" />
     <RolePrivilege name="prvWritesprk_PolicyVersion" level="Deep" />
-    <RolePrivilege name="prvWritesprk_Signal" level="Deep" />
     <RolePrivilege name="prvWritesprk_TriageCategory" level="Global" />
   </RolePrivileges>
 </Role>

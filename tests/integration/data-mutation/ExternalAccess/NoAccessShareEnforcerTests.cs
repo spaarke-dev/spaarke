@@ -72,6 +72,24 @@ public class NoAccessShareEnforcerTests
             "the walled user's impersonated root set is cleared under the key that user's own reads write");
     }
 
+    /// <summary>
+    /// r3 task 048 (046 review K1): a licensed user with a stored home link reads under their CUSTOMER tenant's tid when
+    /// they sign in with their company account, so the walled user's set is also cleared under every customer directory.
+    /// </summary>
+    [Fact]
+    public async Task Enforce_ClearsTheWalledUsersCacheKey_AlsoUnderEveryCustomerHomeTenant()
+    {
+        var customer = Guid.Parse("4a8b0c3e-7d21-4f5a-9e6b-0480480480e1");
+        _h.WorkforceIdentity = Sprk.Bff.Api.Tests.AccessControl.IdentityBinding.IdentityBindingTestKit.Tenants(customer);
+        _h.Shares.Seed(Project, SecureProject, User(Walled), CollaborateMask);
+        var entry = _h.Store.AddEntry(subjectUser: Walled, objectRecord: (Project, SecureProject), modifiedBy: Author);
+
+        await Enforce(entry);
+
+        _h.Cache.Removed.Should().Contain((Tenant, ImpersonatedRootSetSource.CacheResource, $"{Walled:D}:{Project}"));
+        _h.Cache.Removed.Should().Contain((customer.ToString("D"), ImpersonatedRootSetSource.CacheResource, $"{Walled:D}:{Project}"));
+    }
+
     [Fact]
     public async Task Enforce_WhenTheReadBackStillFindsTheShare_IsAFailureNamingTheUserAndRecord_NeverRemoved()
     {
@@ -470,11 +488,11 @@ public class NoAccessShareEnforcerTests
         NoAccessEnforcementReport? secondReport = null;
         var interleaved = new InterleavingShares(_h.Shares);
         var other = new NoAccessShareEnforcer(_h.Store, _h.Participations, _h.Identities, _h.Shares, _h.Cache.Mock.Object,
-            _h.Lease, _h.ChildShares(), _h.Entities(), Microsoft.Extensions.Logging.Abstractions.NullLogger<NoAccessShareEnforcer>.Instance);
+            _h.Lease, _h.ChildShares(), _h.Entities(), _h.WorkforceIdentity, Microsoft.Extensions.Logging.Abstractions.NullLogger<NoAccessShareEnforcer>.Instance);
         interleaved.BeforeFirstRevoke = async () =>
             secondReport = await other.EnforceEntryAsync(second, new[] { Tenant }, CancellationToken.None);
         var enforcer = new NoAccessShareEnforcer(_h.Store, _h.Participations, _h.Identities, interleaved, _h.Cache.Mock.Object,
-            _h.Lease, _h.ChildShares(interleaved), _h.Entities(), Microsoft.Extensions.Logging.Abstractions.NullLogger<NoAccessShareEnforcer>.Instance);
+            _h.Lease, _h.ChildShares(interleaved), _h.Entities(), _h.WorkforceIdentity, Microsoft.Extensions.Logging.Abstractions.NullLogger<NoAccessShareEnforcer>.Instance);
 
         var firstReport = await enforcer.EnforceEntryAsync(first, new[] { Tenant }, CancellationToken.None);
 
@@ -510,7 +528,7 @@ public class NoAccessShareEnforcerTests
             AfterFirstRead = async () => reportA = await _h.Enforcer.EnforceEntryAsync(entryA, new[] { Tenant }, CancellationToken.None),
         };
         var enforcerB = new NoAccessShareEnforcer(_h.Store, _h.Participations, _h.Identities, staleFirstRead, _h.Cache.Mock.Object,
-            _h.Lease, _h.ChildShares(staleFirstRead), _h.Entities(), Microsoft.Extensions.Logging.Abstractions.NullLogger<NoAccessShareEnforcer>.Instance);
+            _h.Lease, _h.ChildShares(staleFirstRead), _h.Entities(), _h.WorkforceIdentity, Microsoft.Extensions.Logging.Abstractions.NullLogger<NoAccessShareEnforcer>.Instance);
 
         var reportB = await enforcerB.EnforceEntryAsync(entryB, new[] { Tenant }, CancellationToken.None);
 

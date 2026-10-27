@@ -6,19 +6,28 @@
  * `navigateTo` code page), the wizard opens there; if none is mounted the call reports `{ opened: false }` and the caller
  * decides what to do (it must NOT fall back to opening a code page or a WizardModal).
  *
- * The widget owns the data routes, so it may pass its own `loadItem` and `lookup` with the launch; they win over the host's.
+ * The widget owns the data routes, so it may pass its own `loadItem`, `lookup`, `openLookup` and `openRecord` with the launch; they win over the host's.
  *
  * Task: spaarke-ontology-platform-r1, task 058.
  */
 
 import type { OpenItemEvent } from '../Worklist/types';
-import type { DecisionItemLoader, DecisionLookupSearch } from './decisionWizardTypes';
+import type {
+  DecisionItemLoader,
+  DecisionLookupSearch,
+  DecisionOpenLookup,
+  DecisionOpenRecord,
+} from './decisionWizardTypes';
 
 export interface DecisionWizardLaunchRequest extends OpenItemEvent {
   /** The widget's reader for one item (task 038 / 045). Overrides the host's. */
   loadItem?: DecisionItemLoader;
   /** The widget's search for Lookup / Person fields. Overrides the host's. */
   lookup?: DecisionLookupSearch;
+  /** The widget's side-pane lookup for Person / Lookup fields (D-182). Overrides the host's. */
+  openLookup?: DecisionOpenLookup;
+  /** The widget's open-record-in-a-modal for the subject link (D-182). Overrides the host's. */
+  openRecord?: DecisionOpenRecord;
   /** Called after an item was recorded, so the widget can refresh. */
   onRecorded?: (event: { signalId: string; alsoResolved: readonly string[] }) => void;
 }

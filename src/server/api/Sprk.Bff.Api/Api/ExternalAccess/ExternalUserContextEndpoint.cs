@@ -89,7 +89,11 @@ public static class ExternalUserContextEndpoint
             projects,
             // The caller's own systemuser id (same property IsCreatedByCaller reads). Null for a CIAM or
             // contact-only caller; an empty id is never emitted.
-            caller.SystemUserId is { } systemUserId && systemUserId != Guid.Empty ? systemUserId : null);
+            caller.SystemUserId is { } systemUserId && systemUserId != Guid.Empty ? systemUserId : null,
+            // Task 036 fix round 1 (F4): the levels above are the composed rights. For a caller whose access Dataverse
+            // decides they say only what the caller may see; write affordances are then asked of the record (its list's
+            // canCreate). No per-record call here. Omitted (false) for every other caller.
+            WriteAccessPerRecord: caller.DataverseConfirmsWrites);
 
         return Results.Ok(response);
     }

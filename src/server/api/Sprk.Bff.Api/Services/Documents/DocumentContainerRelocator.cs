@@ -1,13 +1,16 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
+using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
+using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Jobs;
 
 namespace Sprk.Bff.Api.Services.Documents;
@@ -27,9 +30,23 @@ namespace Sprk.Bff.Api.Services.Documents;
 /// <item><see cref="RelocateIfMisplacedAsync"/> — moves a file that is NOT in its document's derived container into
 /// it: copy through the BFF identity — REPLAYING the source's version history oldest first, the current content last
 /// (round 45 item 1) — verify (each version's size; the final content's size, and <c>quickXorHash</c> where Graph returns
-/// one), re-point through the SAME pointer-attach path, then settle what the move leaves behind (below). Two callers, one
-/// mechanism (round 26 item 3): task 166's legacy migration (<see cref="DocumentContainerMigrationJob"/>) and the Make
-/// Secure transition (task 150's provisioning lane).</item>
+/// one), re-point through the SAME pointer-attach path, then settle what the move leaves behind (below). One mechanism,
+/// three purposes (<see cref="RelocationPurpose"/>; round 26 item 3, #2159): task 166's legacy migration
+/// (<see cref="DocumentContainerMigrationJob"/>), the Make Secure transition (task 150's provisioning lane, and the
+/// <c>SecureChildReconciliationJob</c> backstop for the moves it left unmade), and the RE-FILE (#2159): a document whose
+/// filing changed — through the BFF or outside it (a model-driven form, an import) — has its file moved into its new
+/// derived container by the <c>SecureChildReconciliationJob</c>'s recent-changes cadence (every 2 minutes, writes on
+/// unless its emergency stop is set). A re-file moves only the row's BFF-bound item, and an unfiled document whose file
+/// is in no business unit's container and no declared home (#2151) is left where it is
+/// (<see cref="RelocationState.UnfiledHomeUnknown"/>). Until the pass reaches it, a re-filed document is refused under
+/// the strict rule (up to about two minutes plus the run). <b>The widening guard holds for every purpose</b> (#2159): a
+/// row owned by the Secure Record owner team whose derivation is not a secure record's own container never has its file
+/// moved — not by a re-file, not by the Make Secure backstop, not by the legacy migration, and not moved along by another
+/// row's settle (<see cref="RelocationState.HeldIsolated"/>) — nor, when its file is in ANOTHER secure record's own
+/// container, into this one's (S1 to S2 needs F3: only the release a BFF re-file with F3 records, <see cref="RecordReleaseAsync"/>,
+/// lets that one move through, #2159 slice 2). Whether the row is isolated (owned in the Secure Record business unit)
+/// is read by the relocator itself, under the document's lock and again just before the re-point, and an unreadable
+/// answer moves nothing. A checked-out document is never moved (<see cref="RelocationState.CheckedOut"/>).</item>
 /// </list>
 /// <para><b>What a move leaves behind, and the relocation ledger</b> (owner round 37, task 166 f1-v1; round 45). Re-pointing
 /// the row is one atomic Dataverse update that ALSO re-keys the row's own columns holding the old drive / item
@@ -88,13 +105,79 @@ public sealed class DocumentContainerRelocator
     /// <summary>The most old items a row's ledger holds; a row that would need more is not moved (reported failed).</summary>
     internal const int MaxLedgerEntries = 8;
 
+    /// <summary>
+    /// #2159 slice 2c: the AGE bound of an F3 release (<see cref="RelocationRelease"/>) — a backstop only. A release is valid
+    /// only while the row's file is still the item it names AND the row still derives to its target; any locked pass that
+    /// finds either changed drops it (<see cref="DropInvalidReleaseAsync"/>), so an edit that moves the document away and
+    /// back never reuses it. Long enough that a long checkout does not strand the file; a document still held when its
+    /// release expires is reported (<see cref="DocumentRelocationOutcome.ReleaseExpired"/>).
+    /// </summary>
+    internal static readonly TimeSpan ReleaseLifetime = TimeSpan.FromDays(30);
+
+    /// <summary>
+    /// #2159 slice 2: how long recording a release waits for the document's relocation lock (another relocation of it is
+    /// running) before it gives up — the re-file's own response must not wait on a move.
+    /// </summary>
+    internal static readonly TimeSpan ReleaseLockWait = TimeSpan.FromSeconds(2);
+
+    /// <summary>
+    /// #2159 slice 4: the TOTAL time recording the releases of one re-file's descendant documents
+    /// (<see cref="RecordReleasesAsync(IReadOnlyList{Guid}, SecureExitPermit, CancellationToken)"/>) waits for their locks.
+    /// Each still gets one lock attempt once it is spent, so only a document whose lock is held at that moment goes without.
+    /// </summary>
+    internal static readonly TimeSpan DescendantReleaseLockBudget = TimeSpan.FromSeconds(5);
+
+    /// <summary>#2159 B5: the file (or one of its versions) is larger than a single-request copy — permanent until #2176 (an upload-session copy).</summary>
+    internal const string TerminalTooLarge = "too-large";
+
+    /// <summary>#2159 B5: the row's ledger already owes <see cref="MaxLedgerEntries"/> moves — permanent until they settle.</summary>
+    internal const string TerminalLedgerFull = "ledger-full";
+
+    /// <summary>
+    /// #2159 B5: the row's ledger has been unreadable for the job's limit of consecutive runs — permanent until an
+    /// administrator repairs it. Set by the job (<see cref="SecureChildReconciliationJob"/>), never by a single call.
+    /// </summary>
+    internal const string TerminalLedgerUnreadable = "ledger-unreadable";
+
+    /// <summary>The prefix of the pending line an unreadable ledger reports (<see cref="DocumentRelocationOutcome.Pending"/>).</summary>
+    internal const string LedgerUnreadablePendingPrefix = "ledger-unreadable:";
+
+    /// <summary>How often <see cref="RecordReleaseAsync"/> asks for the lock again within <see cref="ReleaseLockWait"/>.</summary>
+    internal static readonly TimeSpan ReleaseLockRetryInterval = TimeSpan.FromMilliseconds(250);
+
+    /// <summary>
+    /// #2159 F2 fix round: how long ONE delivery of a queued release retry (<see cref="RelocationReleaseRetryJobHandler"/>)
+    /// waits for the document's relocation lock — a relocation replaying a long history holds it for minutes. Within the
+    /// queue's message lock (5 minutes, auto-renewed to 10); with the broker's redeliveries it covers about ten minutes.
+    /// </summary>
+    internal static readonly TimeSpan ReleaseRetryLockWait = TimeSpan.FromMinutes(2);
+
+    /// <summary>How often a queued release retry asks for the lock again within <see cref="ReleaseRetryLockWait"/>.</summary>
+    internal static readonly TimeSpan ReleaseRetryLockRetryInterval = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// The one recovery for a document whose F3 release could not be recorded, nor its retry completed: a re-file to the
+    /// SAME parent changes nothing (<see cref="RecordOwnerResolution.ParentsUnchanged"/>) and carries no F3 permission, so
+    /// only a new re-file that leaves the secure record holding the file, with F3, can release it.
+    /// </summary>
+    internal const string UnreleasedRecovery =
+        "file the document back under the secure record whose container holds its file, then re-file it with F3";
+
     /// <summary>The most referencing rows one source check reads; more is undecidable (pending), never "none".</summary>
     internal const int MaxReferencesPerSource = 50;
 
     private const string DocumentEntity = "sprk_document";
+    private const string OwningTeamColumn = "owningteam";
+    private const string OwningBusinessUnitColumn = "owningbusinessunit";
+
+    /// <summary>#2159 B4: who holds the document checked out (<c>DocumentCheckoutService</c>; cleared at check-in).</summary>
+    internal const string CheckedOutByColumn = "sprk_checkedoutby";
+
+    /// <summary>#2159 B4: when it was checked out (cleared at check-in, with <see cref="CheckedOutByColumn"/>).</summary>
+    internal const string CheckedOutDateColumn = "sprk_checkedoutdate";
     private const string DocumentIdColumn = "sprk_documentid";
-    private const string DriveColumn = "sprk_graphdriveid";
-    private const string ItemColumn = "sprk_graphitemid";
+    internal const string DriveColumn = "sprk_graphdriveid";
+    internal const string ItemColumn = "sprk_graphitemid";
     private const string FilePathColumn = "sprk_filepath";
     private const string HasFileColumn = "sprk_hasfile";
     private const string FileNameColumn = "sprk_filename";
@@ -102,9 +185,9 @@ public sealed class DocumentContainerRelocator
     private const string SearchIndexNameColumn = "sprk_searchindexname";
     private const string ParentDocumentColumn = "sprk_parentdocument";
     private const string ParentItemColumn = "sprk_parentgraphitemid";
-    private const string AttachmentEntity = "sprk_communicationattachment";
-    private const string AttachmentDocumentColumn = "sprk_document";
-    private const string AttachmentCommunicationColumn = "sprk_communication";
+    internal const string AttachmentEntity = "sprk_communicationattachment";
+    internal const string AttachmentDocumentColumn = "sprk_document";
+    internal const string AttachmentCommunicationColumn = "sprk_communication";
 
     /// <summary>
     /// The row's OWN legacy columns that hold its file's drive or item (live <c>sprk_document</c> metadata, spaarkedev1
@@ -149,9 +232,17 @@ public sealed class DocumentContainerRelocator
     private readonly IAccessDataSource _access;
     private readonly TimeProvider _time;
     private readonly ILogger<DocumentContainerRelocator> _logger;
+    private readonly IConfiguration _configuration;
 
     /// <summary>Who an APP-ONLY upload was made for (task 171 attach fix); without it an app-uploaded file is refused.</summary>
     private readonly UploadAttribution? _uploadAttribution;
+
+    /// <summary>
+    /// Where the ADR-004 job queue is resolved from, on first use (<see cref="QueueReleaseRetryAsync"/>) — never at
+    /// construction: the attach route constructs this type on every client upload and must not fail where Service Bus is
+    /// not configured (the <c>CoreAncestorRestampQueue</c> idiom). <see langword="null"/> = no retry can be queued.
+    /// </summary>
+    private readonly IServiceProvider? _services;
 
     /// <summary>The relocation locks this instance holds, by document (each with its heartbeat).</summary>
     private readonly ConcurrentDictionary<Guid, RelocationLease> _leases = new();
@@ -168,7 +259,16 @@ public sealed class DocumentContainerRelocator
     /// one) is never taken as a right (<see cref="MayWriteAsync"/>).
     /// </param>
     /// <param name="logger">Logger.</param>
+    /// <param name="configuration">
+    /// The host configuration: which business unit and owner team are the Secure Record ones
+    /// (<see cref="SecureRecordOwnerTeam"/>) — the isolation the widening guard reads (#2159).
+    /// </param>
     /// <param name="timeProvider">The clock of the ledger and of the lock's heartbeat.</param>
+    /// <param name="uploadAttribution">Who an app-only upload was made for (the pointer attach).</param>
+    /// <param name="services">
+    /// Resolves the job queue a release that could not be recorded is retried through
+    /// (<see cref="RelocationReleaseRetryJobHandler"/>), lazily; <see langword="null"/> = none is queued.
+    /// </param>
     public DocumentContainerRelocator(
         RecordContainerResolver resolver,
         IGenericEntityService dataverse,
@@ -177,10 +277,13 @@ public sealed class DocumentContainerRelocator
         IIdempotencyService locks,
         IAccessDataSource access,
         ILogger<DocumentContainerRelocator> logger,
+        IConfiguration configuration,
         TimeProvider? timeProvider = null,
-        UploadAttribution? uploadAttribution = null)
+        UploadAttribution? uploadAttribution = null,
+        IServiceProvider? services = null)
     {
         _uploadAttribution = uploadAttribution;
+        _services = services;
         _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
         _spe = spe ?? throw new ArgumentNullException(nameof(spe));
@@ -188,6 +291,7 @@ public sealed class DocumentContainerRelocator
         _locks = locks ?? throw new ArgumentNullException(nameof(locks));
         _access = access ?? throw new ArgumentNullException(nameof(access));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _time = timeProvider ?? TimeProvider.System;
     }
 
@@ -607,12 +711,26 @@ public sealed class DocumentContainerRelocator
     /// <param name="apply"><see langword="false"/> = report only: the outcome says what WOULD happen, and nothing is
     /// read beyond the checks or written (a ledger entry still owed is reported, not settled).</param>
     /// <param name="purpose">
-    /// <see cref="RelocationPurpose.LegacyMigration"/> moves only a file that is verifiably the row's own
-    /// (<see cref="RecordContainerResolver.IsRelocationSourceVerifiedAsync"/>): a forged pointer is reported, never copied
+    /// <see cref="RelocationPurpose.LegacyMigration"/> moves only a file that is verifiably the row's own — the
+    /// row's BFF-bound item that the BFF identity uploaded (#2159 B3), or
+    /// <see cref="RecordContainerResolver.IsRelocationSourceVerifiedAsync"/>: a forged pointer is reported, never copied
     /// into the document's container. <see cref="RelocationPurpose.MakeSecure"/> — a record just made secure — moves the
     /// file the document shows into the record's OWN container whatever its uploader: that move only NARROWS who can
     /// reach the bytes (SPE permissions are additive-only, so leaving them in the shared container is the exposure),
     /// and it applies only when the derived container is that secure one.
+    /// <see cref="RelocationPurpose.Refile"/> (#2159) — the document's filing changed — moves the file into its NEW
+    /// derived container. Its source is verified ONLY as the row's BFF-bound item (<c>sprk_graphitemidbound</c>) that the
+    /// BFF identity uploaded (B9; never the legacy check — a legacy misplaced row is the operator-gated migration's); and an
+    /// unfiled document whose file is in no business unit's container (a record's own, or another owner's that is not a
+    /// declared home, #2151) is reported <see cref="RelocationState.UnfiledHomeUnknown"/> and never pulled into a business
+    /// unit's container. For EVERY purpose (#2159): a checked-out row is left alone (<see cref="RelocationState.CheckedOut"/>,
+    /// B4); and the widening guard holds an isolated row (owned in the Secure Record business unit) whose move would leave
+    /// its secure record — its derivation is not a secure record's own container, or its file is in ANOTHER secure record's
+    /// own container (A1: S1 to S2 needs F3, honoured only through the exact, unexpired release a BFF re-file with F3
+    /// recorded — <see cref="RecordReleaseAsync"/>, consumed by the re-point) — as <see cref="RelocationState.HeldIsolated"/>, nothing moved (isolation
+    /// holds the row, owner round 24 item 2). The guard runs again under the confirmed lock just before the re-point (B8).
+    /// What it cannot read moves nothing (<see cref="RelocationState.Failed"/>). A ledger entry an earlier move owes is
+    /// settled first all the same: deleting a stale source and re-keying only narrow.
     /// </param>
     /// <param name="ct">Cancellation token.</param>
     /// <param name="expectedTargetContainer">
@@ -642,7 +760,10 @@ public sealed class DocumentContainerRelocator
 
         try
         {
-            return await RelocateCoreAsync(documentId, apply, purpose, expectedTargetContainer, ct).ConfigureAwait(false);
+            var releaseCheck = new ReleaseCheck();
+            var outcome = await RelocateCoreAsync(documentId, apply, purpose, expectedTargetContainer, ct, releaseCheck)
+                .ConfigureAwait(false);
+            return releaseCheck.Expired ? outcome with { ReleaseExpired = true } : outcome;
         }
         finally
         {
@@ -650,8 +771,16 @@ public sealed class DocumentContainerRelocator
         }
     }
 
+    /// <summary>What the locked release check of one call found (#2159 slice 2c).</summary>
+    private sealed class ReleaseCheck
+    {
+        /// <summary>The row's F3 release had expired and was dropped.</summary>
+        public bool Expired { get; set; }
+    }
+
     private async Task<DocumentRelocationOutcome> RelocateCoreAsync(
-        Guid documentId, bool apply, RelocationPurpose purpose, string? expectedTargetContainer, CancellationToken ct)
+        Guid documentId, bool apply, RelocationPurpose purpose, string? expectedTargetContainer, CancellationToken ct,
+        ReleaseCheck? releaseCheck = null)
     {
         var row = await ReadRowAsync(documentId, ct).ConfigureAwait(false);
         var sourceDrive = row?.GetAttributeValue<string>(DriveColumn)?.Trim();
@@ -674,9 +803,32 @@ public sealed class DocumentContainerRelocator
                 bindingRefusal + " — an administrator must repair it; it is not moved");
         }
 
+        // #2159 slice 2c: an F3 release is valid only while the row's file is its item AND the row derives to its target. A
+        // locked pass that finds either changed (or the release expired) drops it — BEFORE the checkout check, so a document
+        // moved away and back while checked out never reuses an old release for a move that had no F3.
+        if (apply && RelocationLedger.Parse(row!.GetAttributeValue<string>(RelocationLedgerColumn))?.Release is { } release
+            && await DropInvalidReleaseAsync(documentId, row!, release, sourceDrive, sourceItem, ct).ConfigureAwait(false)
+                is ReleaseDrop.Expired
+            && releaseCheck is not null)
+        {
+            releaseCheck.Expired = true;
+        }
+
+        // #2159 B4: a CHECKED-OUT document is left alone, whatever the purpose: its holder is editing THIS item, so a copy,
+        // a re-point or a source delete (or a ledger re-copy, which re-points) would strand or lose those edits. Check-in
+        // clears the checkout and modifies the row, so a later pass (the re-file window, the backstop's listing, the
+        // migration) reaches it again.
+        if (IsCheckedOut(row!))
+        {
+            return DocumentRelocationOutcome.Of(
+                documentId, RelocationState.CheckedOut, sourceDrive, sourceItem, null, null,
+                "it is checked out; nothing is moved, settled or re-pointed until it is checked in");
+        }
+
         // An earlier move of this row may still owe something (round 37 / F2): settle it BEFORE anything else, so a
         // repeat call completes it whatever the file's placement is now.
         var ledger = RelocationLedger.Parse(row!.GetAttributeValue<string>(RelocationLedgerColumn));
+
         var prior = await SettleOrReportAsync(documentId, row, sourceDrive, sourceItem, ledger, purpose, apply, ct)
             .ConfigureAwait(false);
 
@@ -687,6 +839,12 @@ public sealed class DocumentContainerRelocator
             var recopy = await RecopyChangedSourcesAsync(documentId, row, sourceDrive, sourceItem, prior, purpose, ct)
                 .ConfigureAwait(false);
             prior = recopy.Summary;
+            if (recopy.CheckedOut is { } checkedOut)
+            {
+                // Checked out while the re-copy ran: nothing more is copied or re-pointed until it is checked in (B4).
+                return checkedOut.With(prior);
+            }
+
             if (recopy.Row is { } after)
             {
                 row = after;
@@ -746,8 +904,17 @@ public sealed class DocumentContainerRelocator
         var target = string.IsNullOrWhiteSpace(expectedTargetContainer)
             ? derivation.PrimaryContainer!
             : expectedTargetContainer.Trim();
-        var verified = purpose == RelocationPurpose.MakeSecure && derivation.IsSecure
-            || await _resolver.IsRelocationSourceVerifiedAsync(documentId, sourceDrive, sourceItem, ct).ConfigureAwait(false);
+
+        // #2159: no move widens — never out of isolation (every purpose), never from an unknown home into a business
+        // unit's container (a re-file). After the ledger settle above: a settle only narrows, and it is not a move.
+        if (await WideningHoldAsync(documentId, derivation, purpose, sourceDrive, sourceItem, target, ct).ConfigureAwait(false)
+            is { } held)
+        {
+            return held.With(prior);
+        }
+
+        var verified = await IsSourceVerifiedAsync(documentId, row!, sourceDrive, sourceItem, facts, derivation, purpose, ct)
+            .ConfigureAwait(false);
         if (!verified)
         {
             return DocumentRelocationOutcome.Of(
@@ -760,7 +927,10 @@ public sealed class DocumentContainerRelocator
         {
             return DocumentRelocationOutcome.Of(
                 documentId, RelocationState.Failed, sourceDrive, sourceItem, target, null,
-                $"the file is {facts.Size} bytes, larger than a single-request copy ({MaxRelocatableBytes} bytes)").With(prior);
+                $"the file is {facts.Size} bytes, larger than a single-request copy ({MaxRelocatableBytes} bytes)").With(prior) with
+            {
+                TerminalCause = TerminalTooLarge,
+            };
         }
 
         if (!apply)
@@ -784,12 +954,16 @@ public sealed class DocumentContainerRelocator
         {
             return DocumentRelocationOutcome.Of(
                 documentId, RelocationState.Failed, sourceDrive, sourceItem, target, null,
-                $"its version history could not be copied: {history.Failure}").With(prior);
+                $"its version history could not be copied: {history.Failure}").With(prior) with
+            {
+                TerminalCause = history.TooLarge ? TerminalTooLarge : null,
+            };
         }
 
         var moved = await MoveAsync(documentId, row, sourceDrive, sourceItem, target,
             new ReplayPlan(history.Steps, facts, history.Witness, facts.Name ?? row.GetAttributeValue<string>(FileNameColumn)),
-            prior.Ledger, LedgerSourceState.Pending, ct).ConfigureAwait(false);
+            prior.Ledger, LedgerSourceState.Pending, ct,
+            recheck: token => RecheckBeforeRepointAsync(documentId, sourceDrive, sourceItem, target, token)).ConfigureAwait(false);
         if (moved.Failure is not null)
         {
             return moved.Failure.With(prior);
@@ -830,6 +1004,739 @@ public sealed class DocumentContainerRelocator
             SourceChangedAfterMove = prior.ChangedAfterMove.Concat(outcome.SourceChangedAfterMove).ToList(),
             VersionsTruncated = prior.Truncated.Concat(outcome.VersionsTruncated).ToList(),
         };
+    }
+
+    /// <summary>Is <paramref name="item"/> the item the BFF bound to <paramref name="row"/> (its field-secured copy names it)?</summary>
+    private static bool IsBoundItem(Entity row, string item)
+        => Spaarke.Dataverse.DocumentPointerBinding.Compare(
+               row.GetAttributeValue<string>(Spaarke.Dataverse.DocumentPointerBinding.BoundItemIdColumn), item)
+           == Spaarke.Dataverse.DocumentPointerBinding.BindingState.Bound;
+
+    /// <summary>#2159 B4: the row is checked out (either checkout column is set; check-in clears both).</summary>
+    private static bool IsCheckedOut(Entity row)
+        => row.GetAttributeValue<EntityReference>(CheckedOutByColumn) is { Id: var holder } && holder != Guid.Empty
+           || row.Contains(CheckedOutDateColumn) && row[CheckedOutDateColumn] is not null;
+
+    /// <summary>
+    /// Is the source the row's OWN file, so that moving it cannot launder another item into this document's container?
+    /// <list type="bullet">
+    /// <item><see cref="RelocationPurpose.MakeSecure"/> into the record's secure container FROM A CONTAINER THAT IS NO SECURE
+    /// RECORD'S OWN: always (a move that only narrows). From ANOTHER secure record's own container (S1 to S2, released by
+    /// F3 — it does not narrow; #2159 fix round): only the row's BFF-bound item, or the legacy check. Otherwise the legacy
+    /// check (<see cref="RecordContainerResolver.IsRelocationSourceVerifiedAsync"/>).</item>
+    /// <item><see cref="RelocationPurpose.Refile"/> (#2159 B9): ONLY the row's BFF-bound item that the BFF identity uploaded
+    /// — the binding alone is not proof (the bound copy records the item, not who placed its bytes). Never the legacy check:
+    /// a legacy misplaced row is the operator-gated migration's (<c>DocumentContainerMigration:WritesEnabled</c>), never
+    /// the two-minute pass's.</item>
+    /// <item><see cref="RelocationPurpose.LegacyMigration"/> (#2159 B3): the same bound-and-BFF-placed item, or the legacy
+    /// check — so the migration repairs a re-filed row whose file is a relocation copy (made by the BFF, never by the row's
+    /// creator) when the re-file pass lost its carry on a restart.</item>
+    /// </list>
+    /// <paramref name="row"/> has passed <see cref="RecordContainerResolver.ItemBindingRefusal"/> (a DIFFERING copy never
+    /// reaches here).
+    /// </summary>
+    private async Task<bool> IsSourceVerifiedAsync(
+        Guid documentId, Entity row, string sourceDrive, string sourceItem, SpeItemCreator facts,
+        DocumentContainerDerivation derivation, RelocationPurpose purpose, CancellationToken ct)
+    {
+        var bound = IsBoundItem(row, sourceItem);
+        var placedByTheBff = bound && _resolver.IsUploadedByTheBffIdentity(facts);
+        switch (purpose)
+        {
+            case RelocationPurpose.Refile:
+                return placedByTheBff;
+            case RelocationPurpose.MakeSecure when derivation.IsSecure:
+                // Narrows only from a container that is no secure record's own. From another secure record's (S1 to S2,
+                // which only an F3 release lets through) it does not narrow, so the source must be proven the row's own.
+                if (await _resolver.ResolveOwningRecordAsync(sourceDrive, ct).ConfigureAwait(false) is null || bound)
+                {
+                    return true;
+                }
+
+                break;
+            case RelocationPurpose.LegacyMigration when placedByTheBff:
+                return true;
+        }
+
+        return await _resolver.IsRelocationSourceVerifiedAsync(documentId, sourceDrive, sourceItem, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// #2159 B8 — asked under the CONFIRMED lock immediately before a move re-points the row: the row's file must be
+    /// unchanged and not checked out (<see cref="RecheckFileUnchangedAsync"/>), the row's derivation, read again, must
+    /// still allow <paramref name="target"/>, and the widening guard must still let the move through (the filing or the
+    /// owner may have changed while the bytes were copied). Otherwise the move stops there: the caller removes its copy
+    /// and writes nothing (<see cref="RelocationState.CheckedOut"/> or <see cref="RelocationState.Failed"/>; a later call
+    /// decides again). A read that faults stops it the same way.
+    /// </summary>
+    private async Task<DocumentRelocationOutcome?> RecheckBeforeRepointAsync(
+        Guid documentId, string sourceDrive, string sourceItem, string target, CancellationToken ct)
+    {
+        if (await RecheckFileUnchangedAsync(documentId, sourceDrive, sourceItem, target, ct).ConfigureAwait(false) is { } changed)
+        {
+            return changed;
+        }
+
+        var now = await _resolver.DeriveDocumentContainersAsync(documentId, ct).ConfigureAwait(false);
+        if (!now.Decided || !now.Allows(target))
+        {
+            return DocumentRelocationOutcome.Of(documentId, RelocationState.Failed, sourceDrive, sourceItem, target, null,
+                $"its derived container changed while the file was copied (now: {now.Reason}); the copy was removed and "
+                + "nothing was written");
+        }
+
+        if (await IsolationHoldAsync(documentId, now, sourceDrive, sourceItem, target, ct).ConfigureAwait(false) is { } held)
+        {
+            return DocumentRelocationOutcome.Of(documentId, RelocationState.Failed, sourceDrive, sourceItem, target, null,
+                $"the widening guard stopped it while the file was copied ({held.Detail}); the copy was removed and nothing "
+                + "was written");
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// #2159 fix round (B4 during the copy) — asked under the confirmed lock immediately before ANY re-point (a move, a
+    /// move-along, and the re-copy of an edited source): the row, read again, must still name
+    /// <paramref name="sourceDrive"/>/<paramref name="sourceItem"/> and must not be checked out. A document checked out
+    /// while its versions were copied is <see cref="RelocationState.CheckedOut"/> — its holder's Office session edits the
+    /// item the move would re-point away from and the settle would delete; a row whose file changed is
+    /// <see cref="RelocationState.Failed"/>. Either way the caller removes the copy and writes nothing.
+    /// </summary>
+    private async Task<DocumentRelocationOutcome?> RecheckFileUnchangedAsync(
+        Guid documentId, string sourceDrive, string sourceItem, string target, CancellationToken ct)
+    {
+        var row = await ReadRowAsync(documentId, ct).ConfigureAwait(false);
+        if (row is null)
+        {
+            return DocumentRelocationOutcome.Of(documentId, RelocationState.Failed, sourceDrive, sourceItem, target, null,
+                "the row could not be read again before the re-point; the copy was removed and nothing was written");
+        }
+
+        if (IsCheckedOut(row))
+        {
+            return DocumentRelocationOutcome.Of(documentId, RelocationState.CheckedOut, sourceDrive, sourceItem, target, null,
+                "it was checked out while the file was copied; the copy was removed and nothing was written — it is moved "
+                + "once it is checked in");
+        }
+
+        var drive = row.GetAttributeValue<string>(DriveColumn);
+        var item = row.GetAttributeValue<string>(ItemColumn);
+        return SameItem(drive, item, sourceDrive, sourceItem)
+            ? null
+            : DocumentRelocationOutcome.Of(documentId, RelocationState.Failed, sourceDrive, sourceItem, target, null,
+                $"its file changed while the file was copied (now {drive?.Trim()}/{item?.Trim()}); the copy was removed and "
+                + "nothing was written");
+    }
+
+    /// <summary>
+    /// #2159 — why a move must NOT run, or <see langword="null"/> when it may. Fail closed: anything that cannot be read
+    /// moves nothing.
+    /// <list type="number">
+    /// <item><b>The widening guard</b> — every purpose (<see cref="IsolationHoldAsync"/>).</item>
+    /// <item><b>An unfiled document's unknown home</b> (#2151) — <see cref="RelocationPurpose.Refile"/>. Unfiled, and its
+    /// file is in no business unit's container (a declared home would have derived in place) →
+    /// <see cref="RelocationState.UnfiledHomeUnknown"/>: where it belongs (a record's own container after a re-scope,
+    /// another owner's) cannot be told, and pulling it into a business unit's container could widen a narrower audience.
+    /// (The legacy migration exists to pull such files into their business unit's container; it keeps doing so.)</item>
+    /// </list>
+    /// </summary>
+    private async Task<DocumentRelocationOutcome?> WideningHoldAsync(
+        Guid documentId, DocumentContainerDerivation derivation, RelocationPurpose purpose, string sourceDrive, string sourceItem,
+        string target, CancellationToken ct)
+    {
+        if (await IsolationHoldAsync(documentId, derivation, sourceDrive, sourceItem, target, ct).ConfigureAwait(false)
+            is { } held)
+        {
+            return held;
+        }
+
+        if (purpose == RelocationPurpose.Refile && derivation.Unfiled)
+        {
+            bool inABusinessUnitContainer;
+            try
+            {
+                inABusinessUnitContainer = await _resolver.IsBusinessUnitContainerAsync(sourceDrive, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogWarning(ex,
+                    "[DOCUMENT-RELOCATE] Document {DocumentId} is NOT re-filed: whether {SourceDrive} is a business unit's "
+                    + "container could not be read. Nothing is moved.", documentId, sourceDrive);
+                return DocumentRelocationOutcome.Of(documentId, RelocationState.Failed, sourceDrive, sourceItem, target, null,
+                    "whether its file is in a business unit's container could not be read; nothing is moved and a later pass retries");
+            }
+
+            if (!inABusinessUnitContainer)
+            {
+                _logger.LogWarning(
+                    "[DOCUMENT-RELOCATE] Document {DocumentId} is NOT re-filed: it is unfiled and its file is in {SourceDrive}, "
+                    + "which is no business unit's container and no declared home; it is not pulled into {Target}.",
+                    documentId, sourceDrive, target);
+                return DocumentRelocationOutcome.Of(documentId, RelocationState.UnfiledHomeUnknown, sourceDrive, sourceItem, target,
+                    null, "unfiled, and its file is in no business unit's container and no declared home: where it belongs cannot "
+                          + "be told, so it is left where it is");
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// #2159 — THE widening guard, for every purpose and for a row moved along by another's settle. An ISOLATED row
+    /// (<see cref="IsIsolatedAsync"/>) is <see cref="RelocationState.HeldIsolated"/>, nothing moved, when the move would
+    /// leave its secure record:
+    /// <list type="bullet">
+    /// <item>its derivation is not a secure record's own container — a filing edited outside the BFF (a model-driven
+    /// form) leaves the row isolated (owner round 24 item 2) while it derives to a business unit's container;</item>
+    /// <item>(A1) its derivation IS a secure record's container but its file is in ANOTHER secure record's own container:
+    /// leaving secure root S1 for S2 is an un-secure of S1's content, which needs F3 (owner round 10 item 7).</item>
+    /// </list>
+    /// Its bytes stay where they are until an F3 act releases the row. Never held: into a secure container from one that
+    /// is no secure record's (a business unit's, the archive) — that narrows — and any row that is not isolated. Asked
+    /// under the row's lock, after its derivation, and again just before the re-point (<see cref="RecheckBeforeRepointAsync"/>).
+    /// What cannot be read (the isolation, the source container's secure owner) is <see cref="RelocationState.Failed"/>:
+    /// nothing moves and a later call retries.
+    /// </summary>
+    private async Task<DocumentRelocationOutcome?> IsolationHoldAsync(
+        Guid documentId, DocumentContainerDerivation derivation, string sourceDrive, string sourceItem, string target,
+        CancellationToken ct)
+    {
+        bool isolated;
+        try
+        {
+            if (derivation.IsSecure
+                && await _resolver.ResolveOwningRecordAsync(sourceDrive, ct).ConfigureAwait(false) is null)
+            {
+                return null; // into the secure record's container from no secure record's: it narrows
+            }
+
+            isolated = await IsIsolatedAsync(documentId, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex,
+                "[DOCUMENT-RELOCATE] Document {DocumentId} is NOT moved: whether it is isolated, or whose secure container its "
+                + "file is in, could not be read. Nothing is moved.", documentId);
+            return DocumentRelocationOutcome.Of(documentId, RelocationState.Failed, sourceDrive, sourceItem, target, null,
+                "whether it is isolated (owned in the Secure Record business unit), or whose secure container its file is in, "
+                + "could not be read; nothing is moved and a later call retries");
+        }
+
+        if (!isolated)
+        {
+            return null;
+        }
+
+        if (derivation.IsSecure)
+        {
+            // #2159 slice 2: the ONE way through — the F3 release a BFF re-file recorded for exactly this move (this item,
+            // into this container, unexpired). Consumed by the re-point's own ledger write (MoveAsync), never here: a move
+            // that stops later keeps it for the retry. Missing, unreadable, stale or for another move: held.
+            RelocationRelease? release;
+            bool releaseUnreadable;
+            try
+            {
+                (release, releaseUnreadable) = await ReadReleaseAsync(documentId, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogWarning(ex,
+                    "[DOCUMENT-RELOCATE] Document {DocumentId} is NOT moved: its F3 release could not be read.", documentId);
+                return DocumentRelocationOutcome.Of(documentId, RelocationState.Failed, sourceDrive, sourceItem, target, null,
+                    "whether an F3 re-file released its move into this secure record's container could not be read; nothing is "
+                    + "moved and a later call retries");
+            }
+
+            if (release is { } r && r.Releases(sourceDrive, sourceItem, target, _time.GetUtcNow()))
+            {
+                _logger.LogInformation(
+                    "[DOCUMENT-RELOCATE] Document {DocumentId}: its move from {SourceDrive} into {Target} was released by the F3 "
+                    + "re-file of {Caller} ({Basis}) at {At}.", documentId, sourceDrive, target, r.AuthorizedBy, r.Basis, r.At);
+                return null;
+            }
+
+            var why = releaseUnreadable
+                ? "its relocation ledger (where an F3 release is recorded) is unreadable"
+                : release is null
+                    ? "no F3 re-file released this move"
+                    : "its F3 release is for another move, or has expired";
+            _logger.LogWarning(
+                "[DOCUMENT-RELOCATE] Document {DocumentId} is NOT moved: it is isolated and its file is in another secure record's "
+                + "container {SourceDrive}; leaving it for {Target} ({Reason}) needs F3 ({Why}).", documentId, sourceDrive, target,
+                derivation.Reason, why);
+            return DocumentRelocationOutcome.Of(documentId, RelocationState.HeldIsolated, sourceDrive, sourceItem, target, null,
+                "isolated, and its file is in another secure record's own container: leaving that secure record for this one is "
+                + $"an un-secure and needs F3 (owner round 10 item 7) — {why}; its file is not moved");
+        }
+
+        _logger.LogWarning(
+            "[DOCUMENT-RELOCATE] Document {DocumentId} is NOT moved: it is owned in the Secure Record business unit but derives "
+            + "to {Target} ({Reason}); its file stays in {SourceDrive} until an F3 act releases it.",
+            documentId, target, derivation.Reason, sourceDrive);
+        return DocumentRelocationOutcome.Of(documentId, RelocationState.HeldIsolated, sourceDrive, sourceItem, target, null,
+            "still owned in the Secure Record business unit while its filing points outside every secure record (an edit "
+            + "outside the product); its file is not moved out of isolation until an F3 act releases it");
+    }
+
+    /// <summary>
+    /// #2159 A2 — is the document ISOLATED NOW: owned in the Secure Record business unit — its owning team is ANY team in
+    /// that business unit, or the row's own business unit is it? The same predicate as
+    /// <c>SecureChildReconciler.ReownOrdinaryRowAsync</c> and <c>TodoAssigneeOwnerReconciliationJob</c>, never the one
+    /// named owner team, so it holds once each secure family has its own owner team (task 178; #2162). No Secure Record
+    /// business unit in this environment = no row is isolated. Two business units with the name (ambiguous), a row that
+    /// cannot be read, or an owning team whose business unit cannot be read throw: the caller then moves nothing.
+    /// </summary>
+    private async Task<bool> IsIsolatedAsync(Guid documentId, CancellationToken ct)
+    {
+        var secure = await SecureChildShareSynchronizer.ResolveSecureBusinessUnitAsync(_dataverse, _configuration, ct)
+            .ConfigureAwait(false);
+        if (secure.Ambiguous)
+        {
+            throw new InvalidOperationException("more than one business unit carries the Secure Record name");
+        }
+
+        if (secure.Id is not { } secureBu)
+        {
+            return false;
+        }
+
+        var row = await _dataverse.RetrieveAsync(DocumentEntity, documentId, [OwningTeamColumn, OwningBusinessUnitColumn], ct)
+                      .ConfigureAwait(false)
+                  ?? throw new InvalidOperationException($"sprk_document {documentId:D} could not be read");
+        if (row.GetAttributeValue<EntityReference>(OwningBusinessUnitColumn)?.Id == secureBu)
+        {
+            return true;
+        }
+
+        if (row.GetAttributeValue<EntityReference>(OwningTeamColumn) is not { Id: var teamId } || teamId == Guid.Empty)
+        {
+            return false; // user-owned outside the Secure Record business unit
+        }
+
+        var query = new QueryExpression("team") { ColumnSet = new ColumnSet("businessunitid"), TopCount = 1, NoLock = true };
+        query.Criteria.AddCondition("teamid", ConditionOperator.Equal, teamId);
+        var team = (await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
+        var teamBu = team?.GetAttributeValue<EntityReference>("businessunitid")?.Id;
+        return teamBu is { } bu && bu != Guid.Empty
+            ? bu == secureBu
+            : throw new InvalidOperationException($"the business unit of sprk_document {documentId:D}'s owning team {teamId:D} could not be read");
+    }
+
+    /// <summary>
+    /// #2159 slice 2 — records the F3 release of a re-filed document's file: the BFF re-file took the document out of
+    /// secure record S1 with the caller's F3 permission (<paramref name="permit"/>) and filed it under secure record S2, so
+    /// its file may follow it from S1's own container into S2's — the one move the widening guard otherwise holds (A1).
+    /// </summary>
+    /// <remarks>
+    /// <para>The relocator stays the ONE writer of the ledger: the release is read-modify-written under the document's ADR-004
+    /// relocation lock (asked for up to <see cref="ReleaseLockWait"/>; still held → nothing is written,
+    /// <see cref="RelocationReleaseState.LockHeld"/>), and never outside it.</para>
+    /// <para>What it names is read HERE, under the lock, never taken from the caller: the row's current file (the source), the
+    /// container it derives to now (the target — a secure record's own), and the secure record whose own container holds
+    /// the file, which must be one the re-file left (<see cref="SecureExitPermit.RootsLeft"/>); and the target's secure record
+    /// must be one the re-file filed the row under (<see cref="SecureExitPermit.RootsAfter"/>, PR #2161 round 4). Anything
+    /// else records nothing. An unreadable ledger is left as it is. Never throws for a read or write fault (<see cref="RelocationReleaseState.Failed"/>).</para>
+    /// </remarks>
+    public Task<RelocationReleaseOutcome> RecordReleaseAsync(Guid documentId, SecureExitPermit permit, CancellationToken ct = default)
+        => RecordReleaseAsync(documentId, permit, ReleaseLockWait, ct);
+
+    /// <summary>
+    /// #2159 slice 4 — <see cref="RecordReleaseAsync(Guid, SecureExitPermit, CancellationToken)"/> for each of a re-file's
+    /// DESCENDANT documents, in order, their lock waits sharing one <see cref="DescendantReleaseLockBudget"/>: each waits at
+    /// most <see cref="ReleaseLockWait"/> and at most what is left; once it is spent, each still gets one lock attempt (no
+    /// wait), so only a document whose lock is held at that moment is <see cref="RelocationReleaseState.LockHeld"/> — and,
+    /// like every release not recorded inline, retried through the job queue (<see cref="RelocationReleaseOutcome.RetryQueued"/>).
+    /// One outcome per id, in order. Never throws (cancellation aside).
+    /// </summary>
+    public Task<IReadOnlyList<(Guid DocumentId, RelocationReleaseOutcome Outcome)>> RecordReleasesAsync(
+        IReadOnlyList<Guid> documentIds, SecureExitPermit permit, CancellationToken ct = default)
+        => RecordReleasesAsync(documentIds, permit, DescendantReleaseLockBudget, ct);
+
+    internal async Task<IReadOnlyList<(Guid DocumentId, RelocationReleaseOutcome Outcome)>> RecordReleasesAsync(
+        IReadOnlyList<Guid> documentIds, SecureExitPermit permit, TimeSpan budget, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(documentIds);
+        ArgumentNullException.ThrowIfNull(permit);
+        var deadline = _time.GetUtcNow() + budget;
+        var outcomes = new List<(Guid, RelocationReleaseOutcome)>(documentIds.Count);
+        foreach (var documentId in documentIds)
+        {
+            var left = deadline - _time.GetUtcNow();
+            var wait = left <= TimeSpan.Zero ? TimeSpan.Zero : left < ReleaseLockWait ? left : ReleaseLockWait;
+            outcomes.Add((documentId, await RecordReleaseAsync(documentId, permit, wait, ct).ConfigureAwait(false)));
+        }
+
+        return outcomes;
+    }
+
+    /// <summary>
+    /// The inline release of a re-file: recorded under the lock now, or — when it could not be (the lock stayed held, a
+    /// read or write failed) — retried DURABLY through the job queue (<see cref="QueueReleaseRetryAsync"/>), bound to the
+    /// move this re-file permitted. A re-file to the same parent again changes nothing and carries no F3, so it is no retry.
+    /// </summary>
+    private async Task<RelocationReleaseOutcome> RecordReleaseAsync(
+        Guid documentId, SecureExitPermit permit, TimeSpan lockWait, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(permit);
+        var permittedAt = _time.GetUtcNow();
+        var outcome = await RecordReleaseUnderLockAsync(documentId, permit, lockWait, ReleaseLockRetryInterval, binding: null, ct)
+            .ConfigureAwait(false);
+        return outcome.State is RelocationReleaseState.LockHeld or RelocationReleaseState.Failed
+            ? await QueueReleaseRetryAsync(documentId, permit, permittedAt, outcome, ct).ConfigureAwait(false)
+            : outcome;
+    }
+
+    /// <summary>
+    /// #2159 fix round — the queued retry of a release the re-file could not record (<see cref="RelocationReleaseRetryJobHandler"/>):
+    /// recorded under the document's lock exactly as the inline path records it, and only while the move it was bound to
+    /// at the re-file still holds — the row's file is still in the source container, the row derives to the target, and the re-file's F3
+    /// permission is at most <see cref="ReleaseLifetime"/> old (the release keeps the re-file's time, so it never outlives
+    /// it). It never records a release the inline path would refuse. Never throws (cancellation aside).
+    /// </summary>
+    /// <param name="payload">What the queued retry carries.</param>
+    /// <param name="lockWait">How long it waits for the document's lock (<see cref="ReleaseRetryLockWait"/>).</param>
+    /// <param name="ct">Cancellation token.</param>
+    internal Task<RelocationReleaseOutcome> RecordQueuedReleaseAsync(
+        RelocationReleaseRetryPayload payload, TimeSpan lockWait, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(payload);
+        var permit = new SecureExitPermit(
+            payload.RootsLeft, SecureRemovalDecision.Permitted(payload.Basis, payload.AuthorizedBy), payload.RootsAfter ?? []);
+        return RecordReleaseUnderLockAsync(payload.DocumentId, permit, lockWait, ReleaseRetryLockRetryInterval,
+            new ReleaseBinding(payload.SourceDrive, payload.TargetContainer, payload.PermittedAt), ct);
+    }
+
+    /// <summary>The move a queued release retry is bound to: what the re-file permitted, read right after it.</summary>
+    private sealed record ReleaseBinding(string SourceDrive, string TargetContainer, DateTimeOffset PermittedAt);
+
+    /// <summary>
+    /// Queues the durable retry of a release the inline path did not record: bound to the move this re-file permitted —
+    /// the container holding the row's file and the container it derives to NOW (read without the lock; the retry records nothing unless both
+    /// still hold under it) — and carrying the permission's facts the release records (the roots left, who, on what basis,
+    /// when). Not queued (no queue, the row or its derivation unreadable, the send failed): an Error naming the document
+    /// only, and the file stays held. Never throws (cancellation aside).
+    /// </summary>
+    private async Task<RelocationReleaseOutcome> QueueReleaseRetryAsync(
+        Guid documentId, SecureExitPermit permit, DateTimeOffset permittedAt, RelocationReleaseOutcome notRecorded,
+        CancellationToken ct)
+    {
+        try
+        {
+            var jobs = _services?.GetService<JobSubmissionService>()
+                       ?? throw new InvalidOperationException("no job queue is available");
+            var row = await ReadRowAsync(documentId, ct).ConfigureAwait(false)
+                      ?? throw new InvalidOperationException("the row could not be read");
+            var drive = row.GetAttributeValue<string>(DriveColumn)?.Trim();
+            var item = row.GetAttributeValue<string>(ItemColumn)?.Trim();
+            if (string.IsNullOrWhiteSpace(drive) || string.IsNullOrWhiteSpace(item))
+            {
+                throw new InvalidOperationException("the row names no file");
+            }
+
+            var derivation = await _resolver.DeriveDocumentContainersAsync(documentId, ct).ConfigureAwait(false);
+            if (!derivation.Decided || string.IsNullOrWhiteSpace(derivation.PrimaryContainer))
+            {
+                throw new InvalidOperationException("its container could not be derived");
+            }
+
+            await jobs.SubmitJobAsync(RelocationReleaseRetryJobHandler.NewJob(new RelocationReleaseRetryPayload(
+                documentId, drive, derivation.PrimaryContainer.Trim(), permit.RootsLeft.ToList(),
+                permit.Decision.CallerSystemUserId, permit.Decision.Basis, permittedAt, permit.RootsAfter.ToList())), ct)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex,
+                "[DOCUMENT-RELOCATE] The F3 release of document {DocumentId}'s file was NOT recorded and its retry could not be "
+                + "queued; its file stays held where it is.", documentId);
+            return notRecorded with { Detail = $"{notRecorded.Detail}; its retry could not be queued — {UnreleasedRecovery}" };
+        }
+
+        _logger.LogWarning(
+            "[DOCUMENT-RELOCATE] The F3 release of document {DocumentId}'s file was not recorded now ({State}); a retry is queued.",
+            documentId, notRecorded.State);
+        return notRecorded with { RetryQueued = true, Detail = $"{notRecorded.Detail}; a retry is queued" };
+    }
+
+    private async Task<RelocationReleaseOutcome> RecordReleaseUnderLockAsync(
+        Guid documentId, SecureExitPermit permit, TimeSpan lockWait, TimeSpan retryInterval, ReleaseBinding? binding,
+        CancellationToken ct)
+    {
+        var deadline = _time.GetUtcNow() + lockWait;
+        while (!await TryLockAsync(documentId, ct).ConfigureAwait(false))
+        {
+            if (_time.GetUtcNow() >= deadline)
+            {
+                _logger.LogWarning(
+                    "[DOCUMENT-RELOCATE] The F3 release of document {DocumentId}'s file was NOT recorded: another relocation of it "
+                    + "held its lock for {Wait}. Its file stays held where it is; the re-file stands.", documentId, lockWait);
+                return new RelocationReleaseOutcome(RelocationReleaseState.LockHeld,
+                    $"another relocation of this document held its lock for {lockWait.TotalSeconds:0.#} s; no release was recorded");
+            }
+
+            await Task.Delay(retryInterval, _time, ct).ConfigureAwait(false);
+        }
+
+        try
+        {
+            return await RecordReleaseCoreAsync(documentId, permit, binding, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex, "[DOCUMENT-RELOCATE] The F3 release of document {DocumentId}'s file could not be recorded.", documentId);
+            return new RelocationReleaseOutcome(RelocationReleaseState.Failed,
+                $"it could not be read or written ({ex.GetType().Name}); no release was recorded");
+        }
+        finally
+        {
+            await UnlockAsync(documentId).ConfigureAwait(false);
+        }
+    }
+
+    /// <param name="documentId">The document.</param>
+    /// <param name="permit">The re-file's F3 permission.</param>
+    /// <param name="binding">
+    /// A queued retry's binding (<see cref="RecordQueuedReleaseAsync"/>): the release is recorded only while the row's file
+    /// is still in its source container and the row still derives to its target, with the re-file's own time, at most
+    /// <see cref="ReleaseLifetime"/> ago. <see langword="null"/> for the inline path, which records what it reads now.
+    /// </param>
+    /// <param name="ct">Cancellation token.</param>
+    private async Task<RelocationReleaseOutcome> RecordReleaseCoreAsync(
+        Guid documentId, SecureExitPermit permit, ReleaseBinding? binding, CancellationToken ct)
+    {
+        var row = await ReadRowAsync(documentId, ct).ConfigureAwait(false);
+        var sourceDrive = row?.GetAttributeValue<string>(DriveColumn)?.Trim();
+        var sourceItem = row?.GetAttributeValue<string>(ItemColumn)?.Trim();
+        if (string.IsNullOrWhiteSpace(sourceDrive) || string.IsNullOrWhiteSpace(sourceItem))
+        {
+            return new RelocationReleaseOutcome(RelocationReleaseState.NotNeeded, "the row carries no file");
+        }
+
+        var derivation = await _resolver.DeriveDocumentContainersAsync(documentId, ct).ConfigureAwait(false);
+        if (!derivation.Decided)
+        {
+            return new RelocationReleaseOutcome(RelocationReleaseState.Failed,
+                $"its container could not be derived ({derivation.Reason}); no release was recorded");
+        }
+
+        if (!derivation.IsSecure || derivation.Allows(sourceDrive) || string.IsNullOrWhiteSpace(derivation.PrimaryContainer))
+        {
+            return new RelocationReleaseOutcome(RelocationReleaseState.NotNeeded,
+                derivation.Allows(sourceDrive)
+                    ? "its file is already in its derived container"
+                    : "it derives to no secure record's own container, so the widening guard asks no release");
+        }
+
+        var sourceRecord = await _resolver.ResolveOwningRecordAsync(sourceDrive, ct).ConfigureAwait(false);
+        if (sourceRecord is null)
+        {
+            return new RelocationReleaseOutcome(RelocationReleaseState.NotNeeded,
+                "its file is in no secure record's own container: the move into the secure record's container only narrows");
+        }
+
+        // A queued retry releases only the move the re-file permitted: out of the same SOURCE CONTAINER (whose secure record
+        // the re-file left — checked below) into the same TARGET. A row moved or re-filed since is another move, which that
+        // F3 act did not approve. It is NOT bound to the item (PR #2161 re-check): the relocator itself re-points the row
+        // inside that container (an edited source closed in place) and keeps a recorded release across it (MoveCoreAsync
+        // re-binds it), so an item binding lost the release for good to that same re-copy. The release names the item read
+        // now, under the lock, so the widening guard's exact match still holds.
+        if (binding is not null && !RecordContainerResolver.IsSameContainerId(binding.SourceDrive, sourceDrive))
+        {
+            return BindingMismatch(documentId,
+                $"its file is no longer in {binding.SourceDrive}, the container the re-file released it from");
+        }
+
+        if (binding is not null && !RecordContainerResolver.IsSameContainerId(binding.TargetContainer, derivation.PrimaryContainer))
+        {
+            return BindingMismatch(documentId,
+                $"it no longer derives to {binding.TargetContainer}, the container the re-file filed it under");
+        }
+
+        if (!permit.RootsLeft.Any(root =>
+                string.Equals(root.EntityLogicalName, sourceRecord.EntityLogicalName, StringComparison.OrdinalIgnoreCase)
+                && root.RecordId == sourceRecord.RecordId))
+        {
+            _logger.LogWarning(
+                "[DOCUMENT-RELOCATE] The F3 re-file of document {DocumentId} did not leave {Table} {RecordId}, whose own container "
+                + "{SourceDrive} holds its file: no release is recorded; the file stays held.", documentId,
+                sourceRecord.EntityLogicalName, sourceRecord.RecordId, sourceDrive);
+            return new RelocationReleaseOutcome(RelocationReleaseState.NotCovered,
+                $"its file is in the own container of {sourceRecord.EntityLogicalName} {sourceRecord.RecordId:D}, which this "
+                + "re-file did not leave with F3; no release was recorded");
+        }
+
+        // PR #2161 round 4 (F1-b): the TARGET must be the filing the F3 decision approved, too — the own container of one of
+        // the secure roots the row was filed under after the re-file (SecureExitPermit.RootsAfter, from the same F3 walk). The
+        // target is read now, so another writer's move between the re-file and this release (the row filed under a third
+        // secure record S3 directly in Dataverse) would otherwise take S1's file to S3's members on an F3 act that never saw
+        // S3. "Belongs" is exact: the record that owns the derived container (ResolveOwningRecordAsync) is one of those roots;
+        // a container no secure record owns, or owned by any other, is NotCovered and the file stays held. A target that is
+        // NO secure record's own container needs no rule here: it was answered NotNeeded above (nothing is recorded, and the
+        // widening guard holds an isolated file bound for an ordinary container whatever the ledger says), so the permit
+        // never releases a file toward an ordinary container. The queued retry carries RootsAfter and runs this same check.
+        var targetRecord = await _resolver.ResolveOwningRecordAsync(derivation.PrimaryContainer!, ct).ConfigureAwait(false);
+        if (targetRecord is null || !permit.RootsAfter.Any(root =>
+                string.Equals(root.EntityLogicalName, targetRecord.EntityLogicalName, StringComparison.OrdinalIgnoreCase)
+                && root.RecordId == targetRecord.RecordId))
+        {
+            _logger.LogWarning(
+                "[DOCUMENT-RELOCATE] Document {DocumentId} derives to container {Target}, whose secure record is not one the F3 "
+                + "re-file filed it under ({Count} root(s)): no release is recorded; the file stays held.", documentId,
+                derivation.PrimaryContainer, permit.RootsAfter.Count);
+            return new RelocationReleaseOutcome(RelocationReleaseState.NotCovered,
+                $"it derives to {derivation.PrimaryContainer!.Trim()}, which is not the own container of a secure record this "
+                + "re-file filed it under with F3; no release was recorded");
+        }
+
+        var ledger = RelocationLedger.Parse(row!.GetAttributeValue<string>(RelocationLedgerColumn));
+        if (ledger is null)
+        {
+            return new RelocationReleaseOutcome(RelocationReleaseState.Failed,
+                $"its {RelocationLedgerColumn} is unreadable; it is not overwritten, and no release was recorded");
+        }
+
+        var release = new RelocationRelease
+        {
+            SourceDrive = sourceDrive,
+            SourceItem = sourceItem,
+            TargetContainer = derivation.PrimaryContainer!.Trim(),
+            SourceRecordTable = sourceRecord.EntityLogicalName,
+            SourceRecordId = sourceRecord.RecordId,
+            AuthorizedBy = permit.Decision.CallerSystemUserId,
+            Basis = permit.Decision.Basis.ToString(),
+            At = binding?.PermittedAt ?? _time.GetUtcNow(),
+        };
+
+        if (binding is not null)
+        {
+            var now = _time.GetUtcNow();
+            if (!release.IsCurrent(now))
+            {
+                return new RelocationReleaseOutcome(RelocationReleaseState.NotCovered,
+                    $"the re-file's F3 permission ({binding.PermittedAt:o}) is more than {ReleaseLifetime.TotalDays:0} days old; "
+                    + "no release was recorded");
+            }
+
+            if (ledger.Release is { } existing && existing.Releases(sourceDrive, sourceItem, release.TargetContainer, now))
+            {
+                // Recorded already (a redelivery, or the inline path won): kept as it is.
+                return new RelocationReleaseOutcome(RelocationReleaseState.Recorded,
+                    $"its file may follow it from {sourceDrive} into {release.TargetContainer} (already recorded)");
+            }
+        }
+
+        if (!await StillLockedAsync(documentId, ct).ConfigureAwait(false))
+        {
+            return new RelocationReleaseOutcome(RelocationReleaseState.Failed,
+                LockLost(documentId, "before its F3 release was recorded"));
+        }
+
+        await _dataverse.UpdateAsync(DocumentEntity, documentId, new Dictionary<string, object>
+        {
+            [RelocationLedgerColumn] = (ledger with { Release = release }).Serialize(),
+        }, ct).ConfigureAwait(false);
+        _logger.LogInformation(
+            "[DOCUMENT-RELOCATE] Recorded the F3 release of document {DocumentId}'s file {SourceDrive}/{SourceItem} into {Target} "
+            + "(left {Table} {RecordId}; by {Caller}, {Basis}).", documentId, sourceDrive, sourceItem, release.TargetContainer,
+            release.SourceRecordTable, release.SourceRecordId, release.AuthorizedBy, release.Basis);
+        return new RelocationReleaseOutcome(RelocationReleaseState.Recorded,
+            $"its file may follow it from {sourceDrive} into {release.TargetContainer}");
+    }
+
+    /// <summary>
+    /// A queued release retry whose binding no longer holds: nothing is recorded and no retry finds otherwise, so its file
+    /// stays held — an Error with the one recovery (<see cref="UnreleasedRecovery"/>).
+    /// </summary>
+    private RelocationReleaseOutcome BindingMismatch(Guid documentId, string why)
+    {
+        _logger.LogError(
+            "[DOCUMENT-RELOCATE] The queued F3 release of document {DocumentId} was NOT recorded: {Why}. Its file stays held "
+            + "unless a later F3 re-file released it. Recovery: {Recovery}.", documentId, why, UnreleasedRecovery);
+        return new RelocationReleaseOutcome(RelocationReleaseState.NotCovered,
+            $"{why}; no release was recorded — {UnreleasedRecovery}");
+    }
+
+    /// <summary>The row's F3 release, read now; <c>Unreadable</c> when its ledger is not a relocation ledger. A fault throws.</summary>
+    private async Task<(RelocationRelease? Release, bool Unreadable)> ReadReleaseAsync(Guid documentId, CancellationToken ct)
+    {
+        var row = await _dataverse.RetrieveAsync(DocumentEntity, documentId, [RelocationLedgerColumn], ct).ConfigureAwait(false)
+                  ?? throw new InvalidOperationException($"sprk_document {documentId:D} could not be read");
+        var ledger = RelocationLedger.Parse(row.GetAttributeValue<string>(RelocationLedgerColumn));
+        return ledger is null ? (null, true) : (ledger.Release, false);
+    }
+
+    /// <summary>Why <see cref="DropInvalidReleaseAsync"/> dropped a release, if it did.</summary>
+    private enum ReleaseDrop
+    {
+        Kept,
+        Expired,
+        Invalid,
+    }
+
+    /// <summary>
+    /// #2159 slice 2c — drops the row's F3 release, under the confirmed lock, when it can no longer release the move it was
+    /// recorded for: it expired (<see cref="ReleaseLifetime"/>), the row's file is no longer its item, or the row derives to
+    /// another container now (a derivation that cannot be read decides nothing: it is kept, and the guard holds the move).
+    /// The row read in memory is updated with what was written. A failed or unlocked write leaves it; the guard's exact
+    /// match holds the move either way.
+    /// </summary>
+    private async Task<ReleaseDrop> DropInvalidReleaseAsync(
+        Guid documentId, Entity row, RelocationRelease release, string currentDrive, string currentItem, CancellationToken ct)
+    {
+        string? why = null;
+        var expired = !release.IsCurrent(_time.GetUtcNow());
+        if (expired)
+        {
+            why = $"it expired (recorded {release.At:o}, lifetime {ReleaseLifetime.TotalDays:0} days)";
+        }
+        else if (!SameItem(release.SourceDrive, release.SourceItem, currentDrive, currentItem))
+        {
+            why = "the row's file is no longer the item it names";
+        }
+        else
+        {
+            var derivation = await _resolver.DeriveDocumentContainersAsync(documentId, ct).ConfigureAwait(false);
+            if (derivation.Decided && !RecordContainerResolver.IsSameContainerId(release.TargetContainer, derivation.PrimaryContainer))
+            {
+                why = $"the row derives to another container now ({derivation.PrimaryContainer})";
+            }
+        }
+
+        if (why is null || RelocationLedger.Parse(row.GetAttributeValue<string>(RelocationLedgerColumn)) is not { } ledger
+            || !await StillLockedAsync(documentId, ct).ConfigureAwait(false))
+        {
+            return ReleaseDrop.Kept;
+        }
+
+        var without = ledger with { Release = null };
+        try
+        {
+            await _dataverse.UpdateAsync(DocumentEntity, documentId, new Dictionary<string, object>
+            {
+                [RelocationLedgerColumn] = without.IsEmpty ? DBNull.Value : without.Serialize(),
+            }, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "[DOCUMENT-RELOCATE] The invalid F3 release of document {DocumentId} could not be dropped.", documentId);
+            return ReleaseDrop.Kept;
+        }
+
+        if (without.IsEmpty)
+        {
+            row.Attributes.Remove(RelocationLedgerColumn);
+        }
+        else
+        {
+            row[RelocationLedgerColumn] = without.Serialize();
+        }
+
+        _logger.LogWarning(
+            "[DOCUMENT-RELOCATE] Dropped the F3 release of document {DocumentId} ({SourceDrive}/{SourceItem} into {Target}, by "
+            + "{Caller} at {At}): {Why}. Leaving its secure record now needs a new F3 re-file.", documentId, release.SourceDrive,
+            release.SourceItem, release.TargetContainer, release.AuthorizedBy, release.At, why);
+        return expired ? ReleaseDrop.Expired : ReleaseDrop.Invalid;
     }
 
     /// <summary>
@@ -887,6 +1794,9 @@ public sealed class DocumentContainerRelocator
         IReadOnlyList<ReplayStep> Steps, SpeItemCreator? Facts, RelocationWitness Witness, string? Failure)
     {
         public static History Fail(string why) => new([], null, new RelocationWitness(null, null, null), why);
+
+        /// <summary>#2159 B5: a version is larger than a single-request copy — permanent, unlike every other failure here.</summary>
+        public bool TooLarge { get; init; }
 
         /// <summary>
         /// The steps written AFTER the state <paramref name="witness"/> recorded — a source's edits since its move — oldest
@@ -1003,7 +1913,10 @@ public sealed class DocumentContainerRelocator
 
         if (steps.Any(s => s.ExpectedSize is > MaxRelocatableBytes))
         {
-            return History.Fail($"a version of {drive}/{item} is larger than a single-request copy ({MaxRelocatableBytes} bytes)");
+            return History.Fail($"a version of {drive}/{item} is larger than a single-request copy ({MaxRelocatableBytes} bytes)") with
+            {
+                TooLarge = true,
+            };
         }
 
         return new History(steps, facts, witness, null);
@@ -1025,15 +1938,169 @@ public sealed class DocumentContainerRelocator
     // The move: copy (replay) → verify → re-point (with the own-column re-key, the version record and the ledger, one update)
     // ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
+    /// <param name="recheck">
+    /// #2159 B8: asked under the confirmed lock immediately before the re-point; an outcome stops the move there (the copy
+    /// is removed, nothing is written). A relocation passes <see cref="RecheckBeforeRepointAsync"/>; the re-copy of an
+    /// edited source (into the row's CURRENT container) passes <see cref="RecheckFileUnchangedAsync"/>.
+    /// </param>
+    /// <remarks>
+    /// #2159 fix round: every path that stops a move after its copy exists removes the copy itself; a move that EXITS by an
+    /// exception instead — a cancellation mid-replay (shutdown), which the fault filters let through, or an unexpected
+    /// fault — removes it here, with <see cref="CancellationToken.None"/>, best effort and logged
+    /// (<see cref="RemoveAbandonedCopyAsync"/>). A copy the row may already point at is never removed blindly.
+    /// </remarks>
     private async Task<MoveResult> MoveAsync(
         Guid documentId, Entity row, string sourceDrive, string sourceItem, string targetDrive, ReplayPlan plan,
-        RelocationLedger ledger, LedgerSourceState sourceState, CancellationToken ct)
+        RelocationLedger ledger, LedgerSourceState sourceState, CancellationToken ct,
+        Func<CancellationToken, Task<DocumentRelocationOutcome?>>? recheck = null)
+    {
+        var copy = new CopyInFlight();
+        var returned = false;
+        try
+        {
+            var result = await MoveCoreAsync(documentId, row, sourceDrive, sourceItem, targetDrive, plan, ledger, sourceState,
+                copy, ct, recheck).ConfigureAwait(false);
+            returned = true; // every return has committed its copy or removed it itself
+            return result;
+        }
+        finally
+        {
+            if (!returned && copy.Item is { } abandoned && !copy.Committed)
+            {
+                await RemoveAbandonedCopyAsync(documentId, targetDrive, abandoned, copy.PointerWriteStarted).ConfigureAwait(false);
+            }
+        }
+    }
+
+    /// <summary>What a move's copy has reached, for <see cref="MoveAsync"/>'s cleanup when the move exits by an exception.</summary>
+    private sealed class CopyInFlight
+    {
+        /// <summary>The copy, once its first version was written.</summary>
+        public string? Item { get; set; }
+
+        /// <summary>The re-point that names the copy was sent (it may have landed even if it did not answer).</summary>
+        public bool PointerWriteStarted { get; set; }
+
+        /// <summary>The re-point landed: the copy is the row's file.</summary>
+        public bool Committed { get; set; }
+    }
+
+    /// <summary>
+    /// Removes the copy of a move that exited by an exception before it was committed, with
+    /// <see cref="CancellationToken.None"/> (the move's own token may be the cancelled one). When the re-point had been
+    /// sent, the copy is KEPT (PR #2161 re-check): the move exits this way only when that write did not answer — a
+    /// cancellation (Make Secure's request token) — so it may have landed, or may still land after any re-read, and
+    /// deleting a file a row may point at would lose the document. The copy is logged for an administrator. Never throws.
+    /// </summary>
+    private async Task RemoveAbandonedCopyAsync(Guid documentId, string targetDrive, string copyItem, bool pointerWriteStarted)
+    {
+        try
+        {
+            if (pointerWriteStarted)
+            {
+                _logger.LogError(
+                    "[DOCUMENT-RELOCATE] the move of document {DocumentId} stopped while re-pointing it and the re-point may "
+                    + "still land; the copy {TargetDrive}/{TargetItem} is kept — an administrator must check whether the row "
+                    + "names it.", documentId, targetDrive, copyItem);
+                return;
+            }
+
+            _logger.LogWarning(
+                "[DOCUMENT-RELOCATE] the move of document {DocumentId} stopped before its re-point (cancelled or faulted); "
+                + "removing its copy {TargetDrive}/{TargetItem}; the row and the source are unchanged.", documentId, targetDrive, copyItem);
+            await DeleteQuietlyAsync(targetDrive, copyItem, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "[DOCUMENT-RELOCATE] the abandoned copy {TargetDrive}/{TargetItem} of document {DocumentId} could not be "
+                + "removed; an administrator must delete it.", targetDrive, copyItem, documentId);
+        }
+    }
+
+    /// <summary>What the row says about a copy whose re-point faulted (refused, or sent and did not answer).</summary>
+    private enum CopyNamed
+    {
+        /// <summary>
+        /// The row names something else NOW. For a write whose outcome is unknown this proves nothing: it may still land.
+        /// </summary>
+        No,
+
+        /// <summary>The row names the copy: the re-point (one atomic update) landed.</summary>
+        Yes,
+
+        /// <summary>The row could not be read again: it may name the copy, so the copy must be kept.</summary>
+        Unknown,
+    }
+
+    /// <summary>
+    /// After a re-point that faulted — refused (the client's last retry only), or sent and did not answer — reads the row again
+    /// with <see cref="CancellationToken.None"/> — the move's own token may be the cancelled one — to learn whether it
+    /// landed. Best effort: a read that faults or finds no row is <see cref="CopyNamed.Unknown"/>. Never throws.
+    /// </summary>
+    private async Task<CopyNamed> RowNamesCopyAsync(Guid documentId, string targetDrive, string copyItem)
+    {
+        try
+        {
+            var row = await ReadRowAsync(documentId, CancellationToken.None).ConfigureAwait(false);
+            if (row is null)
+            {
+                return CopyNamed.Unknown;
+            }
+
+            return SameItem(row.GetAttributeValue<string>(DriveColumn), row.GetAttributeValue<string>(ItemColumn), targetDrive, copyItem)
+                ? CopyNamed.Yes
+                : CopyNamed.No;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[DOCUMENT-RELOCATE] document {DocumentId} could not be read again after its re-point.", documentId);
+            return CopyNamed.Unknown;
+        }
+    }
+
+    /// <summary>
+    /// PR #2161 re-check: did Dataverse DEFINITELY refuse a write, so it never commits? Only when it ANSWERED with a refusal
+    /// — a service fault or a 4xx (the update's transaction rolled back; the <c>DecisionActionExecutors.IsClearRefusal</c>
+    /// rule); a concurrency mismatch arrives as such a fault. Looked for through the whole exception chain: the entity
+    /// service wraps every failure, a cancellation included, in an <see cref="InvalidOperationException"/>. A timeout, a
+    /// cancellation, a transport fault or a 5xx is not an answer: the write may have committed, or may still. Even a
+    /// definite refusal is only the client's LAST attempt (it retries internally), so the caller still reads the row
+    /// again before removing anything.
+    /// </summary>
+    internal static bool IsDefiniteWriteRejection(Exception ex)
+    {
+        for (var e = ex; e is not null; e = e.InnerException)
+        {
+            if (e is System.ServiceModel.FaultException<OrganizationServiceFault>
+                || e is Microsoft.PowerPlatform.Dataverse.Client.Utils.DataverseOperationException
+                {
+                    InnerException: Microsoft.Rest.HttpOperationException
+                    {
+                        Response.StatusCode: >= System.Net.HttpStatusCode.BadRequest and < System.Net.HttpStatusCode.InternalServerError,
+                    },
+                })
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private async Task<MoveResult> MoveCoreAsync(
+        Guid documentId, Entity row, string sourceDrive, string sourceItem, string targetDrive, ReplayPlan plan,
+        RelocationLedger ledger, LedgerSourceState sourceState, CopyInFlight inFlight, CancellationToken ct,
+        Func<CancellationToken, Task<DocumentRelocationOutcome?>>? recheck)
     {
         if (ledger.Entries.Count >= MaxLedgerEntries)
         {
             return MoveResult.Failed(DocumentRelocationOutcome.Of(
                 documentId, RelocationState.Failed, sourceDrive, sourceItem, targetDrive, null,
-                $"the row already owes {ledger.Entries.Count} earlier moves; settle them before moving it again"));
+                $"the row already owes {ledger.Entries.Count} earlier moves; settle them before moving it again") with
+            {
+                TerminalCause = TerminalLedgerFull,
+            });
         }
 
         // Read the row's own reference columns BEFORE any byte moves: if they cannot be read, nothing has happened yet.
@@ -1113,6 +2180,7 @@ public sealed class DocumentContainerRelocator
             }
 
             copy = written;
+            inFlight.Item = written!.Id; // the check above refused a write with no item
         }
 
         _logger.LogInformation(
@@ -1160,7 +2228,15 @@ public sealed class DocumentContainerRelocator
             At = _time.GetUtcNow(),
             Witness = plan.OldItemWitness,
         };
-        alsoWrite[RelocationLedgerColumn] = ledger.With(entry).Serialize();
+        // #2159 slice 2: a release is CONSUMED here, in the re-point's own write, by a move that LEAVES its container — the
+        // item it named is no longer the row's. A re-copy WITHIN the container (an edited source closed in place, #2159 fix
+        // round) is not the move it releases: the release is kept, re-bound to the copy (same source container and secure
+        // record, same target, same age), so the released move still runs.
+        var release = RecordContainerResolver.IsSameContainerId(sourceDrive, targetDrive)
+                      && ledger.Release is { } kept && SameItem(kept.SourceDrive, kept.SourceItem, sourceDrive, sourceItem)
+            ? kept with { SourceItem = copy.Id }
+            : null;
+        alsoWrite[RelocationLedgerColumn] = (ledger.With(entry) with { Release = release }).Serialize();
         alsoWrite[RelocatedVersionHistory.Column] = record.Json!;
 
         // Round 54 item 2: the re-point is destructive — only under a lock confirmed as this call's NOW. A lost lock
@@ -1173,18 +2249,83 @@ public sealed class DocumentContainerRelocator
                 LockLost(documentId, "before the re-point; the row still names its file and the copy was removed")));
         }
 
+        if (recheck is not null)
+        {
+            DocumentRelocationOutcome? stopped;
+            try
+            {
+                stopped = await recheck(ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogError(ex, "[DOCUMENT-RELOCATE] the re-check before re-pointing document {DocumentId} faulted.", documentId);
+                stopped = DocumentRelocationOutcome.Of(documentId, RelocationState.Failed, sourceDrive, sourceItem, targetDrive, null,
+                    $"the re-check before the re-point faulted ({ex.GetType().Name}); the copy was removed and nothing was written");
+            }
+
+            if (stopped is not null)
+            {
+                _logger.LogWarning(
+                    "[DOCUMENT-RELOCATE] re-point STOPPED for document {DocumentId} ({Detail}); removing the copy "
+                    + "{TargetDrive}/{TargetItem}; the row still points at {SourceDrive}/{SourceItem}.",
+                    documentId, stopped.Detail, targetDrive, copy.Id, sourceDrive, sourceItem);
+                await DeleteQuietlyAsync(targetDrive, copy.Id, ct).ConfigureAwait(false);
+                return MoveResult.Failed(stopped);
+            }
+        }
+
         try
         {
+            inFlight.PointerWriteStarted = true;
             await WritePointerAsync(documentId, targetDrive, copy.Id, copyFacts!.WebUrl, alsoWrite, ct).ConfigureAwait(false);
+            inFlight.Committed = true;
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            _logger.LogError(ex,
-                "[DOCUMENT-RELOCATE] re-point FAILED for document {DocumentId}; removing the copy {TargetDrive}/{TargetItem}; "
-                + "the row still points at {SourceDrive}/{SourceItem}.", documentId, targetDrive, copy.Id, sourceDrive, sourceItem);
-            await DeleteQuietlyAsync(targetDrive, copy.Id, ct).ConfigureAwait(false);
-            return MoveResult.Failed(DocumentRelocationOutcome.Of(
-                documentId, RelocationState.Failed, sourceDrive, sourceItem, targetDrive, null, "the row could not be re-pointed"));
+            // The row is ALWAYS read again first, a definite refusal included: the Dataverse client retries an update
+            // internally (502/503, transient SQL codes, throttling), so the refusal it surfaces is only its LAST attempt's
+            // answer — an earlier attempt may have committed. A row that names the copy is a commit, whatever the exception.
+            var definite = IsDefiniteWriteRejection(ex);
+            var names = await RowNamesCopyAsync(documentId, targetDrive, copy.Id).ConfigureAwait(false);
+
+            // PR #2161 re-check: only a DEFINITE refusal (Dataverse answered with a fault or a 4xx) whose row was read and
+            // names something else proves the update never committed, so only then is the copy removed.
+            if (definite && names == CopyNamed.No)
+            {
+                _logger.LogError(ex,
+                    "[DOCUMENT-RELOCATE] document {DocumentId}: Dataverse refused the re-point and the row, read again, does not "
+                    + "name the copy; the copy {TargetDrive}/{TargetItem} is removed.", documentId, targetDrive, copy.Id);
+                await DeleteQuietlyAsync(targetDrive, copy.Id, CancellationToken.None).ConfigureAwait(false);
+                return MoveResult.Failed(DocumentRelocationOutcome.Of(
+                    documentId, RelocationState.Failed, sourceDrive, sourceItem, targetDrive, null, "the row could not be re-pointed"));
+            }
+
+            // Otherwise the outcome is unknown: a refusal whose row could not be read again, or a write that was SENT and
+            // did not answer (a timeout, a cancellation — the request's own token, wrapped by the entity service — a
+            // transport fault or a 5xx after send), which may have landed or may still land after any re-read. A row that
+            // does not name the copy (yet) proves nothing, so the copy is KEPT — a stray copy is recoverable, a row pointing
+            // at a deleted file is not.
+            if (names != CopyNamed.Yes)
+            {
+                _logger.LogError(ex,
+                    "[DOCUMENT-RELOCATE] document {DocumentId}: {Answer} ({Reread}); the copy {TargetDrive}/{TargetItem} is kept "
+                    + "— an administrator must check whether the row names it.",
+                    documentId,
+                    definite ? "Dataverse refused the re-point, but an earlier attempt of the client's retries may have committed it"
+                             : "the re-point did not answer and may still land",
+                    names == CopyNamed.Unknown ? "the row could not be read again" : "the row does not name it yet",
+                    targetDrive, copy.Id);
+                return MoveResult.Failed(DocumentRelocationOutcome.Of(
+                    documentId, RelocationState.Failed, sourceDrive, sourceItem, targetDrive, null,
+                    names == CopyNamed.Unknown
+                        ? "the re-point faulted and the row could not be read again; the copy is kept until it is checked"
+                        : "the re-point did not answer and may still land; the copy is kept until it is checked"));
+            }
+
+            // The one atomic update landed (pointer, ledger, version record, release): the move is committed.
+            _logger.LogWarning(ex,
+                "[DOCUMENT-RELOCATE] document {DocumentId}: the re-point faulted but landed; the move is committed.", documentId);
+            inFlight.Committed = true;
         }
 
         _logger.LogInformation(
@@ -1194,6 +2335,12 @@ public sealed class DocumentContainerRelocator
             documentId, sourceDrive, sourceItem, targetDrive, copy.Id,
             string.Join(", ", alsoWrite.Keys.Where(k => k != RelocationLedgerColumn && k != RelocatedVersionHistory.Column)),
             record.Recorded);
+        if (release is not null)
+        {
+            _logger.LogInformation(
+                "[DOCUMENT-RELOCATE] document {DocumentId}'s F3 release into {Target} is kept, re-bound from {SourceItem} to its "
+                + "re-copy {CopyItem} in the same container.", documentId, release.TargetContainer, sourceItem, copy.Id);
+        }
         return new MoveResult(copy.Id, copyFacts, null, record.Truncated);
     }
 
@@ -1342,7 +2489,10 @@ public sealed class DocumentContainerRelocator
     // A source edited after its move (owner round 45 item 4): re-copy, verify, re-point
     // ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-    private sealed record RecopyResult(SettleSummary Summary, Entity? Row);
+    /// <param name="Summary">What the settle and the re-copy found.</param>
+    /// <param name="Row">The row after the re-copy re-pointed it; <see langword="null"/> when it did not.</param>
+    /// <param name="CheckedOut">The re-copy stopped because the document was checked out while it ran (#2159 fix round).</param>
+    private sealed record RecopyResult(SettleSummary Summary, Entity? Row, DocumentRelocationOutcome? CheckedOut = null);
 
     /// <summary>
     /// Closes every source in <paramref name="summary"/> that was edited after its move: a NEW copy, in the document's
@@ -1415,14 +2565,17 @@ public sealed class DocumentContainerRelocator
         var finalFacts = editIsCurrent ? lastSourceFacts! : current.Facts!;
         reports = reports.Select(r => r with { EditIsCurrent = editIsCurrent }).ToList();
 
+        // #2159 fix round: the re-copy re-points too, so it is re-checked the same way just before — a document checked
+        // out (or re-pointed) while the histories were replayed is left alone.
         var moved = await MoveAsync(documentId, row, currentDrive, currentItem, currentDrive,
             new ReplayPlan(steps, finalFacts, current.Witness, current.Facts!.Name ?? row.GetAttributeValue<string>(FileNameColumn)),
-            ledger, LedgerSourceState.Pending, ct).ConfigureAwait(false);
+            ledger, LedgerSourceState.Pending, ct,
+            recheck: token => RecheckFileUnchangedAsync(documentId, currentDrive, currentItem, currentDrive, token)).ConfigureAwait(false);
         if (moved.Failure is not null)
         {
             summary.AddPending($"source-changed-after-move: the re-copy failed ({moved.Failure.State}: {moved.Failure.Detail}); "
                                + "a repeat call retries");
-            return new RecopyResult(summary, null);
+            return new RecopyResult(summary, null, moved.Failure.State == RelocationState.CheckedOut ? moved.Failure : null);
         }
 
         _logger.LogInformation(
@@ -1516,7 +2669,7 @@ public sealed class DocumentContainerRelocator
         {
             // An unreadable ledger is never acted on (it could name anything); an administrator must repair it.
             return SettleSummary.Unreadable(
-                $"ledger-unreadable: {RelocationLedgerColumn} of this document is not a relocation ledger; it is not acted on — "
+                $"{LedgerUnreadablePendingPrefix} {RelocationLedgerColumn} of this document is not a relocation ledger; it is not acted on — "
                 + "an administrator must clear or repair it");
         }
 
@@ -1611,7 +2764,7 @@ public sealed class DocumentContainerRelocator
 
         // Write the ledger back. A failed write leaves the stored ledger as it was; every step above is idempotent, so the
         // next call redoes only what it finds owed — but this call must not report the row settled.
-        var updated = new RelocationLedger(remaining);
+        var updated = ledger with { Entries = remaining };
         if (!updated.SameAs(ledger))
         {
             if (!await StillLockedAsync(documentId, ct).ConfigureAwait(false))
@@ -1626,7 +2779,7 @@ public sealed class DocumentContainerRelocator
             {
                 await _dataverse.UpdateAsync(DocumentEntity, documentId, new Dictionary<string, object>
                 {
-                    [RelocationLedgerColumn] = remaining.Count == 0 ? DBNull.Value : updated.Serialize(),
+                    [RelocationLedgerColumn] = updated.IsEmpty ? DBNull.Value : updated.Serialize(),
                 }, ct).ConfigureAwait(false);
                 _logger.LogInformation(
                     "[DOCUMENT-RELOCATE] ledger of document {DocumentId}: {Before} -> {After} entr(ies) owed or kept.",
@@ -1746,7 +2899,8 @@ public sealed class DocumentContainerRelocator
     /// <summary>
     /// The old item: gone → removed; referenced only by rows OUTSIDE → kept for those records (settled); referenced by
     /// rows that belong where this document's file now is → moved along / re-keyed; unreferenced → deleted only when it
-    /// still matches the witness recorded when its copy was verified (round 45 item 4) — edited since → reported
+    /// still matches the witness recorded when its copy was verified (round 45 item 4) AND the row's current file exists
+    /// (PR #2161 re-check) — edited since → reported
     /// <see cref="SourceChangedAfterMovePrefix"/> and handed to the re-copy. Anything unknown keeps it pending.
     /// </summary>
     private async Task<SourceSettlement> SettleSourceAsync(
@@ -1785,8 +2939,24 @@ public sealed class DocumentContainerRelocator
                 continue;
             }
 
+            if (purpose == RelocationPurpose.Refile && !derivation.IsSecure)
+            {
+                // #2159: a re-file moves ANOTHER row along only into a secure record's own container (that narrows). Whether
+                // it may leave for any other container — it may still be isolated — is that row's own re-file to decide, so
+                // it keeps the source as its file, settled.
+                keptFor.Add($"sprk_document:{other} (a re-file moves another row along only into a secure container; it keeps the source)");
+                continue;
+            }
+
             // Inside: it belongs where this document's file now is — move it along, with its OWN copy (unique item key).
             var along = await MoveAlongAsync(other, entry, currentDrive, purpose, ct).ConfigureAwait(false);
+            if (along.State == RelocationState.HeldIsolated)
+            {
+                // #2159: an isolated row is never moved along out of isolation either; the source stays its file, settled.
+                keptFor.Add($"sprk_document:{other} (owned by the Secure Record owner team; it keeps the source as its file)");
+                continue;
+            }
+
             summary.MovedAlong.Add(along);
             switch (along.State)
             {
@@ -1880,6 +3050,14 @@ public sealed class DocumentContainerRelocator
             return new SourceSettlement(LedgerSourceState.Pending, LockLost(documentId, "before the source delete; the source is kept"));
         }
 
+        // PR #2161 re-check: the source is deleted only while the row's CURRENT file provably exists. A row can name a file
+        // that is gone (a re-point that landed after its copy was removed); deleting the source then loses the document.
+        if (!await CurrentFileExistsAsync(documentId, currentDrive, currentItem, ct).ConfigureAwait(false))
+        {
+            return new SourceSettlement(LedgerSourceState.Pending,
+                "the document's current file is missing or could not be read, so its source is kept");
+        }
+
         if (!await DeleteQuietlyAsync(entry.SourceDrive, entry.SourceItem, ct).ConfigureAwait(false))
         {
             return new SourceSettlement(LedgerSourceState.Pending, "its delete failed (logged); a repeat call retries");
@@ -1889,6 +3067,33 @@ public sealed class DocumentContainerRelocator
             "[DOCUMENT-RELOCATE] source deleted: {SourceDrive}/{SourceItem} (document {DocumentId} now {CurrentDrive}).",
             entry.SourceDrive, entry.SourceItem, documentId, currentDrive);
         return new SourceSettlement(LedgerSourceState.Removed, null);
+    }
+
+    /// <summary>
+    /// PR #2161 re-check — does the row's current file exist, read now? Missing or unreadable is <see langword="false"/>,
+    /// logged as an Error naming the document only: its source is then kept, and the entry stays owed.
+    /// </summary>
+    private async Task<bool> CurrentFileExistsAsync(Guid documentId, string currentDrive, string currentItem, CancellationToken ct)
+    {
+        string why;
+        try
+        {
+            if (await _spe.GetItemCreatorAsync(currentDrive, currentItem, ct).ConfigureAwait(false) is not null)
+            {
+                return true;
+            }
+
+            why = "is missing";
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            why = $"could not be read ({ex.GetType().Name})";
+        }
+
+        _logger.LogError(
+            "[DOCUMENT-RELOCATE] document {DocumentId}: its current file {Why}; the old source its ledger owes is NOT deleted "
+            + "and stays pending.", documentId, why);
+        return false;
     }
 
     internal enum WitnessComparison
@@ -2074,6 +3279,13 @@ public sealed class DocumentContainerRelocator
                     targetDrive, null, bindingRefusal + " — an administrator must repair it; it is not moved");
             }
 
+            // #2159 B4: a checked-out row is never moved along (its holder is editing the source); the source stays pending.
+            if (IsCheckedOut(row))
+            {
+                return DocumentRelocationOutcome.Of(other, RelocationState.CheckedOut, entry.SourceDrive, entry.SourceItem,
+                    targetDrive, null, "it is checked out; it is moved along once it is checked in");
+            }
+
             var ledger = RelocationLedger.Parse(row.GetAttributeValue<string>(RelocationLedgerColumn));
             if (ledger is null)
             {
@@ -2089,8 +3301,15 @@ public sealed class DocumentContainerRelocator
                     null, "the source is not in its drive");
             }
 
-            var verified = purpose == RelocationPurpose.MakeSecure && derivation.IsSecure
-                || await _resolver.IsRelocationSourceVerifiedAsync(other, entry.SourceDrive, entry.SourceItem, ct).ConfigureAwait(false);
+            // #2159: the same widening guard as the row's own move, under ITS lock.
+            if (await IsolationHoldAsync(other, derivation, entry.SourceDrive, entry.SourceItem, targetDrive, ct).ConfigureAwait(false)
+                is { } held)
+            {
+                return held;
+            }
+
+            var verified = await IsSourceVerifiedAsync(other, row, entry.SourceDrive, entry.SourceItem, facts, derivation, purpose, ct)
+                .ConfigureAwait(false);
             if (!verified)
             {
                 return DocumentRelocationOutcome.Of(other, RelocationState.SourceUnverified, entry.SourceDrive, entry.SourceItem,
@@ -2100,19 +3319,27 @@ public sealed class DocumentContainerRelocator
             if (facts.Size is > MaxRelocatableBytes)
             {
                 return DocumentRelocationOutcome.Of(other, RelocationState.Failed, entry.SourceDrive, entry.SourceItem, targetDrive,
-                    null, "too large for a single-request copy");
+                    null, "too large for a single-request copy") with
+                {
+                    TerminalCause = TerminalTooLarge,
+                };
             }
 
             var history = await ReadHistoryAsync(entry.SourceDrive, entry.SourceItem, VersionRecordOf(row), ct).ConfigureAwait(false);
             if (history.Failure is not null)
             {
                 return DocumentRelocationOutcome.Of(other, RelocationState.Failed, entry.SourceDrive, entry.SourceItem, targetDrive,
-                    null, $"its version history could not be copied: {history.Failure}");
+                    null, $"its version history could not be copied: {history.Failure}") with
+                {
+                    TerminalCause = history.TooLarge ? TerminalTooLarge : null,
+                };
             }
 
             var moved = await MoveAsync(other, row, entry.SourceDrive, entry.SourceItem, targetDrive,
                 new ReplayPlan(history.Steps, facts, history.Witness, facts.Name ?? row.GetAttributeValue<string>(FileNameColumn)),
-                ledger, LedgerSourceState.Delegated, ct).ConfigureAwait(false);
+                ledger, LedgerSourceState.Delegated, ct,
+                recheck: token => RecheckBeforeRepointAsync(other, entry.SourceDrive, entry.SourceItem, targetDrive, token))
+                .ConfigureAwait(false);
             if (moved.Failure is not null)
             {
                 return moved.Failure;
@@ -2144,7 +3371,7 @@ public sealed class DocumentContainerRelocator
         => await _dataverse.RetrieveAsync(
             DocumentEntity, documentId,
             [DriveColumn, ItemColumn, Spaarke.Dataverse.DocumentPointerBinding.BoundItemIdColumn, FileNameColumn, SearchIndexNameColumn,
-             RelocationLedgerColumn, RelocatedVersionHistory.Column], ct)
+             RelocationLedgerColumn, RelocatedVersionHistory.Column, CheckedOutByColumn, CheckedOutDateColumn], ct)
             .ConfigureAwait(false);
 
     private static bool SameItem(string? driveA, string? itemA, string? driveB, string? itemB)
@@ -2190,10 +3417,19 @@ public sealed class DocumentContainerRelocator
     // The ledger
     // ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-    /// <summary>The row's relocation ledger: the old items a move of THIS row still owes something for.</summary>
+    /// <summary>
+    /// The row's relocation ledger: the old items a move of THIS row still owes something for, and (#2159 slice 2) the F3
+    /// release a BFF re-file recorded for the row's next move (<see cref="Release"/>).
+    /// </summary>
     internal sealed record RelocationLedger(IReadOnlyList<RelocationLedgerEntry> Entries)
     {
         public static RelocationLedger EmptyLedger { get; } = new([]);
+
+        /// <summary>#2159 slice 2: the F3 release of the row's move from one secure record's container into another's.</summary>
+        public RelocationRelease? Release { get; init; }
+
+        /// <summary>Nothing owed and no release: the column is cleared.</summary>
+        public bool IsEmpty => Entries.Count == 0 && Release is null;
 
         /// <summary>The ledger in <paramref name="json"/>; empty for no value; <see langword="null"/> when unreadable.</summary>
         public static RelocationLedger? Parse(string? json)
@@ -2207,12 +3443,13 @@ public sealed class DocumentContainerRelocator
             {
                 var stored = JsonSerializer.Deserialize<StoredLedger>(json, LedgerJson);
                 if (stored is not { V: 1, Entries: { } entries }
-                    || entries.Any(e => string.IsNullOrWhiteSpace(e.SourceDrive) || string.IsNullOrWhiteSpace(e.SourceItem)))
+                    || entries.Any(e => string.IsNullOrWhiteSpace(e.SourceDrive) || string.IsNullOrWhiteSpace(e.SourceItem))
+                    || stored.Release is { IsWellFormed: false })
                 {
                     return null;
                 }
 
-                return new RelocationLedger(entries);
+                return new RelocationLedger(entries) { Release = stored.Release };
             }
             catch (JsonException)
             {
@@ -2221,13 +3458,51 @@ public sealed class DocumentContainerRelocator
         }
 
         public RelocationLedger With(RelocationLedgerEntry entry)
-            => new(Entries.Where(e => !SameItem(e.SourceDrive, e.SourceItem, entry.SourceDrive, entry.SourceItem)).Append(entry).ToList());
+            => this with
+            {
+                Entries = Entries.Where(e => !SameItem(e.SourceDrive, e.SourceItem, entry.SourceDrive, entry.SourceItem)).Append(entry).ToList(),
+            };
 
-        public string Serialize() => JsonSerializer.Serialize(new StoredLedger(1, Entries.ToList()), LedgerJson);
+        public string Serialize() => JsonSerializer.Serialize(new StoredLedger(1, Entries.ToList(), Release), LedgerJson);
 
-        public bool SameAs(RelocationLedger other) => Entries.SequenceEqual(other.Entries);
+        public bool SameAs(RelocationLedger other) => Entries.SequenceEqual(other.Entries) && Equals(Release, other.Release);
 
-        private sealed record StoredLedger(int V, List<RelocationLedgerEntry>? Entries);
+        private sealed record StoredLedger(int V, List<RelocationLedgerEntry>? Entries, RelocationRelease? Release = null);
+    }
+
+    /// <summary>
+    /// #2159 slice 2 — the F3 release of ONE move of the row: its file <see cref="SourceItem"/> in secure record
+    /// <see cref="SourceRecordTable"/>/<see cref="SourceRecordId"/>'s own container <see cref="SourceDrive"/> may follow it
+    /// into <see cref="TargetContainer"/>, because a BFF re-file took the row out of that record with
+    /// <see cref="AuthorizedBy"/>'s F3 permission at <see cref="At"/>. Written only by <see cref="RecordReleaseAsync"/>
+    /// under the row's lock; consumed by the re-point; honoured only on an exact match (<see cref="Releases"/>).
+    /// </summary>
+    internal sealed record RelocationRelease
+    {
+        public required string SourceDrive { get; init; }
+        public required string SourceItem { get; init; }
+        public required string TargetContainer { get; init; }
+        public required string SourceRecordTable { get; init; }
+        public Guid SourceRecordId { get; init; }
+        public Guid AuthorizedBy { get; init; }
+        public string? Basis { get; init; }
+        public DateTimeOffset At { get; init; }
+
+        /// <summary>Every field a release is matched on is present (otherwise the whole ledger is unreadable).</summary>
+        [JsonIgnore]
+        public bool IsWellFormed
+            => !string.IsNullOrWhiteSpace(SourceDrive) && !string.IsNullOrWhiteSpace(SourceItem)
+               && !string.IsNullOrWhiteSpace(TargetContainer) && !string.IsNullOrWhiteSpace(SourceRecordTable)
+               && SourceRecordId != Guid.Empty && At != default;
+
+        /// <summary>Unexpired: recorded no more than <see cref="ReleaseLifetime"/> ago, and not in the future.</summary>
+        public bool IsCurrent(DateTimeOffset now) => At <= now + TimeSpan.FromMinutes(5) && now - At <= ReleaseLifetime;
+
+        /// <summary>Does it release exactly this move: this item, into this container, unexpired?</summary>
+        public bool Releases(string sourceDrive, string sourceItem, string target, DateTimeOffset now)
+            => IsCurrent(now)
+               && SameItem(SourceDrive, SourceItem, sourceDrive, sourceItem)
+               && RecordContainerResolver.IsSameContainerId(TargetContainer, target);
     }
 
     /// <summary>
@@ -2377,6 +3652,14 @@ public enum RelocationPurpose
 
     /// <summary>Task 150's Make Secure transition: the file the document shows moves into the record's own container.</summary>
     MakeSecure,
+
+    /// <summary>
+    /// #2159: the document's filing changed (by any writer), so its file moves into its NEW derived container. Only the
+    /// row's BFF-bound item that the BFF identity uploaded is moved (never the legacy check, B9), and never an unfiled
+    /// document's file of unknown home: see
+    /// <see cref="DocumentContainerRelocator.RelocateIfMisplacedAsync"/>. (No purpose moves a file out of isolation.)
+    /// </summary>
+    Refile,
 }
 
 /// <summary>What a relocation found or did.</summary>
@@ -2417,6 +3700,60 @@ public enum RelocationState
 
     /// <summary>A copy, verification or re-point step failed; the row is unchanged.</summary>
     Failed,
+
+    /// <summary>
+    /// #2159 (every purpose): the row is still owned by the Secure Record owner team, so its file is not moved into a
+    /// container that is not a secure record's own — its filing was changed outside the BFF and isolation holds the row
+    /// (owner round 24 item 2). Only an F3 act (<c>/unsecure-project</c>, a re-parent with F3) releases it; the next
+    /// re-file pass then moves it. A ledger entry an earlier move owed was still settled; nothing else was written.
+    /// </summary>
+    HeldIsolated,
+
+    /// <summary>
+    /// #2159 / #2151 (<see cref="RelocationPurpose.Refile"/>): the document is UNFILED and its file is in no business
+    /// unit's container and in no declared home — where it belongs cannot be told (a record's narrower audience must not
+    /// be widened to a whole business unit). Reported and left; nothing was written.
+    /// </summary>
+    UnfiledHomeUnknown,
+
+    /// <summary>
+    /// #2159 B4 (every purpose): the document is checked out (<c>sprk_checkedoutby</c> / <c>sprk_checkedoutdate</c>), so its
+    /// file is not copied, re-pointed, settled or deleted while its holder edits it. Not settled: check-in modifies the row
+    /// and clears the checkout, and a later pass moves it. Nothing was written.
+    /// </summary>
+    CheckedOut,
+}
+
+/// <summary>#2159 slice 2: what <see cref="DocumentContainerRelocator.RecordReleaseAsync"/> did.</summary>
+public enum RelocationReleaseState
+{
+    /// <summary>The release was written to the row's ledger, under its lock.</summary>
+    Recorded,
+
+    /// <summary>No release is needed: the document's file does not leave a secure record's own container for another's.</summary>
+    NotNeeded,
+
+    /// <summary>
+    /// Not recorded: the move the file would make is not one this F3 permission covers (its file is in a secure record the
+    /// re-file did not leave). The widening guard keeps holding it.
+    /// </summary>
+    NotCovered,
+
+    /// <summary>Not recorded: another relocation of the document held its lock past <see cref="DocumentContainerRelocator.ReleaseLockWait"/>.</summary>
+    LockHeld,
+
+    /// <summary>Not recorded: something could not be read or written (the file stays held — fail closed).</summary>
+    Failed,
+}
+
+/// <summary>#2159 slice 2: the answer of <see cref="DocumentContainerRelocator.RecordReleaseAsync"/>.</summary>
+public sealed record RelocationReleaseOutcome(RelocationReleaseState State, string Detail)
+{
+    /// <summary>
+    /// #2159 fix round: not recorded now (<see cref="RelocationReleaseState.LockHeld"/> or
+    /// <see cref="RelocationReleaseState.Failed"/>), and its retry was queued (<see cref="RelocationReleaseRetryJobHandler"/>).
+    /// </summary>
+    public bool RetryQueued { get; init; }
 }
 
 /// <summary>A source kept because rows of other records still use it (round 37 item 2: <c>SourceKeptForOtherRecords</c>).</summary>
@@ -2461,6 +3798,21 @@ public sealed record DocumentRelocationOutcome(
 {
     /// <summary>What is still owed (<c>source-pending</c>, <c>index-pending</c>, <c>rekey-pending</c>, …); empty when settled.</summary>
     public IReadOnlyList<string> Pending { get; init; } = [];
+
+    /// <summary>
+    /// #2159 slice 2c: the row's F3 release had EXPIRED (<see cref="DocumentContainerRelocator.ReleaseLifetime"/>) and this call
+    /// dropped it — the move it released never happened, so the document stays held until a new F3 re-file. Reported once by
+    /// the job (<c>releaseExpiredDocuments</c>), for an administrator.
+    /// </summary>
+    public bool ReleaseExpired { get; init; }
+
+    /// <summary>
+    /// #2159 B5: a <see cref="RelocationState.Failed"/> that no repeat call can settle — <see cref="DocumentContainerRelocator.TerminalTooLarge"/>
+    /// or <see cref="DocumentContainerRelocator.TerminalLedgerFull"/> (the job adds
+    /// <see cref="DocumentContainerRelocator.TerminalLedgerUnreadable"/>). The job reports it once, never carries it, and it
+    /// fails no later run; <see langword="null"/> for every other outcome.
+    /// </summary>
+    public string? TerminalCause { get; init; }
 
     /// <summary>Sources kept because rows of other records still use them.</summary>
     public IReadOnlyList<KeptSource> KeptForOtherRecords { get; init; } = [];

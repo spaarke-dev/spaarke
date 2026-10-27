@@ -729,6 +729,12 @@ public class AnalysisTestFixture : WebApplicationFactory<Program>
                         });
                 return access.Object;
             });
+            // The fixture caller stands for a resolved internal systemuser: D7 document narrowing (uac-r2 task 188) hides
+            // every document from a caller that does not resolve to one, and this fixture's oid is not a GUID (#2229).
+            services.RemoveAll<Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver>();
+            services.AddScoped(_ => InternalCaller());
+            services.RemoveAll<Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver>();
+            services.AddSingleton(_ => InternalSystemUser());
             // R7 task 041 (FR-11) — scenario-aware mock for /api/ai/analysis/execute migration.
             // Replaces the previous loose mock that produced empty SSE streams. Drives the
             // same TestScenario enum the legacy MockAnalysisOrchestrationService used, so test
@@ -799,6 +805,24 @@ public class AnalysisTestFixture : WebApplicationFactory<Program>
         });
 
         builder.UseEnvironment("Testing");
+    }
+
+    private static readonly Guid InternalSystemUserId = Guid.Parse("0a0a0a0a-0000-0000-0000-000000002229");
+
+    /// <summary>#2229: every caller of this fixture resolves to one internal systemuser (not narrowed).</summary>
+    private static Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver InternalCaller()
+    {
+        var resolver = new Mock<Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver>();
+        resolver.Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Sprk.Bff.Api.Services.Ai.Context.CallerSystemUserResolution.Resolved(InternalSystemUserId.ToString("D")));
+        return resolver.Object;
+    }
+
+    private static Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver InternalSystemUser()
+    {
+        var identity = new Mock<Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver>();
+        identity.Setup(r => r.IsExternalAsync(InternalSystemUserId, It.IsAny<CancellationToken>())).ReturnsAsync(false);
+        return identity.Object;
     }
 
     private static string GenerateMockJwt(string userId)

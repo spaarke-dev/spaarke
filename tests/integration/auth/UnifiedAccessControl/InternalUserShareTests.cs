@@ -978,6 +978,24 @@ public class InternalUserShareTests
     // Unshare
     // ─────────────────────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// r3 task 048 (046 review K1): the removed user's root set is also cleared under every customer home directory — a
+    /// linked user's company sign-in reads under its tid.
+    /// </summary>
+    [Fact]
+    public async Task Unshare_ClearsTheUsersRootSet_AlsoUnderEveryCustomerHomeTenant()
+    {
+        var customer = Guid.Parse("4a8b0c3e-7d21-4f5a-9e6b-0480480480e3");
+        _shares.Seed(MatterTable, MatterId, User(UserId), CollaborateMask);
+
+        OkBody<UnshareRecordWithUserResponse>(await Unshare(UserId, workforceIdentity: Sprk.Bff.Api.Tests.AccessControl.IdentityBinding.IdentityBindingTestKit.Tenants(customer)))
+            .Removed.Should().BeTrue();
+
+        var id = ImpersonatedRootSetSource.CacheId(UserId, MatterTable);
+        _invalidated.Should().Contain(i => i.Tenant == customer.ToString("D") && i.Id == id);
+        _invalidated.Should().Contain(i => i.Tenant != customer.ToString("D") && i.Id == id, "and still under the caller's own");
+    }
+
     /// <summary>Acceptance criterion 4: removing a share that does not exist succeeds and writes nothing.</summary>
     [Fact]
     public async Task Unshare_AUserWithNoShare_Is200RemovedFalseAndSendsNoRevoke()
@@ -1500,12 +1518,14 @@ public class InternalUserShareTests
             => throw new InvalidOperationException("Simulated failure establishing the caller's rights.");
     }
 
-    private Task<IResult> Unshare(Guid? systemUserId, string? recordType = "matter") =>
+    private Task<IResult> Unshare(
+        Guid? systemUserId, string? recordType = "matter",
+        Microsoft.Extensions.Options.IOptionsMonitor<WorkforceIdentityOptions>? workforceIdentity = null) =>
         InternalShareEndpoints.UnshareAsync(
             new UnshareRecordWithUserRequest(recordType, MatterId, systemUserId),
             _shares, _users.Client, _flags, _cache.Object, AssignedAccess, _children.Synchronizer(_shares),
             Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(), _lease, AuthenticatedContext(),
-            NullLogger<Program>.Instance, CancellationToken.None);
+            NullLogger<Program>.Instance, CancellationToken.None, workforceIdentity);
 
     /// <summary>Task 114: the per-record removal lease /unshare-user takes (task 143's enforcer and the Restricted remover share it).</summary>
     private readonly Spaarke.Scheduling.IScheduledJobLease _lease = new Spaarke.Scheduling.ProcessLocalScheduledJobLease();

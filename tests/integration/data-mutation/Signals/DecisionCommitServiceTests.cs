@@ -110,6 +110,23 @@ public sealed class DecisionCommitServiceTests
         public Action<Guid>? BeforeSignalUpdate { get; set; }
         public List<Entity> ExistingRecords { get; } = new();
 
+        /// <summary>Task 161 (D-180, fix round 1 F1-a): how many ACTIVE budgets the matter really has, as the BFF's own (app-only) read
+        /// sees them; null: the read is not scripted and throws, which the routes must treat as "cannot be counted".
+        /// <see cref="AppBudgetsFault"/> throws instead when set.</summary>
+        public int? ActiveBudgets { get; set; }
+
+        /// <summary>How many of those the CALLER's own read of <c>sprk_budgets</c> returns (a Deep Read cannot see a budget owned in a
+        /// parent business unit). Null: the caller sees what is there. The routes must not rely on it.</summary>
+        public int? CallerSeesBudgets { get; set; }
+
+        public Exception? AppBudgetsFault { get; set; }
+
+        /// <summary>The caller-identity reads of <c>sprk_budgets</c> (the old, wrong source of "has no budget").</summary>
+        public List<string> BudgetReads { get; } = new();
+
+        /// <summary>The app-only reads of <c>sprk_budget</c>.</summary>
+        public List<QueryExpression> AppBudgetReads { get; } = new();
+
         /// <summary>Uac-r2 re-check F1: every query the commit service's reads asked (the stored-record lookup included).</summary>
         public List<QueryExpression> QueriesAsked { get; } = new();
 
@@ -232,6 +249,17 @@ public sealed class DecisionCommitServiceTests
                 .ReturnsAsync((QueryExpression query, CancellationToken _) =>
                 {
                     QueriesAsked.Add(query);
+                    if (query.EntityName == "sprk_budget")
+                    {
+                        // Task 161 (F1-a): the matter's active budgets, as the BFF's own app-only read sees them.
+                        AppBudgetReads.Add(query);
+                        if (AppBudgetsFault is { } appFault)
+                            throw appFault;
+                        if (ActiveBudgets is not { } actual)
+                            throw new InvalidOperationException("the budget count is not scripted");
+                        return new EntityCollection(Enumerable.Range(0, Math.Min(actual, 1)).Select(_ => new Entity("sprk_budget", Budget)).ToList());
+                    }
+
                     var createdBy = query.Criteria.Conditions.FirstOrDefault(c => c.AttributeName == "createdby" && c.Operator == ConditionOperator.Equal);
                     return new EntityCollection(ExistingRecords
                         .Where(r => createdBy is null || Equals(r.GetAttributeValue<EntityReference>("createdby")?.Id, createdBy.Values.Single()))
@@ -293,7 +321,7 @@ public sealed class DecisionCommitServiceTests
             PlanReads = new DecisionPlanReadStamp(Ledger, Clock, NullLogger<DecisionPlanReadStamp>.Instance);
 
             Probe = new Mock<CallerRecordAccessProbe>(
-                new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance, null!)
+                new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance, null!, null!)
             { CallBase = false };
             Probe.Setup(p => p.GetCallerSystemUserIdAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>())).ReturnsAsync(() => CallerUnresolved ? null : Caller);
             // FR-51: the caller's rights on the subject and the core record; every record is granted unless a test takes it away.
@@ -501,6 +529,15 @@ public sealed class DecisionCommitServiceTests
                 });
             }
 
+            if (path.StartsWith("sprk_budgets?", StringComparison.Ordinal))
+            {
+                // Task 161: the matter's active budgets, as the caller reads them.
+                BudgetReads.Add(path);
+                return (CallerSeesBudgets ?? ActiveBudgets) is { } count
+                    ? Ok(new Dictionary<string, object?> { ["value"] = Enumerable.Range(0, Math.Min(count, 1)).Select(_ => new Dictionary<string, object?> { ["sprk_budgetid"] = Budget.ToString("D") }).ToList() })
+                    : DataverseUserResponse.Fail(404, DataverseUserClientErrorCodes.NotFound, "unscripted");
+            }
+
             if (path.StartsWith("sprk_matters(", StringComparison.Ordinal) || path.StartsWith("sprk_projects(", StringComparison.Ordinal))
             {
                 var id = Guid.Parse(path[(path.IndexOf('(') + 1)..path.IndexOf(')')]);
@@ -540,7 +577,7 @@ public sealed class DecisionCommitServiceTests
                 resolver = recording.Object;
             }
 
-            var records = new DecisionRecordWriter(WriterClient(), resolver, CoreAncestors(), Entities.Object, RecordTypes, Clock, NullLogger<DecisionRecordWriter>.Instance);
+            var records = new DecisionRecordWriter(WriterClient(), resolver, CoreAncestors(), Entities.Object, RecordTypes, Clock, NullLogger<DecisionRecordWriter>.Instance, new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing);
             return new DecisionCommitService(access, plans, new DecisionActionExecutors(Executors.Values), records, WriterClient(),
                 Entities.Object, Probe.Object, Identity.Object, Links, LedgerStore ?? Ledger, FollowUps.Object, Lease, PlanReads, Clock, NullLogger<DecisionCommitService>.Instance);
         }
@@ -601,6 +638,7 @@ public sealed class DecisionCommitServiceTests
         private static DecisionRecordRef[] DefaultWritten(string code) => code switch
         {
             "revise-budget" => [new("sprk_budgetrevision", RevisionId), new("sprk_budget", Budget)],
+            "create-budget" => [new("sprk_budget", Budget)],
             "add-todo" => [new("sprk_todo", TodoId)],
             "send-budget-inquiry" => [new("sprk_servicerequest", ServiceRequestId), new("sprk_communication", CommunicationId)],
             "send-email" => [new("sprk_communication", Guid.Parse("c0430000-0000-4000-8000-000000000055"))],
@@ -628,6 +666,9 @@ public sealed class DecisionCommitServiceTests
 
     private static readonly IReadOnlyDictionary<string, JsonElement> ApproveValues = Values(("amount", 5000), ("note", "ok"));
 
+    private static readonly IReadOnlyDictionary<string, JsonElement> CreateBudgetValues =
+        Values(("amount", 90000m), ("reason", "No budget was ever set"));
+
     private static readonly IReadOnlyDictionary<string, JsonElement> TodoValues =
         Values(("title", "Chase the revision"), ("assignee", Assignee.ToString("D")), ("dueDate", "2026-10-20"));
 
@@ -651,6 +692,22 @@ public sealed class DecisionCommitServiceTests
             ],
             NextSteps = todo ? [new DecisionReviewNextStep { Code = "add-todo", Values = TodoValues }] : null,
             Because = "The firm agreed the scope change",
+        };
+
+    /// <summary>Task 161 (D-180): the Path B review as the wizard builds it for a matter with no active budget: Create budget in the
+    /// place Revise budget had.</summary>
+    private static DecisionReview CreateBudgetReview(bool create = true, bool inquiry = false, Guid? reviewId = null) =>
+        new()
+        {
+            ReviewId = reviewId ?? Guid.NewGuid(),
+            Confirmed = true,
+            Actions =
+            [
+                inquiry ? Take("send-budget-inquiry", InquiryValues) : Skip("send-budget-inquiry"),
+                create ? Take("create-budget", CreateBudgetValues) : Skip("create-budget"),
+                Skip("approve-variance"),
+            ],
+            Because = "The matter never had a budget",
         };
 
     private static DecisionReview Dismissal(string? code, string? detail = null) =>
@@ -918,8 +975,10 @@ public sealed class DecisionCommitServiceTests
         var rig = new Rig();
         QueryExpression? asked = null;
         rig.Entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
-            .Callback<QueryExpression, CancellationToken>((q, _) => asked = q)
-            .ReturnsAsync(new EntityCollection());
+            .Callback<QueryExpression, CancellationToken>((q, _) => { if (q.EntityName == "sprk_decisionrecord") asked = q; }) // the budget count is app-only too (F1-a)
+            .ReturnsAsync((QueryExpression q, CancellationToken _) => q.EntityName == "sprk_budget"
+                ? new EntityCollection(new List<Entity> { new Entity("sprk_budget", Budget) }) // the matter has a budget: Revise budget stays
+                : new EntityCollection());
         var review = PathBReview();
 
         await rig.CommitAsync(review);
@@ -3238,6 +3297,236 @@ public sealed class DecisionCommitServiceTests
         unproven.ReasonCode.Should().Be(DecisionCommitReasons.ReviewChanged, "a record that cannot prove it is this review answers nothing");
 
         rig.Status(Primary).Should().Be(Open);
+    }
+
+    // ── Task 161 (D-180): Create budget in place of Revise budget on a matter with no active budget ─────────────────────────
+
+    [Fact]
+    public async Task CreateBudget_OnAMatterWithNoActiveBudget_RunsTheCreate_RecordsIt_AndClosesTheSignalActed_D180()
+    {
+        var rig = new Rig { ActiveBudgets = 0 };
+
+        var result = await rig.CommitAsync(CreateBudgetReview());
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        rig.Writes.Should().Equal("execute:create-budget", "record:sprk_decisionrecord", $"close:{Primary}");
+        rig.Executors["create-budget"].Requests.Single().Parameters["amount"].Should().Be("90000");
+        rig.Executors["create-budget"].Requests.Single().Core.Should().NotBeNull();
+        rig.Executors["revise-budget"].Requests.Should().BeEmpty();
+        var steps = Steps(rig.Record).GetProperty("steps").EnumerateArray().ToList();
+        steps.Select(x => (x.GetProperty("code").GetString(), x.GetProperty("taken").GetBoolean()))
+            .Should().Equal(("send-budget-inquiry", false), ("create-budget", true), ("approve-variance", false));
+        steps[1].GetProperty("label").GetString().Should().Be("Create budget");
+        steps[1].GetProperty("written").EnumerateArray().Select(w => (w.GetProperty("entity").GetString(), w.GetProperty("id").GetGuid()))
+            .Should().Equal(("sprk_budget", Budget));
+        rig.Resolution(Primary).Should().Be(SignalWriter.ResolutionActed);
+        rig.AppBudgetReads.Should().ContainSingle("one count read, the BFF's own (F1-a)");
+        rig.BudgetReads.Should().BeEmpty("the caller's own read of sprk_budgets decides nothing: a Deep Read cannot see a parent-BU budget");
+    }
+
+    [Fact]
+    public async Task CreateBudget_ReviewedOnZeroBudgets_ButTheMatterNowHasOne_IsRefusedAsTheActionsMismatch_NothingWritten_D17()
+    {
+        var rig = new Rig { ActiveBudgets = 1 };
+
+        var result = await rig.CommitAsync(CreateBudgetReview());
+
+        result.Status.Should().Be(DecisionCommitStatus.Refused);
+        result.ReasonCode.Should().Be(DecisionCommitReasons.ActionsDoNotMatchPlan);
+        result.Detail.Should().Be("The matter's budgets changed while you were deciding; reopen the item.");
+        rig.Writes.Should().BeEmpty("a create-budget is never silently turned into a revise-budget");
+        rig.Executors["create-budget"].Requests.Should().BeEmpty();
+        rig.Executors["revise-budget"].Requests.Should().BeEmpty();
+        rig.Status(Primary).Should().Be(Open);
+    }
+
+    [Fact]
+    public async Task ReviseBudget_ReviewedOnABudget_ButTheMatterNowHasNone_IsRefusedAsTheActionsMismatch_NothingWritten_D17()
+    {
+        var rig = new Rig { ActiveBudgets = 0 };
+
+        var result = await rig.CommitAsync(PathBReview());
+
+        result.Status.Should().Be(DecisionCommitStatus.Refused);
+        result.ReasonCode.Should().Be(DecisionCommitReasons.ActionsDoNotMatchPlan);
+        rig.Writes.Should().BeEmpty("a revise-budget is never silently turned into a create-budget");
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(3)]
+    public async Task ReviseBudget_OnAMatterWithBudgets_IsUnchanged_MustNotFire_D180(int budgets)
+    {
+        var rig = new Rig { ActiveBudgets = budgets };
+
+        var result = await rig.CommitAsync(PathBReview(inquiry: false, todo: false));
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        rig.Writes.Should().Equal("execute:revise-budget", "record:sprk_decisionrecord", $"close:{Primary}");
+        rig.Executors["create-budget"].Requests.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task TheBudgetsCannotBeCounted_ReviseBudgetStays_AndACreateBudgetReviewIsUnavailable_NothingWritten_F1b()
+    {
+        foreach (var fault in new Exception?[] { null, new TimeoutException("no answer"), new InvalidOperationException("Dataverse 503") })
+        {
+            var rig = new Rig { ActiveBudgets = null, AppBudgetsFault = fault };
+
+            var revise = await rig.CommitAsync(PathBReview(inquiry: false, todo: false));
+            revise.Status.Should().Be(DecisionCommitStatus.Recorded, revise.Detail);
+            rig.Executors["revise-budget"].Requests.Should().ContainSingle();
+
+            foreach (var review in new[] { CreateBudgetReview(), CreateBudgetReview(create: false) })
+            {
+                var other = new Rig { ActiveBudgets = null, AppBudgetsFault = fault };
+                var create = await other.CommitAsync(review);
+                create.Status.Should().Be(DecisionCommitStatus.Unavailable, "a read that failed is not a change in the budgets");
+                create.ReasonCode.Should().Be(DecisionCommitReasons.SignalUnreadable);
+                create.Detail.Should().Be("Whether the matter has a budget could not be checked; nothing was done. Try again.");
+                other.Writes.Should().BeEmpty();
+                other.Status(Primary).Should().Be(Open);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task TheCallerSeesNoBudget_ButTheBffSeesOne_NothingIsSubstituted_AndCreateBudgetIsRefused_F1a()
+    {
+        // A Core User whose Read on sprk_budget is Deep cannot see a budget owned in a parent business unit: the caller's read says 0.
+        var rig = new Rig { ActiveBudgets = 1, CallerSeesBudgets = 0 };
+
+        var create = await rig.CommitAsync(CreateBudgetReview());
+
+        create.Status.Should().Be(DecisionCommitStatus.Refused);
+        create.ReasonCode.Should().Be(DecisionCommitReasons.ActionsDoNotMatchPlan);
+        create.Detail.Should().Be("The matter's budgets changed while you were deciding; reopen the item.");
+        rig.Writes.Should().BeEmpty("no second active budget is ever written");
+        rig.Executors["create-budget"].Requests.Should().BeEmpty();
+
+        var revise = await rig.CommitAsync(PathBReview(inquiry: false, todo: false));
+        revise.Status.Should().Be(DecisionCommitStatus.Recorded, revise.Detail);
+        rig.Executors["revise-budget"].Requests.Should().ContainSingle("the plan keeps Revise budget for a matter that has a budget");
+    }
+
+    [Fact]
+    public async Task TheBffSeesNoBudget_ButTheCallerSeesOne_StillSubstitutes_MustNotFire_F1a()
+    {
+        var rig = new Rig { ActiveBudgets = 0, CallerSeesBudgets = 1 };
+
+        var result = await rig.CommitAsync(CreateBudgetReview());
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        rig.Executors["create-budget"].Requests.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task TheAppOnlyBudgetRead_IsTheActiveBudgetsOfTheCoreMatter_AndNeverRunsForACallerWhoCannotReadTheMatter_F1a()
+    {
+        var rig = new Rig { ActiveBudgets = 0 };
+        (await rig.CommitAsync(CreateBudgetReview())).Status.Should().Be(DecisionCommitStatus.Recorded);
+        var query = rig.AppBudgetReads.Single();
+        query.TopCount.Should().Be(1);
+        query.Criteria.Conditions.Select(c => (c.AttributeName, c.Values.Single())).Should()
+            .BeEquivalentTo(new[] { ("sprk_matter", (object)Matter), ("statecode", (object)0) });
+
+        // The caller cannot read the Signal's matter: the uniform 404 comes before anything is read app-only.
+        var blocked = new Rig { ActiveBudgets = 0 };
+        blocked.CallerCannotReadCore.Add(Matter);
+        var result = await blocked.CommitAsync(CreateBudgetReview());
+        result.Status.Should().Be(DecisionCommitStatus.NotFound);
+        blocked.AppBudgetReads.Should().BeEmpty("never an app-only read for a matter the caller could not read");
+    }
+
+    // ── Task 161 fix round 1 (K2a): two commits on one matter are serialized by a budget lease ──────────────────────────────
+
+    [Fact]
+    public async Task TakingCreateBudget_HoldsTheMatterBudgetLease_SoACommitOnAnotherSignalOfTheMatterIsInProgress_K2a()
+    {
+        var rig = new Rig { ActiveBudgets = 0 };
+        var held = await rig.Lease.TryAcquireAsync($"decision-budget:{Tenant}:{Matter:D}", null, TimeSpan.FromMinutes(1), CancellationToken.None);
+        held.Status.Should().Be(ScheduledJobLeaseStatus.Granted);
+
+        var taken = await rig.CommitAsync(CreateBudgetReview());
+
+        taken.Status.Should().Be(DecisionCommitStatus.InProgress);
+        rig.Writes.Should().BeEmpty();
+        rig.Executors["create-budget"].Requests.Should().BeEmpty();
+        await rig.Lease.ReleaseAsync($"decision-budget:{Tenant}:{Matter:D}", held.Token!, CancellationToken.None);
+        (await rig.CommitAsync(CreateBudgetReview())).Status.Should().Be(DecisionCommitStatus.Recorded);
+        (await rig.Lease.TryAcquireAsync($"decision-budget:{Tenant}:{Matter:D}", null, TimeSpan.FromMinutes(1), CancellationToken.None))
+            .Status.Should().Be(ScheduledJobLeaseStatus.Granted, "the lease is released after a commit");
+    }
+
+    [Fact]
+    public async Task TheMatterBudgetLease_IsNotTaken_WhenCreateBudgetIsSkipped_OrNotInThePlan_MustNotFire_K2a()
+    {
+        var skip = new Rig { ActiveBudgets = 0 };
+        await skip.Lease.TryAcquireAsync($"decision-budget:{Tenant}:{Matter:D}", null, TimeSpan.FromMinutes(1), CancellationToken.None);
+        (await skip.CommitAsync(CreateBudgetReview(create: false, inquiry: true))).Status.Should().Be(DecisionCommitStatus.Recorded, "a skipped create writes nothing: no lease");
+
+        var revise = new Rig { ActiveBudgets = 1 };
+        await revise.Lease.TryAcquireAsync($"decision-budget:{Tenant}:{Matter:D}", null, TimeSpan.FromMinutes(1), CancellationToken.None);
+        (await revise.CommitAsync(PathBReview(inquiry: false, todo: false))).Status.Should().Be(DecisionCommitStatus.Recorded);
+    }
+
+    // ── Task 161 fix round 1 (K2b): a resume with Create budget skipped is not refused for a budget someone else made ───────
+
+    [Fact]
+    public async Task ARetryOfAFailedReview_ThatSkippedCreateBudget_KeepsThePlan_WhenSomeoneElseCreatedTheBudgetMeanwhile_K2b()
+    {
+        var rig = new Rig { ActiveBudgets = 0 };
+        rig.Executors["add-todo"].Result = DecisionActionOutcome.Refused("add-todo", DecisionActionReasons.WriteFailed, "no");
+        var review = CreateBudgetReview(create: false) with { NextSteps = [new DecisionReviewNextStep { Code = "add-todo", Values = TodoValues }] };
+
+        var failed = await rig.CommitAsync(review);
+        failed.Resumable.Should().BeTrue(failed.Detail);
+
+        rig.ActiveBudgets = 1; // another user created the budget while the first attempt was stuck
+        rig.Executors["add-todo"].Result = null;
+        var retried = await rig.CommitAsync(review with { Retry = true });
+
+        retried.Status.Should().Be(DecisionCommitStatus.Recorded, retried.Detail);
+        rig.Executors["create-budget"].Requests.Should().BeEmpty("it was skipped and still is");
+        rig.Executors["revise-budget"].Requests.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ARetryOfAFailedReview_WhoseCreateBudgetAlreadyLanded_KeepsThePlanItWasTakenUnder_AndNeverCreatesTheBudgetTwice_D180()
+    {
+        var rig = new Rig { ActiveBudgets = 0 };
+        rig.Executors["add-todo"].Result = DecisionActionOutcome.Refused("add-todo", DecisionActionReasons.WriteFailed, "no");
+        var review = CreateBudgetReview() with { NextSteps = [new DecisionReviewNextStep { Code = "add-todo", Values = TodoValues }] };
+
+        var failed = await rig.CommitAsync(review);
+        failed.Resumable.Should().BeTrue(failed.Detail);
+
+        // The first attempt's create-budget landed, so the matter now HAS a budget: the plan the review was taken under is kept.
+        rig.ActiveBudgets = 1;
+        rig.Executors["add-todo"].Result = null;
+        var retried = await rig.CommitAsync(review with { Retry = true });
+
+        retried.Status.Should().Be(DecisionCommitStatus.Recorded, retried.Detail);
+        rig.Log.Count(l => l == "execute:create-budget").Should().Be(1, "a landed step is not run again");
+        rig.Executors["revise-budget"].Requests.Should().BeEmpty();
+        Steps(rig.Record).GetProperty("steps")[1].GetProperty("code").GetString().Should().Be("create-budget");
+    }
+
+    [Fact]
+    public async Task AFinishedReview_WhoseCreateBudgetAlreadyLanded_IsAnsweredByItsRecord_AndNeverRefusedForTheNewBudget_D180()
+    {
+        var rig = new Rig { ActiveBudgets = 0 };
+        FirstCloseFails(rig);
+        var review = CreateBudgetReview();
+        (await rig.CommitAsync(review)).Status.Should().Be(DecisionCommitStatus.Recorded);
+        await LedgerForgetsButTheRecordStays(rig, review);
+
+        rig.ActiveBudgets = 1; // the budget the first run created
+        var finished = await rig.CommitAsync(review);
+
+        finished.Status.Should().Be(DecisionCommitStatus.Recorded, finished.Detail);
+        finished.Replayed.Should().BeTrue();
+        rig.Log.Count(l => l == "execute:create-budget").Should().Be(1);
     }
 
     // ── uac-r2 re-check F1 (PR #1953): the stored-record lookup matches only records the ontology writer created ───────────────────────

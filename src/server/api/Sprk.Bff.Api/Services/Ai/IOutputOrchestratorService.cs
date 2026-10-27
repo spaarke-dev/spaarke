@@ -43,6 +43,20 @@ public class PlaybookExecutionContext
     public Dictionary<string, object?> Variables { get; init; } = new();
 
     /// <summary>
+    /// Who started the run whose outputs are mapped (#2257, owner round 123). <see cref="PlaybookRunStartedBy.Person"/> — the
+    /// default — writes AS <see cref="RunUserId"/> and writes nothing when it is unknown; only an entry with no person in the
+    /// run sets <see cref="PlaybookRunStartedBy.System"/>, which writes app-only behind the deny-lists
+    /// (<see cref="PlaybookRunWriteIdentity"/>). Same meaning as <see cref="PlaybookRunRequest.StartedBy"/>.
+    /// </summary>
+    public PlaybookRunStartedBy StartedBy { get; init; } = PlaybookRunStartedBy.Person;
+
+    /// <summary>
+    /// The Dataverse <c>systemuserid</c> of the person who started the run, resolved server-side (never a caller value).
+    /// Same meaning as <see cref="PlaybookRunRequest.RunUserId"/>.
+    /// </summary>
+    public Guid? RunUserId { get; init; }
+
+    /// <summary>
     /// Get variable value with type conversion.
     /// </summary>
     /// <typeparam name="T">Target type for conversion</typeparam>
@@ -174,10 +188,11 @@ public record OutputMappingResult
         new() { Success = true, Updates = updates };
 
     /// <summary>
-    /// Create a failure result with error message.
+    /// Create a failure result with error message, and the per-update results when updates were attempted (#2257 fix round
+    /// 1: each failed update keeps its own message and code, e.g. <c>playbook.write_access_denied</c>).
     /// </summary>
-    public static OutputMappingResult FailureResult(string error) =>
-        new() { Success = false, ErrorMessage = error };
+    public static OutputMappingResult FailureResult(string error, List<EntityUpdateResult>? updates = null) =>
+        new() { Success = false, ErrorMessage = error, Updates = updates ?? new() };
 }
 
 /// <summary>

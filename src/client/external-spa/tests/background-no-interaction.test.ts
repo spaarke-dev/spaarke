@@ -8,7 +8,7 @@
 // failure (a later user-initiated redirect must still work). Every other caller is unchanged: these tests pin both sides.
 //
 // MSAL and Teams JS are fakes that record what the code asks for; event names and error classes are msal-browser's real ones.
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.setConfig({ testTimeout: 60000 });
 
@@ -256,7 +256,14 @@ describe('the standalone plane seam', () => {
 });
 
 describe('Teams - a background read opens no popup', () => {
+  // Task 075 (A9): the Teams strategy is built for the multitenant home client, which the config must name.
   const cfg = { clientId: 'cccccccc-0000-0000-0000-00000000000c', tenantId: SPAARKE_TENANT, bffScope: BFF_SCOPE };
+  beforeEach(() => {
+    vi.stubEnv('VITE_WORKFORCE_HOME_MSAL_CLIENT_ID', cfg.clientId);
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
 
   it('NAA says interaction is required: SignInRequiredError, no acquireTokenPopup anywhere', async () => {
     const { msal, msalAuth } = await load();
@@ -280,7 +287,11 @@ describe('Teams - a background read opens no popup', () => {
     expect(h.popupInstances).toHaveLength(built); // the popup fallback instance was never even built
 
     // Without the option, the same state opens the broker popup (unchanged).
-    naa.acquireTokenPopup.mockResolvedValue({ accessToken: 'tok-popup', account });
+    naa.acquireTokenPopup.mockResolvedValue({
+      accessToken: 'tok-popup',
+      idTokenClaims: { tid: SPAARKE_TENANT },
+      account,
+    });
     await expect(msalAuth.acquireTeamsWorkforceBffToken(cfg)).resolves.toBe('tok-popup');
     expect(naa.acquireTokenPopup).toHaveBeenCalledTimes(1);
   });

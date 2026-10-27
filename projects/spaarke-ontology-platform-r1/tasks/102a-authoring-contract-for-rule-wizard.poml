@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="102a" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Ontology admin slice (b), BFF: the authoring contract the rule wizard needs (catalog lanes, validate route, authorable-column allow-list)</title>
+    <phase>10 Ontology admin (D-22)</phase>
+    <gate>101 complete</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security-relevant: narrows a column-value oracle on the dry run (owner option 101(b)) and adds an authoring route; treated as auth-tagged.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Shared validation path across four admin routes plus a new security allow-list; the authorization must equal the existing routes exactly.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Task 102 is built on this contract.</parallel-reason>
+    <deps>101</deps>
+    <tags>bff-api,auth,security,admin,endpoints</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Give the rule wizard (task 102) what task 101's contract lacks. The catalog gains a per-lane block: actions, next steps, dismissal reasons, severities and work types, plus the authorable fields per subject and join. A compile-only POST /authoring/validate route returns valid, errors and templateEligibleFields. A closed (entity, column) allow-list, enforced on every authoring path, narrows the dry run's column-value oracle to the listed columns.</prompt>
+  <role>SPAARKE backend developer. The server supplies every value the wizard offers; nothing is hand-copied to the client.</role>
+  <goal>The wizard can build every step from server data, check a draft without running it, and cannot reference a column outside the allow-list. A refusal is the same on validate, dry run, save and publish, because one validation path serves all four.</goal>
+
+  <context>
+    <background>Task 102 escalated: 101's catalog has no action, next-step, dismissal-reason, severity or work-type lists, and no way to check a draft or get its TemplateEligibleFields without a dry run. OWNER DECISION 2026-10-17, option A: the server provides them. Owner option 101(b): an authorable-column allow-list. The dry run evaluates as the evaluator (org-wide read), so a clause on any column was a one-bit oracle over values the caller cannot read; the allow-list narrows it to the listed columns (residual on joinable related tables: notes/102a-authoring-contract.md). 101(c), the related-records gap, is a signed ADR-028 tension recorded by the main session (no code here). The raw rule body for "New version" is out of scope: the wizard rebuilds the condition. Coordinator 2026-10-16 (in this lane): nextSteps[] and authorableFields[] are approved additions; work types and severities have no lane mapping on the server, so each lane returns the full list.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Ontology/OntologyAdminAuthoringEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ontology/OntologyAdminAuthoringService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ontology/OntologyAdminAuthoringModels.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/PolicyVersionValidator.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/PredicateCompiler.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Telemetry/OntologyWriterTelemetry.cs</file>
+      <file role="modify">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs</file>
+      <file role="modify">tests/integration/auth/Ontology/OntologyAdminAuthoringEndpointTests.cs</file>
+      <file role="modify">tests/integration/seam/Signals/SignalPredicateTests.cs</file>
+      <file role="new">tests/unit/domain/Signals/AuthorableColumnsTests.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Signals/Actions/DecisionActionCatalog.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ontology/OntologyAdminRulesService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner">Scope (option A): GET /authoring/catalog (no new route) returns one block per lane (Decide, Do) with actions[] {code, label, excludes} (DecisionActionCatalog codes whose PlanLane is the lane), nextSteps[] {code, label, excludes} (IsNextStep), dismissalReasons[] {value, label} (DecisionActionCatalog.DismissalReasons), severities[] and workTypes[] {value, label} (OntologyAdminRulesService.SeverityLabels / WorkTypeLabels, pinned to solution source by OntologyAdminRulesSchemaAgreementTests). Each subject and join gains authorableFields[] from the allow-list. Nothing is hand-copied.</constraint>
+    <constraint source="owner">Scope: POST /authoring/validate takes { policyId?, lane?, draft } (the draft has the save route's shape) and compiles it with no Dataverse write and no evaluation. It answers 200 { valid, errors[] {field, message}, reasonCode, templateEligibleFields[] }. templateEligibleFields are the compiled predicate's TemplateEligibleFields intersected with the allow-list (§0.3).</constraint>
+    <constraint source="owner">Scope: validate's authorization is IDENTICAL to the dry run's: the group's RequireAuthorization and rate limit, WhoAmI as the caller (unresolved: the single 403), and the caller's prvCreatesprk_PolicyVersion asked fresh as the caller (not held: 403 ontology.admin.forbidden). A policyId is read as the caller through the Ontology domain allow-list (absent, unreadable or non-Ontology: the uniform 404).</constraint>
+    <constraint source="owner">Scope: ONE validation path. validate, dry run, save and publish all go through OntologyAdminAuthoringService.ValidateRule, which calls PolicyVersionValidator.ValidateForAuthoring. validate runs the save's checks for a new rule (lane, ValidateDraft, subject type) and the publish's checks for an existing policy (the policy's lane, ValidateDraft).</constraint>
+    <constraint source="owner">Scope (101(b)): PolicyVersionValidator.AuthorableColumns is a closed set of (entity, column) pairs. It is seeded with exactly the columns the 5 live Ontology policies read (spaarkedev1, 2026-10-16), the columns the existing authoring tests read, the compiler's DateOnlyColumns and ThresholdColumns, and the VerifiedJoins paths. CompiledPredicate.ReadColumns records every column a body reads: when, threshold, exists and notExists filters, and the join path. ValidateForAuthoring refuses an unlisted column with reason column_not_authorable; the authoring routes return ontology.admin.column_not_authorable.</constraint>
+    <constraint source="project">Scope: the allow-list is NOT enforced by ValidateForSave or TryPrepareForEvaluation, so the evaluator and RuleBodyDescriber are unchanged.</constraint>
+    <constraint source="project">Scope (NFR-10): the route is added to the existing endpoints file and to the route-authorization ledger as a HandlerDecision; ExpectedEndpointFileCount is unchanged. The ledger is uac-r2-owned: the PR asks for their review.</constraint>
+    <constraint source="project">Scope: .claude/rules/bff-hygiene.md: placement, §11 justification, publish size measured against a fresh build of origin/docs/ontology-platform-design (same zip tool, file counts compared), no package, full Spaarke.ArchTests run, filtered BFF tests only, no live writes.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Rule authoring</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/101-ontology-admin-authoring.md</file>
+      <file>projects/spaarke-ontology-platform-r1/tasks/102-ontology-admin-rule-wizard-ui.poml</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor, then load the knowledge files.</step>
+    <step order="1">Compiler: CompiledPredicate.ReadColumns. Validator: AuthorableColumns and ValidateForAuthoring. Telemetry: the new reason constant.</step>
+    <step order="2">Service: ValidateRule calls ValidateForAuthoring and carries the reason code and eligible fields. Add ValidateAsync. Extend the catalog.</step>
+    <step order="3">Endpoint, the ValidationProblem reasonCode extension, and the ledger entry.</step>
+    <step order="4">Tests, with a seeding proof that the allow-list check is load-bearing; the live read-only IsSecured test, run on spaarkedev1.</step>
+    <step order="5">Publish-size delta, full ArchTests, PR. Record deviations in notes/102a-authoring-contract.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>A catalog value has no server source: STOP and report; do not invent one.</trigger>
+    <trigger>Enforcing the allow-list would refuse a live policy's current rule body: STOP and report.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>The catalog route, ValidateRule, ValidateForSave, DecisionActionCatalog and the label tables exist. No route checks a draft without evaluating it (grep "authoring/validate": none), and no column allow-list exists (the compiler's lists cover entities, joins, Date Only and Threshold columns only).</existing>
+    <extension>The catalog route and the authoring service are extended in place. The new route sits in the existing endpoints file and reuses the dry run's gate and the save's validation. The allow-list is a set in PolicyVersionValidator, checked by one new method on the existing validation body.</extension>
+    <cost-of-doing-nothing>Task 102 stays blocked: the wizard cannot offer actions, reasons, severities or work types without a client-side list (#46), and it cannot show TemplateEligibleFields without running the evaluator. Any column, a field-secured one included, stays readable through the dry run's org-wide evaluation, one bit per request.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ontology/OntologyAdminAuthoringService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/PolicyVersionValidator.cs</output>
+    <output type="test">tests/unit/domain/Signals/AuthorableColumnsTests.cs</output>
+    <output type="test">tests/integration/auth/Ontology/OntologyAdminAuthoringEndpointTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given GET /authoring/catalog, then lanes[] holds exactly Decide and Do. Each lane's actions are exactly DecisionActionCatalog's codes for that lane, with their mutual excludes; its nextSteps are exactly the IsNextStep codes; its dismissalReasons are exactly DismissalReasons(lane); severities and workTypes are exactly the server label tables (the full list on both lanes). Each subject and join carries authorableFields from the allow-list.</criterion>
+    <criterion testable="true">Given the catalog, then every column it offers (dateOnlyFields, thresholdFields, authorableFields and join paths) is in AuthorableColumns, and a body built from each authorable field compiles through ValidateForAuthoring.</criterion>
+    <criterion testable="true">Given POST /authoring/validate with a valid draft, then it returns 200 valid:true with templateEligibleFields equal to the compiled TemplateEligibleFields that are on the allow-list, with no Dataverse write and no evaluation. Given an invalid draft, it returns 200 valid:false with the same field errors the save returns.</criterion>
+    <criterion testable="true">Negative: a body reading an unlisted column (in when, threshold, an exists or notExists filter) is refused by validate, dry run, save and publish with the same reason code ontology.admin.column_not_authorable, with no write and no evaluation.</criterion>
+    <criterion testable="true">Negative, authorization: validate without a token is 401; for an unresolved caller it is the single 403, with only WhoAmI asked; for a caller without prvCreatesprk_PolicyVersion it is 403 ontology.admin.forbidden, with nothing compiled from the request; for a non-Ontology or unreadable policyId it is the uniform 404. The route is in the ledger and the full ArchTests suite passes.</criterion>
+    <criterion testable="true">The 5 live Ontology policies' current rule bodies (and their templates) pass ValidateForAuthoring. A live read-only test asserts that every allow-listed column exists and has IsSecured == false on spaarkedev1. A seeding proof shows the named enforcement tests fail with the check removed.</criterion>
+    <criterion testable="true">Tests cover the stated contract and authorization cases; anything beyond needs a one-line justification in task notes. The BFF builds; the publish-size delta is reported.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-58; D-22; #39, #46; owner option A (2026-10-17) and 101(b).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+  <completion date="2026-10-17">PR #2054 merged into docs `a9ed6f41a` (head `c4785ff07`). Catalog per lane (actions, nextSteps, dismissalReasons, severities, workTypes, authorableFields); compile-only `POST /authoring/validate`; authorable-column allow-list (50 entries, all IsSecured=False live) on dry run, save, publish and validate (`ontology.admin.column_not_authorable`). Reviews: uac-r2 OK; adversarial pass 1 (fixed: duplicate_action, dry-run reasonCode, null ReadColumns fail closed, SkippableFact live tests); pass 2 no F (K1 residual text for derived Threshold base reads fixed). ArchTests 1076/1076 on branch and on branch+master. Residual oracle (D-151(c)) open with the owner: A re-sign or B narrow; spec §6 corrected. Contract for 102: validate 200 with errors, save/publish 400, same reasonCodes; assign-work must not be offered in both actions and nextSteps.</completion>
+</task>

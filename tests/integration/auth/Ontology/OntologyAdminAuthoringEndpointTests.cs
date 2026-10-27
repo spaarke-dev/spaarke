@@ -20,10 +20,12 @@ using Microsoft.Extensions.Options;
 using Moq;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Ontology;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Actions;
 using Sprk.Bff.Api.Tests.Integration.Workspace;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.AccessControl.Ontology;
@@ -38,7 +40,7 @@ namespace Sprk.Bff.Api.Tests.AccessControl.Ontology;
 /// <remarks>Placement: <c>tests/integration/auth/**</c> (the security-auth KEEP path). "Admin" is a caller whose writes Dataverse accepts;
 /// "Console User" one whose every write Dataverse refuses with 403 (the Spaarke Console User role holds no Create or Write on the policy
 /// tables, notes/security-roles.md).</remarks>
-public class OntologyAdminAuthoringEndpointTests : IClassFixture<OntologyAdminAuthoringTestFixture>
+public partial class OntologyAdminAuthoringEndpointTests : IClassFixture<OntologyAdminAuthoringTestFixture>
 {
     private const string Root = "/api/v1/ontology/admin/authoring";
 
@@ -126,7 +128,8 @@ public class OntologyAdminAuthoringEndpointTests : IClassFixture<OntologyAdminAu
     [Fact]
     public void Catalog_EveryOfferedSubjectFieldOperatorAndJoin_Compiles()
     {
-        // The acceptance criterion, exhaustively: a rule body built from each catalog entry passes the SAME ValidateForSave save uses.
+        // The acceptance criterion, exhaustively: a rule body built from each catalog entry passes the SAME validation save uses
+        // (ValidateForAuthoring since task 102a: ValidateForSave plus the authorable-column allow-list).
         var validator = _fixture.Services.GetRequiredService<PolicyVersionValidator>();
         var category = Guid.NewGuid();
         var catalog = OntologyAdminAuthoringService.BuildCatalog(new[] { new OntologyCatalogCategory(category, "Fee or scope change", true) });
@@ -177,7 +180,7 @@ public class OntologyAdminAuthoringEndpointTests : IClassFixture<OntologyAdminAu
         bodies.Should().HaveCountGreaterThan(40);
         foreach (var (what, type, body) in bodies)
         {
-            var result = validator.ValidateForSave(type, body, null);
+            var result = validator.ValidateForAuthoring(type, body, null).Validation;
             result.IsValid.Should().BeTrue($"the catalog offers '{what}', so it must compile: {string.Join("; ", result.Errors)}");
         }
 
@@ -187,6 +190,302 @@ public class OntologyAdminAuthoringEndpointTests : IClassFixture<OntologyAdminAu
                 .Replace("@N", (catalog.RelativeDates.MaxDays + 1).ToString(System.Globalization.CultureInfo.InvariantCulture)),
             null).IsValid.Should().BeFalse();
         catalog.RuleTypes.Should().Equal("Existence", "Threshold");
+    }
+
+
+    // ── Task 102a: the per-lane lists and the authorable fields ─────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Catalog_EachLane_CarriesTheServerCatalogs_ReadFromTheirSources()
+    {
+        var response = await _client.GetAsync($"{Root}/catalog");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        var lanes = (await Json(response)).GetProperty("lanes").EnumerateArray().ToList();
+        lanes.Select(l => l.GetProperty("lane").GetString()).Should().Equal("Decide", "Do");
+
+        static IEnumerable<(string Code, string Label, string[] Excludes)> Actions(JsonElement list) =>
+            list.EnumerateArray().Select(a => (a.GetProperty("code").GetString()!, a.GetProperty("label").GetString()!,
+                a.GetProperty("excludes").EnumerateArray().Select(e => e.GetString()!).ToArray()));
+        static IEnumerable<(string Code, string Label, string[] Excludes)> Expected(IEnumerable<DecisionActionDefinition> defs) =>
+            // Task 161 (D-180): a substitution-only action (create-budget) is never authorable, nor named as an exclusion.
+            defs.Where(d => !d.SubstitutionOnly).Select(d => (d.Code, d.Label,
+                d.Excludes.Where(e => !(DecisionActionCatalog.TryGet(e, out var excluded) && excluded.SubstitutionOnly)).ToArray()));
+        static IEnumerable<(int, string)> Options(JsonElement list) =>
+            list.EnumerateArray().Select(o => (o.GetProperty("value").GetInt32(), o.GetProperty("label").GetString()!));
+
+        foreach (var lane in lanes)
+        {
+            var which = Enum.Parse<DecisionLane>(lane.GetProperty("lane").GetString()!);
+            Actions(lane.GetProperty("actions")).Should().BeEquivalentTo(
+                Expected(DecisionActionCatalog.All.Where(a => a.PlanLane == which)), o => o.WithStrictOrdering(), $"{which}: the plan actions");
+            Actions(lane.GetProperty("nextSteps")).Should().BeEquivalentTo(
+                Expected(DecisionActionCatalog.All.Where(a => a.IsNextStep)), o => o.WithStrictOrdering(), "the Next-step creators");
+            lane.GetProperty("dismissalReasons").EnumerateArray().Select(r => (r.GetProperty("value").GetString(), r.GetProperty("label").GetString()))
+                .Should().Equal(DecisionActionCatalog.DismissalReasons(which).Select(r => ((string?)r.Code, (string?)r.Label)));
+            Options(lane.GetProperty("severities")).Should().Equal(OntologyAdminRulesService.SeverityLabels.OrderBy(kv => kv.Key).Select(kv => (kv.Key, kv.Value)));
+            Options(lane.GetProperty("workTypes")).Should().Equal(OntologyAdminRulesService.WorkTypeLabels.OrderBy(kv => kv.Key).Select(kv => (kv.Key, kv.Value)),
+                "the server has no lane mapping for work types, so each lane carries the full list");
+        }
+
+        // Spot checks against the catalog's declared shape, so a test that only mirrors the source cannot hide a broken source.
+        var decide = Actions(lanes[0].GetProperty("actions")).ToDictionary(a => a.Code);
+        decide.Keys.Should().Equal("send-budget-inquiry", "revise-budget", "approve-variance", "assign-task", "assign-work");
+        decide["revise-budget"].Excludes.Should().Equal("approve-variance");
+        decide["approve-variance"].Excludes.Should().Equal("revise-budget");
+        var doActions = Actions(lanes[1].GetProperty("actions")).ToDictionary(a => a.Code);
+        doActions["mark-complete"].Excludes.Should().BeEquivalentTo("reschedule", "reassign");
+        Options(lanes[1].GetProperty("severities")).Select(o => o.Item2).Should().Equal("Info", "Warning", "Critical");
+        _fixture.World.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Catalog_SeveritiesAndWorkTypes_AreExactlyTheValuesTheSaveAccepts()
+    {
+        // The catalog reads OntologyAdminRulesService's labels; the save checks SignalWriter's severities and SignalReadService's work
+        // types. Two sources: this pins them to the same sets, so the wizard never offers a value the save refuses, or hides one.
+        var catalog = OntologyAdminAuthoringService.BuildCatalog(Array.Empty<OntologyCatalogCategory>());
+        int[] saveSeverities = [SignalWriter.SeverityInfo, SignalWriter.SeverityWarning, SignalWriter.SeverityCritical];
+
+        foreach (var lane in catalog.Lanes)
+        {
+            lane.Severities.Select(o => o.Value).Should().BeEquivalentTo(saveSeverities, $"{lane.Lane}: the severities the save accepts");
+            lane.WorkTypes.Select(o => o.Value).Should().BeEquivalentTo(SignalReadService.WorkTypeKeys.Keys, $"{lane.Lane}: the work types the save accepts");
+        }
+    }
+
+    [Fact]
+    public void Catalog_EveryColumnItOffers_IsAllowListed_AndEveryAuthorableFieldCompiles()
+    {
+        var validator = _fixture.Services.GetRequiredService<PolicyVersionValidator>();
+        var catalog = OntologyAdminAuthoringService.BuildCatalog(Array.Empty<OntologyCatalogCategory>());
+        var allow = PolicyVersionValidator.AuthorableColumns;
+        var nullTest = catalog.Operators.NullTests[0];
+
+        foreach (var subject in catalog.Subjects)
+        {
+            subject.AuthorableFields.Should().NotBeEmpty($"{subject.Entity} must offer at least one field");
+            foreach (var field in subject.DateOnlyFields.Concat(subject.ThresholdFields.Select(t => t.Field)).Concat(subject.AuthorableFields))
+            {
+                allow.Should().Contain((subject.Entity, field), $"the catalog offers {subject.Entity}.{field}");
+            }
+
+            foreach (var field in subject.AuthorableFields)
+            {
+                var body = """{"type":"Existence","subject":"@S","when":{"@F":{"@T":true}},"all":[]}"""
+                    .Replace("@S", subject.Entity, StringComparison.Ordinal).Replace("@F", field, StringComparison.Ordinal).Replace("@T", nullTest, StringComparison.Ordinal);
+                var result = validator.ValidateForAuthoring("Existence", body, null).Validation;
+                result.IsValid.Should().BeTrue($"{subject.Entity}.{field} is offered, so it must compile: {string.Join("; ", result.Errors)}");
+            }
+
+            foreach (var join in subject.Joins)
+            {
+                allow.Should().Contain((join.Related, join.Path));
+                foreach (var field in join.DateOnlyFields.Concat(join.AuthorableFields))
+                {
+                    allow.Should().Contain((join.Related, field), $"the catalog offers {join.Related}.{field}");
+                    var body = """{"type":"Existence","subject":"@S","all":[{"exists":"@R","path":"@P","filter":{"@F":{"@T":true}}}]}"""
+                        .Replace("@S", subject.Entity, StringComparison.Ordinal).Replace("@R", join.Related, StringComparison.Ordinal)
+                        .Replace("@P", join.Path, StringComparison.Ordinal).Replace("@F", field, StringComparison.Ordinal).Replace("@T", nullTest, StringComparison.Ordinal);
+                    var result = validator.ValidateForAuthoring("Existence", body, null).Validation;
+                    result.IsValid.Should().BeTrue($"{join.Related}.{field} is offered, so it must compile: {string.Join("; ", result.Errors)}");
+                }
+            }
+        }
+
+        var matter = catalog.Subjects.Single(s => s.Entity == "sprk_matter");
+        matter.AuthorableFields.Should().NotContain(matter.ThresholdFields.Select(t => t.Field), "a Threshold column is offered as a ThresholdField only");
+        matter.Joins.Single(j => j.Related == "sprk_communication").AuthorableFields
+            .Should().Contain(new[] { "sprk_triagecategory", "sprk_receiveddate", "sprk_reviewoutcome" }, "the flagship rule can be rebuilt from the catalog")
+            .And.NotContain("sprk_regardingmatter", "the join path is named by path, not as a filter field");
+    }
+
+    // ── Task 102a: the validate route (compile only) ──────────────────────────────────────────────────────────
+
+    private const string FlagshipShapedBody =
+        """{"type":"Existence","subject":"sprk_matter","when":{"statecode":0},"all":[{"exists":"sprk_communication","path":"sprk_regardingmatter","filter":{"sprk_triagecategory":["8b62dd84-1fbc-f111-aaaf-3833c5e9614d"],"sprk_receiveddate":{">=":"now-30d"}}}]}""";
+
+    private async Task<HttpResponseMessage> Validate(object? draft = null, string? lane = "Decide", Guid? policyId = null) =>
+        await _client.PostAsJsonAsync($"{Root}/validate", new { policyId, lane, draft = draft ?? Draft() });
+
+    private static Dictionary<string, string[]> ValidateErrors(JsonElement result) =>
+        result.GetProperty("errors").EnumerateArray()
+            .GroupBy(e => e.GetProperty("field").GetString()!)
+            .ToDictionary(g => g.Key, g => g.Select(e => e.GetProperty("message").GetString()!).ToArray());
+
+    [Fact]
+    public async Task Validate_AValidDraft_Is200Valid_WithTheTemplateEligibleFields_AndNothingIsWrittenEvaluatedOrProved()
+    {
+        var w = _fixture.World;
+
+        var response = await Validate(Draft(body: FlagshipShapedBody));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        var result = await Json(response);
+        result.GetProperty("valid").GetBoolean().Should().BeTrue();
+        result.GetProperty("errors").GetArrayLength().Should().Be(0);
+        result.GetProperty("reasonCode").ValueKind.Should().Be(JsonValueKind.Null);
+        result.GetProperty("templateEligibleFields").EnumerateArray().Select(f => f.GetString())
+            .Should().Equal(new[] { "sprk_triagecategory", "statecode" }, "the when field, and the exists field pinned to one value; never the ranged date");
+        w.Requests.Should().Equal(new[] { "GET WhoAmI()", PrivilegeRequest(w.Caller) }, "a new rule is compiled only: no other read");
+        w.Writes.Should().BeEmpty();
+        _fixture.Engine.Evaluated.Should().BeEmpty();
+
+        // Validate is not a test run: no proof was recorded, so the save still needs a dry run.
+        var save = await Save(draft: Draft(body: FlagshipShapedBody));
+        save.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await ReasonOf(save)).Should().Be("ontology.admin.dry_run_required");
+    }
+
+    [Fact]
+    public async Task Validate_AnInvalidDraft_Is200NotValid_WithExactlyTheFieldErrorsTheSaveReturns()
+    {
+        var draft = Draft(template: "The {{sprk_secretfield}} is wrong.", plan: """{"actions":["mark-complete"]}""");
+
+        var validate = await Json(await Validate(draft));
+        var save = await Save(draft: draft);
+
+        validate.GetProperty("valid").GetBoolean().Should().BeFalse();
+        save.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var saveErrors = (await Json(save)).GetProperty("errors").EnumerateObject()
+            .ToDictionary(p => p.Name, p => p.Value.EnumerateArray().Select(m => m.GetString()!).ToArray());
+        ValidateErrors(validate).Should().BeEquivalentTo(saveErrors, "one validation path: validate and save cannot disagree");
+        ValidateErrors(validate).Keys.Should().BeEquivalentTo("messageTemplate", "decisionPlan");
+        validate.GetProperty("templateEligibleFields").EnumerateArray().Select(f => f.GetString()).Should().Equal(new[] { "statecode" },
+            "the body compiled, so the Wording step can still offer its fields");
+        _fixture.World.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Validate_ForAnExistingPolicy_ChecksAgainstThePolicysOwnLane_NotTheRequests()
+    {
+        // PolicyId is a Decide-lane policy: a Do-lane plan is refused even though the request says Do, as publish would refuse it.
+        var other = await Json(await Validate(Draft(plan: """{"actions":["mark-complete"]}"""), lane: "Do", policyId: PolicyId));
+        var own = await Json(await Validate(Draft(), lane: "Do", policyId: PolicyId));
+
+        other.GetProperty("valid").GetBoolean().Should().BeFalse();
+        ValidateErrors(other).Keys.Should().Equal("decisionPlan");
+        own.GetProperty("valid").GetBoolean().Should().BeTrue(own.ToString());
+        _fixture.World.Requests.Should().Contain(r => r.Contains($"sprk_policyid eq {PolicyId:D} and (sprk_domain eq null or sprk_domain eq 100000001)",
+            StringComparison.Ordinal), "the policy is read as the caller through the domain allow-list");
+        _fixture.World.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Validate_AndSave_RefuseADraftThatNamesCreateBudget_ItIsOnlyEverSubstituted_D180()
+    {
+        // Task 161 (D-180): create-budget replaces revise-budget when the server builds the plan for a matter with no budget; a rule author
+        // can never name it, so a published plan is never edited by it (D-14).
+        var draft = Draft(plan: """{"actions":["send-budget-inquiry","create-budget","approve-variance"]}""");
+
+        var validate = await Json(await Validate(draft));
+        var save = await Save(draft: draft);
+
+        validate.GetProperty("valid").GetBoolean().Should().BeFalse();
+        ValidateErrors(validate)["decisionPlan"].Single().Should().Contain("action_not_allowed").And.Contain("Decide lane's catalog");
+        save.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await Json(save)).GetProperty("errors").GetProperty("decisionPlan")[0].GetString().Should().Be(ValidateErrors(validate)["decisionPlan"].Single());
+        _fixture.World.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Validate_ACodeInBothActionsAndNextSteps_GetsTheDuplicateMessageAndCode_AsTheSaveDoes()
+    {
+        // The catalog offers assign-work as a Decide action AND as a next step; the plan resolver refuses a code in both lists. The
+        // author must be told that, not that the code is outside the lane's catalog.
+        var draft = Draft(plan: """{"actions":["assign-work"],"nextSteps":["assign-work"]}""");
+
+        var validate = await Json(await Validate(draft));
+        var save = await Save(draft: draft);
+
+        validate.GetProperty("valid").GetBoolean().Should().BeFalse();
+        validate.GetProperty("reasonCode").GetString().Should().Be("ontology.admin.duplicate_action");
+        var message = ValidateErrors(validate)["decisionPlan"].Single();
+        message.Should().Contain("duplicate_action").And.Contain("never in both").And.NotContain("lane's catalog");
+        save.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await ReasonOf(save)).Should().Be("ontology.admin.duplicate_action");
+        (await Json(save)).GetProperty("errors").GetProperty("decisionPlan")[0].GetString().Should().Be(message);
+
+        // A code outside the lane keeps the catalog message and carries no code.
+        var outside = await Json(await Validate(Draft(plan: """{"actions":["mark-complete"]}""")));
+        ValidateErrors(outside)["decisionPlan"].Single().Should().Contain("Decide lane's catalog");
+        outside.GetProperty("reasonCode").ValueKind.Should().Be(JsonValueKind.Null);
+        _fixture.World.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Validate_ANewRuleAboutATableWithNoPolicySubjectType_IsNotValid_AsTheSaveWouldRefuseIt()
+    {
+        var result = await Json(await Validate(Draft(body: """{"type":"Existence","subject":"sprk_budgetrevision","when":{"statecode":0},"all":[]}""")));
+
+        result.GetProperty("valid").GetBoolean().Should().BeFalse();
+        ValidateErrors(result)["ruleBody"].Single().Should().Contain("no policy subject type");
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Validate_ANonOntologyOrUnreadablePolicy_IsTheUniform404(bool billing)
+    {
+        if (!billing) _fixture.World.Unreadable.Add(("sprk_policy", PolicyId));
+
+        var response = await Validate(policyId: billing ? BillingPolicyId : PolicyId);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await ReasonOf(response)).Should().Be("ontology.admin.not_found");
+        _fixture.World.Writes.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Validate_AsAConsoleUser_WithoutTheAuthoringPrivilege_Is403_AndNothingElseIsRead(bool existingPolicy)
+    {
+        var w = _fixture.World;
+        w.HoldsAuthoringPrivilege = false;
+
+        var response = await Validate(policyId: existingPolicy ? PolicyId : null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden, await response.Content.ReadAsStringAsync());
+        (await ReasonOf(response)).Should().Be("ontology.admin.forbidden");
+        w.Requests.Should().Equal(new[] { "GET WhoAmI()", PrivilegeRequest(w.Caller) }, "the same gate as the dry run, before anything else");
+        w.Writes.Should().BeEmpty();
+    }
+
+    // ── Task 102a: an unlisted column is refused by every authoring route, with one code ─────────────────────────
+
+    public static TheoryData<string> UnlistedColumnBodies => new()
+    {
+        """{"type":"Existence","subject":"sprk_matter","when":{"statecode":0,"sprk_secretnotes":"x"},"all":[]}""",
+        """{"type":"Existence","subject":"sprk_matter","all":[{"exists":"sprk_communication","path":"sprk_regardingmatter","filter":{"sprk_body":"x"}}]}""",
+        """{"type":"Existence","subject":"sprk_matter","all":[{"notExists":"sprk_budgetrevision","path":"sprk_matter","filter":{"sprk_amount":{">":0}}}]}""",
+    };
+
+    [Theory]
+    [MemberData(nameof(UnlistedColumnBodies))]
+    public async Task AnUnlistedColumn_IsRefusedWithTheSameCode_ByValidateDryRunSaveAndPublish(string body)
+    {
+        const string code = "ontology.admin.column_not_authorable";
+
+        var validate = await Json(await Validate(Draft(body: body)));
+        var dryRunExisting = await DryRun(PolicyId, body);
+        var dryRunNew = await DryRun(null, body, lane: "Decide");
+        var save = await Save(draft: Draft(body: body));
+        var publish = await Publish(PolicyId, Draft(body: body));
+
+        validate.GetProperty("valid").GetBoolean().Should().BeFalse();
+        validate.GetProperty("reasonCode").GetString().Should().Be(code);
+        ValidateErrors(validate).Keys.Should().Equal("ruleBody");
+        foreach (var (route, response) in new[] { ("dry run", dryRunExisting), ("dry run (new)", dryRunNew), ("save", save), ("publish", publish) })
+        {
+            response.StatusCode.Should().Be(HttpStatusCode.BadRequest, $"{route}: {await response.Content.ReadAsStringAsync()}");
+            (await ReasonOf(response)).Should().Be(code, route);
+            (await Json(response)).GetProperty("errors").GetProperty("ruleBody")[0].GetString()
+                .Should().Be(ValidateErrors(validate)["ruleBody"][0], $"{route} and validate give the same message");
+        }
+
+        _fixture.Engine.Evaluated.Should().BeEmpty("a refused body is never evaluated");
+        _fixture.World.Writes.Should().BeEmpty();
     }
 
     // ── Dry run (#39) ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -757,7 +1056,7 @@ public class OntologyAdminAuthoringEndpointTests : IClassFixture<OntologyAdminAu
                 It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("redis is down"));
         var service = new OntologyAdminAuthoringService(w, _fixture.Services.GetRequiredService<PolicyVersionValidator>(), _fixture.Engine,
-            cache.Object, TimeProvider.System, NullLogger<OntologyAdminAuthoringService>.Instance);
+            _fixture.Ownership, cache.Object, TimeProvider.System, NullLogger<OntologyAdminAuthoringService>.Instance);
         var principal = new ClaimsPrincipal(new ClaimsIdentity(
             [new Claim("oid", "oid-" + w.Caller.ToString("N")), new Claim("tid", WorkspaceTestConstants.TestTenantId)], "test"));
 
@@ -1117,6 +1416,7 @@ public class OntologyAdminAuthoringEndpointTests : IClassFixture<OntologyAdminAu
     {
         { "GET", "/catalog" },
         { "POST", "/dry-run" },
+        { "POST", "/validate" },
         { "POST", "/policies" },
         { "POST", $"/policies/{PolicyId:D}/versions" },
     };
@@ -1185,11 +1485,18 @@ public sealed class OntologyAdminAuthoringTestFixture : WorkspaceTestFixture
 
     public RecordingEngine Engine { get; } = new();
 
+    /// <summary>#2084: the ownership resolver a publish asks before any write. Answers an ordinary team unless a test says otherwise.</summary>
+    public RecordOwnershipResolverDouble Ownership { get; } = new();
+
     public void Reset()
     {
         World.Reset();
         Engine.Reset();
         Engine.World = World;
+        Ownership.TeamId = RecordOwnershipResolverDouble.DefaultTeamId;
+        Ownership.IsSecureOwner = false;
+        Ownership.Fault = null;
+        Ownership.Requests.Clear();
     }
 
     public HttpClient ClientFor(string oid)
@@ -1214,6 +1521,8 @@ public sealed class OntologyAdminAuthoringTestFixture : WorkspaceTestFixture
             services.AddScoped<IDataverseUserClient>(_ => World);
             services.RemoveAll<IOntologyAdminAuthoringSignalEngine>();
             services.AddSingleton<IOntologyAdminAuthoringSignalEngine>(Engine);
+            services.RemoveAll<IRecordOwnershipResolver>();
+            services.AddSingleton<IRecordOwnershipResolver>(Ownership);
 
             services.AddAuthentication()
                 .AddScheme<AuthenticationSchemeOptions, AuthoringCallerHandler>(AuthoringCallerHandler.SchemeName, _ => { });
@@ -1263,6 +1572,12 @@ public sealed class RecordingEngine : IOntologyAdminAuthoringSignalEngine
 
     public ConcurrentQueue<SignalEvaluationPolicy> Evaluated { get; } = new();
 
+    /// <summary>Task 102b: the matter scope each evaluation was asked for (null: all matters), in call order.</summary>
+    public ConcurrentQueue<Guid?> Scopes { get; } = new();
+
+    /// <summary>Task 102b: when set, the engine returns every hit whatever the scope (an evaluator that failed to confine it).</summary>
+    public bool IgnoreScope { get; set; }
+
     /// <summary>Each call with the policy's current version AT THE TIME OF THE CALL (proves the pointer moved first).</summary>
     public ConcurrentQueue<(Guid PolicyId, Guid? CurrentAtCall)> ReevaluateCalls { get; } = new();
 
@@ -1271,13 +1586,18 @@ public sealed class RecordingEngine : IOntologyAdminAuthoringSignalEngine
         Hits = new();
         Result = new(true, 0, 0, string.Empty);
         Evaluated.Clear();
+        Scopes.Clear();
+        IgnoreScope = false;
         ReevaluateCalls.Clear();
     }
 
-    public Task<SignalEvaluation> EvaluateAsync(SignalEvaluationPolicy policy, CancellationToken ct)
+    /// <summary>As the shipped evaluator: a matter scope returns only that matter's hits (its compiled query carries the subject id).</summary>
+    public Task<SignalEvaluation> EvaluateAsync(SignalEvaluationPolicy policy, Guid? matterScope, CancellationToken ct)
     {
         Evaluated.Enqueue(policy);
-        return Task.FromResult(new SignalEvaluation(true, "sprk_matter", DateTimeOffset.UtcNow, 14, Hits));
+        Scopes.Enqueue(matterScope);
+        var hits = matterScope is { } m && !IgnoreScope ? Hits.Where(h => h.SubjectId == m).ToList() : Hits;
+        return Task.FromResult(new SignalEvaluation(true, "sprk_matter", DateTimeOffset.UtcNow, 14, hits));
     }
 
     public Task<PolicyReevaluationResult> ReevaluateAsync(Guid policyId, CancellationToken ct)
@@ -1310,6 +1630,12 @@ public sealed class AuthoringWorld : IDataverseUserClient
         public int? Domain { get; init; }
         public Guid? Current { get; set; }
         public long RowVersion { get; set; } = 100;
+
+        /// <summary>Task 102b: the policy's matter scope (<c>sprk_matter</c>); null for all matters.</summary>
+        public Guid? Matter { get; set; }
+
+        /// <summary>#2084 round 2: the policy's owner (<c>_ownerid_value</c>); null when the read returns none.</summary>
+        public Guid? Owner { get; set; }
     }
 
     public sealed class VersionState
@@ -1362,6 +1688,23 @@ public sealed class AuthoringWorld : IDataverseUserClient
     public Dictionary<Guid, VersionState> Versions { get; } = new();
     public List<SignalState> Signals { get; } = new();
     public HashSet<(string Table, Guid Id)> Unreadable { get; } = new();
+
+    /// <summary>Task 102b: rows that do not exist at all (a read of them returns nothing, exactly as for an unreadable row).</summary>
+    public HashSet<(string Table, Guid Id)> Missing { get; } = new();
+
+    /// <summary>Task 102b fix round 1 (F4): matter names, for the dry run's read of the stored matter's name as the caller.</summary>
+    public Dictionary<Guid, string> MatterNames { get; } = new();
+
+    /// <summary>Task 102b fix round 2 (uac-r2 F1): when set, the read of a matter's name throws it (an HttpClient timeout surfaces as a
+    /// <see cref="TaskCanceledException"/> while the request is still live).</summary>
+    public Exception? MatterNameReadThrows { get; set; }
+
+    /// <summary>Task 102b fix round 4 (uac-r2 E): a matter's access columns as the caller's read returns them: <c>sprk_issecure</c> (null:
+    /// not returned, a masked field) and <c>sprk_accesspermission</c> (null: Standard). A matter not listed is ordinary.</summary>
+    public Dictionary<Guid, (bool? IsSecure, int? AccessPermission)> MatterAccess { get; } = new();
+
+    /// <summary>Task 102b fix round 4: when set, the scope check's read of the matter throws it.</summary>
+    public Exception? MatterAccessReadThrows { get; set; }
     public List<string> Requests { get; } = new();
     public List<Write> Writes { get; } = new();
 
@@ -1383,12 +1726,17 @@ public sealed class AuthoringWorld : IDataverseUserClient
         Versions.Clear();
         Signals.Clear();
         Unreadable.Clear();
+        Missing.Clear();
+        MatterNames.Clear();
+        MatterNameReadThrows = null;
+        MatterAccess.Clear();
+        MatterAccessReadThrows = null;
         Requests.Clear();
         Writes.Clear();
     }
 
-    public void AddPolicy(Guid id, string code, int lane, bool enabled, int? domain, Guid? current) =>
-        Policies[id] = new PolicyState { Code = code, Lane = lane, Enabled = enabled, Domain = domain, Current = current };
+    public void AddPolicy(Guid id, string code, int lane, bool enabled, int? domain, Guid? current, Guid? matter = null) =>
+        Policies[id] = new PolicyState { Code = code, Lane = lane, Enabled = enabled, Domain = domain, Current = current, Matter = matter };
 
     public void AddVersion(Guid id, Guid policyId, int number, string? inForceTo) =>
         Versions[id] = new VersionState { PolicyId = policyId, Number = number, InForceTo = inForceTo };
@@ -1513,6 +1861,8 @@ public sealed class AuthoringWorld : IDataverseUserClient
                         ["sprk_enabled"] = p.Value.Enabled,
                         ["statecode"] = p.Value.State,
                         ["_sprk_currentversion_value"] = p.Value.Current?.ToString("D"),
+                        ["_sprk_matter_value"] = p.Value.Matter?.ToString("D"),
+                        ["_ownerid_value"] = p.Value.Owner?.ToString("D"),
                         ["versionnumber"] = p.Value.RowVersion,
                         ["sprk_domain"] = p.Value.Domain,
                     })
@@ -1569,6 +1919,35 @@ public sealed class AuthoringWorld : IDataverseUserClient
                 return Ok(new { EntitySetName = meta.Groups[1].Value + "s" });
             }
 
+            var matterName = Regex.Match(relativePath, @"^sprk_matters\?\$select=sprk_mattername&\$filter=sprk_matterid eq ([0-9a-f-]{36})&\$top=1$");
+            if (matterName.Success)
+            {
+                if (MatterNameReadThrows is { } thrown) throw thrown;
+                var id = Guid.Parse(matterName.Groups[1].Value);
+                return Ok(new
+                {
+                    value = Unreadable.Contains(("sprk_matter", id)) || Missing.Contains(("sprk_matter", id))
+                        ? Array.Empty<object>()
+                        : new object[] { new Dictionary<string, object?> { ["sprk_matterid"] = id.ToString("D"), ["sprk_mattername"] = MatterNames.GetValueOrDefault(id) } },
+                });
+            }
+
+            // Task 102b fix round 4 (uac-r2 E): the scope check's read of the matter with its access columns, as the caller. A row the caller
+            // cannot read (or that does not exist) is absent; sprk_issecure is false and sprk_accesspermission absent (Standard) unless set.
+            var matterAccess = Regex.Match(relativePath,
+                @"^sprk_matters\?\$select=sprk_matterid,sprk_issecure,sprk_accesspermission,statecode&\$filter=sprk_matterid eq ([0-9a-f-]{36})&\$top=1$");
+            if (matterAccess.Success)
+            {
+                if (MatterAccessReadThrows is { } thrown) throw thrown;
+                var id = Guid.Parse(matterAccess.Groups[1].Value);
+                if (Unreadable.Contains(("sprk_matter", id)) || Missing.Contains(("sprk_matter", id))) return Ok(new { value = Array.Empty<object>() });
+                var row = new Dictionary<string, object?> { ["sprk_matterid"] = id.ToString("D"), ["statecode"] = 0 };
+                var (isSecure, accessPermission) = MatterAccess.GetValueOrDefault(id, (false, null));
+                if (isSecure is { } secure) row["sprk_issecure"] = secure;
+                if (accessPermission is { } permission) row["sprk_accesspermission"] = permission;
+                return Ok(new { value = new object[] { row } });
+            }
+
             var table = Regex.Match(relativePath, @"^([a-z_]+)s\?\$select=([a-z_]+)id&\$filter=Microsoft\.Dynamics\.CRM\.In\(PropertyName='[a-z_]+id',PropertyValues=\[(.*)\]\)$");
             if (table.Success)
             {
@@ -1576,7 +1955,7 @@ public sealed class AuthoringWorld : IDataverseUserClient
                 var ids = Regex.Matches(table.Groups[3].Value, "[0-9a-f-]{36}").Select(m => Guid.Parse(m.Value));
                 return Ok(new
                 {
-                    value = ids.Where(id => !Unreadable.Contains((logical, id)))
+                    value = ids.Where(id => !Unreadable.Contains((logical, id)) && !Missing.Contains((logical, id)))
                         .Select(id => new Dictionary<string, object?> { [logical + "id"] = id.ToString("D") })
                         .ToArray(),
                 });
@@ -1621,7 +2000,8 @@ public sealed class AuthoringWorld : IDataverseUserClient
                 {
                     var id = Guid.Parse(json.GetProperty("sprk_policyid").GetString()!);
                     AddPolicy(id, json.GetProperty("sprk_policycode").GetString()!, json.GetProperty("sprk_lane").GetInt32(),
-                        json.GetProperty("sprk_enabled").GetBoolean(), json.GetProperty("sprk_domain").GetInt32(), current: null);
+                        json.GetProperty("sprk_enabled").GetBoolean(), json.GetProperty("sprk_domain").GetInt32(), current: null,
+                        matter: MatterOf(json));
                     foreach (var v in json.GetProperty("sprk_policyversion_policy").EnumerateArray())
                     {
                         AddVersion(Guid.Parse(v.GetProperty("sprk_policyversionid").GetString()!), id, v.GetProperty("sprk_versionnumber").GetInt32(), null);
@@ -1695,6 +2075,11 @@ public sealed class AuthoringWorld : IDataverseUserClient
                 var policy = Policies[id];
                 if (expected is { } e && e != policy.RowVersion) return Precondition();
                 policy.Current = Guid.Parse(Regex.Match(json.GetProperty("sprk_CurrentVersion@odata.bind").GetString()!, "[0-9a-f-]{36}").Value);
+                if (json.TryGetProperty(MatterBind, out _))
+                {
+                    policy.Matter = MatterOf(json); // a null bind clears the lookup
+                }
+
                 policy.RowVersion++;
             }
             else if (relativePath.StartsWith("sprk_policyversions(", StringComparison.Ordinal))
@@ -1716,4 +2101,18 @@ public sealed class AuthoringWorld : IDataverseUserClient
 
     public Task<DataverseUserResponse> DeleteAsync(string relativePath, CancellationToken cancellationToken) =>
         throw new InvalidOperationException("The authoring routes never delete.");
+
+    public const string MatterBind = "sprk_Matter@odata.bind";
+
+    /// <summary>The matter a write binds (<c>/sprk_matters(id)</c>), or null when it binds none or clears it.</summary>
+    private static Guid? MatterOf(JsonElement json)
+    {
+        if (!json.TryGetProperty(MatterBind, out var bind) || bind.ValueKind == JsonValueKind.Null)
+        {
+            return null;
+        }
+
+        var reference = Regex.Match(bind.GetString()!, @"^/sprk_matters\(([0-9a-f-]{36})\)$");
+        return reference.Success ? Guid.Parse(reference.Groups[1].Value) : throw new InvalidOperationException($"Unexpected matter bind: {bind}");
+    }
 }

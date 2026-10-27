@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="048" project="spaarke-SPA-external-access-platform-r3">
+  <metadata>
+    <title>BFF link endpoint POST /api/v1/external/workforce/link (dual-token proof)</title>
+    <phase>4b A9 workforce home sign-in</phase>
+    <gate>after 046; after 047 merges (shared route registration file)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags bff-api, auth; validates a second token and writes an identity link</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-tenant identity proof (tags auth, security)</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>file-overlap with task 047 (ExternalAccessEndpoints.cs, ContactIdentityStore.cs)</parallel-reason>
+    <deps>046</deps>
+    <tags>bff-api, api, endpoints, auth, security, testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Build POST /api/v1/external/workforce/link exactly as notes/a9-bff-design.md §5 specifies: one request proves a licensed user's home identity (bearer) and Spaarke guest identity (body token), and writes the stored link once. Two adversarial review passes.</prompt>
+  <role>SPAARKE platform developer. JWT validation and Entra B2B expert. Follow ADRs strictly.</role>
+  <goal>With a valid home bearer and a valid guest token for the same person, the endpoint writes sprk_hometenantid/sprk_homeobjectid and their key mirrors sprk_hometenantidkey/sprk_homeobjectidkey (same values, one update) on the guest's enabled systemuser and returns 200; every failed check returns 403 with a reason code and writes nothing; an existing different link is never re-pointed.</goal>
+
+  <context>
+    <background>Design note §5 and owner decision §11 item 3 ("both sign-ins" = the licensed user's company account and their Spaarke guest account; freshness = each token's own lifetime, no shorter extra limit; the UPN check stays). No home_oid claim exists (§9). TryParseHomeTenant exists in WorkforceIdentityOptions.cs (:282-340 area). Builds on UAC #1801; rebase onto UAC task 185 if merged.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalWorkforceLinkEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalAccessEndpoints.cs (mount under the registration group from 047)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ContactIdentityStore.cs (systemuser link write, if the store owns systemuser writes; otherwise the existing systemuser writer — record which)</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Api/ExternalAccess/ExternalWorkforceLinkEndpointsTests.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/WorkforceIdentityOptions.cs (TryParseHomeTenant)</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>TryLinkSystemUserAsync links systemuser → contact, not home id → systemuser; no endpoint accepts a second token.</existing>
+    <extension>No: the proof needs both tokens in one request; the write itself extends the existing systemuser writer with the two 044 columns.</extension>
+    <cost-of-doing-nothing>A licensed user signing in with their company account gets registration_required and becomes a second, contact principal with split access (A8's own objection; ADR-028 A9 MUST).</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="design §5">Bearer: authenticated by WorkforceHome only (Spaarke-tenant and CIAM principals → 403). Body: { guestAccessToken } only (closed DTO). Validate the body token with the DEFAULT scheme's TokenValidationParameters (signature, aud = the stamp BFF app, lifetime with the default skew); then require tid = AzureAd:TenantId, acct = "1", the idp home tenant (TryParseHomeTenant) = the bearer's tid, and its oid → an ENABLED systemuser.</constraint>
+    <constraint source="design §5 / owner §11.3">Freshness = each token's own exp; no extra shorter window and no longer one.</constraint>
+    <constraint source="design §5">Defense in depth: the guest token's home UPN (from the #EXT# UPN or email) must equal the bearer's preferred_username, case-insensitive. It can only refuse.</constraint>
+    <constraint source="design §5">Write once. Systemuser already linked to the same (tid, oid) → 200 no write. Linked to a different pair, or the pair already on another systemuser (alternate key) → 403 link_collision, no re-point.</constraint>
+    <constraint source="project">The guest token is never logged, stored or echoed; audit logs record the systemuserid and hashed tid/oid only. Request body size limit 16 KB.</constraint>
+    <constraint source="ADR-028 A9">No OBO with either token.</constraint>
+    <constraint source="CLAUDE.md §10">Placement line, publish-size delta, no new package.</constraint>
+    <constraint source="046 review K1 (carried)">Once a link exists, the linked systemuser's cached root sets are keyed by the CUSTOMER tenant id (ImpersonatedRootSetSource.cs ~225/233, IdentityNormalizationService.cs ~112). NoAccessShareEnforcer.cs ~1159 and RestrictedExternalShareRemover.cs ~395 evict only the deployment tenant's keys, so a record turned Restricted would stay visible to a home sign-in for up to CacheTtl. This task must also evict under every WorkforceIdentity:CustomerTenantIds entry (copy ExternalParticipationService.GrantCacheTenantIds ~606), with a test.</constraint>
+    <constraint source="046">The collision check (pair already on another systemuser) reads through IContactIdentityStore.FindHomeLinkedSystemUsersAsync (secured pair only, any state, ordered isdisabled asc); never by the mirror columns or azureactivedirectoryobjectid.</constraint>
+    <constraint source="046 review K2 (accepted)">The external notification last-seen marker is keyed by (token tid, principal id), so a linked user's unread state differs between their company and guest sign-ins. Accepted; no change required. Note it in the task notes.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r3/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r3/notes/a9-bff-design.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load knowledge; confirm 047 merged into the branch; /conflict-check; declare rigor/tier.</step>
+    <step order="1">Write the tests in acceptance criteria (locally signed tokens, stubbed metadata); confirm they fail.</step>
+    <step order="2">Implement the endpoint and the link write.</step>
+    <step order="3">Seeding proofs: drop the idp-tenant equality → its test fails; drop the enabled-systemuser check → its test fails. Restore; record.</step>
+    <step order="4">Build, test, publish-size delta, notes/task-048-notes.md; two adversarial passes; fix F-class; status + drift check.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If validating the body token with the default scheme's parameters requires changing that scheme's configuration, STOP and escalate.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalWorkforceLinkEndpoints.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Api/ExternalAccess/ExternalWorkforceLinkEndpointsTests.cs</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r3/notes/task-048-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Valid home bearer + valid guest token (same person, enabled systemuser) → 200, link written; a following resolution (046) returns the systemuser.</criterion>
+    <criterion testable="true">Repeat call → 200, no write.</criterion>
+    <criterion testable="true">Each → 403 with reason code and no write: guest token expired; bad signature; wrong aud; tid not Spaarke; acct 0 or missing; idp tenant ≠ bearer tid; oid with no systemuser; disabled systemuser; UPN mismatch; systemuser linked to a different pair; pair already linked to another systemuser.</criterion>
+    <criterion testable="true">Bearer from Spaarke-tenant or CIAM scheme → 403; anonymous → 401; missing body token or extra properties → 400.</criterion>
+    <criterion testable="true">No log line or response contains the guest token (log-capture test).</criterion>
+    <criterion testable="true">Both seeding proofs recorded.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Design note §5/§11.3. Residual risk K (stolen unexpired guest token plus a same-UPN home token) is accepted in the design.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

@@ -56,7 +56,7 @@ public class SecureChildReownOrdinaryRowTests
         var synchronizer = new SecureChildShareSynchronizer(entities.Object, new FakeRecordShareTable(),
             SecureChildShareWorld.NobodyWalled(), configuration, NullLogger<SecureChildShareSynchronizer>.Instance);
         return new SecureChildReconciler(entities.Object, resolver, synchronizer, _webApi, configuration,
-            NullLogger<SecureChildReconciler>.Instance, _evictions);
+            NullLogger<SecureChildReconciler>.Instance, new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing, _evictions);
     }
 
     private Guid TeamOwnedRow(string table, Guid team, Guid? storedBusinessUnit = null)

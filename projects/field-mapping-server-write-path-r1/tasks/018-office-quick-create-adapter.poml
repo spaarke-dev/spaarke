@@ -1,0 +1,159 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="018" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Office quick-create (Matter, Project, Invoice) becomes a thin adapter over the service; delete the Office RecordCreationService (FR-13 part 2, FR-12)</title>
+    <phase>2 W2 Unified RecordCreationService</phase>
+    <gate>016 complete</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs in Sprk.Bff.Api; tags include bff-api, office; deletes a 1264-line creation core with security behaviour; adds tests at KEEP paths (TEST-MODIFYING and deletion override).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Deleting the old core must not lose any check, default or Office error code; needs judgment on what moved where.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits OfficeService.cs and OfficeModule.cs, which 017's DI swap and 030's Office paths also touch; must be sequenced.</parallel-reason>
+    <deps>016</deps>
+    <tags>bff-api, office, security, testing</tags>
+    <estimated-effort>10-14 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Make Office quick-create for Matter, Project AND Invoice a thin adapter that maps `QuickCreateRequest` to `RecordCreationService` (caller principal) and maps the result back to the existing `QuickCreateResponse` and Office error codes. Then delete `Services/Office/OfficeRecordCreationService.cs` (the class renamed in task 013; its file renamed in task 013 fix round 2). Keep the quick-create defaults endpoint (`ResolveDefaultAssigneeAsync`) working by moving only that method to a small home that survives the deletion.</prompt>
+  <role>SPAARKE platform developer, .NET 10 BFF, Office add-in API contracts. Follow ADRs strictly.</role>
+  <goal>Office quick-create creates only through the unified service; the Office contract tests pass with unchanged error codes; the old Office creation core is deleted; no Office create path is left that writes without the service.</goal>
+
+  <context>
+    <background>spec.md FR-13 (part 2), FR-12, NFR-07. `OfficeService.QuickCreateAsync` (~:1868) already has a Matter/Project leg `QuickCreateViaCreationServiceAsync` (~:2001) that calls the Office core `_recordCreation.CreateAsync` (~:2009), and an Invoice leg that creates directly through `_genericEntityService.CreateAsync` (~:1966) with `ownerid` set from the matter's team (~:1963). Another consumer of the Office class exists: `OfficeEndpoints.GetQuickCreateDefaultsAsync` (Api/Office/OfficeEndpoints.cs ~:1432) takes it for `ResolveDefaultAssigneeAsync` (Services/Office/OfficeRecordCreationService.cs ~:433). The Office error codes live in the Office adapter (spec FR-12: "The Office adapter keeps its existing Office error codes").</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs (QuickCreateAsync ~:1868, QuickCreateViaCreationServiceAsync ~:2001, Invoice leg ~:1909-1975; fields ~:77 and ctor ~:107)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Office/OfficeEndpoints.cs (GetQuickCreateDefaultsAsync ~:1432)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/OfficeModule.cs (remove the Office core registration ~:73 and add the home for ResolveDefaultAssigneeAsync if it needs one)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.cs (only to receive Office-specific defaults that the old core owned and that belong to the table rules; prefer RecordTableRules entries)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Dataverse/FieldMapping/CreateTimeFieldMapping.cs (no change expected; verify no remaining Office-namespace reference)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Office/OfficeRecordCreationService.cs (1264 lines; read in full before deleting; itemize every behaviour in the task notes)</file>
+      <file role="canonical-reference">tests/integration/contract/Api/Office/OfficeQuickCreateContractTests.cs</file>
+      <file role="canonical-reference">tests/integration/contract/Api/Office/OfficeQuickCreateProjectContractTests.cs</file>
+      <file role="canonical-reference">tests/integration/contract/Api/Office/OfficeQuickCreateFieldsContractTests.cs</file>
+      <file role="canonical-reference">tests/integration/data-mutation/RecordOwnership/OfficeRecordOwnershipTests.cs</file>
+      <file role="new">tests/integration/contract/Api/Office/OfficeQuickCreateInvoiceThroughServiceTests.cs (Invoice goes through the service with the matter-record-first owner)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="016" status="required">Create and Repair modes complete; owner and search-index steps live.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-008 (path A, spec ADR Tensions)">Scope: authorization. Office route filters (QuickCreateSourceAccessFilter, endpoint authorization) stay on the routes; the payload-dependent checks that the old Office core did move to `CallerWriteAuthorization` through the service. No check is duplicated in the adapter.</constraint>
+    <constraint source="ADR-019">Scope: error mapping. Office error codes and the Office ProblemDetails shape are UNCHANGED (NFR-07); the adapter maps each service refusal Kind to the existing Office code; an unmapped Kind fails closed to the existing generic Office failure code, never a 200.</constraint>
+    <constraint source="ADR-028">Scope: identity. The adapter passes the caller principal; WhoAmI is resolved by the service on the caller token, not by the adapter; the create stays app-only. The Invoice leg must stop calling `_genericEntityService.CreateAsync` directly.</constraint>
+    <constraint source="ADR-010">Scope: DI. Net DI change is a removal (the Office core registration at OfficeModule.cs ~:73). If `ResolveDefaultAssigneeAsync` needs a home, move it into an existing registered Office service rather than adding a registration; if a new one is unavoidable, justify per CLAUDE.md §11.</constraint>
+    <constraint source="NFR-01 (spec)">Scope: deletion. Fail closed: before deleting, list every check the old core performed (authorization, secure-parent handling, field-security, required-field rules, defaults) and show each lands in CallerWriteAuthorization, RecordTableRules or the service; any check with no home is a defect to fix, not to drop. A service refusal or exception yields an Office failure response, never a created row.</constraint>
+    <constraint source="NFR-07 (spec)">Scope: contract. Office quick-create response shape and error codes are unchanged; the only visible change is the Project-under-Matter owner (task 015's release note) and Invoice ownership via the record-first rule.</constraint>
+    <constraint source="NFR-08 / CLAUDE.md §8.5">Scope: coordination. UAC-r2 PR #2110 edits CommunicationService.cs, OwnedChildWrite.cs and ChildRecordEndpoints.cs; this task touches none of them, but run /conflict-check first for OfficeService.cs / OfficeEndpoints.cs overlap.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: BFF publish. Placement Justification in the PR (net deletion of about 1264 lines); fresh-master publish-size delta per §10.4 (expected negative); `dotnet list package --vulnerable --include-transitive`; no package.</constraint>
+    <constraint source="ADR-038">Scope: tests added or modified. KEEP paths; no Mock&lt;HttpMessageHandler&gt;; no DI-registration tests. Existing Office contract tests change only to follow a rename/deleted type, never by weakening an assertion. Cover the stated contract plus the named edge cases only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Office add-in quick-create contracts; unified creation service</topic>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>.claude/skills/conflict-check/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="entity-operations" location=".claude/patterns/dataverse/entity-operations.md">Create payload shapes.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor; read spec FR-13/FR-12/NFR-07; read the old core in full; re-grep every reference to the Office `RecordCreationService` / `OfficeRecordCreationService` (src and tests).</step>
+    <step order="1">Run /conflict-check; record the result. Escalate if another PR edits OfficeService.cs QuickCreate paths.</step>
+    <step order="2">Itemize in the task notes every behaviour of the old core (checks, defaults, error codes) and where it lands in the new service; fix gaps in the service/registry first (with tests), not in the adapter.</step>
+    <step order="3">Write the Invoice test first (service call, matter-record-first owner, no direct `_genericEntityService.CreateAsync`), then convert the Invoice leg and the Matter/Project leg to the adapter: map `QuickCreateRequest` to the service request (table, user-entered values, regarding/parent, optional mapping source); map refusal Kind to the existing Office codes; map success to `QuickCreateResponse`.</step>
+    <step order="4">Move `ResolveDefaultAssigneeAsync` (and only that) so `GetQuickCreateDefaultsAsync` keeps returning the same prefill; update OfficeModule.cs; delete the Office creation core and its CreateTimeFieldMapping reference remnants.</step>
+    <step order="5">Build; run all contract tests under tests/integration/contract/Api/Office/, OfficeRecordOwnershipTests, SecureChildOwnershipAiToolTests*, RouteAuthorizationGuardTests, RecordOwnerAssignmentCensusTests unchanged; publish-size delta; CVE check.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="7">Document any deviation in projects/field-mapping-server-write-path-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If an Office error code has no corresponding service refusal Kind (so the contract cannot be preserved), STOP and escalate per CLAUDE.md §6 (breaking API contract) with the code and the scenario; do not rename the code.</trigger>
+    <trigger>If the old core performs a check that cannot be expressed in CallerWriteAuthorization or the registry without changing its contract, STOP and escalate as a security finding before deleting.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Grep `QuickCreateViaCreationServiceAsync` and `_genericEntityService.CreateAsync` in src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs (~:2001, ~:1966); the existing contract tests are tests/integration/contract/Api/Office/OfficeQuickCreate*ContractTests.cs, which cover Matter and Project only (grep "Invoice" in those files before writing the new test).</existing>
+    <extension>Yes for production code: this task deletes a file and re-uses the service from task 013; it adds no production file. The only new file is a test class, because the Invoice-through-service behaviour is not covered by the existing Matter/Project contract tests, which must stay unchanged.</extension>
+    <cost-of-doing-nothing>Office keeps a second creation core with weaker authorization and a different Project owner, and Office Invoice quick-create keeps writing directly with no mapping, stamp or search-index invariants (spec FR-13, section 11 table).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build/test .NET</tool>
+    <tool name="skill:conflict-check">Detect overlap with other PRs</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs (adapter)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/OfficeModule.cs</output>
+    <output type="test">tests/integration/contract/Api/Office/OfficeQuickCreateInvoiceThroughServiceTests.cs</output>
+    <output type="docs">projects/field-mapping-server-write-path-r1/notes/ (old-core behaviour inventory)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`src/server/api/Sprk.Bff.Api/Services/Office/OfficeRecordCreationService.cs` (the class `OfficeRecordCreationService`) no longer exists, and nothing in src/ or tests/ references it.</criterion>
+    <criterion testable="true">Office quick-create for Matter, Project and Invoice each call `RecordCreationService` (caller principal); `OfficeService` has no direct `_genericEntityService.CreateAsync` for Invoice.</criterion>
+    <criterion testable="true">OfficeQuickCreateContractTests, OfficeQuickCreateProjectContractTests and OfficeQuickCreateFieldsContractTests pass with unchanged assertions and unchanged Office error codes.</criterion>
+    <criterion testable="true">The quick-create defaults endpoint still returns the caller's linked contact prefill (same response), with `ResolveDefaultAssigneeAsync` moved intact.</criterion>
+    <criterion testable="true">WITHDRAWN 2026-10-21 (ebilling-r1; owner decision L: invoices are created only by submission, FR-17/FR-20): the Office Invoice leg does NOT move onto RecordCreationService. Leave it exactly as it is, apart from a marker comment "removed by ebilling-r1 task 096". Task 096 deletes the leg (QuickCreateRequest.cs:180, OfficeDocumentPersistence.cs:47) one release after the word-add-in-r1 add-in release. Negative: no RecordCreationService call is added for sprk_invoice from Office.</criterion>
+    <criterion testable="true">The task notes contain the itemized behaviour inventory of the deleted core with the landing place of each check, default and error code.</criterion>
+    <criterion testable="true">Negative: a service refusal or exception produces the existing Office failure response (existing code), never a 200 and never a created row; an unmapped refusal Kind fails closed to the existing generic Office failure code.</criterion>
+    <criterion testable="true">BFF build 0 errors; Office contract tests, OfficeRecordOwnershipTests, SecureChildOwnershipAiToolTests*, RouteAuthorizationGuardTests and RecordOwnerAssignmentCensusTests pass; publish-size delta, CVE result and /conflict-check result recorded in the task notes.</criterion>
+    <criterion testable="true">UAC-r2 review of 013 (2026-10-21).
+      - K-3: Office reference lookups (matter type, practice area, assignee) are verified and dropped with a warning today; through the service they would become 404 AppendTo refusals. Route them through the FR-08 mapped/reference drop-with-warning path, with tests.
+      - Pre-create stamps: OfficeService.cs:2207/2258/2276 stamp into the payload before the create. Do not re-point them until the FR-06 step-10 amendment is decided and implemented (see 017).</criterion>
+    <criterion testable="true">From task 014 (2026-10-21):
+      - Office Project-under-Matter derives the regarding pair from the filed-under source BEFORE mapping, because ApplyFillOnly never writes it. Mapping never decides isolation. A caller pair cannot lower isolation: for a SECURE matter or project source, only the derived pair is accepted and any other pair is refused uniformly. A non-secure source keeps the caller's pair. This is the same rule as the #2191 hotfix (UAC-r2 2026-10-21); keep its tests green. The hotfix checks the caller's AppendTo on the derived pair for every source (#2191 UAC-r2 re-check, 2026-10-21: CallerMayFileUnderAsync, refusal caller_cannot_file_under_parent); keep that check when the Office create moves onto the unified service.
+      - Verify #2124 (DI-001) on the SDK path: a Default rule into a Money column writes a Money. It is unobservable on the Web API path. Then close #2124.
+      - Office default-contact order (named contact, else mapped, else maker's contact) needs a post-mapping default hook (015 or here).</criterion>
+    <criterion testable="true">From task 015 review (2026-10-21): the Office root owner moves to record-first HERE, through the unified service, which has the step-5 AppendTo checks (#1614). 015 reverted its live Office owner change. Required:
+      - Office Project-under-Matter is owned by the Matter's BU team (release note);
+      - a mapped or paired filing parent the caller cannot AppendTo refuses uniformly;
+      - the search index comes from the OWNING BU, so the owner and the index never diverge;
+      - remove the CreateOwnerResolutionGuardTests allow-list entry for Office;
+      - tests for the secure-owner refusal and for the isolated-project ordering (no caller-BU team needed).
+    </criterion>
+    <criterion testable="true">From UAC-r2's task 015 review (2026-10-21), blocking before any route reaches the unified create:
+      - K1: a test where the catalog read in step 7 throws (`RetrieveMultipleAsync` faults) gets 503 `OwnerUnavailableCode` and nothing is written (RecordCreationService step 7, ~:609-630);
+      - K3: a caller payload holding an explicit null under lowercase `sprk_ai_search_index@odata.bind` must not produce two keys that differ only in case after step 8's fill. Normalise the bind key (or drop the null entry before filling); test the duplicate-key case and the canonical-case case.
+      Whichever of 017 or 018 lands first owns this; the other confirms it.
+    </criterion>
+    <criterion testable="true">UAC-r2 condition (b) for 018b (2026-10-21):
+      - Assigned To contact named in the request: REFUSE when the caller lacks AppendTo on the contact, checked as the caller, the same way Create does it (it materialises an uncapped Collaborate grant, ADR-034 A4). The refusal names the field: its ProblemDetails code identifies `assignedTo`, and it never reads as "matter not found". If Office already has a fitting code, reuse it; otherwise this one code is the single allowed addition under NFR-07, recorded in the notes. Test with an unreadable contact (refused) and a readable one (created).
+      - A Matter create with no bearer token is refused with 500 `caller_rights_unverifiable` (fail closed).
+      - (i) The matter membership event fires exactly once per Office create: assert the single publish, and that the endpoint publish (OfficeEndpoints.cs ~:1858) is gone.
+      - (ii) A Project filed under a SECURE matter is owned by the Secure Record Owners team (D-11 / round 6), not the matter's BU default team. It is itself secure (round 6), inherits Access Permission as a floor (round 87), and its search index follows that owner. Test it.
+      - (iii) The adapter map keeps Office's existing status for EVERY refusal code the service can return, including OwnerUnresolved (stays 403) and the Assigned To refusal. A table-driven test lists the full map, enumerated from the service's codes, so an unmapped new code fails the test.
+    </criterion>
+    <criterion testable="true">UAC-r2 018a review (2026-10-22), for 018b:
+      - The maker's-contact Assigned To default is dropped, not refused, when the caller cannot AppendTo it. The adapter shows `record_creation.default_value_dropped` to the user, and nothing writes Assigned To app-only after a drop. Test both conditions.
+      - #2238 (K-c): de-duplicate the step-9 server binds (`ownerid@odata.bind`, the creator-person bind, `sprk_issecure`) case-insensitively for system-principal items, the K3 way, with tests. Optional; record the outcome either way.
+    </criterion>
+    <criterion testable="true">On merge of the Office move onto the unified create: close #1614 and #1617 (their unified-service half merged in #2214, cf0886360a; the Office half closes here). Cite the merge SHA.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-13 part 2, FR-12, NFR-07. Office todo and document save are task 030 (not here). Release note: Office Project-under-Matter owner changes (task 015); Office Invoice becomes team-owned.
+From task 002 (2026-10-20): the Office Project-under-Matter regarding pair came from the Matter→Project mapping profile via legacy CreateTimeFieldMapping.Apply; ApplyFillOnly never writes a pair, so the adapter must pass the pair (or let the service derive it from the filed-under Matter) before the secure-root filing plan reads it. Keep SecureRootInheritanceWriterTests.OfficeCreate_* / SecureRootCreateRouteTests.OfficeQuickCreate_* green. Deleting the Office service also deletes the last caller of legacy Apply; remove Apply then if nothing else uses it.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

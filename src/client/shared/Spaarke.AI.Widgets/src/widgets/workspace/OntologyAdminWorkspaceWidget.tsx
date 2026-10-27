@@ -14,7 +14,16 @@
 
 import * as React from 'react';
 import { makeStyles } from '@fluentui/react-components';
-import { ClassificationArea, OntologyAdminTab, RulesArea, createClassificationService, createOntologyRulesService } from '@spaarke/ui-components';
+import type { MatterPicker } from '@spaarke/ui-components';
+import {
+  ClassificationArea,
+  OntologyAdminTab,
+  RulesArea,
+  createClassificationService,
+  createOntologyAuthoringService,
+  createOntologyRulesService,
+  searchLookupTarget,
+} from '@spaarke/ui-components';
 import { useAiSession } from '../../providers/useAiSession';
 import type { WorkspaceWidgetProps } from '../../types/widget-types';
 
@@ -28,6 +37,9 @@ const useStyles = makeStyles({
   },
 });
 
+/** The table a rule's matter limit names (task 102b, D-165): the subject it applies to and the table the picker searches. */
+const MATTER_TABLE = 'sprk_matter';
+
 export const OntologyAdminWorkspaceWidget: React.FC<WorkspaceWidgetProps> = () => {
   const styles = useStyles();
   const { authenticatedFetch, bffBaseUrl } = useAiSession();
@@ -37,15 +49,32 @@ export const OntologyAdminWorkspaceWidget: React.FC<WorkspaceWidgetProps> = () =
     [authenticatedFetch, bffBaseUrl]
   );
 
+  // Task 102: the rule wizard (New rule, New version) writes through the authoring routes as the caller.
+  const authoringService = React.useMemo(
+    () => createOntologyAuthoringService({ fetch: authenticatedFetch, baseUrl: bffBaseUrl }),
+    [authenticatedFetch, bffBaseUrl]
+  );
+
   // Task 103: the Classification area reads and writes through the BFF as the caller.
   const classificationService = React.useMemo(
     () => createClassificationService({ fetch: authenticatedFetch, baseUrl: bffBaseUrl }),
     [authenticatedFetch, bffBaseUrl]
   );
 
+  // Task 102b (D-165): the rule wizard's matter picker, offered for a rule about matters. It searches matters by name AS THE CALLER
+  // (Xrm.WebApi) through the shared lookup search the record header uses; only the chosen id reaches the BFF, which reads the matter
+  // again as the caller and refuses a limit on any other subject.
+  const matterPicker = React.useMemo<MatterPicker>(
+    () => ({ subject: MATTER_TABLE, search: (query: string) => searchLookupTarget(MATTER_TABLE, query) }),
+    []
+  );
+
   return (
     <div className={styles.host} data-testid="ontology-admin-workspace-widget">
-      <OntologyAdminTab rules={<RulesArea service={rulesService} />} classification={<ClassificationArea service={classificationService} />} />
+      <OntologyAdminTab
+        rules={<RulesArea service={rulesService} authoringService={authoringService} matterPicker={matterPicker} />}
+        classification={<ClassificationArea service={classificationService} />}
+      />
     </div>
   );
 };

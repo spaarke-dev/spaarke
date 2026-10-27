@@ -82,6 +82,10 @@ public static class DocumentOperationsEndpoints
             .WithDescription("Deletes a document from both Dataverse and SharePoint Embedded")
             .Produces<DeleteDocumentResponse>(200)
             .Produces<DocumentLockedError>(409)
+            // R3 ISS-004 (#1650): the file-first delete keeps the row when the file is not deleted. 409 also carries the
+            // problem bodies (pointer refused, child documents); 503 is the retryable "file could not be deleted right now".
+            .ProducesProblem(409)
+            .ProducesProblem(503)
             .ProducesProblem(403)
             .ProducesProblem(404)
             .ProducesProblem(401)
@@ -461,7 +465,8 @@ public static class DocumentOperationsEndpoints
 
     /// <summary>
     /// DELETE /api/documents/{documentId}
-    /// Deletes a document from both Dataverse and SharePoint Embedded.
+    /// Deletes a document from both Dataverse and SharePoint Embedded. The file goes first; if it cannot be deleted
+    /// the row is kept and this answers 503 (retry) or 409 (pointer refused) — R3 ISS-004, #1650.
     /// </summary>
     private static async Task<IResult> DeleteDocument(
         Guid documentId,
@@ -492,6 +497,25 @@ public static class DocumentOperationsEndpoints
                 CheckedOutDeleteResult checkedOut => TypedResults.Json(
                     checkedOut.CheckedOutError,
                     statusCode: 409
+                ),
+                // Task 188 slice D: still the parent of other documents. From the pre-check nothing was deleted; from
+                // Dataverse's Restrict at the row (a child created after the count) the file is gone and the row kept.
+                HasChildDocumentsDeleteResult hasChildren =>
+                    ProblemDetailsHelper.DocumentHasChildDocuments(hasChildren.ChildCount, correlationId, hasChildren.FileGone),
+                // R3 ISS-004 (#1650): the SPE file was not deleted (or its pointer was refused), so the row was KEPT, as on
+                // the external delete-own route (ExternalProjectDataEndpoints.DeleteOwnDocument): the result's status (503
+                // retryable, 409 for a refused pointer) and its code in reasonCode, with the correlation id of this plane.
+                FileNotDeletedDeleteResult notDeleted => TypedResults.Problem(
+                    statusCode: notDeleted.FailureStatusCode,
+                    title: "Document not deleted",
+                    detail: notDeleted.FailureStatusCode == StatusCodes.Status503ServiceUnavailable
+                        ? "The document's file could not be deleted right now, so the document was kept. Nothing was deleted. Try again shortly."
+                        : "The document's file could not be deleted, so the document was kept. Nothing was deleted.",
+                    extensions: new Dictionary<string, object?>
+                    {
+                        ["reasonCode"] = notDeleted.Code,
+                        ["correlationId"] = correlationId
+                    }
                 ),
                 FailedDeleteResult failed => TypedResults.Problem(
                     statusCode: 500,

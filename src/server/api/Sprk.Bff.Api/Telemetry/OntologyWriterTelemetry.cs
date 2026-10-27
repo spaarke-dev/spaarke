@@ -227,7 +227,7 @@ public static class DecisionPlanRefusalReason
     /// the Signal's lane, or a Next step that is not a Next-step creator).</summary>
     public const string ActionNotAllowed = "action_not_allowed";
 
-    /// <summary>The same code appears twice in one list.</summary>
+    /// <summary>The same code appears twice in one list, or in both <c>actions</c> and <c>nextSteps</c>.</summary>
     public const string DuplicateAction = "duplicate_action";
 }
 
@@ -400,6 +400,12 @@ public static class OntologyWriterFailureReason
     /// non-global-readable entity, a cross-clause <c>$</c>-reference, or a bounded-refusal limit (clause count,
     /// <c>in</c>-list length).</summary>
     public const string CompileRefused = "compile_refused";
+
+    /// <summary>Task 102a (owner option 101(b)): the body compiled, but it names a column outside
+    /// <see cref="Sprk.Bff.Api.Services.Signals.PolicyVersionValidator.AuthorableColumns"/>. Returned only by
+    /// <see cref="Sprk.Bff.Api.Services.Signals.PolicyVersionValidator.ValidateForAuthoring"/> (the BFF authoring routes); never
+    /// logged or metered by the evaluator.</summary>
+    public const string ColumnNotAuthorable = "column_not_authorable";
 
     /// <summary>The <c>sprk_messagetemplate</c> references a <c>{{field}}</c> token outside
     /// <see cref="Sprk.Bff.Api.Services.Signals.CompiledPredicate.TemplateEligibleFields"/> — absent entirely,

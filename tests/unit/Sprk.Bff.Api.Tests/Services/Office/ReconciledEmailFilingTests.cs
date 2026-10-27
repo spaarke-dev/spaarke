@@ -20,6 +20,7 @@ using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Tests.AccessControl;
 using Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
 using Sprk.Bff.Api.Tests.Domain.Signals;
+using Sprk.Bff.Api.Tests.Services.Signals;
 using Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
@@ -52,10 +53,15 @@ public class ReconciledEmailFilingTests
         /// <summary>Task 129: the thread resolver every step of the save reaches (capture, association, after-re-file).</summary>
         public Mock<IThreadResolver> Threads { get; } = new();
 
+        /// <summary>#2143 round 8: every thread reconcile asked for, through ANY overload.</summary>
+        public IReadOnlyList<Moq.IInvocation> ThreadReconciles() => Threads.Invocations
+            .Where(i => i.Method.Name == nameof(IThreadResolver.ReconcileThreadForFilingAsync))
+            .ToList();
+
         /// <summary>Task 129: the #1629 grant the capture issues for the thread its join returned.</summary>
         public Mock<Sprk.Bff.Api.Services.Communication.Access.IDirectThreadAccessService> Grants { get; } = new();
         public Mock<CallerRecordAccessProbe> Probe { get; } = new(
-            new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance, null!)
+            new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance, null!, null!)
         { CallBase = false };
 
         public World(bool reconciled, params DataverseEntity[] filingReads)
@@ -97,12 +103,13 @@ public class ReconciledEmailFilingTests
             var entities = new Mock<IGenericEntityService>();
             var configuration = new ConfigurationBuilder().Build();
             var children = Isolation is { } isolation
-                ? SecureChildShareWorld.ReconcilerOver(() => isolation, new FakeRecordShareTable(), null!)
+                ? SecureChildShareWorld.ReconcilerOver(() => isolation, new FakeRecordShareTable(), null!, gateDecisionRecords: GateRecords)
                 : new SecureChildReconciler(
                 entities.Object, Ownership,
                 new SecureChildShareSynchronizer(entities.Object, Mock.Of<IDataverseRecordShareService>(), null!, configuration,
                     NullLogger<SecureChildShareSynchronizer>.Instance),
-                null!, configuration, NullLogger<SecureChildReconciler>.Instance, threads: Threads.Object);
+                null!, configuration, NullLogger<SecureChildReconciler>.Instance, GateRecords ?? new GateSharingWorld().Sharing,
+                threads: Threads.Object);
             var filing = new ReconciledEmailFiling(
                 resolver, Dataverse.Object, Probe.Object, children,
                 Isolation is { } stamped && !RestampOverStamps
@@ -136,6 +143,10 @@ public class ReconciledEmailFilingTests
 
         /// <summary>Ontology D-48 (#1659): the association-confirmed Signal trigger the filing queues; null = none registered.</summary>
         public Mock<SignalEvaluationTrigger>? Trigger { get; set; }
+
+        /// <summary>Ontology task 042b (D-169): the gate Decision Record helper the reconciler's after-re-file step calls; null = a double over an
+        /// empty world.</summary>
+        public GateDecisionRecordSharing? GateRecords { get; set; }
 
         /// <summary>Ontology task 144: logs the real restamper writes to; null = none. A throwing logger breaks the
         /// restamper's never-throws contract, the one way a fault can escape it.</summary>
@@ -638,7 +649,8 @@ public class ReconciledEmailFilingTests
         var (_, result) = await world.SaveAsync(PaneSave(Matter()));
 
         result.Should().Be(ReconciledFilingResult.Filed);
-        world.Threads.Verify(t => t.ReconcileThreadForFilingAsync(CanonicalId, It.IsAny<CancellationToken>()), Times.Once);
+        world.ThreadReconciles().Should().ContainSingle("once, through any overload")
+            .Which.Arguments[0].Should().Be(CanonicalId);
         world.Threads.Verify(t => t.ResolveAndAssignAsync(It.IsAny<ThreadResolutionRequest>(), It.IsAny<CancellationToken>()), Times.Never,
             "a save that reconciled to an existing row keeps that row's thread");
     }
@@ -652,7 +664,7 @@ public class ReconciledEmailFilingTests
         var (_, result) = await world.SaveAsync(PaneSave(Matter()));
 
         result.Should().Be(ReconciledFilingResult.NotPermitted);
-        world.Threads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        world.ThreadReconciles().Should().BeEmpty("through any overload");
     }
 
     [Fact]
@@ -677,8 +689,7 @@ public class ReconciledEmailFilingTests
         asked.ChannelType.Should().Be(Sprk.Bff.Api.Services.Communication.Models.CommunicationType.Email);
         asked.Message.InternetMessageId.Should().Be("<CAF0a1b2c3@mail.example.com>", "the resolution receives the email's own envelope");
         world.Grants.Verify(g => g.GrantMessageAccessAsync(CanonicalId, assignment, It.IsAny<CancellationToken>()), Times.Once);
-        world.Threads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never,
-            "a new row is not a re-file");
+        world.ThreadReconciles().Should().BeEmpty("a new row is not a re-file, through any overload");
     }
 
     [Fact]
@@ -694,5 +705,59 @@ public class ReconciledEmailFilingTests
         capture.Should().NotBeNull("thread resolution is best-effort (NFR-02/NFR-04)");
         world.Grants.Verify(g => g.GrantMessageAccessAsync(It.IsAny<Guid>(), It.IsAny<ThreadAssignment>(), It.IsAny<CancellationToken>()),
             Times.Never);
+    }
+
+    // ── Ontology task 042b (D-169): the filed communication's gate Decision Record takes the team-owned path ─────
+
+    private static readonly Guid GateRecord = Guid.Parse("d0d0d0d0-0000-4000-8000-0000000000d1");
+    private static readonly Guid GateOwner = Guid.Parse("a0000000-0000-4000-8000-0000000000d2");
+    private static readonly Guid GateSharee = Guid.Parse("a0000000-0000-4000-8000-0000000000d3");
+    private static readonly Guid MatterTeam = Guid.Parse("e0000000-0000-4000-8000-0000000000d4");
+
+    /// <summary>The reconciled communication's user-owned gate record, shared with its participant, and the resolver's ordinary answer.</summary>
+    private static GateSharingWorld GateRecordOfTheCommunication()
+    {
+        var gate = new GateSharingWorld()
+            .WithGateRecord(GateRecord, CanonicalId, GateOwner)
+            .Share(GateSharingWorld.Record, GateRecord, GateSharee);
+        gate.OwnerAnswers(RecordOwnerResolution.Owned(MatterTeam));
+        return gate;
+    }
+
+    [Fact(DisplayName = "Ontology task 042b (D-169): filing the reconciled communication under an ordinary record re-owns its gate Decision Record to the resolver's team, reads it back, then revokes its participant shares")]
+    public async Task FileIfUnfiled_ReownsTheGateDecisionRecord_ThenRevokesItsShares()
+    {
+        var gate = GateRecordOfTheCommunication();
+        var world = new World(reconciled: true, Unfiled()) { GateRecords = gate.Sharing };
+
+        var (_, result) = await world.SaveAsync(PaneSave(Matter()));
+
+        result.Should().Be(ReconciledFilingResult.Filed);
+        gate.Rows[(GateSharingWorld.Record, GateRecord)].GetAttributeValue<EntityReference>("owningteam").Id.Should().Be(MatterTeam);
+        gate.RecordSharees(GateRecord).Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "Ontology task 042b (D-169): a gate Decision Record re-own that fails keeps the user owner and the shares, and the filing still succeeds")]
+    public async Task FileIfUnfiled_AFailedGateRecordReown_KeepsItsSharesAndOwner_AndTheFilingStands()
+    {
+        var gate = GateRecordOfTheCommunication();
+        gate.AssignLands = false;
+        gate.AssignFault = new InvalidOperationException("Test: Dataverse refused the Assign.");
+        var world = new World(reconciled: true, Unfiled()) { GateRecords = gate.Sharing };
+
+        var (_, result) = await world.SaveAsync(PaneSave(Matter()));
+
+        result.Should().Be(ReconciledFilingResult.Filed);
+        gate.Rows[(GateSharingWorld.Record, GateRecord)].GetAttributeValue<EntityReference>("owninguser").Id.Should().Be(GateOwner);
+        gate.RecordSharees(GateRecord).Should().Equal(GateSharee);
+    }
+    [Fact(DisplayName = "Ontology task 042b round 2 (D-169): a gate Decision Record helper fault after the filing leaves the filing standing")]
+    public async Task FileIfUnfiled_AGateHelperFault_LeavesTheFilingStanding()
+    {
+        var world = new World(reconciled: true, Unfiled()) { GateRecords = GateSharingWorld.Faulting() };
+
+        var (_, result) = await world.SaveAsync(PaneSave(Matter()));
+
+        result.Should().Be(ReconciledFilingResult.Filed, "the reconciler's after-re-file step isolates the gate helper's fault");
     }
 }

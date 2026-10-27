@@ -68,6 +68,16 @@ public static class SignalsModule
         // shared regarding builder, then the core-ancestor stamp) -- no new registration.
         services.AddSingleton<DecisionRecordWriter>();
 
+        // GateDecisionRecordSharing (task 042b, D-169): the gate Decision Record of an UNFILED communication is shared Read with the
+        // communication's internal sharees (at write, and on each later grant of the communication), and re-owned to the resolver's team
+        // when any re-file of the communication runs SecureChildReconciler.AfterRefileAsync. Registered unconditionally, singleton over
+        // singletons (the shared sysadmin reader, the POA seam, the writer client above, the resolver, the cache invalidator), so the
+        // scoped SecureChildReconciler and the singleton DirectThreadAccessService take it as a REQUIRED dependency with no captive
+        // scope (GateDecisionRecordSharingRegistrationTests). DecisionRecordWriter takes it as a REQUIRED last parameter too. CLAUDE.md section 11: Existing: the writer (create-only, guarded), uac-r2's
+        // DirectThreadAccessService and SecureChildReconciler.ReownOrdinaryRowAsync (refuses a user-owned row). Extension: the writer cannot
+        // assign without breaking its create-only guard; the other two are uac-r2's. Cost of doing nothing: D-169 fails (owner-only record).
+        services.AddSingleton<GateDecisionRecordSharing>();
+
         // Decision plan read (task 036, FR-49/FR-50): the Signal-level access decision (as the caller, through the
         // caller-identity client, so scoped) and the plan resolver (the catalog itself is a static table). Both
         // unconditional -- the route that uses them is mapped unconditionally (bff-extensions.md F.1).
@@ -77,6 +87,9 @@ public static class SignalsModule
         // Signal read route (task 038, FR-54): the worklist's only Signal reader. Scoped (every read is the request caller's
         // through the caller-identity client); unconditional, like the route that uses it (bff-extensions.md F.1).
         services.AddScoped<SignalReadService>();
+        // D-176 (task 157): the earlier-invoice readability check of a billing Duplicate, as the caller (the caller's client is passed
+        // in). Shared with ebilling task 119's invoice-review read; scoped like SignalReadService, which takes it.
+        services.AddScoped<EarlierInvoiceReadability>();
 
         // Decision action executors (task 044, FR-52): one per catalog action the commit route (task 043) calls, except the
         // inquiry (070) and Assign Work (046). Internal services, not routes; scoped because every write is the request
@@ -84,6 +97,7 @@ public static class SignalsModule
         // nothing here is feature-gated (bff-extensions.md F.1).
         services.AddScoped<DecisionRouteCores>();
         services.AddScoped<IDecisionActionExecutor, ReviseBudgetExecutor>();
+        services.AddScoped<IDecisionActionExecutor, CreateBudgetExecutor>();
         services.AddScoped<IDecisionActionExecutor, ApproveVarianceExecutor>();
         services.AddScoped<IDecisionActionExecutor, MarkCompleteExecutor>();
         services.AddScoped<IDecisionActionExecutor, RescheduleExecutor>();
@@ -96,6 +110,8 @@ public static class SignalsModule
         services.AddScoped<IDecisionActionExecutor, SendEmailExecutor>();
         // Task 043: the last two catalog actions (Assign Work through the 046 create; the inquiry adapting 070).
         services.AddScoped<IDecisionActionExecutor, AssignWorkExecutor>();
+        // Task 159 (D-178): Assign Task, the no-budget decision's action (a sprk_event of type Task) through the same child-records create.
+        services.AddScoped<IDecisionActionExecutor, AssignTaskExecutor>();
         services.AddScoped<IDecisionActionExecutor, BudgetInquiryActionExecutor>();
         services.AddScoped<DecisionActionExecutors>();
         // Task 043: the decision commit route's service and its after-record step (032 trigger, 034 suppression).

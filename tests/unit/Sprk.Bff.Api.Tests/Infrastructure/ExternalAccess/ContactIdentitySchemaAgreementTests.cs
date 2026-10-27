@@ -1,4 +1,6 @@
+using System.Globalization;
 using System.Text.RegularExpressions;
+using System.Xml.Linq;
 using FluentAssertions;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Xunit;
@@ -44,7 +46,42 @@ public class ContactIdentitySchemaAgreementTests
 
         schema.ReasonOptions.Should().BeEquivalentTo(Enum.GetValues<IdentityCollisionReason>().Select(v => (int)v),
             "a reason the choice lacks makes the flag write fail, and the operator never sees the collision");
-        schema.PlaneOptions.Should().BeEquivalentTo(Enum.GetValues<IdentityPlaneMarker>().Select(v => (int)v));
+        // r3 task 047: the WorkforceHome option (100000002) is added to the same global choice by the A9 schema script
+        // (scripts/Set-WorkforceHomeIdentitySchema.ps1, task 044), not by the binding script.
+        var a9 = Regex.Match(File.ReadAllText(Path.Combine(RepoRoot(), "scripts", "Set-WorkforceHomeIdentitySchema.ps1")),
+            @"^\s*\$WorkforceHomeValue\s*=\s*(?<value>1\d{8})\s*$", RegexOptions.Multiline);
+        a9.Success.Should().BeTrue("the A9 script declares the WorkforceHome option value");
+        schema.PlaneOptions.Append(int.Parse(a9.Groups["value"].Value)).Should()
+            .BeEquivalentTo(Enum.GetValues<IdentityPlaneMarker>().Select(v => (int)v),
+                "a plane the choice lacks makes every bind or create on it fail");
+    }
+
+    [Fact]
+    public void TheSolutionOptionSet_CarriesEveryCollisionReason_AsTheScriptDoes()
+    {
+        // r3 task 047 fix round 3: the SpaarkeMaster solution's global choice is the other place the options live. A reason it
+        // lacks (e.g. InactiveContactEmailMatch, 100000012) is missing from an environment built from the solution, and the
+        // flag write for it fails there.
+        var path = Path.Combine(RepoRoot(), "src", "dataverse", "solutions", "SpaarkeMaster", "OptionSets",
+            "sprk_identitycollisionreason.xml");
+        var values = XDocument.Load(path).Descendants("option")
+            .Select(o => int.Parse((string)o.Attribute("value")!, CultureInfo.InvariantCulture))
+            .ToList();
+
+        values.Should().BeEquivalentTo(Enum.GetValues<IdentityCollisionReason>().Select(v => (int)v),
+            "the solution's sprk_identitycollisionreason must offer every reason the BFF writes");
+        values.Should().BeEquivalentTo(Analyse(File.ReadAllText(ScriptPath())).ReasonOptions,
+            "the solution and the schema script describe the same choice");
+
+        // The labels too: the export carried every option with an empty label, so an environment built from the solution
+        // showed operators blank collision reasons (r3 task 047, main-session review 2026-10-16).
+        var solutionLabels = XDocument.Load(path).Descendants("option").ToDictionary(
+            o => int.Parse((string)o.Attribute("value")!, CultureInfo.InvariantCulture),
+            o => (string?)o.Descendants("label").FirstOrDefault(l => (string?)l.Attribute("languagecode") == "1033")?.Attribute("description"));
+        var block = Regex.Match(File.ReadAllText(ScriptPath()), @"\$ReasonOptions\s*=\s*\[ordered\]@\{(?<body>.*?)\}", RegexOptions.Singleline);
+        var scriptLabels = Regex.Matches(block.Groups["body"].Value, @"(?<value>1\d{8})\s*=\s*'(?<label>[^']*)'")
+            .ToDictionary(m => int.Parse(m.Groups["value"].Value, CultureInfo.InvariantCulture), m => (string?)m.Groups["label"].Value);
+        solutionLabels.Should().BeEquivalentTo(scriptLabels, "the solution labels each collision reason as the schema script does");
     }
 
     // ── The guard bites: the analyser on seeded scripts ───────────────────────────────────────────────

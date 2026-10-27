@@ -28,6 +28,14 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Handlers;
 /// </remarks>
 public sealed class DataverseToolNameFreezeTests
 {
+    // Task 078 (ISS-010): the read handlers' caller-externality collaborators; unused by these contract checks.
+    private static readonly Microsoft.AspNetCore.Http.IHttpContextAccessor HttpContextAccessor =
+        new Microsoft.AspNetCore.Http.HttpContextAccessor();
+    private static readonly Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver CallerResolver =
+        new Moq.Mock<Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver>().Object;
+    private static readonly Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver IdentityResolver =
+        new Moq.Mock<Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver>().Object;
+
     // ═════════════════════════════════════════════════════════════════════════════
     // Tool ids frozen against the GA Dataverse MCP tool names
     // ═════════════════════════════════════════════════════════════════════════════
@@ -72,7 +80,8 @@ public sealed class DataverseToolNameFreezeTests
         // GA: describe(path, scope?) — path required, scope optional.
         var handler = new DataverseDescribeHandler(
             new Moq.Mock<IDataverseUserClient>().Object,
-            Microsoft.Extensions.Logging.Abstractions.NullLogger<DataverseDescribeHandler>.Instance);
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<DataverseDescribeHandler>.Instance,
+            HttpContextAccessor, CallerResolver, IdentityResolver, DocumentNarrowingReads.NeverCalled);
 
         var parameters = handler.Metadata.Parameters;
         parameters.Should().Contain(p => p.Name == "path" && p.Required,
@@ -87,7 +96,8 @@ public sealed class DataverseToolNameFreezeTests
         // GA: read_query(querytext) — single required string.
         var handler = new DataverseReadQueryHandler(
             new Moq.Mock<IDataverseUserClient>().Object,
-            Microsoft.Extensions.Logging.Abstractions.NullLogger<DataverseReadQueryHandler>.Instance);
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<DataverseReadQueryHandler>.Instance,
+            HttpContextAccessor, CallerResolver, IdentityResolver, DocumentNarrowingReads.NeverCalled);
 
         var parameters = handler.Metadata.Parameters;
         parameters.Should().ContainSingle(because: "GA MCP read_query takes exactly one argument");
@@ -103,7 +113,8 @@ public sealed class DataverseToolNameFreezeTests
         // (no MCP scope registry) — property NAME frozen so the swap only tightens the schema.
         var handler = new DataverseSearchDataHandler(
             new Moq.Mock<IDataverseUserClient>().Object,
-            Microsoft.Extensions.Logging.Abstractions.NullLogger<DataverseSearchDataHandler>.Instance);
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<DataverseSearchDataHandler>.Instance,
+            HttpContextAccessor, CallerResolver, IdentityResolver, DocumentNarrowingReads.NeverCalled);
 
         var parameters = handler.Metadata.Parameters;
         parameters.Should().Contain(p => p.Name == "query" && p.Required,
@@ -204,9 +215,12 @@ public sealed class DataverseToolNameFreezeTests
         var mock = new Moq.Mock<IDataverseUserClient>().Object;
         IToolHandler[] handlers =
         {
-            new DataverseDescribeHandler(mock, Microsoft.Extensions.Logging.Abstractions.NullLogger<DataverseDescribeHandler>.Instance),
-            new DataverseReadQueryHandler(mock, Microsoft.Extensions.Logging.Abstractions.NullLogger<DataverseReadQueryHandler>.Instance),
-            new DataverseSearchDataHandler(mock, Microsoft.Extensions.Logging.Abstractions.NullLogger<DataverseSearchDataHandler>.Instance)
+            new DataverseDescribeHandler(mock, Microsoft.Extensions.Logging.Abstractions.NullLogger<DataverseDescribeHandler>.Instance,
+                HttpContextAccessor, CallerResolver, IdentityResolver, DocumentNarrowingReads.NeverCalled),
+            new DataverseReadQueryHandler(mock, Microsoft.Extensions.Logging.Abstractions.NullLogger<DataverseReadQueryHandler>.Instance,
+                HttpContextAccessor, CallerResolver, IdentityResolver, DocumentNarrowingReads.NeverCalled),
+            new DataverseSearchDataHandler(mock, Microsoft.Extensions.Logging.Abstractions.NullLogger<DataverseSearchDataHandler>.Instance,
+                HttpContextAccessor, CallerResolver, IdentityResolver, DocumentNarrowingReads.NeverCalled)
         };
 
         foreach (var handler in handlers)

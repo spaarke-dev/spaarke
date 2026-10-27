@@ -11,6 +11,10 @@ import { render, screen } from '@testing-library/react';
 const authenticatedFetch = jest.fn();
 const createOntologyRulesService = jest.fn((opts: unknown) => ({ opts }));
 const createClassificationService = jest.fn((opts: unknown) => ({ opts }));
+const createOntologyAuthoringService = jest.fn((opts: unknown) => ({ authoring: opts }));
+const searchLookupTarget = jest.fn((_target: string, _query: string) =>
+  Promise.resolve([{ id: 'm-1', name: 'Acme v Beta' }])
+);
 let tabProps: Record<string, unknown> | undefined;
 let rulesAreaProps: Record<string, unknown> | undefined;
 let classificationAreaProps: Record<string, unknown> | undefined;
@@ -31,6 +35,8 @@ jest.mock('@spaarke/ui-components', () => ({
   },
   createOntologyRulesService: (opts: unknown) => createOntologyRulesService(opts),
   createClassificationService: (opts: unknown) => createClassificationService(opts),
+  createOntologyAuthoringService: (opts: unknown) => createOntologyAuthoringService(opts),
+  searchLookupTarget: (target: string, query: string) => searchLookupTarget(target, query),
 }));
 jest.mock('../../../providers/useAiSession', () => ({
   __esModule: true,
@@ -49,21 +55,50 @@ describe('OntologyAdminWorkspaceWidget', () => {
     classificationAreaProps = undefined;
   });
 
-  it('builds the Rules service over the session fetch and BFF base url, and passes the area as the tab\'s rules slot', () => {
+  it("builds the Rules service over the session fetch and BFF base url, and passes the area as the tab's rules slot", () => {
     render(<OntologyAdminWorkspaceWidget {...props} />);
 
-    expect(createOntologyRulesService).toHaveBeenCalledWith({ fetch: authenticatedFetch, baseUrl: 'https://bff.example' });
+    expect(createOntologyRulesService).toHaveBeenCalledWith({
+      fetch: authenticatedFetch,
+      baseUrl: 'https://bff.example',
+    });
     expect(screen.getByTestId('mock-tab')).toContainElement(screen.getByTestId('mock-rules-area'));
     expect(rulesAreaProps?.service).toEqual({ opts: { fetch: authenticatedFetch, baseUrl: 'https://bff.example' } });
   });
 
-  it('fills the tab\'s classification slot with the area, over a service built from the session fetch and BFF base url', () => {
+  it("builds the rule wizard's authoring service over the same session and hands it to the Rules area", () => {
+    render(<OntologyAdminWorkspaceWidget {...props} />);
+
+    expect(createOntologyAuthoringService).toHaveBeenCalledWith({
+      fetch: authenticatedFetch,
+      baseUrl: 'https://bff.example',
+    });
+    expect(rulesAreaProps?.authoringService).toEqual({
+      authoring: { fetch: authenticatedFetch, baseUrl: 'https://bff.example' },
+    });
+  });
+
+  it('hands the Rules area a matter picker for rules about sprk_matter, searching through the shared lookup search (task 102b)', async () => {
+    render(<OntologyAdminWorkspaceWidget {...props} />);
+
+    const picker = rulesAreaProps?.matterPicker as { subject: string; search: (query: string) => Promise<unknown> };
+    expect(picker.subject).toBe('sprk_matter');
+    await expect(picker.search('acme')).resolves.toEqual([{ id: 'm-1', name: 'Acme v Beta' }]);
+    expect(searchLookupTarget).toHaveBeenCalledWith('sprk_matter', 'acme');
+  });
+
+  it("fills the tab's classification slot with the area, over a service built from the session fetch and BFF base url", () => {
     render(<OntologyAdminWorkspaceWidget {...props} />);
 
     expect(screen.getByTestId('mock-classification')).toBeInTheDocument();
     expect(tabProps?.classification).toBeDefined();
-    expect(createClassificationService).toHaveBeenCalledWith({ fetch: authenticatedFetch, baseUrl: 'https://bff.example' });
-    expect(classificationAreaProps?.service).toEqual({ opts: { fetch: authenticatedFetch, baseUrl: 'https://bff.example' } });
+    expect(createClassificationService).toHaveBeenCalledWith({
+      fetch: authenticatedFetch,
+      baseUrl: 'https://bff.example',
+    });
+    expect(classificationAreaProps?.service).toEqual({
+      opts: { fetch: authenticatedFetch, baseUrl: 'https://bff.example' },
+    });
   });
 
   it('builds each service once across re-renders with the same session', () => {
@@ -72,5 +107,6 @@ describe('OntologyAdminWorkspaceWidget', () => {
 
     expect(createOntologyRulesService).toHaveBeenCalledTimes(1);
     expect(createClassificationService).toHaveBeenCalledTimes(1);
+    expect(createOntologyAuthoringService).toHaveBeenCalledTimes(1);
   });
 });

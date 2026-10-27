@@ -405,6 +405,12 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
     internal SecureChildShareWorld ChildWorld { get; set; } = SecureChildShareWorld.WithoutSecureBusinessUnit();
 
     /// <summary>
+    /// UAC task 099b review round 2: what the child pass asks before it assigns a grant row to a team (every team holds Read on
+    /// the grant table unless a test says otherwise). Read at call time; reset per test.
+    /// </summary>
+    internal Sprk.Bff.Api.Tests.TestInfrastructure.TeamPrivilegeCheckerDouble OwnerPrivileges { get; set; } = new();
+
+    /// <summary>
     /// One recorded POA operation. <c>AccessRightsCsv</c> is null for a revoke. <c>Sequence</c> shares
     /// <see cref="RecordedUpdate"/>'s counter, so a test can order a share against an owner PATCH (task 133).
     /// </summary>
@@ -549,8 +555,88 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
 
     private static readonly Guid BffWriterProfileId = Guid.Parse("0000b175-0000-0000-0000-0000000f1e1d");
 
-    /// <summary>Task 175 fix round 2: the BFF application user holds the System Administrator role.</summary>
+    /// <summary>Task 175 fix round 2: the BFF application user holds the System Administrator role (directly; real template id).</summary>
     public bool BffIsSystemAdministrator { get; set; }
+
+    /// <summary>
+    /// #2320: the BFF application user directly holds a role NAMED "System Administrator" whose template id is NOT the System
+    /// Administrator template (a renamed or impostor role). It proves nothing.
+    /// </summary>
+    public bool BffHoldsRoleNamedSystemAdministratorWithOtherTemplate { get; set; }
+
+    /// <summary>#2320: a team the BFF application user is a member of holds the System Administrator role.</summary>
+    public bool BffTeamIsSystemAdministrator { get; set; }
+
+    /// <summary>#2320: the tables a field security profile held by the BFF's TEAM grants Read on (none by default).</summary>
+    public HashSet<string> BffTeamProfileReadTables { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// #2320 follow-up: how many MORE teams the BFF application user is a member of, besides its own team. They grant nothing,
+    /// and they come BEFORE its own team in the roster (so with 499 its own team is the 500th).
+    /// </summary>
+    public int BffAdditionalTeamCount { get; set; }
+
+    /// <summary>The System Administrator role template id — a literal here, so the fixture pins the value independently.</summary>
+    private static readonly Guid SystemAdministratorTemplateId = Guid.Parse("627090ff-40a3-4053-8790-584edc5be201");
+
+    // #2320: the team the BFF's user is a member of, its profile, and a DECOY user and team (and profile) — the decoy user
+    // directly holds System Administrator and the decoy profile; the decoy team, whose only member is the decoy user, holds
+    // a System Administrator copy and the decoy profile too. The decoy profile grants Read on both tables, so a query that
+    // drops (or misnames) the user or the membership clause proves readability it must not.
+    private static readonly Guid BffTeamId = Guid.Parse("0000b175-0000-0000-0000-000000007ea1");
+    private static readonly Guid BffTeamProfileId = Guid.Parse("0000b175-0000-0000-0000-0000000f1e7e");
+    private static readonly Guid OtherTeamProfileId = Guid.Parse("0000b175-0000-0000-0000-0000000f1e0d");
+    private static readonly Guid DecoyTeamId = Guid.Parse("0000b175-0000-0000-0000-000000007ea0");
+    private static readonly Guid DecoyUserId = Guid.Parse("0000b175-0000-0000-0000-00000000dec0");
+
+    /// <summary>The teams the BFF's user is a member of: <see cref="BffAdditionalTeamCount"/> that grant nothing, then its own.</summary>
+    private IReadOnlyList<Guid> BffTeams() =>
+        Enumerable.Range(1, BffAdditionalTeamCount).Select(AdditionalTeamId).Append(BffTeamId).ToList();
+
+    /// <summary>The id of the BFF's <paramref name="n"/>th additional team.</summary>
+    public static Guid AdditionalTeamId(int n) => Guid.Parse($"0000b175-0000-0000-0001-{n:D12}");
+
+    private IReadOnlyList<Guid> MembersOf(Guid team) =>
+        team == DecoyTeamId ? new[] { DecoyUserId }
+        : BffTeams().Contains(team) ? new[] { BffApplicationUserId }
+        : Array.Empty<Guid>();
+
+    /// <summary>
+    /// #2320 follow-up: whether a principal-scoped filter admits a record held directly by <paramref name="users"/> and through
+    /// <paramref name="teams"/>. It honours the two server-side membership shapes the proof sends —
+    /// <c>{direct}/any(u:u/systemuserid eq X)</c> and <c>{team}/any(t:t/teammembership_association/any(u:u/systemuserid eq X))</c>,
+    /// joined by <c>or</c> — against the fixture's own rosters. A leg it cannot read admits ANY holder of that kind (the decoys
+    /// too), and a filter with neither leg admits every held record, so a query that drops or rewrites the membership clause
+    /// goes red rather than green.
+    /// </summary>
+    private bool HolderClauseAdmits(string? filter, string directNav, string teamNav, IReadOnlyCollection<Guid> users,
+        IReadOnlyCollection<Guid> teams)
+    {
+        filter ??= string.Empty;
+        var directAsked = filter.Contains(directNav + "/any(", StringComparison.Ordinal);
+        var teamAsked = filter.Contains(teamNav + "/any(", StringComparison.Ordinal);
+        if (!directAsked && !teamAsked)
+            return users.Count + teams.Count > 0;
+
+        var direct = System.Text.RegularExpressions.Regex.Match(filter,
+            System.Text.RegularExpressions.Regex.Escape(directNav) + @"/any\((\w+):\1/systemuserid eq ([0-9a-fA-F-]{36})\)");
+        var team = System.Text.RegularExpressions.Regex.Match(filter,
+            System.Text.RegularExpressions.Regex.Escape(teamNav)
+            + @"/any\((\w+):\1/teammembership_association/any\((\w+):\2/systemuserid eq ([0-9a-fA-F-]{36})\)\)");
+        // A team leg that names team ids instead (the pre-follow-up client-side join) admits exactly the teams it names.
+        var namedTeams = System.Text.RegularExpressions.Regex.Matches(filter, @"teamid eq ([0-9a-fA-F-]{36})")
+            .Select(m => Guid.Parse(m.Groups[1].Value)).ToHashSet();
+        var admits = false;
+        if (directAsked)
+            admits |= direct.Success ? users.Contains(Guid.Parse(direct.Groups[2].Value)) : users.Count > 0;
+        if (teamAsked)
+        {
+            admits |= team.Success ? teams.Any(t => MembersOf(t).Contains(Guid.Parse(team.Groups[3].Value)))
+                : namedTeams.Count > 0 ? teams.Any(namedTeams.Contains)
+                : teams.Count > 0;
+        }
+        return admits;
+    }
 
     /// <summary>The BFF application user's systemuserid in this fixture.</summary>
     public static readonly Guid BffApplicationUserId = Guid.Parse("0000b175-0000-0000-0000-00000000bff1");
@@ -764,6 +850,10 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
         AccessRecordReadTables.Add("sprk_workassignment");
         AccessRecordReadTables.Add("sprk_project");
         BffIsSystemAdministrator = false;
+        BffHoldsRoleNamedSystemAdministratorWithOtherTemplate = false;
+        BffTeamIsSystemAdministrator = false;
+        BffTeamProfileReadTables.Clear();
+        BffAdditionalTeamCount = 0;
         OwnershipPatchTimesOutAfterApplying = false;
         _updateSequence = 0;
         Grants.Clear();
@@ -834,6 +924,7 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
         OnGranted = null;
         Logs.Clear();
         ChildWorld = SecureChildShareWorld.WithoutSecureBusinessUnit();
+        OwnerPrivileges = new();
         _childWorldMirrorsRoots = false;
     }
 
@@ -883,7 +974,9 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
             services.AddScoped(sp => SecureChildShareWorld.ReconcilerOver(
                 () => ChildWorld, recordShare, sp.GetRequiredService<DataverseWebApiClient>(),
                 // Batch-4 integration, 148 × 132: the child owner-change eviction, through the host's hook as in production.
-                accessCacheInvalidator: sp.GetService<Sprk.Bff.Api.Services.Ai.Membership.IMembershipCacheInvalidator>()));
+                accessCacheInvalidator: sp.GetService<Sprk.Bff.Api.Services.Ai.Membership.IMembershipCacheInvalidator>(),
+                // UAC task 099b review round 2: read when the request scope builds the reconciler, after the test set it.
+                ownerPrivileges: OwnerPrivileges));
 
             // Round 26 item 3 (batch-4 integration): the Make Secure file relocator — the test's, when it supplies one.
             services.RemoveAll<Sprk.Bff.Api.Services.Documents.DocumentContainerRelocator>();
@@ -1345,24 +1438,72 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
             return JsonSerializer.Serialize(new[] { new Dictionary<string, object?> { ["IsSecured"] = AccessRecordColumnSecured } });
         if (entitySet == "systemusers" && filter is not null && filter.Contains("EqualUserId", StringComparison.Ordinal))
             return JsonSerializer.Serialize(new[] { new Dictionary<string, object?> { ["systemuserid"] = BffApplicationUserId } });
-        if (entitySet == $"systemusers({BffApplicationUserId})/systemuserroles_association")
+        // The BFF's team roster. The proof no longer reads it (#2320 follow-up: membership is joined server-side), but a proof
+        // that regressed to a client-side join would read every team here — and the many-teams test would see its filter grow.
+        if (entitySet == $"systemusers({BffApplicationUserId})/teammembership_association")
+            return JsonSerializer.Serialize(BffTeams().Select(t => new Dictionary<string, object?> { ["teamid"] = t }).ToArray());
+        if (entitySet == "roles")
         {
-            return JsonSerializer.Serialize(BffIsSystemAdministrator
-                ? new[] { new Dictionary<string, object?> { ["roleid"] = Guid.Parse("0000b175-0000-0000-0000-0000000005a1") } }
-                : Array.Empty<Dictionary<string, object?>>());
+            // #2320: every role in the org, with its direct and team holders. Honours the template id (or a name), and the
+            // membership legs through HolderClauseAdmits: the decoy user and team always hold System Administrator, and the
+            // BFF's team always holds a non-administrator role, so dropping the user, the membership or the template clause
+            // proves what it must not.
+            var otherTemplate = Guid.Parse("0000b175-0000-0000-0000-00000000075a");
+            var roles = new List<(Guid Id, string Name, Guid Template, Guid[] Users, Guid[] Teams)>
+            {
+                (Guid.Parse("0000b175-0000-0000-0000-0000000005a1"), "System Administrator", SystemAdministratorTemplateId,
+                    BffIsSystemAdministrator ? new[] { DecoyUserId, BffApplicationUserId } : new[] { DecoyUserId }, Array.Empty<Guid>()),
+                (Guid.Parse("0000b175-0000-0000-0000-0000000005a2"), "System Administrator", otherTemplate,
+                    BffHoldsRoleNamedSystemAdministratorWithOtherTemplate ? new[] { BffApplicationUserId } : Array.Empty<Guid>(),
+                    Array.Empty<Guid>()),
+                (Guid.Parse("0000b175-0000-0000-0000-0000000005a3"), "System Administrator", SystemAdministratorTemplateId,
+                    Array.Empty<Guid>(), BffTeamIsSystemAdministrator ? new[] { DecoyTeamId, BffTeamId } : new[] { DecoyTeamId }),
+                (Guid.Parse("0000b175-0000-0000-0000-0000000005a4"), "Team Member", otherTemplate,
+                    Array.Empty<Guid>(), new[] { BffTeamId }),
+            };
+            var matching = roles.Where(r =>
+                (filter is null || !filter.Contains("_roletemplateid_value eq ", StringComparison.Ordinal)
+                 || filter.Contains($"_roletemplateid_value eq {r.Template}", StringComparison.OrdinalIgnoreCase))
+                && (filter is null || !filter.Contains("name eq ", StringComparison.Ordinal)
+                    || filter.Contains($"name eq '{r.Name}'", StringComparison.Ordinal))
+                && HolderClauseAdmits(filter, "systemuserroles_association", "teamroles_association", r.Users, r.Teams));
+            return JsonSerializer.Serialize(matching.Select(r => new Dictionary<string, object?> { ["roleid"] = r.Id }).ToArray());
         }
-        if (entitySet == $"systemusers({BffApplicationUserId})/systemuserprofiles_association")
-            return JsonSerializer.Serialize(new[] { new Dictionary<string, object?> { ["fieldsecurityprofileid"] = BffWriterProfileId } });
+        if (entitySet == "fieldsecurityprofiles")
+        {
+            // #2320: every profile in the org, with its direct and team holders — the BFF's own, its team's, and the decoy
+            // (held by the decoy user and the decoy team). Membership is honoured through HolderClauseAdmits.
+            var profiles = new List<(Guid Id, Guid[] Users, Guid[] Teams)>
+            {
+                (BffWriterProfileId, new[] { BffApplicationUserId }, Array.Empty<Guid>()),
+                (BffTeamProfileId, Array.Empty<Guid>(), new[] { BffTeamId }),
+                (OtherTeamProfileId, new[] { DecoyUserId }, new[] { DecoyTeamId }),
+            };
+            var ids = profiles
+                .Where(p => HolderClauseAdmits(filter, "systemuserprofiles_association", "teamprofiles_association", p.Users, p.Teams))
+                .Select(p => p.Id);
+            return JsonSerializer.Serialize(ids.Select(id => new Dictionary<string, object?> { ["fieldsecurityprofileid"] = id }).ToArray());
+        }
         if (entitySet == "fieldpermissions")
         {
-            // Honours the filter (fix round 3): the column, Read, and the BFF's own profile must all be asked for.
+            // Honours the filter (fix round 3): the column, Read, and a profile must all be asked for; each profile grants
+            // its own tables (#2320: the BFF's direct profile, its team's, and the decoy team's).
             var asked = filter is not null
                         && filter.Contains("attributelogicalname eq 'sprk_accessinheritance'", StringComparison.Ordinal)
-                        && filter.Contains("canread eq 4", StringComparison.Ordinal)
-                        && filter.Contains($"_fieldsecurityprofileid_value eq {BffWriterProfileId}", StringComparison.OrdinalIgnoreCase);
-            return JsonSerializer.Serialize(asked && AccessRecordReadableByProfile && !ChildWorld.HidesAccessRecords
-                ? AccessRecordReadTables.Select(t => new Dictionary<string, object?> { ["entityname"] = t }).ToArray()
-                : Array.Empty<Dictionary<string, object?>>());
+                        && filter.Contains("canread eq 4", StringComparison.Ordinal);
+            bool Names(Guid profile) => filter!.Contains($"_fieldsecurityprofileid_value eq {profile}", StringComparison.OrdinalIgnoreCase);
+            var tables = new List<string>();
+            if (asked && !ChildWorld.HidesAccessRecords)
+            {
+                if (AccessRecordReadableByProfile && Names(BffWriterProfileId))
+                    tables.AddRange(AccessRecordReadTables);
+                if (Names(BffTeamProfileId))
+                    tables.AddRange(BffTeamProfileReadTables);
+                if (Names(OtherTeamProfileId))
+                    tables.AddRange(new[] { "sprk_workassignment", "sprk_project" });
+            }
+
+            return JsonSerializer.Serialize(tables.Select(t => new Dictionary<string, object?> { ["entityname"] = t }).ToArray());
         }
 
         switch (entitySet)

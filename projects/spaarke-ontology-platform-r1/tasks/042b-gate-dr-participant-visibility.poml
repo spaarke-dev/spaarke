@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042b" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Gate Decision Record for an unfiled communication: visible to the communication's sharees, re-owned when the communication is filed (D-169, #1876)</title>
+    <phase>D Decision Record</phase>
+    <gate>042 complete; uac-r2 reviews the POML before it starts</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags include security and tenant-isolation: it changes who can read a Decision Record, and it re-owns Decision Records on filing.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive visibility change. It spans three owners' code: the DR writer (ontology), DirectThreadAccessService (uac-r2 / messaging) and ReconciledEmailFiling (ontology 144). The ordering must never orphan or over-share a record.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>No other ontology lane touches these files. uac-r2's #2084 PR touches RecordOwnershipResolver and OntologyAdminAuthoringService, not these.</parallel-reason>
+    <deps>042</deps>
+    <tags>bff-api,security,tenant-isolation,dataverse,unit-test</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Owner decision D-169 (2026-10-18, relayed by uac-r2): the gate Decision Record (DR) for a communication filed under no record is visible to whoever the communication is associated with. In practice that means the principals the communication is shared with. Once the communication is filed, the existing team-owned path applies. Today the DR is written owned by the communication's owning user (D-144 as amended), with no shares. Close DI-84 / #1876.</prompt>
+  <role>SPAARKE BFF developer. Server-side only. No schema, role or privilege change.</role>
+  <goal>Three things must hold. An unfiled communication's gate DR is readable by exactly the communication's owner plus the principals the communication is shared with (Read only), whichever of the DR write or the communication share happens first. When the communication is filed under an ordinary record, the DR is re-owned to the owner RecordOwnershipResolver gives, and only then are the per-participant DR shares revoked. A DR owned by a Secure team never gets participant shares.</goal>
+
+  <context>
+    <background>
+      Read first: `notes/decisions.md` D-144 (amended), D-129, D-169; `notes/defer-issues.md` DI-84; the uac-r2 analysis copied below.
+      Current write path: `DecisionRecordWriter.ResolveOwnerCoreAsync` (~1518-1588). Its principal comes from `ReadCommunicationOwnerAsync` (~1602-1650), and `requireTeam` is enforced at ~1579. The owner is stamped at ~1449-1451 ("no team, no share"). The gate job is `GateDecisionRecordJob.cs` ~227. The gate enqueues at `CommunicationRuleGate.cs` ~226-229/286/373.
+      Communication shares: `DirectThreadAccessService.GrantMessageAccessAsync` (~191). It grants ReadAccess through `IDataverseRecordShareService` (the BFF app identity), is best-effort, and never grants on a secure-team-owned message (~201, ~269-273). Its callers run at create or ingest: `CommunicationService.cs` ~1029/~1083, `ThreadResolver.cs` ~1107, `MessagingIngestor.cs` ~129, `EmailUploadCaptureService.cs` ~283. No revoke path exists today.
+      Filing: `ReconciledEmailFiling.FileIfUnfiledAsync` (~103-175). It runs association (~135), re-stamp (~147; DRs are report-only at ~155/~165), then `_children.AfterRefileAsync` (~170).
+      uac-r2 (2026-10-18), from code:
+      (a) UAC's reconciler cannot mirror shares. A share grant writes principalobjectaccess, not the communication's modifiedon, and the synchronizer covers only secure-isolated rows. So the share mirror belongs where communication shares change.
+      (b) `SecureChildReconciler.AfterRefileAsync` re-owns descendants only when the isolation boundary is crossed (~741-766). `sprk_decisionrecord` is already in SecureChildLineage under `sprk_communication` (~100-102), so filing into a SECURE record is already handled. Filing into an ORDINARY record re-owns nothing, so that part is this task's.
+      Privileges: the Ontology Service role holds Assign on `sprk_decisionrecord` (depth Global) and no Share privilege. The BFF app identity (IDataverseRecordShareService) can share.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/DecisionRecordWriter.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/Access/DirectThreadAccessService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Office/ReconciledEmailFiling.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Signals/DecisionRecordWriterTests.GateDecision.cs</file>
+      <file role="modify">tests/Spaarke.ArchTests/RecordOwnerAssignmentCensusTests.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/Access/DirectThreadAccessService.cs (best-effort grant + secure-owned refusal shape)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Access/IDataverseRecordShareService.cs (grant and revoke seam)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="D-169">Share at write: after the gate DR is created for a communication that RecordOwnershipResolver reports as unfiled (the `Unchanged` / principal branch), read the communication's current shared principals (RetrieveSharedPrincipalsAndAccess or the existing share-service read). Grant each principal that holds at least ReadAccess on the communication ReadAccess, and only ReadAccess, on the DR, through `IDataverseRecordShareService`. Skip the DR owner. Do not add a Share privilege to any role.</constraint>
+    <constraint source="owner 2026-10-18 (D-169 amended), uac-r2 review">Externals: internal only (owner, 2026-10-18). the share-at-write and mirror-on-grant paths skip any systemuser with `sprk_isexternal = true` and any principal whose external flag cannot be read. A Decision Record has never been visible outside. The owner confirmed: a gate DR is never shared with an external or a B2B guest.</constraint>
+    <constraint source="D-169, uac-r2 (a)">Share on change: in `DirectThreadAccessService`, wherever a principal is granted ReadAccess on a communication, also grant ReadAccess on that communication's gate DRs, but only while the COMMUNICATION is unfiled AND the DR is user-owned. A filed communication whose DR re-own failed keeps a user-owned DR on purpose, and later grants must not widen it. After each mirror grant, read the DR's owner again; if it is now a team (filing re-owned it in between), revoke that grant. If a revoke path is added to that service later, it must mirror the revoke; leave a one-line comment at the grant site saying so. Both sides read current state, so the order of DR write and communication share does not matter.</constraint>
+    <constraint source="D-123">Never share a DR owned by a team, Secure or ordinary, and never share a DR whose communication is secure-team owned. Use the same check as `DirectThreadAccessService` ~201/~269-273.</constraint>
+    <constraint source="project">Best-effort, fail-closed on visibility: a failed share read or grant is logged at Warning with ids only and counted on `OntologyWriterTelemetry`. It never throws out of the writer or the messaging path, and it never widens beyond the communication's sharees. The DR stays written and owner-visible.</constraint>
+    <constraint source="D-169, uac-r2 (b)">On filing into an ORDINARY record, `FileIfUnfiledAsync`, after the existing steps: for each gate DR of that communication still owned by a user, decide the owner with RecordOwnershipResolver (the same rule as everywhere else), Assign it through the identity that holds Assign on `sprk_decisionrecord`, and read the owner back. Only after the read-back confirms the new owner, revoke EVERY share (principalobjectaccess) on the DR. No other path shares a DR (no role holds Share; the Secure mirror touches only Secure-team-owned rows, which this path never revokes), so do not build share tracking. If the re-own fails, keep the shares: the over-share stays bounded to the participants, and the DR is never orphaned. A filing into a SECURE record is left to `SecureChildReconciler`; do not duplicate it.</constraint>
+    <constraint source="project">Fault isolation: the filing additions follow the existing fault-isolated re-stamp pattern (task 144 review K, `dcd89f41b`). A DR re-own failure never fails the filing.</constraint>
+    <constraint source="project">Ownership coordination: `DirectThreadAccessService` was last changed by uac-r2 (#1629) and messaging. Send uac-r2 the diff of that file before the PR opens, and cite their review in the PR.</constraint>
+    <constraint source="CLAUDE.md §10/§11">BFF hygiene: no new endpoint, service or DI registration unless one is justified with the three questions. Prefer extending the existing DR writer and share seam. Measure the publish-size delta per §10. Run the full `tests/Spaarke.ArchTests` and filtered unit tests only; never run the unfiltered `Sprk.Bff.Api.Tests`.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion>The writer shares an unfiled communication's gate DR as Read with every principal the communication is shared with (Read or more), and with no one else. The owner gets no extra share.</criterion>
+    <criterion>A grant on the communication made after the DR exists also grants Read on that DR. A grant made before is picked up at write. Test both orders.</criterion>
+    <criterion>An external sharee of the communication (`sprk_isexternal = true`), or one whose flag cannot be read, gets no DR share at write or on a mirror grant (must-fire test).</criterion>
+    <criterion>Race: mirror grant interleaved with filing (the mirror reads user-owned, filing re-owns and revokes, then the grant lands) ends with no participant share on the team-owned DR. A grant on a filed communication whose DR stayed user-owned adds no share.</criterion>
+    <criterion>A team-owned DR (the Secure business unit → Secure team case, or a filed communication) gets no participant share. Same for a DR whose communication is secure-team owned.</criterion>
+    <criterion>A failed share read or grant: the DR is written, the failure is logged and counted, and no exception escapes. Nothing is shared beyond the communication's sharees.</criterion>
+    <criterion>Filing into an ordinary record re-owns the DR to the resolver's owner, reads it back, then revokes every share on the DR. A failed re-own or read-back leaves the shares and the user owner in place, and the filing still succeeds.</criterion>
+    <criterion>Filing into a Secure record: this task does nothing (the reconciler path). Proven by a test that the new code does not assign or revoke.</criterion>
+    <criterion>`DecisionRecordWriterTests.GateDecision.cs` ~240 ("gets no share or grant") is inverted to D-169 with the reason in its name. The census entry in `RecordOwnerAssignmentCensusTests.cs` ~218 is updated.</criterion>
+    <criterion>Test scope: cover the stated contract and the edge cases named above. Anything beyond needs a one-line justification in the task notes. Seeding proof: one seed each for the team/secure-owned no-share guard and the revoke-only-after-read-back ordering.</criterion>
+  </acceptance-criteria>
+
+  <steps mode="directional">
+    <step>Read the relevant files and confirm the line references; note any drift in `notes/042b-gate-dr-participant-visibility.md`.</step>
+    <step>Writer: share at write. DirectThreadAccessService: mirror on grant. Filing: re-own, read back, revoke.</step>
+    <step>Tests, ArchTests, publish-size; uac-r2 review of the DirectThreadAccessService diff; PR into docs/ontology-platform-design.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If an existing ArchTest or guard forbids touching `sprk_decisionrecord` outside the writer (append-only or immutability guards), STOP and escalate rather than adding an exemption.</trigger>
+    <trigger>If the identity that can Assign `sprk_decisionrecord` is not reachable from `ReconciledEmailFiling` without a new client or credential, STOP and escalate (no new secret, CLAUDE.md §9).</trigger>
+    <trigger>If any step would need a role, privilege or schema change, STOP: the owner approves it.</trigger>
+  </escalation>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+  <completion date="2026-10-18">PR #2096 merged into docs `f66aa811a` after 4 rounds (uac-r2 review of the POML and both foreign diffs; adversarial passes 1 (no over-share) and 2 (2 F1 fixed in r3); scoped re-check clean, K closed in r4). D-169 internal only. Re-own runs from SecureChildReconciler.AfterRefileAsync (uac-r2 choice A). Known limits: UAC #2091 (three re-file writers skip the hook), DI-117 #2092, DI-118 #2093. Closes #1876 / DI-84. Notes: notes/042b-gate-dr-participant-visibility.md.</completion>
+</task>

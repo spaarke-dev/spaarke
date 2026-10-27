@@ -38,4 +38,42 @@ public sealed class ExternalAccessOptions
     /// value, including empty, fails startup.
     /// </summary>
     public bool PartnerInventionIntakeEnabled { get; set; }
+
+    /// <summary>
+    /// ADR-028 A9 (r3 task 047): the business unit whose DEFAULT team owns every contact the registration route
+    /// (<c>POST /api/v1/external/registration</c>) creates. Absent means no registration create: the route answers 500
+    /// <c>registration_owner_unconfigured</c> and creates nothing (binding an existing contact needs no owner). App Service
+    /// form: <c>ExternalAccess__CustomerBusinessUnitId</c>. A value that is not a GUID fails startup.
+    /// </summary>
+    public Guid? CustomerBusinessUnitId { get; set; }
+
+    /// <summary>
+    /// FR-20 (unified-access-control-r2 task 036): whether Dataverse decides an internal user's record access on the
+    /// SPA/Teams plane. See <see cref="ImpersonatedRootSetsOptions"/>.
+    /// </summary>
+    public ImpersonatedRootSetsOptions ImpersonatedRootSets { get; set; } = new();
+}
+
+/// <summary>
+/// Options bound from <c>ExternalAccess:ImpersonatedRootSets</c> (FR-20, unified-access-control-r2 task 036; ADR-034
+/// Amendment A2, accepted by owner round 75).
+/// </summary>
+/// <remarks>
+/// <para><b>Off (the default; absent means off).</b> A systemuser's accessible projects, matters and work assignments come
+/// from the ADR-034 membership walk, each at the membership term's Read|Write|Create, exactly as before this option
+/// existed. Transitional only: it keeps the membership walk's business-unit over-grant.</para>
+/// <para><b>On.</b> For the systemuser plane, Dataverse's own answer replaces the membership rules for ACCESS: the root ids
+/// come from an impersonated read as the caller (<see cref="IImpersonatedRootSetSource"/>) and confer Read only; every write
+/// route on <c>/api/v1/external</c> confirms the write against the caller's own rights on the target record
+/// (<see cref="CallerRecordAccessProbe"/>). The contact-grants union, the deny list and the Restricted veto apply in both
+/// states. A failed impersonated read fails the composition (the request is refused); it never falls back to membership.
+/// </para>
+/// <para>Do not turn it on in an environment until tasks 142 and 143 are deployed there and the task-034 canary has passed
+/// with a strictly smaller set (owner round 59). App Service form: <c>ExternalAccess__ImpersonatedRootSets__Enabled</c>. A
+/// value that is not a boolean, including empty, fails startup.</para>
+/// </remarks>
+public sealed class ImpersonatedRootSetsOptions
+{
+    /// <summary>When <c>true</c>, Dataverse decides a systemuser's access on this plane. Default <c>false</c>.</summary>
+    public bool Enabled { get; set; }
 }

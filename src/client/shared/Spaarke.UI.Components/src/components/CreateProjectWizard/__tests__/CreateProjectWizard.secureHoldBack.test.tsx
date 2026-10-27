@@ -34,6 +34,8 @@ const BFF = 'https://bff.example.test';
 
 /** One ordered log of every side effect, so a test can assert what happened and in what order. */
 const mockCalls: string[] = [];
+/** The arguments of every `createDocumentRecords` call, so the parent bind of the project's files can be pinned. */
+const mockDocumentCalls: unknown[][] = [];
 
 jest.mock('../projectService', () => ({
   ProjectService: jest.fn().mockImplementation(() => ({
@@ -50,7 +52,8 @@ jest.mock('../../../services/EntityCreationService', () => ({
       mockCalls.push('upload');
       return { uploadedFiles: files.map((_, i) => ({ id: `f${i}` })), errors: [] };
     }),
-    createDocumentRecords: jest.fn().mockImplementation(async () => {
+    createDocumentRecords: jest.fn().mockImplementation(async (...args: unknown[]) => {
+      mockDocumentCalls.push(args);
       mockCalls.push('document-records');
       return { warnings: [], createdDocumentIds: [] };
     }),
@@ -153,6 +156,7 @@ describe('CreateProjectWizard — a secure-requested project whose provisioning 
   beforeEach(() => {
     mockShell.config = undefined;
     mockCalls.length = 0;
+    mockDocumentCalls.length = 0;
     consoleSpies = (['info', 'error', 'warn'] as const).map(m => jest.spyOn(console, m).mockImplementation(() => {}));
   });
 
@@ -200,6 +204,16 @@ describe('CreateProjectWizard — a secure-requested project whose provisioning 
 
     expect(mockCalls).not.toContain('provision');
     expect(mockCalls).toEqual(expect.arrayContaining(['create-project', ...ADDS]));
+  });
+
+  it('files the project documents under the parent column: sprk_projects / project id / nav prop sprk_Project (task 162)', async () => {
+    // Live metadata (spaarkedev1): sprk_document.sprk_project -> nav prop `sprk_Project`, the column the Project form's
+    // Documents subgrid reads. `sprk_RelatedProject` (column sprk_relatedproject) is the other lookup and must not be used.
+    await finish(false, bffFetch(provisioned));
+
+    expect(mockDocumentCalls).toHaveLength(1);
+    const [entitySet, parentId, navProp] = mockDocumentCalls[0];
+    expect([entitySet, parentId, navProp]).toEqual(['sprk_projects', PROJECT_ID, 'sprk_Project']);
   });
 });
 

@@ -13,6 +13,11 @@ than the value already on the board is not written (`KEEP <slug> ...`), and AI S
 touched when something is written. When the spend archive exists (spend-report.py --archive), the
 figure per project is max(transcript all-time total, archive all-time total).
 
+AI Cost (allocated) is the invoiced actual cost given to each project: each billing cycle's invoices
+(the hand-kept invoice list, see spend-report.py --actuals) split by the projects' share of that cycle's
+archived estimate. It is written as computed, even when lower: both inputs are durable, and a project's
+share of the open cycle shrinks when other projects' usage grows. Without an invoice list it is not written.
+
 Usage:
     python scripts/ai-cost/update-board-spend.py                 # all Type=Project board items
     python scripts/ai-cost/update-board-spend.py <slug> [<slug> ...]  # just these
@@ -43,6 +48,7 @@ PROJECT_ID = "PVT_kwHODW0Pv84BEgWu"
 F_SPEND = "PVTF_lAHODW0Pv84BEgWuzhkWwag"   # "AI Spend (est.)" - NUMBER
 F_ASOF = "PVTF_lAHODW0Pv84BEgWuzhkWwcU"    # "AI Spend As Of" - DATE
 F_CALLS = "PVTF_lAHODW0Pv84BEgWuzhkWwdQ"   # "AI Calls" - NUMBER
+F_ALLOC = "PVTF_lAHODW0Pv84BEgWuzhncDeA"   # "AI Cost (allocated)" - NUMBER
 # Re-derive these IDs if the board is ever rebuilt:
 #   gh project field-list 2 --owner spaarke-dev --format json
 
@@ -120,6 +126,21 @@ def archive_totals(path=None):
         t["cost"] += sum(r[k] for k in _sr.COST_FIELDS)
         t["calls"] += r["calls"]
     return {k: {"cost": round(v["cost"], 2), "calls": v["calls"]} for k, v in out.items()}
+
+
+def allocated_totals(invoices_path=None, archive_path=None):
+    """({lower-case project name: allocated actual $}, date of the last invoice); ({}, None) without invoices."""
+    try:
+        invoices = _sr.read_invoices(invoices_path or _sr.DEFAULT_INVOICES)
+        arows = _sr.read_archive(archive_path or _sr.DEFAULT_ARCHIVE)
+    except _sr.ArchiveError as ex:
+        print(f"WARN     allocation skipped: {ex}")
+        return {}, None
+    if not invoices:
+        return {}, None
+    rep = _sr.actuals_report(invoices, arows)
+    return ({p.lower(): t["allocated"] for p, t in rep["projects"].items() if t["allocated"] > 0},
+            invoices[-1]["date"])
 
 
 def archive_lookup(archive, slug, folder):
@@ -207,6 +228,24 @@ def main():
 
     print(f"\n{updated} updated, {kept_n} kept (board already higher), {skipped} skipped (no local data), "
           f"{failed} failed - out of {len(pairs)} targeted")
+
+    alloc, through = allocated_totals()
+    if not alloc:
+        print("AI Cost (allocated): not written (no invoice list, or no invoices fall in an archived billing cycle)")
+        return
+    a_ok, a_failed = 0, 0
+    for item_id, slug, _, _ in pairs:
+        v = archive_lookup(alloc, slug, find_folder(slug, known))
+        if not v:
+            continue
+        ok, e = set_field(item_id, F_ALLOC, "--number", v)
+        if ok:
+            a_ok += 1
+            print(f"ALLOC    {slug:55s} ${v:>10,.2f}")
+        else:
+            a_failed += 1
+            print(f"FAIL     {slug:55s} allocated: {e}")
+    print(f"AI Cost (allocated): {a_ok} written, {a_failed} failed (invoices through {through})")
 
 if __name__ == "__main__":
     main()

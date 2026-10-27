@@ -221,4 +221,38 @@ public sealed class DocumentProfileAiTests
         _documents.Verify(d => d.UpdateDocumentFieldsAsync(
             It.IsAny<string>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>()), Times.Never);
     }
+
+    // ── #2237: an output naming a column Spaarke sets itself is not written; the rest of the profile is ─────────────
+    [Fact]
+    public async Task ProfileDocumentAsUserAsync_OutputNamesAccessAndLinkColumns_WritesTheProfileWithoutThem()
+    {
+        var documentId = Guid.NewGuid();
+        ArrangeDocument();
+        ArrangeText();
+        _actionResolver
+            .Setup(r => r.ResolveAsync(ConsumerTypes.DocumentProfile, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(ProfilerAction());
+        _actionRunner
+            .Setup(r => r.RunAsync(It.IsAny<AnalysisAction>(), It.IsAny<DocumentText>(),
+                It.IsAny<LinearRunContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Output(
+                "{\"sprk_filesummary\":\"A summary\",\"sprk_filetldr\":\"tldr\",\"sprk_documenttype\":\"contract\"," +
+                "\"sprk_accesspermission\":1,\"sprk_AccessInheritance\":\"{}\"," +
+                "\"sprk_relatedcommunication\":\"5b1e7a4c-0f6d-4a52-9d1b-3f0c2e8a7d11\"," +
+                "\"sprk_ParentDocument@odata.bind\":\"/sprk_documents(5b1e7a4c-0f6d-4a52-9d1b-3f0c2e8a7d11)\"}"));
+
+        Dictionary<string, object?>? written = null;
+        _documents
+            .Setup(d => d.UpdateDocumentFieldsAsync(
+                documentId.ToString(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Dictionary<string, object?>, CancellationToken>((_, f, _) => written = f)
+            .Returns(Task.CompletedTask);
+
+        var result = await CreateSut().ProfileDocumentAsUserAsync(documentId, new DefaultHttpContext(), CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        written.Should().NotBeNull();
+        written!.Keys.Should().BeEquivalentTo(
+            "sprk_filesummary", "sprk_filetldr", "sprk_documenttype", "sprk_filetype");
+    }
 }

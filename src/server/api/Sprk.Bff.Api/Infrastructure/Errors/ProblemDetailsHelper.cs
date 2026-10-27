@@ -244,6 +244,86 @@ public static partial class ProblemDetailsHelper
             extensions: extensions);
     }
 
+    /// <summary>
+    /// The ONE 409 for a document delete refused because other documents still name the document as their
+    /// <c>sprk_parentdocument</c> (an .eml and its attachments; unified-access-control-r2 task 188 slice D, owner round 111
+    /// item 3: the relationship is Delete = Restrict). Nothing was deleted. <c>reasonCode</c> =
+    /// <see cref="Sprk.Bff.Api.Services.DocumentCheckoutService.HasChildDocumentsCode"/>.
+    /// </summary>
+    /// <param name="childCount">How many child documents, or <see langword="null"/> to name none (the external plane,
+    /// where a child the caller cannot see must not be counted to them). Never their ids.</param>
+    /// <param name="traceId">Optional correlation id for support.</param>
+    /// <param name="fileGone"><see langword="true"/> when Dataverse refused the ROW after the file was deleted (a child
+    /// created after the pre-check): the detail then says the file is gone and the record was kept, not "nothing was
+    /// deleted".</param>
+    public static IResult DocumentHasChildDocuments(int? childCount, string? traceId = null, bool fileGone = false)
+    {
+        var extensions = new Dictionary<string, object?>
+        {
+            ["reasonCode"] = Sprk.Bff.Api.Services.DocumentCheckoutService.HasChildDocumentsCode,
+        };
+        if (childCount is { } count)
+        {
+            extensions["childCount"] = count;
+        }
+        if (!string.IsNullOrWhiteSpace(traceId))
+        {
+            extensions["traceId"] = traceId;
+        }
+
+        return Results.Problem(
+            title: "Document has child documents",
+            statusCode: StatusCodes.Status409Conflict,
+            detail: fileGone
+                ? "The document's file was deleted, but its record was kept: other documents, such as an email's " +
+                  "attachments, now name it as their parent. Delete those documents first, then remove this record."
+                : childCount is { } n
+                ? $"The document was not deleted: {n} other document(s), such as an email's attachments, name it as their " +
+                  "parent. Delete those documents first. Nothing was deleted."
+                : "The document was not deleted: other documents, such as an email's attachments, name it as their parent. " +
+                  "Nothing was deleted.",
+            extensions: extensions);
+    }
+
+    /// <summary>
+    /// The 409 for a re-file whose owner could not be settled against concurrent writers (#2143,
+    /// <see cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnsettledException"/>): <c>reasonCode</c>
+    /// <see cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnsettledException.ReasonCode"/>, and a detail telling the client to
+    /// reload the record and retry. Not <see cref="RecordOwnerRefused(string?, string?, string, string?)"/>: that answers "nothing
+    /// was written"; here the change was written and its filing put back or superseded (the exception's remarks), so the
+    /// client's copy is stale either way.
+    /// </summary>
+    /// <remarks>
+    /// CLAUDE.md §11. <i>Existing</i> — <see cref="RecordOwnerRefused(string?, string?, string, string?)"/> is the other owner
+    /// 409; it is not reused because its detail says "was not saved" and its reason code is a refusal code, both false here
+    /// (the change was written). <i>Extension</i> — it is that method's shape (title, 409, <c>reasonCode</c>, optional
+    /// <c>traceId</c>) with its own reason code, shared by every HTTP re-file writer instead of one copy per route.
+    /// <i>Cost of doing nothing</i> — each route would render its own 409 for one condition, or let it reach the global
+    /// handler as a 500.
+    /// </remarks>
+    /// <param name="noun">What was being re-filed ("document", "event", …), for the detail.</param>
+    /// <param name="traceId">Optional correlation id for support.</param>
+    /// <param name="traceIdExtension">The extension the id is carried under: <c>traceId</c> by default; a route whose other
+    /// problems carry <c>correlationId</c> (Finance) passes that, so its 409 matches them (#2143 round 3).</param>
+    public static IResult RecordOwnerUnsettled(string noun, string? traceId = null, string traceIdExtension = "traceId")
+    {
+        var extensions = new Dictionary<string, object?>
+        {
+            ["reasonCode"] = Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnsettledException.ReasonCode,
+        };
+        if (!string.IsNullOrWhiteSpace(traceId))
+        {
+            extensions[traceIdExtension] = traceId;
+        }
+
+        return Results.Problem(
+            title: "Record changed concurrently",
+            statusCode: StatusCodes.Status409Conflict,
+            detail: $"The {noun} was changed by someone else while it was being re-filed, so where it is filed and who owns it "
+                + "could not be settled. Reload it and try again.",
+            extensions: extensions);
+    }
+
     /// <inheritdoc cref="RecordOwnerRefused(string?, string?, string, string?)"/>
     /// <remarks>
     /// A refusal the F3 check made (<see cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution.IsForbidden"/>:

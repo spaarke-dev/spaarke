@@ -135,6 +135,7 @@
     <RolePrivilege name="prvAppendTosprk_ContactOrganization" level="Global" />
     <RolePrivilege name="prvAppendTosprk_Document" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_Event" level="Deep" />
+    <RolePrivilege name="prvAppendTosprk_EventType_Ref" level="Global" />
     <RolePrivilege name="prvAppendTosprk_Invoice" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_InvoiceLineItem" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_KPIAssessment" level="Deep" />

@@ -188,7 +188,7 @@ public class PolymorphicGrantWriteTests
         var request = MakeGrant(projectId: projectId, recordType: null, recordId: null);
 
         var payload = ToDict(GrantExternalAccessEndpoint.BuildGrantPayload(
-            request, ExternalGrantRootType.Project, projectId, grantedBySystemUserId: null));
+            request, ExternalGrantRootType.Project, projectId, TestInfrastructure.RecordOwnershipResolverDouble.DefaultTeamId, grantedBySystemUserId: null));
 
         payload.Should().ContainKey("sprk_Project@odata.bind");
         payload["sprk_Project@odata.bind"].Should().Be($"/sprk_projects({projectId})");
@@ -199,13 +199,38 @@ public class PolymorphicGrantWriteTests
     }
 
     [Fact]
+    public void BuildGrantPayload_BindsTheOwnerTeam_NeverAUser()
+    {
+        // Task 099b (D-11): without an ownerid the row is owned by the BFF application user in the root business unit.
+        var matterId = Guid.NewGuid();
+        var team = Guid.NewGuid();
+        var request = MakeGrant(projectId: Guid.Empty, recordType: "matter", recordId: matterId);
+
+        var payload = ToDict(GrantExternalAccessEndpoint.BuildGrantPayload(
+            request, ExternalGrantRootType.Matter, matterId, team, grantedBySystemUserId: null));
+
+        payload["ownerid@odata.bind"].Should().Be($"/teams({team:D})");
+    }
+
+    [Fact]
+    public void BuildGrantPayload_WithNoOwnerTeam_Throws_NothingIsBuilt()
+    {
+        var request = MakeGrant(projectId: Guid.NewGuid(), recordType: null, recordId: null);
+
+        var act = () => GrantExternalAccessEndpoint.BuildGrantPayload(
+            request, ExternalGrantRootType.Project, request.ProjectId, Guid.Empty, grantedBySystemUserId: null);
+
+        act.Should().Throw<ArgumentException>().WithParameterName("owningTeamId");
+    }
+
+    [Fact]
     public void BuildGrantPayload_MatterRoot_BindsMatterLookupOnly()
     {
         var matterId = Guid.NewGuid();
         var request = MakeGrant(projectId: Guid.Empty, recordType: "matter", recordId: matterId);
 
         var payload = ToDict(GrantExternalAccessEndpoint.BuildGrantPayload(
-            request, ExternalGrantRootType.Matter, matterId, grantedBySystemUserId: null));
+            request, ExternalGrantRootType.Matter, matterId, TestInfrastructure.RecordOwnershipResolverDouble.DefaultTeamId, grantedBySystemUserId: null));
 
         payload["sprk_Matter@odata.bind"].Should().Be($"/sprk_matters({matterId})");
         payload.Should().NotContainKey("sprk_Project@odata.bind");
@@ -219,7 +244,7 @@ public class PolymorphicGrantWriteTests
         var request = MakeGrant(projectId: Guid.Empty, recordType: "workassignment", recordId: waId);
 
         var payload = ToDict(GrantExternalAccessEndpoint.BuildGrantPayload(
-            request, ExternalGrantRootType.WorkAssignment, waId, grantedBySystemUserId: null));
+            request, ExternalGrantRootType.WorkAssignment, waId, TestInfrastructure.RecordOwnershipResolverDouble.DefaultTeamId, grantedBySystemUserId: null));
 
         payload["sprk_WorkAssignment@odata.bind"].Should().Be($"/sprk_workassignments({waId})");
         payload.Should().NotContainKey("sprk_Project@odata.bind");
@@ -236,7 +261,7 @@ public class PolymorphicGrantWriteTests
         var request = MakeGrant(projectId: rootId, recordType: null, recordId: null);
 
         var payload = ToDict(GrantExternalAccessEndpoint.BuildGrantPayload(
-            request, type, rootId, grantedBySystemUserId: null));
+            request, type, rootId, TestInfrastructure.RecordOwnershipResolverDouble.DefaultTeamId, grantedBySystemUserId: null));
 
         var rootKeys = new[] { "sprk_Project@odata.bind", "sprk_Matter@odata.bind", "sprk_WorkAssignment@odata.bind" };
         payload.Keys.Count(k => rootKeys.Contains(k)).Should().Be(1,
@@ -251,7 +276,7 @@ public class PolymorphicGrantWriteTests
             accessLevel: ExternalAccessLevel.Collaborate);
 
         var payload = ToDict(GrantExternalAccessEndpoint.BuildGrantPayload(
-            request, ExternalGrantRootType.Matter, matterId, grantedBySystemUserId: null));
+            request, ExternalGrantRootType.Matter, matterId, TestInfrastructure.RecordOwnershipResolverDouble.DefaultTeamId, grantedBySystemUserId: null));
 
         payload.Should().ContainKey("sprk_Contact@odata.bind");
         payload["sprk_accesslevel"].Should().Be((int)ExternalAccessLevel.Collaborate);
@@ -266,7 +291,7 @@ public class PolymorphicGrantWriteTests
         var request = MakeGrant(projectId: Guid.Empty, recordType: "matter", recordId: matterId);
 
         var payload = ToDict(GrantExternalAccessEndpoint.BuildGrantPayload(
-            request, ExternalGrantRootType.Matter, matterId, grantedBySystemUserId: systemUserId.ToString()));
+            request, ExternalGrantRootType.Matter, matterId, TestInfrastructure.RecordOwnershipResolverDouble.DefaultTeamId, grantedBySystemUserId: systemUserId.ToString()));
 
         payload["sprk_GrantedBy@odata.bind"].Should().Be($"/systemusers({systemUserId})");
     }
@@ -280,7 +305,7 @@ public class PolymorphicGrantWriteTests
         var request = MakeGrant(projectId: Guid.Empty, recordType: "matter", recordId: matterId);
 
         var payload = ToDict(GrantExternalAccessEndpoint.BuildGrantPayload(
-            request, ExternalGrantRootType.Matter, matterId, grantedBySystemUserId: null));
+            request, ExternalGrantRootType.Matter, matterId, TestInfrastructure.RecordOwnershipResolverDouble.DefaultTeamId, grantedBySystemUserId: null));
 
         payload.Should().NotContainKey("sprk_GrantedBy@odata.bind");
     }
@@ -297,7 +322,7 @@ public class PolymorphicGrantWriteTests
             RecordType: "matter", RecordId: matterId);
 
         var payload = ToDict(GrantExternalAccessEndpoint.BuildGrantPayload(
-            request, ExternalGrantRootType.Matter, matterId, grantedBySystemUserId: null));
+            request, ExternalGrantRootType.Matter, matterId, TestInfrastructure.RecordOwnershipResolverDouble.DefaultTeamId, grantedBySystemUserId: null));
 
         payload.Should().ContainKey("sprk_expiresdate");
         payload.Should().NotContainKey("sprk_expirydate");
@@ -314,7 +339,7 @@ public class PolymorphicGrantWriteTests
             ExpiryDate: null, OrganizationId: orgId, RecordType: "matter", RecordId: matterId);
 
         var payload = ToDict(GrantExternalAccessEndpoint.BuildGrantPayload(
-            request, ExternalGrantRootType.Matter, matterId, grantedBySystemUserId: null));
+            request, ExternalGrantRootType.Matter, matterId, TestInfrastructure.RecordOwnershipResolverDouble.DefaultTeamId, grantedBySystemUserId: null));
 
         payload["sprk_Organization@odata.bind"].Should().Be($"/sprk_organizations({orgId})");
         payload.Should().NotContainKey("sprk_accountid@odata.bind");
@@ -327,7 +352,7 @@ public class PolymorphicGrantWriteTests
         var request = MakeGrant(projectId: Guid.Empty, recordType: "matter", recordId: matterId);
 
         var payload = ToDict(GrantExternalAccessEndpoint.BuildGrantPayload(
-            request, ExternalGrantRootType.Matter, matterId, grantedBySystemUserId: null));
+            request, ExternalGrantRootType.Matter, matterId, TestInfrastructure.RecordOwnershipResolverDouble.DefaultTeamId, grantedBySystemUserId: null));
 
         payload.Should().NotContainKey("sprk_Organization@odata.bind");
     }
@@ -347,7 +372,7 @@ public class PolymorphicGrantWriteTests
             ExpiryDate: null, OrganizationId: orgId, RecordType: "matter", RecordId: matterId);
 
         var payload = ToDict(GrantExternalAccessEndpoint.BuildGrantPayload(
-            request, ExternalGrantRootType.Matter, matterId, grantedBySystemUserId: null));
+            request, ExternalGrantRootType.Matter, matterId, TestInfrastructure.RecordOwnershipResolverDouble.DefaultTeamId, grantedBySystemUserId: null));
 
         payload.Should().NotContainKey("sprk_Contact@odata.bind",
             "an org grant has no contact grantee — the contact-empty row IS the org-grant marker");

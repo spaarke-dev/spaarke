@@ -195,6 +195,35 @@ describe('sendCommunication — success path', () => {
     expect(body.sendMode).toBe('User');
     expect(body.bodyFormat).toBe('PlainText');
   });
+
+  it('sends isInternalOnly: true when the caller says true and isInternalOnly: false when it says false (task 068)', async () => {
+    const authenticatedFetch = jest
+      .fn()
+      .mockResolvedValue(
+        fakeResponse({ status: 200, contentType: 'application/json', jsonBody: { communicationId: 'c' } })
+      );
+
+    await sendCommunication(validOptions({ isInternalOnly: true }), { authenticatedFetch });
+    await sendCommunication(validOptions({ isInternalOnly: false }), { authenticatedFetch });
+
+    const on = JSON.parse(authenticatedFetch.mock.calls[0][1].body);
+    const off = JSON.parse(authenticatedFetch.mock.calls[1][1].body);
+    expect(on.isInternalOnly).toBe(true);
+    // An explicit false must survive JSON.stringify - the field is present, not dropped as falsy.
+    expect(off).toHaveProperty('isInternalOnly', false);
+  });
+
+  it('leaves isInternalOnly out of the body when the caller passes none (the BFF decides)', async () => {
+    const authenticatedFetch = jest
+      .fn()
+      .mockResolvedValue(
+        fakeResponse({ status: 200, contentType: 'application/json', jsonBody: { communicationId: 'c' } })
+      );
+
+    await sendCommunication(validOptions(), { authenticatedFetch });
+    const body = JSON.parse(authenticatedFetch.mock.calls[0][1].body);
+    expect(body).not.toHaveProperty('isInternalOnly');
+  });
 });
 
 describe('sendCommunication — error path', () => {
@@ -213,7 +242,12 @@ describe('sendCommunication — error path', () => {
     const err = await sendCommunication(validOptions(), { authenticatedFetch }).catch((e: unknown) => e);
 
     expect(err).toBeInstanceOf(SendCommunicationError);
-    expect(err).toMatchObject({ status: 422, code: 'FROM_NOT_APPROVED', detail: 'Sender not approved', correlationId: 'corr-7' });
+    expect(err).toMatchObject({
+      status: 422,
+      code: 'FROM_NOT_APPROVED',
+      detail: 'Sender not approved',
+      correlationId: 'corr-7',
+    });
   });
 
   it('maps a thrown ApiError without problem details to HTTP_<status> and the fetch message', async () => {

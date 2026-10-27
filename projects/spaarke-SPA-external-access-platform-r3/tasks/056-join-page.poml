@@ -126,7 +126,9 @@
     <criterion testable="true">typecheck, lint, tests and the production build of external-spa all pass.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-13. NFR-07: test against a stamp-shaped customer configuration, not dev's.</notes>
+  <notes>Spec FR-13. NFR-07: test against a stamp-shaped customer configuration, not dev's.
+
+    SUPERSEDED IN PART 2026-10-13 (ADR-028 A9): the registration-service hand-off (VITE_REGISTRATION_SERVICE_URL) is replaced by the profile form posting to the stamp BFF (task 058, BFF route task 047). Status unchanged.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

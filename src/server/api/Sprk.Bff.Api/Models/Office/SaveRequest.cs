@@ -182,6 +182,22 @@ public record EmailMetadata
     public string? InternetMessageId { get; init; }
 
     /// <summary>
+    /// Task 065 fix round 4: the RFC 5322 <c>In-Reply-To</c> header of the saved email, when the client sends it. Optional
+    /// and additive: the current add-in sends nothing, so a save behaves as before. When present, the upload capture treats
+    /// it as the message the email replies to (thread continuity and the "parent must be explicitly shareable" rule that
+    /// keeps a reply to an internal-only email internal-only).
+    /// </summary>
+    [MaxLength(998)]
+    public string? InReplyTo { get; init; }
+
+    /// <summary>
+    /// Task 065 fix round 4: the RFC 5322 <c>References</c> header of the saved email (message ids separated by whitespace,
+    /// oldest first), when the client sends it. Optional and additive, like <see cref="InReplyTo"/>.
+    /// </summary>
+    [MaxLength(8000)]
+    public string? References { get; init; }
+
+    /// <summary>
     /// Task 121: the Exchange item id of the message in the caller's mailbox (<c>Office.context.mailbox.item.itemId</c>).
     /// Optional. The key the Graph fallback fetches the email by when the client sent no body; never stored as the
     /// email's Message-ID while <see cref="InternetMessageId"/> carries one.
@@ -344,8 +360,9 @@ public record AttachmentMetadata
     public Guid? ParentEmailArtifactId { get; init; }
 
     /// <summary>
-    /// Parent email's internetMessageId (for fetching attachment content via Graph API).
-    /// When provided, server will fetch the email via Graph API and extract this attachment's content.
+    /// The parent email's identifier: an Exchange item id (the Graph key the server fetches the email and this attachment's
+    /// content by) or an RFC 5322 Message-ID. Task 130 resolves the parent's <c>sprk_communication</c> from it: an RFC id is
+    /// looked up directly; an Exchange item id is fetched from Graph and the email captured.
     /// </summary>
     [MaxLength(998)]
     public string? ParentEmailId { get; init; }

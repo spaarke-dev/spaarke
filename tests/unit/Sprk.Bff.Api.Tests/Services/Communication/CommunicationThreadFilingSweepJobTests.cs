@@ -62,9 +62,9 @@ public class CommunicationThreadFilingSweepJobTests
         // By default the doubled reconcile WORKS: it gives the email a thread anchored to the record it is filed to. A test
         // that wants a reconcile that silently does nothing overrides this (NoOpReconcile).
         _resolver
-            .Setup(r => r.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Setup(r => r.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), FilingReconcileHost.Standalone, It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask)
-            .Callback<Guid, CancellationToken>((id, _) => FixEmail(id));
+            .Callback<Guid, FilingReconcileHost, CancellationToken>((id, _, _) => FixEmail(id));
 
         _resolver
             .Setup(r => r.ReconcileAnchoredThreadOwnerAsync(It.IsAny<Guid>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
@@ -91,7 +91,7 @@ public class CommunicationThreadFilingSweepJobTests
     /// <summary>A reconcile that returns without changing anything — as the real one does when a step fails (NFR-02).</summary>
     private void NoOpReconcile() =>
         _resolver
-            .Setup(r => r.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Setup(r => r.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), FilingReconcileHost.Standalone, It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
     /// <summary>
@@ -245,6 +245,7 @@ public class CommunicationThreadFilingSweepJobTests
         filing.GetProperty("unresolved").GetInt32().Should().Be(0, "a dry run attempts nothing");
         filing.GetProperty("sample").GetArrayLength().Should().Be(3);
 
+        _resolver.Verify(r => r.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<FilingReconcileHost>(), It.IsAny<CancellationToken>()), Times.Never);
         _resolver.Verify(r => r.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
         _resolver.Verify(r => r.ReconcileAnchoredThreadOwnerAsync(It.IsAny<Guid>(), false, It.IsAny<CancellationToken>()), Times.Never,
             "a dry run asks the owner question only as a dry run");
@@ -264,6 +265,7 @@ public class CommunicationThreadFilingSweepJobTests
         var result = await RunAsync(apply: null);
 
         Result(result).GetProperty("apply").GetBoolean().Should().BeFalse();
+        _resolver.Verify(r => r.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<FilingReconcileHost>(), It.IsAny<CancellationToken>()), Times.Never);
         _resolver.Verify(r => r.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -301,11 +303,11 @@ public class CommunicationThreadFilingSweepJobTests
 
         result.Success.Should().BeTrue(result.ErrorMessage);
         foreach (var candidate in new[] { 2, 3, 4 })
-            _resolver.Verify(r => r.ReconcileThreadForFilingAsync(Id(100 + candidate), It.IsAny<CancellationToken>()), Times.Once);
+            _resolver.Verify(r => r.ReconcileThreadForFilingAsync(Id(100 + candidate), FilingReconcileHost.Standalone, It.IsAny<CancellationToken>()), Times.Once);
         foreach (var fine in new[] { 1, 5, 6 })
-            _resolver.Verify(r => r.ReconcileThreadForFilingAsync(Id(100 + fine), It.IsAny<CancellationToken>()), Times.Never,
+            _resolver.Verify(r => r.ReconcileThreadForFilingAsync(Id(100 + fine), It.IsAny<FilingReconcileHost>(), It.IsAny<CancellationToken>()), Times.Never,
                 "an email already on its record's panel, in a user-deleted (inactive) thread, or in a private thread, is not handed to the reconcile");
-        _resolver.Verify(r => r.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Exactly(3));
+        _resolver.Verify(r => r.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), FilingReconcileHost.Standalone, It.IsAny<CancellationToken>()), Times.Exactly(3));
 
         // The owner part: the Open, active, anchored threads (1, 4) — 5 is inactive, 3 is unanchored, 6 is private.
         _resolver.Verify(r => r.ReconcileAnchoredThreadOwnerAsync(Id(1), false, It.IsAny<CancellationToken>()), Times.Once);
@@ -376,6 +378,7 @@ public class CommunicationThreadFilingSweepJobTests
 
         result.Success.Should().BeTrue();
         Result(result).GetProperty("filing").GetProperty("candidates").GetInt32().Should().Be(0);
+        _resolver.Verify(r => r.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<FilingReconcileHost>(), It.IsAny<CancellationToken>()), Times.Never);
         _resolver.Verify(r => r.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -393,6 +396,7 @@ public class CommunicationThreadFilingSweepJobTests
         var filing = Result(result).GetProperty("filing");
         filing.GetProperty("skippedInactiveThread").GetInt32().Should().Be(1, "still reported");
         filing.GetProperty("candidates").GetInt32().Should().Be(0);
+        _resolver.Verify(r => r.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<FilingReconcileHost>(), It.IsAny<CancellationToken>()), Times.Never);
         _resolver.Verify(r => r.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -422,7 +426,7 @@ public class CommunicationThreadFilingSweepJobTests
     {
         AddEmail(1, threadN: null, "sprk_matter");
         AddEmail(2, threadN: null, "sprk_matter");
-        _resolver.Setup(r => r.ReconcileThreadForFilingAsync(Id(102), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask); // does nothing
+        _resolver.Setup(r => r.ReconcileThreadForFilingAsync(Id(102), FilingReconcileHost.Standalone, It.IsAny<CancellationToken>())).Returns(Task.CompletedTask); // does nothing
 
         var result = await RunAsync(apply: true);
 
@@ -459,14 +463,14 @@ public class CommunicationThreadFilingSweepJobTests
         var first = Result(await RunAsync(job: job)).GetProperty("filing");
         first.GetProperty("examined").GetInt32().Should().Be(3, "the cap");
         first.GetProperty("passComplete").GetBoolean().Should().BeFalse();
-        _resolver.Verify(r => r.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Exactly(3));
+        _resolver.Verify(r => r.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), FilingReconcileHost.Standalone, It.IsAny<CancellationToken>()), Times.Exactly(3));
 
         var second = Result(await RunAsync(job: job)).GetProperty("filing");
         second.GetProperty("startAfter").GetGuid().Should().Be(Id(103), "it continues after the last row of the first run");
         second.GetProperty("examined").GetInt32().Should().Be(2);
         second.GetProperty("passComplete").GetBoolean().Should().BeTrue();
         foreach (var n in new[] { 101, 102, 103, 104, 105 })
-            _resolver.Verify(r => r.ReconcileThreadForFilingAsync(Id(n), It.IsAny<CancellationToken>()), Times.Once, "every email, once");
+            _resolver.Verify(r => r.ReconcileThreadForFilingAsync(Id(n), FilingReconcileHost.Standalone, It.IsAny<CancellationToken>()), Times.Once, "every email, once");
 
         var third = Result(await RunAsync(job: job)).GetProperty("filing");
         third.GetProperty("startAfter").ValueKind.Should().Be(JsonValueKind.Null, "a finished pass starts at the top");
@@ -497,13 +501,13 @@ public class CommunicationThreadFilingSweepJobTests
     {
         for (var n = 1; n <= 3; n++)
             AddEmail(n, threadN: null, "sprk_matter");
-        _resolver.Setup(r => r.ReconcileThreadForFilingAsync(Id(102), It.IsAny<CancellationToken>()))
+        _resolver.Setup(r => r.ReconcileThreadForFilingAsync(Id(102), FilingReconcileHost.Standalone, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("simulated"));
 
         var result = await RunAsync(apply: true);
 
-        _resolver.Verify(r => r.ReconcileThreadForFilingAsync(Id(101), It.IsAny<CancellationToken>()), Times.Once);
-        _resolver.Verify(r => r.ReconcileThreadForFilingAsync(Id(103), It.IsAny<CancellationToken>()), Times.Once, "the run went on past the failure");
+        _resolver.Verify(r => r.ReconcileThreadForFilingAsync(Id(101), FilingReconcileHost.Standalone, It.IsAny<CancellationToken>()), Times.Once);
+        _resolver.Verify(r => r.ReconcileThreadForFilingAsync(Id(103), FilingReconcileHost.Standalone, It.IsAny<CancellationToken>()), Times.Once, "the run went on past the failure");
         result.Success.Should().BeFalse();
         var json = Result(result);
         json.GetProperty("status").GetString().Should().Be(CommunicationThreadFilingSweepJob.StatusPartial);

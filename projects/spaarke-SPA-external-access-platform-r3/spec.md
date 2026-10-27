@@ -40,8 +40,8 @@ R3 turns the external SPA from a read-only portal into a working destination for
 - **C4 — Grid column refinement.** Data-only `sprk_gridconfiguration` changes; the input is the owner's per-tab column list.
 - **C5 — Teams parity, workforce plane.** C1–C4 in the Teams tab.
 - **C6 — Message send.** A thread post plus a notification to the record's members. No outbound email from the sender. Tier-2 is enforced on send.
-- **C7 — Workforce-contact self-registration (join link).**
-  - The join page.
+- **C7 — Workforce-contact self-registration (profile form at first sign-in).**
+  - The profile form shown at first sign-in (ADR-028 A9; replaces the former join page).
   - A shared Spaarke registration service that invites the B2B guest and adds them to the customer group.
   - A stamp-side member-test change that creates and binds the contact on first sign-in.
 - **C9 — Documents, creator attribution, delete-own.** Documents on every core record that allows them, including service requests; server-stamped creator on every SPA create; users delete only what they created.
@@ -70,7 +70,7 @@ R3 turns the external SPA from a read-only portal into a working destination for
 
 ### Affected Areas
 
-- `src/client/external-spa/src/` — host, auth (`auth/msal-config.ts`, `msal-auth.ts`, `standalone-plane.ts`, `host/TeamsHostAdapter.ts`), API clients (`api/`), pages, widget/quick-start registries, the new join page, the detail view, and the notification surface.
+- `src/client/external-spa/src/` — host, auth (`auth/msal-config.ts`, `msal-auth.ts`, `standalone-plane.ts`, `host/TeamsHostAdapter.ts`), API clients (`api/`), pages, widget/quick-start registries, the new profile form (registration page), the detail view, and the notification surface.
 - `src/client/external-spa/appPackage/` — Teams manifest (dev and prod).
 - `src/client/shared/Spaarke.UI.Components/` — reused modal, wizard and grid components; extended only where the external host needs it.
 - `src/server/api/Sprk.Bff.Api/Api/ExternalAccess/` and `Infrastructure/ExternalAccess/`:
@@ -162,11 +162,10 @@ R3 turns the external SPA from a read-only portal into a working destination for
 #### C7 — Workforce-contact self-registration
 
 - **FR-12: spike, first.** Compare Entra's built-in B2B self-service sign-up user flow with a custom join flow. Adopt the built-in flow if it covers FR-13–FR-15 more simply. Acceptance: a written decision with evidence.
-- **FR-13: join page.**
-  - Route: `https://external.spaarke.com/join?customer={key}`.
-  - The user signs in with their home company account through a registration-only client that reads only their profile.
-  - The page then hands off to the normal workforce sign-in (Spaarke-tenant authority).
-  - Acceptance: a new employee of an allow-listed company goes from link to signed-in SPA in one flow, with no admin step.
+- **FR-13: profile form at first sign-in (replaces the join page; ADR-028 A9, task 058).**
+  - There is no `/join` route and no join link: the person signs in with their home company account (browser or Teams), and the signed-in tenant id picks the customer backend.
+  - On the first sign-in the BFF answers `registration_required` and the SPA shows a profile form (first name, last name, department; email read-only) that registers the contact. A licensed user is linked instead (silent, or the "Link my account" popup).
+  - Acceptance: a new employee of a listed company goes from sign-in to the workspace in one flow, with no admin step.
 - **FR-14: shared registration service.**
   1. Verify the caller's home tenant is on that customer's `CustomerTenantIds` and `acct = 0`.
   2. Invite them as a B2B guest into Spaarke's tenant (Graph invitations, no email, no licence).
@@ -336,7 +335,7 @@ R3 turns the external SPA from a read-only portal into a working destination for
 | Subsequent-grant email (FR-07) | `invite-and-grant` email | Yes: extend onto the `/grant` path | An onboarded contact is never told about a new record (UAT 6A) |
 | Member-test branch (FR-15) | `WorkforceMembershipTest.Evaluate` | Yes: modify (one branch) | Licence-free customer staff cannot sign in on any Model 1 stamp |
 | Default modules by type (FR-19) | `ModuleEntitlementResolver` | Yes: modify | Workforce users see no Front Door / Policy Library modules |
-| Join page (FR-13) | none in `external-spa` | No existing page | Licence-free staff have no way to get access |
+| Profile form (FR-13) | none in `external-spa` | No existing page | Licence-free staff have no way to get access |
 | Shared registration service (FR-14) | None in the repo. H11 (L2) invites guests at provisioning time, but only for a known list, and owner direction says provisioning does not own new components | Possibly co-hosted with the T240c directory; to be decided | Self-registration (owner requirement) is impossible without a Spaarke-tenant invite identity |
 | `sprk_createdbycontact` lookup (FR-25) on document, to-do, event, communication (service requests stamp the existing `sprk_requestedby`; `notes/decisions.md`) | `sprk_createdbyperson` exists but targets systemuser only (FLS-secured) | No: a systemuser lookup cannot hold a contact. A polymorphic retype of `sprk_createdbyperson` would break existing readers | Contacts can never delete their own mistaken records; SPA creates carry no author (L-5) |
 | Intake columns `sprk_requesttype` (choice) + `sprk_intakedata` (multiline JSON) on `sprk_servicerequest` (FR-05; pipeline 2026-10-10) | Live describe: no type or answers column; `sprk_recordsummary` is a human summary, `sprk_direction` is Inbound/Outbound | No: overloading `sprk_name`/`sprk_recordsummary` loses structure and makes the tab unfilterable by type | A submitted intake cannot record which request type it is or the answers |
@@ -353,6 +352,8 @@ R3 turns the external SPA from a read-only portal into a working destination for
 | ADR-028 A2 (:70) | "MUST authenticate Teams users via Teams SSO / NAA against a **multitenant** app" | R3 uses a single-tenant Spaarke client, Spaarke-tenant authority, NAA + popup, no SSO fallback | **B — amend** | Owner decision 2026-10-08/09. Matches the add-in pattern proven live for guests. A multitenant client is needed only for Model 2 |
 | ADR-028 A3 (:124) | "MUST NOT infer Tier-1 entitlement from the plane" | FR-19 gives default modules by user type | **B — amend** | Owner decision 2026-10-09 (option b): scales with no per-user setup; the CIAM blanket was already the owner's choice |
 | ADR-028 A1 (:55) | "MUST NOT provision a B2B guest per external user" | C7 creates one B2B guest per workforce contact | **B — clarify** | The rule targets CIAM partners (external users). Workforce contacts are customer staff, the same population as H11 guests. The amendment states the scope explicitly |
+| ADR-028 A9 (task 048) | "Authorization never relies on email, upn or preferred_username" | The stored-link route also refuses when the guest token's home UPN differs from the home bearer's `preferred_username` | **A — project exception** | Owner decision 2026-10-13 (`notes/a9-bff-design.md` §11 item 3). The check only refuses; the target is found by the proven guest `oid`. Known limit K1 in `notes/task-048-notes.md` |
+| ADR-008 / project rule "every external route in the filtered group" (tasks 047, 048) | Resource endpoint filter (`CallerPrincipalAuthorizationFilter`) | `POST /registration` and `POST /workforce/link` use group `ExternalCollaboration` plus an in-handler WorkforceHome check, without that filter | **A — project exception** | The filter would refuse a not-yet-registered or not-yet-linked caller. The routes take no resource id and act only on the caller's own identities. Ledgered `Permanent CallerScopedOnly` (`r3-047`, `r3-048`) and pinned by the scheme census |
 | ADR-052 | Workload placement for a new host | The registration service needs a shared Spaarke-tenant host | **C — comply** | The host is chosen under ADR-052 §6 (stamp UAMI pattern not applicable; shared-platform identity) |
 
 Amendment source: auth record §12b + `notes/r3-auth-path.md`. The amendment is merged before or with the first C8 code task.
@@ -364,8 +365,8 @@ Amendment source: auth record §12b + `notes/r3-auth-path.md`. The amendment is 
 3. [ ] A grant to an onboarded contact sends one email whose link opens the record, and appears in the in-portal feed. Verify: E2E + an email capture.
 4. [ ] Grid columns match the owner's list. Verify: owner review.
 5. [ ] A message send on an accessible record appears in the thread; a send outside the set returns 403. Verify: a server negative test + E2E.
-6. [ ] A new employee of an allow-listed company self-registers from the join link and lands signed in; a non-listed tenant is refused. Verify: E2E with a test tenant.
-7. [ ] Browser and Teams sign-in use the single-tenant client, Spaarke-tenant authority and `user_impersonation`, for both a member and a guest. Verify: token diagnostics + the FR-21 live check.
+6. [ ] A new employee of an allow-listed company self-registers through the profile form at first sign-in and lands signed in; a non-listed tenant is refused. Verify: E2E with a test tenant.
+7. [ ] Workforce sign-in (browser and Teams) uses the A9 multitenant client at the customer's home directory with `user_impersonation`; licensed users resolve through the stored link; CIAM partners unchanged. Verify: token diagnostics + the FR-21 live check.
 8. [ ] One SPA build reaches two different backends by run-time selection. Verify: a dev test with two configured entries.
 9. [ ] No SPA page leaves the external plane; no mock identity in production. Verify: code test + E2E.
 10. [ ] Documents upload/download on Project, Matter, Work Assignment, Invoice and Service Request; ViewOnly cannot upload. Verify: server tests + E2E.
@@ -408,8 +409,8 @@ Amendment source: auth record §12b + `notes/r3-auth-path.md`. The amendment is 
 | Add-in | Who? | Dataverse-licensed users only (2026-10-10) | Server already requires a systemuser on `/api/office/*` |
 | Teams for partners | In scope? | No — browser only (2026-10-07) | FR-10 |
 | Scope name | `access_as_user` or `user_impersonation`? | `user_impersonation` everywhere (2026-10-09) | FR-16 |
-| Workforce-contact access | Pre-created or self-service? | Self-registration via a customer-shared link; automatic approval (2026-10-09) | C7 |
-| Contact creation | When? | During self-registration, on the first sign-in that ends the join flow, via the member-test branch (2026-10-09) | FR-15 |
+| Workforce-contact access | Pre-created or self-service? | Self-registration through the profile form at first sign-in; automatic approval (2026-10-09) | C7 |
+| Contact creation | When? | During self-registration, on the first sign-in, through the profile form and the member-test branch (2026-10-09) | FR-15 |
 | Registration service owner | Provisioning? | No — R3 builds it, or R4 with a written path (2026-10-09) | FR-14 |
 | Built-in Entra sign-up | Use it? | Yes, if available and simpler (2026-10-09) | FR-12 |
 | Customer IT setting | Handling? | A required customer approval (PRQ-C-14) (2026-10-09) | Dependencies |
@@ -425,13 +426,13 @@ Amendment source: auth record §12b + `notes/r3-auth-path.md`. The amendment is 
 - **Feed retention**: the feed shows the last 30 days of grants/messages. *Affects FR-08 query cost; confirm in the task.*
 - **Messages are not deletable** in the SPA (owner confirmed 2026-10-10).
 - **Delete is a hard delete** of the user's own row (and SPE file for documents) (owner confirmed 2026-10-10).
-- **Picker storage**: known customer keys are kept in `localStorage`; a new device re-uses the invite or join link (T240d §4).
+- **Picker storage**: known customer keys are kept in `localStorage`; a new device re-uses the invite link (T240d §4).
 
 ## Unresolved Questions
 
 - [ ] **Registration service host (FR-14).** Recommendation: co-host with the T240c directory service (both are shared Spaarke-tenant services with no customer data). However, T240c is planned as a provisioning task, and the owner has said provisioning does not build new components.
   - Decide who builds the directory and where the shared host lives (ADR-052).
-  - If the shared host is not ready when R3 reaches FR-14, FR-14 moves to **R4** with this spec section as its starting point, and C7 ships the join page + FR-15 behind a feature flag.
+  - If the shared host is not ready when R3 reaches FR-14, FR-14 moves to **R4** with this spec section as its starting point, and C7 ships the profile form + FR-15 behind a feature flag.
   - Blocks: FR-14 build order only.
 - [ ] **Teams broker pre-authorization (FR-21).** Whether stamp apps must pre-authorize Microsoft's broker for NAA. Blocks: nothing until the FR-21 live check; the outcome may add one H3 platform-list entry.
 

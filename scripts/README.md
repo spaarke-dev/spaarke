@@ -650,7 +650,7 @@ Rationale + verification evidence: [`projects/spaarke-auth-v4-dataverse-MI/notes
 **Parameters:**
 - `-EnvironmentUrl` — One or more Dataverse environment URLs or names from `config/environments.json` (e.g., `dev`, `demo`, `https://spaarkedev1.crm.dynamics.com`)
 - `-Version` — Release version tag in `v{major}.{minor}.{patch}` format; auto-suggests from latest git tag if omitted
-- `-SkipPhase` — Array of phase names to skip: `Build`, `BffApi`, `Solutions`, `WebResources`, `Validation`
+- `-SkipPhase` — Array of phase names to skip: `Build`, `BffApi`, `OntologyConfig`, `Solutions`, `WebResources`, `Validation`. Skipping `OntologyConfig` does not block Phase 3 (an explicit operator choice); a failed Phase 2 or Phase 2b always does
 - `-SkipBuild` — Shortcut for `-SkipPhase Build`
 - `-StopOnFailure` — Stop deploying to remaining environments if a deployment fails (default: `$true`)
 - `-ClientSecret` — ignored since T218f (warns): Phase 3 imports SpaarkeMaster with your own az/pac sign-in
@@ -661,6 +661,7 @@ Rationale + verification evidence: [`projects/spaarke-auth-v4-dataverse-MI/notes
 | 0 | (built-in) | Pre-flight checks: git clean, branch, auth, BFF URL validation |
 | 1 | `Build-AllClientComponents.ps1` | Build all client components in dependency order |
 | 2 | `Deploy-BffApi.ps1` | BFF API deployment (per environment) |
+| 2b | `Apply-WorklistGridConfiguration.ps1` | Ontology configuration (per environment): apply, then `-Verify -RequireRow`, the worklist grid configuration row (task 164, D-185). Runs after Phase 2 and before Phase 3, and does not run if Phase 2 failed (a skipped Phase 2, `-SkipPhase BffApi`, is an explicit operator choice and still runs it); a failure here, or a failed Phase 2, blocks Phase 3 for that environment even with `-StopOnFailure $false` |
 | 3 | `solution-authoring/Import-SpaarkeMasterPackage.ps1` | SpaarkeMaster import — the CI-published package, typed per environment (`solutionPackageType` in `config/environments.json`; `none` skips the authoring environment). T218f retired `Deploy-DataverseSolutions.ps1` |
 | 4 | `Deploy-AllWebResources.ps1` | Web resource deployment (per environment) |
 | 5 | `Validate-DeployedEnvironment.ps1` | Post-deploy validation (per environment) |
@@ -1223,10 +1224,35 @@ or the Graph PowerShell `New-MgStorageFileStorageContainer` cmdlet (round 41 ite
 
 **Safety model:** dry-run default (`-WhatIf` forces a preview even with `-Apply`); a **write-ahead reversal manifest** records each row's previous owner before its write, so `-RevertManifest` undoes a run; every assignment is **read back** (Dataverse silently ignores an unrecognised `@odata.bind`); only application-user-owned rows are candidates; an ambiguous or missing default team is reported `Unresolvable`, never guessed. Detail: [`projects/spaarkeai-word-add-in-r1/notes/080-record-ownership.md`](../projects/spaarkeai-word-add-in-r1/notes/080-record-ownership.md) §6.9.
 
+### `Set-FieldMappingRuleSyncMode.ps1`
+**Purpose:** Migrates every existing **Copy** field-mapping rule (`sprk_fieldmappingrule.sprk_mapping_type = 0`) to sync mode **Manual Refresh** (`sprk_syncmode = 1`), so `/push` (task 040) can select the rules it re-applies by that value. Default/Concat/Template rules and rules already at 1 are never written; an empty `sprk_syncmode` counts as not migrated; an inactive Copy rule is reported, never touched; an unrecognised mapping type or sync mode stops the run before any write (exit 2). The PATCH body is exactly `{ "sprk_syncmode": 1 }`.
+**Usage:** 🔴 One-time (per environment); idempotent — a second `-Apply` reports `ToMigrate: 0`.
+**Lifecycle:** ✅ Maintained (added 2026-10-21 by `field-mapping-server-write-path-r1` task 005, FR-05d)
+**Dependencies:** Azure CLI (`az login`) with access to the environment, PowerShell 7+
+**Owner:** `field-mapping-server-write-path-r1`
+**Last Used:** 2026-10-21 — `-SelfTest` PASS; read-only dry run + `-Verify` baseline against `spaarkedev1` (25 Copy rules: 21 would migrate — 20 empty, 1 One-time — 4 already Manual Refresh). **No `-Apply` has been run**: it needs the owner's explicit OK per environment.
+
+**Command:**
+```powershell
+# Dry run (default) — zero writes; lists each rule that would move, with its current mode, and the totals.
+.\Set-FieldMappingRuleSyncMode.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com"
+
+# Read-only baseline — exits 1 while any Copy rule is not at Manual Refresh.
+.\Set-FieldMappingRuleSyncMode.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -Verify
+
+# Migrate (owner OK required), read each row back, then verify.
+.\Set-FieldMappingRuleSyncMode.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -Apply -Verify
+
+# Offline checks of the classifier and idempotency.
+.\Set-FieldMappingRuleSyncMode.ps1 -SelfTest
+```
+
+**Safety model:** dry-run default (`-WhatIf` forces a preview even with `-Apply`); `If-Match: *` so the PATCH can only update; every write is read back; `-Verify` is read-only and fails on any Copy rule short of Manual Refresh, active or not.
+
 ### `Set-DocumentAccessPermissionSchema.ps1`
-**Purpose:** Brings `sprk_document.sprk_accesspermission` into source (owner round 81): the column exists, is a Choice bound to the SAME global choice as the roots' Access Permission, and ships in `SpaarkeCore` (membership decided through `scripts/common/DataverseSolutionMembership.ps1`). `-Apply` creates the column when absent (or adds it to the solution); it never alters an existing one (`COLUMN_MISMATCH` refuses).
-**Usage:** 🟡 Per environment, before `Set-InheritedAccessPermissionFormLock.ps1`; `-Verify` any time.
-**Lifecycle:** ✅ Maintained (added 2026-10-08 by `unified-access-control-r2` task 173)
+**Purpose:** Brings `sprk_document.sprk_accesspermission` into source (owner round 81): the column exists, is a Choice bound to the SAME global choice as the roots' Access Permission, and ships in `SpaarkeCore` (membership decided through `scripts/common/DataverseSolutionMembership.ps1`). Task 189 (D7 T7a, #2126) adds the document's own-narrowing record `sprk_document.sprk_accessinheritance` (Multiple lines of text, 4000, audited, **NOT field-secured** — decision D1; see `docs/data-model/access-inheritance.md`). `-Apply` creates each column when absent (or adds it to the solution); it never alters an existing one (`COLUMN_MISMATCH` / `RECORD_MISMATCH` refuse — a secured record column is a mismatch). `-Verify` also asserts the record column is on no `sprk_document` form.
+**Usage:** 🟡 Per environment, before `Set-InheritedAccessPermissionFormLock.ps1`, and BEFORE deploying a BFF with task 189 (until the record column exists that BFF writes no document's Access Permission — fail closed); `-Verify` any time.
+**Lifecycle:** ✅ Maintained (added 2026-10-08 by `unified-access-control-r2` task 173; record column 2026-10-20, task 189)
 **Dependencies:** Azure CLI (`az login`) with customizer rights in the environment, PowerShell 7+
 **Owner:** `unified-access-control-r2`
 **Last Used:** 2026-10-08 — `-SelfTest` PASS; `-Verify` PASS against `spaarkedev1` (the owner added the column live; it ships in SpaarkeCore with its table).
@@ -1928,3 +1954,4 @@ Most scripts require:
 - **2026-10-01:** Added Migrate-SecureRecordsToNamedOwnerTeam.ps1. It moves secure roots off the Secure Record business unit's default team onto its named, memberless owner team, with a dry run by default, read-back, share-count comparison and a `-Verify` gate (`unified-access-control-r2` task 144, #967).
 - **2026-10-02:** Added Set-RecordNumberingSchema.ps1 — interim `MAT-`/`PRJ-` platform autonumber on the matter/project primary-name columns, data-derived seed, blank-row backfill, alternate keys, `-Verify` (`spaarkeai-word-add-in-r1` task 076, write-path invariant I-11).
 - **2026-09-30:** Added Backfill-RecordOwnership.ps1 — re-owns existing app-owned `sprk_document`/`sprk_todo` rows to a business unit default owner team, record-first, with a write-ahead reversal manifest (`spaarkeai-word-add-in-r1` task 080, write-path invariant I-6).
+- **2026-10-21:** Added Set-FieldMappingRuleSyncMode.ps1 — one-time, idempotent migration of existing Copy field-mapping rules to sync mode Manual Refresh (`sprk_syncmode = 1`), dry-run by default with `-Apply`, `-Verify` and `-SelfTest` (`field-mapping-server-write-path-r1` task 005, FR-05d).

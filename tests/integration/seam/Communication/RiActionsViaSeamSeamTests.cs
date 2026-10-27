@@ -271,7 +271,8 @@ public sealed class RiActionsViaSeamSeamTests
                 entity.Object,
                 new Sprk.Bff.Api.Tests.TestInfrastructure.RecordTypeCatalogStub(Sprk.Bff.Api.Tests.TestInfrastructure.RecordTypeCatalogStub.SpaarkeDev1),
                 TimeProvider.System,
-                NullLogger<DecisionRecordWriter>.Instance);
+                NullLogger<DecisionRecordWriter>.Instance,
+                new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing);
             handler = new GateDecisionRecordJobHandler(
                 writer,
                 entity.Object,

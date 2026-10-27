@@ -21,8 +21,10 @@ namespace Sprk.Bff.Api.Services.Ontology;
 /// </remarks>
 public interface IOntologyAdminAuthoringSignalEngine
 {
-    /// <summary>Evaluates <paramref name="policy"/> over every subject, as the evaluator. Writes nothing.</summary>
-    Task<SignalEvaluation> EvaluateAsync(SignalEvaluationPolicy policy, CancellationToken ct);
+    /// <summary>Evaluates <paramref name="policy"/> as the evaluator, over every subject or, with <paramref name="matterScope"/> (task
+    /// 102b, D-165), over that one matter: the same subject-scoped evaluation the nightly job runs for a matter-scoped policy. The caller
+    /// has checked that the rule's subject is <c>sprk_matter</c>. Writes nothing.</summary>
+    Task<SignalEvaluation> EvaluateAsync(SignalEvaluationPolicy policy, Guid? matterScope, CancellationToken ct);
 
     /// <summary>The nightly job's single-policy pass for one enabled policy, now (supersede, then raise the new version's episodes).</summary>
     Task<PolicyReevaluationResult> ReevaluateAsync(Guid policyId, CancellationToken ct);
@@ -41,8 +43,8 @@ public sealed class OntologyAdminAuthoringSignalEngine : IOntologyAdminAuthoring
     }
 
     /// <inheritdoc/>
-    public Task<SignalEvaluation> EvaluateAsync(SignalEvaluationPolicy policy, CancellationToken ct) =>
-        _evaluator.EvaluateAsync(policy, subjectId: null, ct);
+    public Task<SignalEvaluation> EvaluateAsync(SignalEvaluationPolicy policy, Guid? matterScope, CancellationToken ct) =>
+        _evaluator.EvaluateAsync(policy, subjectId: matterScope, ct);
 
     /// <inheritdoc/>
     public Task<PolicyReevaluationResult> ReevaluateAsync(Guid policyId, CancellationToken ct) =>

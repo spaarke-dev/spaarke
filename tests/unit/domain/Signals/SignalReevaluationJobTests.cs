@@ -1096,6 +1096,9 @@ public partial class SignalReevaluationJobTests
     public async Task Run_AnotherPoliciesKeyUnderTheSamePrefix_PolicyCodeContainingAPipe_IsNotUnparseable()
     {
         var h = new Harness().WithPathBPolicy();
+        // Task 102b fix round 3: policy POL|ODD exists (Off, so only POL is evaluated); without it, its Signal would be a deleted
+        // policy's, which the deleted-policy sweep rightly closes.
+        h.Sysadmin.AddPolicy($"{PolicyCode}|ODD", SignalWriter.LaneDecide, false, PathBBody, PathBTemplate);
         var otherId = h.Org.SeedSignal($"{PolicyCode}|ODD|sprk_matter|{Lower(MatterId)}|1", SignalWriter.SignalStatusOpen, coreId: MatterId);
 
         var result = await h.RunAsync();
@@ -2575,7 +2578,7 @@ public partial class SignalReevaluationJobTests
             services.AddScoped<Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessStore>(_ => Links);
             services.AddScoped(sp => new Sprk.Bff.Api.Services.Access.SecureChildReconciler(
                 Sysadmin, Ownership, sp.GetRequiredService<Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer>(), ReownApi,
-                configuration, NullLogger<Sprk.Bff.Api.Services.Access.SecureChildReconciler>.Instance));
+                configuration, NullLogger<Sprk.Bff.Api.Services.Access.SecureChildReconciler>.Instance, new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing));
             var scopes = services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
             Writer = new SignalWriter(writerClient, Sysadmin,
                 new Ownership.CoreAncestorResolver(Sysadmin, StampColumnProbe, NullLogger<Ownership.CoreAncestorResolver>.Instance),
@@ -2590,7 +2593,7 @@ public partial class SignalReevaluationJobTests
                 new Ownership.CoreAncestorResolver(Sysadmin, StampColumnProbe, NullLogger<Ownership.CoreAncestorResolver>.Instance),
                 Sysadmin,
                 new Sprk.Bff.Api.Tests.TestInfrastructure.RecordTypeCatalogStub(Sprk.Bff.Api.Tests.TestInfrastructure.RecordTypeCatalogStub.SpaarkeDev1),
-                Clock, Logger<DecisionRecordWriter>());
+                Clock, Logger<DecisionRecordWriter>(), new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing);
             Job = new SignalReevaluationJob(Evaluator, Writer, Suppression, Closure, Records, Sysadmin, Cache, Clock, Logger<SignalReevaluationJob>());
             Sysadmin.Stub(new Entity("sprk_matter", MatterId) { ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitId) });
             Sysadmin.Stub(new Entity("sprk_project", ProjectId) { ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitId) });
@@ -2860,6 +2863,10 @@ public partial class SignalReevaluationJobTests
         /// <summary>Task 145 F1: a witness communication read by id (the evidence family read) faults.</summary>
         public bool FailWitnessReads { get; set; }
 
+        /// <summary>Task 102b fix round 1 (uac-r2 F3): Dataverse ignores the subject-scoped root condition (<see cref="HoldsSubjectId"/>),
+        /// so a scoped evaluation returns every subject: the job's fail-closed hit guard must fire.</summary>
+        public bool IgnoreSubjectIdCondition { get; set; }
+
         private static readonly Guid SecureBusinessUnitId = Guid.Parse("5ec0be00-0000-4000-8000-0000000000b1");
 
         /// <summary>Task 143: this World's Secure Record business unit (answered once <see cref="SecureTeamId"/> exists).</summary>
@@ -2936,6 +2943,13 @@ public partial class SignalReevaluationJobTests
                 ["sprk_messagetemplate"] = template,
             });
             return versionId;
+        }
+
+        /// <summary>Task 102b: the policy's matter scope (<c>sprk_matter</c>), as a publish sets it; null for all matters.</summary>
+        public void SetMatterScope(string code, Guid? matter)
+        {
+            var policy = _policies.Single(p => p.GetAttributeValue<string>("sprk_policycode") == code);
+            if (matter is { } m) policy["sprk_matter"] = new EntityReference("sprk_matter", m); else policy.Attributes.Remove("sprk_matter");
         }
 
         /// <summary>Off (<c>sprk_enabled</c> No) or Retired (<c>statecode</c> Inactive).</summary>
@@ -3027,6 +3041,62 @@ public partial class SignalReevaluationJobTests
         /// <summary>#1661 round 2: a read that faults (a Dataverse timeout), chosen per query.</summary>
         public Func<QueryExpression, Exception?>? FaultOn { get; set; }
 
+        /// <summary>Task 102b fix round 4 (K c): a smaller page than the query asks for, so a test can reach a second page or the per-run
+        /// bound without seeding thousands of rows. Null: the query's own <c>PageInfo.Count</c>.</summary>
+        public int? PageSizeCap { get; set; }
+
+        /// <summary>Task 102b fix round 4 (K c): each paged read answered, as (table, page number).</summary>
+        public List<(string Table, int Page)> PagedReads { get; } = new();
+
+        /// <summary>Task 102b fix round 5 (F3): only the columns the query selects come back, as in Dataverse (a column the query leaves out is
+        /// absent), plus the primary id, which Dataverse always returns, and the row version the fake carries beside the attributes. A
+        /// query that asks for <c>AllColumns</c> gets the whole row. A select that omits a column production reads therefore fails a test.</summary>
+        private static Entity Project(QueryExpression query, Entity row)
+        {
+            if (query.ColumnSet.AllColumns) return row;
+            var copy = new Entity(row.LogicalName, row.Id) { RowVersion = row.RowVersion };
+            foreach (var attribute in row.Attributes.Where(a => query.ColumnSet.Columns.Contains(a.Key))) copy[attribute.Key] = attribute.Value;
+            return copy;
+        }
+
+        /// <summary>A query with <c>PageInfo.Count</c> set is answered one page at a time, ordered by id (every paged read here orders by
+        /// its primary key), with <c>MoreRecords</c> and a paging cookie as Dataverse sets them; any other query gets every row.</summary>
+        private EntityCollection Paged(QueryExpression query, IEnumerable<Entity> rows)
+        {
+            var ordered = rows.OrderBy(r => r.Id).ToList();
+            var result = new EntityCollection();
+            if (query.PageInfo is not { Count: > 0 } paging)
+            {
+                result.Entities.AddRange(ordered.Select(r => Project(query, r)));
+                return result;
+            }
+
+            var size = PageSizeCap is { } cap ? Math.Min(cap, paging.Count) : paging.Count;
+            var page = Math.Max(paging.PageNumber, 1);
+            PagedReads.Add((query.EntityName, page));
+            result.Entities.AddRange(ordered.Skip((page - 1) * size).Take(size).Select(r => Project(query, r)));
+            result.MoreRecords = ordered.Count > page * size;
+            result.PagingCookie = result.MoreRecords ? $"<cookie page=\"{page}\" />" : null;
+            return result;
+        }
+
+        /// <summary>Task 102b fix round 4: the policy row's <c>createdon</c>, as Dataverse stamps it on create.</summary>
+        public void SetPolicyCreatedOn(string code, DateTime createdOn) =>
+            _policies.Single(p => p.GetAttributeValue<string>("sprk_policycode") == code)["createdon"] = createdOn;
+
+        /// <summary>Task 102b fix rounds 3-4: an administrator's hard delete of the rule, or a matter delete cascading to it. The row is gone,
+        /// and <c>sprk_signal_policy</c> (RemoveLink) empties the policy lookup on every one of its Signals; their rows stay.</summary>
+        public void DeletePolicy(string code)
+        {
+            var policy = _policies.Single(p => p.GetAttributeValue<string>("sprk_policycode") == code);
+            _policies.Remove(policy);
+            _rows.Remove(("sprk_policy", policy.Id));
+            foreach (var signal in Org.Rows.Values.Where(r => r.GetAttributeValue<EntityReference>("sprk_policy")?.Id == policy.Id))
+            {
+                signal.Attributes.Remove("sprk_policy");
+            }
+        }
+
         public Task<EntityCollection> RetrieveMultipleAsync(QueryExpression query, CancellationToken ct = default)
         {
             if (FaultOn?.Invoke(query) is { } fault) throw fault;
@@ -3084,12 +3154,22 @@ public partial class SignalReevaluationJobTests
                     });
                     break;
                 case "sprk_policy":
-                    foreach (var p in _policies.Where(p => query.Criteria.Conditions.All(c =>
-                                 c.Operator == ConditionOperator.Equal && Matches(p, c.AttributeName, c.Values[0]))))
-                    {
-                        result.Entities.Add(p);
-                    }
-
+                    // Fix round 4 (K c): a paged read (the existence read) is answered page by page, as Dataverse answers it.
+                    result = Paged(query, _policies.Where(p => query.Criteria.Conditions.All(c =>
+                                 c.Operator == ConditionOperator.Equal && Matches(p, c.AttributeName, c.Values[0]))));
+                    break;
+                // Task 102b fix round 3: the deleted-policy sweep's read (sprk_policy is null, Open or Acknowledged), as Dataverse answers it.
+                // Fix round 4: and the redaction's read of the codes (sprk_policy is null, ANY status: no status condition); both paged.
+                case "sprk_signal" when query.Criteria.Conditions.Any(c => c.AttributeName == "sprk_policy" && c.Operator == ConditionOperator.Null):
+                    var sweepStatuses = query.Criteria.Conditions.SingleOrDefault(c => c.AttributeName == "sprk_signalstatus")?.Values.Cast<int>().ToHashSet();
+                    result = Paged(query, Org.Rows.Values.Where(r => r.GetAttributeValue<EntityReference>("sprk_policy") is null
+                                 && (sweepStatuses is null || sweepStatuses.Contains(r.GetAttributeValue<OptionSetValue>("sprk_signalstatus")!.Value)))
+                        .Select(row =>
+                        {
+                            var copy = new Entity("sprk_signal", row.Id) { RowVersion = Org.VersionOf(row.Id) };
+                            foreach (var attribute in row.Attributes) copy[attribute.Key] = attribute.Value;
+                            return copy;
+                        }));
                     break;
                 case "sprk_signal" when Value("sprk_policy") is Guid policyId:
                     var openStatuses = query.Criteria.Conditions.Single(c => c.AttributeName == "sprk_signalstatus").Values.Cast<int>().ToHashSet();
@@ -3098,7 +3178,7 @@ public partial class SignalReevaluationJobTests
                     {
                         var copy = new Entity("sprk_signal", row.Id) { RowVersion = Org.VersionOf(row.Id) };
                         foreach (var attribute in row.Attributes) copy[attribute.Key] = attribute.Value;
-                        result.Entities.Add(copy);
+                        result.Entities.Add(Project(query, copy));
                     }
 
                     break;
@@ -3107,7 +3187,7 @@ public partial class SignalReevaluationJobTests
                     {
                         var copy = new Entity("sprk_signal", row.Id) { RowVersion = Org.VersionOf(row.Id) };
                         foreach (var attribute in row.Attributes) copy[attribute.Key] = attribute.Value;
-                        result.Entities.Add(copy);
+                        result.Entities.Add(Project(query, copy));
                     }
 
                     break;
@@ -3225,6 +3305,15 @@ public partial class SignalReevaluationJobTests
                 return (string)c.Attribute("operator")! == "null" ? !hasValue : hasValue;
             });
 
+        /// <summary>
+        /// Task 102b: the subject-scoped evaluation's root condition (<c>{subject}id eq id</c>, PredicateCompiler; an event trigger's
+        /// subject or a policy's matter scope), as Dataverse answers it: only that row. Before 102b every scoped test had one subject.
+        /// </summary>
+        private static bool HoldsSubjectId(Entity row, XElement entity, string subject) =>
+            (entity.Element("filter")?.Elements("condition") ?? Enumerable.Empty<XElement>())
+            .Where(c => c.Attribute("entityname") is null && (string?)c.Attribute("attribute") == subject + "id" && (string?)c.Attribute("operator") == "eq")
+            .All(c => Guid.Parse((string)c.Attribute("value")!) == row.Id);
+
         private static bool Matches(Entity row, string attribute, object expected) => row.Attributes.TryGetValue(attribute, out var actual) && actual switch
         {
             OptionSetValue o => Equals(o.Value, expected),
@@ -3273,7 +3362,8 @@ public partial class SignalReevaluationJobTests
             var result = new EntityCollection();
             if (SubjectRows.TryGetValue(name, out var subjects))
             {
-                foreach (var row in subjects.Where(r => HoldsNumericConditions(r, entity) && HoldsNullTests(r, entity) && InnerLinksSatisfied(entity, r))) result.Entities.Add(row);
+                foreach (var row in subjects.Where(r => HoldsNumericConditions(r, entity) && HoldsNullTests(r, entity) && (IgnoreSubjectIdCondition || HoldsSubjectId(r, entity, name))
+                             && InnerLinksSatisfied(entity, r))) result.Entities.Add(row);
             }
             else if (WitnessRows.TryGetValue(name, out var witnesses))
             {
@@ -3325,6 +3415,7 @@ public partial class SignalReevaluationJobTests
 
         public Task<Guid> CreateAsync(Entity entity, CancellationToken ct = default) => throw Write();
         public Task<(Guid Id, bool Created)> UpsertAsync(Entity entity, CancellationToken ct = default) => throw Write();
+        public Task UpdateIfRowVersionMatchesAsync(string entityLogicalName, Guid id, string rowVersion, Dictionary<string, object> fields, CancellationToken ct = default) => throw Write();
         public Task UpdateAsync(string entityLogicalName, Guid id, Dictionary<string, object> fields, CancellationToken ct = default) => throw Write();
         public Task BulkUpdateAsync(string entityLogicalName, List<(Guid id, Dictionary<string, object> fields)> updates, CancellationToken ct = default) => throw Write();
         public Task DeleteAsync(string entityLogicalName, Guid id, CancellationToken ct = default) => throw Write();

@@ -677,10 +677,35 @@ internal static class AssignedAccessTestDoubles
             }
         }
 
+        /// <summary>
+        /// Task 099b review round 1 (F2): when true, a <c>contacts</c> create (the invite core onboarding a NEW person) is
+        /// recorded in <see cref="ContactCreates"/> and answered with a new id, instead of failing as an unexpected create.
+        /// </summary>
+        public bool AcceptContactCreates { get; set; }
+
+        /// <summary>Task 099b review round 1 (F2): every <c>contacts</c> payload created (with <see cref="AcceptContactCreates"/>).</summary>
+        public List<string> ContactCreates { get; } = new();
+
+        /// <summary>
+        /// Task 099b review round 1: when set, every GRANT-row create throws this — as the Web API client throws a bare
+        /// <see cref="HttpRequestException"/> on Dataverse's 403 "Read Privilege Check For Owner failed".
+        /// </summary>
+        public Exception? GrantCreateFailure { get; set; }
+
         public override Task<Guid> CreateAsync(string entitySetName, object entity, CancellationToken cancellationToken = default)
         {
+            if (entitySetName == "contacts" && AcceptContactCreates)
+            {
+                lock (_gate)
+                    ContactCreates.Add(JsonSerializer.Serialize(entity));
+                return Task.FromResult(Guid.NewGuid());
+            }
+
             if (entitySetName != GrantSet)
                 throw new InvalidOperationException($"Unexpected create in {entitySetName}.");
+
+            if (GrantCreateFailure is { } createFailure)
+                throw createFailure;
 
             var payload = (IDictionary<string, object?>)entity;
             var row = new ExternalGrantRow
@@ -1036,9 +1061,23 @@ internal static class AssignedAccessTestDoubles
         public Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer Children =>
             Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.SynchronizerOver(() => ChildWorld, Shares, Guard);
 
+        /// <summary>
+        /// Task 099b (D-11): the ownership resolver the grant core asks for a new grant row's owner team — a double that answers
+        /// <see cref="TestInfrastructure.RecordOwnershipResolverDouble.DefaultTeamId"/> unless a test replaces it (the REAL
+        /// resolver over an <see cref="TestInfrastructure.OwnershipDirectory"/>, a fault, a refusal).
+        /// </summary>
+        public Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver Ownership { get; set; } =
+            new TestInfrastructure.RecordOwnershipResolverDouble();
+
+        /// <summary>
+        /// Task 099b review round 2: the owner-team privilege reader the grant core and <c>/invite-and-grant</c> ask (every
+        /// team holds Read unless a test says otherwise).
+        /// </summary>
+        public TestInfrastructure.TeamPrivilegeCheckerDouble OwnerPrivileges { get; set; } = new();
+
         public AssignedAccessMaterializer Materializer => new(
             Store, Grants, Participations, NoAccessCheckOverride ?? AccessibleRecords, Identities, Guard, SharesOverride ?? Shares,
-            Children, Cache.Mock.Object, Standing, Registry, Configuration, Time, Logger, Invites, Notifier, Scopes);
+            Children, Cache.Mock.Object, Standing, Registry, Configuration, Time, Logger, Invites, Notifier, Ownership, OwnerPrivileges, Scopes);
 
         /// <summary>Task 181: every <c>appnotification</c> the grant notifier wrote through task 100's NotificationService.</summary>
         public ConcurrentQueue<Microsoft.Xrm.Sdk.Entity> SentNotifications { get; } = new();
@@ -1122,8 +1161,11 @@ internal static class AssignedAccessTestDoubles
         /// (<see cref="GrantTable.SystemUsers"/>), cache and child synchronizer.
         /// </summary>
         public RestrictedExternalShareRemover RestrictedRemover => new(
-            Participations, SharesOverride ?? Shares, Grants, Cache.Mock.Object, Children, Lease,
+            Participations, SharesOverride ?? Shares, Grants, Cache.Mock.Object, Children, Lease, WorkforceIdentity,
             NullLogger<RestrictedExternalShareRemover>.Instance);
+
+        /// <summary>r3 task 048: the customer home directories the remover also clears root sets under (none by default).</summary>
+        public IOptionsMonitor<WorkforceIdentityOptions> WorkforceIdentity { get; set; } = IdentityBindingTestKit.Tenants();
 
         /// <summary>Task 114: the per-record removal lease the remover shares with task 143's enforcer and /unshare-user.</summary>
         public Spaarke.Scheduling.IScheduledJobLease Lease { get; set; } = new Spaarke.Scheduling.ProcessLocalScheduledJobLease();

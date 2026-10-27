@@ -21,6 +21,8 @@
 //       diagnostic names the exact FIELD-MAPPING-ADMIN-GUIDE.md remediation.
 //   T5  Fail-fast on first recordtype_ref lookup HTTP failure.
 //   T6  Token acquisition failure -> Failed, zero HTTP calls made.
+//   T3b Rule existence GET filters on `_sprk_fieldmappingprofile_value` (#1318),
+//       never the bare lookup name.
 //   T7  Active DI registration (AppConfigSeedModule.cs) contains zero
 //       `new DeferredAppConfigSeeder(` call sites (acceptance criterion #1).
 // -----------------------------------------------------------------------------
@@ -156,6 +158,34 @@ public sealed class DataverseWebApiFieldMappingSeederTests
         var secondResult = await seeder.SeedAsync(BuildInput(), CancellationToken.None);
         secondResult.Status.Should().Be(AppConfigSeederStatus.Ok);
         fake.Requests.Should().NotContain(r => r.Method == HttpMethod.Post);
+    }
+
+    // ---------- T3b rule existence lookup filters on the lookup's _value form (#1318, FR-05c) ----------
+
+    [Fact]
+    public async Task SeedAsync_RuleExistenceLookup_FiltersOnTheLookupValueForm_NeverTheBareLookupName()
+    {
+        const string profileId = "20000000-0000-0000-0000-000000000001";
+        var fake = new FakeDataverseHandler
+        {
+            OnGetRecordType = req => RecordTypeResponse(req),
+            OnGetProfile = _ => JsonResponse(HttpStatusCode.OK, ValueJson("sprk_fieldmappingprofileid", profileId)),
+            OnGetRule = _ => JsonResponse(HttpStatusCode.OK, ValueJson("sprk_fieldmappingruleid", "50000000-0000-0000-0000-000000000001")),
+        };
+        var seeder = BuildSeeder(fake);
+
+        var result = await seeder.SeedAsync(BuildInput(), CancellationToken.None);
+
+        result.Status.Should().Be(AppConfigSeederStatus.Ok);
+        var ruleLookups = fake.Requests
+            .Where(r => r.Method == HttpMethod.Get && r.Uri.AbsolutePath.Contains("sprk_fieldmappingrules", StringComparison.Ordinal))
+            .Select(r => Uri.UnescapeDataString(r.Uri.Query))
+            .ToList();
+        ruleLookups.Should().NotBeEmpty();
+        ruleLookups.Should().OnlyContain(q => q.Contains($"_sprk_fieldmappingprofile_value eq {profileId} and ", StringComparison.Ordinal),
+            "a lookup column filters as _<name>_value eq <guid>");
+        ruleLookups.Should().OnlyContain(q => !q.Contains("$filter=sprk_fieldmappingprofile eq", StringComparison.Ordinal),
+            "the bare lookup name is a Dataverse 400 (#1318)");
     }
 
     // ---------- T4 missing recordtype_ref row -> Failed, fail-loud diagnostic ----------

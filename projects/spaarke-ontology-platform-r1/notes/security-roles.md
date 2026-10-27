@@ -915,7 +915,7 @@ rows.** Both tables hold 0 rows in total after the run.
 Status: repo role XML and the live-apply script are in the task 049 PR; **nothing has been changed on spaarkedev1**. The main
 session applies after uac-r2's check on the PR and appends the dated result below this section.
 
-**The three removals (and nothing else):** Console User `prvWritesprk_Signal` (D-17), Console User
+**The three removals (and nothing else; a fourth, Ontology Administrator Signal Write, was added by owner Q6 on 2026-10-17, see below):** Console User `prvWritesprk_Signal` (D-17), Console User
 `prvCreatesprk_DecisionRecord` (D-62), Ontology Administrator `prvCreatesprk_DecisionRecord` (D-147), each on the **ROOT copy
 of the role only: 3 `RemovePrivilegeRole` calls** (uac-r2 review F2/Q2, 2026-10-16). The five child-BU copies of each role are
 inherited and read-only (Dataverse rejects an edit with `0x80044152` "Inherited roles cannot be modified",
@@ -960,25 +960,19 @@ copies are inherited and cannot be edited, so the script plans and applies on th
 other five copies of each role by read-back. That `DIVERGENT` check is therefore defence in depth, not independent evidence (the
 call reads through to the root); the live union check (A1 to A5) is the real guard. Union:
 
-| Privilege | Holders now | After the three removals |
+| Privilege | Holders at preparation | After the removals (incl. Q6) |
 |---|---|---|
 | Write on `sprk_decisionrecord` | System Administrator, System Customizer, Service Writer | unchanged |
 | Delete on `sprk_decisionrecord` | System Administrator, System Customizer, Service Deleter | unchanged |
 | Create on `sprk_decisionrecord` | System Administrator, System Customizer, Service Writer, **Console User (Deep)**, **Ontology Administrator (Deep)**, Ontology Service | System Administrator, System Customizer, Service Writer, Ontology Service |
-| Write on `sprk_signal` | System Administrator, System Customizer, Service Writer, **Console User (Deep)**, **Ontology Administrator (Deep)**, Ontology Service | System Administrator, System Customizer, Service Writer, **Ontology Administrator (Deep)**, Ontology Service |
+| Write on `sprk_signal` | System Administrator, System Customizer, Service Writer, **Console User (Deep)**, **Ontology Administrator (Deep)**, Ontology Service | System Administrator, System Customizer, Service Writer, Ontology Service |
 
-🔴 **Finding for the owner (open question).** The task goal says "no human role writes `sprk_signal`", but D-17 names only
-Console User. **Spaarke Ontology Administrator still holds Write (Deep) on `sprk_signal`** after the three removals (its only
-member is Ralph Schroeder; §3's matrix gives the admin Write, Delete and Assign on Signals). It was **not** removed here: it is
-outside the owner's scope. uac-r2 (review of PR #2022) notes no code path needs it: every BFF `sprk_signal` write goes through
-`OntologyWriterDataverseClient` and no client writes it, while the forms ship in SpaarkeMaster, so an admin could edit a Signal by
-direct form URL or the Web API outside the writer's invariants; uac-r2 leans toward removal on least privilege. Decide whether to
-remove it as well, or accept it as the admin's override.
-
-**Union assertion A5 (added in the fix round).** Only platform roles, admin roles (System Administrator, System Customizer) and
-Spaarke Ontology Service may hold Write on `sprk_signal`. ONE named waiver covers Ontology Administrator and is printed as
-`WAIVED (owner question open: Ontology Administrator Signal Write)`; any other holder fails the run. If the owner decides to
-remove the admin's Signal Write, set `$A5Waiver = $null` in the script (one line) so the assertion then rejects it.
+**Ontology Administrator Signal Write: removed live 2026-10-17 (owner Q6), see §17.** The owner approved removing
+`prvWritesprk_Signal` (Deep) from Spaarke Ontology Administrator; it was removed from the ROOT role by a one-off
+`RemovePrivilegeRole` (privilege `8df17c8f-8796-4e7c-9d32-3c0d7c9cd082`), and the script now carries it as a fourth closed-list
+removal (decision `Q6`, K-A gated on that role's Decision Record Create being read back absent). Union assertion A5 therefore has
+no waiver (`$A5Waiver = $null`): only platform roles, admin roles (System Administrator, System Customizer) and Spaarke Ontology
+Service may hold Write on `sprk_signal`, and any other holder fails the run.
 
 **Evidence and commands.** `049-role-removal-evidence-whatif-*.md` (plan, projected union) and `-verify-*.md` (live before
 picture) in this folder carry the full `RetrieveRolePrivilegesRole` listing per copy. Script:
@@ -991,6 +985,7 @@ depth (Deep, `privilegedepthmask` 4), taking the ids from the 2026-10-16 live re
 | D-17 | Console User `51c924e2-bdbe-f111-a05b-3833c5e9614d` | `prvWritesprk_Signal` | `8df17c8f-8796-4e7c-9d32-3c0d7c9cd082` | Deep |
 | D-62 | Console User `51c924e2-bdbe-f111-a05b-3833c5e9614d` | `prvCreatesprk_DecisionRecord` | `38366142-e133-4978-9a46-e6d1d598ce1f` | Deep |
 | D-147 | Ontology Administrator `2f2b2137-bfbe-f111-aaaf-0022482913fc` | `prvCreatesprk_DecisionRecord` | `38366142-e133-4978-9a46-e6d1d598ce1f` | Deep |
+| Q6 | Ontology Administrator `2f2b2137-bfbe-f111-aaaf-0022482913fc` | `prvWritesprk_Signal` | `8df17c8f-8796-4e7c-9d32-3c0d7c9cd082` | Deep |
 
 ```powershell
 $base = 'https://spaarkedev1.crm.dynamics.com'
@@ -1005,6 +1000,7 @@ function Restore($roleId, $privName, $privId) {
 Restore '51c924e2-bdbe-f111-a05b-3833c5e9614d' 'prvWritesprk_Signal'            '8df17c8f-8796-4e7c-9d32-3c0d7c9cd082'   # D-17
 Restore '51c924e2-bdbe-f111-a05b-3833c5e9614d' 'prvCreatesprk_DecisionRecord'   '38366142-e133-4978-9a46-e6d1d598ce1f'   # D-62
 Restore '2f2b2137-bfbe-f111-aaaf-0022482913fc' 'prvCreatesprk_DecisionRecord'   '38366142-e133-4978-9a46-e6d1d598ce1f'   # D-147
+Restore '2f2b2137-bfbe-f111-aaaf-0022482913fc' 'prvWritesprk_Signal'            '8df17c8f-8796-4e7c-9d32-3c0d7c9cd082'   # Q6 (after D-147, so K-A holds)
 ```
 
 After restoring:
@@ -1021,3 +1017,49 @@ After restoring:
 Still to do by the main session after uac-r2's check: `-Apply`, `-Verify`, the live negatives (non-admin update of a
 `sprk_signal` row, and create of a `sprk_decisionrecord`, both refused: task 008 §10.4 method), and one decision recorded in
 the deployed dev Console.
+
+## 15. 2026-10-17 — AppendTo on the Signal/Decision Record lookup targets for Spaarke Ontology Service (owner-approved; ebilling 026 F1, DI-107 #2046)
+
+- **Why**: the writer (`mi-ontology-writer-dev`, systemuser `3121bf1b-…`) sets lookups on `sprk_signal` / `sprk_decisionrecord` to tables
+  its own role held no AppendTo on. `sprk_billingevent` (ebilling 026's invoice-line subject) had no route at all, so every line-subject
+  Signal or Decision Record would fail 0x80040220. Matter, project, invoice, record-type catalog and the rest worked only through the root
+  team "Spaarke" Basic User role (#2046).
+- **Approval**: owner, 2026-10-16 ("yes grant 'append to'; also for other records").
+- **Change**: `AddPrivilegesRole` on the root **Spaarke Ontology Service** `b1fb7ee0-bfbe-f111-aaaf-0022482913fc` (BU `06fbf21c-…`),
+  all at **Global**: `prvAppendTosprk_AnalysisAction`, `prvAppendTosprk_BillingEvent`, `prvAppendTosprk_Document`,
+  `prvAppendTosprk_Invoice`, `prvAppendTosprk_Matter`, `prvAppendTosprk_Project`, `prvAppendTosprk_RecordType_Ref`,
+  `prvAppendTosprk_ServiceRequest`. The set is every `ReferencedEntity` of a ManyToOne on the two tables that the role lacked, apart from
+  the ownership lookups (businessunit, owner, team).
+- **Read-back**: 50 → 58, all 8 at Global, nothing unrequested, nothing removed. Child BU copy `0d5642b7-…` holds 58. The writer
+  resolves `prvAppendTosprk_BillingEvent`, `_Matter`, `_RecordType_Ref` at Global via BU `06fbf21c-…`. uac-r2 notified before and after.
+- **Repo**: `SpaarkeMaster/Roles/Spaarke Ontology Service.xml` + a guard test follow in an ontology PR. Other environments need the same grant.
+
+## 16. 2026-10-17 — Append on `sprk_policy` / `sprk_policyversion` for Spaarke Ontology Administrator (owner-approved, D-150)
+
+- **Why**: saving or publishing a rule links rule rows (Append on the referencing row). The role had AppendTo but not Append, so only System Administrators could author.
+- **Change**: `AddPrivilegesRole` on the root `2f2b2137-bfbe-f111-aaaf-0022482913fc`: `prvAppendsprk_Policy`, `prvAppendsprk_PolicyVersion` at **Deep**.
+- **Read-back**: 38 → 40 on the root and all 5 copies (`4f6a91ff`, `2c4541b2`, `675098f9`, `efca5b32`, `d785bc47`), both Deep; nothing unrequested. uac-r2 notified before and after. Repo XML already on master.
+
+## 17. 2026-10-17 — Task 049 APPLIED (D-17, D-62, D-147, D-159)
+
+- **03:17Z `-Apply`** (evidence `049-role-removal-evidence-apply-20261017T031742Z.md`): root-only `RemovePrivilegeRole` in K-A order — Ontology Administrator `prvCreatesprk_DecisionRecord` (40 → 39); Console User `prvCreatesprk_DecisionRecord`, then `prvWritesprk_Signal` (23 → 21). All 6 copies of each role read back with no divergence; Ontology Service unchanged (58). A1–A5 PASS.
+- **Owner Q6, same window**: root-only `RemovePrivilegeRole` of `prvWritesprk_Signal` (Deep) on Ontology Administrator; all 6 copies 39 → 38, nothing else changed.
+- **03:24Z `-Verify` with `$A5Waiver = $null`** (PR #2050 branch): PASS; no non-platform, non-admin, non-writer role holds Write on `sprk_signal`.
+- **Still held — KEPT by owner decision D-160 (2026-10-17, "not a risk; we can remove later")**: Ontology Administrator keeps `prvDeletesprk_Signal` and `prvAssignsprk_Signal` (Deep). No shipped flow deletes or assigns a Signal as the caller (2026-10-17 search; test cleanups run as the operator or the writer). Console User holds neither. No Spaarke human role holds Write, Delete or Assign on `sprk_decisionrecord`.
+- **Rollback**: §14.
+
+## 18. 2026-10-23 — AppendTo on `sprk_eventtype_ref` for Spaarke Core User (D-110, task 159)
+
+- **Why**: task 159's Assign Task creates a `sprk_event` with `sprk_eventtype_ref` = Task (`124f5fc9-…`) as the caller. Binding a lookup needs AppendTo on its target. `sprk_eventtype_ref` is user-owned, and no user role held `prvAppendTosprk_EventType_Ref`; only Service Writer (Global), Spaarke Office Add In User (Deep), System Administrator and System Customizer did (live read, 2026-10-23). A Core User's Assign Task would therefore be refused.
+- **Change** (2026-10-23T00:32:20Z, D-110 standing approval for Core User): `AddPrivilegesRole` on the root Spaarke Core User `75e1b627-2ab6-f111-aaad-0022482913fc`: `prvAppendTosprk_EventType_Ref` at **Global**. Global because the reference rows are owned in the root BU and users sit in child and secure BUs; it matches Service Writer and Basic User's Global AppendTo on `sprk_recordtype_ref`.
+- **Read-back** (`RetrieveRolePrivilegesRole` before and after): 784 → 785, added exactly that privilege at Global; nothing removed and nothing else added. Repo `Roles/Spaarke Core User.xml` is updated in task 159's PR #2289. Other environments need the same grant.
+
+## 19. 2026-10-23 — Read on `sprk_policy` / `sprk_policyversion` dropped from Spaarke Basic User and Spaarke Console User: PREPARED in the repo, NOT applied live (D-185, #2285, task 163)
+
+- **Why**: every internal user could read billing policies directly in Dataverse, bypassing the BFF's Procedure Read gate. The worklist no longer needs the Reads: it takes the policy short name, work type and severity from a BFF read of `sprk_policy` by id (task 163), and its configuration row has no `policy` link.
+- **Repo change** (`Roles/*.xml`): Spaarke Basic User loses `prvReadsprk_Policy` (Deep); Spaarke Console User loses `prvReadsprk_Policy` and `prvReadsprk_PolicyVersion` (Deep). Spaarke Ontology Administrator and Spaarke Ontology Service keep theirs. Nothing else changes in the two role files (Basic User and Console User).
+- **Live order, per environment**: (1) deploy the BFF with task 163, (2) apply `config/worklist.gridconfiguration.json`, (3) only then remove the three privileges from the live roles with `RemovePrivilegesRole`, and read back the role privilege counts. Before step 2 the old configuration still links `sprk_policy`, and a caller without Read gets an empty worklist (Dataverse 0x80040220, treated as no read on `sprk_signal`). This supersedes section 12's "Read on `sprk_policy` for Basic User".
+- **Drift until the live change**: `check-dev-drift.py` and `Export-SpaarkeMasterSource.ps1` see dev still holding the Reads the repo has dropped, and a fresh export would put them back. Make the dev role change promptly after the config apply, and nobody exports the roles from dev before it.
+- **Applied**: not yet. The main session records the live change and read-back here.
+- **Found 2026-10-23 (not ours):** the live root-BU Spaarke Basic User (`11f93c04-ddf6-f011-8406-7c1e520aa4df`) already lacks `prvReadsprk_Policy` (granted Deep in §12) and `prvReadsprk_ruleset`. ebilling saw it in its task 120 `-WhatIf` (669 live vs 671 in source); confirmed by a `roleprivileges` query (only `prvReadsprk_Signal` of the four checked). Nobody in this session ran a removal, and `audit` holds no rows for the role. Asked ebilling whether its session removed them. Effect until the 163 BFF and the config row land on dev: a Basic + Core user without Console User gets an empty worklist (the old row links `sprk_policy` as the caller); Console User holders are unaffected. Not re-granted: the D-185 end state is removal and the BFF deploy is next. When applying this section, Basic User needs no change; Console User still does. **Pinned (uac-r2, 2026-10-23):** both Reads were present at 2026-10-22 01:11Z (uac-r2 T191a snapshot, 671 rows); the role's `modifiedon` is 2026-10-23 **00:01:07Z** (the MCP returns EDT; calibrated against ebilling's new role), by the owner's account, which every CLI session also uses. Ruled out by their own transcripts: ontology (this session and its agents), ebilling, R3 (it ran only `Deploy-BffApi.ps1` then), uac-r2; no `importjob` or SpaarkeMaster import. field-mapping, customer-provisioning and word-add-in also answered no from their transcripts; the BFF only reads role privileges and `modifiedby` is the owner's interactive systemuser (not the BFF app user), so the 31-second-earlier dev BFF deploy is not the cause (uac-r2). Remaining explanation: a manual edit or a session outside this machine's peers under the owner's sign-in; asked the owner.
+

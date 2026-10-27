@@ -12,6 +12,14 @@ namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 /// request hold on this Dataverse record?</i>
 /// </summary>
 /// <remarks>
+/// <para><b>Two planes, two mechanisms.</b> The token-taking (OBO) questions — <see cref="GetCallerRightsAsync"/>,
+/// <see cref="GetCallerRightsForRecordsAsync"/>, <see cref="GetCallerSystemUserIdAsync"/>,
+/// <see cref="CallerHoldsPrivilegeAsync"/> — serve the INTERNAL routes only (the model-driven app, the Console, Office,
+/// the <c>/api/v1/external-access</c> management group; ADR-028 A4). They are never reached from <c>/api/v1/external</c>,
+/// where ADR-028 A1–A3 forbid OBO: that plane's write confirmation asks the app-only, named-principal questions
+/// (<see cref="GetPrincipalRightsAppOnlyOrUnknownAsync"/>, <see cref="PrincipalHoldsPrivilegeAppOnlyOrUnknownAsync"/>;
+/// ADR-028 A5's mechanism) for every systemuser (task 036 option C, owner 2026-10-20). Enforced by
+/// <c>tests/Spaarke.ArchTests/ExternalPlaneNoOboGuardTests.cs</c>.</para>
 /// <para><b>Why this exists</b> (unified-access-control-r2 task 008, spec FR-07, finding A-6). The
 /// delegation rule — "you may grant access to a record if you have Write on that record" (owner
 /// decision B-14) — needs the caller's rights on a <c>sprk_project</c> / <c>sprk_matter</c> /
@@ -146,6 +154,14 @@ public class CallerRecordAccessProbe
     /// </remarks>
     private readonly OrderedCredentialClientProvider? _confidentialClients;
 
+    /// <summary>
+    /// The BFF's existing app-only Dataverse client, used ONLY by the named-principal questions
+    /// (<see cref="GetPrincipalRightsAppOnlyOrUnknownAsync"/>, <see cref="PrincipalHoldsPrivilegeAppOnlyOrUnknownAsync"/>)
+    /// — task 036 owner decision (a), 2026-10-18. Optional like <see cref="_confidentialClients"/>: absent, those questions
+    /// are unanswered (<see langword="null"/>, fix round 4 F1), which grants nothing. The OBO questions never touch it.
+    /// </summary>
+    private readonly DataverseWebApiService? _appOnlyDataverse;
+
     private readonly HttpClient _httpClient;
     private readonly ILogger<CallerRecordAccessProbe> _logger;
     private readonly string? _environmentUrl;
@@ -156,11 +172,13 @@ public class CallerRecordAccessProbe
         HttpClient httpClient,
         IConfiguration configuration,
         ILogger<CallerRecordAccessProbe> logger,
-        OrderedCredentialClientProvider? confidentialClients = null)
+        OrderedCredentialClientProvider? confidentialClients = null,
+        DataverseWebApiService? appOnlyDataverse = null)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _confidentialClients = confidentialClients;
+        _appOnlyDataverse = appOnlyDataverse;
 
         _environmentUrl = configuration["Dataverse:ServiceUrl"]?.TrimEnd('/');
 
@@ -178,12 +196,15 @@ public class CallerRecordAccessProbe
         if (!OboAvailable)
         {
             // No app-only fallback by design — see the class remarks. Without OBO configuration every
-            // delegation check denies, which is the correct direction for a missing credential.
+            // internal delegation and write check that asks as the caller denies, which is the correct direction
+            // for a missing credential. The /api/v1/external write confirmation never uses OBO (task 036 option C):
+            // it asks the app-only, named-principal questions, which this does not affect.
             _logger.LogWarning(
                 "[{Marker}] CallerRecordAccessProbe cannot perform OBO (hasProvider={HasProvider}, " +
-                "hasTenantId={HasTenantId}, hasClientId={HasClientId}). Every external-access mutation " +
-                "will be denied. There is deliberately no app-only fallback: an app-only Write probe would " +
-                "answer for the application, not the caller.",
+                "hasTenantId={HasTenantId}, hasClientId={HasClientId}). Every internal check that asks as the " +
+                "caller (the /api/v1/external-access mutations and the internal write gates) will be denied. There " +
+                "is deliberately no app-only fallback: an app-only Write probe would answer for the application, " +
+                "not the caller.",
                 FallbackMarker,
                 _confidentialClients is not null,
                 !string.IsNullOrEmpty(_tenantId),
@@ -543,6 +564,231 @@ public class CallerRecordAccessProbe
         {
             return false;
         }
+    }
+
+    /// <summary>Log value naming which path answered a write confirmation: app-only, naming the resolved systemuser.</summary>
+    internal const string AppOnlyNamedPrincipalPath = "app-only-named-principal";
+
+    /// <summary>
+    /// The most an app-only, named-principal question may take, 404 re-asks included (task 036): past it the question is
+    /// unanswered (<see langword="null"/>; the write gate's retry-able 503, fix round 4 F1) instead of holding the write
+    /// request open on a slow Dataverse. The re-asks wait on the linked token, so the bound cuts a re-ask short. Linked to
+    /// the caller's token, so the caller's own cancellation still wins and is rethrown.
+    /// </summary>
+    internal static readonly TimeSpan AppOnlyQuestionTimeout = TimeSpan.FromSeconds(15);
+
+    /// <summary>The timeout the app-only questions apply (<see cref="AppOnlyQuestionTimeout"/>); a test seam.</summary>
+    protected virtual TimeSpan AppOnlyTimeout => AppOnlyQuestionTimeout;
+
+    /// <summary>
+    /// <see cref="GetCallerRightsAsync"/>'s question — what rights does this person hold on this record — asked APP-ONLY,
+    /// as the BFF application user, naming the person: <c>RetrievePrincipalAccess</c> with <c>Principal =
+    /// systemusers(<paramref name="principalSystemUserId"/>)</c> (the existing
+    /// <see cref="DataverseWebApiService.RetrievePrincipalRightsOrUnknownAsync"/>, which also impersonates that user like the
+    /// A5 read). <see langword="null"/> when Dataverse gave no answer about the user (task 036 fix round 4, F1).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>The <c>/api/v1/external</c> write confirmation, for every systemuser</b> (task 036 option C, owner
+    /// 2026-10-20, widening decision (a) of 2026-10-18 from WorkforceHome-linked users): ADR-028 forbids OBO on that plane,
+    /// so the question is never asked with the caller's token there. Same trust basis as the A5 impersonated read:
+    /// <paramref name="principalSystemUserId"/> is the id the authenticated identity was resolved to, never client-supplied,
+    /// and Dataverse answers from that user's own roles, teams and shares.</para>
+    /// <para>The class remarks' warning still holds — here the identity IS data, so the caller must pass the RESOLVED
+    /// principal's id and nothing else.</para>
+    /// <para><b>A 404 is re-asked</b> on <see cref="NotFoundRetryDelay"/>'s schedule, as the OBO question does: a write
+    /// confirmed seconds after the record was created may ask before it has replicated. A 403 is answered at once. The
+    /// re-asks run inside <see cref="AppOnlyQuestionTimeout"/>.</para>
+    /// <para><b>An answer, or <see langword="null"/>; never throws</b>. An ANSWER is Dataverse's word about the user: the
+    /// rights it returned, or <see cref="AccessRights.None"/> for its "no access" (a 404 after the re-asks, or a 403
+    /// access-check code). <see cref="Guid.Empty"/> or a blank entity set is <see cref="AccessRights.None"/> too: there is
+    /// no systemuser or record to ask about. Everything else is <see langword="null"/>, because Dataverse said nothing about
+    /// the user: no app-only client, a 403 that is NOT an access answer (an impersonation fault such as <c>0x8004A110</c>,
+    /// an unrecognised code), a throttle or 5xx, a transport fault, an unreadable answer, or
+    /// <see cref="AppOnlyQuestionTimeout"/>. A write gate answers <see langword="null"/> with a retry-able 503, never a
+    /// "no access" 403, and never grants on it (fix round 4, F1). Each is logged as a Warning naming the fault, never as
+    /// the user's rights. Uncached, like the OBO question. Only the caller's own cancellation is rethrown.</para>
+    /// </remarks>
+    public virtual async Task<AccessRights?> GetPrincipalRightsAppOnlyOrUnknownAsync(
+        Guid principalSystemUserId,
+        string entitySet,
+        Guid recordId,
+        CancellationToken ct = default)
+    {
+        if (principalSystemUserId == Guid.Empty || string.IsNullOrWhiteSpace(entitySet))
+        {
+            _logger.LogWarning(
+                "[{Marker}] App-only rights check has nothing to ask for {EntitySet}({RecordId}): hasPrincipal={HasPrincipal}. " +
+                "No rights (fail closed, task 036 decision a).",
+                FallbackMarker, entitySet, recordId, principalSystemUserId != Guid.Empty);
+            return AccessRights.None;
+        }
+
+        if (_appOnlyDataverse is null)
+        {
+            _logger.LogWarning(
+                "[{Marker}] App-only rights check cannot run for {EntitySet}({RecordId}): no app-only Dataverse client is " +
+                "configured. Unanswered (task 036 fix round 4, F1); nothing is granted on it.",
+                FallbackMarker, entitySet, recordId);
+            return null;
+        }
+
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(AppOnlyTimeout);
+        try
+        {
+            var answer = await _appOnlyDataverse
+                .RetrievePrincipalRightsOrUnknownAsync(
+                    principalSystemUserId, entitySet, recordId, timeout.Token,
+                    reaskOnNotFound: (attemptsMade, token) => ReaskAfterNotFoundAsync(entitySet, recordId, attemptsMade, token))
+                .ConfigureAwait(false);
+
+            if (answer is not { } rights)
+            {
+                _logger.LogWarning(
+                    "[{Marker}] App-only RetrievePrincipalAccess for systemuser {SystemUserId} on {EntitySet}({RecordId}) " +
+                    "answered a fault, not an access answer (UNKNOWN, e.g. the application user lacks " +
+                    "prvActOnBehalfOfAnotherUser, 0x8004A110). Unanswered (task 036 fix round 4, F1); this is not a " +
+                    "refusal by the user's roles.",
+                    FallbackMarker, principalSystemUserId, entitySet, recordId);
+                return null;
+            }
+
+            _logger.LogInformation(
+                "[DELEGATION] Rights of systemuser {SystemUserId} on {EntitySet}({RecordId}) via {Path}: {AccessRights}",
+                principalSystemUserId, entitySet, recordId, AppOnlyNamedPrincipalPath, rights);
+            return rights;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException ex) when (timeout.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex,
+                "[{Marker}] App-only RetrievePrincipalAccess for systemuser {SystemUserId} on {EntitySet}({RecordId}) did not " +
+                "answer within {TimeoutSeconds}s. Unanswered (task 036 fix round 4, F1).",
+                FallbackMarker, principalSystemUserId, entitySet, recordId, AppOnlyTimeout.TotalSeconds);
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "[{Marker}] App-only RetrievePrincipalAccess for systemuser {SystemUserId} on {EntitySet}({RecordId}) failed. " +
+                "Unanswered (task 036 fix round 4, F1).",
+                FallbackMarker, principalSystemUserId, entitySet, recordId);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// <see cref="GetPrincipalRightsAppOnlyOrUnknownAsync"/> in the old shape: an unanswered question is
+    /// <see cref="AccessRights.None"/> (fail closed). For a caller with no "try again" to offer; a write gate asks
+    /// <see cref="GetPrincipalRightsAppOnlyOrUnknownAsync"/>, so a Dataverse fault is not shown as a denial.
+    /// </summary>
+    public async Task<AccessRights> GetPrincipalRightsAppOnlyAsync(
+        Guid principalSystemUserId,
+        string entitySet,
+        Guid recordId,
+        CancellationToken ct = default) =>
+        await GetPrincipalRightsAppOnlyOrUnknownAsync(principalSystemUserId, entitySet, recordId, ct).ConfigureAwait(false)
+        ?? AccessRights.None;
+
+    /// <summary>
+    /// <see cref="CallerHoldsPrivilegeAsync"/>'s question — does this person hold the named table privilege — asked
+    /// APP-ONLY, naming the person: <c>systemusers(<paramref name="principalSystemUserId"/>)/RetrieveUserSetOfPrivilegesByNames</c>
+    /// (<see cref="DataverseWebApiService.PrincipalHoldsPrivilegeAsync"/>). <paramref name="privilegeName"/> is sent exactly
+    /// as given (Dataverse privilege names are case-sensitive): the same live names the OBO path asks.
+    /// <see langword="null"/> when Dataverse gave no answer (task 036 fix round 4, F1).
+    /// </summary>
+    /// <remarks>Same scope, trust basis and contract as <see cref="GetPrincipalRightsAppOnlyOrUnknownAsync"/>: every
+    /// systemuser's <c>/api/v1/external</c> child-create confirmation (task 036 option C); uncached. <see cref="Guid.Empty"/>
+    /// or a blank name is <c>false</c> (nothing to ask). No app-only client, a fault (any non-success, an impersonation
+    /// fault included), an unreadable answer or <see cref="AppOnlyQuestionTimeout"/> is <see langword="null"/>, logged as a
+    /// Warning and never read as "not held"; only the caller's own cancellation is rethrown.</remarks>
+    public virtual async Task<bool?> PrincipalHoldsPrivilegeAppOnlyOrUnknownAsync(
+        Guid principalSystemUserId,
+        string privilegeName,
+        CancellationToken ct = default)
+    {
+        if (principalSystemUserId == Guid.Empty || string.IsNullOrWhiteSpace(privilegeName))
+        {
+            _logger.LogWarning(
+                "[{Marker}] App-only privilege check {Privilege} has nothing to ask: hasPrincipal={HasPrincipal}. Not held " +
+                "(fail closed, task 036 decision a).",
+                FallbackMarker, privilegeName, principalSystemUserId != Guid.Empty);
+            return false;
+        }
+
+        if (_appOnlyDataverse is null)
+        {
+            _logger.LogWarning(
+                "[{Marker}] App-only privilege check {Privilege} cannot run: no app-only Dataverse client is configured. " +
+                "Unanswered (task 036 fix round 4, F1); nothing is granted on it.",
+                FallbackMarker, privilegeName);
+            return null;
+        }
+
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(AppOnlyTimeout);
+        try
+        {
+            var holds = await _appOnlyDataverse
+                .PrincipalHoldsPrivilegeAsync(principalSystemUserId, privilegeName, timeout.Token).ConfigureAwait(false);
+
+            _logger.LogInformation(
+                "[DELEGATION] Systemuser {SystemUserId} holds {Privilege} via {Path}: {Holds}",
+                principalSystemUserId, privilegeName, AppOnlyNamedPrincipalPath, holds);
+            return holds;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException ex) when (timeout.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex,
+                "[{Marker}] App-only RetrieveUserSetOfPrivilegesByNames for systemuser {SystemUserId} ({Privilege}) did not " +
+                "answer within {TimeoutSeconds}s. Unanswered (task 036 fix round 4, F1).",
+                FallbackMarker, principalSystemUserId, privilegeName, AppOnlyTimeout.TotalSeconds);
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "[{Marker}] App-only RetrieveUserSetOfPrivilegesByNames for systemuser {SystemUserId} ({Privilege}) failed. " +
+                "Unanswered (task 036 fix round 4, F1).",
+                FallbackMarker, principalSystemUserId, privilegeName);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// <see cref="PrincipalHoldsPrivilegeAppOnlyOrUnknownAsync"/> in the old shape: an unanswered question is <c>false</c>
+    /// (fail closed). A write gate asks <see cref="PrincipalHoldsPrivilegeAppOnlyOrUnknownAsync"/> instead.
+    /// </summary>
+    public async Task<bool> PrincipalHoldsPrivilegeAppOnlyAsync(
+        Guid principalSystemUserId,
+        string privilegeName,
+        CancellationToken ct = default) =>
+        await PrincipalHoldsPrivilegeAppOnlyOrUnknownAsync(principalSystemUserId, privilegeName, ct).ConfigureAwait(false)
+        ?? false;
+
+    /// <summary>
+    /// <see cref="GetPrincipalRightsAppOnlyOrUnknownAsync"/>'s re-ask of a 404: waits <see cref="NotFoundRetryDelay"/> and
+    /// answers <c>true</c> (ask again), or <c>false</c> once the schedule is exhausted — the OBO question's replication-lag
+    /// schedule, shared rather than copied. <paramref name="ct"/> must be the question's LINKED token, so
+    /// <see cref="AppOnlyQuestionTimeout"/> cuts the wait short (fix round 4, K6).
+    /// </summary>
+    private async Task<bool> ReaskAfterNotFoundAsync(string entitySet, Guid recordId, int attemptsMade, CancellationToken ct)
+    {
+        if (NotFoundRetryDelay(attemptsMade) is not { } delay)
+            return false;
+
+        _logger.LogInformation(
+            "[DELEGATION] App-only {EntitySet}({RecordId}) answered 404 on attempt {Attempt} — asking again in {DelayMs}ms.",
+            entitySet, recordId, attemptsMade, delay.TotalMilliseconds);
+        await DelayAsync(delay, ct).ConfigureAwait(false);
+        return true;
     }
 
     /// <summary>

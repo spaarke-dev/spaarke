@@ -299,3 +299,79 @@ Criterion 89 (blank the writer client id, expect the writer-failure alert to fir
 - **Worklist reachability (task 156, found at this deploy):** no Console path opened the worklist. #2004 → master #2008 `a8c3182ec`. Console rebuilt from `a8c3182ec` in `C:\wts-055` (contains the 01:56 build's `44b6a72c1`; live hash checked unchanged before deploying); `Deploy-SpaarkeAi.ps1` 03:44:03–03:44:16Z, live SHA-256 = build `06d393561564f5835ba5702941b5767095b91f8abdf1a32dcba7670c43f218e1`. `seed-worklist-workspace-layout.ps1`: `-WhatIf` one create → CREATED `Worklist` (`202bcde0-13c9-f111-a05c-0022482913fc`, system, sortorder 13, sections `["worklist"]`) → re-run SKIP. The BFF layout route does not cache. Peer notices before and after.
   CI also published the same commit at 03:45:41Z (`deploy-spaarke-ai.yml` run 38846776203, push to master): live SHA-256 `b62f6fca…e8b849` differs from the Windows build only in CRLF/LF on 13 HTML wrapper lines. The owner's `Unknown section ID: worklist` was a browser still on the pre-03:44 bundle (hard reload).
 - **Pending (criteria 1–4, 6, 7):** owner checks in the browser (worklist renders real items; one full review with two actions + one Next step; network log; console errors; Daily Briefing).
+
+## 2026-10-17 — task 055 closed (owner browser check)
+
+- Owner: "checked and it seems correct; formal UAT once delivered" (D-154).
+- Dataverse read-back (main session): DR-1066 `67d34ab5-…` 15:03:15Z (Judgement; Send budget inquiry + Revise budget; confirmed by the owner; policy version `e51906ea-…`); budget revision 15:03:06Z (amount 150000); inquiry `sprk_communication` status Send; Signal `b35d4ec2-…` Resolved with the record linked. DR-1064 (12:25Z, Revise budget) likewise.
+- Not exercised: Next step To Do (DR follow-ons empty, no new `sprk_todo`). Carried to 105 UAT.
+
+## 2026-10-17 — owner answers: policy on, landing tab switched
+
+- ~14:36Z: POL-MATTER-NOBUDGET (`00000000-0000-4000-8000-000000006301`) `sprk_enabled` = Yes (PATCH with If-Match *, read back; unscoped; current version `…6311`) (D-163).
+- 14:38Z: dev landing tab switched to the Worklist by `scripts/Set-DefaultWorkspaceLayout.ps1 -To Worklist` (WhatIf first, verified) (D-164). Peers notified before and after.
+- Same day, R3 deployed dev BFF `1.0.0+9721819ed…` (14:32:19Z): master `88b3ecb1f` (sync #2073: 063, 102a, 102, 064) + UAC #2074. Console from `88b3ecb1f` at 07:32:56Z.
+
+## 2026-10-21 — task 130 live proof (dev, spaarkedev1): scoped PublishXml, owner-approved (D-176)
+
+- **What ran:** `scripts/Publish-ThemeIcons.ps1` from origin/master (git-archive copy, with `scripts/lib/Publish-SolutionComponents.ps1`), `-DataverseUrl https://spaarkedev1.crm.dynamics.com`. 20:28:43–20:28:58Z. One `PublishXml` built by `New-PublishParameterXml -WebResources` for six web resources: `sprk_ThemeMenu.js`, `sprk_ThemeMenu16.svg`, `sprk_ThemeMenu32.svg`, `sprk_ThemeAuto16.svg`, `sprk_ThemeLight16.svg`, `sprk_ThemeDark16.svg` (all six "Found:"). Output "Published successfully!", exit 0. No import, no PublishAllXml.
+- **Before snapshot** (unmanaged web resources 640, saved queries 1001, sitemaps 8, app modules 5): **0 pending** in every set. The run was only allowed to proceed because nothing was pending.
+- **After snapshot:** 0 pending everywhere. **0** published-stamp changes on web resources, sitemaps and app modules. Sentinel content hashes (`sprk_spaarkeai`, `sprk_ThemeMenu.js`) are unchanged.
+- **Saved queries 1001 → 1008:** the seven new rows are the default system views of `sprk_procedureversion` (Active, Inactive, My, Advanced Find, Associated, Lookup, Quick Find). That table was being created by ebilling's concurrent task 080 schema run, which owns them; the web-resource publish created none of them.
+- **Peer notices:** R3, uac-r2, word-add-in and ebilling, before and after.
+- **Limit:** this proves the web-resource branch of the scoped publish. The entity, ribbon, app-module and sitemap branches are covered by the module's unit tests (`tests/scripts/Publish-SolutionComponents.Tests.ps1`). ebilling's `Deploy-Ebilling*` scripts use the same module for their entity publishes.
+
+## 2026-10-21 — ebilling 115 option run on sprk_policyversion.sprk_ruletype (dev; ebilling owner OK + ontology PASS)
+
+- ebilling inserted 100000015 AddedFee and 100000016 Discount into the local choice, then ran a scoped publish of sprk_policyversion only.
+- Ontology read-back: a local choice (not global) with 16 options. Ontology's 100000000 Threshold, 100000001 Switch and 100000002 Existence are unchanged, as are billing's 100000003–100000013.
+- 100000014 SubmissionIntegrity is still absent on dev; ebilling task 049's option script hasn't run.
+
+## 2026-10-21 — ebilling 080 Procedure schema on dev (ebilling owner OK + ontology PASS of 11ead6c938)
+
+- **ebilling's run:** exit 0; created 64, changed 20, skipped 40. Verbatim verify output: `projects/ebilling-r1/notes/080-dev-run-2026-10-21.md` on work/ebilling-r1.
+- **Ontology independent read-back** (metadata GETs, after the run):
+  - `sprk_procedureassignment`:
+    - core lookups `sprk_matter` (repaired from Cascade), `sprk_project` and `sprk_workassignment`: RemoveLink, Assign/Share/Unshare/Reparent NoCascade;
+    - `sprk_excludedpolicy`: Cascade, the only cascading relationship;
+    - `sprk_procedure`, `sprk_pinnedversion`, `sprk_firm`: Restrict;
+    - `sprk_createdbyperson`: RemoveLink.
+  - `sprk_procedureversion`: `sprk_procedure` Cascade is the only cascading relationship; `sprk_previousversion` and `sprk_createdbyperson` are RemoveLink.
+  - `sprk_ruleset`: the matter, project and work-assignment lookups are RemoveLink; `sprk_procedure` is Restrict.
+- **D-146 / #2132:** holds. No core-record delete reaches a Restrict or a cascade on the new tables.
+
+
+## 2026-10-22 — dev BFF `a7b956fb55` (R3): ontology smoke and nightly heartbeat
+
+- **Deploy:** R3 deployed master `a7b956fb55` at 02:17–02:18:52Z (ProductVersion `1.0.0+a7b956fb55d6…`). Its predecessor `f1b3dadcf5` is an ancestor, and it contains R3 077 `283466d40`. It adds field-mapping #2223/#2228 and UAC #2221. No ontology-owned file changes; the edits to `SecureChildShareSynchronizer`, `CoreAncestorRestamper` and `SecurableEntityRegistry` are additive. We gave OK before the deploy; the owner approved it in R3's session.
+- **Smoke:** PASS. Validate on Secure PAT-908068 (`5d46df87`) returns `valid:false` / `scope_matter_secured`; on Standard REAL-2026-123456.01 (`2444af6d`) it returns `valid:true`.
+- **Nightly sweep:** `[SIGNAL-EVALUATOR] heartbeat outcome=succeeded` at 02:30:29Z with policies=6 hits=142 written=0 closed=0, the same as 2026-10-21. Since 21:45:37Z the only 503xx trace is the heartbeat, with 0 Signals/Ontology/Gate exceptions.
+
+## 2026-10-23 — Spaarke Core User: AppendTo on `sprk_eventtype_ref` (D-110, task 159), spaarkedev1
+
+- 00:32:20Z, root role `75e1b627-…`: `prvAppendTosprk_EventType_Ref` at Global. Read-back 784 → 785, exact. Details in security-roles.md §18. uac-r2 told on #1355.
+
+## 2026-10-23 — dev BFF `1fa0cf5cb8` (R3): ontology smoke; 157 now on dev
+
+- **Deploy:** R3 deployed master `1fa0cf5cb8` (ProductVersion `1.0.0+1fa0cf5cb88443d9a4279851e558495d71ec9169`); started ~23:58Z on 2026-10-22, new version first read at 00:00:36Z. Its ancestors include R3 077 `283466d40` and our **157** `aa3dc49897` (Duplicate earlier-invoice withholding is now live, latent until Duplicate Signals exist). Changes since our OK'd `f5bf481185`: field-mapping #2282 only (we reviewed it; fixes #2281).
+- **Smoke (~00:10Z):** PASS. Validate on Secure PAT-908068 (`5d46df87`) returns `valid:false` / `scope_matter_secured`; on Standard REAL-2026-123456.01 (`2444af6d`) it returns `valid:true`.
+- **Logs since 00:00:00Z:** no 503xx trace at Warning or above, no Signals/Ontology/Gate exceptions. The last `[SIGNAL-EVALUATOR]` heartbeat is 2026-10-22 02:30:29Z (succeeded); tonight's run is the next check.
+- **Owner check (via R3):** Create Work Assignment from a matter with `sprk_assignedattorney1` copies the attorney with no warning (#2281).
+
+## 2026-10-22 — dev BFF `1283c41817` (R3): ontology smoke
+
+- **Deploy:** R3 deployed master `1283c41817` (ProductVersion `1.0.0+1283c41817`, read via Kudu VFS) after `a7b956fb55`, with 25 commits between them. It contains R3 077 `283466d40` and no change under `Services/Signals`, `Services/Ontology` or `DecisionRecordWriter.cs`. It does **not** yet contain 157 (`aa3dc49897`, #2233), so 157 reaches dev with the next R3 deploy from master.
+- **Smoke (re-run 2026-10-22 ~13:35Z):** PASS. Validate on Secure PAT-908068 (`5d46df87`) returns `valid:false` / `scope_matter_secured`; on Standard REAL-2026-123456.01 (`2444af6d`) it returns `valid:true`.
+- **Logs since 12:50:18Z:** no 503xx trace at Warning or above, and no Signals/Ontology/Gate exceptions. The last `[SIGNAL-EVALUATOR]` heartbeat is still the 02:30:29Z run (succeeded; policies=6 hits=142); tonight's run is the next check.
+
+## 2026-10-22 — ebilling 088 Stored File schema on dev (owner OK in ebilling's session + ontology PASS)
+
+- **Run 1** stopped with exit 1. The field-permission service refused the BigInt `sprk_sourceversion` (0x8004f508), even though CanBeSecuredFor* read true. The script reverted that column to unsecured. The owner approved a retype: `sprk_sourceversion` becomes text 20 and `sprk_sizebytes` becomes Integer 0..2147483647. ebilling deleted the two empty BigInt columns; our read-only check confirmed 0 rows and 0 permission rows on them, and that 9 columns were already secured, including `sprk_filestatus`.
+- **Retype scoped check:** PASS on `44c1ef6a2d..5af7f6c879`. We reproduced the Pester runs (088 74/74, 080 85/85; Pester 3.4 under pwsh 7). -WhatIf creates 13, changes 6, skips 31.
+- **Run 2:** exit 0 (13 created, 6 changed, 31 skipped). **Run 3:** idempotent (39 skipped, no publish).
+- **Our independent read-back:**
+  - `sprk_storedfile` (SchemaName `sprk_StoredFile`, UserOwned, audited, primary `sprk_name` 400 required, 0 rows).
+  - 15 columns secured with Writers 444 / Readers 400 plus the platform's System Administrator row; `sprk_blobpath` has Writers only.
+  - Marker `sprk_document.sprk_restrictedbysubmission` secured, default No, 0 Yes rows.
+  - 6 relationships: RemoveLink ×4 (procedureversion, invoice, billingexport, createdbyperson) and Restrict ×2 (sourcedocument, sourcecommunication). All have NoCascade for assign/share/unshare/reparent and Related menu DoNotDisplay.
+  - `sprk_invoice` statuscode 659490005 Superseded at statecode 1, 0 invoices.

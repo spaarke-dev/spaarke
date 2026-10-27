@@ -121,3 +121,4 @@
 
 ## Meta
 - [Knowledge base layout](knowledge-base-layout.md) — `knowledge/` tree convention; SOURCE/NOTES/README
+- [Cascade delete privileges/Archive (2026-10-17)](dataverse-cascade-delete-privileges-archive-2026-10-17.md) — child Delete priv checked, whole op fails (documented); Archive 'internal use only'; PUT+MergeLabels

@@ -266,8 +266,9 @@ public sealed class MembershipCacheInvalidator : IMembershipCacheInvalidator
 
     /// <summary>
     /// The on-wire patterns <see cref="InvalidateUserAccessAsync"/> removes: the user's identity entry, every one of the
-    /// user's membership-resolution entries (any entity type, any options hash), and every one of the user's
-    /// impersonated root-set entries (any root type) — each under every tenant segment.
+    /// user's membership-resolution entries (any entity type, any options hash), every one of the user's impersonated
+    /// root-set entries (any root type), and every one of the user's Secure lookup-only rights answers (any set, any record;
+    /// #2121 round 2, F4) — each under every tenant segment.
     /// </summary>
     internal static IReadOnlyList<string> UserAccessPatterns(string? instanceName, Guid systemUserId) => new[]
     {
@@ -287,12 +288,14 @@ public sealed class MembershipCacheInvalidator : IMembershipCacheInvalidator
             ImpersonatedRootSetSource.CacheResource,
             ImpersonatedRootSetSource.CacheId(systemUserId.ToString("D"), AnySegment),
             ImpersonatedRootSetSource.CacheVersion)),
+        SecureLookupRightsPattern(instanceName, systemUserId.ToString("D"), AnySegment, AnySegment),
     };
 
     /// <summary>
     /// The on-wire patterns <see cref="InvalidateRecordOwnerChangeAsync"/> removes: every user's membership-resolution
-    /// entries for the entity type, every user's impersonated root-set entry for it, and every user's access snapshots
-    /// of the record — each under every tenant segment, and each ONLY when its cache can hold that type (task 132
+    /// entries for the entity type, every user's impersonated root-set entry for it, every user's access snapshots of the
+    /// record, and every user's Secure lookup-only rights answer for the record (#2121 round 2, F4: an owner change changes
+    /// what Dataverse answers) — each under every tenant segment, and each ONLY when its cache can hold that type (task 132
     /// integration residual: a pattern for a type no reader caches would scan the whole key space for nothing). A table
     /// an Assign cascade re-owns (<c>sharepointdocumentlocation</c> / <c>sharepointdocument</c>) gets no pattern at all.
     /// </summary>
@@ -320,14 +323,16 @@ public sealed class MembershipCacheInvalidator : IMembershipCacheInvalidator
         }
 
         patterns.AddRange(RecordSnapshotPatterns(instanceName, entitySetName, recordId));
+        patterns.AddRange(RecordSecureLookupRightsPatterns(instanceName, entitySetName, recordId));
         return patterns;
     }
 
     /// <summary>
     /// The on-wire patterns <see cref="InvalidateRecordShareChangeAsync"/> removes: every user's impersonated root-set
-    /// entry for the record's root type (when the set is a root's), and every user's access snapshots of the record —
-    /// each under every tenant segment, and each only when its cache can hold that set. No membership pattern: a share is
-    /// not a membership term.
+    /// entry for the record's root type (when the set is a root's), every user's access snapshots of the record, and every
+    /// user's Secure lookup-only rights answer for the record (#2121 round 2, F4: the answer is Dataverse's, which a share
+    /// changes) — each under every tenant segment, and each only when its cache can hold that set. No membership pattern: a
+    /// share is not a membership term.
     /// </summary>
     internal static IReadOnlyList<string> RecordShareChangePatterns(string? instanceName, string entitySetName, Guid recordId)
     {
@@ -338,6 +343,7 @@ public sealed class MembershipCacheInvalidator : IMembershipCacheInvalidator
         }
 
         patterns.AddRange(RecordSnapshotPatterns(instanceName, entitySetName, recordId));
+        patterns.AddRange(RecordSecureLookupRightsPatterns(instanceName, entitySetName, recordId));
         return patterns;
     }
 
@@ -348,6 +354,30 @@ public sealed class MembershipCacheInvalidator : IMembershipCacheInvalidator
             ImpersonatedRootSetSource.CacheResource,
             ImpersonatedRootSetSource.CacheId(AnySegment, rootType),
             ImpersonatedRootSetSource.CacheVersion));
+
+    /// <summary>
+    /// Every user's Secure lookup-only rights answer for one record (#2121 round 2, F4) — only when the set is one that
+    /// cache can hold (a secure root's), in the spelling the key carries.
+    /// </summary>
+    private static IEnumerable<string> RecordSecureLookupRightsPatterns(string? instanceName, string entitySetName, Guid recordId)
+    {
+        if (AccessibleRecordSetService.TryGetSecureLookupRightsSet(entitySetName, out var set))
+        {
+            yield return SecureLookupRightsPattern(instanceName, AnySegment, set, recordId.ToString("D"));
+        }
+    }
+
+    /// <summary>
+    /// A <see cref="AccessibleRecordSetService.SecureLookupRightsCacheResource"/> pattern over the composer's own id
+    /// composition, under every tenant segment (#2121 round 2, F4).
+    /// </summary>
+    private static string SecureLookupRightsPattern(
+        string? instanceName, string systemUserSegment, string entitySetSegment, string recordSegment) =>
+        TenantCache.OnWire(instanceName, TenantCache.BuildKey(
+            TenantCache.AnyTenant,
+            AccessibleRecordSetService.SecureLookupRightsCacheResource,
+            AccessibleRecordSetService.SecureLookupRightsCacheId(systemUserSegment, entitySetSegment, recordSegment),
+            AccessibleRecordSetService.SecureLookupRightsCacheVersion));
 
     /// <summary>
     /// Every user's access snapshots of one record: the record-scoped snapshot (when the decorator caches the set), and —

@@ -41,7 +41,9 @@ import {
   fakeService,
   group,
   matterCore,
+  projectCore,
   routeItem,
+  serviceRequestCore,
 } from '../__fixtures__/worklistRouteFixtures';
 
 /** The viewer's local calendar day every test renders against (the same day task 051's tests use). */
@@ -90,6 +92,45 @@ describe('lanes', () => {
     expect(within(lane('Decide')).getByRole('button', { name: 'Start review' })).toBeEnabled();
     expect(within(lane('Do')).getByRole('button', { name: 'Work through these' })).toBeEnabled();
     expect(lineIds(lane('Decide'))).toEqual([A1, A2, A3]);
+  });
+
+  it('keeps every Decide line above a long Do lane: 49 overdue Do items never push 2 decisions down or out (task 064, BR-5)', async () => {
+    // The production shape that motivated "Decide always above Do": a few judgements and a long run of overdue work.
+    const doItems = Array.from({ length: 49 }, (_, i) =>
+      routeItem(`20000000-0000-0000-0000-${String(i + 100).padStart(12, '0')}`, 'Do', {
+        subjectName: `Overdue item ${i}`,
+        ruleShortName: 'Overdue task',
+        workType: 'finishOrReschedule',
+        dueDate: '2026-10-04',
+      })
+    );
+    renderWidget({
+      service: fakeService({
+        lanes: body(
+          'lanes',
+          [
+            group(matterCore, [routeItem(A1, 'Decide', { workType: 'approveOrRebudget' })]),
+            group(serviceRequestCore, [routeItem(A3, 'Decide', { workType: 'chaseReply' })]),
+          ],
+          [group(projectCore, doItems)]
+        ),
+      }),
+    });
+    await ready();
+
+    // Both decisions are rendered, in the Decide lane, with nothing hidden behind a cap or a collapsed section.
+    expect(lineIds(lane('Decide'))).toEqual([A1, A3]);
+    expect(within(lane('Decide')).getByTestId('lane-count-Decide')).toHaveTextContent('2');
+    expect(within(lane('Do')).getByTestId('lane-count-Do')).toHaveTextContent('49');
+    expect(within(lane('Decide')).queryByTestId('lane-showing-Decide')).not.toBeInTheDocument();
+    expect(within(lane('Decide')).getByRole('button', { name: 'Start review' })).toBeEnabled();
+
+    // The Decide lane precedes the Do lane in the document (and so on screen), and no Do line sits before a Decide line.
+    // compareDocumentPosition returns a bit mask
+    expect(lane('Decide').compareDocumentPosition(lane('Do')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const allLines = screen.getAllByTestId('issue-line').map(l => l.getAttribute('data-signal-id'));
+    expect(allLines.slice(0, 2)).toEqual([A1, A3]);
+    expect(allLines).toHaveLength(2 + 49);
   });
 
   it("shows the route's order exactly: the widget never re-sorts (unranked input stays unranked)", async () => {

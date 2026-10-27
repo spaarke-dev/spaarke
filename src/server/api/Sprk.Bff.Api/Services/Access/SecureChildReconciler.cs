@@ -29,6 +29,7 @@ using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Documents;
 
 namespace Sprk.Bff.Api.Services.Access;
 
@@ -69,6 +70,29 @@ public enum SecureChildPassTrigger
     /// boundary.
     /// </summary>
     UnsecureCompletion,
+}
+
+/// <summary>
+/// GitHub #2091: whether <see cref="SecureChildReconciler.AfterRefileAsync(string, Guid, Func{Task{bool}}, RefileThreadStep, CancellationToken)"/>
+/// lets a re-filed COMMUNICATION's thread follow the filing (<see cref="Sprk.Bff.Api.Services.Communication.IThreadResolver.ReconcileThreadForFilingAsync"/>).
+/// </summary>
+/// <remarks>
+/// Component Justification (CLAUDE.md §11): (1) Existing — <c>AfterRefileAsync</c> ran the thread reconcile on every communication
+/// re-file, with no way to leave it out. (2) Extension — this IS the extension: one argument of the existing step, not a second
+/// copy of its other steps. (3) Cost of doing nothing — the thread writers (a message joining a record thread, respond-into-thread)
+/// either skip the step (a row joined into a Secure record's thread unmirrored, its gate Decision Records left user-owned and
+/// shared) or run the reconcile on the join they just made, which can move the message straight back out of that thread.
+/// </remarks>
+public enum RefileThreadStep
+{
+    /// <summary>The communication's thread follows the filing (every writer that moves a filing lookup).</summary>
+    Reconcile,
+
+    /// <summary>
+    /// The writer IS the communication's thread placement — a message joining a record thread (<c>ThreadResolver</c>'s join,
+    /// <c>CommunicationService</c>'s respond-into-thread). Every other step runs; the thread reconcile does not.
+    /// </summary>
+    PlacedByWriter,
 }
 
 /// <summary>How a reconcile pass of one root ended.</summary>
@@ -178,6 +202,12 @@ public sealed record SecureChildReconcileReport(
     /// <summary>Rows re-owned by this pass.</summary>
     public int ChildrenReowned => Tables.Sum(t => t.Changed);
 
+    /// <summary>
+    /// UAC task 099b review round 3 (K2): a grant row of this pass was left where it is because the team the rule gives it
+    /// may not own one — a repeat call does not complete the pass until an administrator adds the privilege.
+    /// </summary>
+    public bool BlockedByGrantOwnerPrivilege => Changes.Any(SecureChildReconciler.IsGrantOwnerPrivilegeRefusal);
+
     /// <summary>Isolated rows the rule would release but this pass may not (owner round 24 item 2): only unsecure does.</summary>
     public int ChildrenNeedingF3 => Tables.Sum(t => t.NeedsF3);
 
@@ -276,7 +306,9 @@ public sealed record OrdinaryRowReownResult(OrdinaryRowReownOutcome Outcome, str
 /// neither it nor its own children are reached. An unfiled row is never reached.</para>
 /// <para><b>The rule is the resolver's, with 146's inputs.</b> Each row's parents are every ownership-parent lookup it
 /// carries (<see cref="RecordOwnershipContext.ParentsOf"/> over all its columns — the reparent's input), plus, for a message,
-/// its record thread's filing (S6, as <c>AssignToThreadReconcilingOwnerAsync</c> passes it); a row that names no parent keeps
+/// its record thread's filing (S6, <c>RecordThreadFiling</c> — the re-file path's rule, by the thread's type (round 7d: a Direct
+/// thread adds nothing; an unset or unknown type counts as a record thread); #2143 round 6: a thread outside the
+/// pass is read, and a message whose thread cannot be read is left undecided); a row that names no parent keeps
 /// its owner (<see cref="UnfiledOwnership.KeepCreator"/>). Rows are decided shallowest first and
 /// REPEATED TO A FIXPOINT (task 148 r1; report-only too since r2, over planned owners): a row whose parent sits at its own level (an FR-26-stamped analysis of a document, a
 /// stamped communication regarding an event) may be decided before that parent moves, so every row a move could change —
@@ -323,7 +355,33 @@ public sealed class SecureChildReconciler
     private const string OwnerColumn = "ownerid";
     private const string IsSecureColumn = "sprk_issecure";
     private const string CommunicationTable = "sprk_communication";
-    private const string ThreadLookupOnCommunication = "sprk_communicationthread";
+
+    /// <summary>
+    /// UAC task 099b review round 2: the grant table. Its rows of the root, in EVERY state (review round 3, F1), are owned by
+    /// the root's team (D-11), so they follow the root across the isolation boundary in this pass. Not a lineage child (no row
+    /// is filed under a grant, and the share mirror never covers it); loaded beside the descendants, decided and written by
+    /// the same rule and sequence.
+    /// </summary>
+    internal const string GrantTable = "sprk_externalrecordaccess";
+
+    /// <summary>The grant table's entity set (the owner-change eviction names it).</summary>
+    private const string GrantEntitySet = "sprk_externalrecordaccesses";
+
+    /// <summary>
+    /// UAC task 099b review round 3 (K2): the detail of a grant row left where it is because the team the rule gives it may
+    /// not own one (its roles lack Read on the grant table). Unlike any other failed row, a repeat pass cannot move it until an
+    /// administrator adds the privilege, so the endpoints say so (<see cref="IsGrantOwnerPrivilegeRefusal"/>).
+    /// </summary>
+    private static readonly string GrantOwnerPrivilegeMissingDetail =
+        Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalGrantLifecycle.GrantOwnerPrivilegeMissingReasonCode
+        + ": the owner team may not own an access grant (its security roles lack Read on sprk_externalrecordaccess); it is "
+        + "left as it is until an administrator adds that privilege";
+
+    /// <summary>Whether <paramref name="change"/> is a grant row this pass could not move for want of the owner privilege.</summary>
+    internal static bool IsGrantOwnerPrivilegeRefusal(SecureChildRowChange change) =>
+        change.Outcome == SecureChildRowOutcome.Failed
+        && string.Equals(change.Table, GrantTable, StringComparison.OrdinalIgnoreCase)
+        && string.Equals(change.Detail, GrantOwnerPrivilegeMissingDetail, StringComparison.Ordinal);
 
     private readonly IGenericEntityService _dataverse;
     private readonly IRecordOwnershipResolver _ownership;
@@ -334,6 +392,11 @@ public sealed class SecureChildReconciler
     private readonly Sprk.Bff.Api.Services.Ai.Membership.IMembershipCacheInvalidator _accessCacheInvalidator;
     private readonly Sprk.Bff.Api.Services.Communication.IThreadResolver? _threads;
 
+    /// <summary>#2159 slice 2: the ONE writer of a document's relocation ledger, which records an F3 re-file's release of its file.</summary>
+    private readonly DocumentContainerRelocator? _relocator;
+    private readonly Sprk.Bff.Api.Services.Dataverse.Privileges.IDataversePrivilegeChecker? _ownerPrivileges;
+    private readonly Sprk.Bff.Api.Services.Signals.GateDecisionRecordSharing _gateDecisionRecords;
+
     /// <param name="accessCacheInvalidator">Batch-4 integration, 148 × 132. Every child OWNER change this pass makes
     /// (provisioning's child pass, the unsecure's Step 3.5 and completion branch, a re-file, <c>SecureChildReconciliationJob</c>)
     /// is evicted through task 132's ONE owner-change hook. It is optional so this service's test compositions keep
@@ -342,6 +405,13 @@ public sealed class SecureChildReconciler
     /// (<see cref="Sprk.Bff.Api.Services.Communication.IThreadResolver.ReconcileThreadForFilingAsync"/>) — here, the one step
     /// every re-file writer runs, so it runs once per filing. Optional so the test compositions keep compiling; the host
     /// registers it unconditionally.</param>
+    /// <param name="ownerPrivileges">UAC task 099b review round 2: before a grant row is assigned to a team, whether that team's
+    /// roles hold Read on the grant table (<c>GrantExternalAccessEndpoint.CheckGrantOwnerPrivilegeAsync</c>, the ONE helper the
+    /// grant routes use). Optional so the test compositions keep compiling; the host registers it unconditionally
+    /// (<c>AddDataverseSavedQueryServices</c>). Without it, Dataverse's own owner check on the write still refuses such an
+    /// assignment, and the row is reported Failed the same way.</param>
+    /// <param name="gateDecisionRecords">Ontology task 042b (D-169, uac-r2 choice A): after a re-filed COMMUNICATION, its gate Decision
+    /// Records still owned by a user are re-owned to the resolver's team (<see cref="AfterRefileAsync"/>).</param>
     public SecureChildReconciler(
         IGenericEntityService dataverse,
         IRecordOwnershipResolver ownership,
@@ -349,10 +419,16 @@ public sealed class SecureChildReconciler
         DataverseWebApiClient webApi,
         IConfiguration configuration,
         ILogger<SecureChildReconciler> logger,
+        Sprk.Bff.Api.Services.Signals.GateDecisionRecordSharing gateDecisionRecords,
         Sprk.Bff.Api.Services.Ai.Membership.IMembershipCacheInvalidator? accessCacheInvalidator = null,
-        Sprk.Bff.Api.Services.Communication.IThreadResolver? threads = null)
+        Sprk.Bff.Api.Services.Communication.IThreadResolver? threads = null,
+        Sprk.Bff.Api.Services.Dataverse.Privileges.IDataversePrivilegeChecker? ownerPrivileges = null,
+        DocumentContainerRelocator? relocator = null)
     {
+        _relocator = relocator;
         _threads = threads;
+        _ownerPrivileges = ownerPrivileges;
+        _gateDecisionRecords = gateDecisionRecords ?? throw new ArgumentNullException(nameof(gateDecisionRecords));
         _dataverse = dataverse;
         _ownership = ownership;
         _shares = shares;
@@ -673,7 +749,9 @@ public sealed class SecureChildReconciler
     private async Task EvictOwnerChangeAsync(string table, Guid id, string? entitySet, string reason)
     {
         var set = entitySet
-            ?? (SecureChildLineage.Children.TryGetValue(table, out var lineage) ? lineage.EntitySet : null);
+            ?? (SecureChildLineage.Children.TryGetValue(table, out var lineage) ? lineage.EntitySet : null)
+            // UAC task 099b review round 2: the pass also re-owns the root's grant rows, which are not lineage children.
+            ?? (string.Equals(table, GrantTable, StringComparison.OrdinalIgnoreCase) ? GrantEntitySet : null);
         if (set is null)
         {
             _logger.LogError("[SECURE-CHILD-RECONCILE] {Table} {Id} was re-owned, but its entity set is not known, so its cached " +
@@ -733,9 +811,14 @@ public sealed class SecureChildReconciler
 
     /// <summary>
     /// unified-access-control-r2 task 147 r1c (owner round 28 item 1; round 36: "then 148/149's child pass runs when the event
-    /// moves under or out of a secure parent") — the ONE step after a re-file, for EVERY re-file writer (the event and
-    /// communication filing routes, <c>PATCH /api/v1/child-records/{table}/{id}</c>, <c>PUT /api/v1/documents/{id}</c> and
-    /// the chat update tool). Never throws; the re-file it follows stands.
+    /// moves under or out of a secure parent") — the ONE step after a re-file, for EVERY re-file writer: the browser routes
+    /// (<c>PATCH /api/v1/child-records/{table}/{id}</c>, the event and communication filing routes, <c>PUT /api/v1/documents/{id}</c>),
+    /// the chat update tool, the Office reconciled-email filing, the playbook update node, the output orchestrator's generic
+    /// update and the field-mapping push (#2091 round 1-4), and a message joining a record thread — <c>ThreadResolver</c>'s join
+    /// and <c>CommunicationService</c>'s respond-into-thread, through <c>ThreadResolver.JoinThreadAsync</c> with
+    /// <see cref="RefileThreadStep.PlacedByWriter"/> (#2091). <c>RefileWriterAfterRefileGuardTests</c> holds every writer to it.
+    /// A writer runs it after a successful write that moved a filing lookup, and not when the reparent answered
+    /// <see cref="RecordOwnerResolution.ParentsUnchanged"/>. Never throws; the re-file it follows stands.
     /// </summary>
     /// <remarks>
     /// <para><b>(1) The row itself</b> — task 149's mirror, inline (<see cref="SecureChildShareSynchronizer.AfterRefileAsync"/>):
@@ -758,14 +841,210 @@ public sealed class SecureChildReconciler
     /// then it is logged as an ERROR naming the row. Every row it could not move is left as it was — an isolated row stays
     /// isolated (an under-share); an ordinary row under a secure record is moved in by the two-minute recent-changes pass,
     /// which sees the re-filed row's modification.</para>
+    /// <para><b>A re-filed communication</b> also has its thread follow the filing — FIRST, before (1) (#2110: a join the
+    /// reconcile makes can re-own the email into a Secure record's isolation, and (1), (2) and the gate step must see it; a row
+    /// that LEFT isolation has its old mirror taken off just before the reconcile, whose read grant to the new record the
+    /// removal would otherwise take off too); skipped when the writer placed the thread itself —
+    /// <see cref="RefileThreadStep.PlacedByWriter"/>. Last, ONCE, its gate Decision Records are re-owned (ontology task 042b,
+    /// D-169) — on EVERY communication re-file, whichever <see cref="RefileThreadStep"/>.</para>
     /// </remarks>
     /// <param name="childLogicalName">The re-filed row's table.</param>
     /// <param name="childId">The re-filed row.</param>
     /// <param name="wasIsolated">Whether the row was owned by the Secure Record owner team BEFORE the re-file.</param>
     /// <param name="ct">Cancellation (writers pass <see cref="CancellationToken.None"/>: the write has landed).</param>
     /// <returns>The descendants' pass, or <c>null</c> when none ran.</returns>
-    public async Task<SecureChildReconcileReport?> AfterRefileAsync(
-        string childLogicalName, Guid childId, Func<Task<bool>> wasIsolated, CancellationToken ct)
+    public Task<SecureChildReconcileReport?> AfterRefileAsync(
+        string childLogicalName, Guid childId, Func<Task<bool>> wasIsolated, CancellationToken ct) =>
+        AfterRefileCoreAsync(childLogicalName, childId, wasIsolated, RefileThreadStep.Reconcile, secureExitCaller: null, reparent: null, ct);
+
+    /// <summary>
+    /// <see cref="AfterRefileAsync(string, Guid, Func{Task{bool}}, CancellationToken)"/> for a writer that holds the reparent's
+    /// answer (<see cref="IRecordOwnershipResolver.ReparentAsync"/>). #2159 slice 2: when a re-filed DOCUMENT left a secure
+    /// root with the caller's F3 permission (<see cref="RecordOwnerResolution.SecureExitPermitted"/>), the release that lets its
+    /// file follow it from S1's own container into S2's is recorded FIRST (<see cref="DocumentContainerRelocator.RecordReleaseAsync"/>);
+    /// without it the widening guard holds the file in S1 (A1). Never throws; the re-file stands either way.
+    /// </summary>
+    public Task<SecureChildReconcileReport?> AfterRefileAsync(
+        string childLogicalName, Guid childId, Func<Task<bool>> wasIsolated, RecordOwnerResolution? reparent, CancellationToken ct) =>
+        AfterRefileCoreAsync(childLogicalName, childId, wasIsolated, RefileThreadStep.Reconcile, secureExitCaller: null, reparent, ct);
+
+    /// <summary>
+    /// <see cref="AfterRefileAsync(string, Guid, Func{Task{bool}}, CancellationToken)"/>, saying whether a re-filed communication's
+    /// thread follows the filing (#2091): a writer that placed the message in its thread passes
+    /// <see cref="RefileThreadStep.PlacedByWriter"/> and every other step runs.
+    /// </summary>
+    public Task<SecureChildReconcileReport?> AfterRefileAsync(
+        string childLogicalName, Guid childId, Func<Task<bool>> wasIsolated, RefileThreadStep thread, CancellationToken ct) =>
+        AfterRefileCoreAsync(childLogicalName, childId, wasIsolated, thread, secureExitCaller: null, reparent: null, ct);
+
+    /// <summary>
+    /// <see cref="AfterRefileAsync(string, Guid, Func{Task{bool}}, RefileThreadStep, CancellationToken)"/> for a re-file a PERSON
+    /// made (#2143 round 7, F1): <paramref name="secureExitCaller"/> is that re-file's
+    /// <see cref="Sprk.Bff.Api.Services.Dataverse.RecordReparent.SecureExitCaller"/>, carried into the thread reconcile
+    /// (<see cref="Sprk.Bff.Api.Services.Communication.IThreadResolver.ReconcileThreadForFilingAsync(Guid, Sprk.Bff.Api.Services.Communication.FilingReconcileHost, SecureRemovalCaller?, Func{CancellationToken, Task}?, CancellationToken)"/>),
+    /// so a re-filed communication's move off a secure record's thread is decided on the rights the re-file was checked
+    /// against. Every user-initiated re-file writer calls this overload, or the one that also takes the reparent's answer;
+    /// <c>null</c> acts for nobody.
+    /// </summary>
+    public Task<SecureChildReconcileReport?> AfterRefileAsync(
+        string childLogicalName, Guid childId, Func<Task<bool>> wasIsolated, RefileThreadStep thread,
+        SecureRemovalCaller? secureExitCaller, CancellationToken ct) =>
+        AfterRefileCoreAsync(childLogicalName, childId, wasIsolated, thread, secureExitCaller, reparent: null, ct);
+
+    /// <summary>
+    /// <see cref="AfterRefileAsync(string, Guid, Func{Task{bool}}, RefileThreadStep, SecureRemovalCaller?, CancellationToken)"/>
+    /// for a writer that also holds the reparent's answer (<see cref="IRecordOwnershipResolver.ReparentAsync"/>): the thread
+    /// reconcile acts for <paramref name="secureExitCaller"/> (#2143 round 7), and a re-file that left a secure root with that
+    /// caller's F3 permission (<see cref="RecordOwnerResolution.SecureExitPermitted"/>) records the release of its document's
+    /// file — and of the files of the documents filed under it — first (#2159 slice 2).
+    /// </summary>
+    public Task<SecureChildReconcileReport?> AfterRefileAsync(
+        string childLogicalName, Guid childId, Func<Task<bool>> wasIsolated, RefileThreadStep thread,
+        SecureRemovalCaller? secureExitCaller, RecordOwnerResolution? reparent, CancellationToken ct) =>
+        AfterRefileCoreAsync(childLogicalName, childId, wasIsolated, thread, secureExitCaller, reparent, ct);
+
+    private async Task<SecureChildReconcileReport?> AfterRefileCoreAsync(
+        string childLogicalName, Guid childId, Func<Task<bool>> wasIsolated, RefileThreadStep thread,
+        SecureRemovalCaller? secureExitCaller, RecordOwnerResolution? reparent, CancellationToken ct)
+    {
+        var permit = reparent?.SecureExitPermitted is { RootsLeft.Count: > 0 } given ? given : null;
+        if (permit is not null && string.Equals(childLogicalName.Trim(), DocumentTable, StringComparison.OrdinalIgnoreCase))
+        {
+            await RecordFileReleaseAsync(childId, permit, "re-filed", ct).ConfigureAwait(false);
+        }
+
+        var report = await RefileStepsAsync(childLogicalName, childId, wasIsolated, thread, secureExitCaller, ct)
+            .ConfigureAwait(false);
+
+        // #2159 slice 2c: the documents filed under the re-filed row followed it out of S1 under the same F3 act (owner round
+        // 24 item 2), so each of their files is released the same way — each checked by the relocator against the roots
+        // this re-file left (a document isolated under another secure record stays held). Slice 4: their lock waits share
+        // one budget (DocumentContainerRelocator.DescendantReleaseLockBudget).
+        if (permit is not null && report is { IsolatedDocumentIds.Count: > 0 })
+        {
+            var descendants = report.IsolatedDocumentIds.Where(id => id != childId).Distinct().ToList();
+            if (descendants.Count > 0)
+            {
+                await RecordDescendantReleasesAsync(childLogicalName.Trim(), childId, descendants, permit, ct).ConfigureAwait(false);
+            }
+        }
+
+        // Ontology task 042b (D-169, uac-r2 choice A): after UAC's own steps, on EVERY communication re-file, its gate Decision Records
+        // still owned by a user are re-owned to the resolver's team (a Secure answer is left to this engine). Never thrown.
+        if (string.Equals(childLogicalName.Trim(), CommunicationTable, StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                await _gateDecisionRecords.ReownAfterFilingAsync(childId).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogError(ex, "[SECURE-CHILD-RECONCILE] {Table} {Id} was re-filed, but its gate Decision Records were not re-owned.",
+                    CommunicationTable, childId);
+            }
+        }
+
+        return report;
+    }
+
+    /// <summary>
+    /// #2159 slice 2 — the F3 release of one document's file (the re-filed document, or one filed under the re-filed row):
+    /// the re-file left at least one secure root with the caller's F3 permission, so the ONE ledger writer
+    /// (<see cref="DocumentContainerRelocator.RecordReleaseAsync"/>) records it under the document's lock, after checking the
+    /// file's secure record is one of those roots. Only a written re-file's own permission. Never throws — a release not
+    /// recorded inline (lock held, a fault) is retried through the job queue (<see cref="RelocationReleaseRetryJobHandler"/>);
+    /// until it is recorded, or when it cannot be (another secure record, no retry queued), the file stays held where it is
+    /// (fail closed); the re-file stands.
+    /// </summary>
+    private async Task RecordDescendantReleasesAsync(
+        string table, Guid rowId, IReadOnlyList<Guid> documentIds, SecureExitPermit permit, CancellationToken ct)
+    {
+        if (_relocator is null)
+        {
+            _logger.LogWarning(
+                "[SECURE-CHILD-RECONCILE] {Table} {Id} left {Count} secure record(s) with F3, but no relocator is available to "
+                + "record the releases of the files of the documents filed under it ({Documents}); they stay held where they are.",
+                table, rowId, permit.RootsLeft.Count, string.Join(", ", documentIds));
+            return;
+        }
+
+        IReadOnlyList<(Guid DocumentId, RelocationReleaseOutcome Outcome)> outcomes;
+        try
+        {
+            outcomes = await _relocator.RecordReleasesAsync(documentIds, permit, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex,
+                "[SECURE-CHILD-RECONCILE] {Table} {Id} was re-filed out of a secure record with F3, but the releases of the files "
+                + "of the documents filed under it could not be recorded and no retry was queued ({Documents}); their files stay "
+                + "held where they are. Recovery for each: {Recovery}.", table, rowId, string.Join(", ", documentIds),
+                DocumentContainerRelocator.UnreleasedRecovery);
+            return;
+        }
+
+        foreach (var (documentId, release) in outcomes)
+        {
+            _logger.Log(
+                release.State is RelocationReleaseState.Recorded or RelocationReleaseState.NotNeeded ? LogLevel.Information : LogLevel.Warning,
+                "[SECURE-CHILD-RECONCILE] sprk_document {Id} (filed under re-filed {Table} {RowId}) left {Count} secure record(s) "
+                + "with F3: release {State} ({Detail}).", documentId, table, rowId, permit.RootsLeft.Count, release.State, release.Detail);
+        }
+
+        // A file left held because its lock was busy or a write failed is retried through the job queue; one whose retry could
+        // not be queued is released only by a new F3 re-file out of the secure record holding it: name them all, by id.
+        var notReleased = outcomes
+            .Where(o => o.Outcome.State is RelocationReleaseState.LockHeld or RelocationReleaseState.Failed)
+            .ToList();
+        var queued = notReleased.Where(o => o.Outcome.RetryQueued).Select(o => o.DocumentId).ToList();
+        var stranded = notReleased.Where(o => !o.Outcome.RetryQueued).Select(o => o.DocumentId).ToList();
+        if (queued.Count > 0)
+        {
+            _logger.LogWarning(
+                "[SECURE-CHILD-RECONCILE] {Table} {Id} was re-filed with F3, but the files of {Count} document(s) filed under it "
+                + "were not released yet (a busy lock or a failed write); a retry is queued for each: {Documents}.",
+                table, rowId, queued.Count, string.Join(", ", queued));
+        }
+
+        if (stranded.Count > 0)
+        {
+            _logger.LogError(
+                "[SECURE-CHILD-RECONCILE] {Table} {Id} was re-filed with F3, but the files of {Count} document(s) filed under it "
+                + "were NOT released and no retry could be queued; they stay held: {Documents}. Recovery for each: {Recovery}.",
+                table, rowId, stranded.Count, string.Join(", ", stranded), DocumentContainerRelocator.UnreleasedRecovery);
+        }
+    }
+
+    private async Task RecordFileReleaseAsync(Guid childId, SecureExitPermit permit, string how, CancellationToken ct)
+    {
+        if (_relocator is null)
+        {
+            _logger.LogWarning(
+                "[SECURE-CHILD-RECONCILE] sprk_document {Id} left {Count} secure record(s) with F3, but no relocator is available "
+                + "to record the release of its file; the file stays held where it is.", childId, permit.RootsLeft.Count);
+            return;
+        }
+
+        try
+        {
+            var release = await _relocator.RecordReleaseAsync(childId, permit, ct).ConfigureAwait(false);
+            _logger.Log(
+                release.State is RelocationReleaseState.Recorded or RelocationReleaseState.NotNeeded ? LogLevel.Information : LogLevel.Warning,
+                "[SECURE-CHILD-RECONCILE] sprk_document {Id} ({How}) left {Count} secure record(s) with F3: release {State} ({Detail}).",
+                childId, how, permit.RootsLeft.Count, release.State, release.Detail);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex,
+                "[SECURE-CHILD-RECONCILE] sprk_document {Id} was re-filed out of a secure record with F3, but the release of its "
+                + "file could not be recorded and no retry was queued; the file stays held where it is. Recovery: {Recovery}.",
+                childId, DocumentContainerRelocator.UnreleasedRecovery);
+        }
+    }
+
+    private async Task<SecureChildReconcileReport?> RefileStepsAsync(
+        string childLogicalName, Guid childId, Func<Task<bool>> wasIsolated, RefileThreadStep thread,
+        SecureRemovalCaller? secureExitCaller, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(childLogicalName);
         ArgumentNullException.ThrowIfNull(wasIsolated);
@@ -782,16 +1061,72 @@ public sealed class SecureChildReconciler
             beforeFault = ex;
         }
 
-        // (1) The row's own mirror — one implementation (task 149's synchronizer); it logs a fault reading `before`.
-        await _shares.AfterRefileAsync(
-            table, childId,
-            () => beforeFault is null ? Task.FromResult(before!.Value) : Task.FromException<bool>(beforeFault),
-            ct).ConfigureAwait(false);
+        Func<Task<bool>> isolatedBefore =
+            () => beforeFault is null ? Task.FromResult(before!.Value) : Task.FromException<bool>(beforeFault);
 
         // spaarkeai-word-add-in-r1 task 129: a re-filed communication's thread follows the filing, so the email shows on the
-        // record's Messages panel (the panel lists threads by the thread's own regarding). Never throws.
-        if (table == CommunicationTable && _threads is not null)
-            await _threads.ReconcileThreadForFilingAsync(childId, CancellationToken.None).ConfigureAwait(false);
+        // record's Messages panel (the panel lists threads by the thread's own regarding). Never throws. #2091: not when the
+        // writer IS the thread placement (a join) — the reconcile could move the message straight back out of the thread it
+        // just joined. #2110 (UAC F1): FIRST, so the mirror, the pass and the gate step below all see the thread the email ends
+        // in — a join it makes (a threadless email joining the thread its conversation key finds, anchored to another record)
+        // re-owns the email to that record's owner, a Secure one included.
+        var reconcilesThread = table == CommunicationTable && _threads is not null && thread == RefileThreadStep.Reconcile;
+        var mirrorTakenOff = false;
+        var aGrantFollowedTheHook = false;
+
+        // The one thing the mirror did first that must stay first: a row that LEFT isolation loses every direct share it holds
+        // (SecureChildShareSynchronizer.RemoveMirrorAsync), so taken off after the reconcile it would also take off the #1629
+        // read grant the reconcile gives the record the email now sits under. Once, before the reconcile when the re-file
+        // itself took the row out; else (#2143 round 8, F1-A) inside the reconcile, between the join that took it out and
+        // that grant — a re-file off S while the email sits in S's thread keeps it Secure until its thread follows the filing.
+        // Round 9 (F2): latched only by a removal that COMPLETED — a read that faulted, a row still isolated (mirrored again)
+        // or a removal that did not finish leaves it open, so the next chance (the hook, then the last step) tries again.
+        async Task TakeTheMirrorOffIfItLeftIsolationAsync()
+        {
+            if (mirrorTakenOff || before != true || !await LeftIsolationAsync(table, childId, ct).ConfigureAwait(false))
+                return;
+            // #2143 round 11 (F2-1): not the last try — the last step below retries — so an exhausted removal is a Warning here.
+            mirrorTakenOff = await _shares.AfterRefileAsync(table, childId, isolatedBefore, LogLevel.Warning, ct).ConfigureAwait(false);
+        }
+
+        if (reconcilesThread)
+        {
+            await TakeTheMirrorOffIfItLeftIsolationAsync().ConfigureAwait(false);
+
+            // Guarded (#2110 ontology re-check K3): it now runs before the mirror, the pass and the gate step, so a fault here
+            // must not skip them. The resolver is best-effort and does not throw today; a fault leaves the thread for the sweep.
+            try
+            {
+                await _threads!.ReconcileThreadForFilingAsync(
+                    childId, Sprk.Bff.Api.Services.Communication.FilingReconcileHost.AfterRefileStep, secureExitCaller,
+                    _ =>
+                    {
+                        aGrantFollowedTheHook = true;
+                        return TakeTheMirrorOffIfItLeftIsolationAsync();
+                    },
+                    CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[SECURE-CHILD-RECONCILE] {Table} {Id}: the thread reconcile after its re-file failed; its " +
+                    "mirror, descendants and gate step still run, and the filing sweep reconciles the thread.", table, childId);
+            }
+        }
+
+        // (1) The row's own mirror, on the owner and thread the reconcile left — one implementation (task 149's synchronizer);
+        // it logs a fault reading `before`. After the removal above it only mirrors a row a join took back into isolation.
+        var removedNow = await _shares.AfterRefileAsync(
+            table, childId, mirrorTakenOff ? static () => Task.FromResult(false) : isolatedBefore, ct).ConfigureAwait(false);
+        if (removedNow && aGrantFollowedTheHook)
+        {
+            // #2143 round 9 (F2): the removal could not be made before the thread move's #1629 grant, so it came off here —
+            // and, as it revokes every direct share, the grant with it. Fail closed: an under-share, never a secure share left.
+            _logger.LogWarning(
+                "[SECURE-CHILD-RECONCILE] {Table} {Id} left isolation, but its secure-child mirror could not be taken off before " +
+                "its thread reconcile's read grant, so it was taken off after it: every direct share on it was REVOKED, including " +
+                "any read grant that move gave. The record's members cannot read it until it is granted again (#2143).",
+                table, childId);
+        }
 
         if (!SecureChildLineage.IsChild(table))
             return null;
@@ -840,6 +1175,25 @@ public sealed class SecureChildReconciler
             report!.Status, report.Tables.Sum(t => t.Refused), report.Tables.Sum(t => t.Failed),
             report.Tables.Sum(t => t.NeedsF3), report.Detail ?? "-");
         return report;
+    }
+
+    /// <summary>
+    /// #2110: whether a row that was isolated before its re-file is no longer owned by the Secure team — it LEFT isolation, so
+    /// its mirror comes off before the thread reconcile (<see cref="RefileStepsAsync"/>). <c>true</c> when that cannot be read:
+    /// the mirror step then runs first, as it always did, and decides on its own read.
+    /// </summary>
+    private async Task<bool> LeftIsolationAsync(string table, Guid childId, CancellationToken ct)
+    {
+        try
+        {
+            return !await _shares.IsSecureTeamOwnedAsync(table, childId, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "[SECURE-CHILD-RECONCILE] {Table} {Id}: whether it is still isolated could not be read before its " +
+                "thread reconcile; its mirror step runs first.", table, childId);
+            return true;
+        }
     }
 
     /// <summary>One pass over the descendants of a re-filed CHILD row (never its platform-cascade rows: only a root has those).</summary>
@@ -904,12 +1258,22 @@ public sealed class SecureChildReconciler
 
         private readonly List<(int Level, Entity Row)> _descendants = new();
         private readonly Dictionary<(string Table, Guid Id), Entity> _byRef = new();
+
+        // #2143 round 6: the record threads this pass's messages sit in that are NOT rows of the pass (a thread regarding a
+        // root outside it), read once by RecordThreadFiling, and the ones whose read faulted (thread id -> why).
+        private readonly Dictionary<Guid, Entity> _threadsOutsidePass = new();
+        private readonly Dictionary<Guid, string> _threadReadFaults = new();
         private readonly Dictionary<string, int[]> _counts = new(StringComparer.OrdinalIgnoreCase);
         private readonly List<SecureChildRowChange> _changes = new();
 
         // Report-only (task 148 r2): the owning team each planned move would give its row — what the resolver reads for
         // that row instead of its stored owner (RecordOwnershipContext.PlannedOwningTeams). Always empty when the pass writes.
         private readonly Dictionary<RecordOwnershipParent, Guid> _planned = new();
+
+        // UAC task 099b review round 5 (K perf): this pass's latest answer, per target team, to "may it own a grant row"
+        // (GrantOwnerRefusalAsync), so N grant rows to one team cost one privilege read, not N. Local to the pass, never the
+        // shared cache: it lives exactly as long as one decision over one root's rows.
+        private readonly Dictionary<Guid, string?> _grantOwnerAnswers = new();
 
         public Pass(
             SecureChildReconciler owner, SecureChildReconcileMode mode, RecordOwnershipParent root, bool rootIsolated,
@@ -989,6 +1353,130 @@ public sealed class SecureChildReconciler
 
                 frontier = next;
             }
+
+            await LoadGrantRowsAsync().ConfigureAwait(false);
+            await LoadThreadsOutsidePassAsync().ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// #2143 round 6: every record thread a message of this pass sits in that is not itself a row of the pass, read the way
+        /// the re-file path reads it (<see cref="RecordThreadFiling.ReadThreadAsync"/>: committed, every column) — so a message in
+        /// a thread regarding a secure root OUTSIDE this pass is still filed under that root (<see cref="ContextFor"/>). A
+        /// preloaded thread is never read again. A read that faults is recorded, not thrown: its messages are left undecided
+        /// (<see cref="DecideRowAsync"/> reports them failed and writes nothing), never decided as if the thread filed nothing.
+        /// Round 7 (R7e): read in batches like <see cref="LoadDescendantsAsync"/> — one paged <c>id IN (…)</c> query per chunk of
+        /// <see cref="SecureChildShareSynchronizer.DescendantConditionsPerQuery"/> ids, not one query per thread. A chunk whose
+        /// read faults records every thread of it as faulted (none of them is known); a thread the chunk does not return
+        /// (deleted, or not readable) is recorded as faulted too, as the single read did.
+        /// </summary>
+        private async Task LoadThreadsOutsidePassAsync()
+        {
+            var threadIds = _descendants
+                .Select(d => RecordThreadFiling.ThreadOf(d.Row))
+                .OfType<Guid>()
+                .Distinct()
+                .Where(id => !_byRef.ContainsKey((RecordThreadFiling.ThreadTable, id)))
+                .ToArray();
+
+            foreach (var chunk in threadIds.Chunk(SecureChildShareSynchronizer.DescendantConditionsPerQuery))
+            {
+                var query = new QueryExpression(RecordThreadFiling.ThreadTable) { ColumnSet = new ColumnSet(true), NoLock = false };
+                query.Criteria.AddCondition(
+                    $"{RecordThreadFiling.ThreadTable}id", ConditionOperator.In, chunk.Select(id => (object)id).ToArray());
+                try
+                {
+                    foreach (var thread in await ReadAllPagesAsync(RecordThreadFiling.ThreadTable, query).ConfigureAwait(false))
+                        _threadsOutsidePass[thread.Id] = thread;
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException || !_ct.IsCancellationRequested)
+                {
+                    Log.LogWarning(ex, "[SECURE-CHILD-RECONCILE] {Count} record threads (first {ThreadId}): they could not be read, "
+                        + "so the messages in them are left as they are (#2143).", chunk.Length, chunk[0]);
+                    foreach (var threadId in chunk)
+                        _threadReadFaults[threadId] = "its record thread could not be read";
+                    continue;
+                }
+
+                foreach (var threadId in chunk.Where(id => !_threadsOutsidePass.ContainsKey(id)))
+                {
+                    Log.LogWarning("[SECURE-CHILD-RECONCILE] record thread {ThreadId}: it could not be read, so the messages in "
+                        + "it are left as they are (#2143).", threadId);
+                    _threadReadFaults[threadId] = "its record thread could not be read";
+                }
+            }
+        }
+
+        /// <summary>
+        /// UAC task 099b review round 2 (F1, Make Secure): the root's <c>sprk_externalrecordaccess</c> rows, as rows of this
+        /// pass at level 1. A grant row is owned by its root's team (D-11, 099b), so a transition that moves the root across the
+        /// isolation boundary moves them too — otherwise a grant created on an ordinary root stays on that business unit's
+        /// default team after Make Secure, readable by every user of the unit (the secure record's name, the contact, the
+        /// level), and one on a secure root stays on the memberless Secure team after Unsecure. Review round 3 (F1): in EVERY
+        /// state, both directions — an inactive (revoked or expired) grant row still names the record and the contact, so it is
+        /// as exposed as an active one, and restoring it later updates it in place without re-owning it. Only a ROOT pass (a
+        /// grant is filed under a root, never a child) and only the three grant roots. Paged like every other read here; an
+        /// incomplete read throws, so the pass writes nothing.
+        /// </summary>
+        private async Task LoadGrantRowsAsync()
+        {
+            if (!_anchorIsRoot)
+                return;
+            var rootType = Enum.GetValues<Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalGrantRootType>()
+                .Where(t => string.Equals(Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalGrantRoot.LogicalNameFor(t),
+                    _root.EntityLogicalName, StringComparison.OrdinalIgnoreCase))
+                .Select(t => (Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalGrantRootType?)t)
+                .FirstOrDefault();
+            if (rootType is null)
+                return;
+
+            var query = new QueryExpression(GrantTable) { ColumnSet = new ColumnSet(true), NoLock = true };
+            // The grant's root lookup is the root table's own logical name (sprk_project / sprk_matter / sprk_workassignment).
+            query.Criteria.AddCondition(_root.EntityLogicalName, ConditionOperator.Equal, _root.RecordId);
+
+            foreach (var entity in await ReadAllPagesAsync(GrantTable, query).ConfigureAwait(false))
+            {
+                var key = (GrantTable, entity.Id);
+                if (_byRef.ContainsKey(key))
+                    continue;
+                _descendants.Add((1, entity));
+                _byRef[key] = entity;
+            }
+        }
+
+        /// <summary>A grant row of this pass (<see cref="LoadGrantRowsAsync"/>).</summary>
+        private static bool IsGrant(string table) => string.Equals(table, GrantTable, StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// UAC task 099b review round 2: before a grant row is assigned to <paramref name="target"/>, whether that team may own
+        /// one — the grant routes' ONE helper (<c>GrantExternalAccessEndpoint.CheckGrantOwnerPrivilegeAsync</c>). <c>null</c>
+        /// when it may (or no reader was given — Dataverse's own owner check then decides at the write); otherwise why not, so
+        /// the row is reported Failed WITHOUT a write and the pass is incomplete (children_incomplete), like any row this pass
+        /// could not move.
+        /// </summary>
+        /// <param name="fresh">Review round 5 (K2): <c>true</c> after Dataverse refused the assignment on a privilege check —
+        /// asked past the shared cache (as the grant core classifies its refused create), so a YES remembered before an
+        /// administrator removed the privilege neither names the refusal wrongly nor stays cached. Otherwise the pass's own
+        /// answer for <paramref name="target"/> is reused (one read per team per pass, review round 5 K perf).</param>
+        private async Task<string?> GrantOwnerRefusalAsync(Guid target, bool fresh = false)
+        {
+            if (_owner._ownerPrivileges is not { } privileges)
+                return null;
+            if (!fresh && _grantOwnerAnswers.TryGetValue(target, out var known))
+                return known;
+            var rootType = Enum.GetValues<Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalGrantRootType>()
+                .First(t => string.Equals(Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalGrantRoot.LogicalNameFor(t),
+                    _root.EntityLogicalName, StringComparison.OrdinalIgnoreCase));
+            var refusal = await Sprk.Bff.Api.Api.ExternalAccess.GrantExternalAccessEndpoint.CheckGrantOwnerPrivilegeAsync(
+                privileges, target, rootType, _root.RecordId, key: null, fresh, Log, _ct).ConfigureAwait(false);
+            // Review round 3 (K2): the detail reaches the endpoint's problem detail, so it names no team id (the helper has
+            // logged it); the privilege refusal's detail is the one IsGrantOwnerPrivilegeRefusal recognises.
+            var answer = refusal is null
+                ? null
+                : refusal.ReasonCode == Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalGrantLifecycle.GrantOwnerPrivilegeMissingReasonCode
+                    ? GrantOwnerPrivilegeMissingDetail
+                    : $"{refusal.ReasonCode}: whether the owner team may own an access grant could not be read; it is left as it is";
+            _grantOwnerAnswers[target] = answer;
+            return answer;
         }
 
         private async Task<IReadOnlyList<Entity>> ReadAllPagesAsync(string table, QueryExpression query)
@@ -1126,13 +1614,33 @@ public sealed class SecureChildReconciler
 
                     if (_mode == SecureChildReconcileMode.Apply)
                     {
+                        // UAC task 099b review round 2: a grant row goes only to a team allowed to own one — asked first, so a
+                        // missing privilege is reported with its reason and no write is attempted.
+                        if (IsGrant(key.Table) && await GrantOwnerRefusalAsync(target).ConfigureAwait(false) is { } refused)
+                        {
+                            failures[key] = refused;
+                            continue;
+                        }
+
                         // Reversal evidence BEFORE the write (constraint "every assign").
                         Log.LogInformation("[SECURE-CHILD-RECONCILE] reassign: {Table} {Id} owner {Previous} -> team {Target}.",
                             key.Table, key.Id, Describe(current[key]), target);
-                        var fault = await AssignAsync(key.Table, key.Id, decision.Resolution!).ConfigureAwait(false);
+                        Exception? writeFault = null;
+                        var fault = await AssignAsync(key.Table, key.Id, decision.Resolution!, ex => writeFault = ex)
+                            .ConfigureAwait(false);
                         if (fault is not null)
                         {
-                            failures[key] = fault;
+                            // Review round 5 (K2): a grant row's assignment refused on a privilege check is confirmed FRESH, as
+                            // the grant core confirms its refused create: named owner_privilege_missing only when the team
+                            // really lacks Read (and the stale YES that let the write through is dropped); a team that holds
+                            // it, or a check that faults, keeps the generic failure (fail closed, the retry still promised).
+                            failures[key] = IsGrant(key.Table)
+                                && writeFault is not null
+                                && Sprk.Bff.Api.Services.Signals.SignalWriter.IsDataverseAccessDenied(writeFault)
+                                && await GrantOwnerRefusalAsync(target, fresh: true).ConfigureAwait(false)
+                                    == GrantOwnerPrivilegeMissingDetail
+                                    ? GrantOwnerPrivilegeMissingDetail
+                                    : fault;
                             continue;
                         }
                     }
@@ -1177,6 +1685,10 @@ public sealed class SecureChildReconciler
                 {
                     var key = (row.LogicalName, row.Id);
                     if (results[key] is not { LeftIsolation: true } left)
+                        continue;
+                    // UAC task 099b review round 2: a grant row never carries the mirror (task 149 mirrors lineage children
+                    // only), so there is nothing to take off it.
+                    if (IsGrant(row.LogicalName))
                         continue;
 
                     var removal = await _owner._shares.RemoveMirrorAsync(row.LogicalName, row.Id, _ct).ConfigureAwait(false);
@@ -1372,6 +1884,12 @@ public sealed class SecureChildReconciler
         private async Task<RowDecision> DecideRowAsync(Entity row, DataversePrincipalRef? current, DataversePrincipalRef? start)
         {
             var table = row.LogicalName;
+            if (RecordThreadFiling.ThreadOf(row) is { } threadId && _threadReadFaults.TryGetValue(threadId, out var threadFault))
+            {
+                // #2143 round 6: its record thread's filing is not known — undecided, written nothing, left for the next pass.
+                return new(RowMove.None, SecureChildRowOutcome.Failed, null, threadFault);
+            }
+
             RecordOwnerResolution resolution;
             try
             {
@@ -1476,14 +1994,17 @@ public sealed class SecureChildReconciler
         /// it back. <c>null</c> on success, else what went wrong. A write that reports failure may still have landed, so the
         /// read-back decides (the task 133 restore rule). The write, eviction and read-back are the class's ONE sequence
         /// (<see cref="WriteOwnerAndReadBackAsync"/>, UAC task 183), shared with <see cref="ReownOrdinaryRowAsync"/>.
+        /// <paramref name="onWriteFault"/> (review round 5, K2) sees the write's fault, so a refused grant assignment can be
+        /// classified; it has no default (the owner-write census reads a parameter default as an assignment).
         /// </summary>
-        private async Task<string?> AssignAsync(string table, Guid id, RecordOwnerResolution resolution)
+        private async Task<string?> AssignAsync(
+            string table, Guid id, RecordOwnerResolution resolution, Action<Exception> onWriteFault)
         {
             var teamId = resolution.OwningTeamId!.Value;
             var ownerUpdate = new Dictionary<string, object> { [OwnerColumn] = new EntityReference("team", teamId) };
             return await _owner.WriteOwnerAndReadBackAsync(
                 table, id, DataversePrincipalRef.Team(teamId), c => _owner._dataverse.UpdateAsync(table, id, ownerUpdate, c),
-                entitySet: null, EvictionReason, _ct).ConfigureAwait(false);
+                entitySet: null, EvictionReason, _ct, onWriteFault: onWriteFault).ConfigureAwait(false);
         }
 
         /// <summary>The reason this pass's owner-change evictions carry (batch-4 integration, 148 × 132).</summary>
@@ -1533,16 +2054,26 @@ public sealed class SecureChildReconciler
         /// <summary>
         /// The resolver's input for an existing row — the reparent's input (task 146): every ownership-parent lookup it
         /// carries; a message in a record thread also takes that thread's filing (S6); a row naming no parent keeps its
-        /// owner; and, mid-unsecure, the root is named as the one whose flag is not a failed provisioning.
+        /// owner; and, mid-unsecure, the root is named as the one whose flag is not a failed provisioning. A GRANT row takes its
+        /// root lookup only (UAC task 099b review round 3, K1): the parent the grant core hands the resolver when it creates
+        /// the row (<c>GrantExternalAccessEndpoint.ResolveGrantOwnerAsync</c>), so a transition and a create cannot disagree on
+        /// its owner — its other lookups (<c>sprk_invoice</c> is an ownership parent) do not file it. A citation lookup (#2084: a
+        /// Signal's rule, <see cref="RecordOwnershipResolver.IsCitation"/>) files nothing and is left out.
         /// </summary>
         private RecordOwnershipContext ContextFor(Entity row)
         {
-            var parents = RecordOwnershipContext.ParentsOf(row.Attributes).ToList();
-            if (string.Equals(row.LogicalName, CommunicationTable, StringComparison.OrdinalIgnoreCase)
-                && row.GetAttributeValue<EntityReference>(ThreadLookupOnCommunication) is { Id: var threadId } && threadId != Guid.Empty
-                && _byRef.TryGetValue(("sprk_communicationthread", threadId), out var thread))
+            var parents = IsGrant(row.LogicalName)
+                ? GrantRootParent(row)
+                : RecordOwnershipContext.ParentsOf(row).ToList();
+            // #2143 round 6: the ONE rule for a message's thread parents (RecordThreadFiling — round 7d: by the thread's type, a
+            // Direct thread adding nothing), from the pass's preloaded row or,
+            // for a thread outside the pass, the one LoadThreadsOutsidePassAsync read (a faulted read decides nothing here:
+            // DecideRowAsync never resolves such a row).
+            if (RecordThreadFiling.ThreadOf(row) is { } threadId
+                && (_byRef.TryGetValue((RecordThreadFiling.ThreadTable, threadId), out var thread)
+                    || _threadsOutsidePass.TryGetValue(threadId, out thread)))
             {
-                parents.AddRange(RecordOwnershipContext.ParentsOf(thread.Attributes));
+                parents.AddRange(RecordThreadFiling.ParentsOf(thread));
             }
 
             return new RecordOwnershipContext
@@ -1553,6 +2084,15 @@ public sealed class SecureChildReconciler
                 PlannedOwningTeams = _planned.Count > 0 ? new Dictionary<RecordOwnershipParent, Guid>(_planned) : null,
             };
         }
+
+        /// <summary>
+        /// A grant row's root, read from its own lookup to the pass's root table (the lookup <see cref="LoadGrantRowsAsync"/>
+        /// selects it by); none when it names none, so the row keeps its owner.
+        /// </summary>
+        private List<RecordOwnershipParent> GrantRootParent(Entity row) =>
+            row.GetAttributeValue<EntityReference>(_root.EntityLogicalName) is { Id: var rootId } && rootId != Guid.Empty
+                ? [new RecordOwnershipParent(_root.EntityLogicalName, rootId)]
+                : [];
 
         /// <summary>A row of the pass as the resolver names a parent (lower-case table).</summary>
         private static RecordOwnershipParent PlannedKey((string Table, Guid Id) key) =>

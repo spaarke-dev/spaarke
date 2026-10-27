@@ -168,6 +168,60 @@ public sealed class SignalPredicateTests : IClassFixture<SignalPredicateTests.Li
         }
     }
 
+    // ── Task 102a (owner option 101(b)): the authorable-column allow-list against the live schema and the live policies ─
+
+    [SkippableFact]
+    public async Task AuthorableColumns_ExistAndAreNotFieldSecured_OnTheLiveSchema()
+    {
+        Skip.IfNot(_dv.IsLive, "Live Dataverse not configured (SIGNALS_LIVE_DATAVERSE_URL unset); a vacuous pass would hide that nothing was checked.");
+
+        // The dry run evaluates as the evaluator. A field-secured column on the allow-list would let an author learn its values one
+        // bit at a time, which is the oracle the allow-list closes. Each entry must exist (RetrieveAttribute throws otherwise) and must
+        // not be secured. Null (unknown) fails too.
+        foreach (var (entity, column) in PolicyVersionValidator.AuthorableColumns.OrderBy(c => c.Entity, StringComparer.Ordinal).ThenBy(c => c.Column, StringComparer.Ordinal))
+        {
+            var attribute = await _dv.GetAttributeAsync(entity, column);
+            _out.WriteLine($"{entity}.{column}: {attribute.GetType().Name}, IsSecured={attribute.IsSecured}");
+            attribute.IsSecured.Should().Be(false, $"{entity}.{column} is authorable, so it must not be field-level secured");
+        }
+    }
+
+    [SkippableFact]
+    public async Task EveryLiveOntologyPolicysCurrentVersion_PassesValidateForAuthoring()
+    {
+        Skip.IfNot(_dv.IsLive, "Live Dataverse not configured (SIGNALS_LIVE_DATAVERSE_URL unset); a vacuous pass would hide that nothing was checked.");
+
+        var validator = new PolicyVersionValidator(new RuleBodySchemaValidator(), _compiler, Microsoft.Extensions.Logging.Abstractions.NullLogger<PolicyVersionValidator>.Instance);
+        var rows = await _dv.RunFetchRowsAsync(
+            """
+            <fetch>
+              <entity name="sprk_policy">
+                <attribute name="sprk_policycode" />
+                <filter type="or">
+                  <condition attribute="sprk_domain" operator="null" />
+                  <condition attribute="sprk_domain" operator="eq" value="100000001" />
+                </filter>
+                <link-entity name="sprk_policyversion" from="sprk_policyversionid" to="sprk_currentversion" alias="v">
+                  <attribute name="sprk_ruletype" />
+                  <attribute name="sprk_rulebody" />
+                  <attribute name="sprk_messagetemplate" />
+                </link-entity>
+              </entity>
+            </fetch>
+            """);
+
+        rows.Should().NotBeEmpty("spaarkedev1 holds the live Ontology policies");
+        foreach (var row in rows)
+        {
+            static object? Aliased(Entity e, string name) => e.Contains(name) ? ((AliasedValue)e[name]).Value : null;
+            var code = row.GetAttributeValue<string>("sprk_policycode");
+            var ruleType = ((OptionSetValue)Aliased(row, "v.sprk_ruletype")!).Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            var result = validator.ValidateForAuthoring(ruleType, (string?)Aliased(row, "v.sprk_rulebody"), (string?)Aliased(row, "v.sprk_messagetemplate"));
+            _out.WriteLine($"{code}: valid={result.Validation.IsValid} {string.Join("; ", result.Validation.Errors)}");
+            result.Validation.IsValid.Should().BeTrue($"{code} is live, so the allow-list must not refuse it: {string.Join("; ", result.Validation.Errors)}");
+        }
+    }
+
     // ── Task 024 (D-16, D-40): the three Do-lane rules, compiled and run against the hand-written references ─
 
     /// <summary>The instant the Do-rule references are anchored at (notes/024-progress.md).</summary>

@@ -37,7 +37,13 @@
 import * as React from 'react';
 import { Button, Field, Input, Spinner, Text, Tooltip, makeStyles, tokens } from '@fluentui/react-components';
 import { Attach20Regular } from '@fluentui/react-icons';
-import { RecipientField, BodyEditor, AttachmentList, validateLocalAttachmentFile } from '../../EmailComposer';
+import {
+  RecipientField,
+  BodyEditor,
+  AttachmentList,
+  InternalOnlySwitch,
+  validateLocalAttachmentFile,
+} from '../../EmailComposer';
 import { SendCommunicationError } from '../../../services/communicationApi';
 import type { IRecipient, IAttachmentItem, EmailComposerBodyFormat } from '../../EmailComposer';
 import type { ILookupItem } from '../../../types/LookupTypes';
@@ -63,6 +69,11 @@ export interface ITimelineSendPayload {
   body: string;
   bodyFormat: EmailComposerBodyFormat;
   attachmentDocumentIds: string[];
+  /**
+   * "Internal Only" switch (task 068; owner 2026-10-14) - always an explicit boolean, never omitted. `true` when
+   * the user switched it on, or when the host marked the target thread Private (`threadIsPrivate`).
+   */
+  isInternalOnly: boolean;
 }
 
 export interface ITimelineComposeBoxProps {
@@ -74,6 +85,12 @@ export interface ITimelineComposeBoxProps {
   onSend: (payload: ITimelineSendPayload) => Promise<void>;
   onSearchRecipients?: (query: string) => Promise<ILookupItem[]>;
   disabled?: boolean;
+  /**
+   * The target thread is KNOWN to be Private: the "Internal Only" switch shows on and disabled, and every send
+   * carries `isInternalOnly: true`. Pass it only when the host already holds the thread's privacy (the BFF floor,
+   * task 065, covers a Private/unknown thread regardless) - never read it from Dataverse just for this.
+   */
+  threadIsPrivate?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -100,6 +117,10 @@ const useStyles = makeStyles({
     justifyContent: 'flex-end',
     gap: tokens.spacingHorizontalS,
   },
+  // The "Internal Only" switch sits at the start of the actions row; Send stays at the end.
+  internalOnly: {
+    marginInlineEnd: 'auto',
+  },
   errorText: {
     color: tokens.colorPaletteRedForeground1,
   },
@@ -120,6 +141,7 @@ export const TimelineComposeBox: React.FC<ITimelineComposeBoxProps> = ({
   onSend,
   onSearchRecipients,
   disabled,
+  threadIsPrivate,
 }) => {
   const styles = useStyles();
 
@@ -130,6 +152,10 @@ export const TimelineComposeBox: React.FC<ITimelineComposeBoxProps> = ({
   const [body, setBody] = React.useState(prefill?.body ?? '');
   const [bodyFormat, setBodyFormat] = React.useState<EmailComposerBodyFormat>(prefill?.bodyFormat ?? 'HTML');
   const [attachments, setAttachments] = React.useState<IAttachmentItem[]>([]);
+  // "Internal Only" (task 068): off by default; the host's `prefill.isInternalOnly` starts it on (reply to an
+  // internal item). It returns to that starting value after each send - a new message is off unless the host
+  // says otherwise. A Private thread (`threadIsPrivate`) overrides it: shown on + disabled, sent as true.
+  const [internalOnly, setInternalOnly] = React.useState<boolean>(prefill?.isInternalOnly ?? false);
   const [error, setError] = React.useState<string | undefined>();
   // Local-file picker (owner UAT 2026-07-24: AttachmentList is now display-only — each host
   // owns its add affordance). CHAT-ATTACHMENT-POLICY gate before an item enters state.
@@ -166,13 +192,15 @@ export const TimelineComposeBox: React.FC<ITimelineComposeBoxProps> = ({
   const prefillBody = prefill?.body;
   const prefillFormat = prefill?.bodyFormat;
   const prefillToKey = prefill?.to?.join(',');
+  const prefillInternalOnly = prefill?.isInternalOnly;
   React.useEffect(() => {
     if (prefillSubject !== undefined) setSubject(prefillSubject);
     if (prefillBody !== undefined) setBody(prefillBody);
     if (prefillFormat !== undefined) setBodyFormat(prefillFormat);
     if (prefillToKey !== undefined) setTo(toRecipients(prefill?.to));
+    if (prefillInternalOnly !== undefined) setInternalOnly(prefillInternalOnly);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prefillSubject, prefillBody, prefillFormat, prefillToKey]);
+  }, [prefillSubject, prefillBody, prefillFormat, prefillToKey, prefillInternalOnly]);
 
   const defaultToKey = defaultTo?.join(',');
   React.useEffect(() => {
@@ -212,9 +240,11 @@ export const TimelineComposeBox: React.FC<ITimelineComposeBoxProps> = ({
         body,
         bodyFormat,
         attachmentDocumentIds,
+        isInternalOnly: threadIsPrivate === true || internalOnly,
       });
       setBody('');
       setAttachments([]);
+      setInternalOnly(prefillInternalOnly ?? false);
       // `to`/`cc`/`bcc`/`subject` are intentionally NOT cleared after send —
       // mirrors the existing `to` behavior (a reply box keeps its recipients
       // and topic for the next message in the same conversation).
@@ -229,7 +259,7 @@ export const TimelineComposeBox: React.FC<ITimelineComposeBoxProps> = ({
             : 'Failed to send message.'
       );
     }
-  }, [to, cc, bcc, subject, body, bodyFormat, attachments, onSend]);
+  }, [to, cc, bcc, subject, body, bodyFormat, attachments, internalOnly, threadIsPrivate, prefillInternalOnly, onSend]);
 
   return (
     <div className={styles.wrapper} role="region" aria-label="Compose message">
@@ -309,6 +339,14 @@ export const TimelineComposeBox: React.FC<ITimelineComposeBoxProps> = ({
         </Text>
       )}
       <div className={styles.actionsRow}>
+        <div className={styles.internalOnly}>
+          <InternalOnlySwitch
+            checked={internalOnly}
+            locked={threadIsPrivate === true}
+            disabled={disabled || isSending}
+            onChange={setInternalOnly}
+          />
+        </div>
         {isSending && <Spinner size="tiny" label="Sending..." />}
         <Button appearance="primary" onClick={() => void handleSend()} disabled={!canSend}>
           Send

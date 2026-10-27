@@ -193,6 +193,24 @@ public class NoAccessEnforcementStoreTests
             .And.NotContain(c => c.Contains("reason", StringComparison.OrdinalIgnoreCase));
     }
 
+    // ── A failed read's log level (#2121 round 1, F2) ────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task PrincipalRights_ANonSuccess_IsLoggedAtError_ByDefault_TheEnforcersLevel()
+    {
+        // The enforcer's reads (NoAccessShareEnforcer) pass no level, so a failed RetrievePrincipalAccess stays an Error
+        // there. The REAL store over a stub transport answering 500.
+        var log = new AccessibleRecordSetServiceTests.CapturingLogger<NoAccessEnforcementStore>();
+        var store = AccessibleRecordSetServiceTests.RealStoreAnswering(System.Net.HttpStatusCode.InternalServerError, log);
+
+        var act = () => store.GetPrincipalRightsAsync(Guid.NewGuid(), "sprk_matters", Record, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<HttpRequestException>()).Which.StatusCode
+            .Should().Be(System.Net.HttpStatusCode.InternalServerError);
+        log.Entries.Should().Contain(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Error
+                                          && e.Message.Contains("Dataverse read FAILED"));
+    }
+
     /// <summary>The PRODUCTION store with only its two wire queries answered from memory.</summary>
     private sealed class RecordingStore : NoAccessEnforcementStore
     {

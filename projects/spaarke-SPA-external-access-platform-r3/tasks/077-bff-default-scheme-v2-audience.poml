@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="077" project="spaarke-SPA-external-access-platform-r3">
+  <metadata>
+    <title>BFF default scheme accepts the bare app-id audience (v2 access tokens) so the BFF app can switch to requestedAccessTokenVersion 2</title>
+    <phase>4b A9 workforce home sign-in</phase>
+    <gate>before 059 stage B (the v2 switch)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags bff-api, auth; changes which tokens the default (workforce) scheme admits</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Inbound token validation on the scheme every workforce surface uses (tags auth, security)</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>AuthorizationModule.cs is shared with the WorkforceHome scheme (045) and the CIAM guard (010)</parallel-reason>
+    <deps>045</deps>
+    <tags>bff-api, auth, security, testing</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Make the default (workforce) JwtBearer scheme accept the BFF app's audience in both forms, the bare app id (v2 access tokens) and api://{appId} (v1), derived from AzureAd:ClientId, without widening anything else. Two adversarial review passes.</prompt>
+  <role>SPAARKE platform developer. ASP.NET Core authentication and Microsoft.Identity.Web expert. Follow ADRs strictly.</role>
+  <goal>After the dev BFF app (1e40baad) switches to requestedAccessTokenVersion 2 (task 059 stage B), every existing workforce surface keeps working: a Spaarke-tenant v2 token with aud = the bare app id gets the same result as today's v1 token with aud = api://{appId}. The guest-token link (SpaarkeGuestTokenValidator, which clones the default scheme's parameters) accepts the v2 guest token. No other tenant, issuer or audience becomes acceptable.</goal>
+
+  <context>
+    <background>Task 059 stage R (2026-10-19) found 1e40baad on v1 tokens (requestedAccessTokenVersion null). ADR-028 A9 requires 2 (ADR-028 line ~612 "MUST make each customer's BFF API app multitenant, with requestedAccessTokenVersion = 2"), and the WorkforceHome scheme requires a v2 issuer, so the switch is needed. Switching makes aud the bare app id for EVERY caller. Probe 2026-10-19 (temporary theory in AuthorizationModuleCiamTests, removed): a token with aud = bare WorkforceBffClientId returns 401 on the default scheme for both the v2 and v1 issuer; api://{id} returns 200. Cause: AzureAd:Audience = api://{id} becomes ValidAudience, the Copilot PostConfigure merges it with AgentToken:CopilotAudience into ValidAudiences, and nothing adds the bare id. The App Service settings AzureAd__ValidAudiences__0..2 exist on dev but no code reads them. The Copilot merge delegate runs once per process (_jwtPostConfigureApplied) and only when AgentToken:CopilotAudience is set, so the new audience must NOT be added inside it. Claim-shape reads were checked and need no change (record §11 S-1): unique_name is the last fallback after upn/preferred_username; appid reads fall back to azp or are logging only; CallerIdentity reads azp; WorkforceIdentityOptions accepts both issuer forms. Owner decision 2026-10-19: "S-1: follow recommended" (this task first, then the v2 switch in 059 stage B), and ship it in the next dev BFF deploy with UAC #2102 and ontology 042b.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AuthorizationModule.cs (a new PostConfigure on JwtBearerDefaults.AuthenticationScheme, outside the once-flag delegate; reuse BuildCiamValidAudiences)</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/DI/AuthorizationModuleCiamTests.cs (harness and new default-scheme cases)</file>
+      <file role="modify">tests/integration/auth/ExternalAccess/SpaarkeGuestTokenValidatorTests.cs (v2 guest token case), only if it builds the parameters from the real default scheme; otherwise record why not</file>
+      <file role="canonical-reference">AuthorizationModule.cs AddJwtBearer(AuthSchemes.Ciam ...) — ValidAudiences = BuildCiamValidAudiences(...)</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>The Copilot PostConfigure already merges audiences into the default scheme; BuildCiamValidAudiences already derives both forms for the Ciam and WorkforceHome schemes.</existing>
+    <extension>This adds the same two-form derivation to the default scheme with the existing helper; it cannot live in the Copilot delegate because that runs once per process and only when the Copilot audience is configured.</extension>
+    <cost-of-doing-nothing>The ADR-required v2 switch on the BFF app would return 401 to every dev workforce surface (PCFs, Console, Office add-in, A8 SPA, guest-token link), so A9 cannot be enabled on dev or on any stamp provisioned with tokenVersion 2.</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="ADR-028 A9">Only the audience changes. Issuer validation, the tenant, signing keys, the CIAM guard (FR-23), the WorkforceHome scheme and every policy stay as they are.</constraint>
+    <constraint source="design">Derive both forms from AzureAd:ClientId only (BuildCiamValidAudiences). Unset or blank ClientId adds nothing (no "api://" alone). Do not read AzureAd:ValidAudiences or any new setting.</constraint>
+    <constraint source="design">Merge, never replace: keep ValidAudience (AzureAd:Audience), any ValidAudiences already set, and the Copilot audience. Set the merged set as ValidAudiences and clear ValidAudience, as the Copilot delegate does. Idempotent per options instance (running twice gives the same set), and applies to EVERY default-scheme options instance, not once per process.</constraint>
+    <constraint source="SpaarkeGuestTokenValidator">The guest link keeps its own stamp-audience check (BuildCiamValidAudiences(stamp app id)) and still refuses the Copilot audience; no change there.</constraint>
+    <constraint source="CLAUDE.md §10">BFF hygiene: placement (inbound auth config for the BFF's own scheme, in AuthorizationModule next to the existing merge), no new package, publish-size delta against a fresh master build, tests.</constraint>
+    <constraint source="CLAUDE.md §9 / owner">No live change in this task. The v2 switch is task 059 stage B and needs its own owner approval; the deploy is the shared dev BFF deploy round with fresh owner approval.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r3/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r3/notes/a9-bff-design.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r3/notes/task-059-dev-setup-record.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load knowledge; /conflict-check (BFF hot path); declare rigor/tier.</step>
+    <step order="1">Write the tests in acceptance criteria; confirm the positive v2 cases fail (401) before the change.</step>
+    <step order="2">Add the PostConfigure; keep the Copilot delegate unchanged.</step>
+    <step order="3">Seeding proof: register the new audiences inside the once-flag delegate instead → the second-host test fails. Restore; record.</step>
+    <step order="4">Build, test (the auth unit tests, guest-validator tests, ArchTests), publish-size delta, notes/task-077-notes.md; two adversarial passes; fix F-class; status, TASK-INDEX, drift check.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any existing test shows that a non-Spaarke tenant, a CIAM token, or an app-only token becomes acceptable on the default scheme, STOP and escalate.</trigger>
+    <trigger>If Microsoft.Identity.Web installs its own AudienceValidator on the default scheme (so ValidAudiences is ignored), STOP and escalate with the evidence.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AuthorizationModule.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/DI/AuthorizationModuleCiamTests.cs</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r3/notes/task-077-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Spaarke-tenant token, aud = bare AzureAd:ClientId, v2 issuer (ver 2.0) → 200 on the default scheme; the same with the v1 issuer → 200.</criterion>
+    <criterion testable="true">Unchanged: aud = api://{ClientId} (v1 and v2 issuer) → 200; Copilot audience → 200.</criterion>
+    <criterion testable="true">Negative: aud = another app's bare GUID, or api://{another GUID} → 401.</criterion>
+    <criterion testable="true">Negative: CIAM issuer, or tid = Ciam:TenantId, with aud = the bare ClientId → 401 (FR-23 guard unaffected).</criterion>
+    <criterion testable="true">AzureAd:ClientId unset or blank → no bare-id or "api://" entry is added; a token with aud = "api://" → 401.</criterion>
+    <criterion testable="true">Two hosts built in one process both accept the bare id (not tied to the once-per-process flag); seeding proof recorded.</criterion>
+    <criterion testable="true">The default scheme's issuer validation, issuer signing-key validation and lifetime settings are identical before and after the change (asserted on the resolved options).</criterion>
+    <criterion testable="true">SpaarkeGuestTokenValidator: a v2 Spaarke-tenant guest token with aud = the bare stamp app id passes the parameter validation; one with the Copilot audience is still refused.</criterion>
+    <criterion testable="true">Existing AuthorizationModuleCiamTests, AuthorizationModuleWorkforceHomeTests, SpaarkeGuestTokenValidatorTests, ExternalWorkforceLinkEndpointsTests and ArchTests pass.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Origin: 059 stage R, stop S-1 (record §11). Ships in the next dev BFF deploy with UAC #2102 (947d98e31) and ontology 042b (30324eeac), owner-approved in scope 2026-10-19; the deploy itself still runs the full coordination round and gets fresh owner approval. Two adversarial passes.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

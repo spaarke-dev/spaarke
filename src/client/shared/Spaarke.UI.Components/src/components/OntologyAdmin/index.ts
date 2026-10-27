@@ -9,3 +9,5 @@ export * from './Classification';
 // Rules area (task 100; FR-57): the host builds the service from its authenticated fetch and passes `<RulesArea>` as the tab's `rules` slot.
 export { RulesArea, createOntologyRulesService, ONTOLOGY_ADMIN_RULES_ROUTE } from './Rules';
 export type { OntologyRulesService, OntologyRulesServiceOptions, RulesAreaProps } from './Rules';
+// Rule wizard (task 102; D-22, D-149): the authoring service the host builds from its authenticated fetch and passes to `<RulesArea authoringService>`.
+export * from './RuleWizard';

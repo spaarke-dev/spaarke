@@ -60,6 +60,20 @@ public static class ToolFrameworkExtensions
         // anti-pattern (CLAUDE.md 10 F.1). Idempotent, same posture as TimeProvider above.
         services.AddCoreAncestorResolver();
 
+        // spaarke-SPA-external-access-platform-r3 task 078 (ISS-010) - the generic dataverse.read_query /
+        // search_data / describe handlers decide whether the caller is external (request principal ->
+        // ICallerSystemUserResolver -> ISystemUserIdentityResolver.IsExternalAsync). The handlers are
+        // registered by the assembly scan below, so the accessor and the caller resolver are registered
+        // HERE too, idempotently (AddHttpContextAccessor is a TryAdd; TryAddScoped never clobbers the
+        // CommunicationModule / AnalysisServicesModule registration) - CLAUDE.md 10 F.1, same posture as
+        // above. ISystemUserIdentityResolver is NOT registered here: NotificationsModule registers it
+        // unconditionally from Program.cs (before the AI module composes this framework), and its own
+        // dependencies (IDataverseService, IDistributedCache) belong to GraphModule / CacheModule, not to
+        // this framework - the same documented posture as CommunicationModule's caller-resolver note.
+        services.AddHttpContextAccessor();
+        services.TryAddScoped<Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver,
+                              Sprk.Bff.Api.Services.Ai.Context.CallerSystemUserResolver>();
+
         // Discover and register all tool handlers from this assembly
         services.AddToolHandlersFromAssembly(Assembly.GetExecutingAssembly());
 
@@ -106,6 +120,20 @@ public static class ToolFrameworkExtensions
         // the tool framework is composed without that module - the asymmetric-registration
         // anti-pattern (CLAUDE.md 10 F.1). Idempotent, same posture as TimeProvider above.
         services.AddCoreAncestorResolver();
+
+        // spaarke-SPA-external-access-platform-r3 task 078 (ISS-010) - the generic dataverse.read_query /
+        // search_data / describe handlers decide whether the caller is external (request principal ->
+        // ICallerSystemUserResolver -> ISystemUserIdentityResolver.IsExternalAsync). The handlers are
+        // registered by the assembly scan below, so the accessor and the caller resolver are registered
+        // HERE too, idempotently (AddHttpContextAccessor is a TryAdd; TryAddScoped never clobbers the
+        // CommunicationModule / AnalysisServicesModule registration) - CLAUDE.md 10 F.1, same posture as
+        // above. ISystemUserIdentityResolver is NOT registered here: NotificationsModule registers it
+        // unconditionally from Program.cs (before the AI module composes this framework), and its own
+        // dependencies (IDataverseService, IDistributedCache) belong to GraphModule / CacheModule, not to
+        // this framework - the same documented posture as CommunicationModule's caller-resolver note.
+        services.AddHttpContextAccessor();
+        services.TryAddScoped<Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver,
+                              Sprk.Bff.Api.Services.Ai.Context.CallerSystemUserResolver>();
 
         // Discover and register all tool handlers from this assembly
         services.AddToolHandlersFromAssembly(Assembly.GetExecutingAssembly());

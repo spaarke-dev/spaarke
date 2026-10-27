@@ -22,7 +22,8 @@ namespace Sprk.Bff.Api.Infrastructure.Dataverse;
 /// <para><b>Clauses</b> (task 144 retargeted 2 and 3 and added 2b and 4):
 /// <list type="number">
 ///   <item>No <b>non-administrator human</b> principal holds Read on a secure root table (project, matter, work
-///   assignment) at a depth that reaches the secure BU.</item>
+///   assignment) — or on any other table of the codified set (<see cref="GuardedChildTables"/>, UAC 2026-10-23) — at
+///   a depth that reaches the secure BU.</item>
 ///   <item>The secure BU's NAMED owner team (<c>SecureRecord:OwnerTeamName</c>) resolves to exactly one non-default
 ///   Owner team (2b), and has <b>zero members of any kind</b> — it owns every secure record, so any member, human or
 ///   application user, reads all of them by ownership.</item>
@@ -62,6 +63,33 @@ public static class SecureBuRoleDepthAssertion
         "prvReadsprk_WorkAssignment"
     };
 
+    /// <summary>
+    /// The codified-set tables clause 1 guards IN ADDITION to the three roots: every table of
+    /// <paramref name="ownerRoleSet"/> whose Read privilege is not one of <see cref="GuardedPrivileges"/>, in file order.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>UAC 2026-10-23: child tables of the codified set (ontology #1911 review K1).</b> Every table in
+    /// <c>config/secure-record-owner-role.json</c> is one whose secure rows the named owner team owns inside the secure
+    /// BU — that is why the owner role must hold Read on it (clause 5). Read on such a table at a depth that reaches the
+    /// secure BU therefore discloses its secure rows exactly as Read on a root does, so clause 1 guards it too. The list
+    /// is DERIVED from the one loader (<see cref="SecureRecordOwnerRoleSet"/>), never copied: a table added to the file
+    /// is guarded on the next run.</para>
+    ///
+    /// <para><b>Roots are excluded case-insensitively, looked up exactly.</b> The file lists the three roots too
+    /// (<c>kind: root</c>); they stay guarded under their names above. Excluding them case-insensitively means a
+    /// mis-cased root entry cannot become a second, never-matching "child". The census builder looks a child up under
+    /// the name the environment returned, matched to the file's case-insensitively, so a mis-cased child entry is still
+    /// guarded; a codified privilege the environment lacks is already a clause-5 finding.</para>
+    /// </remarks>
+    public static IReadOnlyList<SecureRecordOwnerRoleTable> GuardedChildTables(SecureRecordOwnerRoleSet ownerRoleSet)
+    {
+        ArgumentNullException.ThrowIfNull(ownerRoleSet);
+
+        return ownerRoleSet.Tables
+            .Where(table => !GuardedPrivileges.Contains(table.PrivilegeName, StringComparer.OrdinalIgnoreCase))
+            .ToArray();
+    }
+
     /// <summary>The role that legitimately anchors ownership inside the secure BU (design §5.1a).</summary>
     public const string SecureOwnerRoleName = "Secure Record Owner";
 
@@ -86,6 +114,38 @@ public static class SecureBuRoleDepthAssertion
     {
         "System Administrator",
         "System Customizer"
+    };
+
+    /// <summary>
+    /// The pinned OWNER-ACCEPTED role exceptions: a named role's Read on named codified tables that reaches the secure BU
+    /// by design. A match is reported as an accepted exception (<see cref="SecureBuAssertionOutcome.AcceptedExceptions"/>),
+    /// not as a clause-1 finding, so it changes neither the verdict nor the census status.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>This is an exception register, NOT an administrative allow-list.</b> Unlike
+    /// <see cref="AdministrativeRoleAllowList"/>, which exempts a role wholesale, an entry here exempts exactly the listed
+    /// privileges of the listed role (both matched case-insensitively), each under the owner decision that accepted it.
+    /// Any other privilege of the same role that reaches the secure BU stays an ordinary finding, and so does the same
+    /// privilege held through any other role.</para>
+    ///
+    /// <para><b>Direct assignment only</b> — the reasoning of the administrative allow-list: the decision accepts a
+    /// deliberate per-identity holder. The same role held through a TEAM promotes every current and future member (a
+    /// default business-unit team cannot be curated), so it is not excepted and stays the ordinary finding.</para>
+    ///
+    /// <para><b>Visible, not silent.</b> Every match is returned on the outcome and logged by
+    /// <c>SecureRecordIsolationCensusJob</c> at Information on every run. Adding to this list requires editing this file
+    /// and citing the owner decision.</para>
+    /// </remarks>
+    public static readonly IReadOnlyList<AcceptedRoleException> AcceptedRoleExceptions = new[]
+    {
+        new AcceptedRoleException(
+            "Spaarke Billing Administrator",
+            new[] { "prvReadsprk_Policy", "prvReadsprk_PolicyVersion" },
+            "EB-D-150 (ebilling, owner 2026-10-26)"),
+        new AcceptedRoleException(
+            "Spaarke AI Analysis Admin",
+            new[] { "prvReadsprk_analysis", "prvReadsprk_analysisoutput" },
+            "UAC owner round 127 (2026-10-26)")
     };
 
     /// <summary>The loud not-run message for the default business-unit name.</summary>
@@ -160,8 +220,10 @@ public static class SecureBuRoleDepthAssertion
         // A census with no depth grants at all means the QUERY is wrong, not that the environment is
         // safe: prvReadsprk_Project is held by System Administrator in every environment that has the
         // entity. Refusing to render a verdict stops a mistyped privilege name from presenting as a
-        // clean bill of health — the same guard as the NFR-04 canary's vacuous baseline.
-        if (census.Grants.Count == 0)
+        // clean bill of health — the same guard as the NFR-04 canary's vacuous baseline. It counts ROOT grants only
+        // (UAC 2026-10-23): child-table grants joined the census then, and must not stand in for a root read that
+        // returned nothing.
+        if (!census.Grants.Any(grant => grant.CodifiedChildTable is null))
         {
             return new SecureBuAssertionOutcome(new[]
             {
@@ -178,13 +240,16 @@ public static class SecureBuRoleDepthAssertion
         }
 
         var findings = new List<SecureBuFinding>();
-        findings.AddRange(EvaluateDepthClause(census, secureBu));
+        var acceptedExceptions = new List<SecureBuAcceptedException>();
+
+        // AddRange enumerates the clause in full, which is what fills acceptedExceptions.
+        findings.AddRange(EvaluateDepthClause(census, secureBu, acceptedExceptions));
         findings.AddRange(EvaluateNoUserBusinessUnitClause(census, secureBu));
         findings.AddRange(EvaluateOwnerTeamClause(census, secureBu));
         findings.AddRange(EvaluateOwnerRoleContainmentClause(census));
         findings.AddRange(EvaluateOwnerRoleCoverageClause(census));
 
-        return new SecureBuAssertionOutcome(findings);
+        return new SecureBuAssertionOutcome(findings) { AcceptedExceptions = acceptedExceptions };
     }
 
     /// <summary>
@@ -271,10 +336,29 @@ public static class SecureBuRoleDepthAssertion
     }
 
     /// <summary>Clause 1 — the load-bearing one. Nothing else here would have caught the §5.2 hole.</summary>
+    /// <remarks>
+    /// A grant of a codified CHILD table's Read (<see cref="EffectiveGrant.CodifiedChildTable"/>, UAC 2026-10-23) is
+    /// graded by exactly the same rules — same reach, same allow-list, same verdict and severity, because its secure rows
+    /// are disclosed the same way. Child-table reaches are AGGREGATED: one finding per principal, role, anchor BU,
+    /// team path and depth, listing every codified child table that grant reaches (sorted), so one broad role does not
+    /// emit a line per table on every run. Root findings stay one per root privilege, worded as before — the control
+    /// plane parses the verdict.
+    /// <para>A human's DIRECTLY held grant matching <see cref="AcceptedRoleExceptions"/> is not a finding: it is added to
+    /// <paramref name="acceptedExceptions"/>, aggregated the same way (one entry per principal, role, anchor BU and depth,
+    /// listing its privileges), once this iterator has been enumerated to the end.</para>
+    /// </remarks>
     private static IEnumerable<SecureBuFinding> EvaluateDepthClause(
         SecureBuRoleDepthCensus census,
-        BusinessUnitNode secureBu)
+        BusinessUnitNode secureBu,
+        ICollection<SecureBuAcceptedException> acceptedExceptions)
     {
+        var childReaches = new Dictionary<ChildReachKey, SortedSet<string>>();
+        var childReachOrder = new List<ChildReachKey>();
+        var accepted = new Dictionary<AcceptedReachKey, (SortedSet<string> Privileges, SortedSet<string> Tables)>();
+        var acceptedOrder = new List<AcceptedReachKey>();
+        var businessUnitsById = BusinessUnitsById(census.BusinessUnits);
+        var directAdministrativeReach = DirectAdministrativeReach(census, secureBu, businessUnitsById);
+
         foreach (var grant in census.Grants)
         {
             if (!grant.PrincipalIsHuman)
@@ -284,7 +368,7 @@ public static class SecureBuRoleDepthAssertion
                 continue;
             }
 
-            if (!Reaches(grant.Depth, grant.AnchorBusinessUnitId, secureBu.Id, census.BusinessUnits))
+            if (!Reaches(grant.Depth, grant.AnchorBusinessUnitId, secureBu.Id, businessUnitsById))
             {
                 continue;
             }
@@ -297,10 +381,57 @@ public static class SecureBuRoleDepthAssertion
                 continue; // A deliberate per-identity administrator. The accepted exception.
             }
 
+            if (!administrative && directAdministrativeReach.Contains((grant.PrincipalId, grant.PrivilegeName)))
+            {
+                // #2131: the same identity holds an allow-listed administrative role BY DIRECT ASSIGNMENT, and that role
+                // already reaches the secure BU on this privilege: the accepted per-identity exception. This grant confers
+                // nothing it does not already hold, and reporting it labelled a designated administrator "a
+                // non-administrator human". A team-held administrative role is not a designation, so it exempts nothing.
+                continue;
+            }
+
             if (administrative && HoldsTheSameRoleDirectly(census, grant))
             {
                 // The identity is independently a designated administrator; the team path confers
                 // nothing it does not already hold.
+                continue;
+            }
+
+            if (AcceptedExceptionFor(grant) is { } exception)
+            {
+                // Owner-accepted (see AcceptedRoleExceptions): reported beside the findings, never as one.
+                var key = new AcceptedReachKey(
+                    grant.PrincipalId, grant.RoleName, grant.AnchorBusinessUnitId, grant.Depth, exception.DecisionId);
+                if (!accepted.TryGetValue(key, out var entry))
+                {
+                    entry = (new SortedSet<string>(StringComparer.Ordinal), new SortedSet<string>(StringComparer.Ordinal));
+                    accepted[key] = entry;
+                    acceptedOrder.Add(key);
+                }
+
+                entry.Privileges.Add(grant.PrivilegeName);
+                if (grant.CodifiedChildTable is { } exceptedTable)
+                {
+                    entry.Tables.Add(exceptedTable);
+                }
+
+                continue;
+            }
+
+            if (grant.CodifiedChildTable is { } childTable)
+            {
+                // UAC 2026-10-23: collected, then reported once per grant shape below (see remarks).
+                var key = new ChildReachKey(
+                    administrative, grant.PrincipalId, grant.RoleName, grant.AnchorBusinessUnitId, grant.HeldViaTeam,
+                    grant.Depth);
+                if (!childReaches.TryGetValue(key, out var tables))
+                {
+                    tables = new SortedSet<string>(StringComparer.Ordinal);
+                    childReaches[key] = tables;
+                    childReachOrder.Add(key);
+                }
+
+                tables.Add(childTable);
                 continue;
             }
 
@@ -312,45 +443,124 @@ public static class SecureBuRoleDepthAssertion
                 // it silently promotes every current AND future member.
                 yield return new SecureBuFinding(
                     SecureBuVerdict.AdministrativeRoleHeldByTeam,
-                    $"'{grant.PrincipalName}' ({grant.PrincipalDomainName ?? "no domain"}) reaches the "
+                    $"systemuser {grant.PrincipalId} reaches the "
                         + $"secure business unit '{secureBu.Name}' through the ALLOW-LISTED administrative "
                         + $"role '{grant.RoleName}' ({grant.PrivilegeName} @ {grant.Depth}, anchored at BU "
                         + $"{grant.AnchorBusinessUnitId}) — but holds it via team '{grant.HeldViaTeam}', "
-                        + "not by direct assignment. The allow-list exempts a DELIBERATE per-identity "
-                        + "administrator; a role on a team promotes every current and future member at "
-                        + "once, and a default business-unit owner team's membership is platform-managed "
-                        + "and cannot be curated. Either assign the administrative role directly to the "
-                        + "identities that should hold it, or remove it from the team.");
+                        + AdministrativeTeamRemedy);
                 continue;
             }
 
             yield return new SecureBuFinding(
                 SecureBuVerdict.HumanPrincipalReachesSecureBusinessUnit,
-                $"SECURE PROJECTS ARE NOT ISOLATED: '{grant.PrincipalName}' "
-                    + $"({grant.PrincipalDomainName ?? "no domain"}) — a non-administrator human — holds "
+                $"SECURE PROJECTS ARE NOT ISOLATED: systemuser {grant.PrincipalId} "
+                    + "— a non-administrator human — holds "
                     + $"'{grant.RoleName}' granting {grant.PrivilegeName} at {grant.Depth} depth anchored "
                     + $"at business unit {grant.AnchorBusinessUnitId}"
                     + (grant.HeldViaTeam is null ? string.Empty : $" (via team '{grant.HeldViaTeam}')")
                     + $", which REACHES '{secureBu.Name}' ({secureBu.Id}). Every secure record of that type is "
-                    + "readable by this principal, with no error and no log line. Fix per design §5.2: "
-                    + "move the principal (or the team) into a subtree that is not an ancestor of the "
-                    + "secure BU, or narrow the depth. This is a MERGE GATE (spec NFR-05).");
+                    + "readable by this principal, with no error and no log line. " + HumanReachRemedy);
+        }
+
+        foreach (var key in acceptedOrder)
+        {
+            var (privileges, tables) = accepted[key];
+            acceptedExceptions.Add(new SecureBuAcceptedException(
+                key.PrincipalId, key.RoleName, privileges.ToArray(), tables.ToArray(), key.Depth,
+                key.AnchorBusinessUnitId, key.DecisionId));
+        }
+
+        foreach (var key in childReachOrder)
+        {
+            var tables = string.Join(", ", childReaches[key]);
+
+            if (key.Administrative)
+            {
+                yield return new SecureBuFinding(
+                    SecureBuVerdict.AdministrativeRoleHeldByTeam,
+                    $"systemuser {key.PrincipalId} reaches the "
+                        + $"secure business unit '{secureBu.Name}' through the ALLOW-LISTED administrative "
+                        + $"role '{key.RoleName}' (Read @ {key.Depth} on codified child tables {tables}, anchored at "
+                        + $"BU {key.AnchorBusinessUnitId}) — but holds it via team '{key.HeldViaTeam}', "
+                        + AdministrativeTeamRemedy);
+                continue;
+            }
+
+            yield return new SecureBuFinding(
+                SecureBuVerdict.HumanPrincipalReachesSecureBusinessUnit,
+                $"SECURE CHILD RECORDS ARE NOT ISOLATED (codified child tables {tables}): systemuser "
+                    + $"{key.PrincipalId} — a non-administrator human — holds '{key.RoleName}' granting Read on each "
+                    + $"of those tables at {key.Depth} depth anchored at business unit {key.AnchorBusinessUnitId}"
+                    + (key.HeldViaTeam is null ? string.Empty : $" (via team '{key.HeldViaTeam}')")
+                    + $", which REACHES '{secureBu.Name}' ({secureBu.Id}). Every secure record of those tables is "
+                    + "readable by this principal, with no error and no log line. " + HumanReachRemedy);
         }
     }
 
+    private const string AdministrativeTeamRemedy =
+        "not by direct assignment. The allow-list exempts a DELIBERATE per-identity "
+        + "administrator; a role on a team promotes every current and future member at "
+        + "once, and a default business-unit owner team's membership is platform-managed "
+        + "and cannot be curated. Either assign the administrative role directly to the "
+        + "identities that should hold it, or remove it from the team.";
+
+    private const string HumanReachRemedy =
+        "Fix per design §5.2: "
+        + "move the principal (or the team) into a subtree that is not an ancestor of the "
+        + "secure BU, or narrow the depth. This is a MERGE GATE (spec NFR-05).";
+
+    /// <summary>One aggregated child-table reach (UAC 2026-10-23): everything a clause-1 finding names except the tables.</summary>
+    private sealed record ChildReachKey(
+        bool Administrative, Guid PrincipalId, string RoleName, Guid AnchorBusinessUnitId, string? HeldViaTeam,
+        PrivilegeDepth Depth);
+
+    /// <summary>One aggregated owner-accepted reach: everything a <see cref="SecureBuAcceptedException"/> names except the privileges.</summary>
+    private sealed record AcceptedReachKey(
+        Guid PrincipalId, string RoleName, Guid AnchorBusinessUnitId, PrivilegeDepth Depth, string DecisionId);
+
+    /// <summary>
+    /// The <see cref="AcceptedRoleExceptions"/> entry covering <paramref name="grant"/>, or null. Direct assignment only:
+    /// a team-held grant is never excepted. Role and privilege both match case-insensitively.
+    /// </summary>
+    private static AcceptedRoleException? AcceptedExceptionFor(EffectiveGrant grant) =>
+        grant.HeldViaTeam is not null
+            ? null
+            : AcceptedRoleExceptions.FirstOrDefault(exception =>
+                string.Equals(exception.RoleName, grant.RoleName, StringComparison.OrdinalIgnoreCase)
+                && exception.Privileges.Contains(grant.PrivilegeName, StringComparer.OrdinalIgnoreCase));
+
     /// <summary>
     /// Whether the same principal also holds the same role by DIRECT assignment — i.e. whether the
-    /// team-conferred copy is redundant. Identity is matched on domain name where present, because a
-    /// display name is not unique (dev has three enabled <c>Ralph Schroeder</c> identities).
+    /// team-conferred copy is redundant. Identity is matched by systemuser id (<see cref="EffectiveGrant.PrincipalId"/>).
     /// </summary>
     private static bool HoldsTheSameRoleDirectly(SecureBuRoleDepthCensus census, EffectiveGrant grant) =>
         census.Grants.Any(other =>
             other.HeldViaTeam is null
             && string.Equals(other.RoleName, grant.RoleName, StringComparison.OrdinalIgnoreCase)
-            && string.Equals(
-                other.PrincipalDomainName ?? other.PrincipalName,
-                grant.PrincipalDomainName ?? grant.PrincipalName,
-                StringComparison.OrdinalIgnoreCase));
+            && other.PrincipalId == grant.PrincipalId);
+
+    /// <summary>
+    /// #2131: whether the same principal holds an ALLOW-LISTED administrative role by DIRECT assignment whose grant of the
+    /// same privilege itself reaches the secure BU, so a non-administrative grant adds no reach the accepted exception does
+    /// not already cover. An administrative role held only through a team never counts (it is itself a finding), and
+    /// neither does a direct one that does not reach: the holder's other reach is then covered by no exception. Identity is
+    /// the systemuser id, and the exempting grant must itself be held by a human principal: the exception is a human's
+    /// deliberate designation (#2131 round 1).
+    /// </summary>
+    /// <remarks>
+    /// Returned as the set of (systemuser id, privilege) pairs it covers, built once per evaluation and probed per grant
+    /// (UAC 2026-10-23) — the same predicate the per-grant scan applied. Privileges match ordinally.
+    /// </remarks>
+    private static HashSet<(Guid PrincipalId, string Privilege)> DirectAdministrativeReach(
+        SecureBuRoleDepthCensus census, BusinessUnitNode secureBu, IReadOnlyDictionary<Guid, BusinessUnitNode> businessUnitsById) =>
+        census.Grants
+            .Where(other =>
+                other.HeldViaTeam is null
+                && AdministrativeRoleAllowList.Contains(other.RoleName, StringComparer.OrdinalIgnoreCase)
+                && Reaches(other.Depth, other.AnchorBusinessUnitId, secureBu.Id, businessUnitsById)
+                && other.PrincipalIsHuman)
+            .Select(other => (other.PrincipalId, other.PrivilegeName))
+            .ToHashSet();
 
     /// <summary>
     /// Clause 4 (task 144) — the no-user business unit. Every record owned by ANY team in the secure BU has that BU as
@@ -454,22 +664,30 @@ public static class SecureBuRoleDepthAssertion
     {
         ArgumentNullException.ThrowIfNull(businessUnits);
 
-        return depth switch
+        return Reaches(depth, anchorBusinessUnitId, secureBusinessUnitId, BusinessUnitsById(businessUnits));
+    }
+
+    /// <summary>
+    /// <see cref="Reaches(PrivilegeDepth, Guid, Guid, IReadOnlyList{BusinessUnitNode})"/> over a BU index built ONCE per
+    /// evaluation (UAC 2026-10-23: the child tables multiplied the grants, and each call used to rebuild it).
+    /// </summary>
+    private static bool Reaches(
+        PrivilegeDepth depth,
+        Guid anchorBusinessUnitId,
+        Guid secureBusinessUnitId,
+        IReadOnlyDictionary<Guid, BusinessUnitNode> businessUnitsById) =>
+        depth switch
         {
             PrivilegeDepth.Basic => false,
             PrivilegeDepth.Local => anchorBusinessUnitId == secureBusinessUnitId,
             PrivilegeDepth.Deep => anchorBusinessUnitId == secureBusinessUnitId
-                || IsAncestor(anchorBusinessUnitId, secureBusinessUnitId, businessUnits),
+                || IsAncestor(anchorBusinessUnitId, secureBusinessUnitId, businessUnitsById),
             PrivilegeDepth.Global => true,
             _ => true
         };
-    }
 
-    /// <summary>True when <paramref name="candidateAncestorId"/> is a strict ancestor of <paramref name="nodeId"/>.</summary>
-    private static bool IsAncestor(
-        Guid candidateAncestorId,
-        Guid nodeId,
-        IReadOnlyList<BusinessUnitNode> businessUnits)
+    /// <summary>The BU tree indexed by id; a duplicated id keeps the LAST node, as the per-call index did.</summary>
+    private static Dictionary<Guid, BusinessUnitNode> BusinessUnitsById(IReadOnlyList<BusinessUnitNode> businessUnits)
     {
         var byId = new Dictionary<Guid, BusinessUnitNode>();
         foreach (var bu in businessUnits)
@@ -477,6 +695,15 @@ public static class SecureBuRoleDepthAssertion
             byId[bu.Id] = bu;
         }
 
+        return byId;
+    }
+
+    /// <summary>True when <paramref name="candidateAncestorId"/> is a strict ancestor of <paramref name="nodeId"/>.</summary>
+    private static bool IsAncestor(
+        Guid candidateAncestorId,
+        Guid nodeId,
+        IReadOnlyDictionary<Guid, BusinessUnitNode> byId)
+    {
         var seen = new HashSet<Guid>();
         var current = byId.TryGetValue(nodeId, out var start) ? start.ParentId : null;
 
@@ -502,15 +729,19 @@ public static class SecureBuRoleDepthAssertion
 public static class SecureBuRoleDepthCensusBuilder
 {
     /// <summary>
-    /// A human principal: a real, enabled, interactive person. Everything else — application users,
-    /// Microsoft platform accounts (<c>#</c>-prefixed), support and non-interactive access modes,
-    /// disabled users — is the documented Global-read exception for clause 1 (design §5.2). Clauses 2 and 4 count
-    /// EVERY principal regardless.
+    /// A human principal: a real, enabled, interactive person. Everything else — application users (the Microsoft
+    /// platform accounts are application users), support and non-interactive access modes, disabled users — is the
+    /// documented Global-read exception for clause 1 (design §5.2). Clauses 2 and 4 count EVERY principal regardless.
     /// </summary>
-    public static bool IsHumanPrincipal(bool hasApplicationId, bool isDisabled, string fullName, int accessMode) =>
+    /// <remarks>
+    /// #2131: the display name is NOT part of the test. A <c>#</c>-prefixed full name used to exempt the user, but a
+    /// platform account is already marked by its application id or its access mode, and an interactive person can carry
+    /// such a name (dev had three enabled, licensed, access-mode-0 users skipped that way, two of them <c>#EXT#</c>
+    /// guests, all of them reading secure records).
+    /// </remarks>
+    public static bool IsHumanPrincipal(bool hasApplicationId, bool isDisabled, int accessMode) =>
         !hasApplicationId
         && !isDisabled
-        && !fullName.StartsWith('#')
         && accessMode is not 3 and not 4; // 3 = Support User, 4 = Non-interactive.
 
     /// <summary>Builds the census from directory rows.</summary>
@@ -544,11 +775,30 @@ public static class SecureBuRoleDepthCensusBuilder
         var usersById = users.ToDictionary(u => u.Id);
         var grants = new List<EffectiveGrant>();
 
+        // UAC 2026-10-23 (ontology #1911 review K1): clause 1 grades Read on every codified child table as well as the
+        // three roots, so the effective grants carry both. The child list is derived from the codified set, not copied.
+        //
+        // A child table's privilege is looked up under the name the ENVIRONMENT returned, matched case-insensitively to
+        // the file's spelling (privilege names are unique ignoring case): a mis-cased file entry would otherwise never
+        // match the depth map, and clause 1 would stay silent on that table while only clause 5 spoke. Roots keep their
+        // exact names — RequireGuardedPrivilegesResolved already insists on them.
+        var returnedNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var returned in resolvedPrivilegeNames)
+        {
+            returnedNames.TryAdd(returned, returned);
+        }
+
+        var childTables = SecureBuRoleDepthAssertion.GuardedChildTables(ownerRoleSet)
+            .Select(table => (
+                Privilege: returnedNames.TryGetValue(table.PrivilegeName, out var returned) ? returned : table.PrivilegeName,
+                table.LogicalName))
+            .ToArray();
+
         foreach (var user in users)
         {
             foreach (var roleId in user.RoleIds)
             {
-                AddGrants(grants, rolesById, depthByRootRole, roleId, anchorOverride: null, user, heldViaTeam: null);
+                AddGrants(grants, rolesById, depthByRootRole, childTables, roleId, anchorOverride: null, user, heldViaTeam: null);
             }
         }
 
@@ -560,7 +810,7 @@ public static class SecureBuRoleDepthCensusBuilder
                 {
                     if (usersById.TryGetValue(memberId, out var member))
                     {
-                        AddGrants(grants, rolesById, depthByRootRole, roleId, team.BusinessUnitId, member, team.Name);
+                        AddGrants(grants, rolesById, depthByRootRole, childTables, roleId, team.BusinessUnitId, member, team.Name);
                     }
                 }
             }
@@ -591,7 +841,7 @@ public static class SecureBuRoleDepthCensusBuilder
         var ownerRoleHolders = new List<SecureOwnerRoleHolder>();
         foreach (var user in users.Where(u => u.RoleIds.Any(ownerRoleCopyIds.Contains)))
         {
-            ownerRoleHolders.Add(new SecureOwnerRoleHolder($"user '{user.Name}' ({user.DomainName ?? "no domain"})", IsSecureOwnerTeam: false));
+            ownerRoleHolders.Add(new SecureOwnerRoleHolder($"systemuser {user.Id}", IsSecureOwnerTeam: false));
         }
 
         foreach (var team in teams.Where(t => t.RoleIds.Any(ownerRoleCopyIds.Contains)))
@@ -623,7 +873,7 @@ public static class SecureBuRoleDepthCensusBuilder
 
     /// <summary>
     /// Every privilege a census reader must resolve: the guarded root-table Reads (clause 1) and every privilege of the
-    /// codified set (clause 5). Distinct, in a stable order.
+    /// codified set (clause 5, and clause 1 for its child tables since UAC 2026-10-23). Distinct, in a stable order.
     /// </summary>
     public static IReadOnlyList<string> CensusPrivilegeNames(SecureRecordOwnerRoleSet ownerRoleSet)
     {
@@ -713,14 +963,16 @@ public static class SecureBuRoleDepthCensusBuilder
             return $"systemuser {userId} (not in the user census)";
         }
 
+        // #2130: by id only. A person's display name and domain name (UPN) never enter a finding message.
         var kind = user.IsHuman ? "human" : "non-human/disabled";
-        return $"{user.Name} ({user.DomainName ?? "no domain"}; {kind})";
+        return $"systemuser {user.Id} ({kind})";
     }
 
     private static void AddGrants(
         List<EffectiveGrant> grants,
         IReadOnlyDictionary<Guid, CensusRole> roles,
         IReadOnlyDictionary<(Guid RootRoleId, string Privilege), PrivilegeDepth> depthByRootRole,
+        IReadOnlyList<(string Privilege, string LogicalName)> childTables,
         Guid roleId,
         Guid? anchorOverride,
         CensusUser principal,
@@ -731,7 +983,13 @@ public static class SecureBuRoleDepthCensusBuilder
             return;
         }
 
-        foreach (var privilege in SecureBuRoleDepthAssertion.GuardedPrivileges)
+        // The three roots, then every codified child table (UAC 2026-10-23) — roots by their EXACT name, children by the
+        // name the environment returned (resolved in Build).
+        var guarded = SecureBuRoleDepthAssertion.GuardedPrivileges
+            .Select(privilege => (Privilege: privilege, ChildTable: (string?)null))
+            .Concat(childTables.Select(table => (table.Privilege, ChildTable: (string?)table.LogicalName)));
+
+        foreach (var (privilege, childTable) in guarded)
         {
             if (!depthByRootRole.TryGetValue((role.RootRoleId, privilege), out var depth))
             {
@@ -743,10 +1001,10 @@ public static class SecureBuRoleDepthCensusBuilder
                 privilege,
                 depth,
                 anchorOverride ?? role.BusinessUnitId,
-                principal.Name,
-                principal.DomainName,
+                principal.Id,
                 principal.IsHuman,
-                heldViaTeam));
+                heldViaTeam,
+                childTable));
         }
     }
 }
@@ -754,9 +1012,11 @@ public static class SecureBuRoleDepthCensusBuilder
 /// <summary>One security-role copy. Only the ROOT copy (<c>roleid == parentrootroleid</c>) carries privileges.</summary>
 public sealed record CensusRole(Guid Id, string Name, Guid BusinessUnitId, Guid RootRoleId);
 
-/// <summary>One systemuser, with the role copies assigned to it directly.</summary>
-public sealed record CensusUser(
-    Guid Id, string Name, string? DomainName, bool IsHuman, Guid? BusinessUnitId, IReadOnlyList<Guid> RoleIds);
+/// <summary>
+/// One systemuser, with the role copies assigned to it directly. By id only (#2130): no display name or UPN, so neither
+/// can reach a finding message or the record's generated <c>ToString()</c>.
+/// </summary>
+public sealed record CensusUser(Guid Id, bool IsHuman, Guid? BusinessUnitId, IReadOnlyList<Guid> RoleIds);
 
 /// <summary>One team, with its role copies and its members.</summary>
 public sealed record CensusTeam(
@@ -787,25 +1047,30 @@ public sealed record BusinessUnitNode(Guid Id, string Name, Guid? ParentId);
 /// and team assignment by the census builder.
 /// </summary>
 /// <param name="RoleName">The role's name (shared by every business-unit copy of the role).</param>
-/// <param name="PrivilegeName">One of <see cref="SecureBuRoleDepthAssertion.GuardedPrivileges"/>.</param>
+/// <param name="PrivilegeName">One of <see cref="SecureBuRoleDepthAssertion.GuardedPrivileges"/>, or the Read privilege of
+/// a codified child table (<see cref="SecureBuRoleDepthAssertion.GuardedChildTables"/>).</param>
 /// <param name="Depth">The depth the ROOT role grants; child copies inherit it.</param>
 /// <param name="AnchorBusinessUnitId">The BU the depth is evaluated from — see <c>Reaches</c>.</param>
-/// <param name="PrincipalName">Display name, for the log.</param>
-/// <param name="PrincipalDomainName">UPN, for the log.</param>
+/// <param name="PrincipalId">
+/// The systemuser id: how a finding names the principal, and how two grants are matched to one identity (#2130, #2131).
+/// The record deliberately carries no display name or domain name, so neither can reach a message or its <c>ToString()</c>.
+/// </param>
 /// <param name="PrincipalIsHuman">False for application users, disabled users and platform accounts.</param>
 /// <param name="HeldViaTeam">Team name when held through a team; null for direct user assignment.</param>
+/// <param name="CodifiedChildTable">The codified-set table's logical name when <paramref name="PrivilegeName"/> is a CHILD
+/// table's Read (UAC 2026-10-23); null for one of the three roots. A clause-1 finding names it.</param>
 public sealed record EffectiveGrant(
     string RoleName,
     string PrivilegeName,
     PrivilegeDepth Depth,
     Guid AnchorBusinessUnitId,
-    string PrincipalName,
-    string? PrincipalDomainName,
+    Guid PrincipalId,
     bool PrincipalIsHuman,
-    string? HeldViaTeam);
+    string? HeldViaTeam,
+    string? CodifiedChildTable = null);
 
 /// <summary>A principal holding <see cref="SecureBuRoleDepthAssertion.SecureOwnerRoleName"/>.</summary>
-/// <param name="PrincipalName">Who holds it, for the log.</param>
+/// <param name="PrincipalName">Who holds it, for the log: a team by name, a user by systemuser id only (#2130).</param>
 /// <param name="IsSecureOwnerTeam">True only for the NAMED secure owner team (task 144) — never the default team.</param>
 public sealed record SecureOwnerRoleHolder(string PrincipalName, bool IsSecureOwnerTeam);
 
@@ -813,7 +1078,7 @@ public sealed record SecureOwnerRoleHolder(string PrincipalName, bool IsSecureOw
 /// <param name="SecureBusinessUnitName">The configured Secure Record BU name the census resolved against.</param>
 /// <param name="SecureOwnerTeamName">The configured named owner team.</param>
 /// <param name="BusinessUnits">The BU tree.</param>
-/// <param name="Grants">Every effective grant of a guarded privilege.</param>
+/// <param name="Grants">Every effective grant of a guarded privilege (a root's Read or a codified child table's).</param>
 /// <param name="SecureOwnerRoleHolders">Every holder of the owner role.</param>
 /// <param name="SecureOwnerTeamMatches">How many non-default Owner teams in the secure BU carry the configured name
 /// (across every BU bearing the secure name, when that name is ambiguous).</param>
@@ -897,9 +1162,43 @@ public enum SecureBuVerdict
 /// <summary>One violation, with the operator-actionable message that belongs in the log.</summary>
 public sealed record SecureBuFinding(SecureBuVerdict Verdict, string Message);
 
+/// <summary>One entry of <see cref="SecureBuRoleDepthAssertion.AcceptedRoleExceptions"/>.</summary>
+/// <param name="RoleName">The role, matched case-insensitively.</param>
+/// <param name="Privileges">The Read privileges the owner accepted for that role, matched case-insensitively.</param>
+/// <param name="DecisionId">The owner decision that accepted them.</param>
+public sealed record AcceptedRoleException(string RoleName, IReadOnlyList<string> Privileges, string DecisionId);
+
+/// <summary>
+/// A human's directly held grant that reaches the secure BU under an owner-accepted role exception
+/// (<see cref="SecureBuRoleDepthAssertion.AcceptedRoleExceptions"/>): visible, low severity, NOT a finding. One entry per
+/// principal, role, anchor BU and depth, listing every excepted privilege that grant shape carries.
+/// </summary>
+/// <param name="PrincipalId">The systemuser id — never a name (#2130).</param>
+/// <param name="RoleName">The role as the environment names it.</param>
+/// <param name="Privileges">The excepted privileges, sorted.</param>
+/// <param name="Tables">The codified child tables of those privileges, sorted (empty for a root privilege).</param>
+/// <param name="Depth">The depth the role grants.</param>
+/// <param name="AnchorBusinessUnitId">The business unit the depth is anchored at.</param>
+/// <param name="DecisionId">The owner decision that accepted it.</param>
+public sealed record SecureBuAcceptedException(
+    Guid PrincipalId,
+    string RoleName,
+    IReadOnlyList<string> Privileges,
+    IReadOnlyList<string> Tables,
+    PrivilegeDepth Depth,
+    Guid AnchorBusinessUnitId,
+    string DecisionId);
+
 /// <summary>The assertion's result. Empty findings is the only pass.</summary>
 public sealed record SecureBuAssertionOutcome(IReadOnlyList<SecureBuFinding> Findings)
 {
+    /// <summary>
+    /// Every owner-accepted role exception the census met (<see cref="SecureBuRoleDepthAssertion.AcceptedRoleExceptions"/>).
+    /// Reported beside the findings and never among them: <see cref="Passed"/>, <see cref="Verdict"/> and the census status
+    /// depend on <see cref="Findings"/> alone.
+    /// </summary>
+    public IReadOnlyList<SecureBuAcceptedException> AcceptedExceptions { get; init; } = Array.Empty<SecureBuAcceptedException>();
+
     /// <summary>True only when no clause was violated.</summary>
     public bool Passed => Findings.Count == 0;
 

@@ -244,6 +244,75 @@ public class ChildAccessCascadeTests : IClassFixture<ProvisionProjectTestFixture
     }
 
     /// <summary>
+    /// Task 189 fix round, the "K1 variant" in task 175's shape (the rule is shared): the matter goes Restricted to Standard
+    /// and, before the next run, a user sets the work assignment to Limited. Limited is below the last floor but above the
+    /// live one, so it is the user's own. Compared with the last floor alone, it was put back to Standard. Must not fire
+    /// beside it: an unchanged inherited Restricted follows the matter back to Standard.
+    /// </summary>
+    [Fact]
+    public async Task ALimitedSetAfterTheParentWidened_IsKeptAsTheChildsOwn()
+    {
+        var (matter, child, inherited) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        OrdinaryMatter(matter, Restricted);
+        FiledWorkAssignment(_fixture, child, "sprk_regardingmatter", "sprk_matter", matter);
+        FiledWorkAssignment(_fixture, inherited, "sprk_regardingmatter", "sprk_matter", matter);
+        SetPermission("sprk_workassignment", child, Standard);
+        SetPermission("sprk_workassignment", inherited, Standard);
+        (await _job.RunAsync()).Success.Should().BeTrue();
+        PermissionOf("sprk_workassignment", child).Should().Be(Restricted);
+        RecordOf("sprk_workassignment", child)!.OwnPermission.Should().BeNull("its Restricted is inherited");
+
+        SetPermission("sprk_matter", matter, Standard);
+        SetPermission("sprk_workassignment", child, InheritedAccessPermission.Limited); // a user, before the next run
+        (await _job.RunAsync()).Success.Should().BeTrue();
+
+        PermissionOf("sprk_workassignment", child).Should().Be(InheritedAccessPermission.Limited);
+        RecordOf("sprk_workassignment", child)!.OwnPermission.Should().Be(InheritedAccessPermission.Limited);
+        PermissionOf("sprk_workassignment", inherited).Should().Be(Standard, "an unchanged inherited Restricted follows back");
+
+        SetPermission("sprk_matter", matter, Restricted);
+        (await _job.RunAsync()).Success.Should().BeTrue();
+        SetPermission("sprk_matter", matter, Standard);
+        (await _job.RunAsync()).Success.Should().BeTrue();
+        PermissionOf("sprk_workassignment", child).Should().Be(InheritedAccessPermission.Limited, "it is the child's own");
+        PermissionOf("sprk_workassignment", inherited).Should().Be(Standard);
+    }
+
+    /// <summary>
+    /// Task 189 fix round: this job writes the Access Permission first and its record last. When the record write fails after
+    /// the value followed a LOWER floor, the value holds max(own, live floor) beside the old record. The next run reads that
+    /// as unchanged, so an own Limited hidden under a Restricted floor survives and comes back when the matter loosens.
+    /// </summary>
+    [Fact]
+    public async Task AnOwnLimitedUnderTheFloor_SurvivesARecordWriteThatFailedAsTheFloorDropped()
+    {
+        var (matter, child) = (Guid.NewGuid(), Guid.NewGuid());
+        OrdinaryMatter(matter, Standard);
+        FiledWorkAssignment(_fixture, child, "sprk_regardingmatter", "sprk_matter", matter);
+        SetPermission("sprk_workassignment", child, Standard);
+        (await _job.RunAsync()).Success.Should().BeTrue();
+        SetPermission("sprk_workassignment", child, InheritedAccessPermission.Limited); // a user: its own Limited
+        (await _job.RunAsync()).Success.Should().BeTrue();
+        SetPermission("sprk_matter", matter, Restricted);
+        (await _job.RunAsync()).Success.Should().BeTrue();
+        PermissionOf("sprk_workassignment", child).Should().Be(Restricted);
+
+        SetPermission("sprk_matter", matter, InheritedAccessPermission.Limited);
+        World.RefusingAccessRecordWritesOf(child);
+        (await _job.RunAsync()).Success.Should().BeFalse("the value followed the floor down; its record could not be written");
+        PermissionOf("sprk_workassignment", child).Should().Be(InheritedAccessPermission.Limited);
+        RecordOf("sprk_workassignment", child)!.FloorPermission.Should().Be(Restricted, "the old record is still there");
+
+        World.AcceptingAccessRecordWritesOf(child);
+        (await _job.RunAsync()).Success.Should().BeTrue();
+        RecordOf("sprk_workassignment", child)!.OwnPermission.Should().Be(InheritedAccessPermission.Limited);
+
+        SetPermission("sprk_matter", matter, Standard);
+        (await _job.RunAsync()).Success.Should().BeTrue();
+        PermissionOf("sprk_workassignment", child).Should().Be(InheritedAccessPermission.Limited, "its own Limited was kept");
+    }
+
+    /// <summary>
     /// Round 87 item 5 (verifier F1): a re-file NEVER loosens a child. A work assignment secure and Restricted through secure
     /// matter M, re-filed (a form edit) to ordinary Standard matter N, stays secure and Restricted; both become its own, so a
     /// later loosening of N does not take them either. And a secure parentless work assignment filed under an ordinary matter
@@ -668,6 +737,207 @@ public class ChildAccessCascadeTests : IClassFixture<ProvisionProjectTestFixture
         World.AccessRecordWrites.Should().NotContain(w => w.Id == workAssignment, "the work assignment table is not proven readable");
         World.ValueOf<string>("sprk_workassignment", workAssignment, AccessInheritance.Column).Should().BeNull();
         _fixture.IsSecureOf(workAssignment).Should().BeTrue();
+    }
+
+    /// <summary>
+    /// UAC 2026-10-23 (a record-level field share must not prove a column): Dataverse can grant a secured field on ONE record,
+    /// so a non-empty work assignment record read in the pass proves nothing about the table. The platform does not grant the
+    /// BFF Read on the work assignment column: the OTHER, empty work assignment is undetermined (<c>access_record_hidden</c>),
+    /// nothing is written for it, and it stays secure.
+    /// </summary>
+    [Fact]
+    public async Task ANonEmptyRecordOnATable_DoesNotProveItsEmptyRecords_WhenThePlatformDoesNotGrantRead()
+    {
+        var (matter, withRecord, empty) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        SeedOneNonEmptyAndOneEmptyWorkAssignment(matter, withRecord, empty);
+        _fixture.AccessRecordReadTables.Remove("sprk_workassignment");
+
+        var pass = await FollowParentsPassAsync();
+
+        pass.Untrusted.Should().Be(SecureRootInheritance.ReasonMarkerHidden);
+        pass.Undetermined.Should().BeGreaterOrEqualTo(1);
+        pass.Problems.Should().Contain(p => p.Contains(SecureRootInheritance.ReasonMarkerHidden));
+        World.AccessRecordWrites.Should().NotContain(w => w.Id == empty, "one readable record does not prove its table");
+        World.ValueOf<string>("sprk_workassignment", empty, AccessInheritance.Column).Should().BeNull();
+        _fixture.IsSecureOf(empty).Should().BeTrue("an empty read the platform does not vouch for is never decided on");
+        _fixture.Updates.Should().NotContain(u => u.RecordId == empty);
+    }
+
+    /// <summary>
+    /// Must-not-fire control for the test above: the same records, and the platform grants the BFF Read on the work assignment
+    /// column — the empty record is decided as before (recorded, and followed out of secure with its ordinary matter).
+    /// </summary>
+    [Fact]
+    public async Task ANonEmptyRecordOnATable_TheEmptyRecordIsDecided_WhenThePlatformGrantsRead()
+    {
+        var (matter, withRecord, empty) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        SeedOneNonEmptyAndOneEmptyWorkAssignment(matter, withRecord, empty);
+
+        var pass = await FollowParentsPassAsync();
+
+        pass.Untrusted.Should().BeNull();
+        World.AccessRecordWrites.Should().Contain(w => w.Id == empty, "the platform proves the column readable on the table");
+        World.ValueOf<string>("sprk_workassignment", empty, AccessInheritance.Column).Should().NotBeNullOrEmpty();
+    }
+
+    // ── #2320: the platform's answer sees team-held grants, and matches System Administrator by its template id ──
+
+    /// <summary>
+    /// #2320 must-fire: the BFF's own profile grants nothing, but a team it is a member of holds System Administrator — the
+    /// column is proven on both tables, so the empty work assignment record is decided.
+    /// </summary>
+    [Fact]
+    public async Task SystemAdministratorHeldOnlyThroughATeam_ProvesTheColumn()
+    {
+        var (matter, withRecord, empty) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        SeedOneNonEmptyAndOneEmptyWorkAssignment(matter, withRecord, empty);
+        _fixture.AccessRecordReadableByProfile = false;
+        _fixture.BffTeamIsSystemAdministrator = true;
+
+        var pass = await FollowParentsPassAsync();
+
+        AssertEmptyRecordDecided(pass, empty);
+    }
+
+    /// <summary>#2320 must-not-fire control: System Administrator held directly (by template id) still proves the column.</summary>
+    [Fact]
+    public async Task SystemAdministratorHeldDirectly_ProvesTheColumn()
+    {
+        var (matter, withRecord, empty) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        SeedOneNonEmptyAndOneEmptyWorkAssignment(matter, withRecord, empty);
+        _fixture.AccessRecordReadableByProfile = false;
+        _fixture.BffIsSystemAdministrator = true;
+
+        var pass = await FollowParentsPassAsync();
+
+        AssertEmptyRecordDecided(pass, empty);
+    }
+
+    /// <summary>
+    /// #2320 must-fire: the BFF directly holds a role NAMED "System Administrator" whose template id is another role's. A name
+    /// proves nothing (an administrator can rename a role): with no profile granting Read, the empty record is undetermined.
+    /// </summary>
+    [Fact]
+    public async Task ARoleNamedSystemAdministratorWithAnotherTemplate_ProvesNothing()
+    {
+        var (matter, withRecord, empty) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        SeedOneNonEmptyAndOneEmptyWorkAssignment(matter, withRecord, empty);
+        _fixture.AccessRecordReadableByProfile = false;
+        _fixture.BffHoldsRoleNamedSystemAdministratorWithOtherTemplate = true;
+
+        var pass = await FollowParentsPassAsync();
+
+        AssertEmptyRecordUndetermined(pass, empty);
+    }
+
+    /// <summary>
+    /// #2320 must-fire: the BFF's own profile grants nothing, but a profile held through its team grants Read on the work
+    /// assignment column — that table is proven and the empty record is decided.
+    /// </summary>
+    [Fact]
+    public async Task AProfileHeldOnlyThroughATeam_ProvesItsTable()
+    {
+        var (matter, withRecord, empty) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        SeedOneNonEmptyAndOneEmptyWorkAssignment(matter, withRecord, empty);
+        _fixture.AccessRecordReadableByProfile = false;
+        _fixture.BffTeamProfileReadTables.Add("sprk_workassignment");
+
+        var pass = await FollowParentsPassAsync();
+
+        AssertEmptyRecordDecided(pass, empty);
+    }
+
+    /// <summary>
+    /// #2320 must-not-fire: a profile held through the team grants Read on the PROJECT column only — that does not prove the
+    /// work assignment table, so its empty record is undetermined.
+    /// </summary>
+    [Fact]
+    public async Task AProfileHeldThroughATeam_OnAnotherTable_DoesNotProveThisOne()
+    {
+        var (matter, withRecord, empty) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        SeedOneNonEmptyAndOneEmptyWorkAssignment(matter, withRecord, empty);
+        _fixture.AccessRecordReadableByProfile = false;
+        _fixture.BffTeamProfileReadTables.Add("sprk_project");
+
+        var pass = await FollowParentsPassAsync();
+
+        AssertEmptyRecordUndetermined(pass, empty);
+    }
+
+    /// <summary>
+    /// #2320 follow-up: team membership is joined by Dataverse, so no request the proof sends grows with the number of teams
+    /// the BFF's user is in (a long OR of team ids could pass the URL limit, fault, and fail the proof closed). The proof's
+    /// requests for a member of 1 team and of 500 teams that grant nothing are identical; and System Administrator held
+    /// through the 500th team still proves the column.
+    /// </summary>
+    [Fact]
+    public async Task TheProofsRequestsDoNotGrowWithTeamCount_AndSystemAdministratorThroughTheFiveHundredthTeamProvesTheColumn()
+    {
+        var (matter, withRecord, empty) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        SeedOneNonEmptyAndOneEmptyWorkAssignment(matter, withRecord, empty);
+        _fixture.AccessRecordReadableByProfile = false;
+
+        var oneTeam = await ProofRequestsAsync(empty);
+        _fixture.BffAdditionalTeamCount = 499;
+        var fiveHundredTeams = await ProofRequestsAsync(empty);
+
+        oneTeam.Should().Contain(q => q.StartsWith("roles?", StringComparison.Ordinal), "the proof asks for System Administrator");
+        fiveHundredTeams.Should().Equal(oneTeam, "the proof's requests do not depend on how many teams the BFF's user is in");
+        fiveHundredTeams.Should().NotContain(q => q.Contains(ProvisionProjectTestFixture.AdditionalTeamId(1).ToString(),
+            StringComparison.OrdinalIgnoreCase), "no request names a team");
+
+        _fixture.BffTeamIsSystemAdministrator = true; // held through the BFF's own team — the 500th in its roster
+        var pass = await FollowParentsPassAsync();
+
+        AssertEmptyRecordDecided(pass, empty);
+    }
+
+    /// <summary>One pass that leaves <paramref name="empty"/> undetermined, and the proof's requests it sent, sorted.</summary>
+    private async Task<List<string>> ProofRequestsAsync(Guid empty)
+    {
+        _fixture.Queries.Clear();
+        var pass = await FollowParentsPassAsync();
+        AssertEmptyRecordUndetermined(pass, empty);
+        return _fixture.Queries
+            .Where(q => q.EntitySet.StartsWith("systemusers", StringComparison.Ordinal)
+                        || q.EntitySet is "roles" or "teams" or "fieldsecurityprofiles" or "fieldpermissions")
+            .Select(q => $"{q.EntitySet}?{q.Filter}")
+            .Order(StringComparer.Ordinal)
+            .ToList();
+    }
+
+    private void AssertEmptyRecordDecided(FollowParentsPass pass, Guid empty)
+    {
+        pass.Untrusted.Should().BeNull();
+        World.AccessRecordWrites.Should().Contain(w => w.Id == empty, "the platform proves the column readable on the table");
+        World.ValueOf<string>("sprk_workassignment", empty, AccessInheritance.Column).Should().NotBeNullOrEmpty();
+    }
+
+    private void AssertEmptyRecordUndetermined(FollowParentsPass pass, Guid empty)
+    {
+        pass.Untrusted.Should().Be(SecureRootInheritance.ReasonMarkerHidden);
+        pass.Undetermined.Should().BeGreaterOrEqualTo(1);
+        World.AccessRecordWrites.Should().NotContain(w => w.Id == empty, "the platform does not prove the column on this table");
+        World.ValueOf<string>("sprk_workassignment", empty, AccessInheritance.Column).Should().BeNull();
+        _fixture.IsSecureOf(empty).Should().BeTrue("an empty read the platform does not vouch for is never decided on");
+    }
+
+    /// <summary>An ordinary matter with two work assignments under it: one with an access record, one secure with none.</summary>
+    private void SeedOneNonEmptyAndOneEmptyWorkAssignment(Guid matter, Guid withRecord, Guid empty)
+    {
+        OrdinaryMatter(matter);
+        FiledWorkAssignment(_fixture, withRecord, "sprk_regardingmatter", "sprk_matter", matter);
+        SetPermission("sprk_workassignment", withRecord, Standard);
+        SeedRecord("sprk_workassignment", withRecord, floorSecure: false, Standard, ownSecure: false, ownPermission: null,
+            ("sprk_matter", matter));
+        SecureFiledWorkAssignment(_fixture, empty, matter);
+    }
+
+    private async Task<FollowParentsPass> FollowParentsPassAsync()
+    {
+        using var scope = _fixture.Services.CreateScope();
+        return await scope.ServiceProvider.GetRequiredService<SecureRootInheritance>()
+            .FollowParentsPassAsync("trace-uac-20261023", null, 25, 500, CancellationToken.None);
     }
 
     /// <summary>

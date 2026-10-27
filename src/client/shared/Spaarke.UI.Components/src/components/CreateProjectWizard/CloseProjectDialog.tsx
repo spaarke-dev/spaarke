@@ -10,11 +10,19 @@
  *   - All external members removed from the SPE document container
  *   - Redis participation cache invalidated for all affected contacts
  *
- * Four phases, each rendered as `SprkModal` header/footer/body content:
- *   1. Confirm  — warning list + "Close Project" (danger) / "Cancel" buttons
- *   2. Closing  — Spinner with progress label
- *   3. Success  — Success summary
- *   4. Error    — Error MessageBar + "Try Again" / "Cancel" buttons
+ * Five phases, each rendered as `SprkModal` header/footer/body content:
+ *   1. Confirm    — warning list + "Close Project" (danger) / "Cancel" buttons
+ *   2. Closing    — Spinner with progress label
+ *   3. Success    — Success summary
+ *   4. Error      — Error MessageBar + "Try Again" / "Cancel" buttons. The line under it says what actually
+ *                   happened for the server's reason code (#2104 round 2): e.g. `container_not_cleared` revoked the
+ *                   access records, so it never says "The project was not closed".
+ *   5. Incomplete — #2104: a failure a retry cannot fix (a revoked organization too large for one closure to
+ *                   sweep, `organization_too_large`; more grant rows than one closure reads, `too_many_grants`;
+ *                   a grantee whose container permission match is ambiguous or unverifiable,
+ *                   `permission_ambiguous`, #2104 round 3).
+ *                   Warning MessageBar with the server's detail (what an administrator must do) + "Close" — never
+ *                   "Try Again", which would promise a retry that meets the same bound.
  *
  * Dependencies are injected via props (no solution-specific imports):
  *   - authenticatedFetch: MSAL-backed fetch function
@@ -74,9 +82,17 @@ import {
   StorageRegular,
   CheckmarkCircleFilled,
   DismissCircleFilled,
+  WarningFilled,
 } from '@fluentui/react-icons';
 import { SprkModal, useDangerButtonClassName } from '../SprkModal';
-import { closeSecureProject, type ICloseProjectResponse } from './closureService';
+import {
+  CLOSURE_CONTAINER_NOT_CLEARED_REASON_CODE,
+  CLOSURE_ENUMERATION_FAILED_REASON_CODE,
+  CLOSURE_PARTIAL_REVOCATION_REASON_CODE,
+  NON_RETRYABLE_CLOSURE_REASON_CODES,
+  closeSecureProject,
+  type ICloseProjectResponse,
+} from './closureService';
 import type { AuthenticatedFetchFn } from '../../utils/fetchTypes';
 
 // ---------------------------------------------------------------------------
@@ -121,7 +137,38 @@ export interface ICloseProjectDialogProps {
 // Internal state
 // ---------------------------------------------------------------------------
 
-type DialogPhase = 'confirm' | 'closing' | 'success' | 'error';
+type DialogPhase = 'confirm' | 'closing' | 'success' | 'error' | 'incomplete';
+
+/**
+ * #2104 round 2 (K4): the line under a retryable failure, true to what the server says happened. A
+ * `container_not_cleared` or `partial_revocation` closure DID revoke access records, so "The project was not closed"
+ * would tell the user nothing was revoked; an unknown failure (no reason code: a network error, a 403) may or may
+ * not have revoked anything, so it claims neither.
+ */
+function closureFailureSummary(reasonCode: string | undefined): string {
+  switch (reasonCode) {
+    case CLOSURE_CONTAINER_NOT_CLEARED_REASON_CODE:
+      return (
+        'Access records were revoked, but some file access could not be confirmed removed. ' +
+        'You can retry or contact your administrator if the issue persists.'
+      );
+    case CLOSURE_PARTIAL_REVOCATION_REASON_CODE:
+      return (
+        'Some access records were revoked, but others could not be and remain active. ' +
+        'You can retry or contact your administrator if the issue persists.'
+      );
+    case CLOSURE_ENUMERATION_FAILED_REASON_CODE:
+      return (
+        'No access was revoked and the project was not closed. ' +
+        'You can retry or contact your administrator if the issue persists.'
+      );
+    default:
+      return (
+        'The closure could not be confirmed complete. ' +
+        'You can retry or contact your administrator if the issue persists.'
+      );
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -216,6 +263,14 @@ const useStyles = makeStyles({
     color: tokens.colorPaletteRedForeground1,
     fontSize: '48px',
   },
+  resultIconWarning: {
+    color: tokens.colorStatusWarningForeground1,
+    fontSize: '48px',
+  },
+  resultMessageBar: {
+    textAlign: 'left',
+    width: '100%',
+  },
   resultTitle: {
     color: tokens.colorNeutralForeground1,
   },
@@ -299,6 +354,7 @@ const CloseProjectDialog: React.FC<ICloseProjectDialogProps> = ({
 
   const [phase, setPhase] = React.useState<DialogPhase>('confirm');
   const [errorMessage, setErrorMessage] = React.useState<string | undefined>(undefined);
+  const [errorReasonCode, setErrorReasonCode] = React.useState<string | undefined>(undefined);
   const [closureResult, setClosureResult] = React.useState<ICloseProjectResponse | undefined>(undefined);
 
   // Reset state when dialog opens
@@ -306,6 +362,7 @@ const CloseProjectDialog: React.FC<ICloseProjectDialogProps> = ({
     if (open) {
       setPhase('confirm');
       setErrorMessage(undefined);
+      setErrorReasonCode(undefined);
       setClosureResult(undefined);
     }
   }, [open]);
@@ -323,6 +380,7 @@ const CloseProjectDialog: React.FC<ICloseProjectDialogProps> = ({
   const handleConfirmClosure = React.useCallback(async () => {
     setPhase('closing');
     setErrorMessage(undefined);
+    setErrorReasonCode(undefined);
 
     const result = await closeSecureProject(
       {
@@ -337,8 +395,14 @@ const CloseProjectDialog: React.FC<ICloseProjectDialogProps> = ({
       setClosureResult(result.data);
       setPhase('success');
       onClosed?.(result.data);
+    } else if (result.reasonCode && NON_RETRYABLE_CLOSURE_REASON_CODES.includes(result.reasonCode)) {
+      // #2104: not retryable — a retry meets the same bound. The server's detail says what an administrator
+      // must do; the dialog offers no "Try Again".
+      setErrorMessage(result.detail ?? result.errorMessage);
+      setPhase('incomplete');
     } else {
       setErrorMessage(result.errorMessage ?? 'An unexpected error occurred during project closure.');
+      setErrorReasonCode(result.reasonCode);
       setPhase('error');
     }
   }, [projectId, containerId, onClosed, authFetch, bffBaseUrl]);
@@ -388,6 +452,10 @@ const CloseProjectDialog: React.FC<ICloseProjectDialogProps> = ({
         ) : phase === 'success' ? (
           <Button appearance="primary" onClick={handleClose} aria-label="Close this dialog">
             Done
+          </Button>
+        ) : phase === 'incomplete' ? (
+          <Button appearance="primary" onClick={handleClose} aria-label="Close this dialog">
+            Close
           </Button>
         ) : (
           <Button appearance="primary" onClick={handleRetry} aria-label="Try closing the project again">
@@ -506,8 +574,25 @@ const CloseProjectDialog: React.FC<ICloseProjectDialogProps> = ({
               </MessageBar>
             )}
             <Text size={300} className={styles.resultSubtitle}>
-              The project was not closed. You can retry or contact your administrator if the issue persists.
+              {closureFailureSummary(errorReasonCode)}
             </Text>
+          </div>
+        )}
+
+        {/* ── Incomplete phase (#2104: not retryable) ── */}
+        {phase === 'incomplete' && (
+          <div className={styles.resultContainer}>
+            <WarningFilled className={styles.resultIconWarning} aria-hidden="true" />
+            <Text size={500} weight="semibold" className={styles.resultTitle}>
+              Closure incomplete
+            </Text>
+            {errorMessage && (
+              <MessageBar intent="warning" className={styles.resultMessageBar}>
+                <MessageBarBody>
+                  <Text size={200}>{errorMessage}</Text>
+                </MessageBarBody>
+              </MessageBar>
+            )}
           </div>
         )}
       </div>

@@ -105,6 +105,21 @@ public static class ExternalAccessModule
             client.Timeout = TimeSpan.FromSeconds(15);
         });
 
+        // unified-access-control-r2 task 188 (main-session decision 2026-10-20): the assistant's dataverse.* tools decide a
+        // document with THE external document narrowing APP-ONLY, through the reader above, so a link field security masks
+        // for the user never reads as "no link". A delegate, so the tools reach nothing else of the app-only reader (the
+        // narrow-by-construction shape of owner rounds 7/8). Registered here, unconditionally with the reader it binds
+        // (AddExternalAccess is unconditional in Program.cs); the tool handlers (AddToolFramework's assembly scan) resolve it.
+        // The reader is resolved on the first call, so a tool call that never narrows (an internal caller) builds no client.
+        services.AddScoped<AppOnlyDocumentNarrowing>(sp =>
+            (documentIds, ct) => sp.GetRequiredService<ExternalDataService>().ReadAndNarrowDocumentsAsync(documentIds, ct));
+
+        // unified-access-control-r2 task 188 round 3 slice B: the same app-only narrowing for the internal plane's document
+        // routes (document filter, bulk download, container lists), logged as plane=internal-routes. Resolved lazily, as above.
+        services.AddScoped<InternalRouteDocumentNarrowing>(sp =>
+            (documentIds, ct) => sp.GetRequiredService<ExternalDataService>()
+                .ReadAndNarrowDocumentsAsync(documentIds, ct, ExternalDataService.InternalRoutesPlane));
+
         // Per-customer external-access switches (external-access-platform-r3 task 011, spec FR-06 / FR-19, ADR-028
         // A8). PartnerServiceRequestsEnabled (default false) lets CIAM partners use the Service Requests module for
         // their own requests and adds legal-front-door to their default modules. Read by the entitlement resolver
@@ -197,6 +212,11 @@ public static class ExternalAccessModule
         // ContactIdentityBinder) are singletons. The interface is the testing seam (ADR-010). No Graph SDK /
         // AI-internal types are injected (broker-only, NFR-02).
         services.AddSingleton<IWorkforcePrincipalResolver, WorkforcePrincipalResolver>();
+
+        // ADR-028 A9 link proof (r3 task 048): validates the link route's body (guest) token with the DEFAULT scheme's own
+        // TokenValidationParameters and signing metadata, read through IOptionsMonitor<JwtBearerOptions> and never changed.
+        // Concrete (ADR-010); singleton (stateless; the options monitor and configuration are singletons).
+        services.AddSingleton<SpaarkeGuestTokenValidator>();
 
         // Standing-grant flag reader (teams-app-r1 task 022 — the task-051 composition seam). Reads the
         // FLS-secured contact.sprk_standinggrant boolean app-only via the already-registered
@@ -306,8 +326,9 @@ public static class ExternalAccessModule
         // contract — communication-specific in NAME only. Declaring an identical second interface is
         // the duplication CLAUDE.md §11 exists to prevent.
         //
-        // ⚠️ NOT consumed by AccessibleRecordSetService yet — that swap is task 036's obligation, and
-        // it is gated on the NFR-04 negative canary (task 034). Registering it here is inert until then.
+        // Consumed by AccessibleRecordSetService (task 036) only while ExternalAccess:ImpersonatedRootSets:Enabled
+        // is true (default false; enabling it is gated on the NFR-04 negative canary, task 034). Flag off, it is
+        // registered but never asked.
         // Scoped: it reads the caller's tenant claim off IHttpContextAccessor for the cache key.
         services.AddScoped<IImpersonatedRootSetSource, ImpersonatedRootSetSource>();
 
@@ -450,6 +471,10 @@ public static class ExternalAccessModule
             {
                 "sprk_invoiceid", "sprk_name", "sprk_invoicenumber", "sprk_invoicedate", "sprk_invoicestatus",
                 "sprk_totalamount", "sprk_project", "sprk_matter",
+                // spaarke-SPA-external-access-platform-r3 (owner Partner UAT 2026-10-17, ebilling-r1 task 015 / D-41): NOT
+                // grid-derived. The invoice status is statuscode; the SPA record detail reads it. Transitional:
+                // sprk_invoicestatus stays until ebilling removes it from grid 3ff4102c and from dev.
+                "statuscode",
             },
         });
 

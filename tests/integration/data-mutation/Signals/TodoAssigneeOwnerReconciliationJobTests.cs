@@ -310,6 +310,23 @@ public class TodoAssigneeOwnerReconciliationJobTests
         _webApi.ConditionalWrites.Should().BeEmpty();
     }
 
+    [Fact(DisplayName = "148 (#2072/#1576): a DISABLED assignee systemuser resolves to no user — its business-unit team refused, not written, run partial")]
+    public async Task DisabledAssigneeSystemUser_IsRefused_NotMoved()
+    {
+        PersonalToDo(modified: BeforeNightly.AddMinutes(-1));
+        LinkAssignee(Eligible(Assignee)); // the link says enabled; the systemuser row itself is disabled
+        _world.Set("systemuser", Assignee, "isdisabled", true);
+        var signal = Row("sprk_signal", GeneralTeam);
+
+        var run = await Job(writes: "true").ExecuteAsync(Context(), CancellationToken.None);
+
+        Result(run).GetProperty("assigneeTeamRefusals").GetInt32().Should().Be(1);
+        Result(run).GetProperty("status").GetString().Should().Be(TodoAssigneeOwnerReconciliationJob.StatusPartial);
+        run.ErrorMessage.Should().Contain("assignee's business-unit team was refused");
+        _world.OwnerOf("sprk_signal", signal).Should().Be(DataversePrincipalRef.Team(GeneralTeam), "a disabled user's BU never owns the To Do's rows");
+        _webApi.ConditionalWrites.Should().BeEmpty();
+    }
+
     [Theory(DisplayName = "148: the ownership resolver refuses the row's parents — never written, SkippedRefused; a configuration refusal makes the run partial")]
     [InlineData("parent-missing", TodoAssigneeOwnerReconciliationJob.StatusOk)]          // ParentUnresolved: one row's data
     [InlineData("secure-unit-ambiguous", TodoAssigneeOwnerReconciliationJob.StatusPartial)] // the tenant's configuration
@@ -577,7 +594,7 @@ public class TodoAssigneeOwnerReconciliationJobTests
         var synchronizer = new SecureChildShareSynchronizer(entities.Object, new FakeRecordShareTable(),
             SecureChildShareWorld.NobodyWalled(), configuration, NullLogger<SecureChildShareSynchronizer>.Instance);
         var reconciler = new SecureChildReconciler(entities.Object, ownership, synchronizer, _webApi, configuration,
-            NullLogger<SecureChildReconciler>.Instance);
+            NullLogger<SecureChildReconciler>.Instance, new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing);
         var probe = SecureChildShareWorld.ColumnProbe();
         CoreAncestorResolver.EntityColumnProbe columns = (table, ct) => table == failingProbeOf
             ? throw new InvalidOperationException($"Test: the column metadata of {table} is unavailable.")

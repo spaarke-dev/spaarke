@@ -72,6 +72,25 @@ public static class DocumentUrlIdentityResolution
     private const string IsEmailArchiveAttribute = "sprk_isemailarchive";
     private const string CreatedOnAttribute = "createdon";
 
+    // Task 132: the archive's link to the communication that captured (or sent) the email. Mailbox capture and the
+    // Spaarke-send archive set this and never sprk_emailmessageid; the communication carries the RFC Message-ID.
+    private const string RelatedCommunicationAttribute = "sprk_relatedcommunication";
+    private const string CommunicationLogicalName = "sprk_communication";
+    private const string CommunicationIdAttribute = "sprk_communicationid";
+    private const string CommunicationInternetMessageIdAttribute = "sprk_internetmessageid";
+
+    /// <summary>The alias of the communication joined by <see cref="ResolveByEmailMessageIdAsync"/>.</summary>
+    internal const string CommunicationLinkAlias = "relatedcommunication";
+
+    /// <summary>
+    /// Task 132: a communication's regarding columns, in the SAME priority as <see cref="RelatedRecordAttributes"/>
+    /// (matter &gt; project &gt; invoice &gt; work assignment). Each is a typed lookup to that one entity
+    /// (<c>RecordContainerResolver</c>'s <c>sprk_communication</c> entry), so the reference names the same four types the
+    /// document's own slots do.
+    /// </summary>
+    private static readonly string[] CommunicationRegardingAttributes =
+        { "sprk_regardingmatter", "sprk_regardingproject", "sprk_regardinginvoice", "sprk_regardingworkassignment" };
+
     /// <summary>
     /// The DIRECT association slots, in the regarding priority of the polymorphic-resolver pattern (matter &gt;
     /// project &gt; invoice &gt; work assignment). The Office save path writes only this family — task 026's
@@ -84,7 +103,7 @@ public static class DocumentUrlIdentityResolution
         { "sprk_matter", "sprk_project", "sprk_invoice", "sprk_workassignment" };
 
     private static readonly string[] LookupColumns =
-        new[] { "sprk_documentid", GraphDriveIdAttribute, DocumentNameAttribute, FileNameAttribute }
+        new[] { "sprk_documentid", GraphDriveIdAttribute, DocumentNameAttribute, FileNameAttribute, RelatedCommunicationAttribute }
             .Concat(RelatedRecordAttributes)
             .ToArray();
 
@@ -124,7 +143,10 @@ public static class DocumentUrlIdentityResolution
     /// allowed <c>read</c> on the <c>sprk_document</c> — never from <see cref="ResolveAsync"/> itself, which
     /// runs before that check. The access model makes the document check equivalent to authorizing the related
     /// record too (record access &#8660; document access, enforced by <c>AuthorizationService</c>; see the
-    /// slot-scope decision note §6), so no second authorization check is re-derived here.
+    /// slot-scope decision note §6), so no second authorization check is re-derived here. That equivalence covers the
+    /// document's OWN slots only: a record reached through the document's communication
+    /// (<see cref="ResolveDerivedRelatedRecordAsync"/>, task 132) is passed here only after the handler confirmed the
+    /// caller's own Read on it.
     /// </summary>
     /// <remarks>
     /// Best-effort: if the complementary column cannot be read (the related record was deleted since the
@@ -153,9 +175,10 @@ public static class DocumentUrlIdentityResolution
                 relatedRecord.LogicalName, relatedRecord.Id, new[] { mapping.ComplementaryColumn }, ct);
             complementary = entity.GetAttributeValue<string>(mapping.ComplementaryColumn);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (!ct.IsCancellationRequested)
         {
-            ct.ThrowIfCancellationRequested();
+            // Only the CALLER's cancellation propagates (the filter above). A cancellation or timeout that is not the
+            // caller's (an HTTP client timeout surfaces as TaskCanceledException) is a failed optional read: no value, not a 500.
             logger.LogWarning(ex,
                 "Document identity: could not read {Column} for {EntityType} {Id} for the related-record card; " +
                 "it will render that field blank.",
@@ -168,7 +191,21 @@ public static class DocumentUrlIdentityResolution
     }
 
     /// <summary>A resolved identity. Carries metadata the caller must not emit until authorization has allowed it.</summary>
-    public sealed record Resolution(Guid DocumentId, string? DocumentName, string? FileName, EntityReference? RelatedRecord);
+    /// <param name="DocumentId">The <c>sprk_document</c> id.</param>
+    /// <param name="DocumentName"><c>sprk_documentname</c>.</param>
+    /// <param name="FileName"><c>sprk_filename</c>.</param>
+    /// <param name="RelatedRecord">The first populated DIRECT slot — a record the document itself carries.</param>
+    /// <param name="RelatedCommunication">
+    /// Task 132: <c>sprk_relatedcommunication</c>, the communication the document archives. Not a related record: the
+    /// record it is filed to is DERIVED from it (<see cref="ResolveDerivedRelatedRecordAsync"/>), and only shown when the
+    /// caller may read that record.
+    /// </param>
+    public sealed record Resolution(
+        Guid DocumentId,
+        string? DocumentName,
+        string? FileName,
+        EntityReference? RelatedRecord,
+        EntityReference? RelatedCommunication = null);
 
     /// <summary>Exactly one of the two is set: an identity, or the reason there is none.</summary>
     public sealed record Result(Resolution? Identity, string? NoIdentityReason)
@@ -360,13 +397,28 @@ public static class DocumentUrlIdentityResolution
     }
 
     /// <summary>
-    /// Task 120 (UAT round 12 O6): the saved <c>.eml</c> <c>sprk_document</c> of an email —
-    /// <c>sprk_isemailarchive = true</c> and <c>sprk_emailmessageid</c> equal to either of the email's keys — or
-    /// <see langword="null"/> when none exists. When several exist (the same email saved to two records) the NEWEST by
-    /// <c>createdon</c> wins, <c>sprk_documentid</c> breaking a tie so the answer is deterministic. Throws 503
+    /// Task 120 (UAT round 12 O6), widened by task 132: the saved <c>.eml</c> <c>sprk_document</c> of an email —
+    /// <c>sprk_isemailarchive = true</c> AND either (a) <c>sprk_emailmessageid</c> equal to either of the email's keys, or
+    /// (b) <c>sprk_relatedcommunication</c> naming a <c>sprk_communication</c> whose <c>sprk_internetmessageid</c> is the
+    /// email's RFC Message-ID — or <see langword="null"/> when none exists. When several exist (the same email saved to
+    /// two records, or saved from the pane AND captured from a mailbox) the NEWEST by <c>createdon</c> wins across both,
+    /// <c>sprk_documentid</c> breaking a tie so the answer is deterministic. Throws 503
     /// (<c>identity_resolution_unavailable</c>) when Dataverse cannot answer — never "not saved".
     /// </summary>
     /// <remarks>
+    /// <para><b>Why the communication (task 132, owner UAT 2026-10-22).</b> Only the Office save stamps
+    /// <c>sprk_emailmessageid</c>. The two other archive writers — mailbox capture
+    /// (<c>IncomingCommunicationProcessor</c>) and the Spaarke-send archive (<c>CommunicationService</c>) — never do, but
+    /// both set <c>sprk_relatedcommunication</c>, and that communication carries <c>sprk_internetmessageid</c>. Matching
+    /// through the link answers "already saved" for every email captured or sent by Spaarke, existing rows included, with
+    /// no backfill and no change to those writers (they belong to the communication projects). Only the RFC id is matched
+    /// there: <c>sprk_internetmessageid</c> never holds an Exchange item id.</para>
+    /// <para><b>One query.</b> The communication is an OUTER link (a pane save has none and must still match on its own
+    /// key), and its condition sits in the SAME OR as the key conditions, so Dataverse applies one order and one
+    /// <c>TopCount</c> across both branches — the newest-wins rule cannot differ between them, and there is no merge to
+    /// get wrong. <c>sprk_isemailarchive = true</c> stays outside the OR, so a communication's attachment children (which
+    /// carry the same link but are not archives) are never candidates. The link is many-to-one, so a document appears at
+    /// most once.</para>
     /// <para><b>Why two keys.</b> <c>sprk_emailmessageid</c> holds the RFC Message-ID for every save since task 121
     /// (<c>OfficeEmailEnricher.ResolveStoredMessageId</c>). Before it, the task pane sent the Exchange item id
     /// (<c>Office.context.mailbox.item.itemId</c> — measured live 2026-10-08: every recent pane save stores an
@@ -394,10 +446,19 @@ public static class DocumentUrlIdentityResolution
             TopCount = 1,
         };
         query.Criteria.AddCondition(IsEmailArchiveAttribute, ConditionOperator.Equal, true);
+
+        // Task 132: the communication the archive records, when it has one. OUTER, so a row without one still matches on
+        // its own key; no columns are read from it.
+        var communication = query.AddLink(
+            CommunicationLogicalName, RelatedCommunicationAttribute, CommunicationIdAttribute, JoinOperator.LeftOuter);
+        communication.EntityAlias = CommunicationLinkAlias;
+
         var anyKey = new FilterExpression(LogicalOperator.Or);
         anyKey.AddCondition(EmailMessageIdAttribute, ConditionOperator.Equal, keys.InternetMessageId);
         if (keys.ExchangeItemId is not null)
             anyKey.AddCondition(EmailMessageIdAttribute, ConditionOperator.Equal, keys.ExchangeItemId);
+        anyKey.AddCondition(
+            CommunicationLinkAlias, CommunicationInternetMessageIdAttribute, ConditionOperator.Equal, keys.InternetMessageId);
         query.Criteria.AddFilter(anyKey);
         query.AddOrder(CreatedOnAttribute, OrderType.Descending);
         query.AddOrder("sprk_documentid", OrderType.Descending);
@@ -415,7 +476,7 @@ public static class DocumentUrlIdentityResolution
             logger.LogWarning(ex,
                 "Email identity: Dataverse could not answer the saved-email lookup; reporting unavailable, NOT " +
                 "\"not saved\".");
-            throw Unavailable("Dataverse could not be reached to check whether this email is saved. Try again.");
+            throw EmailLookupUnavailable();
         }
 
         var row = rows?.Entities.FirstOrDefault();
@@ -429,7 +490,62 @@ public static class DocumentUrlIdentityResolution
             row.Id,
             row.GetAttributeValue<string>(DocumentNameAttribute),
             row.GetAttributeValue<string>(FileNameAttribute),
-            FirstRelatedRecord(row));
+            FirstRelatedRecord(row),
+            row.GetAttributeValue<EntityReference>(RelatedCommunicationAttribute) is { } communication
+                && communication.Id != Guid.Empty
+                ? communication
+                : null);
+
+    /// <summary>
+    /// Task 132: the record a document is filed to THROUGH its communication — the first populated regarding of
+    /// <see cref="Resolution.RelatedCommunication"/>, in <see cref="CommunicationRegardingAttributes"/> order — for a
+    /// document that carries no direct slot of its own (a mailbox-captured or Spaarke-sent archive files the
+    /// communication, not the document). <c>Record</c> is <see langword="null"/> when the document has a direct slot (the
+    /// communication is then not read at all), has no communication, the communication is filed to none of the four, or
+    /// it cannot be read. <c>Undetermined</c> is <see langword="true"/> only in the last case: the communication may be
+    /// filed, so the answer must not read as "not filed" (the handler sends <c>RelatedRecordWithheld</c>).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>DERIVED, so not covered by the document's authorization.</b> The record-access ⇔ document-access rule
+    /// (<c>notes/026-slot-scope-decision.md</c> §6) holds for the document's own slots. It does not hold here: an
+    /// external participant may read an email without reading the matter it is filed to. The caller must therefore
+    /// confirm the user's own Read on the returned record before showing it (the identity handler does, with
+    /// <c>CallerRecordAccessProbe</c>), and must not pass it to <see cref="ResolveRelatedRecordDisplayAsync"/> before.</para>
+    /// <para>Best-effort: the card is optional. A failed read is logged and answered <see langword="null"/>; it never
+    /// turns the identity answer into a 503. The read is app-only, like every other read in this type.</para>
+    /// </remarks>
+    public static async Task<(EntityReference? Record, bool Undetermined)> ResolveDerivedRelatedRecordAsync(
+        Resolution identity,
+        IGenericEntityService dataverse,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        if (identity.RelatedRecord is not null || identity.RelatedCommunication is not { } communication)
+            return (null, false);
+
+        Entity row;
+        try
+        {
+            row = await dataverse.RetrieveAsync(
+                CommunicationLogicalName, communication.Id, CommunicationRegardingAttributes, ct);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            // Only the CALLER's cancellation propagates. A cancellation or timeout that is not the caller's (an HTTP client
+            // timeout surfaces as TaskCanceledException) is a failed optional read: no card, never a 500.
+            logger.LogWarning(ex,
+                "Document identity: could not read sprk_communication {CommunicationId} of sprk_document {DocumentId} " +
+                "for the related-record card; the card is omitted.",
+                communication.Id, identity.DocumentId);
+            return (null, true);
+        }
+
+        return row is null
+            ? (null, true)
+            : (CommunicationRegardingAttributes
+                .Select(row.GetAttributeValue<EntityReference>)
+                .FirstOrDefault(r => r is not null && r.Id != Guid.Empty), false);
+    }
 
     /// <summary>
     /// Whether a BY-ID retrieve failed because the row does not exist: <c>0x80040217 ObjectDoesNotExist</c> anywhere
@@ -548,6 +664,14 @@ public static class DocumentUrlIdentityResolution
     private static bool IsAlternateKeyRecordDoesNotExist(Exception ex)
         => ex is FaultException<OrganizationServiceFault> fault
            && fault.Detail?.ErrorCode == unchecked((int)0x80060891);
+
+    /// <summary>
+    /// The one 503 the email-identity route gives when the answer cannot be determined — Dataverse not answering the
+    /// lookup, or the access check faulting (<c>DocumentEmailIdentityFilter</c>). One factory, so the two are the same
+    /// answer byte for byte and cannot drift apart.
+    /// </summary>
+    internal static SdapProblemException EmailLookupUnavailable()
+        => Unavailable("Dataverse could not be reached to check whether this email is saved. Try again.");
 
     private static SdapProblemException Unavailable(string detail)
         => new("identity_resolution_unavailable", "Document Identity Unavailable", detail, 503);

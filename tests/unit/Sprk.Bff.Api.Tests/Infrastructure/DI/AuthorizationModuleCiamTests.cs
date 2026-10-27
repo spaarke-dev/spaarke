@@ -1,6 +1,7 @@
 // spaarke-SPA-external-access-platform-r3 — Task 010 (2026-10-10)
 // FR-22: the Ciam JwtBearer scheme accepts the per-customer audience in both forms ({appId}, api://{appId}).
 // FR-23: the default (workforce) JwtBearer scheme rejects any CIAM token (iss ∋ ciamlogin.com, or tid == Ciam:TenantId).
+// Task 077 (2026-10-19): the default scheme also accepts the bare app-id audience (v2 access tokens, ADR-028 A9).
 //
 // Every test runs the REAL schemes registered by AuthorizationModule.AddAuthorizationModule behind a TestServer
 // and asserts the HTTP status a route returns. Only two things are replaced, both test-side and both outside the
@@ -34,6 +35,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Protocols;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
@@ -41,6 +43,7 @@ using Microsoft.IdentityModel.Tokens;
 using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Authorization;
 using Sprk.Bff.Api.Infrastructure.DI;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Infrastructure.DI;
@@ -352,6 +355,184 @@ public sealed class AuthorizationModuleCiamTests
         act.Should().NotThrow();
     }
 
+    // ─────────── Task 077: default scheme accepts the bare app-id audience (v2 access tokens) ───────────
+    // ADR-028 A9 sets requestedAccessTokenVersion = 2 on the BFF app, which makes aud the bare app id for EVERY caller.
+    // The default scheme must accept that form as well as api://{appId}, derived from AzureAd:ClientId, and nothing else.
+
+    [Theory]
+    [InlineData(WorkforceIssuerV2)]
+    [InlineData(WorkforceIssuerV1)]
+    public async Task DefaultScheme_BareClientIdAudience_Returns200(string issuer)
+    {
+        using var host = await StartHostAsync(ciamAudience: StampCiamAppId, ciamTenantId: CiamTenantId);
+
+        var status = await GetAsync(host, WorkforceRoute, WorkforceToken(issuer, WorkforceTenantId, WorkforceBffClientId));
+
+        status.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task DefaultScheme_ApiUriAudienceWithV1Issuer_StillReturns200()
+    {
+        using var host = await StartHostAsync(ciamAudience: StampCiamAppId, ciamTenantId: CiamTenantId);
+
+        var status = await GetAsync(host, WorkforceRoute,
+            WorkforceToken(WorkforceIssuerV1, WorkforceTenantId, WorkforceBffAudience));
+
+        status.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Theory]
+    [InlineData(OtherCustomerCiamAppId)]
+    [InlineData("api://" + OtherCustomerCiamAppId)]
+    [InlineData("api://")]
+    public async Task DefaultScheme_AnotherAppsAudience_Returns401(string audience)
+    {
+        using var host = await StartHostAsync(ciamAudience: StampCiamAppId, ciamTenantId: CiamTenantId);
+
+        var status = await GetAsync(host, WorkforceRoute, WorkforceToken(WorkforceIssuerV2, WorkforceTenantId, audience));
+
+        status.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Theory]
+    [InlineData(CiamIssuer, CiamTenantId)]
+    [InlineData(CiamTenantViaWorkforceAuthorityIssuer, CiamTenantId)]
+    public async Task DefaultScheme_CiamTokenWithBareClientIdAudience_Returns401(string issuer, string tenantId)
+    {
+        using var host = await StartHostAsync(ciamAudience: StampCiamAppId, ciamTenantId: CiamTenantId);
+
+        var status = await GetAsync(host, WorkforceRoute, WorkforceToken(issuer, tenantId, WorkforceBffClientId));
+
+        status.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task DefaultScheme_BareClientIdAudience_EveryHostInTheProcess_Returns200()
+    {
+        // The bare-id audience (task 077) comes from its own PostConfigure, not the Copilot merge; every host gets it.
+        using var first = await StartHostAsync(ciamAudience: StampCiamAppId, ciamTenantId: CiamTenantId);
+        using var second = await StartHostAsync(ciamAudience: StampCiamAppId, ciamTenantId: CiamTenantId);
+
+        var token = WorkforceToken(WorkforceIssuerV2, WorkforceTenantId, WorkforceBffClientId);
+
+        (await GetAsync(first, WorkforceRoute, token)).Should().Be(HttpStatusCode.OK);
+        (await GetAsync(second, WorkforceRoute, token)).Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task DefaultScheme_ResolvedOptions_AudiencesAddedAndValidationFlagsKept()
+    {
+        using var host = await StartHostAsync(ciamAudience: StampCiamAppId, ciamTenantId: CiamTenantId);
+
+        var parameters = host.Services.GetRequiredService<IOptionsMonitor<JwtBearerOptions>>()
+            .Get(JwtBearerDefaults.AuthenticationScheme).TokenValidationParameters;
+
+        parameters.ValidAudiences.Should().Contain(new[] { WorkforceBffClientId, WorkforceBffAudience, CopilotAudience });
+        parameters.ValidAudiences.Should().NotContain(a => a == "api://" || string.IsNullOrWhiteSpace(a));
+        parameters.ValidateAudience.Should().BeTrue();
+        parameters.ValidateIssuer.Should().BeTrue();
+        parameters.ValidateLifetime.Should().BeTrue();
+        parameters.RequireSignedTokens.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task GuestTokenParameters_V2GuestTokenWithBareStampAppId_Validates()
+    {
+        // SpaarkeGuestTokenValidator clones the default scheme's parameters and hands them the scheme's configuration
+        // manager; this repeats exactly that against the REAL registered scheme.
+        using var host = await StartHostAsync(ciamAudience: StampCiamAppId, ciamTenantId: CiamTenantId);
+        var options = host.Services.GetRequiredService<IOptionsMonitor<JwtBearerOptions>>()
+            .Get(JwtBearerDefaults.AuthenticationScheme);
+        var parameters = options.TokenValidationParameters.Clone();
+        parameters.ConfigurationManager = (BaseConfigurationManager)options.ConfigurationManager!;
+
+        var result = await new JsonWebTokenHandler { MapInboundClaims = false }.ValidateTokenAsync(
+            WorkforceToken(WorkforceIssuerV2, WorkforceTenantId, WorkforceBffClientId), parameters);
+
+        result.IsValid.Should().BeTrue(result.Exception?.Message);
+    }
+
+    [Fact]
+    public void GuestTokenDenyReason_CopilotAudience_StillRefused()
+    {
+        var jwt = new JsonWebToken(WorkforceToken(WorkforceIssuerV2, WorkforceTenantId, CopilotAudience));
+
+        var reason = SpaarkeGuestTokenValidator.DenyReason(
+            jwt, Guid.NewGuid(), "someone@example.com", WorkforceTenantId, WorkforceBffClientId, out _);
+
+        reason.Should().Be(GuestTokenDeny.Invalid);
+    }
+
+    [Fact]
+    public async Task DefaultScheme_IdTokenForTheApp_WithRoles_Returns401()
+    {
+        // 077 review F4: an ID token issued to a client signing in AS the BFF app has aud = the bare app id. With an app
+        // role it carries roles (so Identity Web's scp-or-roles check passes) but never azpacr/appidacr.
+        var logs = new CapturingLoggerProvider();
+        using var host = await StartHostAsync(ciamAudience: StampCiamAppId, ciamTenantId: CiamTenantId, loggerProvider: logs);
+
+        var status = await GetAsync(host, WorkforceRoute, IdToken(WorkforceBffClientId));
+
+        status.Should().Be(HttpStatusCode.Unauthorized);
+        logs.Entries.Should().ContainSingle(e => e.Message.Contains("sdap.auth.deny.id_token_on_workforce_scheme"),
+            "the refusal must come from the 077 guard, not another 401 source");
+    }
+
+    [Theory]
+    [InlineData(WorkforceBffClientId, false, true)]
+    [InlineData("22222222-2222-2222-2222-222222222222", true, false)]  // v2 access token (azpacr)
+    [InlineData(WorkforceBffAudience, false, false)]                   // other audiences are not judged here
+    public void IsIdTokenForApp_JudgesOnlyTheBareAppIdAudience(string audience, bool accessToken, bool expected)
+    {
+        var token = accessToken
+            ? WorkforceToken(WorkforceIssuerV2, WorkforceTenantId, audience)
+            : IdToken(audience);
+
+        var jwt = new JsonWebToken(token);
+        AuthorizationModule.IsIdTokenForApp(jwt, null, WorkforceBffClientId).Should().Be(expected);
+        AuthorizationModule.IsIdTokenForApp(jwt, null, null).Should().BeFalse();
+
+        // Any other token type: judged from the principal's claims (077 re-check K2), with the same answer.
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(jwt.Claims, "test"));
+        AuthorizationModule.IsIdTokenForApp(null, principal, WorkforceBffClientId).Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void AddWorkforceAudiences_ClientIdUnsetOrBlank_LeavesParametersUnchanged(string? clientId)
+    {
+        var parameters = new TokenValidationParameters { ValidAudience = WorkforceBffAudience };
+
+        AuthorizationModule.AddWorkforceAudiences(parameters, clientId);
+
+        parameters.ValidAudience.Should().Be(WorkforceBffAudience);
+        parameters.ValidAudiences.Should().BeNull();
+    }
+
+    [Fact]
+    public void AddWorkforceAudiences_MergesBothFormsKeepsExistingAndIsIdempotent()
+    {
+        IssuerValidator issuerValidator = (issuer, _, _) => issuer;
+        var parameters = new TokenValidationParameters
+        {
+            ValidAudience = WorkforceBffAudience,
+            ValidAudiences = new[] { CopilotAudience },
+            ValidIssuers = new[] { WorkforceIssuerV2 },
+            IssuerValidator = issuerValidator,
+        };
+
+        AuthorizationModule.AddWorkforceAudiences(parameters, WorkforceBffClientId);
+        AuthorizationModule.AddWorkforceAudiences(parameters, WorkforceBffClientId);
+
+        parameters.ValidAudience.Should().BeNull();
+        parameters.ValidAudiences.Should().BeEquivalentTo(new[] { WorkforceBffAudience, WorkforceBffClientId, CopilotAudience });
+        parameters.ValidIssuers.Should().BeEquivalentTo(new[] { WorkforceIssuerV2 });
+        parameters.IssuerValidator.Should().BeSameAs(issuerValidator);
+    }
+
     // ───────────────────────────── harness ─────────────────────────────
 
     private static async Task<IHost> StartHostAsync(
@@ -404,17 +585,6 @@ public sealed class AuthorizationModuleCiamTests
                         UseLocalSigningMetadata(options, WorkforceIssuerV2);
                         // Worst case for FR-23: library issuer validation accepts every issuer.
                         options.TokenValidationParameters.IssuerValidator = (issuer, _, _) => issuer;
-                        // The Copilot audience merge in AddAuthorizationModule runs once per PROCESS (the
-                        // _jwtPostConfigureApplied flag), so in a shared test process another host may have
-                        // consumed it. Re-adding the same configured audience here keeps the Copilot case
-                        // deterministic; what this task can break — the guard rejecting a Copilot token —
-                        // is still exercised end to end.
-                        var audiences = new HashSet<string>(
-                            options.TokenValidationParameters.ValidAudiences ?? [], StringComparer.OrdinalIgnoreCase);
-                        if (audiences.Add(CopilotAudience))
-                        {
-                            options.TokenValidationParameters.ValidAudiences = audiences;
-                        }
                     });
                 })
                 .Configure(app =>
@@ -458,16 +628,40 @@ public sealed class AuthorizationModuleCiamTests
     private static string WorkforceToken(string issuer, string? tenantId, string audience)
         => CreateToken(issuer, tenantId, audience);
 
+    // An Entra v2 ID token's shape: aud = the client id, no scp, no azpacr/appidacr; roles when the user has an app role.
+    private static string IdToken(string audience)
+        => new JsonWebTokenHandler().CreateToken(new SecurityTokenDescriptor
+        {
+            Issuer = WorkforceIssuerV2,
+            Audience = audience,
+            IssuedAt = DateTime.UtcNow.AddMinutes(-1),
+            NotBefore = DateTime.UtcNow.AddMinutes(-1),
+            Expires = DateTime.UtcNow.AddMinutes(30),
+            Claims = new Dictionary<string, object>
+            {
+                ["ver"] = "2.0",
+                ["tid"] = WorkforceTenantId,
+                ["oid"] = Guid.NewGuid().ToString(),
+                ["sub"] = Guid.NewGuid().ToString(),
+                ["nonce"] = "n",
+                ["roles"] = new[] { "Admin" },
+            },
+            SigningCredentials = new SigningCredentials(SigningKey, SecurityAlgorithms.RsaSha256),
+        });
+
     private static string CreateToken(string issuer, string? tenantId, string audience)
     {
+        var v2 = issuer.EndsWith("/v2.0", StringComparison.Ordinal);
         var claims = new List<Claim>
         {
             // Entra stamps ver = 2.0 on tokens from a /v2.0 issuer and 1.0 otherwise; Microsoft.Identity.Web's
             // workforce audience validator keys the accepted audience form off it.
-            new("ver", issuer.EndsWith("/v2.0", StringComparison.Ordinal) ? "2.0" : "1.0"),
+            new("ver", v2 ? "2.0" : "1.0"),
             new("oid", Guid.NewGuid().ToString()),
             new("sub", Guid.NewGuid().ToString()),
             new("scp", "user_impersonation"),
+            // Every Entra ACCESS token carries azpacr (v2) or appidacr (v1); ID tokens carry neither (task 077 F4).
+            new(v2 ? "azpacr" : "appidacr", "0"),
         };
         if (tenantId is not null)
         {

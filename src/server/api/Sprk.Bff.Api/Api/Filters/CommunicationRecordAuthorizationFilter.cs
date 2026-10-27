@@ -147,6 +147,13 @@ public sealed class CommunicationRecordAuthorizationFilter : IEndpointFilter
     /// <summary>The proposal table's LOGICAL name — read app-only, as the queue feed does; its row is never returned.</summary>
     public const string EmailReviewLogEntity = "sprk_emailreviewlog";
 
+    /// <summary>
+    /// The proposal's communication: a caller sees or applies a proposal only when they can see this message
+    /// (<c>CanSeeCommunicationAsync</c>), so an app-only generic writer never writes it (#2253 fix round 4,
+    /// <c>InheritedAccessPermission.AccessColumns</c>).
+    /// </summary>
+    internal const string ProposalCommunicationColumn = "sprk_communication";
+
     /// <summary>Create on <c>sprk_event</c>. Schema name <c>sprk_Event</c>, so the privilege is not all lower case.</summary>
     public const string CreateEventPrivilege = "prvCreatesprk_Event";
 
@@ -618,15 +625,23 @@ public sealed class CommunicationRecordAuthorizationFilter : IEndpointFilter
             if (attachmentIds is { Length: > MaxAttachmentCount })
                 return Denial.Problem(AttachmentLimitExceeded(attachmentIds.Length));
 
-            // (1) Attachments: the decision the document download route makes (operation "read"). A reader can
-            //     already download the bytes, so emailing them adds no capability. An unparseable id is denied with
-            //     the same body.
+            // (1) Attachments: the decision the document download route makes (operation "read", then - task 188
+            //     round 4b - THE external document narrowing, InternalPlaneDocumentNarrowing.AuthorizeDocumentsAsync).
+            //     Emailing an attachment adds no capability only because the caller could download the same bytes, and
+            //     the download route refuses a document the narrowing hides (an internal-only email's .eml, a
+            //     Restricted document or one under a Restricted parent) to a caller who is not an internal systemuser;
+            //     so the send refuses it too. An unparseable id, an unreadable or hidden attachment, and a narrowing
+            //     fault all get the same body.
+            var attachmentDocumentIds = new List<Guid>();
             foreach (var raw in (attachmentIds ?? Array.Empty<string>()).Distinct(StringComparer.OrdinalIgnoreCase))
             {
-                if (!Guid.TryParse(raw, out var documentId) || documentId == Guid.Empty
-                    || !await CanReadDocumentAsync(documentId))
+                if (!Guid.TryParse(raw, out var documentId) || documentId == Guid.Empty)
                     return Forbidden(reasonCode);
+                attachmentDocumentIds.Add(documentId);
             }
+
+            if (attachmentDocumentIds.Count > 0 && !await CanReadDocumentsAsync(attachmentDocumentIds.Distinct().ToList()))
+                return Forbidden(reasonCode);
 
             // (2) The thread the message is stamped into (and its participants granted access to).
             if (threadId is { } tid && !await CanSeeThreadAsync(tid))
@@ -642,6 +657,31 @@ public sealed class CommunicationRecordAuthorizationFilter : IEndpointFilter
                 if (set is null || association!.EntityId == Guid.Empty)
                     return Forbidden(reasonCode);
                 targets.Add((set, association.EntityId));
+            }
+
+            // (3b) Task 065 fix round 3 (F3): a send into a thread with no association of its own is filed against the
+            //      thread's regarding record (CommunicationService.ApplyTargetThreadAsync). The record written is the
+            //      record checked: the thread's anchor, read as the caller, in the priority order the send uses. A thread
+            //      that cannot be read is a deny (fail closed); a thread with no regarding adds no target.
+            if (threadId is { } regardingThreadId && associations is not { Length: > 0 })
+            {
+                CommunicationThreadReadService.ThreadRegardingTarget? threadRegarding = null;
+                var threadRead = await Safely("thread regarding read", async () =>
+                {
+                    threadRegarding = await Required<CommunicationThreadReadService>()
+                        .ReadVisibleThreadRegardingAsync(regardingThreadId, User, Ct);
+                    return threadRegarding is not null;
+                });
+                if (!threadRead)
+                    return Forbidden(reasonCode);
+
+                if (threadRegarding!.EntityType is { } threadRecordType && threadRegarding.RecordId is { } threadRecordId)
+                {
+                    var set = RegardingNameFields.EntitySetName(threadRecordType);
+                    if (set is null)
+                        return Forbidden(reasonCode); // a thread regarding we cannot address is never guessed
+                    targets.Add((set, threadRecordId));
+                }
             }
 
             if (inheritFrom is { } sourceId)
@@ -750,21 +790,16 @@ public sealed class CommunicationRecordAuthorizationFilter : IEndpointFilter
             Safely($"privilege {privilegeName}", () =>
                 Required<CallerRecordAccessProbe>().CallerHoldsPrivilegeAsync(_token, privilegeName, Ct));
 
-        private Task<bool> CanReadDocumentAsync(Guid documentId) =>
+        private Task<bool> CanReadDocumentsAsync(IReadOnlyCollection<Guid> documentIds) =>
             Safely("document read", async () =>
             {
                 var userId = CallerResolution.ResolveObjectId(User);
                 if (string.IsNullOrEmpty(userId))
                     return false;
 
-                var result = await Required<AuthorizationService>().AuthorizeAsync(new AuthorizationContext
-                {
-                    UserId = userId,
-                    ResourceId = documentId.ToString(),
-                    Operation = "read",
-                    CorrelationId = _http.TraceIdentifier,
-                    UserAccessToken = _token,
-                }, Ct);
+                var result = await InternalPlaneDocumentNarrowing.AuthorizeDocumentsAsync(
+                    _http, Required<AuthorizationService>(), userId, documentIds, "read", _token,
+                    "communication-send-attachments", _logger, Ct);
                 return result.IsAllowed;
             });
 
@@ -807,10 +842,10 @@ public sealed class CommunicationRecordAuthorizationFilter : IEndpointFilter
                 var row = await Required<IGenericEntityService>().RetrieveAsync(
                     EmailReviewLogEntity,
                     reviewLogId,
-                    new[] { "sprk_communication", "sprk_targetentity", "sprk_targetrecordid" },
+                    new[] { ProposalCommunicationColumn, "sprk_targetentity", "sprk_targetrecordid" },
                     Ct);
 
-                var communication = row.GetAttributeValue<EntityReference>("sprk_communication");
+                var communication = row.GetAttributeValue<EntityReference>(ProposalCommunicationColumn);
                 if (communication is null || communication.Id == Guid.Empty)
                     return false;
 

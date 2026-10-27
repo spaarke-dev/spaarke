@@ -75,7 +75,14 @@ The cost is one admin consent per customer and Microsoft publisher verification 
   - The workforce SPA client is a one-time operator app; its id is a platform parameter.
   - The intake gains `customerWorkforceTenantIds`, which H4b writes to both slots. The run hand-off prints the admin-consent URL; consent is a manual gate.
   - Publisher verification is tracked as ISS-026 / #1811. Provisioning accepts task 041's directory field shape.
-- **unified-access-control-r2**: conditions above; waiting for its owner's direct confirmation.
+- **unified-access-control-r2**, 2026-10-13 (commit `15fb8cf6b`, after its owner confirmed A9 directly):
+  - merged master (`30f4a6e4e`);
+  - round 97 marked SUPERSEDED by A9;
+  - task 186 re-scoped to baseline access only (role as a ceiling plus grant/participation scope, fail-closed);
+  - A9 and the conditions recorded in UAC's project CLAUDE.md §3;
+  - the "allows R3 to change" list accepted on the four conditions, with **each of those PRs sent to UAC for review**.
+  - #1801 is owner-approved and auto-merges; UAC tells R3 when it is on master. Design input: `projects/unified-access-control-r2/notes/186-model1-workforce-design.md` (its §5 role-as-ceiling is UAC's).
+  - Intake 403: R3 owns the fix. Only Read on `sprk_servicerequest` is needed, for the **owning team** (the create is app-only). It was put to the owner on 2026-10-13 with the recommendation of Basic-level Read in Spaarke Basic User. UAC's 186 references it rather than raising it again.
 
 ### spaarkeai-word-add-in-r1
 

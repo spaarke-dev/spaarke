@@ -39,5 +39,11 @@ public static class AuthPolicies
     /// plane-agnostic principal + its Tier-2 record scope. A token validates against exactly one
     /// authority, so exactly one scheme succeeds per request; the CIAM path is unchanged (FR-15).
     /// </summary>
+    /// <remarks>
+    /// ADR-028 A9 (external-access-platform-r3 task 045): also names <see cref="AuthSchemes.WorkforceHome"/>, a workforce
+    /// contact's token from their customer's home directory. This is the ONLY policy that names that scheme; a
+    /// Spaarke-tenant or CIAM token fails its allowlist, so one scheme still succeeds per request.
+    /// <c>AuthenticationSchemeCensusTests</c> pins the scheme set, this policy and the routes that carry it.
+    /// </remarks>
     public const string ExternalCollaboration = "ExternalCollaboration";
 }

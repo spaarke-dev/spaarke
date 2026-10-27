@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Options;
 using Spaarke.Dataverse;
 using Spaarke.Scheduling;
 using Sprk.Bff.Api.Api.ExternalAccess;
@@ -146,11 +147,14 @@ public sealed class RestrictedExternalShareRemover
     private readonly ITenantCache _cache;
     private readonly SecureChildShareSynchronizer _secureChildShares;
     private readonly IScheduledJobLease _recordLock;
+    private readonly IOptionsMonitor<WorkforceIdentityOptions> _workforceIdentity;
     private readonly ILogger<RestrictedExternalShareRemover> _logger;
 
     /// <param name="recordLock">The atomic lease task 143's enforcer serializes its per-record removals on (the scheduler's
     /// lease store reused as a keyed mutex under <c>no-access-enforce:{table}:{id}</c> — never a job's dispatch key). The
     /// same project-scoped §6.5 path-A exception (design.md §9, task 143 r2) covers this second user of it.</param>
+    /// <param name="workforceIdentity">The customer home directories (A9): a removed user's root sets are also cleared under
+    /// each (<see cref="ImpersonatedRootSetSource.EvictionTenants"/>).</param>
     public RestrictedExternalShareRemover(
         ExternalParticipationService participations,
         IDataverseRecordShareService recordShare,
@@ -158,6 +162,7 @@ public sealed class RestrictedExternalShareRemover
         ITenantCache cache,
         SecureChildShareSynchronizer secureChildShares,
         IScheduledJobLease recordLock,
+        IOptionsMonitor<WorkforceIdentityOptions> workforceIdentity,
         ILogger<RestrictedExternalShareRemover> logger)
     {
         _participations = participations ?? throw new ArgumentNullException(nameof(participations));
@@ -166,6 +171,7 @@ public sealed class RestrictedExternalShareRemover
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
         _secureChildShares = secureChildShares ?? throw new ArgumentNullException(nameof(secureChildShares));
         _recordLock = recordLock ?? throw new ArgumentNullException(nameof(recordLock));
+        _workforceIdentity = workforceIdentity ?? throw new ArgumentNullException(nameof(workforceIdentity));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -390,7 +396,9 @@ public sealed class RestrictedExternalShareRemover
             }
             finally
             {
-                foreach (var tenant in cacheTenants.Where(t => !string.IsNullOrWhiteSpace(t) && t != "anonymous").Distinct())
+                // A9 (r3 task 048): also every customer home directory — a linked user's home sign-in reads under its tid.
+                foreach (var tenant in ImpersonatedRootSetSource.EvictionTenants(
+                             cacheTenants, ImpersonatedRootSetSource.CustomerTenantIdsOrNone(_workforceIdentity, _logger)))
                 {
                     await ImpersonatedRootSetSource.InvalidateForTenantAsync(_cache, tenant, userId, logical, _logger)
                         .ConfigureAwait(false);

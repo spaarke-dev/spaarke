@@ -150,6 +150,15 @@ export interface SendCommunicationOptions {
    * re-derivation. Only reply/forward set it; omit for `+ New`/draft/view.
    */
   inheritRegardingFromCommunicationId?: string;
+  /**
+   * "Internal Only" (owner 2026-10-14): `true` hides the sent communication from every non-systemuser caller
+   * (CIAM partners and workforce contacts alike). The compose surfaces (TimelineComposeBox, ConversationView,
+   * EmailComposer) send an explicit boolean, except an untouched reply/forward of a source whose flag the host
+   * does not know, which omits it. Omitted = the BFF decides (task 065: `false`, or `true` when the source of a
+   * reply/forward is internal or unreadable). An explicit `false` is the sender's choice and WINS over that
+   * reply/forward raise; only a Private target thread still floors it to `true`.
+   */
+  isInternalOnly?: boolean;
   /** Send mode. Default `'sharedMailbox'`. */
   sendMode?: CommunicationSendMode;
   /** Caller-provided correlation ID for tracing. Optional. */
@@ -375,6 +384,7 @@ export async function sendCommunication(
     sendMode: toBffSendMode(opts.sendMode),
     archiveToSpe: opts.archiveToSpe ?? false,
     attachmentDocumentIds: opts.attachmentDocumentIds,
+    isInternalOnly: opts.isInternalOnly,
     correlationId: opts.correlationId,
     associations: opts.associations?.map(a => ({
       entityType: a.entityType,
