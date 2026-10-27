@@ -537,6 +537,25 @@ public class SecureChildOrdinaryParentMoveTests
             "its core (the unsecured matter) is its primary, as SignalWriter asks");
     }
 
+    [Theory(DisplayName = "194b F1-a must fire: a To Do regarding the B matter, created from an UNFILED user-owned email, is already correct at B's team — the email is its carrier, not its record")]
+    [InlineData(true)]  // the email lookup read first
+    [InlineData(false)]
+    public async Task AToDoRegardingTheMovedMatter_CreatedFromAnUnfiledEmail_IsAlreadyCorrect(bool emailFirst)
+    {
+        MatterMovedToB();
+        var communication = Guid.NewGuid();
+        _world.UserOwnedChild("sprk_communication", communication); // filed under nothing: its creator's (general) unit
+        var lookups = new[] { ("sprk_regardingcommunication", "sprk_communication", communication), ("sprk_regardingmatter", Matter, MatterId) };
+        Row("sprk_todo", TodoId, TeamRef(TeamB), emailFirst ? lookups : lookups.Reverse().ToArray());
+        _world.Set("sprk_todo", TodoId, "sprk_regardingrecordid", MatterId.ToString("D")); // the Office writer's pair: the record
+
+        await Reconciler().ReconcileOrdinaryParentMoveAsync(Matter, MatterId, SecureChildReconcileMode.Apply, 200, CancellationToken.None);
+
+        _world.OwnerOf("sprk_todo", TodoId).Should().Be(DataversePrincipalRef.Team(TeamB),
+            "OfficeService owns it by its record regarding (the matter), then the document or email");
+        _world.OwnerWrites.Should().NotContain(w => w.Id == TodoId);
+    }
+
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
     // The job: the switch, the window, and the document's file in the same run
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════

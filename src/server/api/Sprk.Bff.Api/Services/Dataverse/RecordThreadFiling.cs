@@ -61,7 +61,7 @@ internal static class RecordThreadFiling
         ArgumentNullException.ThrowIfNull(thread);
         return thread.GetAttributeValue<OptionSetValue>(ThreadTypeColumn)?.Value == DirectThreadType
             ? Array.Empty<RecordOwnershipParent>()
-            : RecordOwnershipContext.ParentsOf(thread);
+            : RecordOwnershipContext.OrderedParentsOf(thread); // UAC task 194b K2: a fixed order, never the attribute order
     }
 
     /// <summary>

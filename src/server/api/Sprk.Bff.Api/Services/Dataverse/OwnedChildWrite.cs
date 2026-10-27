@@ -98,13 +98,45 @@ internal static class OwnedChildWrite
 
     /// <summary>The ownership parents a mapped row of <paramref name="table"/> is filed under (resolver's definition — no per-table
     /// list). #2084: a lookup that CITES rather than files (<see cref="RecordOwnershipResolver.IsCitation"/>, the one predicate the
-    /// resolver's own <c>ParentsOf</c> applies) is left out, so a Signal created naming its rule is never filed under the rule.</summary>
-    internal static IReadOnlyList<RecordOwnershipParent> ParentsOf(string table, DataverseWriteItemMapper.MappedItem item) =>
-        item.Lookups
+    /// resolver's own <c>ParentsOf</c> applies) is left out, so a Signal created naming its rule is never filed under the rule.
+    /// UAC task 194b fix round F4: in the table's primary order (<see cref="RecordOwnershipContext.InPrimaryOrder"/>, the order the
+    /// reconciler asks the row in once it exists), never the order the caller's payload named the lookups in — the first is the
+    /// primary, whose business unit decides an ordinary row's owner.</summary>
+    internal static IReadOnlyList<RecordOwnershipParent> ParentsOf(string table, DataverseWriteItemMapper.MappedItem item)
+    {
+        var filed = item.Lookups
             .Where(l => RecordOwnershipResolver.IsOwnershipParent(l.RelatedTable) && !RecordOwnershipResolver.IsCitation(table, l.Column))
-            .Select(l => new RecordOwnershipParent(l.RelatedTable, l.RecordId))
+            .Select(l => new KeyValuePair<string, DataverseWriteItemMapper.MappedLookup>(l.Column, l))
+            .ToArray();
+        var subject = RecordOwnershipContext.SubjectColumnOf(
+            table,
+            PairIdOf(item.JsonBody),
+            column => filed.FirstOrDefault(l => string.Equals(l.Key, column, StringComparison.OrdinalIgnoreCase)).Value?.RecordId);
+        return RecordOwnershipContext.InPrimaryOrder(table, filed, subject)
+            .Select(l => new RecordOwnershipParent(l.Value.RelatedTable, l.Value.RecordId))
             .Distinct()
             .ToArray();
+    }
+
+    /// <summary>The body's <c>sprk_regardingrecordid</c> (the regarding pair's id, a text column), or <c>null</c>.</summary>
+    private static string? PairIdOf(string jsonBody)
+    {
+        if (string.IsNullOrWhiteSpace(jsonBody))
+            return null;
+        try
+        {
+            using var body = JsonDocument.Parse(jsonBody);
+            return body.RootElement.ValueKind == JsonValueKind.Object
+                   && body.RootElement.TryGetProperty(CoreAncestorResolver.RegardingRecordIdColumn, out var pair)
+                   && pair.ValueKind == JsonValueKind.String
+                ? pair.GetString()
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
 
     /// <summary>
     /// True when an <c>email.draft</c> takes the owned path: a draft (a <c>sprk_communication</c>, a CHILD in the ownership

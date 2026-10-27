@@ -385,22 +385,43 @@ public sealed record RecordOwnershipContext
                                               && a.Value is EntityReference reference
                                               && reference.Id != Guid.Empty
                                               && RecordOwnershipResolver.IsOwnershipParent(reference.LogicalName));
-        return InPrimaryOrder(row.LogicalName, filed)
+        return InPrimaryOrder(row.LogicalName, filed, SubjectColumnOf(row))
             .Select(a => (EntityReference)a.Value)
             .Select(reference => new RecordOwnershipParent(reference.LogicalName, reference.Id))
             .Distinct()
             .ToArray();
     }
 
-    /// <summary>UAC task 194b: <paramref name="byColumn"/> in <paramref name="table"/>'s primary order (see
-    /// <see cref="OrderedParentsOf"/>).</summary>
+    /// <summary>
+    /// UAC task 194b: <paramref name="byColumn"/> in <paramref name="table"/>'s primary order (see <see cref="OrderedParentsOf"/>).
+    /// For a host table of the shared regarding builder (<c>TodoRegardingBuilder.RegardingLookupsByHostTable</c>) the row's
+    /// SUBJECT — the regarding lookup that carries <c>sprk_regardingrecordid</c>, <paramref name="subjectColumn"/>
+    /// (<see cref="SubjectColumnOf(Entity)"/>) — is what its writer files it under, not a core-ancestor stamp in another
+    /// <c>sprk_regarding*</c> column:
+    /// <list type="bullet">
+    /// <item><c>sprk_todo</c> (fix round F1-a): the subject first, then the document carrier, then the email carrier, then the
+    /// lineage order — the Office writer's "the record regarding first, then the document or email"
+    /// (<c>OfficeService.ResolveTodoOwnerTeamAsync</c>), and <c>TodoGenerationService</c> / <c>InquiryReplyTodoCreator</c>,
+    /// which name the regarding as the primary.</item>
+    /// <item><c>sprk_signal</c> / <c>sprk_decisionrecord</c>: the typed core lookups first, then the subject, then the lineage
+    /// order (<c>SignalWriter.OwnershipContextOf</c>: core, subject, stamps).</item>
+    /// </list>
+    /// Every other table: the lineage order. A lookup that order does not name comes after, by column name.
+    /// </summary>
     internal static IEnumerable<KeyValuePair<string, TValue>> InPrimaryOrder<TValue>(
-        string? table, IEnumerable<KeyValuePair<string, TValue>> byColumn)
+        string? table, IEnumerable<KeyValuePair<string, TValue>> byColumn, string? subjectColumn = null)
     {
-        var order = table is not null && Sprk.Bff.Api.Services.Access.SecureChildLineage.Children.TryGetValue(table, out var lineage)
-            ? lineage.LookupOrder
-            : Array.Empty<string>();
-        int Rank(string column)
+        Sprk.Bff.Api.Services.Access.SecureChildLineage.Table? lineage = null;
+        if (table is not null)
+            Sprk.Bff.Api.Services.Access.SecureChildLineage.Children.TryGetValue(table, out lineage);
+        var order = lineage?.LookupOrder ?? Array.Empty<string>();
+        var regarding = table is not null
+                        && Sprk.Bff.Api.Services.Workspace.TodoRegardingBuilder.RegardingLookupsByHostTable.TryGetValue(table, out var map)
+            ? new HashSet<string>(map.Values, StringComparer.OrdinalIgnoreCase)
+            : null;
+        var corePair = table is not null && CorePairTables.Contains(table);
+
+        int Lineage(string column)
         {
             for (var i = 0; i < order.Count; i++)
             {
@@ -411,7 +432,73 @@ public sealed record RecordOwnershipContext
             return int.MaxValue;
         }
 
-        return byColumn.OrderBy(c => Rank(c.Key)).ThenBy(c => c.Key, StringComparer.OrdinalIgnoreCase);
+        bool Is(string column, string? other) => other is not null && string.Equals(column, other, StringComparison.OrdinalIgnoreCase);
+
+        int Group(string column)
+        {
+            if (regarding is null)
+                return 0;
+            if (corePair)
+            {
+                // The typed core lookups (a lookup to a core record that is not a regarding lookup), then the subject.
+                if (!regarding.Contains(column)
+                    && lineage is not null
+                    && lineage.Lookups.TryGetValue(column, out var target)
+                    && CoreAncestorResolver.CoreRecordEntities.Contains(target, StringComparer.OrdinalIgnoreCase))
+                {
+                    return 0;
+                }
+
+                return Is(column, subjectColumn) ? 1 : 2;
+            }
+
+            return Is(column, subjectColumn) ? 0
+                : Is(column, TodoDocumentCarrierColumn) ? 1
+                : Is(column, TodoEmailCarrierColumn) ? 2
+                : 3;
+        }
+
+        return byColumn
+            .OrderBy(c => Group(c.Key))
+            .ThenBy(c => Lineage(c.Key))
+            .ThenBy(c => c.Key, StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>The To Do's document carrier (the open Word document it was created from) — <c>OfficeService.TodoRegardingMap</c>.</summary>
+    private const string TodoDocumentCarrierColumn = "sprk_regardingdocument";
+
+    /// <summary>The To Do's email carrier (the Outlook email it was created from) — <c>OfficeService.TodoRegardingMap</c>.</summary>
+    private const string TodoEmailCarrierColumn = "sprk_regardingcommunication";
+
+    /// <summary>
+    /// Fix round F1-a: the column of <paramref name="row"/>'s SUBJECT — the regarding lookup whose id repeats the pair id
+    /// <c>sprk_regardingrecordid</c> (<c>SignalWriter.SubjectEntityOf</c>, the one agreement rule) — for a host table of the
+    /// shared regarding builder; <c>null</c> for any other table, a row with no pair, or a pair no single lookup repeats.
+    /// </summary>
+    internal static string? SubjectColumnOf(Entity row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        return SubjectColumnOf(
+            row.LogicalName,
+            row.Attributes.TryGetValue(CoreAncestorResolver.RegardingRecordIdColumn, out var pair) ? pair as string : null,
+            column => row.Attributes.TryGetValue(column, out var value) && value is EntityReference reference ? reference.Id : null);
+    }
+
+    /// <summary><see cref="SubjectColumnOf(Entity)"/> from a table, its pair id as written, and the id each lookup column carries.</summary>
+    internal static string? SubjectColumnOf(string? table, string? pairId, Func<string, Guid?> lookupIdOf)
+    {
+        ArgumentNullException.ThrowIfNull(lookupIdOf);
+        if (table is null
+            || !Sprk.Bff.Api.Services.Workspace.TodoRegardingBuilder.RegardingLookupsByHostTable.TryGetValue(table, out var lookups)
+            || !Guid.TryParse(pairId?.Trim(), out var pair))
+        {
+            return null;
+        }
+
+        return Sprk.Bff.Api.Services.Signals.SignalWriter.SubjectEntityOf(table, pair, lookupIdOf) is { } subject
+               && lookups.TryGetValue(subject, out var column)
+            ? column
+            : null;
     }
 
     /// <summary>The tables whose rows name a CORE record in a pair (<c>sprk_corerecordtype</c> + <c>sprk_corerecordid</c>) and a
@@ -526,15 +613,20 @@ public sealed record RecordOwnershipContext
     /// The context for a child row about to be created: every ownership-parent lookup on <paramref name="child"/>
     /// becomes a parent. The first parent in attribute order is not meaningful, so an ordinary child's business unit
     /// comes from <paramref name="primaryParent"/> when it is an ownership parent (a contact regarding is not), else
-    /// the first parent found.
+    /// the first parent in the child table's primary order (fix round F4: <see cref="OrderedParentsOf"/>, the order the
+    /// reconciler asks an existing row in, never the attribute order). The parents are listed primary first, then in that
+    /// order, so the row's writer and the reconciler ask the same question.
     /// </summary>
     public static RecordOwnershipContext ForChild(Entity child, RecordOwnershipParent? primaryParent = null)
     {
         ArgumentNullException.ThrowIfNull(child);
-        var parents = ParentsOf(child); // #2084: keyed by the child's table, so a citation files nothing
+        var ordered = OrderedParentsOf(child); // #2084: keyed by the child's table, so a citation files nothing
         var primary = primaryParent is { IsSpecified: true } p && RecordOwnershipResolver.IsOwnershipParent(p.EntityLogicalName)
             ? p
-            : parents.FirstOrDefault();
+            : ordered.FirstOrDefault();
+        var parents = primary is null || !ordered.Contains(primary)
+            ? ordered
+            : new[] { primary }.Concat(ordered.Where(parent => parent != primary)).ToArray();
         return new RecordOwnershipContext
         {
             TargetEntityLogicalName = primary?.EntityLogicalName,
@@ -1638,7 +1730,13 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
 
         // UAC task 194b: in the table's primary order (RecordOwnershipContext.OrderedParentsOf), never the attribute order.
         var parents = WithInheritedParents(
-            RecordOwnershipContext.InPrimaryOrder(request.EntityLogicalName, byColumn).Select(c => c.Value).Concat(threadAfter),
+            RecordOwnershipContext.InPrimaryOrder(
+                    request.EntityLogicalName, byColumn,
+                    RecordOwnershipContext.SubjectColumnOf(
+                        request.EntityLogicalName,
+                        current.Attributes.TryGetValue(CoreAncestorResolver.RegardingRecordIdColumn, out var pairText) ? pairText as string : null,
+                        column => byColumn.TryGetValue(column, out var heldParent) ? heldParent.RecordId : null))
+                .Select(c => c.Value).Concat(threadAfter),
             request);
         var resolution = await ResolveReparentOwnerAsync(request, parents, ct).ConfigureAwait(false);
 
@@ -1943,7 +2041,8 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             row.GetAttributeValue<EntityReference>(OwningTeamColumn)?.Id,
             row.GetAttributeValue<EntityReference>(OwningBusinessUnitColumn)?.Id,
             WithInheritedParents(
-                RecordOwnershipContext.InPrimaryOrder(request.EntityLogicalName, OwnershipParentColumnsOf(row))
+                RecordOwnershipContext.InPrimaryOrder(
+                        request.EntityLogicalName, OwnershipParentColumnsOf(row), RecordOwnershipContext.SubjectColumnOf(row))
                     .Select(c => c.Value).Concat(threadParents),
                 request),
             LineageOnlyLookupsOf(request.EntityLogicalName, row));
