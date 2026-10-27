@@ -71,7 +71,7 @@ function Get-StandingGrantWriterFinding {
     if ($direct.ContainsKey($sga)) {
         $findings.Add(@{ State = 'OK'; What = "$UserName is a DIRECT member of '$StandingGrantProfileName'" })
     } else {
-        $findings.Add(@{ State = 'FAIL'; What = "$UserName is not a DIRECT member of '$StandingGrantProfileName' — the person removal cannot clear a standing grant. A provisioning step adds this membership; this script never writes it" })
+        $findings.Add(@{ State = 'FAIL'; What = "$UserName is not a DIRECT member of '$StandingGrantProfileName' — the person removal cannot clear a standing grant. H7b (S20) adds this membership on a stamp; in an environment no provisioning run reaches, add it directly (deployment guide 6.5.2). This script never writes it" })
     }
 
     # C5: the System Administrator profile, held directly or through a team, is noted on every run and never fails.

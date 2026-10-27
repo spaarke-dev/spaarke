@@ -1002,7 +1002,10 @@ No other profile (System Administrator excepted) may read, create or update thes
 `-BffApplicationIds` as above — dry run, then `-Apply`, then `-Verify`, which checks every column is secured and every
 profile x column pair, and **must exit 0** before a BFF that writes the new columns is deployed. `-Verify` also checks
 that each BFF application user is a direct member of Standing Grant Administrators, which H7b adds (§7.11), so run it
-after H7b completes. A new stamp receives
+after H7b completes. In an environment no provisioning run reaches (for example spaarkedev1), the operator adds each
+BFF application user to Standing Grant Administrators directly, with the owner's OK — the same association H7b's S20
+writes: `POST {org}/api/data/v9.2/fieldsecurityprofiles({Standing Grant Administrators id})/systemuserprofiles_association/$ref`
+with body `{"@odata.id": "{org}/api/data/v9.2/systemusers({BFF application user id})"}` — then runs `-Verify`. A new stamp receives
 the columns, the field security and the profile permissions through the SpaarkeMaster import (H6) — that path applies
 only once SpaarkeMaster 1.2.4.0 is published (1.2.3.1 and earlier do not secure these columns; until then run the
 script on a new stamp too). H7b's identity-link check (S18) covers the plane and collision columns, and its

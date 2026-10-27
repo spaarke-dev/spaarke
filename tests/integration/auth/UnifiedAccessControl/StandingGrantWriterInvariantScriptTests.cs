@@ -84,7 +84,11 @@ public class StandingGrantWriterInvariantScriptTests
     {
         var findings = Findings(direct: Array.Empty<object>(), team: Array.Empty<object>(), writers: new[] { SgaWrites });
 
-        findings.Should().ContainSingle(f => f.State == "FAIL" && f.What.Contains("not a DIRECT member", StringComparison.Ordinal));
+        var fail = findings.Should().ContainSingle(f => f.State == "FAIL" && f.What.Contains("not a DIRECT member", StringComparison.Ordinal)).Which;
+        // The remedy names both routes: H7b's S20 on a stamp, and the direct add (§6.5.2) where no provisioning run reaches.
+        fail.What.Should().Contain("H7b (S20) adds this membership on a stamp")
+            .And.Contain("in an environment no provisioning run reaches, add it directly (deployment guide 6.5.2)")
+            .And.Contain("This script never writes it");
     }
 
     [Fact]
