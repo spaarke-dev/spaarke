@@ -193,9 +193,13 @@ public class PersonAccessAdministrationTests
 
         await Remove(contact);
         _h.Identities.Contacts[contact].StateCode.Should().Be(stateCode, "removal does not change the contact's state");
-        await Reinstate(contact);
+        var reinstated = await Reinstate(contact);
 
-        _h.Identities.Contacts[contact].StateCode.Should().Be(stateCode, "nor does reinstatement");
+        _h.Identities.Contacts[contact].StateCode.Should().Be(stateCode, "nor does reinstatement, refused or not");
+        if (stateCode == 0)
+            reinstated.Should().BeOfType<Ok<ReinstatePersonResponse>>();
+        else
+            Problem(reinstated).StatusCode.Should().Be(StatusCodes.Status409Conflict, "an inactive contact is reactivated first");
     }
 
     [Fact]
@@ -551,6 +555,64 @@ public class PersonAccessAdministrationTests
         _h.Emails.Onboarding.Should().BeEmpty();
         _h.Emails.ExistingAccount.Should().BeEmpty();
         _h.Identities.Contacts[contact].Oid.Should().Be(oid);
+    }
+
+    /// <summary>
+    /// Reinstate option (b): an inactive contact is refused with 409 contact_inactive_reactivate_first and the staff message,
+    /// the marker stays as it is and nothing is written, and the 9822 audit still records the refusal.
+    /// </summary>
+    [Fact]
+    public async Task Reinstate_AnInactiveMarkedContact_Is409_TheMarkerUnchanged_NothingWritten_AndTheRefusalAudited()
+    {
+        var (contact, _) = BoundPerson(stateCode: 1);
+        await Remove(contact);
+        var marked = _h.Identities.Contacts[contact].RemovedOn;
+        marked.Should().NotBeNull("control: the removal marked the person");
+        var writesBefore = _h.Identities.Writes.Count;
+        var grantWrites = _h.Grants.WriteCount;
+
+        var result = await Reinstate(contact);
+
+        var problem = Problem(result);
+        problem.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        ReasonCode(result).Should().Be("sdap.access.person.contact_inactive_reactivate_first");
+        problem.ProblemDetails.Extensions["staffMessage"].Should().Be(PersonAccessAdministrationEndpoints.ContactInactiveStaffMessage);
+        PersonAccessAdministrationEndpoints.ContactInactiveStaffMessage.Should()
+            .Contain("Reactivate the contact first, then reinstate");
+        _h.Identities.Contacts[contact].RemovedOn.Should().Be(marked, "the marker is unchanged");
+        _h.Identities.Contacts[contact].StateCode.Should().Be(1);
+        _h.Identities.Writes.Count.Should().Be(writesBefore, "nothing is written");
+        _h.Grants.WriteCount.Should().Be(grantWrites);
+
+        var audit = _audit.Records.Where(r => r.EventId.Id == 9822).Should().ContainSingle().Subject;
+        audit.Category.Should().Be(ExternalAccessAudit.Category);
+        audit.Message.Should().StartWith("[EXT-PERSON-AUDIT] reinstate:")
+            .And.Contain($"status {PersonAdministrationStatus.RefusedContactInactive}")
+            .And.Contain("statecode at start 1")
+            .And.Contain(contact.ToString());
+    }
+
+    /// <summary>Reinstate option (b): a contact or a statecode that cannot be read is a 503 and nothing is written.</summary>
+    [Theory]
+    [InlineData("contact-read-fails")]
+    [InlineData("statecode-empty")]
+    public async Task Reinstate_AnUnreadableStatecode_Is503_AndNothingIsWritten(string how)
+    {
+        var (contact, _) = BoundPerson();
+        await Remove(contact);
+        var marked = _h.Identities.Contacts[contact].RemovedOn;
+        var writesBefore = _h.Identities.Writes.Count;
+        if (how == "contact-read-fails")
+            _h.Identities.FailGetContact = true;
+        else
+            _h.Identities.MaskStateCode = true;
+
+        var result = await Reinstate(contact);
+
+        Problem(result).StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable);
+        ReasonCode(result).Should().Be(PersonAccessAdministrationEndpoints.ContactUnreadableReasonCode);
+        _h.Identities.Writes.Count.Should().Be(writesBefore, "nothing is written");
+        _h.Identities.Contacts[contact].RemovedOn.Should().Be(marked);
     }
 
     [Fact]

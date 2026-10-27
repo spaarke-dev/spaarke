@@ -49,6 +49,18 @@ public static class PersonAccessAdministrationEndpoints
     /// <summary>The reason code when the contact could not be read; nothing was written.</summary>
     internal const string ContactUnreadableReasonCode = "sdap.access.person.contact_unreadable";
 
+    /// <summary>
+    /// The reason code of a reinstatement refused because the contact is inactive; nothing was written. CLAUDE.md §11:
+    /// Existing — the contact_unreadable and reinstate incomplete codes. Extension — neither names the action that unblocks
+    /// the request, and an inactive contact is neither unreadable nor a failed write. Cost of doing nothing: a reinstated
+    /// inactive contact is marked again by the next removal sweep, so the reinstatement undoes itself without telling staff.
+    /// </summary>
+    internal const string ContactInactiveReasonCode = "sdap.access.person.contact_inactive_reactivate_first";
+
+    /// <summary>What staff are told when a reinstatement is refused because the contact is inactive.</summary>
+    internal const string ContactInactiveStaffMessage =
+        "This contact is inactive. Reactivate the contact first, then reinstate the person.";
+
     /// <summary>Registers both routes on a group of their own (see the class remarks).</summary>
     public static void MapPersonAccessAdministrationEndpoints(this WebApplication app)
     {
@@ -79,12 +91,14 @@ public static class PersonAccessAdministrationEndpoints
             .WithSummary("Reinstate a removed person (external-access administrators only)")
             .WithDescription(
                 "Clears the contact's removed marker and nothing else: no grant is restored and no invite is sent. A contact " +
-                "that is not removed is left unchanged.")
+                "that is not removed is left unchanged. Only an active contact is reinstated: an inactive one is refused (409) " +
+                "with nothing changed; reactivate it first.")
             .Produces<ReinstatePersonResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status409Conflict)
             .ProducesProblem(StatusCodes.Status500InternalServerError)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
     }
@@ -159,6 +173,8 @@ public static class PersonAccessAdministrationEndpoints
     /// <summary>
     /// Handles <c>POST /reinstate-person</c>: clears the removed marker only. The marker alone refuses the person whatever the
     /// contact's statecode, and reinstatement does not change that state either; no grant is restored and no invite is sent.
+    /// Only an active contact is reinstated: an inactive one is a 409 with nothing written (the audit still records the
+    /// refusal), and a statecode that cannot be read is a 503.
     /// </summary>
     internal static async Task<IResult> ReinstatePersonAsync(
         ExternalPersonRequest request,
@@ -190,6 +206,17 @@ public static class PersonAccessAdministrationEndpoints
             PersonAdministrationStatus.NotFound => Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "Not Found",
                 detail: "The contact was not found. Nothing was changed."),
             PersonAdministrationStatus.ContactUnreadable => ContactUnreadable(httpContext),
+            PersonAdministrationStatus.RefusedContactInactive => Results.Problem(
+                statusCode: StatusCodes.Status409Conflict,
+                title: "Contact inactive",
+                detail: ContactInactiveStaffMessage,
+                extensions: new Dictionary<string, object?>
+                {
+                    ["reasonCode"] = ContactInactiveReasonCode,
+                    ["staffMessage"] = ContactInactiveStaffMessage,
+                    ["contactId"] = request.ContactId,
+                    ["traceId"] = httpContext.TraceIdentifier,
+                }),
             PersonAdministrationStatus.Incomplete => Results.Problem(
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Reinstatement incomplete",

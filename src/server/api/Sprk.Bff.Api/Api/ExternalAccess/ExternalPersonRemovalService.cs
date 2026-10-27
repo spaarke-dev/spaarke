@@ -19,6 +19,12 @@ internal enum PersonAdministrationStatus
 
     /// <summary>The contact could not be read. Nothing was written.</summary>
     ContactUnreadable,
+
+    /// <summary>
+    /// A reinstatement refused because the contact is inactive. The marker is unchanged and nothing was written: staff
+    /// reactivate the contact first, then reinstate.
+    /// </summary>
+    RefusedContactInactive,
 }
 
 /// <summary>The outcome of one removal or reinstatement.</summary>
@@ -60,7 +66,12 @@ internal sealed record PersonAdministrationOutcome(
 /// <para>The binding (the object id, its plane and its key mirror) is never cleared: the person is still found by their object
 /// id and refused, and the same object id can never be keyed onto another contact.</para>
 /// <para><b>Reinstatement</b> clears the marker and nothing else: no grant is restored (staff grant again) and no invite is
-/// sent. A contact that carries no marker is a no-op.</para>
+/// sent. A contact that carries no marker is a no-op. Only an ACTIVE contact is reinstated: the statecode is read live first,
+/// an inactive contact is refused with nothing written (reactivate it first, then reinstate), and a statecode that cannot be
+/// read refuses as an unreadable contact. So a reinstatement never leaves an inactive contact unmarked for the removal sweep
+/// (<see cref="Sprk.Bff.Api.Services.ExternalAccess.ExternalAccessRemovalSweep"/>) to mark again. Residual, intended: a
+/// contact deactivated after its reinstatement and before the next sweep is marked again by that sweep. That is a fresh
+/// removal, not a defect.</para>
 /// <para><b>Staleness.</b> Composition and binding read the marker live on every request, so the person is refused on their
 /// next request once the marker is written (0 seconds); the cache evictions are belt and braces.</para>
 /// <para><b>CLAUDE.md §11.</b> Existing: <see cref="ExternalGrantRevocationService"/> revokes one grant; the identity store
@@ -185,13 +196,24 @@ internal sealed class ExternalPersonRemovalService
 
     /// <summary>
     /// Reinstates <paramref name="contactId"/>: clears the removed marker and nothing else. No grant is restored and no invite
-    /// is sent; a contact without the marker is a no-op.
+    /// is sent; a contact without the marker is a no-op. Only an active contact is reinstated: an inactive one is
+    /// <see cref="PersonAdministrationStatus.RefusedContactInactive"/> and a statecode that cannot be read is
+    /// <see cref="PersonAdministrationStatus.ContactUnreadable"/>, both with nothing written.
     /// </summary>
     public async Task<PersonAdministrationOutcome> ReinstateAsync(Guid contactId, CancellationToken ct)
     {
         var (found, stateCode) = await ReadContactAsync(contactId, ct).ConfigureAwait(false);
         if (found is not PersonAdministrationStatus.Completed)
             return PersonAdministrationOutcome.Refused(found);
+
+        // Reinstate only an active contact: the removal sweep marks an inactive one again, so clearing its marker would not hold.
+        if (stateCode is null)
+            return PersonAdministrationOutcome.Refused(PersonAdministrationStatus.ContactUnreadable);
+        if (stateCode != 0)
+        {
+            return new PersonAdministrationOutcome(PersonAdministrationStatus.RefusedContactInactive, stateCode,
+                Array.Empty<ExternalPersonStepResult>());
+        }
 
         var marker = await ReadMarkerAsync(contactId, ct).ConfigureAwait(false);
         if (marker == RemovedMarkerRead.NotRemoved)

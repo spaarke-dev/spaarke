@@ -231,6 +231,8 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
     public LookupStatus HomeContactLookupStatus { get; set; } = LookupStatus.Read;
     public bool FailReferences { get; set; }
     public bool FailGetContact { get; set; }
+    /// <summary>Reinstate option (b): <c>GetContactAsync</c> answers the row with an empty statecode (a statecode not read).</summary>
+    public bool MaskStateCode { get; set; }
     /// <summary>Task 181: <see cref="LookupStatus.ColumnMissing"/> makes <c>GetContactAsync</c> answer that a binding column is not provisioned.</summary>
     public LookupStatus GetContactStatus { get; set; } = LookupStatus.Read;
     public bool FailBind { get; set; }
@@ -1160,7 +1162,7 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
 
     private ContactBindingRow Row(Contact c)
     {
-        var row = new ContactBindingRow(c.Id, c.StateCode, MaskBindingColumn ? null : c.Oid,
+        var row = new ContactBindingRow(c.Id, MaskStateCode ? null : c.StateCode, MaskBindingColumn ? null : c.Oid,
             MaskIdentityColumns ? null : c.Plane, $"W/\"{c.Version}\"", c.Email,
             MaskIdentityColumns || MaskCollisionColumns ? null : c.Flag,
             c.KeyMirror, MaskHomeColumns ? null : c.ExternalTenantId) { RemovedOn = c.RemovedOn };

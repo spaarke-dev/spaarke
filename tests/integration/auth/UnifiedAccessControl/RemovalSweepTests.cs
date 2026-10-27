@@ -9,6 +9,7 @@ using Moq;
 using Spaarke.Dataverse;
 using Spaarke.Scheduling;
 using Sprk.Bff.Api.Api.ExternalAccess;
+using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
@@ -293,6 +294,56 @@ public class RemovalSweepTests
         _h.Identities.Writes.Should().BeEmpty();
         _h.Grants.WriteCount.Should().Be(0);
         SweepAudit.Should().BeEmpty();
+    }
+
+    // ── Reinstate option (b): only an active contact is reinstated, so a sweep does not undo it ─────────────────────
+
+    private Task<Microsoft.AspNetCore.Http.IResult> Reinstate(Guid contactId)
+    {
+        var http = new Microsoft.AspNetCore.Http.DefaultHttpContext { TraceIdentifier = "trace-c4-reinstate" };
+        Sprk.Bff.Api.Api.Filters.ExternalAccessAdministratorAuthorizationFilter.SetDecision(http,
+            new AdministratorAuthorityDecision(Guid.NewGuid(), AdministratorAuthorityLeg.Direct, AdministratorAuthorityReason.Granted));
+        return PersonAccessAdministrationEndpoints.ReinstatePersonAsync(
+            new ExternalPersonRequest(contactId), _h.Grants, _h.Participations, _h.Identities, Mock.Of<IMembershipCacheInvalidator>(),
+            _h.Time, http, NullLogger<Program>.Instance, _audit.Factory, CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task ASweepAfterAnActiveReinstatement_LeavesTheContactUnmarked()
+    {
+        var (contact, _) = Person(stateCode: 0);
+        _h.Identities.Contacts[contact].RemovedOn = _h.Time.Now.AddDays(-1);
+        var revoked = GrantOnMatter(contact);
+        _h.Grants.DeactivateOutOfBand(revoked.Id);
+
+        (await Reinstate(contact)).Should().BeOfType<Microsoft.AspNetCore.Http.HttpResults.Ok<ReinstatePersonResponse>>();
+        _h.Identities.Contacts[contact].RemovedOn.Should().BeNull("control: the reinstatement cleared the marker");
+        var writesAfterReinstate = _h.Identities.Writes.Count;
+
+        var result = await RunAsync(linkWrites: true, sweepWrites: true, looseScan: true);
+
+        Sweep(result).GetProperty("candidates").GetInt32().Should().Be(1, "control: the loose scan returned the contact");
+        _h.Identities.Contacts[contact].RemovedOn.Should().BeNull("an active reinstated contact is not marked again");
+        _h.Identities.Writes.Count.Should().Be(writesAfterReinstate);
+        SweepAudit.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// The documented residual: a contact deactivated AFTER its reinstatement and before the next sweep is marked again by that
+    /// sweep. Intended: that is a fresh removal, not a defect.
+    /// </summary>
+    [Fact]
+    public async Task AContactDeactivatedAfterItsReinstatement_IsMarkedAgainByTheNextSweep_AsAFreshRemoval()
+    {
+        var (contact, _) = Person(stateCode: 0);
+        _h.Identities.Contacts[contact].RemovedOn = _h.Time.Now.AddDays(-1);
+        (await Reinstate(contact)).Should().BeOfType<Microsoft.AspNetCore.Http.HttpResults.Ok<ReinstatePersonResponse>>();
+        _h.Identities.Contacts[contact].StateCode = 1;
+
+        await RunAsync(linkWrites: true, sweepWrites: true);
+
+        _h.Identities.Contacts[contact].RemovedOn.Should().Be(_h.Time.Now, "the sweep's fresh removal marks it again");
+        SweepAudit.Should().ContainSingle();
     }
 
     // ── The cap ─────────────────────────────────────────────────────────────────────────────────────────────
