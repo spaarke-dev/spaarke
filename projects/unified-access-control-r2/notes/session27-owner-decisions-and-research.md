@@ -2051,3 +2051,26 @@ Reading:
   - Core User, Basic User and Internal Contact User (Workforce) keep Read only.
 - The change is applied in the repo and on dev after a reviewed dry-run diff.
 - The finding behind this was told to the owner in chat. It is not recorded here.
+
+## Round 135 (2026-10-28): making a record not Secure removes no access
+Owner: "If a record is moved from secure to not secure the access should not be removed (either in the model driven app or SPA)."
+
+Scope chosen: **keep all access**.
+- Unsecure, through every route (direct, the parent's cascade, re-file), keeps:
+  - every explicit share on the record;
+  - the shares it passed down to the work assignments and projects filed under it;
+  - every contact/workforce grant.
+- The owner change and the cleared Secure flag still happen.
+- Shares stay visible and removable in Current Access.
+
+This supersedes the earlier "every share is revoked" rule in `UnsecureProjectEndpoint` (steps 3.5 mirrored-share removal, 4 and 4.5). Owner's clarification: a Power Apps-licensed user keeps MDA access; a workforce contact has no MDA access, so the grant is their only path.
+
+## Round 136 (2026-10-28): business-unit model
+Owner: "we only want our 'product' tables at the Spaarke main parent; we do not want to put customer records at the Spaarke main parent; we should use the customer's main 'parent' as the de facto top level for any customer records, either configured/defined or working records."
+
+Confirmed reading:
+1. The Spaarke root BU holds Spaarke product data only.
+2. The customer's own BU is the top level for every customer record, configured or working. This is the direct child of the root that provisioning H10 creates (`customerBusinessUnitId`), a sibling of Secure Record.
+3. Round 131's memberless restricted-content owner team moves from the root to the customer's BU.
+4. Customer-configured reference data (event types, matter types, ...) is owned in the customer's BU. Core User's Deep Read then covers every user in that unit or below it.
+   - #2401 needs no role change. On dev the gap comes only from the layout: several sibling test BUs, with the reference rows in "Spaarke Business Unit 1".
