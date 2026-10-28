@@ -1,6 +1,6 @@
 # Current Task State - spaarke-SPA-external-access-platform-r3
 
-> **Last Updated**: 2026-10-27 23:40Z. Dev BFF = de38296499 (deployed 19:41:16Z for UAC 194; UAC gate result pending); dev SPA = 1fa0cf5cb8.
+> **Last Updated**: 2026-10-28 02:05Z. **PR #2360 MERGED to master as 078f62bcad (01:57:56Z, owner's direct go).** Dev BFF = de38296499 (no fix yet; UAC gate result pending); dev SPA = 1fa0cf5cb8.
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -10,9 +10,9 @@
 | Field | Value |
 |-------|-------|
 | **Task** | **Contact identity hardening (security rework)** on branch `fix/r3-iss-005-combined` (worktree `C:/wtr3-005`). Tracked ONLY in private draft advisory GHSA-hq7m-w2pf-v8j7. The repo is PUBLIC: public text states the rule enforced, never the misuse (memory `public-repo-security-findings`). Scan commits for sensitive wording before every push. |
-| **Step** | **Head d72fdfe9c6, pushed and sent to UAC 2026-10-27 ~23:35Z** for a re-check of N-F2, N-K2 and N-K1(a), then the PR OK. UAC's earlier verdict on 3799c8e359/a24215e967: F1 and F3–F13 pass, K list accepted, no fail-open path. Commits since then: a24215e967 and b93b12aad7 (comment wording), da5bfe05a9 (direct SGA add remedy text + deployment guide 6.5.2; provisioning OK), e6abdc8305 (N-F2 reinstate audit try/finally Interrupted), 05833b92dd (N-K2 mode-aware cap message), d72fdfe9c6 (N-K1(a): a removed person's own sign-in and registration answer exactly as not invited; logs keep contact_removed; staff surfaces unchanged). Verified at d72fdfe9c6: build 0 errors; affected classes 571/571; IntegrationTests 172/0/8; ArchTests 1551; wording scan clean. |
-| **Status** | in-progress: waiting on UAC |
-| **Next Action** | (1) UAC's PR OK on d72fdfe9c6; fix anything it raises. (2) Open the PR with a rule-level title (e.g. "contact identity hardening: field security, invite stamp, admin removal"). The body states: SpaarkeMaster 1.2.4.0 is published before the control-plane redeploy if this merges first; schema-first rollout; §10 numbers (+0.07 MB, 37.77 → 37.84 MB; re-measure against a fresh master build) and the placement decision. (3) Update the advisory. (4) Live steps, each with the owner's approval and a rollback (list below). |
+| **Step** | **Merged.** PR #2360 (head 6a051e8c52 = d72fdfe9c6 + master merge 173e56f8e7 + F-M1 fix) merged with --match-head-commit as **078f62bcad**. CI on 6a051e8c52: 43 pass / 4 skipping / 0 fail (Router, Client lint pass). UAC PR OK (after F-M1: app-only generic writers refused the removed marker, invite stamp and collision columns; reflection guard ContactAccessColumnGuardTests). §10: fresh master 4ab7c1a9c1 37.79 MB → 37.88 MB (+0.10, canonical, Optimal, PDBs incl.); no package changes. Advisory GHSA-hq7m-w2pf-v8j7 updated with "Fix status (2026-10-28)", still DRAFT (keep draft until deployed everywhere serving external users). Main checkout master fast-forwarded to 078f62bcad. Merge SHA sent to UAC (task 193); schema-first notice sent to provisioning, ontology, field-mapping, ebilling, word-add-in. |
+| **Status** | in-progress: live rollout on dev, each step needs the owner's approval |
+| **Next Action** | Dev rollout, in order, each with its own owner go + rollback (live reads shown before running): (1) `Set-ExternalAccessContactSecuritySchema.ps1` dry run → `-Apply` → `-Verify`; (2) direct SGA add for the BFF app user(s) (guide 6.5.2) → `-Verify` exit 0; (3) BFF deploy of a master SHA ≥ 078f62bcad (usual deploy rule + peer OKs + UAC server gate window); (4) xms_edov/email claims + token probe; `removeUnverifiedEmailClaim`; (5) sweep report-only run; (6) re-invite the 2 unbound dev contacts. NO BFF from master goes to dev before (1)–(2) pass. |
 
 ### Private files (scratchpad, NOT in repo)
 `C:\Users\RALPHS~1\AppData\Local\Temp\claude\c--code-files-spaarke-wt-SPA-external-access-platform-r3\15aa240f-634c-4332-99f6-382ebcb06a62\scratchpad\`
@@ -31,6 +31,8 @@
 - Defers: show them, staff retry (no automatic retry).
 - -Verify step (h): the System Administrator profile is exempt and printed as INFO ("note it, pass"). Least privilege is filed as #2332. Pinning the profile id is tracked privately with the advisory.
 - N-K1 (2026-10-27): option (a), the person's own surfaces answer with the ordinary not-invited refusal.
+- Merge of #2360 approved by the owner 2026-10-28 ("Merge 6a051e8c52").
+- Private K (not a public issue): registration resolver branch answers an unproven marker as a final not-invited (outage wording only); in the private brief.
 - Accepted known limits (UAC): the marker write honours the caller's token; F5 ~2 × 500 reads; F6 9823 on RowChangedSinceRead; F1 no If-Match; F7 noun; F9 orphan CIAM account; F12 extra reads; the 503 title difference; the step (h) name match.
 
 ## Live steps for later (each needs the owner's approval with a rollback)
@@ -48,7 +50,7 @@
 - Pending: UAC's server gate result, including the `[SECURE-CHILD-RECONCILE]` ordinaryMoves report; ontology wants its lines for sprk_signal, sprk_decisionrecord and sprk_budgetrevision before OrdinaryMovesWritesEnabled goes on. Then send after-notices (SHA + DLL 1.0.0+de38296499) to ontology, word-add-in, field-mapping, ebilling and provisioning.
 - Rollback: `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261027T193805Z` (3ff2c04bf5). Deploy worktree C:\wtbffe-de3.
 - Push Updates 409 (owner report): the parent-lookup check, which this deploy did not change. sprk_project links to sprk_matter only through N:N; field-mapping filed #2352, which waits on an owner and UAC decision.
-- word-add-in: #2357 (68048b83d5, search-only) is OK on content for a later deploy.
+- word-add-in: #2357 (68048b83d5, search-only) is OK on content for a later deploy (it is in master before 078f62bcad).
 - The owner's field-mapping check 2 (Create Work Assignment from a matter with Assigned Attorney 1) is still pending.
 
 ## Open owner items
