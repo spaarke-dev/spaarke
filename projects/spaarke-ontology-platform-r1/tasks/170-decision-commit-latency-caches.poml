@@ -4,7 +4,7 @@
     <title>Faster decision commit: per-request caller identity and cached entity metadata (D-196, UAT round 2 item 3)</title>
     <phase>11 UAT</phase>
     <gate>startable (D-196). Changes in uac-r2-owned files need uac-r2's review before merge</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Touches access-probe code and a shared Dataverse client in Sprk.Bff.Api / Spaarke.Dataverse (.cs); security-adjacent (caller identity); modifies tests.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -89,4 +89,11 @@
       <file>docs/adr/ADR-038-testing-strategy.md</file>
     </files>
   </knowledge>
+  <completion date="2026-10-28">
+    `CallerWhoAmIMemo` remembers only the caller's successful WhoAmI, for one request, in `HttpContext.Items`. Its key is SHA-256(normalised environment URL + newline + exact token), which was uac-r2's F1 condition. `CallerRecordAccessProbe` and `DataverseUserClient` share it. Access answers (RetrievePrincipalAccess, RUSOP, record reads) are still asked every time. An ended or recycled request is a miss and never throws. `DataverseServiceClientImpl` caches entity-set names per process for at most 15 minutes and never caches failures. ADR-009: path C (comply), per its "Allowed L1 Exceptions" rows (per-request `HttpContext.Items`; metadata at most 15 minutes, documented in code). No exception was needed.
+
+    Review: two Opus adversarial passes (isolation, then correctness) found no code defect. Their shared F4 was the unrecorded ADR-009 reasoning, now recorded as path C. Fix round `aad52ac62e`, `01fa8338f8`, `2eb18ffc67`. The Sonnet re-check found only K-class items; I closed its K2 and K4 in `b8a69ad28a` (the NullReferenceException case is tested, the notes match the code). uac-r2 reviewed its probe change and approved at `2eb18ffc67`. Its views on the further savings: P2 and P3 declined (access can change mid-request; TOCTOU), P4 acceptable if bounded and fail-closed.
+
+    Saving: the test proves 2 to 1 for the commit service's own identity questions. The production 35 to 1 is an estimate. Post-deploy done-when: one commit in App Insights shows at most 2 WhoAmI dependencies; record its wall time. The three RetrievePrincipalAccess 400s are DI-131 (#2405, field-mapping and uac-r2). PR #2404 merged to docs (`0f9fd108fa`).
+  </completion>
 </task>
