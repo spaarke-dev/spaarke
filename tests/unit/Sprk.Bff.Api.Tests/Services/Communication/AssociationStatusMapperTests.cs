@@ -613,6 +613,26 @@ public class AssociationStatusMapperTests
     }
 
     [Fact]
+    public void Decide_CallerSuppliedNonCoreTarget_OverConflict_IsNotWritten_AndTheReasonDoesNotClaimIt_Issue2412()
+    {
+        // An invoice is non-core: the caller's invoice settles the conflict but is still a candidate only (unchanged
+        // write gate), so the reason must not say the caller "decided" a field nothing was written to.
+        var chosen = Guid.NewGuid();
+        var mapper = AssociationTestSupport.Mapper(enabled: true, threshold: 0.85);
+
+        var decision = mapper.Decide(
+            new[]
+            {
+                Match("sprk_regardinginvoice", chosen, 1.0, RungKind.ExplicitReference, entity: "sprk_invoice") with { CallerSupplied = true },
+                Match("sprk_regardinginvoice", Guid.NewGuid(), 0.95, RungKind.ExplicitReference, entity: "sprk_invoice"),
+            },
+            CommunicationDirection.Incoming, tenantKey: null);
+
+        decision.RegardingWrites.Should().NotContainKey("sprk_regardinginvoice");
+        decision.Provenance.Decision.Reason.Should().NotContain("caller's choice decided");
+    }
+
+    [Fact]
     public void Decide_TwoCallerSuppliedTargetsOnSameField_StaysAmbiguous_Issue2412()
     {
         // Must-not-fire: the caller exemption settles a field only when the caller named ONE target on it.

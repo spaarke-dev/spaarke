@@ -192,7 +192,12 @@ public sealed class AssociationStatusMapper
             AddWrites(writes, fieldWinners, coreEntities, useDeterministic: false);
         }
 
-        var callerDecided = fieldWinners.Where(f => f.CallerOverrodeConflict).Select(f => f.Field).ToList();
+        // Only fields where the caller's target was actually WRITTEN (a non-core caller target stays a candidate).
+        var callerDecided = fieldWinners
+            .Where(f => f.CallerOverrodeConflict
+                && writes.TryGetValue(f.Field, out var written) && written.Id == f.Winner.Target.Id)
+            .Select(f => f.Field)
+            .ToList();
         if (callerDecided.Count > 0)
             reason += $" The caller's choice decided field(s) {string.Join(", ", callerDecided)} over other high-confidence match(es), kept as review candidates.";
 
