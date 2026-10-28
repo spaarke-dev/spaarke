@@ -2083,3 +2083,6 @@ Confirmed reading:
 2. **Admin-tab authoring:** **author wins.** A policy stays owned by its author wherever the author is homed, the root included. No change to `SavePolicyAsync`; this is an accepted exception to round 136.
 
 Related review (field-mapping #2399): Core User Global Read + AppendTo on `sprk_aisearchindex` was NOT recommended under round 136. Recommended instead: own the index rows in the customer BU, with no role change (optional: the server applies the BU's index). The owner decides through field-mapping. UAC owns test zz-046 (`WorkAssignmentCreateLiveTests.cs:119`), whose premise is stale.
+
+## Round 138 (2026-10-28): child shares follow the record after an Unsecure
+When a now-ordinary record (formerly Secure) has a person removed, what they got on its documents, events, to-dos and filed work assignments and projects through that share is removed too. Child access tracks the record's share list. Design: `notes/task-196-unsecure-keeps-access.md`.
