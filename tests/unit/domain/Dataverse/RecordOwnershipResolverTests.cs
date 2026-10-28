@@ -1245,38 +1245,6 @@ public class RecordOwnershipResolverTests
         directory.Assignments.Should().ContainSingle().Which.Item3.Should().Be(ChildTeam);
     }
 
-    [Fact(DisplayName = "194b F1-d must fire: a Decision Record held in isolation is NEVER re-filed out on its stored parents — refused before any write, even with F3 (since R A5: as every generic re-file of one)")]
-    public async Task Reparent_WhenADecisionRecordHeldInIsolationWouldLeaveIt_RefusesBeforeAnyWrite()
-    {
-        var recordId = Guid.NewGuid();
-        var directory = Directory()
-            .WithRecord("sprk_project", SecureProjectId, SecureBu)
-            .WithRecord("sprk_matter", MatterId, ChildBu)
-            .WithRecord("sprk_decisionrecord", recordId, SecureBu, owningTeam: SecureNamedTeam,
-                extra: new() { ["sprk_project"] = new EntityReference("sprk_project", SecureProjectId) });
-        var applied = false;
-        var request = new RecordReparent
-        {
-            EntityLogicalName = "sprk_decisionrecord",
-            RecordId = recordId,
-            ParentChanges = new Dictionary<string, EntityReference?>
-            {
-                ["sprk_project"] = null,
-                ["sprk_matter"] = new EntityReference("sprk_matter", MatterId),
-            },
-            SecureExitCaller = CallerHolding(FullAccess), // F3 would permit a document; a Decision Record is still held
-        };
-
-        var resolution = await Build(directory).ReparentAsync(
-            request, Applies(directory, request, () => applied = true), CancellationToken.None);
-
-        resolution.IsRefused.Should().BeTrue();
-        resolution.RefusalCode.Should().Be(RecordOwnerRefusal.ParentUndetermined);
-        resolution.Reason.Should().Be(RecordOwnershipContext.WriterOwnedFilingRefusal, "194b R (A5): refused before the F1-d check");
-        applied.Should().BeFalse("the guard decides before anything is written");
-        directory.Assignments.Should().BeEmpty();
-    }
-
     [Theory(DisplayName = "194b R (A5) must fire: a Signal's or a Decision Record's filing is its writer's — a generic re-file (into isolation, or between ordinary records) is refused before anything is read or written")]
     [InlineData("sprk_decisionrecord", "sprk_project", true)]
     [InlineData("sprk_decisionrecord", "sprk_matter", false)]
@@ -1308,6 +1276,8 @@ public class RecordOwnershipResolverTests
         resolution.RefusalCode.Should().Be(RecordOwnerRefusal.ParentUndetermined);
         resolution.Reason.Should().Be(RecordOwnershipContext.WriterOwnedFilingRefusal);
         applied.Should().BeFalse("refused before the change is written");
+        directory.QueriedEntities.Should().BeEmpty("refused before anything is read");
+        directory.RecordQueries.Should().BeEmpty();
         directory.Assignments.Should().BeEmpty();
     }
 
