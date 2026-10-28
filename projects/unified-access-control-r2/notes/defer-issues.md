@@ -1533,6 +1533,13 @@ direction 2026-09-09.
 `TrackingFieldTrio/index.ts:805`. It has no dependency on any of the above and should be scheduled on
 its own.
 
+### 2026-10-28 — filed from the ebilling 086/098 reviews
+
+| ID | Title | GitHub Issue |
+|---|---|---|
+| D-2368 | Unsecure and ordinary creates fail on tables no default team can read (stored file, procedure assignment, rule set, policy); fix option (a), pending owner, built in 194b | https://github.com/spaarke-dev/spaarke/issues/2368 |
+| D-2369 | read_query and semantic search: base completeness and labels on the caller-visible result set (tracked with task 191) | https://github.com/spaarke-dev/spaarke/issues/2369 |
+
 ## Closed
 
 *(none yet)*
