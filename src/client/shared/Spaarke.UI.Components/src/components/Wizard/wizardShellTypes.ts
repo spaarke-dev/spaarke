@@ -83,6 +83,12 @@ export type WizardShellAction =
       type: 'REMOVE_DYNAMIC_STEP';
       /** The `id` of the dynamic step to remove. */
       stepId: string;
+    }
+  /** Rebuild the whole state from `steps` (and `initialStepId`), as a fresh mount would (task 165, `resetKey`). */
+  | {
+      type: 'RESET';
+      steps: ReadonlyArray<IWizardStepConfig>;
+      initialStepId?: string;
     };
 
 // ---------------------------------------------------------------------------
@@ -398,4 +404,15 @@ export interface IWizardShellProps {
    * @since R2 UAT §3.1 (2026-07-03)
    */
   initialStepId?: string;
+  /**
+   * Opt-in, additive (ontology task 165). When this value CHANGES after mount, the shell rebuilds its step state in place,
+   * as a fresh mount would, from the current `steps` and `initialStepId`: the step list and position, the skipped marks,
+   * the Finish error and success screen are reset, and the step content is remounted. The dialog itself stays mounted (no
+   * unmount, no second open animation, no focus jump). Use it where the wizard changes what it is about while it stays
+   * open (the decision wizard moving between items, loading, and recording), instead of remounting the shell with a `key`.
+   * The value is compared, never read: any string or number will do.
+   *
+   * Absent (the default): nothing changes, and `steps` / `initialStepId` keep being captured once on mount.
+   */
+  resetKey?: string | number;
 }

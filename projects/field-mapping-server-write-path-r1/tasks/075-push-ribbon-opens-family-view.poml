@@ -3,7 +3,7 @@
   <metadata>
     <title>Push Updates ribbon opens the Family view (code-page dialog hosting RecordFamilyModal) (FR-35)</title>
     <phase>7 W7 Record family service and Family tool</phase>
-    <gate>073 complete</gate>
+    <gate>073 complete; MERGE AND DEPLOY ONLY TOGETHER WITH 040 (owner, 2026-10-28)</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>New code page + ribbon web-resource change.</rigor-reason>
@@ -12,7 +12,7 @@
     <effort>high</effort>
     <parallel-group>W7-C</parallel-group>
     <parallel-safe>true</parallel-safe>
-    <deps>073</deps>
+    <deps>073 (build); 040 (merge + deploy)</deps>
     <tags>frontend, react, fluent-ui, ribbon, dataverse, testing</tags>
     <estimated-effort>4-6 hours</estimated-effort>
   </metadata>
@@ -33,6 +33,7 @@
   </context>
 
   <constraints>
+    <constraint source="Owner 2026-10-28">Build and review now; the PR stays unmerged until 040 is ready, then merges and deploys with it, so Push Updates never stops working on dev. The legacy direct-push helpers kept "until task 040" are deleted in that combined change.</constraint>
     <constraint source="FR-35">No direct /push call remains in pushUpdates; the old confirm dialog path is removed.</constraint>
     <constraint source="ADR-050">Ribbon → code-page dialog is the sanctioned launch for a modal from a non-React surface.</constraint>
     <constraint source="ADR-021">Fluent v9 tokens; dark-mode safe.</constraint>

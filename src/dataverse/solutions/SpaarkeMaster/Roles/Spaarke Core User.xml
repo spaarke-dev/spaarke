@@ -61,7 +61,6 @@
     <RolePrivilege name="prvAppendsprk_CommunicationChannelRef" level="Basic" />
     <RolePrivilege name="prvAppendsprk_CommunicationParticipant" level="Basic" />
     <RolePrivilege name="prvAppendsprk_CommunicationThread" level="Basic" />
-    <RolePrivilege name="prvAppendsprk_ContactOrganization" level="Global" />
     <RolePrivilege name="prvAppendsprk_Document" level="Deep" />
     <RolePrivilege name="prvAppendsprk_Event" level="Deep" />
     <RolePrivilege name="prvAppendsprk_Invoice" level="Deep" />
@@ -77,7 +76,7 @@
     <RolePrivilege name="prvAppendsprk_Todo" level="Deep" />
     <RolePrivilege name="prvAppendsprk_WorkAssignment" level="Deep" />
     <RolePrivilege name="prvAppendSyncError" level="Basic" />
-    <RolePrivilege name="prvAppendToAccount" level="Basic" />
+    <RolePrivilege name="prvAppendToAccount" level="Deep" />
     <RolePrivilege name="prvAppendToActionCard" level="Global" />
     <RolePrivilege name="prvAppendToActivity" level="Basic" />
     <RolePrivilege name="prvAppendToArticleTemplate" level="Global" />
@@ -86,7 +85,7 @@
     <RolePrivilege name="prvAppendtoCategory" level="Global" />
     <RolePrivilege name="prvAppendToChannelPropertyGroup" level="Global" />
     <RolePrivilege name="prvAppendToConnection" level="Global" />
-    <RolePrivilege name="prvAppendToContact" level="Basic" />
+    <RolePrivilege name="prvAppendToContact" level="Deep" />
     <RolePrivilege name="prvAppendToConvertRule" level="Global" />
     <RolePrivilege name="prvAppendToCustomerRelationship" level="Basic" />
     <RolePrivilege name="prvAppendToEmailServerProfile" level="Global" />
@@ -132,7 +131,6 @@
     <RolePrivilege name="prvAppendTosprk_CommunicationChannelRef" level="Basic" />
     <RolePrivilege name="prvAppendTosprk_CommunicationParticipant" level="Basic" />
     <RolePrivilege name="prvAppendTosprk_CommunicationThread" level="Basic" />
-    <RolePrivilege name="prvAppendTosprk_ContactOrganization" level="Global" />
     <RolePrivilege name="prvAppendTosprk_Document" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_Event" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_EventType_Ref" level="Global" />
@@ -140,10 +138,15 @@
     <RolePrivilege name="prvAppendTosprk_InvoiceLineItem" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_KPIAssessment" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_Matter" level="Deep" />
+    <RolePrivilege name="prvAppendTosprk_MatterType_Ref" level="Global" />
     <RolePrivilege name="prvAppendTosprk_Memo" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_NavItem" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_notificationoutbox" level="Deep" />
+    <RolePrivilege name="prvAppendTosprk_Organization" level="Deep" />
+    <RolePrivilege name="prvAppendTosprk_PracticeArea_Ref" level="Global" />
     <RolePrivilege name="prvAppendTosprk_Project" level="Deep" />
+    <RolePrivilege name="prvAppendTosprk_ProjectType_Ref" level="Global" />
+    <RolePrivilege name="prvAppendTosprk_RecordType_Ref" level="Global" />
     <RolePrivilege name="prvAppendTosprk_Report" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_ServiceRequest" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_Todo" level="Deep" />
@@ -200,7 +203,6 @@
     <RolePrivilege name="prvAssignsprk_CommunicationChannelRef" level="Basic" />
     <RolePrivilege name="prvAssignsprk_CommunicationParticipant" level="Basic" />
     <RolePrivilege name="prvAssignsprk_CommunicationThread" level="Basic" />
-    <RolePrivilege name="prvAssignsprk_ContactOrganization" level="Global" />
     <RolePrivilege name="prvAssignsprk_Document" level="Deep" />
     <RolePrivilege name="prvAssignsprk_Event" level="Deep" />
     <RolePrivilege name="prvAssignsprk_Invoice" level="Deep" />
@@ -268,7 +270,6 @@
     <RolePrivilege name="prvCreatesprk_CommunicationChannelRef" level="Basic" />
     <RolePrivilege name="prvCreatesprk_CommunicationParticipant" level="Basic" />
     <RolePrivilege name="prvCreatesprk_CommunicationThread" level="Basic" />
-    <RolePrivilege name="prvCreatesprk_ContactOrganization" level="Global" />
     <RolePrivilege name="prvCreatesprk_Document" level="Deep" />
     <RolePrivilege name="prvCreatesprk_Event" level="Deep" />
     <RolePrivilege name="prvCreatesprk_Invoice" level="Deep" />
@@ -332,7 +333,6 @@
     <RolePrivilege name="prvDeletesprk_CommunicationChannelRef" level="Basic" />
     <RolePrivilege name="prvDeletesprk_CommunicationParticipant" level="Basic" />
     <RolePrivilege name="prvDeletesprk_CommunicationThread" level="Basic" />
-    <RolePrivilege name="prvDeletesprk_ContactOrganization" level="Global" />
     <RolePrivilege name="prvDeletesprk_Document" level="Deep" />
     <RolePrivilege name="prvDeletesprk_Event" level="Deep" />
     <RolePrivilege name="prvDeletesprk_Invoice" level="Deep" />
@@ -725,7 +725,6 @@
     <RolePrivilege name="prvWritesprk_CommunicationChannelRef" level="Basic" />
     <RolePrivilege name="prvWritesprk_CommunicationParticipant" level="Basic" />
     <RolePrivilege name="prvWritesprk_CommunicationThread" level="Basic" />
-    <RolePrivilege name="prvWritesprk_ContactOrganization" level="Global" />
     <RolePrivilege name="prvWritesprk_Document" level="Deep" />
     <RolePrivilege name="prvWritesprk_Event" level="Deep" />
     <RolePrivilege name="prvWritesprk_Invoice" level="Deep" />

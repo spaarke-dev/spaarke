@@ -225,11 +225,29 @@ internal sealed class SdkColumnReadPermissionSource : IColumnReadPermissionSourc
         return (await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false))?.Entities.Count > 0;
     }
 
+    /// <summary>Page size of the field-permission read.</summary>
+    internal const int FieldPermissionPageSize = 5000;
+
+    /// <summary>
+    /// The most pages the field-permission read follows. The rows are bounded by the asked columns times the user's
+    /// profiles, so a read that needs more pages is not a real answer: it throws, and the proof is Faulted (fail closed).
+    /// </summary>
+    internal const int FieldPermissionMaxPages = 20;
+
+    /// <remarks>
+    /// The table is checked in code, not by the query: Dataverse refuses a QueryExpression/FetchXML condition on
+    /// <c>fieldpermission.entityname</c> given a table's logical name (observed live through the Web API: the read faults,
+    /// the attribute's value being expected as an integer), while an OData <c>$filter</c> on it is accepted. So the query selects <c>entityname</c> and asks
+    /// the server only for the columns (<c>attributelogicalname</c> In), <c>canread</c> = allowed and the profile link; a
+    /// returned row counts only when its <c>entityname</c> is a string equal to <paramref name="table"/>. A row whose table is
+    /// missing or not a string never counts (fail closed). The table check is what keeps a grant on a same-named column of
+    /// another table (for example <c>sprk_accesspermissiongrant</c>, on both <c>contact</c> and <c>sprk_organization</c>)
+    /// from proving this table's column. Every page is read; a fault on any page throws.
+    /// </remarks>
     public async Task<IReadOnlyCollection<string>> ColumnsGrantingReadAsync(
         Guid user, string table, IReadOnlyCollection<string> columns, bool throughTeam, CancellationToken ct)
     {
-        var query = new QueryExpression("fieldpermission") { ColumnSet = new ColumnSet("attributelogicalname") };
-        query.Criteria.AddCondition("entityname", ConditionOperator.Equal, table);
+        var query = new QueryExpression("fieldpermission") { ColumnSet = new ColumnSet("attributelogicalname", "entityname") };
         query.Criteria.AddCondition("attributelogicalname", ConditionOperator.In, columns.Cast<object>().ToArray());
         query.Criteria.AddCondition("canread", ConditionOperator.Equal, SecuredColumnReadProof.FieldPermissionAllowed);
 
@@ -245,12 +263,33 @@ internal sealed class SdkColumnReadPermissionSource : IColumnReadPermissionSourc
             userProfiles.LinkCriteria.AddCondition("systemuserid", ConditionOperator.Equal, user);
         }
 
-        var rows = (await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false))?.Entities;
-        return rows is null
-            ? Array.Empty<string>()
-            : rows.Select(r => r.GetAttributeValue<string>("attributelogicalname"))
+        query.PageInfo = new PagingInfo { PageNumber = 1, Count = FieldPermissionPageSize };
+        var granted = new List<string>();
+        for (var page = 1; ; page++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var result = await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)
+                ?? throw new InvalidOperationException($"The field-permission read returned no result for page {page}.");
+            granted.AddRange(result.Entities
+                .Where(r => r.Attributes.TryGetValue("entityname", out var t)
+                    && t is string rowTable && string.Equals(rowTable, table, StringComparison.OrdinalIgnoreCase))
+                .Select(r => r.GetAttributeValue<string>("attributelogicalname"))
                 .Where(c => !string.IsNullOrWhiteSpace(c))
-                .Select(c => c!)
-                .ToArray();
+                .Select(c => c!));
+
+            if (!result.MoreRecords)
+            {
+                return granted;
+            }
+
+            if (page >= FieldPermissionMaxPages)
+            {
+                throw new InvalidOperationException(
+                    $"The field-permission read had more than {FieldPermissionMaxPages} pages; it is not taken as an answer.");
+            }
+
+            query.PageInfo.PageNumber = page + 1;
+            query.PageInfo.PagingCookie = result.PagingCookie;
+        }
     }
 }

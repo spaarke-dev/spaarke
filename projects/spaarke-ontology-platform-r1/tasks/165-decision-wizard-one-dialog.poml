@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="165" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Decision wizard keeps ONE dialog open from launch to close (no close and reopen on load, item move or record) (UAT round 1 re-check)</title>
+    <phase>11 UAT</phase>
+    <gate>startable (owner UAT re-check 2026-10-28, check 2; "fix found defects now", 2026-10-05)</gate>
+    <status>pr-open-awaiting-review</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes a shared component (`WizardShell`, used by every Spaarke wizard) and the decision wizard (.tsx); modifies tests.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Bounded UI state change with exact files known; the acceptance is a DOM-identity property testable in jest.</model-tier-reason>
+    <effort>high</effort>
+    <deps>158 (decision wizard as on dev)</deps>
+    <tags>frontend,shared-ui,testing</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+    <parallel-group>L</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Owner UAT re-check 2026-10-28 (notes/uat-v4-log.md, "Round 1 re-check", check 2): opening a Work Item shows a "Decision" dialog with one step, "Loading", and the text "Loading the decision...". That dialog then closes, and a second dialog opens with the item's steps (What was found, Send budget inquiry, ...). The owner sees this as a double load. Cause, verified: `DecisionWizard.tsx:441` renders the loading and error states as their OWN `WizardShell` (`key={currentId}:loading|error`, title "Decision"). When the item is ready, `DecisionItemWizard` (`DecisionWizard.tsx:410`, `key={currentId}` or `{currentId}:recorded`) renders a DIFFERENT `WizardShell`. Both are modal `SprkModal`s, so React unmounts one dialog and mounts another. The same remount happens on every ‹ › move between items (key = item id) and when an item is recorded (key `:recorded`, used so the shell reopens on its Confirm step, because `WizardShell` captures `initialStepId` once on mount: `WizardShell.tsx:173-179`).</prompt>
+  <role>SPAARKE front-end engineer (shared UI components / decision wizard).</role>
+  <goal>From launch to close, the decision wizard shows ONE dialog. Loading, a load error and retry, ready, moving between items, and recording all change the content in place (title, steps, body, footer). The dialog element is never unmounted and remounted, and there is no visible close-and-reopen.</goal>
+
+  <context>
+    <background>Files: `src/client/shared/Spaarke.UI.Components/src/components/DecisionWizard/DecisionWizard.tsx` (:395-480: the body switch, the loading/error `WizardShell` at :441, the `DecisionItemWizard` keys at :410-412) and `DecisionItemWizard.tsx` (:450 its `WizardShell`). `src/client/shared/Spaarke.UI.Components/src/components/Wizard/WizardShell.tsx` (modal mode renders inside `SprkModal`; embedded mode has its own chrome; `initialStepId` is read once through the `useReducer` lazy init at :173-179); `wizardShellReducer.ts` (`buildInitialShellState`); `wizardShellTypes.ts:393` (initialStepId note). The decision wizard's step state is deliberately reset per item and on record. Keep that, but reset the STEP STATE without unmounting the DIALOG.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DecisionWizard/DecisionWizard.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DecisionWizard/DecisionItemWizard.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/Wizard/WizardShell.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/Wizard/wizardShellReducer.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/Wizard/wizardShellTypes.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/Wizard/__tests__/ (existing WizardShell tests)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DecisionWizard/__tests__/ (existing decision wizard tests)</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>`WizardShell` + `SprkModal` (the canonical modal, D-26) and `buildInitialShellState`. Check with Grep for any existing "reset steps without remount" mechanism before adding one.</existing>
+    <extension>Extend `WizardShell` with ONE additive, optional prop that resets its step state in place (for example a `resetKey` whose change re-runs `buildInitialShellState(steps, initialStepId)` through a reducer action), or an equivalent that keeps `SprkModal` mounted. Every other wizard keeps its current behaviour when the prop is absent.</extension>
+    <cost-of-doing-nothing>Every decision opens as two dialogs, one after the other. Every item move and every record does the same. The owner reported it as a defect in UAT.</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="D-26 / ADR-050">The dialog stays the canonical `SprkModal` + `WizardShell` modal (header, stepper, footer, sizes, dismiss rules). Do not switch the decision wizard to embedded mode inside a hand-made dialog, and do not add a second modal component.</constraint>
+    <constraint source="shared component">Any `WizardShell` change is additive and optional. With the new prop absent, every existing `WizardShell` test passes unchanged, and no other wizard's behaviour changes. Run the full `Spaarke.UI.Components` jest suite for the Wizard and DecisionWizard folders, plus any wizard tests the change could reach. Run `/conflict-check`: shared UI is a hot path (`projects/INDEX.md`).</constraint>
+    <constraint source="behaviour kept">Keep, unchanged: per-item drafts; the "Discard unrecorded choices?" confirm; the error state with Try again; after a record, the item reopens read-only on its Confirm step (the reason for today's `:recorded` key); ‹ › navigation and the "N of M" counter; the next-open-item button; nav and uiScale.</constraint>
+    <constraint source="no flash">While an item loads, the same dialog shows the loading content (title "Decision" until the item's title is known is acceptable). There is no unmount, no second open animation, and no focus jump to the page behind.</constraint>
+    <constraint source="D-106">Critical path only: fix this defect. Log anything else found in notes/defer-issues.md with a GitHub issue, not here.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor and the reason, then load the knowledge files.</step>
+    <step order="1">Failing tests first, in the DecisionWizard test folder. Capture the `role="dialog"` element and assert it is the SAME node (`toBe`) across each transition below. Each must fail on today's code.
+      <ul>
+        <li>(a) loading → ready;</li>
+        <li>(b) loading → error → Try again → ready;</li>
+        <li>(c) item 1 → › → item 2 (including item 2 still loading);</li>
+        <li>(d) record → read-only Confirm step.</li>
+      </ul>
+      Must-not-fire: closing the wizard unmounts the dialog. WizardShell tests: with the new prop absent, behaviour is unchanged; when it changes, the step state resets to `initialStepId` with the dialog node unchanged.</step>
+    <step order="2">Implement the additive `WizardShell` reset, and make `DecisionWizard` render ONE `WizardShell` whose steps, title and reset key come from the current state (loading, error, ready or recorded). Move the per-item content into steps or props instead of separate shells.</step>
+    <step order="3">Run the client checks. Run `npm run build` (or the package's type check) for `Spaarke.UI.Components` and the Console (`src/solutions/SpaarkeAi`). Use `npm install --legacy-peer-deps --no-audit --no-fund`, not `npm ci`. Then open the PR into `docs/ontology-platform-design`.</step>
+    <step order="4">Main session: independent review, fix round, re-check, merge. The docs→master PR then auto-deploys the Console to dev (`deploy-spaarke-ai.yml`). The owner re-checks: one dialog on open, on › and on record.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">Opening a Work Item whose data loads asynchronously keeps the same `role="dialog"` DOM node from the loading content to the ready steps (test a).</criterion>
+    <criterion testable="true">Load error → Try again → ready keeps the same dialog node (test b).</criterion>
+    <criterion testable="true">Moving to the next or previous item, including one that is still loading, keeps the same dialog node, and the new item's steps start at its first step (test c).</criterion>
+    <criterion testable="true">Recording an item keeps the same dialog node and shows the read-only Confirm step, as today (test d).</criterion>
+    <criterion testable="true">Closing the wizard (Cancel, ✕, or after the discard confirm) removes the dialog, unchanged (must-not-fire).</criterion>
+    <criterion testable="true">Every existing WizardShell and DecisionWizard test passes. Without the new prop, WizardShell behaves exactly as before (no test edited to pass except where the remount was the asserted behaviour, each such edit named in the task notes).</criterion>
+    <criterion testable="true">Test scope: the stated contract plus the cases above. Anything beyond needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="One dialog on dev (owner, after the Console deploy)"><steps><step>In the Worklist, open a Decide item; press › to the next item; record an item (zz- data).</step></steps><expected>One dialog opens and stays open: no close and reopen, no second open animation, on open, on › and on record.</expected></test>
+  </ui-tests>
+
+  <escalation>
+    <trigger>If keeping one dialog needs a non-additive change to `WizardShell` (a changed default, a removed prop, or changed behaviour for other wizards), STOP and report with options.</trigger>
+  </escalation>
+
+  <knowledge>
+    <files>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>.claude/patterns/ui/record-modal-selection.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/uat-v4-log.md</file>
+    </files>
+  </knowledge>
+</task>
