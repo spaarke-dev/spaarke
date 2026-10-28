@@ -593,3 +593,9 @@ Scripts, snapshots and logs: `C:/Users/RALPHS~1/AppData/Local/Temp/uac191b/` (no
   - UAC's recommendation is therefore Deep on those two tables. It is assigned only to users whose BU is not an ancestor of the secure BU.
   - ebilling takes this to the owner. Nobody holds the role on dev (read-only check, 2026-10-23).
 - **UAC impact.** No UAC surface reads those tables as the caller. `SecureChildLineage` and `RecordOwnershipResolver` read them app-only.
+
+## Inputs from the ebilling 086 review (2026-10-28): `sprk_storedfile`
+
+- **The share mirror gives Read only on `sprk_storedfile`:** no Write, Delete, Share, Assign or AppendTo. StoredFileService is the only writer, and a model-driven-app Delete would orphan the blob and destroy invoice evidence. This needs a per-table cap on `ChildMirrorMask`, with a must-fire test. Any role that 191 grants on the table gets Read only: the role grant is the control, and the mirror cap is defence in depth.
+- **Inline mirror (086 K1):** StoredFileService does not call `SyncChildAsync` after create, so a Secure-team-owned file gets its root's sharees on the next 2-minute reconcile. Decide whether to add the inline mirror when a role first grants Stored File privileges.
+- **Secure-held source copies (086 K5):** a copy of a document held by a Secure matter, attached to an ordinary invoice, is owned by the invoice's ordinary team (citation rule). Its bytes stay protected by the copy rule, but once Read on the table is granted to BU-depth roles, its name, size and hash become visible in the model-driven app. Decide before granting.
