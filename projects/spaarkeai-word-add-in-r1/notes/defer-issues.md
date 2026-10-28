@@ -1282,3 +1282,13 @@ Capture never carries `contentId` (`emailContentCapture.ts`, `OutlookAdapter.ts:
 | **GitHub Issue** | [#2356](https://github.com/spaarke-dev/spaarke/issues/2356) |
 
 `QuickCreateFieldRequirements.TryParse` uses `Enum.TryParse`. The filter and the endpoint share it, so they agree on the type, but undefined values are not refused at the boundary. Fix: exact name match, as in task 133's search fix. Kept out of task 133 because that task allows only one server change.
+## ISS-027 — Email association: a caller-supplied regarding loses to a conflicting 1.0 match
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round (owner to decide) |
+| **Filed** | 2026-10-28 (owner's Outlook check on dev, found in passing; pre-existing) |
+| **GitHub Issue** | [#2412](https://github.com/spaarke-dev/spaarke/issues/2412) |
+
+The owner saved an email to CMRCL-464674 whose body carried a signed tracking token for another matter (PAT-942404). `AssociationStatusMapper` treated the save-pane choice (`ExplicitReferenceRung`, documented as authoritative) as one more 1.0 candidate. The result was Ambiguous, with no `sprk_regardingmatter` on the communication. The .eml Document was filed correctly. The communication is missing from the matter's Messages widget, and the pane shows no "Filed to" card. Fix: a caller-supplied regarding wins on its field; the conflicts stay in the provenance. Engine code belongs to email-communication-intelligence (BFF).
