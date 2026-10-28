@@ -860,27 +860,29 @@ public class CallerRecordAccessProbe
     /// mis-supplied. It also needs no privilege beyond being a user, and no oid→systemuser mapping
     /// that could silently miss (<see cref="DataverseAccessDataSource"/> returns
     /// <see cref="AccessRights.None"/> exactly there, which reads as "denied" rather than "unmapped").
+    /// <para><b>Asked once per request</b> (ontology task 170, D-196). A successful answer is remembered for the rest of the
+    /// request under exactly this token (<see cref="CallerWhoAmIMemo"/>), so the next question in the same request does not ask
+    /// again; a failure is never remembered. Rights are not remembered: <c>RetrievePrincipalAccess</c> is asked every time.</para>
     /// </remarks>
     protected virtual async Task<Guid?> ResolveCallerSystemUserIdAsync(string dataverseToken, CancellationToken ct)
     {
+        var currentRequest = CallerWhoAmIMemo.CurrentRequest;
+        if (CallerWhoAmIMemo.TryGetUserId(currentRequest, dataverseToken, out var knownCaller))
+            return knownCaller;
+
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, $"{_environmentUrl}/api/data/v9.2/WhoAmI()");
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", dataverseToken);
-            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            var (status, body) = await SendWhoAmIRequestAsync(dataverseToken, ct).ConfigureAwait(false);
 
-            using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
-
-            if (!response.IsSuccessStatusCode)
+            if (((int)status) < 200 || ((int)status) > 299)
             {
                 _logger.LogWarning(
                     "[{Marker}] WhoAmI returned {StatusCode} for the delegation check. Denying.",
-                    FallbackMarker, (int)response.StatusCode);
+                    FallbackMarker, (int)status);
 
                 return null;
             }
 
-            var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
             using var document = JsonDocument.Parse(body);
 
             if (document.RootElement.TryGetProperty("UserId", out var userId) &&
@@ -888,6 +890,7 @@ public class CallerRecordAccessProbe
                 Guid.TryParse(userId.GetString(), out var systemUserId) &&
                 systemUserId != Guid.Empty)
             {
+                CallerWhoAmIMemo.Remember(currentRequest, dataverseToken, document.RootElement);
                 return systemUserId;
             }
 
@@ -901,6 +904,25 @@ public class CallerRecordAccessProbe
             _logger.LogWarning(ex, "[{Marker}] WhoAmI threw during the delegation check. Denying.", FallbackMarker);
             return null;
         }
+    }
+
+    /// <summary>
+    /// One <c>WhoAmI()</c> GET under <paramref name="dataverseToken"/>: its status and, on success, its body (the wire seam,
+    /// ontology task 170 — as <see cref="SendPrincipalAccessRequestAsync"/> is for task 064, so a test answers it from memory
+    /// instead of a transport double, ADR-038, and counts it).
+    /// </summary>
+    protected virtual async Task<(System.Net.HttpStatusCode Status, string Body)> SendWhoAmIRequestAsync(
+        string dataverseToken, CancellationToken ct)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"{_environmentUrl}/api/data/v9.2/WhoAmI()");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", dataverseToken);
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+        using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
+        var body = response.IsSuccessStatusCode
+            ? await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false)
+            : string.Empty;
+        return (response.StatusCode, body);
     }
 
     /// <summary>
