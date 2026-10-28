@@ -308,13 +308,15 @@ public class SubmissionCommitGate
     }
 
     /// <summary>
-    /// The compensation of an undone commit, idempotent (fix round: undo ordering and F2-a). In order: the approval (its invoice lookup is
-    /// required), the lines, the invoice's file rows withdrawn (Removed; uac-r2 (b)), their blobs, then ONE transaction that deletes the file rows AND the invoice together, and
+    /// The compensation of an undone commit, idempotent (fix round: undo ordering and F2-a). In order: the invoice's file rows read and
+    /// withdrawn (Removed; uac-r2 (b) and F4-1: before any delete, so a held undo never leaves a file served), the approval (its invoice
+    /// lookup is required), the lines, the file rows' blobs, then ONE transaction that deletes the file rows AND the invoice together, and
     /// last the submission's commit columns with the "removed" administrator note. The invoice is never left without its file rows: the
     /// rows are the source gate the external invoice predicate (task 098) reads, and <c>sprk_storedfile.sprk_invoice</c> is RemoveLink, so
     /// an invoice deleted first would orphan them, and rows deleted first would leave an invoice that reads as having no source. The columns
     /// are cleared only when something of the commit was left (the link or the findings set, or a row found), so a submission Failed BEFORE
-    /// any commit with the same code keeps its number. More than <see cref="MaxFiles"/> file rows hold the undo with nothing deleted (uac-r2 K2).
+    /// any commit with the same code keeps its number. More than <see cref="MaxFiles"/> file rows hold the undo with nothing deleted (uac-r2 K2);
+    /// the rows read are withdrawn first.
     /// True when nothing is left; false when a step faulted (the undo is held; logged with
     /// the fault type only, and the note still says the removal is pending). Only the caller's cancellation propagates.
     /// </summary>
@@ -333,8 +335,20 @@ public class SubmissionCommitGate
             // the rows that carry one.
             step = "files_read";
             var files = await _files.ReadRowsForInvoiceAsync(invoiceId, MaxFiles + 1, ct).ConfigureAwait(false);
+
+            // uac-r2 F4-1: every row read is withdrawn (Removed, never served) straight after the read, BEFORE any delete, so an undo
+            // held at any later step (approval, lines, blobs, the transaction) never leaves a Servable file on a Failed submission.
+            // The rows read before an over-MaxFiles hold are withdrawn too; nothing is deleted then. Each write is conditioned on the
+            // row version read above.
+            if (files.Count > 0)
+            {
+                step = "withdraw";
+                await _files.WithdrawForUndoAsync(files, ct).ConfigureAwait(false);
+            }
+
             if (files.Count > MaxFiles)
             {
+                step = "files_read";
                 throw new InvalidOperationException($"Invoice {invoiceId} has more than {MaxFiles} file rows; the undo is held.");
             }
 
@@ -364,11 +378,8 @@ public class SubmissionCommitGate
             {
                 left = true;
 
-                // uac-r2 (b): every row is withdrawn (Removed, never served) BEFORE any blob goes, so an undo held after a blob delete
-                // never leaves a Servable row whose blob is gone. Each write is conditioned on the row version read above.
-                step = "withdraw";
-                await _files.WithdrawForUndoAsync(files, ct).ConfigureAwait(false);
-
+                // uac-r2 (b): every row was withdrawn above, before any blob goes, so an undo held after a blob delete never leaves a
+                // Servable row whose blob is gone.
                 step = "blobs";
                 foreach (var file in files)
                 {
