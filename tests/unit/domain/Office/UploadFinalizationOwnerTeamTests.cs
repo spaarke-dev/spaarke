@@ -61,9 +61,75 @@ public class UploadFinalizationOwnerTeamTests
 
         team.Should().Be(RecordOwnershipResolverDouble.DefaultTeamId);
         var asked = resolver.Requests.Should().ContainSingle().Subject;
-        asked.TargetEntityLogicalName.Should().Be("matter", "the queued spelling; the resolver maps it");
-        asked.TargetRecordId.Should().Be(MatterId);
+        // 194b R4-2: the queued friendly spelling is mapped to the column the document is written with (sprk_matter).
+        asked.Parents.Should().Equal(new RecordOwnershipParent("sprk_matter", MatterId));
         asked.CallerObjectId.Should().Be(CallerOid);
+    }
+
+    // ── UAC task 194b R4-2: the communication the worker links its documents to is in the question ──────────────
+
+    private static readonly Guid SecureCommunicationId = Guid.Parse("194b0042-0000-4000-8000-0000000000c1");
+    private static readonly Guid SecureTeam = Guid.Parse("194b0042-0000-4000-8000-00000000005e");
+
+    /// <summary>A secure-if-any stand-in: the Secure team when the question names the secure communication.</summary>
+    private static RecordOwnershipResolverDouble SecureCommunicationResolver() => new()
+    {
+        AnswerFor = q => q.Parents.Contains(new RecordOwnershipParent("sprk_communication", SecureCommunicationId))
+            ? RecordOwnerResolution.Owned(SecureTeam) with { IsSecureOwner = true }
+            : null,
+    };
+
+    [Fact]
+    [Trait("status", "task-194b-uac-r2")]
+    public async Task ResolveDocumentOwnerTeam_ASecureCommunicationNextToAnOrdinaryAssociation_GivesTheSecureTeam()
+    {
+        var resolver = SecureCommunicationResolver();
+
+        var team = await UploadFinalizationWorker.ResolveDocumentOwnerTeamAsync(
+            resolver, Payload(owningTeamId: null) with { RelatedCommunicationId = SecureCommunicationId },
+            CallerOid.ToString(), CancellationToken.None);
+
+        team.Should().Be(SecureTeam, "the document is written linked to the secure communication; the sweep must not be the first to see it");
+        var written = new Microsoft.Xrm.Sdk.Entity("sprk_document", Guid.NewGuid())
+        {
+            // Attribute order deliberately NOT the table's: the communication first.
+            ["sprk_relatedcommunication"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_communication", SecureCommunicationId),
+            ["sprk_matter"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_matter", MatterId),
+        };
+        resolver.Requests.Should().ContainSingle().Which.Parents
+            .Should().Equal(RecordOwnershipContext.OrderedParentsOf(written), "the reconciler's question about the written row");
+    }
+
+    [Fact]
+    [Trait("status", "task-194b-uac-r2")]
+    public async Task ResolveDocumentOwnerTeam_ADocumentSave_NeverAsksAboutACommunication()
+    {
+        var resolver = SecureCommunicationResolver();
+
+        var team = await UploadFinalizationWorker.ResolveDocumentOwnerTeamAsync(
+            resolver,
+            Payload(owningTeamId: null) with { ContentType = SaveContentType.Document, RelatedCommunicationId = SecureCommunicationId },
+            CallerOid.ToString(), CancellationToken.None);
+
+        team.Should().Be(RecordOwnershipResolverDouble.DefaultTeamId, "a Document save is never linked to a communication");
+    }
+
+    [Fact]
+    [Trait("status", "task-194b-uac-r2")]
+    public async Task ResolveDocumentOwnerTeam_AContactAssociation_KeepsItsTargetQuestion_WithTheCommunication()
+    {
+        var contactId = Guid.NewGuid();
+        var resolver = SecureCommunicationResolver();
+
+        var team = await UploadFinalizationWorker.ResolveDocumentOwnerTeamAsync(
+            resolver,
+            Payload(owningTeamId: null) with { AssociationType = "contact", AssociationId = contactId, RelatedCommunicationId = SecureCommunicationId },
+            CallerOid.ToString(), CancellationToken.None);
+
+        team.Should().Be(SecureTeam);
+        var asked = resolver.Requests.Should().ContainSingle().Subject;
+        asked.TargetEntityLogicalName.Should().Be("contact", "a contact is no ownership column; its pre-146 question is unchanged");
+        asked.TargetRecordId.Should().Be(contactId);
     }
 
     [Fact]

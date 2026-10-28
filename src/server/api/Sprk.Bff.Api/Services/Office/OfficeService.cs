@@ -468,56 +468,6 @@ internal class OfficeService : IOfficeService
                 };
             }
 
-            // ══ RECORD OWNERSHIP (task 080, write-path invariant I-6) ═════════════════════════════════
-            // The sprk_document this save creates is owned by a business unit's DEFAULT OWNER TEAM — the team of
-            // the record it is filed against, or the acting user's when it is filed against nothing (owner
-            // decisions 2026-09-22 / 2026-09-25). Left unset, Dataverse makes the app user the owner, which sits
-            // in the ROOT business unit, so no child-BU user could ever read their own saved document.
-            //
-            // Resolved HERE — before the email capture, the job row, the upload and the document row — so a
-            // refusal writes nothing at all. A version save is skipped: it creates no document, and its row keeps
-            // the owner it already has. `IsVersionSave` is the cheap intent predicate; the target is read below.
-            Guid? owningTeamId = null;
-            Guid? createdByPersonId = null;
-            if (!IsVersionSave(request))
-            {
-                var documentOwner = await _ownershipResolver.ResolveOwnerAsync(
-                    new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext
-                    {
-                        TargetEntityLogicalName = request.TargetEntity?.EntityType,
-                        TargetRecordId = request.TargetEntity?.EntityId,
-                        // The oid is enough: the resolver keys systemuser on azureactivedirectoryobjectid, the same
-                        // key OfficeAuthFilter resolved and RecordContainerResolver uses for this save's container.
-                        CallerObjectId = Guid.TryParse(userId, out var callerObjectId) ? callerObjectId : null,
-                        // Task 146 c1-r1 (owner round 13 item 9): the saving user asked for every document this save
-                        // creates app-only — recorded as their creator person (carried to the worker with the team).
-                        RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfObjectId(userId),
-                    },
-                    cancellationToken);
-                owningTeamId = documentOwner.IsOwned ? documentOwner.OwningTeamId : null;
-                createdByPersonId = documentOwner.CreatedByPerson;
-
-                if (owningTeamId is null)
-                {
-                    // Fail-closed, never app-owned: an app-owned row is invisible to its own author, which is the
-                    // defect this exists to remove. The resolver has already logged which link in the chain broke.
-                    return new SaveResponse
-                    {
-                        Success = false,
-                        Error = new SaveError
-                        {
-                            Code = OfficeErrorCodes.RecordOwnerUnresolved,
-                            Message = request.TargetEntity is not null
-                                ? "This item could not be assigned an owner from the record it is filed to, so it "
-                                  + "was not saved. Check that the record still exists and that you can open it."
-                                : "This item could not be assigned an owner from your business unit, so it was not "
-                                  + "saved. Ask an administrator to check your user record's business unit.",
-                            Retryable = false
-                        }
-                    };
-                }
-            }
-
             // FR-B3 (task 043): route a user-saved EMAIL through the SAME capture engine as mailbox intake —
             // create/reconcile the canonical sprk_communication and run association + triage + provenance — so a
             // hand-filed email is intelligence-bearing, not merely a sprk_document archive. Runs AFTER the
@@ -569,6 +519,91 @@ internal class OfficeService : IOfficeService
 
                 emailFiling = ToEmailFilingOutcome(await _reconciledEmailFiling.FileIfUnfiledAsync(
                     parentSave, parentCapture, TokenHelper.ExtractBearerTokenOrNull(httpContext), cancellationToken));
+            }
+
+            // Task 130: an attachment's parent RFC Message-ID, as the parent itself reported it — the lookup key when the
+            // capture produced nothing (ParentEmailId is an Exchange item id whenever Graph read it).
+            var emailMessageIdFallback = attachmentParentEmail is { } parentForLookup
+                ? OfficeEmailEnricher.ResolveRfcMessageId(parentForLookup)
+                : null;
+
+            // ══ RECORD OWNERSHIP (task 080, write-path invariant I-6) ═════════════════════════════════
+            // The sprk_document this save creates is owned by a business unit's DEFAULT OWNER TEAM — the team of
+            // the record it is filed against, or the acting user's when it is filed against nothing (owner
+            // decisions 2026-09-22 / 2026-09-25). Left unset, Dataverse makes the app user the owner, which sits
+            // in the ROOT business unit, so no child-BU user could ever read their own saved document.
+            //
+            // UAC task 194b R4-2: resolved AFTER the email capture and BEFORE the job row, the upload and the document
+            // row. An email-derived document is created linked to its email's communication, and the owner question
+            // is asked over BOTH lookups the document is written with (the association and sprk_relatedcommunication,
+            // in sprk_document's order — the reconciler's question), so a secure communication next to an ordinary
+            // association is seen here, not at the next sweep. The capture's id is reused; only a save the capture
+            // produced no id for reads the communication by Message-ID (ResolveEmailCommunicationAsync), and that id
+            // is handed to the create as final. A read that fails refuses the save — never a question about the
+            // association alone. A refusal writes no job row, upload or document (the capture, best-effort and
+            // idempotent on the Message-ID, has run, as mailbox intake would run it). A version save is skipped: it
+            // creates no document, and its row keeps the owner it already has.
+            Guid? owningTeamId = null;
+            Guid? createdByPersonId = null;
+            var emailCommunicationResolved = false;
+            if (!IsVersionSave(request))
+            {
+                var (communicationResolved, relatedCommunicationId) = await _documentPersistence
+                    .ResolveEmailCommunicationAsync(request, emailCommunicationId, emailMessageIdFallback, cancellationToken);
+                if (!communicationResolved)
+                {
+                    return new SaveResponse
+                    {
+                        Success = false,
+                        Error = new SaveError
+                        {
+                            Code = OfficeErrorCodes.RecordOwnerUnresolved,
+                            Message = "This email's record could not be read to assign the item an owner, so it was not "
+                                      + "saved. Try again.",
+                            Retryable = true
+                        }
+                    };
+                }
+
+                emailCommunicationId = relatedCommunicationId;
+                emailCommunicationResolved = true;
+
+                var documentOwner = await _ownershipResolver.ResolveOwnerAsync(
+                    OfficeDocumentPersistence.DocumentOwnershipOf(
+                        request.TargetEntity?.EntityType,
+                        request.TargetEntity?.EntityId,
+                        relatedCommunicationId,
+                        // The oid is enough: the resolver keys systemuser on azureactivedirectoryobjectid, the same
+                        // key OfficeAuthFilter resolved and RecordContainerResolver uses for this save's container.
+                        Guid.TryParse(userId, out var callerObjectId) ? callerObjectId : null) with
+                    {
+                        // Task 146 c1-r1 (owner round 13 item 9): the saving user asked for every document this save
+                        // creates app-only — recorded as their creator person (carried to the worker with the team).
+                        RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfObjectId(userId),
+                    },
+                    cancellationToken);
+                owningTeamId = documentOwner.IsOwned ? documentOwner.OwningTeamId : null;
+                createdByPersonId = documentOwner.CreatedByPerson;
+
+                if (owningTeamId is null)
+                {
+                    // Fail-closed, never app-owned: an app-owned row is invisible to its own author, which is the
+                    // defect this exists to remove. The resolver has already logged which link in the chain broke.
+                    return new SaveResponse
+                    {
+                        Success = false,
+                        Error = new SaveError
+                        {
+                            Code = OfficeErrorCodes.RecordOwnerUnresolved,
+                            Message = request.TargetEntity is not null
+                                ? "This item could not be assigned an owner from the record it is filed to, so it "
+                                  + "was not saved. Check that the record still exists and that you can open it."
+                                : "This item could not be assigned an owner from your business unit, so it was not "
+                                  + "saved. Ask an administrator to check your user record's business unit.",
+                            Retryable = false
+                        }
+                    };
+                }
             }
 
             // Step 3: Determine job type based on content type
@@ -1034,14 +1069,12 @@ internal class OfficeService : IOfficeService
                     // Task 080: resolved (or refused) before anything was written — see RECORD OWNERSHIP above.
                     owningTeamId,
                     createdByPersonId,
-                    // Task 130: the capture's communication — the document is created linked to it (or Restricted).
+                    // Task 130: the email's communication — the document is created linked to it (or Restricted). 194b
+                    // R4-2: resolved above for the owner question, so final (no second lookup).
                     emailCommunicationId: emailCommunicationId,
                     jobId: jobId,
-                    // Task 130: an attachment's parent RFC Message-ID, as the parent itself reported it — the lookup key
-                    // when the capture produced nothing (ParentEmailId is an Exchange item id whenever Graph read it).
-                    emailMessageIdFallback: attachmentParentEmail is { } parentForLookup
-                        ? OfficeEmailEnricher.ResolveRfcMessageId(parentForLookup)
-                        : null);
+                    emailMessageIdFallback: emailMessageIdFallback,
+                    emailCommunicationResolved: emailCommunicationResolved);
 
                 // FR-C3 (email-communication-intelligence-r2, R-3): the content is byte-identical to an existing
                 // canonical document (returned as `documentId`). No second document was created — and there is

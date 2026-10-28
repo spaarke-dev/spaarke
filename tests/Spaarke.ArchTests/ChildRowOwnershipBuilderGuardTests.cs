@@ -71,10 +71,8 @@ public class ChildRowOwnershipBuilderGuardTests
             "Single parent: the matter (the vendor organisation it also writes is not an ownership parent; R4-2)."),
         new(Bff("Services.Finance.SpendSnapshotService"), "ResolveSnapshotOwnerAsync",
             "Single parent: the matter OR the project, one per path, never both (R4-2)."),
-        new(Bff("Services.Office.OfficeService"), "SaveAsync",
-            "An Office-saved document is asked about the save target alone, not the columns it writes."),
-        new(Bff("Workers.Office.UploadFinalizationWorker"), "ResolveDocumentOwnerTeamAsync",
-            "The document is asked about its association target (friendly spelling) alone, not by column."),
+        new(Bff("Services.Office.OfficeDocumentPersistence"), "AssociationTargetOwnershipOf",
+            "An Office document filed to a contact (no sprk_document ownership column holds it): the pre-146 target question reads the contact's business unit, which the reconciler's question drops (it sees the row unfiled); kept unchanged pending a ruling (R4-2; 0 dev rows)."),
     ];
 
     private static string Bff(string type) => "Sprk.Bff.Api." + type;
