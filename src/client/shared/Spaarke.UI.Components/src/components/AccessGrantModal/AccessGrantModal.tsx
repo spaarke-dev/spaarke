@@ -2148,6 +2148,8 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
           const outcome = await shareUser(it.user, level);
           anyNarrowed = anyNarrowed || outcome.narrowed;
           anyNotificationFailed = anyNotificationFailed || outcome.notificationFailed;
+          // F-final: a user picked directly is a share, so the notice leads with "Shared with X" as for a contact.
+          sharedWithColleagues.push({ name: it.name, expiryNotApplied: false });
         }
         granted += 1;
       } catch (err) {
@@ -2185,7 +2187,9 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
           granted += 1;
           relatedRecordsPending.push(pendingDetail);
           // Task 193: a contact answered with a share names the colleague (and the end date) here too.
-          const pendingShare = sharedWithColleagueOfError(err);
+          const pendingShare =
+            sharedWithColleagueOfError(err) ??
+            (it.kind === 'user' && it.user ? { name: it.name, expiryNotApplied: false } : null);
           if (pendingShare) sharedWithColleagues.push(pendingShare);
           // Task 181: that response also says whether the person could not be notified.
           anyNotificationFailed =
@@ -2387,7 +2391,9 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
               },
               entry.sourceFieldLabel
             )
-          : `Granted ${name} access (suggested from ${entry.sourceFieldLabel}).`;
+          : entry.systemUserId
+            ? suggestionSharedLead({ name, expiryNotApplied: false }, entry.sourceFieldLabel)
+            : `Granted ${name} access (suggested from ${entry.sourceFieldLabel}).`;
         setNoticeIfCurrent({
           intent: notificationFailed ? 'warning' : 'success',
           text: lead + (notificationFailed ? ` ${NOTIFICATION_FAILED_SENTENCE}` : ''),
@@ -2403,7 +2409,8 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
           await loadData();
           const notificationFailed = err instanceof AccessGrantModalApiError && err.notificationFailed === true;
           // Task 193: a contact answered with a share names the colleague (and the end date) here too.
-          const pendingShare = sharedWithColleagueOfError(err);
+          const pendingShare =
+            sharedWithColleagueOfError(err) ?? (entry.systemUserId ? { name, expiryNotApplied: false } : null);
           const lead = pendingShare
             ? suggestionSharedLead(pendingShare, entry.sourceFieldLabel)
             : `Granted ${name} access (suggested from ${entry.sourceFieldLabel}).`;

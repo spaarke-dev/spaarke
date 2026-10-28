@@ -126,7 +126,9 @@ describe('AccessGrantModal — internal grant notification (task 181)', () => {
     await stageTheUser();
     fireEvent.click(addButton());
 
-    expect(await screen.findByText(`Granted access to 1 item(s). ${NOTIFICATION_FAILED_SENTENCE}`)).toBeInTheDocument();
+    expect(
+      await screen.findByText(`Shared with Uma Userton — internal user. ${NOTIFICATION_FAILED_SENTENCE}`)
+    ).toBeInTheDocument();
   });
 
   // Beyond the POML's named cases, justified: the related-records-pending answer is a 500 ProblemDetails, read through
@@ -144,7 +146,7 @@ describe('AccessGrantModal — internal grant notification (task 181)', () => {
     fireEvent.click(addButton());
 
     expect(
-      await screen.findByText(`Granted access to 1 item(s). ${detail} ${NOTIFICATION_FAILED_SENTENCE}`)
+      await screen.findByText(`Shared with Uma Userton — internal user. ${detail} ${NOTIFICATION_FAILED_SENTENCE}`)
     ).toBeInTheDocument();
   });
 

@@ -209,7 +209,7 @@ describe('AccessGrantModal — Assigned-To suggestions on a secure record (task 
 
     expect(
       await screen.findByText(
-        /Granted Ines Internal access \(suggested from Assigned To \(Internal\)\)\. 2 related records are not updated yet/
+        /^Shared with Ines Internal — internal user\. Suggested from Assigned To \(Internal\)\. 2 related records are not updated yet/
       )
     ).toBeInTheDocument();
   });
@@ -255,7 +255,7 @@ describe('AccessGrantModal — Assigned-To suggestions on a secure record (task 
 
     expect(
       await screen.findByText(
-        'Granted Ines Internal access (suggested from Assigned To (Internal)). 2 related records are not updated yet; ' +
+        'Shared with Ines Internal — internal user. Suggested from Assigned To (Internal). 2 related records are not updated yet; ' +
           `they complete automatically. ${NOTIFICATION_FAILED_SENTENCE}`
       )
     ).toBeInTheDocument();

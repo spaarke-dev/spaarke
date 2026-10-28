@@ -266,7 +266,8 @@ describe('AccessGrantModal — one "Add person" entry (task 193)', () => {
   });
 
   it('a share and a grant in one Add: the notice leads with the share, then counts the other grant', async () => {
-    const fetchMock = fetchWith(SHARED_WITH_ADA);
+    // Ada's /grant is a grant (no sharedWithUser); Uma, a user picked directly, is a share.
+    const fetchMock = fetchWith({ accessRecordId: 'g-1', speContainerMembershipGranted: false });
     const pickPerson = jest
       .fn()
       .mockResolvedValueOnce(personFromContact(ADA_CONTACT))
@@ -282,8 +283,55 @@ describe('AccessGrantModal — one "Add person" entry (task 193)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add (2)' }));
 
     expect(
-      await screen.findByText('Shared with Ada Lovelace — internal user. Granted access to 1 other item(s).')
+      await screen.findByText('Shared with Uma Userton — internal user. Granted access to 1 other item(s).')
     ).toBeInTheDocument();
+  });
+
+  it('F-final: a user picked directly is a share — the notice leads with "Shared with X", never "Granted"', async () => {
+    const fetchMock = fetchWith({});
+    renderWithTheme(<AccessGrantModal {...makeProps(fetchMock, personFromUser(UMA_USER))} />);
+
+    await addPerson(UMA_USER.name);
+
+    expect(await screen.findByText('Shared with Uma Userton — internal user.')).toBeInTheDocument();
+    expect(screen.queryByText(/^Granted/)).not.toBeInTheDocument();
+  });
+
+  it('F-final: a user suggestion through /share-user leads with "Shared with X"', async () => {
+    const fetchMock = throwingAuthenticatedFetch(async (url: string) => {
+      if (url.includes('/assigned-access?')) {
+        return jsonResponse({
+          entries: [
+            {
+              entryId: 'entry-2',
+              sourceField: 'sprk_assignedto',
+              sourceFieldLabel: 'Assigned To',
+              subjectKind: 'contact',
+              subjectId: ADA_CONTACT.contactId,
+              subjectName: 'Ada Lovelace',
+              systemUserId: ADA_USER_ID,
+              accessRecordId: null,
+              state: 'PendingConfirmation',
+              reason: null,
+              residualAccessTerms: [],
+            },
+          ],
+        });
+      }
+      if (url.includes('/user-shares')) return jsonResponse({ shares: [] });
+      if (url === SHARE_USER) return jsonResponse({ systemUserId: ADA_USER_ID, outcome: 'created', narrowed: false });
+      return jsonResponse({});
+    });
+    renderWithTheme(
+      <AccessGrantModal {...makeProps(fetchMock, null, { accessPermissionState: 'limited', isSecureRecord: true })} />
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Grant Ada Lovelace' }));
+
+    expect(
+      await screen.findByText('Shared with Ada Lovelace — internal user. Suggested from Assigned To.')
+    ).toBeInTheDocument();
+    expect(postsTo(fetchMock, SHARE_USER)).toHaveLength(1);
   });
 
   it('a /grant share whose related records are pending names the colleague and says there is no end date', async () => {

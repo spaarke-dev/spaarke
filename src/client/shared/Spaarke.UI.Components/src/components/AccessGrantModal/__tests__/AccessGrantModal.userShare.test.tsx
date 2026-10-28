@@ -179,7 +179,7 @@ describe('AccessGrantModal — "Add person" internal system-user share (task 065
       );
       expect(shareUserPosts).toHaveLength(1);
 
-      await screen.findByText(/Granted access to 1 item/);
+      await screen.findByText('Shared with Uma Userton — internal user.');
     });
 
     it('does not render the "Add person" button when pickPerson is not supplied', async () => {
@@ -400,7 +400,9 @@ describe('AccessGrantModal — "Add person" internal system-user share (task 065
 
       // The share WAS written: counted as granted, shown as a warning ("Notice"), never "0 of 1" or an error.
       expect(
-        await screen.findByText(/Granted access to 1 item\(s\)\. The record was shared, but 1 of its 6 related records/)
+        await screen.findByText(
+          /^Shared with Uma Userton — internal user\. The record was shared, but 1 of its 6 related records/
+        )
       ).toBeInTheDocument();
       expect(screen.getByText('Notice')).toBeInTheDocument();
       expect(screen.queryByText('Error')).not.toBeInTheDocument();
@@ -433,7 +435,7 @@ describe('AccessGrantModal — "Add person" internal system-user share (task 065
       await pickLevelFor('Uma Userton', 'View Only');
       fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-      expect(await screen.findByText(/Granted access to 1 item\(s\)\./)).toBeInTheDocument();
+      expect(await screen.findByText(/^Shared with Uma Userton — internal user\./)).toBeInTheDocument();
       expect(props.onClose).not.toHaveBeenCalled();
 
       fireEvent.click(screen.getByRole('button', { name: 'Save' }));

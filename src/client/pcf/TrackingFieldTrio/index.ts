@@ -123,6 +123,10 @@
  * - The dead `onSetStandingGrant` wiring is removed (the modal has had no
  *   standing-grant control since task 073 UAT v1.0.24 #5).
  *
+ * v1.0.57 (task 193 F-final): no change in this file's logic. In the bundled modal, a user picked directly and a user
+ *   suggestion (`/share-user`) are shares too, so their notices also lead with "Shared with X" (pending related records
+ *   included), with the same count of the other items.
+ *
  * v1.0.56 (task 193 V-fix): no change in this file's logic. In the bundled modal, a contact the server answered with a
  *   share leads its notice with "Shared with X" (never "Granted access"), and a share whose related records are still
  *   pending also names the colleague and says when the Expiration was not applied.
@@ -1541,7 +1545,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       title: (this.context.parameters.title?.raw as string) || undefined,
       showTitle,
       showVersion,
-      versionText: 'v1.0.56 • Built 2026-10-28',
+      versionText: 'v1.0.57 • Built 2026-10-28',
       // Task 175 (owner round 87): only the options at or above the parent's floor.
       accessPermissionOptions: accessPermissionPill.options,
       // Labels pulled from each bound field's Dataverse metadata so they
