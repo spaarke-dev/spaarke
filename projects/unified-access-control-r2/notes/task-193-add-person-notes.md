@@ -156,3 +156,67 @@ Each batch ran in a fresh write with a `--no-incremental` build over the filter 
 | P | Grant row `pairedWith` dropped | 1: …EachNameTheOther… |
 | Q | Share row `pairedWith` dropped | 1: …EachNameTheOther… |
 | R | Display pairing read fails loud | 14 results (11 tests): the G2 unreadable-pairing Theory plus 10 existing `/user-shares` and `/record-grants` tests whose fakes don't answer the pairing read |
+
+## G2b: system share removals end the paired grant at once
+
+Coordinator ruling: a system path that removes a share because the person must no longer see the record ends their paired grant in the same operation; waiting for R5 (up to a day) leaves workforce-app access on a record the person was walled off. Owner round 135 (via the coordinator): unsecure keeps all access, shares and grants; that change is tracked separately, so Unsecure is not touched here.
+
+### The one helper
+
+`ExternalGrantRevocationService.RevokePairedWithAsync`, the same pairing read and grant revoke `/unshare-user` uses, is now registered (scoped, `ExternalAccessModule`) instead of built by hand per caller. `/unshare-user` takes it as one `[FromServices]` parameter (its four SPE/time/identity parameters are gone). The class became `public` with `internal` members only so the public share-removal services can take it in their constructors. A logical-name overload maps `sprk_matter` etc. to the root type; a table that is not a grant root has nothing paired.
+
+### Paths (updates the G2 table)
+
+| Path | Ends the paired grant? | When it fails | Incomplete contract |
+|---|---|---|---|
+| `/unshare-user` | Yes (G2) | `pairedGrantEnded: false` | the response says so |
+| `NoAccessShareEnforcer` | **Yes**, for every covered user whose direct share is confirmed gone (removed now, or held none). Not when S5 keeps the share | `paired-grant-not-ended` failure | `Complete` false: never "fully enforced" while the grant may be active |
+| `RestrictedExternalShareRemover` | **Yes**, for each user whose share this pass removed | `paired-grant-not-ended` failure | `Complete` false |
+| `SecureRootInheritance.EndInheritedSourceAsync` | **Yes**, when the inherited share is removed outright (not put back to a prior level) for a user. **Not on the unsecure cascade** (`endingParent` set), per owner round 135 | end not done, detail names the paired grant | the pass is not complete (`/unshare-user` answers `children_incomplete` with `filedRecordsNotUpdated`) |
+| `AssignedAccessMaterializer` | **Yes.** It CAN remove a share that has a paired grant: an "Add person" share at the level the rule wrote reads as the rule's (`AssignedAccessMaterializer.cs`, the `Shared` case: `row.GrantedLevel == current` then `RemoveOrRestoreShareAsync`). Resolved through its scope factory (the revoke depends on the materializer) | `paired-grant-not-ended` failure | `Complete` false |
+| `UnsecureProjectEndpoint` | No: declared (owner round 135) | | |
+| `ProvisionProjectEndpoint`, `SecureChildShareSynchronizer`, `GateDecisionRecordSharing`, `PlaybookSharingService` | No: declared (undo of its own creator share; child rows; not grant roots) | | |
+
+Order everywhere: the share first, then the grant. Grant-end failure: the revoke logs Error with ids only; the share stays removed; R5 ends the grant. Missing column: the revoke's Warning; share-only behaviour as before.
+
+No Access "either way": the enforcer ends no contact grant itself (contacts are vetoed at read time). Its covered users are the user named, the users a named contact represents, and the users an organization's member contacts represent, so the pairing ends whichever the entry names.
+
+### Known limits
+
+- No Access adds one pairing read per (covered record, covered user) per enforcement, beside the share read it already makes per pair. With the column missing, each such read logs the revoke's Warning, which on dev (schema not applied) is a Warning per walled pair every 5 minutes until the script runs.
+- The secure-root inheritance's net path for a parent that now passes nothing on (unsecured or deleted, `PassesNothingOn`) still ends the pairing when it removes a leftover inherited share; only the unsecure cascade itself is skipped. It goes with the separately tracked unsecure change.
+- Pre-existing, filed for the coordinator: "Add person" at the same level as an existing Assigned-To auto share writes nothing, so the share stays attributed to the rule and clearing Assigned-To removes the person's explicitly added access. G2b only makes the paired grant follow.
+
+### Guard
+
+`tests/Spaarke.ArchTests/PairedGrantFollowsShareRevokeGuardTests.cs` (compiled IL scan): every BFF type that references `IDataverseRecordShareService.RevokeAccessAsync` also references `RevokePairedWithAsync`, or is on the declared list with a reason. The five system paths must end the pairing, and a declared entry that no longer revokes, or now ends the pairing, must leave the list. Must-fire: a bare revoke and a revoke in a lambda. Must-not-fire: revoke plus paired end, a declared type, a grant-only type. Known limit: per type, not per removal.
+
+### Tests
+
+- `PairedGrantFollowsShareRemovalTests` (11): No Access (removes then ends; contact subject; holds no share; end fails → incomplete; column missing → share only; S5 keeps share → grant kept), Restricted (ends; end fails → incomplete), materializer (ends; end fails → incomplete; share kept → grant kept).
+- `SecureRootInheritanceRound31Tests.G2b_*` (2): the matter's unshare ends the grant paired with the filed record's inherited share; end fails → `children_incomplete`, share stays removed, grant left for R5.
+
+### Perturbations (G2b)
+
+Each batch: a fresh write, a `--no-incremental` build, over the filter `PairedGrantFollowsShareRemovalTests | SecureRootInheritanceRound31Tests | ContactGrantSharesInternalUserTests` (130 tests), or the guard (6). The restored tree passed 130/130 and 6/6.
+
+| Batch | Perturbation | Red |
+|---|---|---|
+| S | No Access: the paired end call removed | 4: removes-then-ends, contact subject, holds no share, end fails |
+| T | No Access: a failed end not recorded | 1: end fails → incomplete |
+| AA | No Access: the paired end runs when S5 kept the share | 1: S5 keeps share → grant kept |
+| U | Restricted: the paired end call removed | 2: ends, end fails |
+| V | Restricted: a failed end not recorded | 1: end fails → incomplete |
+| W | Inheritance: the paired end disabled | 2: both G2b_* |
+| X | Inheritance: a failed end not reported not-done | 1: end fails → `children_incomplete` |
+| Y | Materializer: the paired end skipped | 2: ends, end fails |
+| Z | Materializer: a failed end not recorded | 1: end fails → incomplete |
+| AB | `/unshare-user` on the injected helper: share-gone check inverted | 6 G2_Unshare_* |
+| AC | Guard: the Restricted remover stops calling `RevokePairedWithAsync` | 2 guard facts (the rule, and "the system paths end the pairing") |
+
+### Gates (G2b)
+
+- 0 warnings: the BFF, the unit project, ArchTests and both integration projects.
+- The touched filter (the `AccessControl`, `DataMutation` and `ExternalAccess` test namespaces): 10636/10636.
+- Full ArchTests: 1604/1604. `Sprk.Bff.Api.IntegrationTests`: 186 passed, 8 skipped. `Spe.Integration.Tests`: 353 passed, 23 skipped.
+- One host fixture changed: `NoAccessEnforceEndpointTests`' host substitutes the grant revoke with the production one over an empty grant table. Its Web API client double answers no grant read, so the enforcer correctly failed closed (`paired-grant-not-ended`) until the boundary was substituted like the others.
