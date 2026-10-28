@@ -1909,22 +1909,16 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         }
 
         // UAC task 194b fix round (F1-d): a Decision Record owned in isolation is never moved out on its stored parents (the
-        // ONE never-out rule the reconciler's passes ask too) — decided before anything is written.
-        if (string.Equals(request.EntityLogicalName, RecordOwnershipContext.DecisionRecordTable, StringComparison.OrdinalIgnoreCase)
-            && resolution.IsOwned && !resolution.IsSecureOwner)
+        // ONE never-out rule the reconciler's passes ask too) — decided before anything is written, and asked again by the
+        // settle over the unit the row is owned in then (fix round R, A4).
+        if (await DecisionRecordHeldOnReparentAsync(
+                request.EntityLogicalName, current.GetAttributeValue<EntityReference>(OwningBusinessUnitColumn)?.Id, resolution, ct)
+            .ConfigureAwait(false) is { } heldDecisionRecord)
         {
-            var secureBu = await ResolveSecureBusinessUnitAsync(ct).ConfigureAwait(false);
-            var owningBu = current.GetAttributeValue<EntityReference>(OwningBusinessUnitColumn)?.Id;
-            var ownedInIsolation = secureBu.Ambiguous || secureBu.Id is { } secureBuId && (owningBu is null || owningBu == secureBuId);
-            if (RecordOwnershipContext.DecisionRecordHeldInIsolation(
-                    request.EntityLogicalName, ownedInIsolation, resolution, RecordOwnershipContext.ReparentQuestionIncomplete)
-                is { } held)
-            {
-                _logger.LogWarning(
-                    "Refusing to re-file {Entity} {RecordId}: {Reason}. The change was NOT written.",
-                    request.EntityLogicalName, request.RecordId, held);
-                return RecordOwnerResolution.Refused(RecordOwnerRefusal.ParentUndetermined, held);
-            }
+            _logger.LogWarning(
+                "Refusing to re-file {Entity} {RecordId}: {Reason}. The change was NOT written.",
+                request.EntityLogicalName, request.RecordId, heldDecisionRecord);
+            return RecordOwnerResolution.Refused(RecordOwnerRefusal.ParentUndetermined, heldDecisionRecord);
         }
 
         // Owner round 10 item 7 (2026-10-03, BINDING): "moving a CHILD out of a secure root is an un-secure, so F3's
@@ -2317,6 +2311,20 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                 return (target, filingIsOwn); // already owned by the team its current parents resolve to
             }
 
+            // Fix round R (A4): the never-out rule, asked again over the unit the row is owned in NOW — a Decision Record moved
+            // into isolation between this call's pre-change check and its settle (a reconciler pass) is never written an
+            // ordinary owner here, whatever this call's F3 check covered.
+            if (await DecisionRecordHeldOnReparentAsync(request.EntityLogicalName, state.OwningBusinessUnit, target, ct)
+                    .ConfigureAwait(false) is { } heldDecisionRecord)
+            {
+                _logger.LogWarning(
+                    "Re-file of {Entity} {RecordId}: {Reason}. No owner is written (attempt {Attempt}, 194b A4).",
+                    request.EntityLogicalName, request.RecordId, heldDecisionRecord, attempt);
+                throw new RecordOwnerUnsettledException(
+                    request.EntityLogicalName, request.RecordId,
+                    $"The owner of {request.EntityLogicalName} {request.RecordId:D} was not settled: it is {heldDecisionRecord}.");
+            }
+
             if (!target.IsSecureOwner
                 && await WouldLeaveSecureBusinessUnitAsync(state, parentsAsResolved, before, ct).ConfigureAwait(false))
             {
@@ -2577,6 +2585,29 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// business unit did not come back, counts as held there (fail closed); no Secure Record business unit at all answers
     /// <c>false</c>.
     /// </summary>
+    /// <summary>
+    /// UAC task 194b: <see cref="RecordOwnershipContext.DecisionRecordHeldInIsolation"/> for a re-file of <paramref name="table"/>
+    /// whose answer is <paramref name="answer"/>, over the business unit the row is owned in (<paramref name="owningBusinessUnit"/>:
+    /// none read, or an ambiguous Secure Record business unit, counts as owned in isolation — fail closed). Asked before the
+    /// change is written and again by <see cref="SettleOwnerAsync"/> before it writes an ordinary owner (fix round R, A4).
+    /// </summary>
+    /// <returns>Why the row is held, or <c>null</c>.</returns>
+    private async Task<string?> DecisionRecordHeldOnReparentAsync(
+        string table, Guid? owningBusinessUnit, RecordOwnerResolution answer, CancellationToken ct)
+    {
+        if (!string.Equals(table, RecordOwnershipContext.DecisionRecordTable, StringComparison.OrdinalIgnoreCase)
+            || !answer.IsOwned || answer.IsSecureOwner)
+        {
+            return null;
+        }
+
+        var secureBu = await ResolveSecureBusinessUnitAsync(ct).ConfigureAwait(false);
+        var ownedInIsolation = secureBu.Ambiguous
+                               || secureBu.Id is { } secureBuId && (owningBusinessUnit is null || owningBusinessUnit == secureBuId);
+        return RecordOwnershipContext.DecisionRecordHeldInIsolation(
+            table, ownedInIsolation, answer, RecordOwnershipContext.ReparentQuestionIncomplete);
+    }
+
     private async Task<bool> WouldLeaveSecureBusinessUnitAsync(
         RowOwnership state, bool parentsAsResolved, RowBeforeChange before, CancellationToken ct)
     {

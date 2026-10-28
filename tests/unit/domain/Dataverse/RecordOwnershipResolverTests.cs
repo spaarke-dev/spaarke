@@ -1323,6 +1323,59 @@ public class RecordOwnershipResolverTests
         resolution.OwningTeamId.Should().Be(ChildTeam);
     }
 
+    /// <summary>194b fix round R (A4): an ORDINARY-owned Decision Record filed under a secure project (an under-share the
+    /// reconciler has not yet settled) re-filed to an ordinary matter, the caller holding F3 rights on the project it leaves.
+    /// With <paramref name="reconcilerMovesItIn"/>, a reconciler pass moves the record into isolation between the change and the
+    /// settle — after the pre-change never-out check, which saw it ordinary.</summary>
+    private static (FakeDirectory Directory, Guid RecordId, Func<Task<RecordOwnerResolution>> Act) DecisionRecordSettleRace(
+        bool reconcilerMovesItIn)
+    {
+        var recordId = Guid.NewGuid();
+        var directory = Directory()
+            .WithRecord("sprk_project", SecureProjectId, SecureBu)
+            .WithRecord("sprk_matter", MatterId, ChildBu)
+            .WithRecord("sprk_decisionrecord", recordId, GeneralBu, owningTeam: GeneralTeam,
+                extra: new() { ["sprk_project"] = new EntityReference("sprk_project", SecureProjectId) });
+        var request = new RecordReparent
+        {
+            EntityLogicalName = "sprk_decisionrecord",
+            RecordId = recordId,
+            ParentChanges = new Dictionary<string, EntityReference?>
+            {
+                ["sprk_project"] = null,
+                ["sprk_matter"] = new EntityReference("sprk_matter", MatterId),
+            },
+            SecureExitCaller = CallerHolding(FullAccess),
+        };
+        var apply = Applies(directory, request, reconcilerMovesItIn
+            ? () => directory.Write("sprk_decisionrecord", recordId, new() { ["ownerid"] = new EntityReference("team", SecureNamedTeam) })
+            : null);
+        return (directory, recordId, () => Build(directory).ReparentAsync(request, apply, CancellationToken.None));
+    }
+
+    [Fact(DisplayName = "194b R (A4) must fire: a Decision Record moved INTO isolation between a re-file's change and its settle is never written an ordinary owner — the settle throws and it keeps the Secure team")]
+    public async Task Reparent_WhenADecisionRecordIsMovedIntoIsolationBeforeTheSettle_ThrowsUnsettled_AndWritesNoOrdinaryOwner()
+    {
+        var (directory, recordId, act) = DecisionRecordSettleRace(reconcilerMovesItIn: true);
+
+        var thrown = await act.Should().ThrowAsync<RecordOwnerUnsettledException>();
+        thrown.Which.Message.Should().Contain("F1-d");
+        directory.Assignments.Should().BeEmpty("no ordinary owner is written to a Decision Record held in isolation");
+        directory.Row("sprk_decisionrecord", recordId).GetAttributeValue<EntityReference>("owningteam")?.Id
+            .Should().Be(SecureNamedTeam);
+    }
+
+    [Fact(DisplayName = "194b R (A4) must not fire: the same re-file with no concurrent move settles the ordinary owner")]
+    public async Task Reparent_WhenAnOrdinaryDecisionRecordLeavesASecureProjectWithF3_AndNothingMovesIt_AssignsTheNewTeam()
+    {
+        var (directory, recordId, act) = DecisionRecordSettleRace(reconcilerMovesItIn: false);
+
+        var resolution = await act();
+
+        resolution.OwningTeamId.Should().Be(ChildTeam);
+        directory.Assignments.Should().ContainSingle().Which.Should().Be(("sprk_decisionrecord", recordId, ChildTeam));
+    }
+
     [Fact]
     public async Task Reparent_WhenTheNewParentIsFlaggedButNotIsolated_RefusesAndDoesNotApplyTheChange()
     {
