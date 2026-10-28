@@ -531,15 +531,19 @@ public class OfficeEmailEnricher
 
     /// <summary>
     /// Generates the human-readable name for the .eml file.
-    /// Format: YYYY-MM-DD_Subject.eml (subject max 80 chars, special chars removed). This is the name the document
-    /// is SHOWN under (<c>sprk_documentname</c>); <see cref="GenerateEmlNames"/> gives the name it is STORED under.
+    /// Format: YYYY-MM-DD_Name.eml, where Name is the typed <see cref="EmailMetadata.DocumentName"/> when there is one,
+    /// else the subject (max 80 chars, special chars removed). This is the name the document is SHOWN under
+    /// (<c>sprk_documentname</c>); <see cref="GenerateEmlNames"/> gives the name it is STORED under.
     /// </summary>
     public static string GenerateEmlFileName(EmailMetadata metadata)
     {
         var datePrefix = metadata.SentDate?.ToString("yyyy-MM-dd") ?? DateTime.UtcNow.ToString("yyyy-MM-dd");
 
-        // Subject capped at 80 chars to leave room for the date prefix and the extension.
-        var sanitizedSubject = SpeUploadPath.SanitizeFileName(metadata.Subject, maxLength: 80);
+        // #2416: a typed Document Name names the file only; the subject stays the email's own everywhere else.
+        var name = string.IsNullOrWhiteSpace(metadata.DocumentName) ? metadata.Subject : metadata.DocumentName.Trim();
+
+        // Capped at 80 chars to leave room for the date prefix and the extension.
+        var sanitizedSubject = SpeUploadPath.SanitizeFileName(name, maxLength: 80);
 
         return $"{datePrefix}_{sanitizedSubject}.eml";
     }

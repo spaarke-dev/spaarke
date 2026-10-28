@@ -105,6 +105,29 @@ public class OfficeEmailSaveNamingTests
     }
 
     [Fact]
+    public async Task EmailSave_WithATypedDocumentName_NamesTheFileOnly_AndKeepsTheEmailsOwnSubject_Issue2416()
+    {
+        // #2416 (owner's Outlook check on dev, 2026-10-28): the typed Document Name used to travel as the subject, so it
+        // replaced the email's subject in the .eml header, sprk_emailsubject and the communication.
+        var world = new OfficeVersionSaveWorld();
+        using var factory = new OfficeVersionSaveTestWebAppFactory(world);
+        var request = EmailSave(NewRecord(), "<named@test.com>", "Named.", systemNamed: false);
+        request = request with { Email = request.Email! with { DocumentName = "  Email Saved 10-28  " } };
+
+        var response = await factory.CreateClient().PostAsJsonAsync("/api/office/save", request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        const string typedName = "2026-09-14_Email Saved 10-28.eml";
+        var stored = EmlItems(world).Should().ContainSingle().Subject;
+        stored.Name.Should().Be(typedName, "the typed name names the file, unchanged");
+        world.CreatedDocumentNames.Should().ContainSingle().Which.Should().Be(typedName);
+        Encoding.UTF8.GetString(stored.Versions[0]).Should().Contain("Subject: Re: Filing", "the saved email keeps its own subject")
+            .And.NotContain("Email Saved 10-28\r\n");
+        world.DocumentUpdates.Where(u => u.Update.EmailSubject is not null)
+            .Should().ContainSingle().Which.Update.EmailSubject.Should().Be("Re: Filing");
+    }
+
+    [Fact]
     public async Task SystemNamedEmailSave_SuffixesOnlyTheStoredFile_AndKeepsTheDocumentNameReadable()
     {
         var world = new OfficeVersionSaveWorld();

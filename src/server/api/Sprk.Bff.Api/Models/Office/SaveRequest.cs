@@ -135,6 +135,16 @@ public record EmailMetadata
     public required string Subject { get; init; }
 
     /// <summary>
+    /// #2416: the Document Name the user typed in the pane, when they typed one. It names the saved <c>.eml</c> only
+    /// (<c>sprk_documentname</c>, <c>sprk_filename</c>); <see cref="Subject"/> stays the email's own subject, so the
+    /// <c>.eml</c> Subject header, <c>sprk_emailsubject</c> and the communication keep the real one. Absent or blank:
+    /// the file is named from <see cref="Subject"/>, which is what an add-in older than #2416 sends (its typed name
+    /// arrives in <see cref="Subject"/>).
+    /// </summary>
+    [MaxLength(500)]
+    public string? DocumentName { get; init; }
+
+    /// <summary>
     /// Sender email address.
     /// </summary>
     [Required]
@@ -228,9 +238,9 @@ public record EmailMetadata
     public List<string>? SelectedAttachmentFileNames { get; init; }
 
     /// <summary>
-    /// Task 046 (b): <c>true</c> when <see cref="Subject"/> — and so the generated <c>.eml</c> name — is
-    /// SYSTEM-DERIVED (the email's own subject); <c>false</c> when the user TYPED it in the pane's "Document Name"
-    /// box. Only a system-derived name is STORED with a short unique suffix, so two emails with the same subject and
+    /// Task 046 (b): <c>true</c> when the generated <c>.eml</c> name is SYSTEM-DERIVED (the email's own subject);
+    /// <c>false</c> when the user TYPED it in the pane's "Document Name" box (sent in <see cref="DocumentName"/> since
+    /// #2416; an older add-in sent it in <see cref="Subject"/>). Only a system-derived name is STORED with a short unique suffix, so two emails with the same subject and
     /// date never share a file. A name the user typed is never changed automatically (owner, 2026-09-15).
     /// </summary>
     /// <remarks>
