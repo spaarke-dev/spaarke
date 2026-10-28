@@ -1,0 +1,200 @@
+using System.Reflection;
+using Sprk.Bff.Api.Services.Dataverse;
+using Xunit;
+
+namespace Spaarke.ArchTests;
+
+/// <summary>
+/// UAC task 194b fix round R (R3b-2): an ownership question that names PARENTS is built by the one builder,
+/// <see cref="RecordOwnershipContext.ForRow"/> (or <see cref="RecordOwnershipContext.ForChild"/> /
+/// <see cref="RecordOwnershipContext.ForExistingRowAsync"/>, which go through it), in the row's table's primary order — the
+/// order the secure-child reconciler asks the written row in — or through the closed writer opt-out
+/// (<see cref="RecordOwnershipContext.ForParentsInWriterOrder"/>, <see cref="WriterOrderOptOutAllowListTests"/>).
+/// </summary>
+/// <remarks>
+/// <para><b>The signal.</b> A compiled reference, outside <see cref="RecordOwnershipContext"/> itself, to
+/// <see cref="RecordOwnershipContext.ForParents"/> or to the init setter of <see cref="RecordOwnershipContext.Parents"/>,
+/// <see cref="RecordOwnershipContext.TargetEntityLogicalName"/> or <see cref="RecordOwnershipContext.TargetRecordId"/> — every way
+/// to name a parent without a table's order. A question that names no parent (the caller's own business unit, I-6) sets none
+/// of them and is not seen. Pinned per (outermost type, source method), read from IL (<see cref="IlCallScan"/>), so a lambda
+/// or async body counts and a comment or <c>nameof</c> does not.</para>
+/// <para><b>The baseline.</b> <see cref="Exemptions"/> are PERMANENT: questions that do not decide which owner a child row
+/// gets in a table's order (each with its reason). <see cref="KnownViolations"/> is the ratchet: child-row questions not yet
+/// on the builder, each with its reason — a new one fails, and an entry that no longer builds a question must be removed.</para>
+/// <para><b>Controls.</b> <see cref="Detector_MustFireAndMustNotFire"/>: an object initialiser naming a parent, a
+/// <c>with</c> that replaces the parents and a <c>ForParents</c> call are found; a <c>ForRow</c> writer and a question naming
+/// only the caller are not.</para>
+/// </remarks>
+public class ChildRowOwnershipBuilderGuardTests
+{
+    private sealed record Entry(string Type, string Method, string Reason);
+
+    /// <summary>PERMANENT: not a question about which owner a child row gets in its table's order (coordinator, R3b-2).</summary>
+    private static readonly IReadOnlyList<Entry> Exemptions =
+    [
+        new(Bff("Services.Dataverse.RecordOwnershipContext"), "ContentOf",
+            "Content an existing record holds is owned like that record: one record, no child row's filing order."),
+        new(Bff("Services.Signals.GateDecisionRecordSharing"), "AskOwnerAsync",
+            "Whether a Decision Record may be shared, not which owner a child row gets."),
+        new(Bff("Services.Access.SecureRootInheritance"), "UnsecureFollowingParentsAsync",
+            "The secure-root cascade: rows that follow a root as it un-secures, asked about that root's parents."),
+        new(Bff("Services.Signals.TodoAssigneeOwnerReconciliationJob"), "ParentsAnswerAsync",
+            "The To Do job's own parent list (A6: the resolved Signals' subjects), not a row's lookups."),
+        new(Bff("Services.Access.SecureChildReconciler"), "Pass.ContextFor",
+            "The reconciler's own question: ForExistingRowAsync's parents plus a message's thread filing (S6) or a grant's root — the reference the writers match."),
+        new(Bff("Services.Access.SecureChildReconciler"), "PlaceCascadeRowsAsync",
+            "Rows the root's own Assign cascades to: one parent, the root."),
+        new(Bff("Api.ExternalAccess.GrantExternalAccessEndpoint"), "ResolveGrantOwnerAsync",
+            "A grant is an access row filed under exactly its root (099b K1: the reconciler asks the same one parent)."),
+        new(Bff("Api.ExternalAccess.ExternalIntakeEndpoints"), "SubmitServiceRequestAsync",
+            "A new service request is a root owned by its requester contact's business unit: no parent order."),
+        new(Bff("Services.Dataverse.RecordOwnershipResolver"), "ResolveReparentOwnerAsync",
+            "The resolver's own re-file: InPrimaryOrder over the row's columns after the change, then its thread filing and inherited parents."),
+    ];
+
+    /// <summary>The ratchet: child-row questions not on the builder yet, each with its reason (found by this guard, R3b-2).</summary>
+    private static readonly IReadOnlyList<Entry> KnownViolations =
+    [
+        new(Bff("Api.ExternalAccess.ExternalProjectDataEndpoints"), "ResolveChildOwnerAsync",
+            "A child created on the external surface is asked about the route's root alone, not the columns it writes."),
+        new(Bff("Services.Ai.AnalysisResultPersistence"), "PersistReviewMemoAsync",
+            "The memo is asked about its analysis alone (one parent), not by column."),
+        new(Bff("Services.Ai.AnalysisResultPersistence"), "StoreDocumentProfileOutputsAsync",
+            "Outputs of an existing analysis are asked about the analysis alone (one parent), not by column."),
+        new(Bff("Services.Ai.AppOnlyAnalysisService"), "ExecutePlaybookAnalysisAsync",
+            "Outputs are asked about their analysis alone (one parent), not by column."),
+        new(Bff("Services.Finance.InvoiceReviewService"), "CreateInvoiceRecordAsync",
+            "The invoice is asked about its matter alone, not the columns it writes."),
+        new(Bff("Services.Finance.SignalEvaluationService"), "EvaluateAsync",
+            "Finance Signals are asked about their matter alone, outside SignalWriter's question."),
+        new(Bff("Services.Finance.SpendSnapshotService"), "ResolveSnapshotOwnerAsync",
+            "A snapshot is asked about its parent alone, not by column."),
+        new(Bff("Services.Office.OfficeService"), "SaveAsync",
+            "An Office-saved document is asked about the save target alone, not the columns it writes."),
+        new(Bff("Services.Ontology.OntologyAdminAuthoringService"), "CheckVersionOwnerAsync",
+            "A policy version is asked about a parent list, not by column."),
+        new(Bff("Services.RecordCreation.RecordCreationService"), "ResolveOwnerOverAsync",
+            "Adds parents the row holds no lookup for (the pair's project; on Repair the thread filing): needs a builder decision."),
+        new(Bff("Services.Workspace.TodoGenerationService"), "CreateTodoAsync",
+            "With no regarding, the content source (not a lookup on the row) is appended to ForChild's parents."),
+        new(Bff("Workers.Office.UploadFinalizationWorker"), "ResolveDocumentOwnerTeamAsync",
+            "The document is asked about its association target (friendly spelling) alone, not by column."),
+    ];
+
+    private static string Bff(string type) => "Sprk.Bff.Api." + type;
+
+    private static readonly Lazy<IReadOnlyList<Type>> BffTypes = new(() => typeof(Program).Assembly.GetTypes());
+
+    [Fact(DisplayName = "194b R3b-2: a child row's ownership question is built by ForRow (or the closed opt-out), or is listed")]
+    public void ChildRowOwnershipQuestionsGoThroughTheOneBuilder()
+    {
+        var found = Constructions(BffTypes.Value);
+        var listed = Exemptions.Concat(KnownViolations).ToArray();
+
+        var unlisted = found
+            .Where(f => !listed.Any(e => e.Type == f.Type && e.Method == f.Method))
+            .Select(f => $"{f.Type}.{f.Method}")
+            .ToArray();
+        Assert.True(unlisted.Length == 0,
+            "An ownership question names parents outside RecordOwnershipContext.ForRow (UAC 194b R3b-2). Ask through ForRow — the " +
+            "row's table plus the column each parent is written to — so the writer asks what the reconciler asks; if the " +
+            "table's order is wrong, change it in SecureChildLineage with a reason:\n" + string.Join("\n", unlisted));
+
+        var stale = listed
+            .Where(e => !found.Any(f => f.Type == e.Type && f.Method == e.Method))
+            .Select(e => $"{e.Type}.{e.Method}")
+            .ToArray();
+        Assert.True(stale.Length == 0, "A baseline entry no longer builds a question — remove it: " + string.Join(", ", stale));
+    }
+
+    [Fact(DisplayName = "194b R3b-2: control — an initialiser, a with and a ForParents are found; ForRow and a caller-only question are not")]
+    public void Detector_MustFireAndMustNotFire()
+    {
+        var fixtures = new[]
+        {
+            typeof(ChildRowOwnershipControlInitialiser), typeof(ChildRowOwnershipControlWith), typeof(ChildRowOwnershipControlForParents),
+            typeof(ChildRowOwnershipControlForRow), typeof(ChildRowOwnershipControlCallerOnly),
+        };
+        var found = Constructions(fixtures.SelectMany(IlCallScan.WithNested)).Select(f => f.Type).Distinct().Order(StringComparer.Ordinal);
+
+        Assert.Equal(
+            new[]
+            {
+                typeof(ChildRowOwnershipControlForParents).FullName!, typeof(ChildRowOwnershipControlInitialiser).FullName!,
+                typeof(ChildRowOwnershipControlWith).FullName!,
+            },
+            found);
+    }
+
+    private static readonly string[] ParentSetters =
+    [
+        "set_" + nameof(RecordOwnershipContext.Parents),
+        "set_" + nameof(RecordOwnershipContext.TargetEntityLogicalName),
+        "set_" + nameof(RecordOwnershipContext.TargetRecordId),
+    ];
+
+    /// <summary>The builders themselves: the one entry point, what goes through it, and the closed opt-out.</summary>
+    private static readonly string[] Builders =
+    [
+        nameof(RecordOwnershipContext.ForParents), nameof(RecordOwnershipContext.ForRow), nameof(RecordOwnershipContext.ForChild),
+        nameof(RecordOwnershipContext.ForParentsInWriterOrder), nameof(RecordOwnershipContext.ForExistingRowAsync),
+    ];
+
+    /// <summary>The detector: each (outermost type, source method) that names a parent outside the builders.</summary>
+    private static IReadOnlyList<(string Type, string Method)> Constructions(IEnumerable<Type> types) =>
+        IlCallScan.MethodReferences(types)
+            .Where(r => r.Target.DeclaringType == typeof(RecordOwnershipContext)
+                        && (r.Target.Name == nameof(RecordOwnershipContext.ForParents) || ParentSetters.Contains(r.Target.Name)))
+            .Select(r => (Type: IlCallScan.Outermost(r.Caller).FullName!, Method: MethodOf(r.Caller, r.CallerMethod)))
+            .Where(c => !(c.Type == typeof(RecordOwnershipContext).FullName && Builders.Contains(c.Method)))
+            .Distinct()
+            .ToArray();
+
+    /// <summary>The source method; an async body (<c>&lt;M&gt;d__N.MoveNext</c>) is read as <c>M</c>, so the baseline does not
+    /// depend on the compiler's numbering. A lambda's body stays its own name (never the method it sits in).</summary>
+    private static string MethodOf(Type caller, MethodBase method)
+    {
+        var name = IlCallScan.SourceMethodName(caller, method);
+        var match = System.Text.RegularExpressions.Regex.Match(name, @"^<(?<m>[^>]+)>d__\d+\.MoveNext$");
+        return match.Success ? match.Groups["m"].Value : name;
+    }
+}
+
+// Compiled control fixtures for ChildRowOwnershipBuilderGuardTests.Detector_MustFireAndMustNotFire. Top-level types (the scan
+// attributes nested types to their outermost one). Never run; only their IL is read.
+
+/// <summary>MUST FIRE: names a parent in an object initialiser.</summary>
+internal static class ChildRowOwnershipControlInitialiser
+{
+    internal static RecordOwnershipContext Ask(Guid matterId) =>
+        new() { TargetEntityLogicalName = "sprk_matter", TargetRecordId = matterId };
+}
+
+/// <summary>MUST FIRE: replaces a built question's parents.</summary>
+internal static class ChildRowOwnershipControlWith
+{
+    internal static RecordOwnershipContext Ask(RecordOwnershipContext built, Guid matterId) =>
+        built with { Parents = [new RecordOwnershipParent("sprk_matter", matterId)] };
+}
+
+/// <summary>MUST FIRE: lists parents with no table.</summary>
+internal static class ChildRowOwnershipControlForParents
+{
+    internal static RecordOwnershipContext Ask(Guid matterId) =>
+        RecordOwnershipContext.ForParents(new RecordOwnershipParent?[] { new("sprk_matter", matterId) });
+}
+
+/// <summary>MUST NOT FIRE: asks through the one builder.</summary>
+internal static class ChildRowOwnershipControlForRow
+{
+    internal static RecordOwnershipContext Ask(Guid matterId) =>
+        RecordOwnershipContext.ForRow(
+            "sprk_event",
+            new[] { KeyValuePair.Create("sprk_regardingmatter", (RecordOwnershipParent?)new RecordOwnershipParent("sprk_matter", matterId)) });
+}
+
+/// <summary>MUST NOT FIRE: names only the caller (the caller's own business unit, I-6).</summary>
+internal static class ChildRowOwnershipControlCallerOnly
+{
+    internal static RecordOwnershipContext Ask(Guid callerObjectId) => new() { CallerObjectId = callerObjectId };
+}
