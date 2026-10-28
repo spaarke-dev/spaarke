@@ -36,9 +36,21 @@ public class DecisionParameterSourcesTests
         public List<string> Gets { get; } = new();
         public DataverseUserResponse Response { get; set; } = DataverseUserResponse.Fail(404, "not_found", "no");
 
+        /// <summary>The answer to the caller's read of the matter (<c>sprk_matters(id)</c>); by default a matter the caller cannot see.</summary>
+        public DataverseUserResponse MatterResponse { get; set; } = DataverseUserResponse.Fail(404, DataverseUserClientErrorCodes.NotFound, "not visible");
+
+        /// <summary>When set, the caller's read of the matter throws it (a transport fault).</summary>
+        public Exception? MatterFault { get; set; }
+
+        public List<string> MatterGets => Gets.Where(IsMatterRead).ToList();
+
+        private static bool IsMatterRead(string path) => path.StartsWith("sprk_matters(", StringComparison.Ordinal);
+
         public Task<DataverseUserResponse> GetAsync(string relativePath, CancellationToken cancellationToken)
         {
             Gets.Add(relativePath);
+            if (IsMatterRead(relativePath))
+                return MatterFault is { } fault ? Task.FromException<DataverseUserResponse>(fault) : Task.FromResult(MatterResponse);
             return Task.FromResult(Response);
         }
 
@@ -202,19 +214,27 @@ public class DecisionParameterSourcesTests
     // The budget's currency
     // ---------------------------------------------------------------------------------------------------------------
 
+    private static DataverseUserResponse MatterOwnedBy(Guid? businessUnit) =>
+        DataverseUserResponse.Ok(200, JsonSerializer.SerializeToElement(new Dictionary<string, object?>
+        {
+            ["_owningbusinessunit_value"] = businessUnit?.ToString("D"),
+        }));
+
     private sealed class CurrencyWorld
     {
         public Mock<IGenericEntityService> Entities { get; } = new();
+        public FakeUser User { get; } = new();
         public List<QueryExpression> Queries { get; } = new();
+
+        public DecisionParameterSources Build() => DecisionParameterSourcesTests.Build(User, Entities);
 
         /// <param name="buCurrency">The business unit's Default Currency (null: none).</param>
         /// <param name="baseCurrency">The organization's base currency (null: none).</param>
         /// <param name="activeCurrencies">The currencies that exist and are active.</param>
         public CurrencyWorld(Guid? buCurrency, Guid? baseCurrency, params (Guid Id, string Iso)[] activeCurrencies)
         {
-            var matter = new Entity("sprk_matter", MatterId);
-            matter["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitId);
-            Entities.Setup(e => e.RetrieveAsync("sprk_matter", MatterId, It.IsAny<string[]>(), It.IsAny<CancellationToken>())).ReturnsAsync(matter);
+            // The matter is record data: its owning business unit is read AS THE CALLER (through the user client), never app-only.
+            User.MatterResponse = MatterOwnedBy(BusinessUnitId);
 
             var bu = new Entity("businessunit", BusinessUnitId);
             if (buCurrency is { } c) bu["transactioncurrencyid"] = new EntityReference("transactioncurrency", c);
@@ -243,7 +263,7 @@ public class DecisionParameterSourcesTests
     {
         var world = new CurrencyWorld(BuCurrencyId, BaseCurrencyId, (BuCurrencyId, "EUR"), (BaseCurrencyId, "USD"));
 
-        var currency = await Build(entities: world.Entities).ResolveBudgetCurrencyAsync(MatterId, null, CancellationToken.None);
+        var currency = await world.Build().ResolveBudgetCurrencyAsync(MatterId, null, CancellationToken.None);
 
         currency.Refusal.Should().BeNull();
         currency.Id.Should().Be(BuCurrencyId);
@@ -256,7 +276,7 @@ public class DecisionParameterSourcesTests
     {
         var world = new CurrencyWorld(buCurrency: null, BaseCurrencyId, (BaseCurrencyId, "USD"));
 
-        var currency = await Build(entities: world.Entities).ResolveBudgetCurrencyAsync(MatterId, null, CancellationToken.None);
+        var currency = await world.Build().ResolveBudgetCurrencyAsync(MatterId, null, CancellationToken.None);
 
         currency.Refusal.Should().BeNull();
         (currency.Id, currency.IsoCode).Should().Be((BaseCurrencyId, "USD"));
@@ -267,7 +287,7 @@ public class DecisionParameterSourcesTests
     {
         var world = new CurrencyWorld(buCurrency: null, baseCurrency: null);
 
-        var currency = await Build(entities: world.Entities).ResolveBudgetCurrencyAsync(MatterId, null, CancellationToken.None);
+        var currency = await world.Build().ResolveBudgetCurrencyAsync(MatterId, null, CancellationToken.None);
 
         currency.Refusal.Should().NotBeNullOrWhiteSpace();
         currency.Id.Should().BeNull();
@@ -280,7 +300,7 @@ public class DecisionParameterSourcesTests
         var chosen = Guid.Parse("cccccccc-0000-0000-0000-000000000009");
         var world = new CurrencyWorld(BuCurrencyId, BaseCurrencyId, (chosen, "GBP"));
 
-        var currency = await Build(entities: world.Entities).ResolveBudgetCurrencyAsync(MatterId, chosen.ToString("D"), CancellationToken.None);
+        var currency = await world.Build().ResolveBudgetCurrencyAsync(MatterId, chosen.ToString("D"), CancellationToken.None);
 
         (currency.Id, currency.IsoCode, currency.Refusal).Should().Be((chosen, "GBP", null));
         world.Entities.Verify(e => e.RetrieveAsync("businessunit", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never);
@@ -296,7 +316,7 @@ public class DecisionParameterSourcesTests
     {
         var world = new CurrencyWorld(BuCurrencyId, BaseCurrencyId, (BuCurrencyId, "EUR"));
 
-        var currency = await Build(entities: world.Entities).ResolveBudgetCurrencyAsync(MatterId, requested, CancellationToken.None);
+        var currency = await world.Build().ResolveBudgetCurrencyAsync(MatterId, requested, CancellationToken.None);
 
         currency.Refusal.Should().NotBeNullOrWhiteSpace();
         currency.Id.Should().BeNull();
@@ -309,8 +329,8 @@ public class DecisionParameterSourcesTests
         // The business unit's currency exists but is not among the active ones: the active-only query finds nothing.
         var world = new CurrencyWorld(BuCurrencyId, BaseCurrencyId);
 
-        var defaulted = await Build(entities: world.Entities).ResolveBudgetCurrencyAsync(MatterId, null, CancellationToken.None);
-        var chosen = await Build(entities: world.Entities).ResolveBudgetCurrencyAsync(MatterId, BuCurrencyId.ToString("D"), CancellationToken.None);
+        var defaulted = await world.Build().ResolveBudgetCurrencyAsync(MatterId, null, CancellationToken.None);
+        var chosen = await world.Build().ResolveBudgetCurrencyAsync(MatterId, BuCurrencyId.ToString("D"), CancellationToken.None);
 
         defaulted.IsResolved.Should().BeFalse("it still fails closed");
         defaulted.Refusal.Should().Be("This matter's business-unit currency is inactive; choose a currency.");
@@ -323,7 +343,7 @@ public class DecisionParameterSourcesTests
     public async Task Currency_AResolvedAnswer_IsReadOncePerRequestPerMatterAndRequestedCurrency_F42()
     {
         var world = new CurrencyWorld(BuCurrencyId, BaseCurrencyId, (BuCurrencyId, "EUR"), (BaseCurrencyId, "USD"));
-        var sources = Build(entities: world.Entities);
+        var sources = world.Build();
 
         var first = await sources.ResolveBudgetCurrencyAsync(MatterId, null, CancellationToken.None);
         var second = await sources.ResolveBudgetCurrencyAsync(MatterId, null, CancellationToken.None);
@@ -332,7 +352,7 @@ public class DecisionParameterSourcesTests
         second.Should().BeSameAs(first);
         third.Should().BeSameAs(first, "blank is the same question as omitted");
         world.Queries.Should().ContainSingle(q => q.EntityName == "transactioncurrency", "one currency read for three asks");
-        world.Entities.Verify(e => e.RetrieveAsync("sprk_matter", MatterId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Once);
+        world.User.MatterGets.Should().ContainSingle("the matter is read once for three asks");
         world.Entities.Verify(e => e.RetrieveAsync("businessunit", BusinessUnitId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Once);
 
         // must not fire: a different requested currency is a different question, and it is read.
@@ -345,7 +365,7 @@ public class DecisionParameterSourcesTests
     public async Task Currency_ARefusalIsNeverRemembered_SoALaterAskReadsAgain_F42()
     {
         var world = new CurrencyWorld(BuCurrencyId, BaseCurrencyId);
-        var sources = Build(entities: world.Entities);
+        var sources = world.Build();
 
         await sources.ResolveBudgetCurrencyAsync(MatterId, null, CancellationToken.None);
         await sources.ResolveBudgetCurrencyAsync(MatterId, null, CancellationToken.None);
@@ -358,7 +378,7 @@ public class DecisionParameterSourcesTests
     {
         var world = new CurrencyWorld(BuCurrencyId, BaseCurrencyId, (BuCurrencyId, ""));
 
-        var currency = await Build(entities: world.Entities).ResolveBudgetCurrencyAsync(MatterId, null, CancellationToken.None);
+        var currency = await world.Build().ResolveBudgetCurrencyAsync(MatterId, null, CancellationToken.None);
 
         currency.Refusal.Should().NotBeNullOrWhiteSpace();
         currency.IsoCode.Should().BeNull();
@@ -370,10 +390,99 @@ public class DecisionParameterSourcesTests
         var entities = new Mock<IGenericEntityService>();
         entities.Setup(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new TimeoutException("no answer"));
+        var user = new FakeUser { MatterResponse = MatterOwnedBy(BusinessUnitId) };
 
-        var act = () => Build(entities: entities).ResolveBudgetCurrencyAsync(MatterId, null, CancellationToken.None);
+        var act = () => Build(user, entities).ResolveBudgetCurrencyAsync(MatterId, null, CancellationToken.None);
 
         await act.Should().ThrowAsync<TimeoutException>();
+    }
+
+    [Fact]
+    public async Task Currency_Omitted_ReadsTheMattersBusinessUnitAsTheCaller_AndNeverReadsTheMatterAppOnly_D193()
+    {
+        var world = new CurrencyWorld(BuCurrencyId, BaseCurrencyId, (BuCurrencyId, "EUR"));
+
+        await world.Build().ResolveBudgetCurrencyAsync(MatterId, null, CancellationToken.None);
+
+        world.User.MatterGets.Should().ContainSingle().Which.Should().Be($"sprk_matters({MatterId:D})?$select=_owningbusinessunit_value");
+        world.Entities.Verify(e => e.RetrieveAsync("sprk_matter", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never);
+        world.Entities.Verify(e => e.RetrieveAsync("businessunit", BusinessUnitId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Once,
+            "the business unit's Default Currency is organization configuration and stays app-only");
+    }
+
+    [Theory]
+    [InlineData(403, DataverseUserClientErrorCodes.AccessDenied)]
+    [InlineData(404, DataverseUserClientErrorCodes.NotFound)]
+    [InlineData(0, DataverseUserClientErrorCodes.UserContextRequired)] // no caller could be established: a refusal, not a fault
+    public async Task Currency_Omitted_WhenTheCallerReadIsRefused_FallsBackToTheBaseCurrency_WithoutAnAppOnlyMatterRead_D193(int status, string code)
+    {
+        var world = new CurrencyWorld(BuCurrencyId, BaseCurrencyId, (BuCurrencyId, "EUR"), (BaseCurrencyId, "USD"));
+        world.User.MatterResponse = DataverseUserResponse.Fail(status, code, "refused");
+
+        var currency = await world.Build().ResolveBudgetCurrencyAsync(MatterId, null, CancellationToken.None);
+
+        (currency.Id, currency.IsoCode, currency.Refusal).Should().Be((BaseCurrencyId, "USD", null));
+        world.Entities.Verify(e => e.RetrieveAsync("sprk_matter", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never);
+        world.Entities.Verify(e => e.RetrieveAsync("businessunit", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never,
+            "no business unit is known, so none is asked");
+    }
+
+    [Fact]
+    public async Task Currency_Omitted_WhenTheCallerReadReturnsNoBusinessUnit_FallsBackToTheBaseCurrency_D193()
+    {
+        var world = new CurrencyWorld(BuCurrencyId, BaseCurrencyId, (BaseCurrencyId, "USD"));
+        world.User.MatterResponse = MatterOwnedBy(null);
+
+        var currency = await world.Build().ResolveBudgetCurrencyAsync(MatterId, null, CancellationToken.None);
+
+        (currency.Id, currency.Refusal).Should().Be((BaseCurrencyId, null));
+        world.Entities.Verify(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Currency_Omitted_WhenTheCallerReadIsRefusedAndThereIsNoBaseCurrency_FailsClosed_D193()
+    {
+        var world = new CurrencyWorld(BuCurrencyId, baseCurrency: null);
+        world.User.MatterResponse = DataverseUserResponse.Fail(403, DataverseUserClientErrorCodes.AccessDenied, "refused");
+
+        var currency = await world.Build().ResolveBudgetCurrencyAsync(MatterId, null, CancellationToken.None);
+
+        currency.IsResolved.Should().BeFalse();
+        currency.Refusal.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [Fact]
+    public async Task Currency_Omitted_WhenTheCallerReadFaults_Throws_SoTheCommitAnswers503_NeverAnAppOnlyFallback_D193()
+    {
+        var world = new CurrencyWorld(BuCurrencyId, BaseCurrencyId, (BuCurrencyId, "EUR"), (BaseCurrencyId, "USD"));
+        world.User.MatterResponse = DataverseUserResponse.Fail(503, DataverseUserClientErrorCodes.ServiceError, "down");
+
+        var act = () => world.Build().ResolveBudgetCurrencyAsync(MatterId, null, CancellationToken.None);
+        await act.Should().ThrowAsync<HttpRequestException>();
+
+        world.User.MatterFault = new TimeoutException("no answer");
+        var thrown = () => world.Build().ResolveBudgetCurrencyAsync(MatterId, null, CancellationToken.None);
+        await thrown.Should().ThrowAsync<TimeoutException>();
+
+        world.Entities.Verify(e => e.RetrieveAsync("sprk_matter", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData(400, DataverseUserClientErrorCodes.BadRequest)]
+    [InlineData(429, DataverseUserClientErrorCodes.RateLimited)]
+    [InlineData(503, DataverseUserClientErrorCodes.ServiceError)]
+    [InlineData(0, DataverseUserClientErrorCodes.OboExchangeFailed)]
+    [InlineData(0, DataverseUserClientErrorCodes.OboNotConfigured)]
+    public async Task Currency_Omitted_EveryCallerReadFaultThatIsNotARefusal_Throws_NeverAFallbackCurrency_D193(int status, string code)
+    {
+        // Review F3 (#2414): a genuine fault must answer 503, never silently prefill the base currency.
+        var world = new CurrencyWorld(BuCurrencyId, BaseCurrencyId, (BuCurrencyId, "EUR"), (BaseCurrencyId, "USD"));
+        world.User.MatterResponse = DataverseUserResponse.Fail(status, code, "fault");
+
+        var act = () => world.Build().ResolveBudgetCurrencyAsync(MatterId, null, CancellationToken.None);
+
+        await act.Should().ThrowAsync<HttpRequestException>();
+        world.Entities.Verify(e => e.RetrieveAsync("sprk_matter", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     // ---------------------------------------------------------------------------------------------------------------
@@ -386,8 +495,9 @@ public class DecisionParameterSourcesTests
     [Fact]
     public async Task ForPlan_CreateBudget_ResolvesBothOptionLists_AndTheCurrencyDefault()
     {
-        var user = new FakeUser { Response = Picklist((100000000, "Fees", false)) };
         var world = new CurrencyWorld(BuCurrencyId, null, (BuCurrencyId, "EUR"));
+        var user = world.User;
+        user.Response = Picklist((100000000, "Fees", false));
         world.Entities.Setup(e => e.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "transactioncurrency" && q.Criteria.Conditions.All(c => c.AttributeName != "transactioncurrencyid")), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new EntityCollection(new List<Entity> { Currency(BuCurrencyId, "Euro", "EUR") }));
 

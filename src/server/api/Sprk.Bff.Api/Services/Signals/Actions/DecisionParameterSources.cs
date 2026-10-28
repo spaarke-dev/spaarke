@@ -35,10 +35,13 @@ public sealed record DecisionParameterFacts(
 /// relabel shows up within <see cref="OptionsTtl"/>; nothing is hard-coded); <c>currency:active</c> is the active
 /// <c>transactioncurrency</c> rows. The default <c>matter-business-unit-currency</c> is the Default Currency of the business unit that
 /// owns the core matter, else the organization base currency (logged).</para>
-/// <para><b>Reads.</b> Metadata is read as the caller (the caller's own client, as the child-records route reads it). Currency and business
-/// unit are read by the BFF's own app-only reader: they are organization configuration, not record content, and a Core User's Read on
-/// <c>businessunit</c> is not a fact the Create budget needs to hold. The binding of the currency onto the budget is still checked as the
-/// caller by the child-records create core (AppendTo on the currency, which the Core User role holds on spaarkedev1).</para>
+/// <para><b>Reads.</b> Metadata is read as the caller (the caller's own client, as the child-records route reads it). So is (d), the
+/// owning business unit of the core matter: it is record data, and a caller who cannot read the matter gets the organization base currency,
+/// never an app-only read of the matter (uac-r2: record data is read as the caller wherever the caller can read it). The reads (a)-(c) are
+/// app-only by the BFF's own reader, because they are organization configuration, not record content: the active <c>transactioncurrency</c>
+/// rows, <c>organization.basecurrencyid</c> and <c>businessunit.transactioncurrencyid</c> (a Core User's Read on <c>businessunit</c> is not a
+/// fact the Create budget needs to hold). The binding of the currency onto the budget is still checked as the caller by the child-records
+/// create core (AppendTo on the currency, which the Core User role holds on spaarkedev1).</para>
 /// <para><b>Fail closed.</b> A list that cannot be read is <c>null</c> (never an empty list that would refuse every value or accept any); a
 /// currency that cannot be determined is a refusal, never a blank <c>sprk_currency</c>. A fault in Dataverse throws, so the commit route
 /// answers 503 before it writes anything.</para>
@@ -257,13 +260,15 @@ public class DecisionParameterSources
     }
 
     /// <summary>The Default Currency of the business unit that owns <paramref name="matterId"/>, else the organization base currency
-    /// (logged); <c>null</c> when neither exists. A fault in Dataverse throws.</summary>
+    /// (logged); <c>null</c> when neither exists. The matter's owning business unit is read AS THE CALLER; a caller read that is refused
+    /// (401/403), finds nothing (404) or returns no value is treated as "the business unit has no Default Currency" (logged), never retried
+    /// app-only. A Dataverse fault on that read (5xx, throttling, OBO failure, an exception) throws, like every other fault here, so the
+    /// commit answers 503 before it writes anything.</summary>
     internal async Task<Guid?> DefaultCurrencyAsync(Guid matterId, CancellationToken ct)
     {
-        var matter = await _entities.RetrieveAsync("sprk_matter", matterId, ["owningbusinessunit"], ct).ConfigureAwait(false);
-        if (matter.GetAttributeValue<EntityReference>("owningbusinessunit") is { } unit)
+        if (await ReadOwningBusinessUnitAsCallerAsync(matterId, ct).ConfigureAwait(false) is { } unitId)
         {
-            var businessUnit = await _entities.RetrieveAsync("businessunit", unit.Id, ["transactioncurrencyid"], ct).ConfigureAwait(false);
+            var businessUnit = await _entities.RetrieveAsync("businessunit", unitId, ["transactioncurrencyid"], ct).ConfigureAwait(false);
             if (businessUnit.GetAttributeValue<EntityReference>("transactioncurrencyid") is { } fromUnit)
                 return fromUnit.Id;
         }
@@ -276,6 +281,35 @@ public class DecisionParameterSources
             return baseCurrency.Id;
         }
 
+        return null;
+    }
+
+    /// <summary>The owning business unit of the matter as the CALLER sees it (<c>sprk_matters(id)?$select=_owningbusinessunit_value</c>), or
+    /// <c>null</c> when the caller cannot read the matter or the value is absent. Throws on a Dataverse fault.</summary>
+    private async Task<Guid?> ReadOwningBusinessUnitAsCallerAsync(Guid matterId, CancellationToken ct)
+    {
+        var response = await _user.GetAsync($"sprk_matters({matterId:D})?$select=_owningbusinessunit_value", ct).ConfigureAwait(false);
+        if (!response.IsSuccess)
+        {
+            if (response.ErrorCode is DataverseUserClientErrorCodes.AccessDenied or DataverseUserClientErrorCodes.NotFound
+                or DataverseUserClientErrorCodes.UserContextRequired)
+            {
+                _logger.LogWarning(
+                    "Decision budget currency: the caller's read of matter {MatterId} failed ({ErrorCode}); treating its business unit as having no Default Currency.",
+                    matterId, response.ErrorCode);
+                return null;
+            }
+
+            throw new HttpRequestException($"The caller's read of the matter's business unit failed ({response.ErrorCode ?? "unknown"}, HTTP {response.StatusCode}).");
+        }
+
+        if (response.Body is { ValueKind: JsonValueKind.Object } body
+            && body.TryGetProperty("_owningbusinessunit_value", out var value) && value.ValueKind == JsonValueKind.String
+            && Guid.TryParse(value.GetString(), out var unitId) && unitId != Guid.Empty)
+            return unitId;
+
+        _logger.LogWarning(
+            "Decision budget currency: the caller's read of matter {MatterId} returned no business unit; treating it as having no Default Currency.", matterId);
         return null;
     }
 
