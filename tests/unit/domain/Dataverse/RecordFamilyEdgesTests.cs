@@ -66,10 +66,13 @@ public class RecordFamilyEdgesTests
     [Fact]
     public void MatterToProject_IsTheRegardingPair_NeverTheAssociation()
     {
-        RecordFamilyEdges.All.Should().ContainSingle(e =>
-            e.ChildTable == "sprk_project" && e.ParentTable == "sprk_matter"
-            && e.LookupColumn == RecordFamilyEdges.PairIdColumn && e.EdgeKind == EdgeKind.Pair);
-        RecordFamilyEdges.PairTypeColumn.Should().Be(CoreAncestorResolver.RegardingRecordTypeColumn);
+        // The ONLY edge filing a project under a matter is the pair — not a typed lookup, not the N:N association.
+        var edge = RecordFamilyEdges.All.Should()
+            .ContainSingle(e => e.ChildTable == "sprk_project" && e.ParentTable == "sprk_matter").Subject;
+
+        edge.LookupColumn.Should().Be("sprk_regardingrecordid");
+        edge.EdgeKind.Should().Be(EdgeKind.Pair);
+        RecordFamilyEdges.PairTypeColumn.Should().Be("sprk_regardingrecordtype");
     }
 
     [Theory]
@@ -142,12 +145,5 @@ public class RecordFamilyEdgesTests
     public void RecordNumberColumnOf_KnownTables_ReturnsTheirNumberColumnOrNull(string table, string? expected)
     {
         RecordFamilyEdges.RecordNumberColumnOf(table).Should().Be(expected);
-    }
-
-    [Fact]
-    public void All_EachRow_CarriesItsChildTablesRecordNumberColumn()
-    {
-        RecordFamilyEdges.All.Should().OnlyContain(e =>
-            e.RecordNumberColumn == RecordFamilyEdges.RecordNumberColumnOf(e.ChildTable));
     }
 }

@@ -21,7 +21,10 @@ namespace Spaarke.ArchTests;
 /// <item><b>Content pin (UAC C3).</b> The six access columns of every row equal <see cref="PinnedAccessRows"/>. A change
 /// fails with a message requiring a "UAC-r2 review:" line in the PR. <c>RecordNumberColumn</c> is not pinned.</item>
 /// <item><b>Isolation stays Filing-only (UAC C2).</b> A synthetic non-Filing row leaves the SecureChildLineage view and
-/// the CoreAncestorResolver children view unchanged.</item>
+/// the CoreAncestorResolver children view unchanged; <c>RecordFamilyEdges.DetailTables</c> is display only and never
+/// removes a row from them.</item>
+/// <item><b>Ownership-parent lineage (UAC-r2 ruling, 2026-10-28).</b> Every SecureChildLineage lookup whose target is an
+/// ownership parent (and is not a citation) is a registry row or a baselined disagreement.</item>
 /// </list>
 /// Each guard ships with must-fire and must-not-fire controls over synthetic data. Source only: static tables, no DI.
 /// </summary>
@@ -40,17 +43,17 @@ public class RecordFamilyEdgesGuardTests
     internal static readonly IReadOnlyDictionary<string, string> KnownDisagreements = new Dictionary<string, string>(StringComparer.Ordinal)
     {
         // SecureChildLineage keeps every lookup on purpose (an extra lookup can only narrow a sharee mirror); these are
-        // the ones its own remarks, CoreAncestorResolver or RecordOwnershipResolver say are not filing.
+        // the ones its own remarks say are not filing.
         [Only("SecureChildLineage", "sprk_document.sprk_currentversionid -> sprk_fileversion")] =
             "a document's current version, not its filing (SecureChildLineage remarks)",
         [Only("SecureChildLineage", "sprk_document.sprk_canonicaldocument -> sprk_document")] =
             "a document's canonical copy, not its filing (SecureChildLineage remarks)",
         [Only("SecureChildLineage", "sprk_analysis.sprk_outputfileid -> sprk_document")] =
             "an analysis's output file, not its filing (SecureChildLineage remarks)",
-        [Only("SecureChildLineage", "sprk_analysis.sprk_documentid -> sprk_document")] =
-            "the document an analysis analyses, its input, not what it is filed under (CoreAncestorResolver.StampSourceColumns remarks)",
-        [Only("SecureChildLineage", "sprk_communication.sprk_communicationthread -> sprk_communicationthread")] =
-            "a thread is a grouping container; a message is filed under its regarding (OwnershipParentEntities remarks)",
+
+        // CoreAncestorResolver's stamp sources are the intermediates a stamp is COPIED from, not every filing lookup.
+        [Extra("CoreAncestorResolver.StampSourceColumns", "sprk_analysis.sprk_documentid -> sprk_document")] =
+            "the analysis's ownership primary, not a stamp source (CoreAncestorResolver.cs:212-214)",
 
         // CoreAncestorResolver's children are its stamp / root topology, not every filing lookup to a core.
         [Extra("CoreAncestorResolver children", "sprk_decisionrecord.sprk_matter -> sprk_matter")] =
@@ -66,7 +69,7 @@ public class RecordFamilyEdgesGuardTests
 
         // OwnershipParentEntities lists the tables a child can be filed under FOR OWNERSHIP.
         [Only("OwnershipParentEntities", "sprk_billingevent")] =
-            "an ownership parent no filing lookup names (no SecureChildLineage row has a lookup to it)",
+            "an ownership parent through sprk_invoicelineitem.sprk_billingevent, which waits for ebilling (#2348)",
         [Only("OwnershipParentEntities", "sprk_kpiassessment")] =
             "an ownership parent no filing lookup names (no SecureChildLineage row has a lookup to it)",
         [Only("OwnershipParentEntities", "sprk_memo")] =
@@ -77,6 +80,8 @@ public class RecordFamilyEdgesGuardTests
             "a lineage parent of a Signal only (signal.sprk_decisionrecord); ownership does not list it",
         [Extra("OwnershipParentEntities", "sprk_emailartifact")] =
             "a lineage parent of an attachment artifact only; ownership does not list it",
+        [Extra("OwnershipParentEntities", "sprk_communicationthread")] =
+            "grouping container, never an ownership parent (RecordOwnershipResolver.cs:1150); a message takes its record thread's filing",
     };
 
     [Fact(DisplayName = "Task 070: every existing registry agrees with RecordFamilyEdges, or the disagreement is in the baseline")]
@@ -234,6 +239,7 @@ public class RecordFamilyEdgesGuardTests
         "Filing | sprk_agreement.sprk_regardingdocument -> sprk_document | LineageHop | secure",
         "Filing | sprk_agreement.sprk_regardingmatter -> sprk_matter | Stamp | secure",
         "Filing | sprk_agreement.sprk_regardingproject -> sprk_project | Stamp | secure",
+        "Filing | sprk_analysis.sprk_documentid -> sprk_document | LineageHop | secure",
         "Filing | sprk_analysis.sprk_regardingbudget -> sprk_budget | LineageHop | secure",
         "Filing | sprk_analysis.sprk_regardingcommunication -> sprk_communication | LineageHop | secure",
         "Filing | sprk_analysis.sprk_regardingdocument -> sprk_document | LineageHop | secure",
@@ -253,6 +259,7 @@ public class RecordFamilyEdgesGuardTests
         "Filing | sprk_budgetbucket.sprk_budget -> sprk_budget | LineageHop | secure",
         "Filing | sprk_budgetrevision.sprk_budget -> sprk_budget | LineageHop | secure",
         "Filing | sprk_budgetrevision.sprk_matter -> sprk_matter | LineageHop | secure",
+        "Filing | sprk_communication.sprk_communicationthread -> sprk_communicationthread | LineageHop | secure",
         "Filing | sprk_communication.sprk_regardinganalysis -> sprk_analysis | LineageHop | secure",
         "Filing | sprk_communication.sprk_regardingbudget -> sprk_budget | LineageHop | secure",
         "Filing | sprk_communication.sprk_regardingevent -> sprk_event | LineageHop | secure",
@@ -460,6 +467,82 @@ public class RecordFamilyEdgesGuardTests
 
         Assert.NotEqual(Flatten(RecordFamilyEdges.SecureLineageView()), Flatten(RecordFamilyEdges.SecureLineageView(withRow)));
         Assert.NotEqual(Flatten(RecordFamilyEdges.CoreAncestorChildrenView()), Flatten(RecordFamilyEdges.CoreAncestorChildrenView(withRow)));
+    }
+
+    [Fact(DisplayName = "Task 070: DetailTables is display only — the isolation views still carry every detail table's rows")]
+    public void DetailTables_LeaveTheIsolationViewsUnchanged()
+    {
+        var filing = RecordFamilyEdges.Of(FamilyKind.Filing);
+        var lineage = Flatten(RecordFamilyEdges.SecureLineageView()).ToHashSet(StringComparer.Ordinal);
+        var coreChildren = Flatten(RecordFamilyEdges.CoreAncestorChildrenView()).ToHashSet(StringComparer.Ordinal);
+        var detailRows = filing.Where(e => RecordFamilyEdges.DetailTables.Contains(e.ChildTable)).ToArray();
+
+        Assert.All(RecordFamilyEdges.DetailTables, t => Assert.Contains(filing, e => e.ChildTable == t));
+        Assert.DoesNotContain("sprk_kpiassessment", RecordFamilyEdges.DetailTables);
+        Assert.All(detailRows.Where(e => e.InSecureFamily), e => Assert.Contains(Key(e), lineage));
+        Assert.All(detailRows.Where(e => RecordFamilyEdges.CoreTables.Contains(e.ParentTable)), e => Assert.Contains(Key(e), coreChildren));
+    }
+
+    // ------------------------------------------------------------------------------------------------------------------
+    // 4. Every SecureChildLineage lookup to an ownership parent is a filing row (UAC-r2 ruling, 2026-10-28)
+    // ------------------------------------------------------------------------------------------------------------------
+
+    [Fact(DisplayName = "Task 070: every SecureChildLineage lookup to an ownership parent (not a citation) is a registry row or baselined")]
+    public void EveryOwnershipParentLineageLookup_IsARow_OrBaselined()
+    {
+        var gaps = OwnershipLineageGaps(LineageLookups(), RecordFamilyEdges.All, KnownDisagreements);
+
+        Assert.True(
+            gaps.Count == 0,
+            "A SecureChildLineage lookup names an ownership parent (RecordOwnershipResolver.IsOwnershipParent) and is not a "
+            + "citation, so it files the row — it must be a RecordFamilyEdges row (UAC-r2 review: line in the PR) or a "
+            + "baselined SecureChildLineage disagreement with UAC-r2's reason:\n" + string.Join("\n", gaps));
+    }
+
+    [Fact(DisplayName = "Task 070: ownership-lineage control — the analysis's sprk_documentid row removed fires (must fire)")]
+    public void OwnershipLineageGaps_TheAnalysisPrimaryRemoved_Fires()
+    {
+        var rows = RecordFamilyEdges.All
+            .Where(e => !(e.ChildTable == "sprk_analysis" && e.LookupColumn == "sprk_documentid"))
+            .ToArray();
+
+        var gaps = OwnershipLineageGaps(LineageLookups(), rows, KnownDisagreements);
+
+        Assert.Equal(new[] { "sprk_analysis.sprk_documentid -> sprk_document" }, gaps);
+    }
+
+    [Fact(DisplayName = "Task 070: ownership-lineage control — a citation, a non-parent target and a baselined lookup pass (must not fire)")]
+    public void OwnershipLineageGaps_CitationNonParentOrBaselined_DoesNotFire()
+    {
+        var lineage = new[]
+        {
+            ("sprk_signal", "sprk_policy", "sprk_policy"), // a citation (RecordOwnershipResolver.IsCitation)
+            ("sprk_child", "sprk_version", "sprk_fileversion"), // not an ownership parent
+            ("sprk_child", "sprk_known", "sprk_document"), // baselined
+        };
+        var baseline = new Dictionary<string, string>
+        {
+            [Only("SecureChildLineage", "sprk_child.sprk_known -> sprk_document")] = "seeded: known",
+        };
+
+        Assert.Empty(OwnershipLineageGaps(lineage, Array.Empty<Edge>(), baseline));
+    }
+
+    private static IEnumerable<(string Child, string Column, string Target)> LineageLookups() =>
+        SecureChildLineage.Children.Values.SelectMany(t => t.Lookups.Select(l => (t.LogicalName, l.Key, l.Value)));
+
+    internal static IReadOnlyList<string> OwnershipLineageGaps(
+        IEnumerable<(string Child, string Column, string Target)> lineage,
+        IEnumerable<Edge> rows,
+        IReadOnlyDictionary<string, string> baseline)
+    {
+        var registry = RecordFamilyEdges.Of(FamilyKind.Filing, rows).Select(Key).ToHashSet(StringComparer.Ordinal);
+        return lineage
+            .Where(l => RecordOwnershipResolver.IsOwnershipParent(l.Target) && !RecordOwnershipResolver.IsCitation(l.Child, l.Column))
+            .Select(l => Key(l.Child, l.Column, l.Target))
+            .Where(k => !registry.Contains(k) && !baseline.ContainsKey(Only("SecureChildLineage", k)))
+            .OrderBy(k => k, StringComparer.Ordinal)
+            .ToArray();
     }
 
     private static IReadOnlyList<string> Flatten(IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> view) =>

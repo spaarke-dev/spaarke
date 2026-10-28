@@ -19,15 +19,20 @@ namespace Sprk.Bff.Api.Services.Dataverse;
 /// <c>SecureRootInheritance.BffManagedPairTables</c> × its parents (<see cref="EdgeKind.Pair"/>: the Matter → Project edge,
 /// owner decision (a), #2352); and <c>ExternalDataService.ServiceRequestRelations</c> (a service request's OWN family,
 /// UAC-r2 round 2; outside the Secure family, so <see cref="Edge.InSecureFamily"/> is false). The existing registries are
-/// untouched and each is a CHECKED VIEW of this one: <c>RecordFamilyEdgesGuardTests</c> compares them with a ratchet
-/// baseline, so a new disagreement fails the build and the known ones are listed with their reason. Migrating UAC's walks
-/// onto this list is UAC's call.</para>
+/// untouched and each is checked against this one, with a ratchet baseline: <c>RecordFamilyEdgesGuardTests</c> fails the
+/// build on a new disagreement and lists the known ones with their reason. None of them can be replaced by a view of this
+/// list as it stands (see <see cref="SecureLineageView"/>). Migrating UAC's walks onto it is UAC's call.</para>
+/// <para><b>Service requests.</b> A service request is an ownership parent of its own (a root,
+/// <c>RecordOwnershipResolver.OwnershipParentEntities</c>, <c>RecordOwnershipResolver.cs:1157-1160</c>; its filing columns are
+/// read by <c>FilingParentOf</c>, <c>:660-680</c>), so the lookups to it are filing edges of ITS family, outside the Secure
+/// family. SecureChildLineage's "not a filing parent" describes only the Secure lineage map (UAC-r2 ruling, 2026-10-28).</para>
 /// <para><b>Left out, each with its reason.</b> Links an existing registry itself declares are not filing:
 /// <c>sprk_document.sprk_currentversionid</c>, <c>.sprk_canonicaldocument</c> and <c>sprk_analysis.sprk_outputfileid</c>
 /// (SecureChildLineage keeps them only because an extra lookup can only narrow a mirror);
-/// <c>sprk_analysis.sprk_documentid</c> (the document it analyses, its input — CoreAncestorResolver.StampSourceColumns);
-/// <c>sprk_communication.sprk_communicationthread</c> (a grouping container; a message is filed under its regarding —
-/// RecordOwnershipResolver.OwnershipParentEntities). Never family (UAC-r2 canonical definition, design §12.2): N:N
+/// <c>sprk_workassignment.sprk_regardingcommunication</c> (not a filing: <c>SecureRootInheritance.cs:426-427</c>, held by the
+/// storage resolver); a service request's own regarding lookups (it is a root). Isolation-only parents are not rows, because
+/// a family never decides isolation: a Decision Record's resolved-Signal subjects (<c>sprk_steps</c>), and a frozen core
+/// that no longer matches the live stamp. Never family (UAC-r2 canonical definition, design §12.2): N:N
 /// associations (incl. <c>sprk_Project_Matter_nn</c>), citations (<c>sprk_signal.sprk_policy</c>), people and organization
 /// lookups, grant rows, <c>sprk_procedureassignment</c> (owner, 2026-10-27), <c>sprk_policy.sprk_currentversion</c> (a
 /// loop), and <c>sprk_invoicelineitem</c> until ebilling deploys it (#2348).</para>
@@ -62,7 +67,10 @@ internal static class RecordFamilyEdges
         /// pair is BFF-managed — a project under a matter or project (#2352).</summary>
         Pair = 2,
 
-        /// <summary>One of the four <c>sprk_regarding{core}</c> columns (<see cref="StampColumns"/>) on a child table.</summary>
+        /// <summary>One of the four <c>sprk_regarding{core}</c> columns (<see cref="StampColumns"/>) on a child table. It names
+        /// the column, never a secondary edge: on an agreement, a report card or a communication thread it is the row's own
+        /// filing (<c>CoreAncestorResolver.IntermediateRootColumns</c>, <c>CoreAncestorResolver.cs:192-193</c>), not a
+        /// restamped copy.</summary>
         Stamp = 3,
 
         /// <summary>Any other child-table lookup: to another child, or a typed lookup to a core.</summary>
@@ -107,25 +115,23 @@ internal static class RecordFamilyEdges
     private const string ReportCard = "sprk_reportcard";
     private const string ToDo = "sprk_todo";
 
-    /// <summary>The ADR-024 regarding pair's record id column (a string).</summary>
-    internal const string PairIdColumn = "sprk_regardingrecordid";
+    /// <summary>The ADR-024 regarding pair's record id column (a string) — <see cref="CoreAncestorResolver"/>'s.</summary>
+    internal const string PairIdColumn = CoreAncestorResolver.RegardingRecordIdColumn;
 
-    /// <summary>The ADR-024 regarding pair's type column (a lookup to <c>sprk_recordtype_ref</c>).</summary>
-    internal const string PairTypeColumn = "sprk_regardingrecordtype";
+    /// <summary>The ADR-024 regarding pair's type column (a lookup to <c>sprk_recordtype_ref</c>) — <see cref="CoreAncestorResolver"/>'s.</summary>
+    internal const string PairTypeColumn = CoreAncestorResolver.RegardingRecordTypeColumn;
 
-    /// <summary>The four core tables (a family's possible roots).</summary>
+    // Static fields initialise in textual order: every field Build() reads (CoreTables, StampColumns, RecordNumberColumns,
+    // DocumentLinkTargetsThatAreNotFiling) must stay ABOVE All.
+
+    /// <summary>The core tables (a family's possible roots): <see cref="CoreAncestorResolver.CoreRecordEntities"/>.</summary>
     internal static readonly IReadOnlySet<string> CoreTables =
-        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { Project, Matter, WorkAssignment, ServiceRequest };
+        new HashSet<string>(CoreAncestorResolver.CoreRecordEntities, StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>The four <c>sprk_regarding{core}</c> stamp columns and the core each names.</summary>
+    /// <summary>The <c>sprk_regarding{core}</c> stamp columns and the core each names:
+    /// <see cref="CoreAncestorResolver.CoreAncestorLookups"/>.</summary>
     internal static readonly IReadOnlyDictionary<string, string> StampColumns =
-        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["sprk_regardingproject"] = Project,
-            ["sprk_regardingmatter"] = Matter,
-            ["sprk_regardingworkassignment"] = WorkAssignment,
-            ["sprk_regardingservicerequest"] = ServiceRequest,
-        };
+        CoreAncestorResolver.CoreAncestorLookups.ToDictionary(l => l.LookupAttribute, l => l.EntityType, StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Each table's record number column (solution source <c>Entities/*/Entity.xml</c>). A table not listed has none
@@ -152,8 +158,19 @@ internal static class RecordFamilyEdges
     internal static string? RecordNumberColumnOf(string table) =>
         RecordNumberColumns.TryGetValue(table, out var column) ? column : null;
 
+    /// <summary>
+    /// Family tables that hold system detail rather than user records (UAC-r2 ruling, 2026-10-28). Display only, outside
+    /// the access pin: the default family view and push (task 040) skip them, which hides no user record. Their edges stay
+    /// rows of the registry, and every isolation view still includes them — this set is never an isolation filter.
+    /// <c>sprk_kpiassessment</c> is not detail (user-entered).
+    /// </summary>
+    internal static readonly IReadOnlySet<string> DetailTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "sprk_eventlog", "sprk_emailreviewlog", "sprk_attachmentartifact", "sprk_emailartifact", "sprk_spendsignal",
+        "sprk_spendsnapshot", "sprk_billingevent", "sprk_analysisoutput",
+    };
+
     /// <summary>Document link targets that are relationships, not filing parents (identities and the email activity).</summary>
-    /// <remarks>Declared before <see cref="All"/>: static fields initialise in textual order, and <see cref="Build"/> reads it.</remarks>
     private static readonly HashSet<string> DocumentLinkTargetsThatAreNotFiling = new(StringComparer.OrdinalIgnoreCase)
     {
         "contact", "sprk_organization", "email",
@@ -167,9 +184,16 @@ internal static class RecordFamilyEdges
         (rows ?? All).Where(e => e.FamilyKind == kind).ToArray();
 
     /// <summary>
-    /// The <c>SecureChildLineage.Children</c> view: for each CHILD table in the Secure family, its lookups (column →
-    /// parent table). Filing edges only (UAC C2).
+    /// The registry in the shape of <c>SecureChildLineage.Children</c>: for each CHILD table in the Secure family, its
+    /// filing lookups (column → parent table). Filing edges only (UAC C2).
     /// </summary>
+    /// <remarks>
+    /// <b>Parity check only — never a source for an isolation walk.</b> It omits lookups SecureChildLineage keeps on purpose
+    /// (an extra lookup can only narrow a sharee mirror; dropping one widens it) and carries no entity set or primary order
+    /// (UAC 194b LookupOrder). The omitted ones are <c>sprk_document.sprk_currentversionid</c>,
+    /// <c>sprk_document.sprk_canonicaldocument</c> and <c>sprk_analysis.sprk_outputfileid</c>
+    /// (<c>RecordFamilyEdgesGuardTests.KnownDisagreements</c>).
+    /// </remarks>
     internal static IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> SecureLineageView(IEnumerable<Edge>? rows = null) =>
         Of(FamilyKind.Filing, rows)
             .Where(e => e.InSecureFamily && e.EdgeKind is EdgeKind.Stamp or EdgeKind.LineageHop)
@@ -207,11 +231,14 @@ internal static class RecordFamilyEdges
         rows.AddRange(Secure(Project, (PairIdColumn, Matter), (PairIdColumn, Project)));
 
         // --- core → child and child → grandchild: SecureChildLineage at de38296499 ---
+        // On the agreement, report card and communication thread rows, sprk_regarding{core} is the row's own filing, not a
+        // restamped copy (CoreAncestorResolver.cs:192-193): "Stamp" never means "secondary".
         rows.AddRange(Secure(Agreement,
             ("sprk_regardingdocument", Document), ("sprk_regardingmatter", Matter), ("sprk_regardingproject", Project)));
-        // Left out: sprk_documentid (the document analysed — its input, not its filing) and sprk_outputfileid (its output).
+        // sprk_documentid is the analysis's ownership primary (RecordOwnershipResolver.ParentsOf; UAC-r2 ruling 2026-10-28),
+        // though not a stamp source. Left out: sprk_outputfileid (its output file, not its filing).
         rows.AddRange(Secure(Analysis,
-            ("sprk_regardingbudget", Budget), ("sprk_regardingcommunication", Communication),
+            ("sprk_documentid", Document), ("sprk_regardingbudget", Budget), ("sprk_regardingcommunication", Communication),
             ("sprk_regardingdocument", Document), ("sprk_regardinginvoice", Invoice), ("sprk_regardingmatter", Matter),
             ("sprk_regardingproject", Project), ("sprk_regardingworkassignment", WorkAssignment)));
         rows.AddRange(Secure("sprk_analysisoutput", ("sprk_analysisid", Analysis)));
@@ -222,9 +249,10 @@ internal static class RecordFamilyEdges
         rows.AddRange(Secure(Budget, ("sprk_matter", Matter), ("sprk_project", Project)));
         rows.AddRange(Secure("sprk_budgetbucket", ("sprk_budget", Budget)));
         rows.AddRange(Secure("sprk_budgetrevision", ("sprk_budget", Budget), ("sprk_matter", Matter)));
-        // Left out: sprk_communicationthread (a grouping container; the message is filed under its regarding).
+        // sprk_communicationthread: a message in a record thread takes the thread's filing (RecordThreadFiling; UAC-r2 ruling
+        // 2026-10-28). The thread is still never an OWNERSHIP parent (OwnershipParentEntities remarks).
         rows.AddRange(Secure(Communication,
-            ("sprk_regardinganalysis", Analysis), ("sprk_regardingbudget", Budget), ("sprk_regardingevent", Event),
+            ("sprk_communicationthread", "sprk_communicationthread"), ("sprk_regardinganalysis", Analysis), ("sprk_regardingbudget", Budget), ("sprk_regardingevent", Event),
             ("sprk_regardinginvoice", Invoice), ("sprk_regardingmatter", Matter), ("sprk_regardingproject", Project),
             ("sprk_regardingreportcard", ReportCard), ("sprk_regardingworkassignment", WorkAssignment)));
         rows.AddRange(Secure("sprk_communicationattachment",
