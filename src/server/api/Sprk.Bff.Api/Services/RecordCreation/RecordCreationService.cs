@@ -468,6 +468,12 @@ internal sealed partial class RecordCreationService
 
         // ── Step 3½ (task 018a, K-7): the adapter's post-mapping defaults, fill-only over what the caller and the mapping
         // supplied, merged with the mapped values so step 5 checks them the same way ─────────────────────────────────────
+        // Task 037 (FR-36): with the table's copied defaults (RecordTableRules.CopiedDefaultsFor), read off the row AS MAPPED,
+        // so they take this same path — filled only where the row leaves the column unset, checked at step 5 like any
+        // default, written in the create (step 11) and so read back by the "Assigned *" materialisation (step 12).
+        if (user is not null)
+            defaults = WithCopiedDefaults(table, rule, item, defaults);
+
         IReadOnlySet<string> defaultColumns = NoDefaultColumns;
         if (defaults.Count > 0 && user is not null)
         {
