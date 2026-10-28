@@ -10,9 +10,13 @@
  *
  * Current Access lists a share and its paired grant together (`pairedWith`), removing the share says it removes both,
  * removing the grant alone says the share stays, and `/unshare-user`'s `pairedGrantEnded: false` adds a neutral note.
+ * G3d: that note promises no timing (the daily clean-up ends the grant only when its writes are on); it says the grant
+ * is still listed under Current Access, where it can be revoked — and the reload keeps it listed once its share is gone.
  */
 
 import * as React from 'react';
+import * as fs from 'fs';
+import * as path from 'path';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import {
@@ -21,6 +25,7 @@ import {
   PAIRED_GRANT_NOT_ENDED_SENTENCE,
   REVOKE_PAIRED_SHARE_SENTENCE,
   SHARE_EXPIRY_NOT_APPLIED_SENTENCE,
+  UNSHARE_PAIRED_GRANT_LEFT_SENTENCE,
   groupPairedAccess,
   pairedShareNote,
   revokePairedGrantSentence,
@@ -493,9 +498,43 @@ describe('AccessGrantModal — Add person and workforce-app access (task 193 G3b
       await confirmRevoke();
 
       expect(
-        await screen.findByText("Removed Ada Lovelace's share. Workforce-app access will be removed within a day.")
+        await screen.findByText(
+          "Removed Ada Lovelace's share. Their workforce app access could not be removed just now; it is still listed " +
+            'under Current Access, where you can revoke it.'
+        )
       ).toBeInTheDocument();
       expect(screen.getByText('Notice')).toBeInTheDocument();
+    });
+
+    it('pairedGrantEnded: false, and the reload lists the grant without its share: a standalone row with Revoke', async () => {
+      // The reload after the removal no longer lists Ada's share; her paired grant is still active.
+      let shareRemoved = false;
+      const fetchMock = throwingAuthenticatedFetch(async (url: string) => {
+        if (url.includes('/user-shares')) return jsonResponse({ shares: shareRemoved ? [] : [ADA_SHARE_JSON] });
+        if (url === UNSHARE_USER) {
+          shareRemoved = true;
+          return jsonResponse({ systemUserId: ADA_USER_ID, removed: true, pairedGrantEnded: false });
+        }
+        return jsonResponse({});
+      });
+      renderWithTheme(
+        <AccessGrantModal {...makeProps(fetchMock, null, { fetchExistingGrants: jest.fn(async () => [PAIRED_GRANT]) })} />
+      );
+
+      await screen.findByText('Ada Lovelace');
+      fireEvent.click(within(rowOf('Ada Lovelace')).getByRole('button', { name: 'Revoke' }));
+      await confirmRevoke();
+
+      expect(await screen.findByText(`Removed Ada Lovelace's share. ${UNSHARE_PAIRED_GRANT_LEFT_SENTENCE}`)).toBeInTheDocument();
+      // The share row is gone; the grant the notice points to is listed on its own, with its Revoke.
+      expect(screen.queryByText('Ada Lovelace')).not.toBeInTheDocument();
+      const rows = Array.from(document.body.querySelectorAll('[data-access-state]'));
+      expect(rows).toHaveLength(1);
+      const grantRow = rowOf('Ada (contact)');
+      expect(rows[0]).toBe(grantRow);
+      expect(grantRow).toHaveAttribute('data-paired', 'grant');
+      expect(within(grantRow).getByText(/^Workforce app access that goes with a share · granted /)).toBeInTheDocument();
+      expect(within(grantRow).getByRole('button', { name: 'Revoke' })).toBeEnabled();
     });
 
     it('pairedGrantEnded: false on a share removed while related records are pending: the note follows the detail', async () => {
@@ -523,6 +562,9 @@ describe('AccessGrantModal — Add person and workforce-app access (task 193 G3b
           `1 related record is not updated yet; it completes automatically. ${PAIRED_GRANT_NOT_ENDED_SENTENCE}`
         )
       ).toBeInTheDocument();
+      expect(PAIRED_GRANT_NOT_ENDED_SENTENCE).toBe(
+        'Their workforce app access could not be removed just now; you can revoke it under Current Access.'
+      );
     });
 
     it('removing the paired grant alone: the confirmation and the notice say the share stays', async () => {
@@ -567,7 +609,7 @@ describe('AccessGrantModal — Add person and workforce-app access (task 193 G3b
       await confirmRevoke();
 
       expect(await screen.findByText("Removed Ada Lovelace's share.")).toBeInTheDocument();
-      expect(screen.queryByText(/Workforce-app access will be removed/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/could not be removed just now/)).not.toBeInTheDocument();
     });
 
     it('groupPairedAccess, pure: either side names the pair; an unlisted share leaves the grant in place', () => {
@@ -607,9 +649,17 @@ describe('AccessGrantModal — Add person and workforce-app access (task 193 G3b
       expect(unshareNotice('Ada', true)).toEqual({ intent: 'success', text: "Removed Ada's share and their workforce app access." });
       expect(unshareNotice('Ada', false)).toEqual({
         intent: 'info',
-        text: "Removed Ada's share. Workforce-app access will be removed within a day.",
+        text:
+          "Removed Ada's share. Their workforce app access could not be removed just now; it is still listed under " +
+          'Current Access, where you can revoke it.',
       });
       expect(unshareNotice('Ada', undefined)).toEqual({ intent: 'success', text: "Removed Ada's share." });
+    });
+
+    it('no notice promises when workforce-app access goes: "within a day" is nowhere in the modal', () => {
+      // The daily clean-up ends a paired grant only when its writes are on (off by default), so no timing is promised.
+      const src = fs.readFileSync(path.join(__dirname, '../AccessGrantModal.tsx'), 'utf8');
+      expect(src).not.toMatch(/within a day/i);
     });
   });
 });

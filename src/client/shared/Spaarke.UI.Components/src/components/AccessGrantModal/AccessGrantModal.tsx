@@ -1067,8 +1067,18 @@ export function revokePairedGrantSentence(fullName: string): string {
   );
 }
 
-/** Task 193 G3b: `/unshare-user` ended the share, but the paired workforce-app grant is left for the daily clean-up. */
-export const PAIRED_GRANT_NOT_ENDED_SENTENCE = 'Workforce-app access will be removed within a day.';
+/**
+ * Task 193 G3d: `/unshare-user` ended the share but not its paired workforce-app grant (`pairedGrantEnded: false`),
+ * after the server's related-records-pending detail. No timing is promised: the daily clean-up ends such a grant only
+ * when its writes are on, so the sentence says where to revoke it instead. The grant stays listed in Current Access.
+ */
+export const PAIRED_GRANT_NOT_ENDED_SENTENCE =
+  'Their workforce app access could not be removed just now; you can revoke it under Current Access.';
+
+/** Task 193 G3d: the same case after a plain removal (no detail before it) — where the grant is and what to do. */
+export const UNSHARE_PAIRED_GRANT_LEFT_SENTENCE =
+  'Their workforce app access could not be removed just now; it is still listed under Current Access, where you can ' +
+  'revoke it.';
 
 /** Task 193 G3b: the notice after removing a share — `pairedGrantEnded` from `/unshare-user` (absent: no pair). */
 export function unshareNotice(fullName: string, pairedGrantEnded: boolean | undefined): IModalNotice {
@@ -1076,7 +1086,7 @@ export function unshareNotice(fullName: string, pairedGrantEnded: boolean | unde
     return { intent: 'success', text: `Removed ${fullName}'s share and their workforce app access.` };
   }
   if (pairedGrantEnded === false) {
-    return { intent: 'info', text: `Removed ${fullName}'s share. ${PAIRED_GRANT_NOT_ENDED_SENTENCE}` };
+    return { intent: 'info', text: `Removed ${fullName}'s share. ${UNSHARE_PAIRED_GRANT_LEFT_SENTENCE}` };
   }
   return { intent: 'success', text: `Removed ${fullName}'s share.` };
 }
@@ -2861,7 +2871,8 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         // Task 149: the share on the record IS gone; some related records of the secure record still need
         // updating (the server completes them within minutes). Reload so the row disappears, and show the
         // server's sentence — never "Failed to revoke", which would claim the share is still there.
-        // Task 193 G3b: the same answer says when the paired workforce-app grant was left for the daily clean-up.
+        // Task 193 G3b/G3d: the same answer says when the paired workforce-app grant could not be ended, and where to
+        // revoke it (the reload above keeps it listed).
         setPendingRevoke(null);
         await loadData();
         setNoticeIfCurrent({
