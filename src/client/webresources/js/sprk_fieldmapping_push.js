@@ -49,7 +49,8 @@
  * for the current record (field-mapping-server-write-path-r1 task 075, spec
  * FR-35). Nothing is pushed from this script any more: the person reviews the
  * record's Family in the modal, and pushing happens only from the modal's
- * actions (task 040). The form is refreshed when the dialog closes, as the
+ * actions (task 040). Unsaved form edits are saved first (a failed save shows the
+ * platform error and opens nothing). The form is refreshed when the dialog closes, as the
  * wizard dialogs do (`sprk_wizard_commands.js` `openWizardDialog`).
  *
  * ### Legacy direct-push flow (NOT called; kept until task 040)
@@ -153,7 +154,7 @@ Spaarke.FieldMapping.Push = Spaarke.FieldMapping.Push || {};
     /** Cache-key prefix for the visibility-check sessionStorage entries. */
     var CACHE_KEY_PREFIX = "sprk_fieldmapping_hasSource_";
 
-    /** Cache-key prefix for the targets list (populated by hasSourceProfile). */
+    /** [LEGACY - delete with task 040] Cache-key prefix for the targets list (written by queryHasSourceProfile, read only by the legacy push). */
     var TARGETS_CACHE_KEY_PREFIX = "sprk_fieldmapping_targets_";
 
     /**
@@ -257,7 +258,8 @@ Spaarke.FieldMapping.Push = Spaarke.FieldMapping.Push || {};
                     var entities = (result && result.entities) || [];
                     var has = entities.length > 0;
                     safeSessionSet(cacheKey, has ? "true" : "false");
-                    // Cache the target recordtype GUIDs for pushUpdates to reuse.
+                    // [LEGACY - delete with task 040 together with TARGETS_CACHE_KEY_PREFIX]
+                    // Cache the target recordtype GUIDs for the legacy direct push to reuse.
                     var targetsCacheKey = TARGETS_CACHE_KEY_PREFIX + entityName + "_" + formId;
                     var targetRtIds = entities
                         .map(function (e) { return e["_sprk_targetrecordtype_value"]; })
@@ -318,15 +320,41 @@ Spaarke.FieldMapping.Push = Spaarke.FieldMapping.Push || {};
                 }
             };
 
-            Xrm.Navigation.navigateTo(
-                {
-                    pageType: "webresource",
-                    webresourceName: FAMILY_PAGE_WEBRESOURCE,
-                    data: "entityName=" + encodeURIComponent(entityName) +
-                        "&id=" + encodeURIComponent(recordId)
-                },
-                FAMILY_DIALOG_OPTIONS
-            ).then(refreshForm, refreshForm);
+            var openFamily = function () {
+                try {
+                    Xrm.Navigation.navigateTo(
+                        {
+                            pageType: "webresource",
+                            webresourceName: FAMILY_PAGE_WEBRESOURCE,
+                            data: "entityName=" + encodeURIComponent(entityName) +
+                                "&id=" + encodeURIComponent(recordId)
+                        },
+                        FAMILY_DIALOG_OPTIONS
+                    ).then(refreshForm, refreshForm);
+                } catch (err) {
+                    console.error("[FieldMapping.Push v" + ns.VERSION + "] open family error:", err);
+                    Xrm.Navigation.openAlertDialog({
+                        text: "Unable to open the family view. See console for details."
+                    });
+                }
+            };
+
+            // The Family view reads the SAVED record from the server, so unsaved edits are saved
+            // first (the same way the form's own Save does). A failed save is shown with the
+            // platform error and the Family view is NOT opened.
+            var entity = primaryControl.data.entity;
+            var isDirty = typeof entity.getIsDirty === "function" && entity.getIsDirty() === true;
+            if (isDirty && typeof primaryControl.data.save === "function") {
+                primaryControl.data.save().then(openFamily, function (saveErr) {
+                    console.error("[FieldMapping.Push v" + ns.VERSION + "] save before family failed:", saveErr);
+                    Xrm.Navigation.openErrorDialog({
+                        message: (saveErr && saveErr.message) ||
+                            "The record could not be saved, so its family was not opened."
+                    });
+                });
+                return;
+            }
+            openFamily();
         } catch (err) {
             console.error("[FieldMapping.Push v" + ns.VERSION + "] pushUpdates error:", err);
             Xrm.Navigation.openAlertDialog({
@@ -340,6 +368,9 @@ Spaarke.FieldMapping.Push = Spaarke.FieldMapping.Push || {};
     // Kept until task 040 lands the modal's Push action; delete with 040.
     // Exceptions below that stay: resolveRecordTypeRefForEntity, escapeODataString,
     // safeSessionGet and safeSessionSet are also used by hasSourceProfile (the enable rule).
+    // TARGETS_CACHE_KEY_PREFIX is still referenced by queryHasSourceProfile (above), whose
+    // targets-cache WRITE is the legacy part (only the legacy push read it): task 040 deletes
+    // that write together with the constant.
     // -----------------------------------------------------------------------
 
     /**

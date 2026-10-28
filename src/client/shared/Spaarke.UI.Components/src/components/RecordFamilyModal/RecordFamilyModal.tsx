@@ -23,6 +23,14 @@
  * exactly the (table, id) pairs the person ticked, and the server re-checks everything. Until the
  * push preview ships (task 040) a host passes no `onAction`, and both actions render disabled with
  * the tooltip "Available after the push update".
+ *
+ * Embedded mode (`embedded`, task 075 fix round 1): for a host that is ALREADY a modal window - the
+ * `RecordFamily` code page opened by the ribbon through `Xrm.Navigation.navigateTo`. The platform
+ * dialog owns the title bar and the ×, so a second Fluent `Dialog` inside it would be a modal in a
+ * modal with a double header (ADR-050). Embedded renders no envelope at all - no title, backdrop,
+ * maximize or header navigator - only the toolbar, the table and a footer with Close, filling its host
+ * the way `WizardShell` does. Everything inside (load, errors, selection, actions) is the same code.
+ * Not embedded (the default) is unchanged: the `BrowseModal` used by the TrackingFieldTrio PCF.
  */
 
 import * as React from 'react';
@@ -31,6 +39,7 @@ import {
   Button,
   Checkbox,
   makeStyles,
+  mergeClasses,
   MessageBar,
   MessageBarBody,
   Spinner,
@@ -81,6 +90,12 @@ export interface RecordFamilyModalProps {
   title?: string;
   /** The `--sprk-ui-scale` factor, forwarded to the shell. */
   uiScale?: number;
+  /**
+   * Render without any modal envelope (no title, backdrop, maximize or header navigator): the toolbar,
+   * the table and a footer with Close, filling the host. For a host that is already a dialog window.
+   * Default false (the `BrowseModal`).
+   */
+  embedded?: boolean;
 }
 
 const ACTIONS: ReadonlyArray<{ action: RecordFamilyAction; label: string }> = [
@@ -251,6 +266,34 @@ const useStyles = makeStyles({
     justifyContent: 'center',
     padding: tokens.spacingVerticalS,
   },
+  // Embedded mode: fills its host (the platform dialog's iframe), like WizardShell's embeddedRoot.
+  embeddedRoot: {
+    display: 'flex',
+    flexDirection: 'column',
+    width: '100%',
+    height: '100%',
+    overflow: 'hidden',
+    backgroundColor: tokens.colorNeutralBackground1,
+    color: tokens.colorNeutralForeground1,
+  },
+  embeddedBody: {
+    flexGrow: 1,
+    minHeight: 0,
+  },
+  embeddedFooter: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    columnGap: tokens.spacingHorizontalS,
+    flexShrink: 0,
+    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalL}`,
+    borderTop: `${tokens.strokeWidthThin} solid ${tokens.colorNeutralStroke2}`,
+    backgroundColor: tokens.colorNeutralBackground1,
+  },
+  embeddedCount: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+  },
   center: {
     display: 'flex',
     flexDirection: 'column',
@@ -292,6 +335,7 @@ export const RecordFamilyModal: React.FC<RecordFamilyModalProps> = ({
   onAction,
   title = 'Family',
   uiScale,
+  embedded = false,
 }) => {
   const styles = useStyles();
 
@@ -529,6 +573,26 @@ export const RecordFamilyModal: React.FC<RecordFamilyModalProps> = ({
       </>
     );
   };
+
+  // Embedded: no envelope. Nothing renders while closed (and nothing is fetched, see the load effect).
+  if (embedded) {
+    if (!open) return null;
+    return (
+      <div className={styles.embeddedRoot} aria-label={title} data-testid="record-family-embedded">
+        <div className={mergeClasses(styles.body, styles.embeddedBody)} data-testid="record-family-body">
+          {renderBody()}
+        </div>
+        <div className={styles.embeddedFooter}>
+          <span className={styles.embeddedCount}>
+            {state.kind === 'ready' ? `${ordered.length} records shown` : ''}
+          </span>
+          <Button appearance="secondary" onClick={onClose}>
+            Close
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <BrowseModal

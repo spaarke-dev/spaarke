@@ -27,7 +27,8 @@ No, deliberately not called. SPAARKE-SIDE-PANE-NAVIGATION.md section 3(b) makes 
 
 - `executePushForAllTargets`, `resolveTargetEntitiesForSource`, `pushSequentially`, `pushOne`, `normalizePushResponse`, `presentAggregateOutcome`, `resolveEntityNameForRecordTypeRef`
 - the MSAL / BFF plumbing: `resolveMsalConfig`, `loadMsalLibrary`, `initMsal`, `getAuthTokenForBff`, `ssoAndPopupFallback`, `resolveBffBaseUrl`, `getEnvironmentVariable`, and helpers `extractChildCountFromDetail`, `pickNumber`, `escapeODataString`, `safeSessionGet/Set`
-- constants `PUSH_ENDPOINT_PATH`, `OVER_LIMIT_TITLE`, `BFF_*`, `TARGETS_CACHE_KEY_PREFIX`
+- constants `PUSH_ENDPOINT_PATH`, `OVER_LIMIT_TITLE`, `BFF_*`
+- `TARGETS_CACHE_KEY_PREFIX` is NOT purely dead: `queryHasSourceProfile` (the enable rule, live) still references it to WRITE the targets cache that only the legacy push read. That write is the legacy part; task 040 deletes the write together with the constant (the code banner and the constant's comment say the same).
 - the header's legacy-flow description (relabelled "Legacy direct-push flow (NOT called; kept until task 040)")
 - Live, NOT legacy (used by the enable rule `hasSourceProfile`): `queryHasSourceProfile`, `resolveRecordTypeRefForEntity`, `escapeODataString`, `safeSessionGet`, `safeSessionSet`, the caches. They sit below the banner but are named as exceptions in it.
 
@@ -65,3 +66,16 @@ Own-diff review (code-review checklist; nothing auth/security-sensitive was adde
   3. The `ensureNavigatorSidePane` doc sentence "every new code page" should say "non-dialog".
   4. `docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md` row for `sprk_fieldmapping_push.js` updated to describe the new behaviour (one table cell); the doc's wider push narrative is task 040's to rewrite.
   5. `.claude/skills/code-page-deploy/SKILL.md` documents the old `src/client/code-pages` webpack layout; the `src/solutions/*` Vite wizard pages deploy via `scripts/Deploy-WizardCodePages.ps1`.
+
+## Fix round 1 (independent review of e3791a1b69; owner: 075 merges and deploys only together with 040)
+
+| Finding | Fix |
+|---|---|
+| F1 modal inside a modal | `RecordFamilyModal` gains `embedded` (default false): no `BrowseModal`/Dialog, no title, backdrop, maximize or header navigator; renders the toolbar + table (same `renderBody`) + a footer with "N records shown" and Close (calls `onClose`), filling its host like `WizardShell`'s `embeddedRoot`; returns null (and fetches nothing) while closed. The default path is byte-for-byte the previous `BrowseModal` return, so the TrackingFieldTrio PCF (074, which passes no `embedded`) is unchanged. `main.tsx` passes `embedded` and `onClose={closeDialog}`. |
+| F3 enable-rule test proved nothing | Replaced by 7 behaviour tests on the real script: miss + profile -> promise resolving true, cache written, two-step lookup with `statecode eq 0` and the source recordtype id; miss + no profile -> false cached; no recordtype-ref -> false, no profile query; failed query -> false, NOT cached; hit -> synchronous boolean, no query; per-form keying; no context/entity -> false. Notes + banner corrected for `TARGETS_CACHE_KEY_PREFIX` (above). |
+| K1 unsaved form | `pushUpdates` saves a dirty form first (`entity.getIsDirty()` then `data.save()`), opens the dialog only after the save; a failed save shows `Xrm.Navigation.openErrorDialog` (the platform error message, or a fixed one) and opens nothing. 5 tests (order save -> navigateTo -> refresh, clean form, no getIsDirty, failed save, failed save without a message). |
+| K2 param validation | New pure `src/solutions/RecordFamily/src/familyParams.ts` `readFamilyParams`: table `^[a-z_][a-z0-9_]*$`, id a GUID with balanced braces optional; `main.tsx` shows the existing error bar otherwise. 26 tests. The test caught a real bug in my first regex (`{guid` and `guid}` were accepted); fixed to balanced braces. |
+| K3 launch-data contract | Test runs the exact `data` string `pushUpdates` builds through the shared `parseDataParams` (as the Xrm `?data=` envelope and as raw params) and `readFamilyParams`; a renamed key on either side fails. |
+| K4 / K5 | Left, as instructed (coordinator writes them into 040's POML). |
+
+Counts: `fieldMappingPush.opensFamily.test.ts` 51 pass (was 10); `RecordFamilyModal.test.tsx` 28 pass (was 22; +5 embedded, +1 non-embedded-unchanged). Fail-before: against the previous script and modal, 7 of these 79 fail (the 3 K1 save tests and the embedded tests; the rest are guards that were already true). Neighbours `secureChildRibbonScript` + `accessRibbon.*`: 162 pass. RecordFamily vite build: 915,310 bytes (gzip 256.9 kB; +1.3 kB). `tsc` with the scratch paths config: no errors in the page's files (one pre-existing unused-variable error in the shared `xrmNavigationServiceAdapter.ts` under this strict config, not mine). The TrackingFieldTrio PCF suite was NOT run: 074 is PR #2383 / `task/fm-074`, not in this branch's base; its only use of the modal is `React.createElement(RecordFamilyModal, {...})` with no `embedded` (read from `origin/task/fm-074`), which takes the unchanged default path.

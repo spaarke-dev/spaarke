@@ -392,6 +392,78 @@ describe('RecordFamilyModal (FR-32)', () => {
     });
   });
 
+  describe('embedded mode (task 075: the RecordFamily code page, already inside a platform dialog)', () => {
+    it('renders no dialog surface and no title, only the toolbar, the table and a footer', async () => {
+      renderModal(makeProps(() => ok(response()), { embedded: true }));
+      await screen.findByText('Diligence Project');
+
+      // No Fluent Dialog (that would be a modal inside the platform modal), hence no backdrop.
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      // No own title / header chrome: the platform dialog owns them.
+      expect(screen.queryByRole('heading')).not.toBeInTheDocument();
+      expect(screen.queryByText('Family')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /maximi[sz]e|restore/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /next|previous/i })).not.toBeInTheDocument();
+      // What it does render: the toolbar (actions), the table and the footer.
+      expect(screen.getByRole('toolbar', { name: 'Family actions' })).toBeInTheDocument();
+      expect(screen.getByRole('table', { name: 'Family members' })).toBeInTheDocument();
+      expect(screen.getByTestId('record-family-embedded')).toBeInTheDocument();
+      expect(screen.getByText('4 records shown')).toBeInTheDocument();
+    });
+
+    it('Close calls onClose once', async () => {
+      const props = makeProps(() => ok(response()), { embedded: true });
+      renderModal(props);
+      await screen.findByText('Diligence Project');
+
+      fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+      expect(props.onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it('still offers Close (and the fixed message) when the family cannot be loaded', async () => {
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      const props = makeProps(() => problem(404), { embedded: true });
+      renderModal(props);
+
+      await screen.findByText('The family could not be loaded. Close this window and try again.');
+      fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+      expect(props.onClose).toHaveBeenCalledTimes(1);
+      warnSpy.mockRestore();
+    });
+
+    it('renders nothing and fetches nothing while closed', () => {
+      const props = makeProps(() => ok(response()), { embedded: true, open: false });
+      renderModal(props);
+      expect(screen.queryByTestId('record-family-embedded')).not.toBeInTheDocument();
+      expect(props.fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('runs the same actions on exactly the ticked rows', async () => {
+      const onAction = jest.fn();
+      renderModal(makeProps(() => ok(response()), { embedded: true, onAction }));
+      await screen.findByText('Diligence Project');
+
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Select Diligence Project' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Push field updates' }));
+      expect(onAction).toHaveBeenCalledWith('push', [{ table: 'sprk_project', id: PROJECT }]);
+    });
+  });
+
+  describe('not embedded (the default, used by the TrackingFieldTrio PCF) is unchanged', () => {
+    it('is still a dialog with its own title, maximize and Close, and no embedded root', async () => {
+      const props = makeProps(() => ok(response()));
+      renderModal(props);
+      await screen.findByText('Diligence Project');
+
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+      expect(screen.getByText('Family')).toBeInTheDocument();
+      expect(screen.queryByTestId('record-family-embedded')).not.toBeInTheDocument();
+      expect(screen.queryByText('4 records shown')).not.toBeInTheDocument();
+      // The header meta column still reads the counts.
+      expect(screen.getByText('Records shown')).toBeInTheDocument();
+    });
+  });
+
   describe('adr-021-dark-mode', () => {
     it('renders the loaded, truncated list under webDarkTheme with no console errors', async () => {
       const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
