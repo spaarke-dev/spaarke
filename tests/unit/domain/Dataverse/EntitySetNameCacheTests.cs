@@ -62,6 +62,42 @@ public sealed class EntitySetNameCacheTests
         sut.Asked.Should().Equal("sprk_noweb", "sprk_noweb");
     }
 
+    [Fact]
+    public async Task AnEntryOlderThanTheAdr009Lifetime_IsAskedAgain_AFresherOneIsNot()
+    {
+        var clock = new StepClock();
+        var sut = new CountingClient { EntitySetNameClock = clock };
+
+        (await sut.GetEntitySetNameAsync("sprk_matter")).Should().Be("sprk_matters");
+        clock.Advance(TimeSpan.FromMinutes(14));
+        (await sut.GetEntitySetNameAsync("sprk_matter")).Should().Be("sprk_matters");
+        sut.Asked.Should().Equal("sprk_matter");
+
+        // Dataverse now says the table was renamed; the cached entry is only trusted for 15 minutes in all.
+        sut.Names["sprk_matter"] = "sprk_matters2";
+        clock.Advance(TimeSpan.FromMinutes(1));
+        (await sut.GetEntitySetNameAsync("sprk_matter")).Should().Be("sprk_matters2", "an entry is never older than 15 minutes (ADR-009 metadata row)");
+        sut.Asked.Should().Equal("sprk_matter", "sprk_matter");
+
+        // and the refreshed entry gets a fresh lifetime
+        clock.Advance(TimeSpan.FromMinutes(14));
+        (await sut.GetEntitySetNameAsync("sprk_matter")).Should().Be("sprk_matters2");
+        sut.Asked.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public void TheLifetime_IsNoMoreThanTheAdr009MetadataCeiling() =>
+        DataverseServiceClientImpl.EntitySetNameLifetime.Should().BeLessThanOrEqualTo(TimeSpan.FromMinutes(15));
+
+    private sealed class StepClock : TimeProvider
+    {
+        private DateTimeOffset _now = new(2026, 10, 28, 12, 0, 0, TimeSpan.Zero);
+
+        public override DateTimeOffset GetUtcNow() => _now;
+
+        public void Advance(TimeSpan by) => _now += by;
+    }
+
     /// <summary>The shipped client with its metadata read answered in memory.</summary>
     private sealed class CountingClient : DataverseServiceClientImpl
     {

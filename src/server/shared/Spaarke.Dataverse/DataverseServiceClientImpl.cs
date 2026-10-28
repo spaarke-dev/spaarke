@@ -1457,22 +1457,36 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
     // ========================================
 
     /// <summary>
-    /// Entity set names already resolved by this instance — one per process, as the BFF registers this class as a
-    /// singleton (ontology task 170, D-196). A table's entity set name is fixed for the life of the environment, so it is
-    /// asked once per table, not on every call (one decision commit asked for <c>sprk_matter</c>'s six times, 0.08–0.8 s each).
-    /// The same cache <c>DataverseWebApiService</c> keeps for the same answer. Only a resolved name is kept: a failure, or an
-    /// empty name, is asked again next time.
+    /// Entity set names already resolved by this instance, each for at most <see cref="EntitySetNameLifetime"/> (ontology
+    /// task 170, D-196). Asked once per table per lifetime, not on every call (one decision commit asked for
+    /// <c>sprk_matter</c>'s six times, 0.08-0.8 s each). The same answer <c>DataverseWebApiService</c> keeps.
+    /// <para><b>ADR-009 exception.</b> This is an L1 in-process cache, permitted by ADR-009 "Allowed L1 Exceptions":
+    /// "Metadata (entity definitions) | TTL &lt;= 15 min | Document in code". It holds entity-definition metadata only (a table's
+    /// logical name to its entity set name), never data or an access decision, and it is caller-independent. An entry older than
+    /// the lifetime is asked again, so a renamed entity set is picked up within 15 minutes.</para>
+    /// Only a resolved name is kept: a failure, or an empty name, is asked again next time.
     /// </summary>
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _entitySetNameCache = new(StringComparer.Ordinal);
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (string Name, DateTimeOffset ExpiresAt)> _entitySetNameCache = new(StringComparer.Ordinal);
+
+    /// <summary>Longest an entity set name is kept: the ADR-009 metadata ceiling (15 minutes).</summary>
+    internal static readonly TimeSpan EntitySetNameLifetime = TimeSpan.FromMinutes(15);
+
+    /// <summary>The clock the entity-set-name lifetime is measured on. Settable by tests (InternalsVisibleTo); the constructor is
+    /// unchanged because this class is a DI singleton that test doubles construct.</summary>
+    internal TimeProvider EntitySetNameClock { get; set; } = TimeProvider.System;
 
     public async Task<string> GetEntitySetNameAsync(string entityLogicalName, CancellationToken ct = default)
     {
-        if (entityLogicalName is not null && _entitySetNameCache.TryGetValue(entityLogicalName, out var cached))
-            return cached;
+        if (entityLogicalName is not null
+            && _entitySetNameCache.TryGetValue(entityLogicalName, out var cached)
+            && EntitySetNameClock.GetUtcNow() < cached.ExpiresAt)
+        {
+            return cached.Name;
+        }
 
         var entitySetName = await RetrieveEntitySetNameAsync(entityLogicalName!, ct).ConfigureAwait(false);
         if (entityLogicalName is not null && !string.IsNullOrEmpty(entitySetName))
-            _entitySetNameCache.TryAdd(entityLogicalName, entitySetName);
+            _entitySetNameCache[entityLogicalName] = (entitySetName, EntitySetNameClock.GetUtcNow() + EntitySetNameLifetime);
 
         return entitySetName;
     }
