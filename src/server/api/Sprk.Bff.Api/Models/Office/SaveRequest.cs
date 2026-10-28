@@ -434,6 +434,8 @@ public record DocumentMetadata
     /// instead of refusing again. Ignored on a version save (<c>ExistingDocumentId</c> set): that path
     /// never collides by name, it targets an existing item by id. Defaults to <c>false</c>, so an
     /// ordinary create still refuses-before-writing on a collision, exactly as before this field existed.
+    /// Document saves only. An email's "Keep both" sends <see cref="EmailMetadata.IsNameSystemDerived"/> = true instead,
+    /// so the .eml is stored under a unique suffix and keeps its typed <see cref="EmailMetadata.DocumentName"/> (#2416).
     /// </summary>
     public bool AllowRename { get; init; }
 }
