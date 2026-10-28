@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="070" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>RecordFamilyEdges — the canonical Filing edge registry, parity ratchet, content pin, Filing-only isolation guard (FR-29)</title>
+    <phase>7 W7 Record family service and Family tool</phase>
+    <gate>startable (UAC 194 merged de38296499)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New BFF code surface; access-adjacent registry that UAC's isolation views are checked against; ArchTest guards.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Consolidating seven existing registries in five files into one checked union with a ratchet baseline is a cross-cutting, access-relevant change.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W7-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>bff-api, dataverse, access, testing</tags>
+    <estimated-effort>6-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Create `RecordFamilyEdges` in `Services/Dataverse`: static data rows (FamilyKind, ChildTable, LookupColumn, ParentTable, EdgeKind, InSecureFamily, RecordNumberColumn) seeded from the existing registries at UAC 194's merge, plus a parity ArchTest with a ratchet baseline, a content pin over the access columns, and a guard that a non-Filing row never changes an isolation view.</prompt>
+  <role>SPAARKE platform developer, .NET 10 BFF, Dataverse filing topology and ArchTest guards.</role>
+  <goal>One registry is the canonical list of Filing edges; every existing registry is a checked view of it; a new disagreement, an unreviewed access-column change, or a non-Filing row leaking into isolation each fails the build.</goal>
+
+  <context>
+    <background>spec.md FR-29; design.md §12.2-§12.3 A and §12.10 (UAC-r2 rounds 1-2, ontology rounds 1-2, D-191). Edges: core→core (typed and intermediate filing, the regarding pair), core→child (the four stamps plus each child's direct filing lookups), child→grandchild (`SecureChildLineage` hops, incl. `sprk_budgetbucket`→`sprk_budget` from UAC 194). Matter→Project is the regarding PAIR only (owner, #2352) — model it as an EdgeKind for a pair; its DATA arrives with UAC task 195, the edge row does not wait. Ontology edges: sprk_signal (matter, the 8 regarding* except servicerequest, decisionrecord), sprk_decisionrecord (typed core lookups + subject regarding), sprk_budgetrevision (budget, matter), sprk_policy→sprk_matter and sprk_policyversion→sprk_policy. Excluded: N:N associations (incl. sprk_Project_Matter_nn), citations, people/organization lookups, grant rows, `sprk_procedureassignment` (owner), `sprk_policy.sprk_currentversion`, `sprk_invoicelineitem` until ebilling deploys it (#2348). Service requests are their own root (ExternalDataService.ServiceRequestRelations lists a service request's own family).</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Dataverse/RecordFamilyEdges.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Access/SecureChildLineage.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Access/SecureRootInheritance.cs (TypedFilingColumns ~:401, IntermediateParentColumns, PairIdColumn ~:350)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Dataverse/CoreAncestorResolver.cs (CoreAncestorLookups ~:117, StampSourceColumns)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Dataverse/RecordOwnershipResolver.cs (OwnershipParentEntities)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalDataService.cs (ServiceRequestRelations)</file>
+      <file role="new">tests/Spaarke.ArchTests/RecordFamilyEdgesGuardTests.cs (parity + ratchet baseline, content pin, Filing-only isolation views)</file>
+      <file role="new">tests/unit/domain/Dataverse/RecordFamilyEdgesTests.cs (row shape, exclusions)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="design §12.3 A">Static data in code; edge TYPES in code, never a Dataverse table. No family table is created (D-191). Every row is FamilyKind = Filing.</constraint>
+    <constraint source="design §12.3 A">Seed from the existing registries at master de38296499; never write rows from scratch. Do not migrate UAC's walks onto the registry (UAC's call) — existing registries stay untouched.</constraint>
+    <constraint source="UAC C3">The content pin covers exactly FamilyKind, ChildTable, LookupColumn, ParentTable, EdgeKind and InSecureFamily. Changing any of them fails the pin with a message requiring a "UAC-r2 review:" line in the PR. RecordNumberColumn and other display fields are not pinned.</constraint>
+    <constraint source="UAC C2">Every view of the registry that an access walk could use filters FamilyKind == Filing; a test adds a synthetic non-Filing row and proves the SecureChildLineage parity view and the CoreAncestorResolver-children view are unchanged.</constraint>
+    <constraint source="ratchet (root CLAUDE.md §16)">Known disagreements with existing registries are listed in a baseline and worked down by UAC; a NEW disagreement fails. The guard ships with must-fire and must-not-fire controls.</constraint>
+    <constraint source="CLAUDE.md §10">BFF task: Placement Justification; publish-size delta vs fresh master; CVE check. No DI registration (static data).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>projects/field-mapping-server-write-path-r1/design.md (§12)</file>
+      <file>projects/field-mapping-server-write-path-r1/notes/decisions.md (UAC canonical family definition, 2026-10-27)</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare FULL rigor; rebase on master; confirm de38296499 is an ancestor.</step>
+    <step order="1">Inventory every edge in the source registries with file:line; write the guard tests (parity, pin, C2 synthetic row) with their controls; confirm they fail.</step>
+    <step order="2">Create RecordFamilyEdges with the seeded rows, the pair edge Matter→Project, the ontology edges, and RecordNumberColumn per table (matter sprk_matternumber, project sprk_projectnumber, work assignment sprk_workassignmentnumber, others where a number column exists; null otherwise).</step>
+    <step order="3">Record known disagreements in the ratchet baseline with a one-line reason each.</step>
+    <step order="4">Run the ArchTests and unit tests; measure publish size; run the CVE check; send the row list and baseline to UAC-r2 for content review.</step>
+    <step order="5">Update TASK-INDEX.md to ✅ [done]; notes in notes/task-070-notes.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If two existing registries disagree on whether an edge is a FILING edge (not just on spelling), STOP and ask UAC-r2 rather than choosing.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Seven registries in five files (SecureChildLineage, SecureRootInheritance TypedFilingColumns / IntermediateParentColumns / pair, CoreAncestorResolver stamps, RecordOwnershipResolver.OwnershipParentEntities, ExternalDataService relations).</existing>
+    <extension>No: each existing registry serves one walk with its own shape; the registry is their checked union, and the parity test leaves them untouched.</extension>
+    <cost-of-doing-nothing>The Family reader (071) and push (040) would each declare an eighth copy of the hierarchy, and drift such as the missing sprk_budgetbucket (found by UAC 194) goes undetected.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Dataverse/RecordFamilyEdges.cs</output>
+    <output type="test">tests/Spaarke.ArchTests/RecordFamilyEdgesGuardTests.cs</output>
+    <output type="test">tests/unit/domain/Dataverse/RecordFamilyEdgesTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">RecordFamilyEdges exists with every Filing edge from the source registries at de38296499, the Matter→Project pair edge, and the ontology edges listed in context; every row is FamilyKind = Filing.</criterion>
+    <criterion testable="true">Exclusions hold (tested): no N:N, no sprk_procedureassignment, no sprk_policy.sprk_currentversion, no sprk_invoicelineitem, no people/organization lookups.</criterion>
+    <criterion testable="true">Parity guard: must-fire — adding an edge to SecureChildLineage that the registry lacks fails; must-not-fire — the baseline's listed disagreements pass.</criterion>
+    <criterion testable="true">Content pin: changing any of the six access columns fails with a message naming the required "UAC-r2 review:" PR line; changing RecordNumberColumn does not fail.</criterion>
+    <criterion testable="true">C2: a synthetic non-Filing row leaves the SecureChildLineage parity view and the CoreAncestorResolver-children view unchanged (tested).</criterion>
+    <criterion testable="true">Existing registries are unchanged (git diff shows no edits to them).</criterion>
+    <criterion testable="true">Test scope: the guards and controls above only; anything beyond needs a one-line justification in the notes.</criterion>
+    <criterion testable="true">BFF build 0 errors; ArchTests and unit tests green; publish-size delta and CVE recorded; UAC-r2 content review recorded.</criterion>
+  </acceptance-criteria>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

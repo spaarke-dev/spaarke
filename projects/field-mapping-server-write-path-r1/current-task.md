@@ -2,7 +2,11 @@
 
 > **Last updated**: 2026-10-22 (task 018 complete; #2281 fixed (1fa0cf5cb8); project blocked on 017)
 > **Phase**: Wave 2. Done (14/43): 001–006, 010–016, 018 on master (018a 36403e1f4b, 018b ef8a91a157 #2261, 018c **ab7cf4fc94** #2266).
-> **Live on dev: 1fa0cf5cb8** (R3, 2026-10-23 00:00Z; carries 018b LIVE, 018c, #2282). Waiting on the owner's 3 Office quick-creates + the Work Assignment attorney-copy check, then this session verifies read-only. **Active: none (blocked on 017).**
+> **Live on dev: de38296499** (R3, 2026-10-27 19:42Z; carries our #2331 timing fix and UAC 194; read-back green; rollback deploy/rollback/wwwroot-20261027T193805Z = 3ff2c04bf5). Owner click checks:
+- Push Updates → 409 for "Matter to Project". Pre-existing, filed as **#2352**. `sprk_project` is linked to `sprk_matter` only by the N:N `sprk_Project_Matter_nn` (no lookup, no pair), so a matter's projects are also outside UAC's family definition. Asked UAC-r2 for the canonical edge: (a) pair, (b) typed lookup or (c) N:N. W7 A and 040 wait for it.
+- Create Work Assignment from a matter (owner, 2026-10-27): the 8 mapped `assigned*` columns copied. Push to the work assignment worked. Two gaps found, both pre-existing and filed:
+  - **#2353:** Number is empty. `sprk_workassignmentnumber` has no autonumber (matter has `MAT-{SEQNUM:6}`, project has `PRJ-{SEQNUM:6}`). Proposed fix `WRK-{SEQNUM:6}`; owner OK needed.
+  - **#2354:** Assigned To (`sprk_assignedto`) is never set. Owner to decide its meaning; options need UAC review. Previous: **3ff2c04bf5** (R3, 2026-10-27 01:29Z; gate clean: 0 5xx, 0 403, 0 access_record_hidden; rollback deploy/rollback/wwwroot-20261027T012731Z; includes UAC #2324, the team-filter fix from our catch). Office smoke done. Waiting on the owner's wizard re-runs against the new dev mapping rules. **Active: W7 design (record family service + TrackingFieldTrio Family tool), waiting on UAC-r2's canonical family definition (asked 2026-10-27). 017 still blocked on ebilling #1911.**
 
 ## Quick Recovery
 
@@ -11,7 +15,7 @@
 | **Active task** | None. Every pending task goes through 019, which needs 017 (blocked) |
 | **HEAD** | work branch = master 1fa0cf5cb8 + this checkpoint. No task branches or agent worktrees open |
 | **Running** | Nothing |
-| **Next Action** | (1) When the owner reports the dev creates: read-only MCP queries on dev for the newest sprk_matter / sprk_project rows by the owner (ownerid team, sprk_issecure, sprk_regardingrecordid + type, Assigned To, sprk_ai_search_index) and the newest work assignment (sprk_assignedattorney1 copied); report. (2) Unblock 017: ebilling #1911 (DRAFT) + reconcile, owner decisions in "Open items" 2 |
+| **Next Action** | **Waiting for the OWNER to approve the new task list** (task-create done 2026-10-27, bc28ffa170; Validate-TaskPoml 51/51 clean; no status drift). New tasks: 037 (FR-36), 070-076 (W7); FR-34/FR-35 are folded into 040. Once approved: run Wave W7-A in parallel via task-execute — 037, 070, 073 (all startable). W7-B (071 → 072) waits for the UAC 194b sha; 040 and 076 also need the UAC 195 sha. PR #2358 (WA autonumber) is on auto-merge; afterwards remove C:\wt2353 with Remove-WorktreeSafe.ps1. /devops-project-sync was not run after task-create (portfolio Task Count is stale); run it at the next sync. |
 | **018 progress** | COMPLETE. 018c deleted `OfficeRecordCreationService` + `CreateTimeFieldMapping.Apply`; `ResolveDefaultAssigneeAsync` moved to `IOfficeService`; guards updated (KnownCallSites 2, owner allow-list empty, census). Opus review: F3 fixed, K4 fixed, K2 known limit (cancellation seam test timing). Publish −21,556 B (37.73 MB). #2253 (UAC) carries `WriteIdentity.AppOnly` in `DropAppOnlyRefusedRules` + must-fire/must-not-fire tests (`RecordCreationServiceMappingSeamTests.AppOnlyAccessSets.cs`); nothing for this project |
 | **#2281 (out-of-task defect, fixed)** | PR #2282, merge **1fa0cf5cb8**. `sprk_targetfieldtype` uses the global set `sprk_fieldmappingtypes` (100000000+n, Currency 100000007); legacy rows and `sprk_sourcefieldtype` hold bare n. `FieldMappingColumns.NormalizeFieldType` reads both at the single rule read (`MapToFieldMappingRuleEntity`); Currency → Number. Client `describeError` shows the Xrm message. Ontology reviewed (no findings); dev check after the BFF deploy that carries it: Create Work Assignment from a matter with `sprk_assignedattorney1` copies it. Known limit: one bad column still voids the profile's client `$select` (task 035 deletes the engine). Seeder writing `1` = #2283, already fixed on the provisioning branch |
 | **CI note** | #2252 raised the Tier 1 arch job timeout to 10 min (merged). The Tier 2 ADR job (#2224) may still be cancelled by its timeout; read the log |
@@ -42,7 +46,7 @@
 ## Blocked: 017
 
 Re-pointing the route and the chat create needs ebilling #1911 (still a draft) plus its reconcile, and these owner items:
-FR-06 step 10, #1608 columns, the chat number, SystemPrincipal.
+All four owner decisions are made (2026-10-22/23: 2a-2c option a, 2d option c); only ebilling #1911 remains.
 
 ## How wave-2 agents are run (lessons)
 
@@ -61,6 +65,13 @@ FR-06 step 10, #1608 columns, the chat number, SystemPrincipal.
 
 ## Open items for the owner
 
+**Owner answers 2026-10-27:** group 3 (016 Repair) waits on UAC-r2's build review. #2137 approved → implementer on
+`fix/fm-2137-timing-equalise` (review before merge). #2224 approved → PR #2328 (auto-merge). Leftover folders: clean
+up at project end. 4a–4d: owner asked UAC-r2 for its recommendation (sent 2026-10-27; owner: no per-BU search except Secure Records). 5b drop HIPC DEV 2; 5c/5d done (read-only, see task-006 notes and item 6). Owner stated policy for 4b/4c: a mapping copy is not
+user-scoped (not yet applied; it reverses 014's AppendTo/field-security checks on mapped values and needs UAC-r2).
+Dev reads: 0 of 64 matters have an empty `sprk_issecure`; 40 active Copy rules (4 Manual Refresh, 16 One-time,
+20 empty); documents point at several indexes (537 none, 76 knowledge-index-v2, 1 spaarke-file-index).
+
 1. **016 Repair questions:** cross-BU re-own (skip for now); whether Repair re-owns roots; SYSTEM/INTEGRATION-owned
    unfiled rows.
 2. **017 decisions:** FR-06 step 10 (UAC-r2 text recommended); #1608 columns; the chat matter/project number (recommend
@@ -68,7 +79,7 @@ FR-06 step 10, #1608 columns, the chat number, SystemPrincipal.
 3. **Live smoke of #2191 on dev** (Office Project-from-Matter quick-create, mapped values, a secured column stays empty).
 4. **005 `-Apply` on dev**, then `-Verify`.
 5. **014:** confirm the 403 for a mapped filing lookup that fails field security. **015:** index precedence notes.
-6. **#2137**; **HIPC DEV 2** map removal; **model1-prod** verification; **prod** null `sprk_issecure` check before a
+6. ~~#2137~~ (PR #2331); ~~HIPC DEV 2~~ (owner: out of scope); **model1-prod** map check after the next managed release (checked 2026-10-27: still there, expected); ~~prod null `sprk_issecure`~~ (2026-10-27: prod has 0 matters/projects/WAs, flag defaults to No) before a
    prod #2191 deploy.
 7. **#2224:** OK to raise the Tier 2 ADR job timeout.
 

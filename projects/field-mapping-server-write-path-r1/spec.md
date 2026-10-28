@@ -376,6 +376,107 @@ contract), `tests/Spaarke.ArchTests/` (`RecordOwnerAssignmentCensusTests`, `Refi
 
     Acceptance: docs merged; issues updated; dead files removed.
 
+**W7 — Record family service and the Family tool** (amendment, 2026-10-27; owner-approved scope; detail and review
+record in `design.md` §12; reviewed by UAC-r2 in two rounds and by ontology-r1 in two rounds; the term "Family" is
+ontology D-191)
+
+29. **FR-29 Family edge registry.** `RecordFamilyEdges` in `Services/Dataverse`.
+    - Each row is (FamilyKind, ChildTable, LookupColumn, ParentTable, EdgeKind, InSecureFamily, RecordNumberColumn).
+      Every row is `FamilyKind = Filing`. EdgeKind covers a typed lookup, a stamp, a lineage hop and the regarding pair.
+    - Seeded from UAC 194 (master `de38296499`): `SecureChildLineage`, typed and intermediate filing columns, the pair,
+      and the stamp columns.
+    - The Matter → Project edge is the regarding pair (owner, #2352). Its data comes with UAC task 195.
+    - Excluded: N:N associations, citations, people and organization lookups, `sprk_procedureassignment` (owner) and
+      `sprk_policy.sprk_currentversion`.
+    - Edge types live in code. No family table is created.
+
+    Acceptance:
+    - a parity test lists every disagreement with the existing registries, and a new disagreement fails the build;
+    - a content pin covers the six access columns, and changing one requires a UAC review line;
+    - adding a synthetic non-Filing row leaves every isolation view unchanged (UAC C2).
+30. **FR-30 Family reader.** `RecordFamilyReader.ReadAsync(kind, table, id, direction, continuation)` is read-only.
+    - It walks as the caller (OBO), one batched query per (table, lookup) per level, with a visited set.
+    - It never passes through an unreadable record, and gives no counts or hints of hidden ones.
+    - Going up, it stops at the first unreadable ancestor. The full view then walks down from the highest readable
+      ancestor.
+    - Each walk covers one kind only.
+    - **One family per record (owner-approved, UAC-r2, 2026-10-27).** A record filed under several parents belongs to
+      exactly one family, its PRIMARY parent's. Its other filing edges are secondary.
+      - The walk goes up only through the primary parent, and going down it lists a child only under its primary
+        parent.
+      - The primary parent comes from `RecordOwnershipResolver`'s order (`InPrimaryOrder` / `OrderedParentsOf`, UAC
+        194b). There is no second ordering.
+      - Isolation is unchanged: secure-if-any still applies over ALL filing parents. Family membership is not the
+        security boundary.
+    - Members are unique by (table, id), and the shallowest edge is kept.
+    - Caps: depth 4 and 500 members. A truncated view keeps the anchor's chain and its own subtree, and returns
+      `truncated` plus a continuation.
+    - The continuation is protected with Data Protection and bound to oid + anchor + kind + direction + top. Every
+      parent it carries is re-checked.
+
+    Acceptance:
+    - a readable record below an unreadable one is absent, with nothing revealing it (tested with a Secure family);
+    - a truncated view says so and loads more, and nothing is dropped silently;
+    - a replayed or tampered continuation is refused like an invalid one;
+    - field-secured display columns come back null.
+31. **FR-31 Family endpoint.** `GET /api/v1/records/{table}/{id}/family` lives in its own file,
+    `Api/Records/RecordFamilyEndpoints.cs`, with auth required and registered in the route-authorization ledger and
+    the census.
+    - `kind` defaults to Filing; any other value is 400.
+    - `direction` defaults to the full family; `down` is also accepted.
+    - The response carries `anchor` and an optional `root`. Each member has id, table, name, record number, record
+      type, status, modified on, kind, edgeKind, parent and depth.
+    - An unknown anchor and an unreadable anchor both get one uniform 404 (equalised probe).
+
+    Acceptance: endpoint contract tests, including the uniform 404 and the 400 on kind.
+32. **FR-32 Family modal.** `RecordFamilyModal` in `Spaarke.UI.Components`, built on `SprkModal/presets/BrowseModal`
+    (ADR-050 Layout 2).
+    - Columns: name, record number (blank when the table has none), record type, status, modified on.
+    - It shows the family grouped by level and table, with selection, a truncation notice and "load more".
+    - Action toolbar: Push field updates and Update Assigned To (FR-34). Each action shows a preview, the person
+      confirms rows, then a result summary.
+
+    Acceptance: component tests; no action acts on unconfirmed rows.
+33. **FR-33 Family tool on TrackingFieldTrio.**
+    - The shared component gains an optional `onOpenFamily` callback, so existing consumers are unchanged.
+    - The PCF wires it to the modal.
+    - It is available on the Matter, Project, Work Assignment and Event main forms.
+    - The PCF bundle delta is measured.
+
+    Acceptance: the icon opens the modal on all four forms; existing consumers' snapshots are unchanged.
+34. **FR-34 Push extensions** (with FR-23, task 040; UAC 4a design).
+    - `preview: true` writes nothing. It returns per-child changes and flags (Secure, Restricted, Limited).
+    - `includeAssignedTo` is false when absent, and requires Write on the source.
+    - `childIds` is the confirmed list: the server re-derives the children as the caller and intersects them.
+    - Children are found through a `RecordFamilyEdges` Filing edge (a typed lookup or the regarding pair), which
+      replaces the lookup-only `ResolveParentLookup` (#2352).
+    - The actions are Filing-only and are refused server-side for any other kind.
+    - Sync mode is class-aware: Assigned-To targets 0, filing targets never, plain data 1. The values ship after the
+      owner reviews a dry run.
+
+    Acceptance: UAC's list in `design.md` §12.8 item 4, plus a Matter → Project push that succeeds through the pair.
+35. **FR-35 Push Updates ribbon opens the Family view** (owner). The Matter and Project ribbon button opens the Family
+    modal instead of pushing directly.
+
+    Acceptance: the button opens the modal, and no push happens without the person confirming in the modal.
+
+**Work Assignment create defaults** (amendment, 2026-10-27; owner, from the dev check)
+
+36. **FR-36 Work Assignment Assigned To default (#2354).**
+    - When a `sprk_workassignment` create does not supply `sprk_assignedto`, the server sets it to the new record's own
+      `sprk_assignedtointernal` after mapping (fill-only, so a supplied value wins).
+    - It applies on every server create path for work assignments (the child-records route and
+      `RecordCreationService`). It is declared once in `RecordTableRules`.
+    - `sprk_assignedto` confers access, so UAC-r2 reviews the diff before merge.
+
+    Acceptance:
+    - a work assignment created from a matter whose Assigned To Internal is X gets Assigned To = X;
+    - a supplied Assigned To is kept;
+    - no Assigned To Internal leaves Assigned To blank, with a structured warning.
+
+    (The Work Assignment Number, #2353, is a Dataverse autonumber `WRK-{SEQNUM:6}`, applied on dev 2026-10-27 with the
+    owner's OK; PR #2358. No code.)
+
 ### Non-Functional Requirements
 
 - **NFR-01 Security fails closed** (WP-6): every caller check refuses on error. Uniform 404 for "doesn't exist" and
@@ -517,6 +618,12 @@ contract), `tests/Spaarke.ArchTests/` (`RecordOwnerAssignmentCensusTests`, `Refi
 - UAC-r2 sign-off on the W2 refactor of `OwnedChildWrite` and the census guard changes; timing agreed before W2
   starts.
 - ontology-r1 awareness for the chat tool, decision cores and Signal/Decision writer re-pointing.
+- W7 prerequisites:
+  - FR-29 seeds from UAC 194 (merged, `de38296499`);
+  - FR-30's primary-parent order needs UAC 194b merged;
+  - the Matter → Project pair edge needs UAC task 195 merged (the server writes the pair; dev backfill);
+  - FR-34/FR-35 ship with task 040 (needs 019 → 017 → ebilling #1911);
+  - FR-36 needs a UAC-r2 diff review.
 
 ### External Dependencies
 
@@ -545,6 +652,14 @@ contract), `tests/Spaarke.ArchTests/` (`RecordOwnerAssignmentCensusTests`, `Refi
 | Backfill | Fix pre-go-live rows? | **Neither**: forward-only | FR-25 forward-only; Out of Scope |
 | Rollout | Reversibility | Per-wizard cutover, revert by redeploy; no runtime flag | FR-16 |
 | Matter number | Wizard `{typeCode}-{random6}` vs autonumber | Autonumber (owner decision 2026-10-02, task 076) | FR-16 |
+| W7 scope (2026-10-27) | Shared family service + Family tool? | Yes: one shared read-only service, a Family tool on TrackingFieldTrio, kept in this project | FR-29…FR-35 |
+| Family term (2026-10-27) | One concept or several? | One Family concept with kinds; Filing now; patent family later (ontology D-191) | FR-29…FR-31 |
+| Family view (2026-10-27) | Default view and columns | The full family, up and down; name, record number, record type, status, modified on | FR-31, FR-32 |
+| Ribbon (2026-10-27) | Push Updates button | Keep it; it opens the Family view | FR-35 |
+| Procedure assignments (2026-10-27) | In the Family list? | Out | FR-29 |
+| Project → Matter (2026-10-27, #2352) | Filing edge | The regarding pair only; the N:N stays an association | FR-29, FR-34 |
+| WA Assigned To (2026-10-27, #2354) | Default | The record's own Assigned To Internal | FR-36 |
+| WA Number (2026-10-27, #2353) | Generation | Autonumber `WRK-{SEQNUM:6}` (dev applied, PR #2358) | — |
 
 ## Assumptions
 

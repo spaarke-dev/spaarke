@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="073" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>RecordFamilyModal in Spaarke.UI.Components on BrowseModal — family list, selection, load more, action toolbar (FR-32)</title>
+    <phase>7 W7 Record family service and Family tool</phase>
+    <gate>startable (codes against the FR-31 contract; live wiring after 072)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New shared React component (.tsx) used by a PCF and a code page.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single component composing the existing BrowseModal preset, following AccessGrantModal's data-fetch and test pattern.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W7-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>react, fluent-ui, frontend, pcf, testing</tags>
+    <estimated-effort>6-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Build `RecordFamilyModal` in `src/client/shared/Spaarke.UI.Components/src/components/RecordFamilyModal/`, composing `SprkModal/presets/BrowseModal`, that calls `GET /api/v1/records/{table}/{id}/family` and shows the family with selection, a truncation notice, "load more", and an action toolbar whose two actions (Push field updates, Update Assigned To) call a caller-supplied handler.</prompt>
+  <role>SPAARKE front-end developer, React 16/17-compatible Fluent UI v9, shared component library.</role>
+  <goal>A reusable modal that lists a record's family per FR-32 and hands confirmed rows to an action handler; it never acts on rows the person did not confirm.</goal>
+
+  <context>
+    <background>spec.md FR-32; design.md §12.3 E. Actions call /push with preview → confirm → apply (FR-34, task 040). Until 040 ships, the actions render disabled with a tooltip "Available after the push update" — the modal is a read-only Family view. Columns (owner): name, record number (blank when none), record type, status, modified on. Group by level and table.</background>
+    <relevant-files>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/RecordFamilyModal/RecordFamilyModal.tsx</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/RecordFamilyModal/recordFamilyService.ts (fetch + types for the FR-31 contract)</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/RecordFamilyModal/index.ts</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/RecordFamilyModal/__tests__/RecordFamilyModal.test.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/index.ts (export)</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/BrowseModal.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/AccessGrantModal.tsx (authenticated BFF fetch, loading/error states, test doubles via __tests__/helpers/authenticatedFetchDouble.ts)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-050 / MODAL-DECISION-CRITERIA">Compose BrowseModal (Layout 2); no new modal shell.</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens only; dark-mode safe; icons currentColor. Visual anchor: mirror AccessGrantModal's spacing, header and empty/error states.</constraint>
+    <constraint source="ADR-022">Compatible with the React version the TrackingFieldTrio PCF bundles (the library already ships AccessGrantModal to it).</constraint>
+    <constraint source="FR-32">Actions receive only confirmed rows (table, id); the server re-checks everything. No action runs on open.</constraint>
+    <constraint source="FR-31">Show nothing that the API did not return (no counts of hidden records). Field values null → blank cell.</constraint>
+    <constraint source="CLAUDE.md §17">Before writing, read docs/standards/MODAL-DECISION-CRITERIA.md and MODAL-DESIGN-SYSTEM.md.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file>.claude/patterns/ui/record-modal-selection.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare FULL rigor; read the modal standards and BrowseModal / AccessGrantModal.</step>
+    <step order="1">Write component tests first (criteria below) with the fetch double; confirm they fail.</step>
+    <step order="2">Implement service + component + export.</step>
+    <step order="3">Run the library's lint, typecheck and tests.</step>
+    <step order="4">Update TASK-INDEX.md to ✅ [done]; notes in notes/task-073-notes.md.</step>
+  </steps>
+
+  <justification>
+    <existing>BrowseModal (preset), AccessGrantModal (data modal pattern); no family list exists.</existing>
+    <extension>BrowseModal is composed, not copied; AccessGrantModal is a different responsibility (grants).</extension>
+    <cost-of-doing-nothing>No user surface lists a record's family or runs family actions (FR-32/FR-33/FR-35 fail).</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/RecordFamilyModal/RecordFamilyModal.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/RecordFamilyModal/recordFamilyService.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/RecordFamilyModal/__tests__/RecordFamilyModal.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Renders members grouped by level and table with the five owner columns; a null record number renders blank.</criterion>
+    <criterion testable="true">truncated=true shows the notice and "Load more", which fetches with the continuation and appends without duplicates.</criterion>
+    <criterion testable="true">An action button is disabled with no selection; clicking it passes exactly the selected (table, id) pairs to the handler; nothing runs on open.</criterion>
+    <criterion testable="true">With no action handler supplied, the toolbar actions render disabled with the tooltip.</criterion>
+    <criterion testable="true">404 and network errors show the fixed error state; no hidden-record count is ever displayed.</criterion>
+    <criterion testable="true">Dark mode: no hard-coded colours (lint/token check passes).</criterion>
+    <criterion testable="true">Test scope: the behaviours above only.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Family view renders">
+      <steps><step>Open a matter with projects and work assignments; open the Family tool</step><step>Verify grouped rows and columns; check the console for errors</step></steps>
+      <expected>Family list renders; no console errors</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps><step>Toggle dark mode</step><step>Verify backgrounds, text and icons adapt</step></steps>
+      <expected>Fluent v9 semantic tokens only</expected>
+    </test>
+  </ui-tests>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
