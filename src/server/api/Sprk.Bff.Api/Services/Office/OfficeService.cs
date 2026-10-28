@@ -1280,7 +1280,9 @@ internal class OfficeService : IOfficeService
                        $"{request.TargetEntity?.EntityType}|" +
                        $"{request.TargetEntity?.EntityId}|" +
                        // Task 121: the stored message id (the RFC id, or an older pane's / a draft's item id).
-                       $"{(request.Email is null ? null : OfficeEmailEnricher.ResolveStoredMessageId(request.Email)) ?? request.Email?.Subject}|" +
+                       // #2416: with no id, the subject plus any typed name, which before #2416 travelled as the subject.
+                       // With no typed name the key is unchanged.
+                       $"{(request.Email is null ? null : OfficeEmailEnricher.ResolveStoredMessageId(request.Email) ?? (request.Email.DocumentName is null ? request.Email.Subject : $"{request.Email.Subject}/{request.Email.DocumentName}"))}|" +
                        $"{request.Attachment?.AttachmentId}|" +
                        $"{request.Document?.FileName}|" +
                        $"{request.Document?.ExistingDocumentId}";
