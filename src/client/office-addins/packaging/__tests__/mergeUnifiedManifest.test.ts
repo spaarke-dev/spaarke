@@ -235,3 +235,36 @@ describe('deriveTestVariant — a test upload can never disturb the tester’s w
     expect(() => merge.deriveTestVariant(production, { appId: production.id })).toThrow(/own package id/);
   });
 });
+
+describe('XML manifests — resource ids', () => {
+  // A <bt:...> resource id declared twice inside one <Resources> block is a schema error: Outlook refuses the
+  // manifest (task 133 review: the V1.1 block declared four Submit Invoice ids twice). Each <Resources> block is its
+  // own scope (V1.0 and V1.1 repeat the same ids on purpose), so duplicates are counted per block.
+  const duplicatesPerBlock = (xmlText: string): string[] => {
+    const xml = xmlText.replace(/<!--[\s\S]*?-->/g, '');
+    const found: string[] = [];
+    const blocks = xml.match(/<Resources>[\s\S]*?<\/Resources>/g) ?? [];
+    expect(blocks.length).toBeGreaterThan(0);
+    blocks.forEach((block, index) => {
+      const seen = new Set<string>();
+      for (const match of block.matchAll(/<bt:(?:Image|Url|String)\s+id="([^"]+)"/g)) {
+        if (seen.has(match[1])) found.push(`Resources block ${index + 1}: ${match[1]}`);
+        seen.add(match[1]);
+      }
+    });
+    return found;
+  };
+
+  it.each(['outlook/outlook-manifest.xml', 'word/word-manifest.xml'])(
+    '%s declares every resource id once per block',
+    relative => {
+      expect(duplicatesPerBlock(fs.readFileSync(path.join(ROOT, relative), 'utf8'))).toEqual([]);
+    }
+  );
+
+  it('must-fire: the check sees a duplicated id', () => {
+    const xml =
+      '<Resources><bt:Urls><bt:Url id="A" DefaultValue="x"/><bt:Url id="A" DefaultValue="x"/></bt:Urls></Resources>';
+    expect(duplicatesPerBlock(xml)).toEqual(['Resources block 1: A']);
+  });
+});

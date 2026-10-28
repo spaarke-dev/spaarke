@@ -565,6 +565,54 @@ internal static class ExternalGrantLifecycle
             cancellationToken: ct);
 
     /// <summary>
+    /// Slice C3: the OData <c>$filter</c> selecting every ACTIVE row a CONTACT holds as its grantee, on every root. Organization
+    /// grants (no contact) are never selected: they belong to the organization, not to the person.
+    /// </summary>
+    internal static string ActiveRowsForContactFilter(Guid contactId)
+        => $"_sprk_contact_value eq {contactId} and statecode eq 0";
+
+    /// <summary>
+    /// Slice C3: every ACTIVE row <paramref name="contactId"/> holds as its grantee, on every root — what an administrator
+    /// removal revokes, one logical grant at a time. Rows without a usable id are kept (the caller reports them as not
+    /// revoked rather than skipping them). Exceptions propagate: a failed read is never "no grants".
+    /// </summary>
+    /// <remarks>
+    /// Slice C2b: <paramref name="top"/> bounds the single page <c>QueryAsync</c> reads (it follows no next link), so a caller
+    /// passes one more than it handles and treats a page above its bound as possibly incomplete, as
+    /// <see cref="QueryActiveRowsForRootAsync"/>'s callers do.
+    /// </remarks>
+    internal static Task<List<ExternalGrantRow>> QueryActiveRowsForContactAsync(
+        DataverseWebApiClient dataverseClient, Guid contactId, int top, CancellationToken ct)
+        => dataverseClient.QueryAsync<ExternalGrantRow>(
+            EntitySet,
+            filter: ActiveRowsForContactFilter(contactId),
+            select: RowSelect,
+            top: top,
+            cancellationToken: ct);
+
+    /// <summary>
+    /// Slice C2c: the OData <c>$filter</c> selecting every ACTIVE organization grant (no contact) an organization holds, on
+    /// every root. The grantee half is <see cref="ExternalGrantKey.ToActiveRowsFilter"/>'s organization clause, so the two
+    /// never disagree about which rows are organization grants.
+    /// </summary>
+    internal static string ActiveOrganizationGrantsFilter(Guid organizationId)
+        => $"_sprk_organization_value eq {organizationId} and _sprk_contact_value eq null and statecode eq 0";
+
+    /// <summary>
+    /// Slice C2c: every ACTIVE organization grant <paramref name="organizationId"/> holds, on every root — read so a removed
+    /// member's own container permission can be cleared on each granted root. <paramref name="top"/> bounds the single page,
+    /// as for <see cref="QueryActiveRowsForContactAsync"/>. Exceptions propagate.
+    /// </summary>
+    internal static Task<List<ExternalGrantRow>> QueryActiveOrganizationGrantsAsync(
+        DataverseWebApiClient dataverseClient, Guid organizationId, int top, CancellationToken ct)
+        => dataverseClient.QueryAsync<ExternalGrantRow>(
+            EntitySet,
+            filter: ActiveOrganizationGrantsFilter(organizationId),
+            select: RowSelect,
+            top: top,
+            cancellationToken: ct);
+
+    /// <summary>
     /// Shapes a <see cref="DateOnly"/> for an SDK write to <c>sprk_expiresdate</c> / <c>sprk_granteddate</c>:
     /// midnight, <see cref="DateTimeKind.Unspecified"/>.
     /// </summary>
@@ -695,6 +743,12 @@ internal static class ExternalGrantLifecycle
     /// <c>EXT_INTAKE_DATAVERSE_UNAVAILABLE</c> (ExternalIntakeEndpoints step 4).
     /// </summary>
     internal const string GrantOwnerUnreadableReasonCode = "sdap.access.grant.owner_unreadable";
+
+    /// <summary>
+    /// Stable reason code (404; slice C2c): the grantee contact id names no contact. Nothing was granted. Answered only when
+    /// the contact read succeeded and found no row; any doubt keeps the removed refusal.
+    /// </summary>
+    internal const string GrantContactNotFoundReasonCode = "sdap.access.grant.contact_not_found";
 
     /// <summary>
     /// Stable reason code (500): no team could be resolved to own a NEW grant row (the record's business unit has no
@@ -1117,6 +1171,46 @@ internal sealed record GrantPolicyDecision(bool IsAllowed, string? ReasonCode, i
     {
         IsDenyListReadFault = true,
     };
+
+    /// <summary>
+    /// Slice C3: the grantee contact carries the removed marker (an administrator removed the person's external access), or
+    /// its marker could not be read. 409 <see cref="ContactBindingDecision.InviteContactRemovedAdminReinstate"/>, the code the
+    /// invite routes already answer for the same person; nothing is written. Every grant surface refuses through the grant core
+    /// (<c>/grant</c>, <c>/invite-and-grant</c>, the Assigned-To rule, contact-side grants), so only an administrator's
+    /// reinstatement lets the person be granted again.
+    /// </summary>
+    public static GrantPolicyDecision ContactRemoved { get; } = new(
+        false,
+        ContactBindingDecision.InviteContactRemovedAdminReinstate,
+        StatusCodes.Status409Conflict,
+        "An administrator removed this person's external access, so they cannot be given access. Nothing was granted. " +
+        "An administrator must reinstate the person first.");
+
+    /// <summary>
+    /// Slice C2c: the grantee contact id names no contact (the contact read succeeded and found no row). 404
+    /// <see cref="ExternalGrantLifecycle.GrantContactNotFoundReasonCode"/>; nothing is written. Answered only when the removed
+    /// marker did not read as not-removed AND the contact read proved the row absent; a failed contact read keeps
+    /// <see cref="ContactRemoved"/> or <see cref="ContactRemovedStateUnavailable"/> (fail closed).
+    /// </summary>
+    public static GrantPolicyDecision ContactNotFound { get; } = new(
+        false,
+        ExternalGrantLifecycle.GrantContactNotFoundReasonCode,
+        StatusCodes.Status404NotFound,
+        "This contact does not exist, so nothing was granted.");
+
+    /// <summary>
+    /// Slice C2c: whether an administrator removed the grantee contact's external access could not be established (its removed
+    /// marker could not be read, or read empty on a read that is not proven). 503
+    /// <see cref="ContactBindingDecision.InviteContactRemovedStateUnavailable"/>, retryable; nothing is written. Kept apart from
+    /// <see cref="ContactRemoved"/> so an outage is never reported as a removal an administrator must undo. The Assigned-To
+    /// materializer records it as a skip, which is never sticky: the next pass decides again.
+    /// </summary>
+    public static GrantPolicyDecision ContactRemovedStateUnavailable { get; } = new(
+        false,
+        ContactBindingDecision.InviteContactRemovedStateUnavailable,
+        StatusCodes.Status503ServiceUnavailable,
+        "Whether this person's external access was removed could not be checked just now, so nothing was granted. Try " +
+        "again in a moment.");
 
     /// <summary>
     /// Task 140: a CONTACT grantor's request names a grantee who already holds an active row somebody else issued. 409;

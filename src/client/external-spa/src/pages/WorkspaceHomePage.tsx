@@ -33,7 +33,13 @@ import {
   useWorkspaceTabs,
   QUICK_START_TAB,
 } from '../components/shell';
-import { fetchMeEntitlements, type MeEntitlementsResponse } from '../api/me-client';
+import {
+  fetchMeEntitlements,
+  OwnerUnconfiguredError,
+  OWNER_UNCONFIGURED_MESSAGE,
+  OWNER_UNCONFIGURED_TITLE,
+  type MeEntitlementsResponse,
+} from '../api/me-client';
 import {
   defaultWidgetIdsFor,
   getWidgetDefinition,
@@ -89,6 +95,8 @@ export const WorkspaceHomePage: React.FC<WorkspaceHomePageProps> = ({ teamsHost 
   const [meAccessFailure, setMeAccessFailure] = React.useState<BffAccessFailure | null>(null);
   // Task 185 (Q9): the server's guidance for a sign-in with no matching invite, shown in the denied state.
   const [meDeniedDetail, setMeDeniedDetail] = React.useState<string | null>(null);
+  // ISS-005 (#1673): the denied state is the organization's unfinished set-up, not a permission problem - its own title.
+  const [meOwnerUnconfigured, setMeOwnerUnconfigured] = React.useState(false);
   React.useEffect(() => {
     let cancelled = false;
     fetchMeEntitlements(teamsHost)
@@ -97,6 +105,14 @@ export const WorkspaceHomePage: React.FC<WorkspaceHomePageProps> = ({ teamsHost 
       })
       .catch((err: unknown) => {
         if (cancelled) return;
+        // ISS-005 (#1673): the organization's sign-in is not configured. Same denied state as a 403, with a FIXED
+        // sentence (the server text is never shown) - not a default workspace whose widgets would all 500.
+        if (err instanceof OwnerUnconfiguredError) {
+          setMeDeniedDetail(OWNER_UNCONFIGURED_MESSAGE);
+          setMeOwnerUnconfigured(true);
+          setMeAccessFailure('denied');
+          return;
+        }
         const failure = accessFailureOf(err);
         setMeDeniedDetail(deniedDetailOf(err));
         if (failure) setMeAccessFailure(failure);
@@ -191,6 +207,7 @@ export const WorkspaceHomePage: React.FC<WorkspaceHomePageProps> = ({ teamsHost 
         <BffAccessState
           failure={meAccessFailure}
           teamsHost={teamsHost}
+          deniedTitle={meOwnerUnconfigured ? OWNER_UNCONFIGURED_TITLE : undefined}
           deniedMessage={
             meDeniedDetail ??
             'You do not have access to this workspace. If you believe this is an error, please contact your Spaarke administrator.'

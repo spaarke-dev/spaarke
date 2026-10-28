@@ -13,6 +13,7 @@
 //   W7 list reads follow @odata.nextLink.
 //   W8 a table's Read privileges: 404 = none; only PrivilegeType Read.
 //   W9 a transport fault or a timeout is the seam's exception; the caller's cancellation propagates.
+//   W10 a role read selects and carries its role template id (S8/S9 match System Administrator by it).
 // -----------------------------------------------------------------------------
 
 using System.Net;
@@ -187,6 +188,27 @@ public sealed class DataverseWebApiSecureRecordSetupTests
         teams.Select(t => t.Name).Should().Equal("a", "b");
         http.Requests.Should().HaveCount(2);
         Uri.UnescapeDataString(http.Requests[0].Uri).Should().Contain("$filter=isdefault eq true");
+    }
+
+    [Fact]
+    public async Task W10_TeamRoles_SelectAndCarryTheRoleTemplateId()
+    {
+        var team = Guid.NewGuid();
+        var template = SecureRecordSetupProcedure.SystemAdministratorRoleTemplateId;
+        var http = new Recorder().Respond(_ => Json(new
+        {
+            value = new object[]
+            {
+                new { roleid = Role, name = "Platform Administrator", _businessunitid_value = Unit, _parentrootroleid_value = Role, _roletemplateid_value = template },
+                new { roleid = Guid.NewGuid(), name = "System Administrator", _businessunitid_value = Unit },
+            },
+        }));
+
+        var roles = await Api(http).ListTeamRolesAsync(team, CancellationToken.None);
+
+        Uri.UnescapeDataString(http.Requests.Single().Uri).Should().Contain($"teams({team})/teamroles_association")
+            .And.Contain("_roletemplateid_value");
+        roles.Select(r => r.RoleTemplateId).Should().Equal(template, null);
     }
 
     [Fact]
