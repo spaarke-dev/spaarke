@@ -379,6 +379,26 @@ public sealed class SubmitInvoiceFromEmailOperationTests
     }
 
     [Fact]
+    public async Task Submit_TheSameBytesAreStagedFromAnotherEml_Is409DocumentAlreadySubmitted_NoRow()
+    {
+        // An earlier request with the same key staged the same Invoice bytes from ANOTHER .eml: not this request's retry.
+        var input = Input();
+        var earlier = input with { SourceEmlDocumentId = Guid.NewGuid() };
+        var (spec, manifest) = SubmitInvoiceFromEmailOperation.SpecOf(earlier, earlier.MarkedParts[0], EmlVersion, [1]);
+        var staged = (await H.Files.Service.StageAsync(spec, new MemoryStream(W.PdfBytes), manifest, CancellationToken.None)).Blob!;
+
+        var result = await Build().SubmitAsync(input, CancellationToken.None);
+
+        result.Outcome.Should().Be(FromEmailSubmitOutcome.Refused);
+        result.Status.Should().Be(StatusCodes.Status409Conflict);
+        result.ErrorCode.Should().Be(InvoiceSubmissionErrors.DocumentAlreadySubmitted);
+        H.Allocations.Should().BeEmpty();
+        H.JobsSent.Should().BeEmpty();
+        H.Files.Gateway.Get(staged.Container, staged.BlobPath)!.Metadata[StoredFileBlobs.MetadataSourceDocument]
+            .Should().Be(earlier.SourceEmlDocumentId.ToString("D"), "the earlier stage is left unchanged");
+    }
+
+    [Fact]
     public async Task Submit_TheStoreIsNotConfigured_Is422StorageNotConfigured()
     {
         H.Files = new StoredFileRig(configured: false);
