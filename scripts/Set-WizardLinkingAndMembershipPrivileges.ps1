@@ -9,24 +9,30 @@
     Reads two declared sets and brings the LIVE roles to them:
 
       config/core-user-wizard-linking-role.json
-          For each bind target: AppendTo on the Core User role is raised to the role's own live Read depth on that
-          table. For each created table: Append is raised to the role's live Create depth. Adds or raises only; never
-          touches Read, Create, Write, Delete, Share or Assign.
+          For each bind target: AppendTo on the Core User role is raised to the target's DECLARED depth
+          ('appendToDepth'), never above it, and never above the role's live Read depth on that table unless the target
+          declares 'appendToAboveRead'. For each created table: Append is raised to the role's live Create depth. Adds
+          or raises only; never touches Read, Create, Write, Delete, Share or Assign.
+          Depth drift: the live Read differing from the declared depth (the exception's 'readDepth' where declared), or
+          the live AppendTo above the declared depth, is reported and fails -Verify. Neither is changed here.
 
       config/contact-organization-membership-role.json
           The writer role gets the listed privileges at Global (adds or raises only). Each read-only role loses the
-          listed write privileges on the table; its Read (and Share) stay.
+          listed privileges on the table; its Read and Share stay.
+          Other writers: every live root role holding Create, Write, Delete, Assign or Append on the table (all pages)
+          must be in 'allowedWriterRoles' (each with its reason) or be one of the planned removals; any other fails
+          -Verify. A failed read of that listing stops the script with exit 1 before any write (fail closed).
 
     MODES
       (default)  Dry run. Prints every change as role, privilege, old depth -> new depth. Zero writes.
       -Apply     Makes the changes (AddPrivilegesRole, RemovePrivilegeRole), then reads every role back and confirms
                  each change. Names anything the platform added that was not asked for.
-      -Verify    Read-only. Exits 1 when any change is still pending (drift), 0 when the live roles match both sets.
+      -Verify    Read-only. Exits 1 when any change is still pending, on depth drift, or on a membership writer not in
+                 the allowlist; 0 when the live roles match both sets.
 
     ALSO REPORTED (never changed here)
       - Each role is resolved by name to exactly one ROOT role (its business-unit copies take their privileges from
         it); the number of copies is printed.
-      - Other live root roles that hold Create or Write on the membership table.
       - XML/live drift: for each role with a file under src/dataverse/solutions/SpaarkeMaster/Roles, every in-scope
         privilege whose level in the file differs from the live level after the planned changes.
 
@@ -95,6 +101,21 @@ if ($membership.writerRole.depth -ne 'Global') { throw 'The membership writer ro
 foreach ($removed in $membership.removedFromReadOnlyRoles) {
     if ($removed -match '^prv(Read|Share)') { throw "Config would remove '$removed' from the read-only roles; Read and Share stay, by design." }
 }
+foreach ($t in $linking.bindTargets) {
+    if (-not $t.appendToDepth) { throw "Bind target '$($t.logicalName)' declares no appendToDepth. Fix the config." }
+    $null = Get-Rank ([string]$t.appendToDepth)
+    if ($t.appendToAboveRead) {
+        $null = Get-Rank ([string]$t.appendToAboveRead.readDepth)
+        if (-not $t.appendToAboveRead.reason -or -not $t.appendToAboveRead.since) { throw "Bind target '$($t.logicalName)': appendToAboveRead needs a reason and a commit ('since')." }
+    }
+}
+$allowedWriters = @{}
+foreach ($a in @($membership.allowedWriterRoles)) {
+    if (-not $a.roleName -or -not $a.reason) { throw 'Each allowedWriterRoles entry needs a roleName and a reason.' }
+    $allowedWriters[[string]$a.roleName] = [string]$a.reason
+}
+if (-not $allowedWriters.ContainsKey([string]$membership.writerRole.roleName)) { throw 'allowedWriterRoles must list the writer role.' }
+foreach ($ro in $membership.readOnlyRoles) { if ($allowedWriters.ContainsKey([string]$ro)) { throw "Read-only role '$ro' cannot also be an allowed writer." } }
 
 # ── Auth: the operator's own az CLI identity. No secrets in this script or the repo. ────────────────────────
 $token = az account get-access-token --resource $EnvironmentUrl --query accessToken -o tsv 2>$null
@@ -107,6 +128,17 @@ $headers = @{
     'Content-Type'     = 'application/json; charset=utf-8'
 }
 function Invoke-DvGet([string]$RelativePath) { Invoke-RestMethod -Uri "$Api/$RelativePath" -Headers $headers -Method Get }
+# Every row of a collection query: follows @odata.nextLink to the last page.
+function Invoke-DvGetAll([string]$RelativePath) {
+    $rows = [System.Collections.Generic.List[object]]::new()
+    $uri = "$Api/$RelativePath"
+    while ($uri) {
+        $page = Invoke-RestMethod -Uri $uri -Headers $headers -Method Get
+        foreach ($v in @($page.value)) { $rows.Add($v) }
+        $uri = $page.'@odata.nextLink'
+    }
+    , $rows
+}
 function Invoke-DvPost([string]$RelativePath, $Body) {
     $json = $Body | ConvertTo-Json -Depth 6
     Invoke-RestMethod -Method Post -Uri "$Api/$RelativePath" -Headers $headers -Body ([Text.Encoding]::UTF8.GetBytes($json)) | Out-Null
@@ -172,11 +204,25 @@ function Add-Raise($Role, $Privilege, [string]$To, [string]$Why) {
 }
 
 $core = Get-Role $linking.roleName
+$depthDrift = [System.Collections.Generic.List[string]]::new()
 foreach ($t in $linking.bindTargets) {
     $read = Get-Privilege $t.logicalName $t.readPrivilege
     $appendTo = Get-Privilege $t.logicalName $t.appendToPrivilege
+    $declared = [string]$t.appendToDepth
+    $declaredRead = if ($t.appendToAboveRead) { [string]$t.appendToAboveRead.readDepth } else { $declared }
     $readDepth = Get-HeldDepth $core $read
-    if ($readDepth -ne 'None') { Add-Raise $core $appendTo $readDepth "Read is $readDepth" }
+    $appendToDepth = Get-HeldDepth $core $appendTo
+    if ($readDepth -ne $declaredRead) {
+        $depthDrift.Add(("{0,-44} {1,-40} live {2,-6} declared {3}" -f $core.Name, $read.Name, $readDepth, $declaredRead))
+    }
+    if ((Get-Rank $appendToDepth) -gt (Get-Rank $declared)) {
+        $depthDrift.Add(("{0,-44} {1,-40} live {2,-6} declared {3} (above it; not lowered here)" -f $core.Name, $appendTo.Name, $appendToDepth, $declared))
+    }
+    # The target is the declared depth. Without a declared exception it is also capped at the live Read, so a Read
+    # narrower than declared (reported above as drift) never leaves AppendTo above it.
+    $target = $declared
+    if (-not $t.appendToAboveRead -and (Get-Rank $readDepth) -lt (Get-Rank $target)) { $target = $readDepth }
+    if ($target -ne 'None') { Add-Raise $core $appendTo $target "declared $declared; Read is $readDepth" }
 }
 foreach ($c in $linking.createdTables) {
     $create = Get-Privilege $c.logicalName $c.createPrivilege
@@ -215,23 +261,46 @@ else {
     }
 }
 
-# Other root roles that can still write memberships (reported, never changed here).
+Write-Host ''
+Write-Host 'Depth drift (live Core User Read or AppendTo off the declared depth; never changed here):'
+if ($depthDrift.Count -eq 0) { Write-Host '  none' }
+foreach ($d in $depthDrift) { Write-Host "  $d" -ForegroundColor DarkYellow }
+
+# Every live root role that can write memberships, checked against the allowlist (never changed here). Fail closed: a
+# failed read stops the script before any write.
+$writerTypes = @('Create', 'Write', 'Delete', 'Assign', 'Append')
 try {
-    $writeIds = @(Get-TablePrivileges $membership.table | Where-Object { $_.Type -in 'Create', 'Write' })
+    $writeIds = @(Get-TablePrivileges $membership.table | Where-Object { [string]$_.Type -in $writerTypes })
+    if ($writeIds.Count -ne $writerTypes.Count) {
+        throw "Expected $($writerTypes.Count) write privileges ($($writerTypes -join ', ')) on $($membership.table) in metadata; found $($writeIds.Count)."
+    }
+    $roleById = @{}
     $holders = foreach ($w in $writeIds) {
-        foreach ($row in @((Invoke-DvGet "roleprivilegescollection?`$select=roleid,privilegedepthmask&`$filter=privilegeid eq $($w.Id)").value)) {
-            $ro = Invoke-DvGet "roles($($row.roleid))?`$select=name,_parentrootroleid_value"
-            if ($ro._parentrootroleid_value -eq $row.roleid) { [pscustomobject]@{ Role = $ro.name; Privilege = $w.Name } }
+        foreach ($row in (Invoke-DvGetAll "roleprivilegescollection?`$select=roleid&`$filter=privilegeid eq $($w.Id)")) {
+            $rid = ([string]$row.roleid).ToLowerInvariant()
+            if (-not $roleById.ContainsKey($rid)) { $roleById[$rid] = Invoke-DvGet "roles($rid)?`$select=name,_parentrootroleid_value" }
+            $ro = $roleById[$rid]
+            if (([string]$ro._parentrootroleid_value).ToLowerInvariant() -eq $rid) { [pscustomobject]@{ Role = [string]$ro.name; Privilege = $w.Name } }
         }
     }
-    $planned = @($plan | Where-Object Action -eq 'Remove' | ForEach-Object { "$($_.Role.Name)|$($_.Privilege.Name)" })
-    $others = @($holders | Where-Object { $_.Role -ne $membership.writerRole.roleName -and $planned -notcontains "$($_.Role)|$($_.Privilege)" } |
-        Sort-Object Role, Privilege -Unique)
-    Write-Host ''
-    Write-Host "Other root roles that keep Create or Write on $($membership.table) ($($others.Count)):"
-    foreach ($o in $others) { Write-Host ("  {0,-44} {1}" -f $o.Role, $o.Privilege) -ForegroundColor DarkYellow }
 }
-catch { Write-Host "Could not list the other membership writers: $($_.Exception.Message)" -ForegroundColor Yellow }
+catch {
+    Write-Host "`nFAIL: could not list the roles that write $($membership.table): $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host 'Nothing was changed. Fix the read and re-run.' -ForegroundColor Red
+    exit 1
+}
+$planned = @($plan | Where-Object Action -eq 'Remove' | ForEach-Object { "$($_.Role.Name)|$($_.Privilege.Name)" })
+$holders = @($holders | Sort-Object Role, Privilege -Unique)
+$allowedHolders = @($holders | Where-Object { $allowedWriters.ContainsKey($_.Role) })
+$unexpectedWriters = @($holders | Where-Object { -not $allowedWriters.ContainsKey($_.Role) -and $planned -notcontains "$($_.Role)|$($_.Privilege)" })
+Write-Host ''
+Write-Host "Root roles that write $($membership.table), in the allowlist ($(@($allowedHolders.Role | Sort-Object -Unique).Count) roles):"
+foreach ($g in $allowedHolders | Group-Object Role) {
+    Write-Host ("  {0,-44} {1} ({2})" -f $g.Name, (($g.Group.Privilege | ForEach-Object { $_ -replace "(?i)sprk_ContactOrganization$", '' }) -join ', '), $allowedWriters[$g.Name])
+}
+Write-Host "Root roles that write $($membership.table), NOT in the allowlist and not planned for removal ($($unexpectedWriters.Count)):"
+if ($unexpectedWriters.Count -eq 0) { Write-Host '  none' }
+foreach ($o in $unexpectedWriters) { Write-Host ("  {0,-44} {1}" -f $o.Role, $o.Privilege) -ForegroundColor Red }
 
 # XML/live drift on the in-scope privileges, after the planned changes (reported, never changed here).
 $scope = @()
@@ -261,8 +330,12 @@ if ($driftCount -eq 0) { Write-Host '  none' }
 
 # ── Verify ──────────────────────────────────────────────────────────────────────────────────────────────────
 if ($Verify) {
-    if ($plan.Count -eq 0) { Write-Host "`nVERIFY PASS: the live roles match both declared sets." -ForegroundColor Green; exit 0 }
-    Write-Host "`nVERIFY FAIL: $($plan.Count) change(s) pending (listed above)." -ForegroundColor Red
+    $reasons = @()
+    if ($plan.Count -gt 0) { $reasons += "$($plan.Count) change(s) pending" }
+    if ($depthDrift.Count -gt 0) { $reasons += "$($depthDrift.Count) depth drift finding(s)" }
+    if ($unexpectedWriters.Count -gt 0) { $reasons += "$($unexpectedWriters.Count) membership writer(s) not in the allowlist" }
+    if ($reasons.Count -eq 0) { Write-Host "`nVERIFY PASS: the live roles match both declared sets." -ForegroundColor Green; exit 0 }
+    Write-Host "`nVERIFY FAIL: $($reasons -join '; ') (listed above)." -ForegroundColor Red
     exit 1
 }
 if ($plan.Count -eq 0) { Write-Host "`nNothing to change." -ForegroundColor Green; exit 0 }
