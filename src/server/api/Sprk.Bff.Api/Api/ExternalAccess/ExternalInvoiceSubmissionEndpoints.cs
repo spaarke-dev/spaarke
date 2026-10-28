@@ -271,7 +271,9 @@ public static class ExternalInvoiceSubmissionEndpoints
     /// single read, <see cref="ExternalInvoiceSubmissionAuthorizationFilter"/>): the submissions of <paramref name="views"/> the
     /// caller may see, in order, decided in ONE call of the caller-aware seam (<see cref="ExternalInvoiceSubmissionHiding"/>:
     /// with an invoice, the invoice predicate; without one, the submission's own source). A withheld submission is omitted, never
-    /// marked. No seam, or a failed read, withholds every asked submission (fail closed).
+    /// marked. No seam withholds every asked submission (fail closed; logged at Error, a registration defect). A failed read
+    /// THROWS <see cref="InvoiceSubmissionService.ReadUnavailable"/> (EB-D-169: the routes answer a retryable 503, never 200
+    /// <c>[]</c> and never the not-found 404); it never shows a row.
     /// </summary>
     internal static async Task<IReadOnlyList<InvoiceSubmissionView>> VisibleSubmissionsAsync(
         CallerPrincipal principal, IReadOnlyList<InvoiceSubmissionView> views, ExternalInvoiceSubmissionHiding? hideSubmissions,
@@ -280,15 +282,27 @@ public static class ExternalInvoiceSubmissionEndpoints
         if (views.Count == 0)
             return views;
 
-        var decision = hideSubmissions is null
-            ? InvoiceVisibilityResult.ReadFailed(views.Select(v => v.SubmissionId))
-            : await hideSubmissions(principal, views, ct).ConfigureAwait(false);
+        if (hideSubmissions is null)
+        {
+            logger.LogError(
+                "[EBILLING-SUBMIT] The submission decision (ExternalInvoiceSubmissionHiding) is not registered: {Count} submission(s) "
+                + "withheld (fail closed).", views.Count);
+            return Array.Empty<InvoiceSubmissionView>();
+        }
+
+        var decision = await hideSubmissions(principal, views, ct).ConfigureAwait(false);
+        if (decision.Faulted)
+        {
+            // EB-D-169: the decision could not be read. A retryable 503 for the whole page; no row is shown.
+            throw InvoiceSubmissionService.ReadUnavailable();
+        }
+
         var kept = views.Where(v => decision.IsVisible(v.SubmissionId)).ToList();
         if (kept.Count < views.Count)
         {
             logger.LogInformation(
                 "[EBILLING-SUBMIT] {Withheld} of {Count} submission(s) withheld: decided by their invoice or their source ({Reasons}).",
-                views.Count - kept.Count, views.Count, hideSubmissions is null ? "no predicate" : decision.HiddenSummary());
+                views.Count - kept.Count, views.Count, decision.HiddenSummary());
         }
 
         return kept;

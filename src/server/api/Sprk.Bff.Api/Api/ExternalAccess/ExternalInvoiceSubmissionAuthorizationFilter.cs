@@ -306,10 +306,19 @@ internal sealed class ExternalInvoiceSubmissionAuthorizationFilter : IEndpointFi
 
         // ebilling-r1 task 098 (model 9.1, (a')), review round 4b: THE decision the list applies
         // (ExternalInvoiceSubmissionEndpoints.VisibleSubmissionsAsync): with an invoice, the invoice predicate; without one, the
-        // submission's own source. A withheld submission is the SAME 404 as a missing one; no seam and a failed read withhold it
-        // too (fail closed).
-        var visible = await ExternalInvoiceSubmissionEndpoints.VisibleSubmissionsAsync(
-            principal, new[] { view }, _hideSubmissions, _logger, http.RequestAborted);
+        // submission's own source. A withheld submission is the SAME 404 as a missing one; no seam withholds it too (fail closed).
+        // A failed read is a retryable 503 (EB-D-169), never the not-found 404, and never shows the submission.
+        IReadOnlyList<InvoiceSubmissionView> visible;
+        try
+        {
+            visible = await ExternalInvoiceSubmissionEndpoints.VisibleSubmissionsAsync(
+                principal, new[] { view }, _hideSubmissions, _logger, http.RequestAborted);
+        }
+        catch (SdapProblemException ex)
+        {
+            return (null, InvoiceSubmissionHttp.ReadFault(ex));
+        }
+
         if (visible.Count == 0)
         {
             return (null, ProblemDetailsHelper.UniformRecordNotFound(http));
