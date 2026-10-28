@@ -14,7 +14,14 @@
 - **F1:** a Decision Record's commit-time parents include the subject of every Signal it resolves. Those subjects are not all stored, because the Signal→DR link is skipped for Signals closed during the review. So add the subjects of the linked Signals, and never move a secure-owned DR to ordinary; report it instead.
 - **F2:** (B) changes the create-time owner of no-core Signals and DRs whose subject is not a personal to-do. Count them; exclude them or re-own them; the writer is not loosened.
 
-Next: re-check F1 and F2 on the head uac-r2 sends after their adversarial pass. Previous: dev BFF `3ff2c04bf5` has been live since 2026-10-27 01:29:15Z (R3 after-notice; DLL 1.0.0+3ff2c04bf5; 30-minute gate clean). |
+- **Slice 2 @ `21c86a7d20` (2026-10-27):** F1-d, F2 (13 no-core Signals and 3 no-core DRs; 0 answers change) and F1-c look right as described. uac-r2 asked whether the re-file pass should hold DRs too: it breaks task 144 criterion 3, so the implementer exempted it (`_refileChildPass`). **Ontology answered (c):**
+  - Take the DR's Signal subjects from `sprk_steps.resolvedSignalIds`. That is the complete, immutable commit-time set: `DecisionRecordWriter.cs:1995`; `Memo` refuses rather than truncates; there is no update path.
+  - Hold and report only when the set cannot be read: no key, a parse failure, a Signal missing or unreadable, or a subject table that can't be derived.
+  - Drop the exemption. Criterion 3 is unchanged.
+  - Parity point: `ResolvedSignalSubjectsAsync` adds every lookup on the Signal; the writer adds only the subject.
+  - Fallback if (c) is out of scope: (a), with criterion 3 reworded to "DR held and reported". Never (b).
+
+Next: re-check the head uac-r2 sends after (c) or (a) lands. Previous: dev BFF `3ff2c04bf5` has been live since 2026-10-27 01:29:15Z (R3 after-notice; DLL 1.0.0+3ff2c04bf5; 30-minute gate clean). |
 | **Next Action** | On the owner's browser-check results: fix any failure (a lane per defect), or close 114, 160 and 163 (✅ + POML + TASK-INDEX; run the drift check). (The D-185 guard is on master: #2344 `0b035c23fd`.) |
 
 ## Owner browser checks (sent 2026-10-23 ~12:00Z; zz- test data, delete afterwards)
