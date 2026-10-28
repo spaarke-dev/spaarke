@@ -20,6 +20,7 @@ import userEvent from '@testing-library/user-event';
 import { FluentProvider, webDarkTheme, webLightTheme } from '@fluentui/react-components';
 
 import { WorklistRequestError, WorklistWidget, createWorklistService } from '..';
+import { LANE_OPEN_STORAGE_KEY } from '../useLaneOpen';
 import type { WorklistService } from '..';
 import type { DecisionWizardLaunchRequest } from '../../DecisionWizard';
 import {
@@ -65,6 +66,9 @@ function renderWidget(
   );
   return { ...utils, service, launchWizard: launchWizard as Launch };
 }
+
+// Each lane's open state is remembered per device (D-195, task 169): start every test from a clean device.
+beforeEach(() => window.localStorage.clear());
 
 async function ready() {
   await screen.findByTestId('worklist-widget');
@@ -316,7 +320,7 @@ describe('count filters', () => {
     expect(countCard(lane('Do'), /^All/)).toHaveTextContent('1 of 6 done today');
   });
 
-  it('nothing is remembered: a new mount opens with no filter and nothing is written to browser storage', async () => {
+  it('the filter is not remembered: a new mount opens with no filter and only the lane open state is written to browser storage', async () => {
     const setItem = jest.spyOn(Storage.prototype, 'setItem');
     const first = renderWidget();
     await ready();
@@ -328,7 +332,10 @@ describe('count filters', () => {
     await ready();
     expect(within(lane('Do')).queryByTestId('lane-showing-Do')).not.toBeInTheDocument();
     expect(lineIds(lane('Do'))).toEqual([D4, D3, D1, D2, D5]);
-    expect(setItem).not.toHaveBeenCalled();
+    // Task 169 (D-195): the lanes' open state is the one thing remembered; no filter is ever written.
+    expect(setItem.mock.calls.length).toBeGreaterThan(0);
+    expect(setItem.mock.calls.every(([key]) => key === LANE_OPEN_STORAGE_KEY)).toBe(true);
+    expect(JSON.parse(window.localStorage.getItem(LANE_OPEN_STORAGE_KEY) ?? '{}')).toEqual({ Do: true });
     setItem.mockRestore();
   });
 });
