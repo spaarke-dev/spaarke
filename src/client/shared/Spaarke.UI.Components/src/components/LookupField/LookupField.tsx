@@ -65,6 +65,11 @@ export interface ILookupFieldProps {
   /** Minimum characters before search fires. Default: 1. */
   minSearchLength?: number;
   /**
+   * Optional hint text shown under the field. Passed to Fluent `Field`'s `hint`, which wires it to the input
+   * with `aria-describedby` (WCAG AA); use it instead of a free-standing `Text` beside the field.
+   */
+  hint?: string;
+  /**
    * Optional chip icon rendered before the selected item's name. Matches
    * OOB Dataverse lookup chip presentation (e.g., chain-link icon for
    * cross-entity references). Ignored when no value is selected. Added
@@ -358,6 +363,7 @@ export const LookupField: React.FC<ILookupFieldProps> = ({
   onSearch,
   labelExtra,
   minSearchLength = 1,
+  hint,
   chipIcon,
   openOnFocus = false,
   onAdvanced,
@@ -586,7 +592,7 @@ export const LookupField: React.FC<ILookupFieldProps> = ({
 
   return (
     <div className={styles.wrapper} ref={wrapperRef} style={gridColumnStyle}>
-      <Field label={renderLabel()} required={required}>
+      <Field label={renderLabel()} required={required} hint={hint}>
         {value ? (
           <div className={styles.selectedChip}>
             {chipIcon ? (

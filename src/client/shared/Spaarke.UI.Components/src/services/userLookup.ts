@@ -199,11 +199,11 @@ export function extractEmailKey(name: string): string | null {
 // `getCurrentUserName` in `utils/xrmContext.ts`) — it must NOT introduce a
 // second identity mechanism.
 //
-// Some assignee-style fields target `systemuser` directly (e.g.
-// `sprk_workassignment.sprk_assignedto`) — for those, the Xrm current-user
-// identity applies as-is (see `getCurrentUserAsLookupItem`). Others target
-// `contact` (e.g. `sprk_event.sprk_assignedto`, `sprk_todo.sprk_assignedto`
-// per the 2026-06-21 UAT migration) — for those, the current systemuser must
+// Some assignee-style fields target `systemuser` directly — for those, the Xrm
+// current-user identity applies as-is (see `getCurrentUserAsLookupItem`). Others
+// target `contact` (e.g. `sprk_event.sprk_assignedto`, `sprk_todo.sprk_assignedto`
+// per the 2026-06-21 UAT migration, and `sprk_workassignment.sprk_assignedto`, a
+// contact lookup per the live schema, 2026-10-27) — for those, the current systemuser must
 // be translated to their own contact record. That translation chain
 // (systemuser id -> internalemailaddress -> matching contact by email) is
 // NOT a new identity mechanism: it is the exact pattern already established
@@ -214,7 +214,8 @@ export function extractEmailKey(name: string): string | null {
 /**
  * The current Dataverse user's own identity, straight from the Xrm host
  * context — no data round-trip. Use for `systemuser`-targeted assignee
- * fields (e.g. `sprk_workassignment.sprk_assignedto`).
+ * fields. (`sprk_workassignment.sprk_assignedto` is NOT one: it targets
+ * `contact`; use `resolveCurrentUserAsContactAssignee`.)
  *
  * @returns `{ id, name }` or `null` when no Xrm host context is reachable.
  */
@@ -228,6 +229,7 @@ export function getCurrentUserAsLookupItem(): ILookupItem | null {
 /**
  * Resolve the current Dataverse user onto their own OOB `contact` record.
  * Use for `contact`-targeted assignee fields (e.g. `sprk_event.sprk_assignedto`,
+ * `sprk_workassignment.sprk_assignedto`,
  * `sprk_matter`'s Assigned Attorney/Paralegal).
  *
  * Resolution chain (graceful at every step — returns `null` rather than
