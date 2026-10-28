@@ -256,10 +256,13 @@ public sealed class IncomingAssociationResolver
     /// </summary>
     internal static Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext OwnershipContextOf(
         IEnumerable<KeyValuePair<string, EntityReference>> regardingWrites, IEnumerable<KeyValuePair<string, EntityReference>> stamps) =>
-        Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForParents(
-            Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.InPrimaryOrder(
-                    CommunicationEntity, regardingWrites.Concat(stamps).Where(w => w.Value is { } r && r.Id != Guid.Empty))
-                .Select(w => new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(w.Value.LogicalName, w.Value.Id))) with
+        Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForRow(
+            CommunicationEntity,
+            regardingWrites.Concat(stamps).Select(w => KeyValuePair.Create(
+                w.Key,
+                w.Value is { } r
+                    ? new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(r.LogicalName, r.Id)
+                    : (Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent?)null))) with
         {
             WhenUnfiled = Sprk.Bff.Api.Services.Dataverse.UnfiledOwnership.KeepCreator,
         };

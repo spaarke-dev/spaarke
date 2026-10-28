@@ -27,15 +27,31 @@ public class EmailAttachmentProcessor : IEmailAttachmentProcessor
         var associatedLogicalName = string.IsNullOrWhiteSpace(associatedEntityType)
             ? null
             : Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.ToTargetLogicalName(associatedEntityType);
-        return Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForParents(new[]
+
+        // UAC task 194b fix round R (B3): through the one builder (ForRow), keyed by the sprk_document columns the processor's
+        // update writes (ParentDocumentLookup, then DocumentAssociationMap's lookup — RecordReparent.ParentChangesOf,
+        // the one column map). An associated type the map does not write is still asked, after them, as before.
+        var written = new UpdateDocumentRequest
         {
-            parentDocumentId != Guid.Empty
-                ? new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent("sprk_document", parentDocumentId)
-                : null,
-            associatedLogicalName is not null && associatedEntityId is { } associatedId
-                ? new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(associatedLogicalName, associatedId)
-                : null,
-        });
+            ParentDocumentLookup = parentDocumentId != Guid.Empty ? parentDocumentId : null,
+        };
+        var mapped = DocumentAssociationMap.TryApply(written, associatedEntityType, associatedEntityId);
+        var lookups = Sprk.Bff.Api.Services.Dataverse.RecordReparent.ParentChangesOf(written)
+            .Select(c => KeyValuePair.Create(
+                c.Key,
+                c.Value is { } reference
+                    ? new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(reference.LogicalName, reference.Id)
+                    : (Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent?)null))
+            .ToList();
+        if (!mapped && associatedLogicalName is not null && associatedEntityId is { } associatedId)
+        {
+            lookups.Add(KeyValuePair.Create(
+                associatedLogicalName,
+                (Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent?)new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(
+                    associatedLogicalName, associatedId)));
+        }
+
+        return Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForRow("sprk_document", lookups);
     }
 
     private readonly SpeFileStore _speFileStore;

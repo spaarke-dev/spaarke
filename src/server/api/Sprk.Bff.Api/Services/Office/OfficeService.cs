@@ -2859,11 +2859,10 @@ internal class OfficeService : IOfficeService
                         ? (TodoRegardingMap["Communication"].LogicalName, communicationId)
                         : (null, null);
 
-        var primary = target.LogicalName is not null && target.Id is { } targetId
-            ? new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(target.LogicalName, targetId)
-            : null;
+        // UAC task 194b fix round R (B3): in sprk_todo's primary order (ForChild → ForRow) — the subject, then the document
+        // carrier, then the email carrier: the rule above, as the reconciler asks the written row; never a primary named here.
         var todoOwner = await _ownershipResolver.ResolveOwnerAsync(
-            Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForChild(todo, primary) with
+            Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForChild(todo) with
             {
                 CallerSystemUserId = Guid.TryParse(ownerSystemUserId, out var callerSystemUserId)
                     ? callerSystemUserId

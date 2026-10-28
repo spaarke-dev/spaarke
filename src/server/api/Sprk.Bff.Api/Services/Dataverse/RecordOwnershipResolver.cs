@@ -381,15 +381,40 @@ public sealed record RecordOwnershipContext
     public static IReadOnlyList<RecordOwnershipParent> OrderedParentsOf(Entity row)
     {
         ArgumentNullException.ThrowIfNull(row);
-        var filed = row.Attributes.Where(a => !RecordOwnershipResolver.IsCitation(row.LogicalName, a.Key)
-                                              && a.Value is EntityReference reference
-                                              && reference.Id != Guid.Empty
-                                              && RecordOwnershipResolver.IsOwnershipParent(reference.LogicalName));
-        return InPrimaryOrder(row.LogicalName, filed, SubjectColumnOf(row))
-            .Select(a => (EntityReference)a.Value)
-            .Select(reference => new RecordOwnershipParent(reference.LogicalName, reference.Id))
-            .Distinct()
+        return PrimaryOrdered(row.LogicalName, LookupsOf(row), PairIdOf(row));
+    }
+
+    /// <summary>Every lookup <paramref name="row"/> holds, column → the record it names (any table; the core filters).</summary>
+    private static IEnumerable<KeyValuePair<string, RecordOwnershipParent?>> LookupsOf(Entity row) =>
+        row.Attributes
+            .Where(a => a.Value is EntityReference)
+            .Select(a => new KeyValuePair<string, RecordOwnershipParent?>(
+                a.Key, new RecordOwnershipParent(((EntityReference)a.Value).LogicalName, ((EntityReference)a.Value).Id)));
+
+    /// <summary>The row's regarding pair id (<c>sprk_regardingrecordid</c>), as written.</summary>
+    private static string? PairIdOf(Entity row) =>
+        row.Attributes.TryGetValue(CoreAncestorResolver.RegardingRecordIdColumn, out var pair) ? pair as string : null;
+
+    /// <summary>
+    /// UAC task 194b fix round R (B3): THE primary-order rule, shared by the reconciler's question about an existing row
+    /// (<see cref="OrderedParentsOf"/>) and every writer's question about a row it writes (<see cref="ForRow"/>): the lookups
+    /// that file the row (an ownership-parent target, a real id, not a citation of <paramref name="table"/>) in
+    /// <paramref name="table"/>'s primary order (<see cref="InPrimaryOrder{TValue}"/>, the subject named by
+    /// <paramref name="pairId"/> first on a regarding host table), de-duplicated.
+    /// </summary>
+    private static IReadOnlyList<RecordOwnershipParent> PrimaryOrdered(
+        string table, IEnumerable<KeyValuePair<string, RecordOwnershipParent?>> lookups, string? pairId)
+    {
+        var filed = lookups
+            .Where(l => l.Value is { IsSpecified: true } parent
+                        && RecordOwnershipResolver.IsOwnershipParent(parent.EntityLogicalName)
+                        && !RecordOwnershipResolver.IsCitation(table, l.Key))
+            .Select(l => new KeyValuePair<string, RecordOwnershipParent>(l.Key, l.Value!))
             .ToArray();
+        var subject = SubjectColumnOf(
+            table, pairId,
+            column => filed.FirstOrDefault(l => string.Equals(l.Key, column, StringComparison.OrdinalIgnoreCase)).Value?.RecordId);
+        return InPrimaryOrder(table, filed, subject).Select(l => l.Value).Distinct().ToArray();
     }
 
     /// <summary>
@@ -699,30 +724,43 @@ public sealed record RecordOwnershipContext
     }
 
     /// <summary>
-    /// The context for a child row about to be created: every ownership-parent lookup on <paramref name="child"/>
-    /// becomes a parent. The first parent in attribute order is not meaningful, so an ordinary child's business unit
-    /// comes from <paramref name="primaryParent"/> when it is an ownership parent (a contact regarding is not), else
-    /// the first parent in the child table's primary order (fix round F4: <see cref="OrderedParentsOf"/>, the order the
-    /// reconciler asks an existing row in, never the attribute order). The parents are listed primary first, then in that
-    /// order, so the row's writer and the reconciler ask the same question.
+    /// UAC task 194b fix round R (B3): THE ownership question for a CHILD row a writer is about to write — its table and the
+    /// lookups it will hold (column → record; nulls, non-parent targets and citations are dropped), in the table's primary
+    /// order (<see cref="PrimaryOrdered"/>: the order the reconciler asks the written row in, so the writer's PRIMARY — an
+    /// ordinary row's business unit — is the reconciler's by construction). <paramref name="pairId"/> is the row's
+    /// <c>sprk_regardingrecordid</c> as written, which names the subject first on a regarding host table. A writer that needs
+    /// another primary has found a table whose order is wrong: that is changed in <c>SecureChildLineage</c>, with a reason,
+    /// never at the call site. The one opt-out is <see cref="ForParentsInWriterOrder"/> (a closed list).
     /// </summary>
-    public static RecordOwnershipContext ForChild(Entity child, RecordOwnershipParent? primaryParent = null)
+    public static RecordOwnershipContext ForRow(
+        string table, IEnumerable<KeyValuePair<string, RecordOwnershipParent?>> lookups, string? pairId = null,
+        Guid? callerObjectId = null, Guid? callerSystemUserId = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(table);
+        ArgumentNullException.ThrowIfNull(lookups);
+        return ForParents(PrimaryOrdered(table.Trim().ToLowerInvariant(), lookups, pairId), callerObjectId, callerSystemUserId);
+    }
+
+    /// <summary>
+    /// <see cref="ForRow"/> for a child row built as an entity: its table, every lookup it holds and its pair id. Fix round R
+    /// (B3): no caller-named primary any more — the table's primary order decides, as the reconciler's does.
+    /// </summary>
+    public static RecordOwnershipContext ForChild(Entity child)
     {
         ArgumentNullException.ThrowIfNull(child);
-        var ordered = OrderedParentsOf(child); // #2084: keyed by the child's table, so a citation files nothing
-        var primary = primaryParent is { IsSpecified: true } p && RecordOwnershipResolver.IsOwnershipParent(p.EntityLogicalName)
-            ? p
-            : ordered.FirstOrDefault();
-        var parents = primary is null || !ordered.Contains(primary)
-            ? ordered
-            : new[] { primary }.Concat(ordered.Where(parent => parent != primary)).ToArray();
-        return new RecordOwnershipContext
-        {
-            TargetEntityLogicalName = primary?.EntityLogicalName,
-            TargetRecordId = primary?.RecordId,
-            Parents = parents,
-        };
+        return ForRow(child.LogicalName, LookupsOf(child), PairIdOf(child));
     }
+
+    /// <summary>
+    /// UAC task 194b fix round R (B3): the ONE opt-out from <see cref="ForRow"/> — <paramref name="parents"/> in the order the
+    /// writer names them, for a writer whose own order IS its table's rule: the Signal writer (core, subject, stamps) and the
+    /// Decision Record writer (its Signal's core, subject, derived cores, every resolved Signal's subject), whose existing-row
+    /// question <see cref="ForExistingRowAsync"/> builds with the same list. A CLOSED list: only
+    /// <c>SignalWriter.OwnershipContextOf</c> and <c>DecisionRecordWriter.OwnershipContextOf</c> may call it
+    /// (<c>WriterOrderOptOutAllowListTests</c>).
+    /// </summary>
+    internal static RecordOwnershipContext ForParentsInWriterOrder(IEnumerable<RecordOwnershipParent?> parents) =>
+        ForParents(parents);
 
     /// <summary>
     /// The context for a CONTENT row created under <paramref name="parentEntityLogicalName"/> — an attachment, a

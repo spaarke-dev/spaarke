@@ -118,8 +118,15 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
     /// so the reconciler's existing-row question is pinned against the writers' own, not a copy).
     /// </summary>
     internal static Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext OwnershipOfNewAnalysis(Guid documentId) =>
-        Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForParents(
-            new[] { new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent("sprk_document", documentId) });
+        Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForRow( // 194b R (B3): the one builder
+            "sprk_analysis",
+            new[]
+            {
+                KeyValuePair.Create(
+                    "sprk_documentid",
+                    (Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent?)new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(
+                        "sprk_document", documentId)),
+            });
 
     /// <summary>
     /// Creates the analysis record OWNED by the analysed document's team (unified-access-control-r2 task 146) — the

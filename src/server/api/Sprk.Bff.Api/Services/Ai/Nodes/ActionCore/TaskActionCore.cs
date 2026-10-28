@@ -259,10 +259,9 @@ internal sealed class TaskActionCore
         // task 152's Assigned To (written below). With NO parent, the supplied owner — else the acting user — is the
         // user whose business unit owns it (I-6; owner round 5: a BFF-created row goes to the creating identity's
         // business-unit team); with neither, nothing is created.
-        var regardingParent = input.RegardingObjectId is { } rid && !string.IsNullOrWhiteSpace(input.RegardingObjectType)
-            ? new RecordOwnershipParent(input.RegardingObjectType!, rid)
-            : null;
-        var ownerContext = RecordOwnershipContext.ForChild(entity, regardingParent) with
+        // UAC task 194b fix round R (B3): in sprk_event's primary order (ForChild → ForRow), never the regarding named first —
+        // the order the reconciler asks the written row in.
+        var ownerContext = RecordOwnershipContext.ForChild(entity) with
         {
             CallerSystemUserId = input.OwnerId ?? input.ActingUserId,
             RequestedBy = RecordRequester.Of(input.RequestedBySystemUserId), // task 146 c1-r1

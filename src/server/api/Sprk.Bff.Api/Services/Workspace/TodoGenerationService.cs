@@ -1051,10 +1051,9 @@ public sealed class TodoGenerationService : IScheduledJob
                 + "resolution of Dataverse dependencies; refusing to create an app-owned to-do (task 146).");
         }
 
-        var primary = hasRegarding
-            ? new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(regardingEntityName!, regardingId!.Value)
-            : ownershipSource;
-        var ownerContext = Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForChild(entity, primary);
+        // UAC task 194b fix round R (B3): in sprk_todo's primary order (ForChild → ForRow; the regarding written above is its
+        // subject). With no regarding, the content source — not a lookup on the row — is asked after whatever the row holds.
+        var ownerContext = Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForChild(entity);
         if (!hasRegarding && ownershipSource is { IsSpecified: true } source)
         {
             ownerContext = ownerContext with { Parents = ownerContext.Parents.Append(source).ToArray() };

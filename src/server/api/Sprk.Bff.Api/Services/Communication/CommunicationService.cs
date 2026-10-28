@@ -3241,11 +3241,10 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                         attachmentDoc[column] = record;
                     }
 
-                    var primary = placement.SecureLinks[0].Record;
+                    // UAC task 194b fix round R (B3): in sprk_document's primary order (ForChild → ForRow), never the first
+                    // secure link named first — the order the reconciler asks the written copy in.
                     copyOwner = await _ownership.ResolveOwnerAsync(
-                        Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForChild(
-                            attachmentDoc,
-                            new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(primary.LogicalName, primary.Id)) with
+                        Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForChild(attachmentDoc) with
                         {
                             RequestedBy = requestedBy,
                         },

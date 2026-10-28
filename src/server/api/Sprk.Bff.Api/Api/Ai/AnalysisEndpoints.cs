@@ -32,16 +32,21 @@ public static class AnalysisEndpoints
     /// Secure team's; the document is the primary. UAC task 194b fix round, slice 3: one builder, which the existing-row parity
     /// test calls.
     /// </summary>
+    /// <remarks>UAC task 194b fix round R (B3): through the one builder (<c>ForRow</c>), keyed by the columns the create writes —
+    /// <c>sprk_documentid</c> and the regarding lookup <c>PopulateAnalysisRegardingAsync</c> stages.</remarks>
     internal static Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext OwnershipOfPromotedAnalysis(
         Guid? documentId, string? regardingTable, Guid? regardingId) =>
-        Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForParents(new[]
+        Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForRow("sprk_analysis", new[]
         {
-            documentId is { } docId
+            KeyValuePair.Create("sprk_documentid", documentId is { } docId
                 ? new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent("sprk_document", docId)
-                : null,
-            regardingTable is not null && regardingId is { } regId
-                ? new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(regardingTable, regId)
-                : null,
+                : (Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent?)null),
+            KeyValuePair.Create(
+                (regardingTable is null ? null : Spaarke.Dataverse.RegardingRecordType.GetRegardingLookupFieldByEntity(regardingTable))
+                    ?? regardingTable ?? "sprk_regarding",
+                regardingTable is not null && regardingId is { } regId
+                    ? new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(regardingTable, regId)
+                    : (Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent?)null),
         });
 
     private static readonly JsonSerializerOptions JsonOptions = new()

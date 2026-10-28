@@ -253,7 +253,7 @@ internal sealed class ComposeCreateOnSavePromoter
         // canonical link below (a byte-identical canonical is not a parent; following it could hand the saver's own
         // document to another record's team).
         // Fix round R (B2): keyed by the column each is copied to, so the question is asked in sprk_document's primary order.
-        var filedUnder = new List<KeyValuePair<string, Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent>>();
+        var filedUnder = new List<KeyValuePair<string, Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent?>>();
         if (request.SourceDocumentRecordId is { } sourceRecordId)
         {
             try
@@ -281,7 +281,9 @@ internal sealed class ComposeCreateOnSavePromoter
                     {
                         entity[attribute] = new EntityReference(reference.LogicalName, reference.Id);
                         filedUnder.Add(KeyValuePair.Create(
-                            attribute, new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(reference.LogicalName, reference.Id)));
+                            attribute,
+                            (Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent?)new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(
+                                reference.LogicalName, reference.Id)));
                         inherited++;
                     }
                 }
@@ -366,9 +368,9 @@ internal sealed class ComposeCreateOnSavePromoter
         var owner = await _ownership.ResolveOwnerAsync(
             // UAC task 194b fix round R (B2): in sprk_document's primary order (InPrimaryOrder), the order the reconciler asks
             // the written copy in — never the copy map's column order — so an ordinary copy's business unit is the same for both.
-            Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForParents(
-                Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.InPrimaryOrder(ComposeService.DocumentLogicalName, filedUnder)
-                    .Select(link => (Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent?)link.Value),
+            Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForRow(
+                ComposeService.DocumentLogicalName,
+                filedUnder,
                 callerObjectId: Guid.TryParse(savingUserOid, out var savingOid) ? savingOid : null) with
             {
                 // Task 146 c1-r1 (owner round 13 item 9): the saving user asked for the row the application upserts.
