@@ -216,6 +216,10 @@ public sealed partial class SecureChildOwnershipAiToolTests
             ShareWorld.Add("sprk_recordtype_ref", OntologyCoreType, ("sprk_recordlogicalname", "sprk_matter"));
             ShareWorld.Set(table, row, "sprk_policyversion", new EntityReference("sprk_policyversion", OntologyPolicyVersion));
             ShareWorld.Set(table, row, "sprk_snapshot", "{\"evidence\":[1,2,3]}");
+            // 194b fix round R (ontology answer (c)): the record lists the Signals it resolved, as DecisionRecordWriter writes it;
+            // its owner question asks about their subjects from this list.
+            if (table == "sprk_decisionrecord")
+                ShareWorld.Set(table, row, "sprk_steps", $"{{\"reviewId\":\"a1440000-0000-4000-8000-0000000000f3\",\"resolvedSignalIds\":[\"{OntologySignal:D}\"],\"steps\":[]}}");
         }
     }
 

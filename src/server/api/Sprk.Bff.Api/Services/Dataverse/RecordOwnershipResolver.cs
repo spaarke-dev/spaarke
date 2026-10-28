@@ -519,8 +519,11 @@ public sealed record RecordOwnershipContext
     /// record-type catalog, + <c>sprk_corerecordid</c>), then the subject (the regarding lookup that carries
     /// <c>sprk_regardingrecordid</c>), then every core ancestor stamp <see cref="CoreAncestorResolver"/> derives from that subject
     /// (the list <c>SignalWriter.OwnershipContextOf</c> and <c>DecisionRecordWriter.OwnershipContextOf</c> build), then — for a
-    /// Decision Record — the subject of every Signal it resolved (the writer's <c>SignalSubjects</c>), then the row's other
-    /// lookups (<see cref="OrderedParentsOf"/>). A row with NO core is decided over the same list without the core, as its
+    /// Decision Record — the subject of every Signal it resolved (the writer's <c>SignalSubjects</c>, asked again from the ids its
+    /// <c>sprk_steps.resolvedSignalIds</c> lists: <c>DecisionCommitService.ResolvedSignalSubjectsOfRecordAsync</c>, fix round R),
+    /// then the row's other lookups (<see cref="OrderedParentsOf"/>). A Decision Record whose Signal subjects cannot all be
+    /// known is <see cref="ExistingRowOwnership.Incomplete"/>: decided over what is known, never released from isolation
+    /// (<see cref="DecisionRecordHeldInIsolation"/>). A row with NO core is decided over the same list without the core, as its
     /// writer decides it, EXCEPT one whose subject is a To Do that <c>TodoAssigneeOwnerReconciliationJob</c> keeps
     /// (<c>TodoAssigneeOwnerReconciliationJob.SelectsAsync</c>, the job's own predicate): its owner is its personal To Do
     /// assignee's team (D-134), and <see cref="ExistingRowOwnership.NoCoreOwnerRule"/> says so (fix round F1-c).</item>
@@ -535,7 +538,8 @@ public sealed record RecordOwnershipContext
     /// <param name="ct">Cancellation.</param>
     /// <returns>A data condition (a malformed pair, an unknown core type, a stamp derivation that failed) is
     /// <see cref="ExistingRowOwnership.Undetermined"/>, never a throw. A Dataverse fault reading the core record propagates; one
-    /// reading what decides a no-core row's rule or a Decision Record's Signal subjects is undetermined.</returns>
+    /// reading what decides a no-core row's rule is undetermined; one reading a Decision Record's Signal subjects leaves its
+    /// question <see cref="ExistingRowOwnership.Incomplete"/>.</returns>
     public static async Task<ExistingRowOwnership> ForExistingRowAsync(Entity row, ExistingRowReads reads, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(row);
@@ -557,22 +561,21 @@ public sealed record RecordOwnershipContext
             ? new RecordOwnershipParent(subjectTable, pairId)
             : null;
 
-        // Fix round F1-d: a Decision Record's writer also asks about the subject of every Signal it resolved (SignalSubjects), so
-        // its question does too — read with the To Do job's own query. A read that faults leaves the row undetermined.
+        // Fix round R (ontology answer (c)): a Decision Record's writer also asks about the subject of every Signal it resolved
+        // (SignalSubjects), so its question does too — from the ids its sprk_steps lists, by the commit's own rule. What cannot be
+        // known leaves the question INCOMPLETE (decided over what is known; never released from isolation), not undetermined.
         IReadOnlyList<RecordOwnershipParent> signalSubjects = Array.Empty<RecordOwnershipParent>();
+        string? incomplete = null;
         if (string.Equals(row.LogicalName, DecisionRecordTable, StringComparison.OrdinalIgnoreCase))
         {
-            try
-            {
-                signalSubjects = await Sprk.Bff.Api.Services.Signals.TodoAssigneeOwnerReconciliationJob.ResolvedSignalSubjectsAsync(
-                    reads.Entities, Sprk.Bff.Api.Services.Signals.TodoAssigneeOwnerReconciliationJob.SignalParentColumns, row.Id, ct)
-                    .ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-            {
-                return undetermined with { Undetermined = $"the subjects of the Signals it resolved could not be read ({ex.Message})" };
-            }
+            var (subjects, why) = await Sprk.Bff.Api.Services.Signals.DecisionCommitService.ResolvedSignalSubjectsOfRecordAsync(
+                row.GetAttributeValue<string>(DecisionRecordStepsColumn), reads.Entities, ct).ConfigureAwait(false);
+            signalSubjects = subjects.Select(s => new RecordOwnershipParent(s.Entity, s.Id)).ToList();
+            incomplete = why;
         }
+
+        ExistingRowOwnership Asked(ExistingRowOwnership question) =>
+            question.Undetermined is null ? question with { Incomplete = incomplete } : question;
 
         if (coreId is null)
         {
@@ -580,7 +583,7 @@ public sealed record RecordOwnershipContext
             // every other no-core row is decided over its parents, as its writer decided it ([subject, ..SignalSubjects]).
             var noCore = ForParents(new[] { subject }.Concat(signalSubjects).Concat(rest));
             if (subject is null || !string.Equals(subject.EntityLogicalName, TodoTable, StringComparison.OrdinalIgnoreCase))
-                return new ExistingRowOwnership(noCore);
+                return Asked(new ExistingRowOwnership(noCore));
             if (reads.Links is null || reads.CoreAncestors is null)
             {
                 return new ExistingRowOwnership(noCore)
@@ -603,13 +606,13 @@ public sealed record RecordOwnershipContext
                 };
             }
 
-            return keptByToDoJob
+            return Asked(keptByToDoJob
                 ? new ExistingRowOwnership(noCore)
                 {
                     NoCoreOwnerRule = "it has no core record: its owner is its To Do assignee's business-unit team (D-134), kept by "
                                       + "TodoAssigneeOwnerReconciliationJob; reported, not moved",
                 }
-                : new ExistingRowOwnership(noCore);
+                : new ExistingRowOwnership(noCore));
         }
 
         var coreTable = await reads.CoreTableOfRecordTypeAsync(typeRef!.Value, ct).ConfigureAwait(false);
@@ -629,34 +632,45 @@ public sealed record RecordOwnershipContext
             parents.AddRange(stamps.Stamps.Select(stamp => new RecordOwnershipParent(stamp.EntityType, stamp.RecordId)));
         }
 
-        return new ExistingRowOwnership(ForParents(parents.Concat(signalSubjects).Concat(rest)));
+        return Asked(new ExistingRowOwnership(ForParents(parents.Concat(signalSubjects).Concat(rest))));
     }
 
     internal const string DecisionRecordTable = "sprk_decisionrecord";
+
+    /// <summary>The Decision Record's step envelope, which lists the Signals it resolved (<c>resolvedSignalIds</c>).</summary>
+    private const string DecisionRecordStepsColumn = "sprk_steps";
     private const string TodoTable = "sprk_todo";
 
     /// <summary>
-    /// UAC task 194b fix round (F1-d): THE never-out rule for a Decision Record — the ONE predicate the reconciler's secure pass
-    /// (a move OUT, Unsecure included), its ordinary pass and <see cref="IRecordOwnershipResolver.ReparentAsync"/> ask. A
-    /// Decision Record owned in isolation (the Secure Record owner team, or any team in the Secure Record business unit) whose
-    /// answer now is an ordinary team is held where it is and reported: the parents its writer asked at commit time are not
-    /// all stored on the row (the Signals it resolved can be re-filed or deleted since), so an ordinary answer read from what
-    /// is stored cannot prove it may leave. A move INTO isolation is never held.
+    /// UAC task 194b fix round (F1-d, narrowed in fix round R by ontology answer (c)): THE never-out rule for a Decision Record —
+    /// the ONE predicate every reconciler pass (a root's secure pass, Unsecure included; the re-file pass; the ordinary pass) and
+    /// <see cref="IRecordOwnershipResolver.ReparentAsync"/> ask. A Decision Record owned in isolation (the Secure Record owner
+    /// team, or any team in the Secure Record business unit) whose answer now is an ordinary team is held where it is and
+    /// reported when its question is INCOMPLETE (<see cref="ExistingRowOwnership.Incomplete"/>: the Signals it resolved cannot
+    /// all be known), since an ordinary answer over part of its commit-time parents cannot prove it may leave. A Decision Record
+    /// whose question is whole leaves isolation as any other row does. A move INTO isolation is never held.
     /// </summary>
     /// <param name="table">The row's table.</param>
     /// <param name="ownedInIsolation">Whether the row is owned now by the Secure Record owner team or in the Secure Record
     /// business unit (an ambiguous Secure Record business unit counts as owned there: fail closed).</param>
     /// <param name="answer">The rule's answer for the row now.</param>
+    /// <param name="incomplete">Why the question the answer came from is incomplete, or <c>null</c> when it is whole.</param>
     /// <returns>Why it is held (a sentence), or <c>null</c> when the rule does not hold it.</returns>
-    public static string? DecisionRecordHeldInIsolation(string? table, bool ownedInIsolation, RecordOwnerResolution answer)
+    public static string? DecisionRecordHeldInIsolation(
+        string? table, bool ownedInIsolation, RecordOwnerResolution answer, string? incomplete)
     {
         ArgumentNullException.ThrowIfNull(answer);
         return string.Equals(table, DecisionRecordTable, StringComparison.OrdinalIgnoreCase)
-               && ownedInIsolation && answer.IsOwned && !answer.IsSecureOwner
-            ? "a Decision Record owned in isolation whose stored parents now give an ordinary team: its commit-time parents are "
-              + "not all stored (the Signals it resolved), so it is held in isolation and reported, never moved out (194b F1-d)"
+               && ownedInIsolation && answer.IsOwned && !answer.IsSecureOwner && incomplete is not null
+            ? $"a Decision Record owned in isolation whose question is incomplete ({incomplete}): an ordinary answer over part of "
+              + "its commit-time parents cannot prove it may leave, so it is held in isolation and reported (194b F1-d)"
             : null;
     }
+
+    /// <summary>Why <see cref="IRecordOwnershipResolver.ReparentAsync"/>'s question about a Decision Record is incomplete: it is
+    /// the update's lookups, not the record's commit-time question (the Signals it resolved are not asked there).</summary>
+    internal const string ReparentQuestionIncomplete =
+        "a re-file asks about the lookups it writes, not the Signals the record resolved";
 
     /// <summary>
     /// The context for a row filed under <paramref name="parents"/> — nulls and non-parent types dropped, the first
@@ -823,6 +837,13 @@ public sealed record ExistingRowOwnership(RecordOwnershipContext Context)
     /// <summary>Set when the question cannot be asked from what the row holds (a malformed core pair, an unknown core type, a
     /// stamp derivation that failed). Fail closed: the row is not decided. Why, as a sentence.</summary>
     public string? Undetermined { get; init; }
+
+    /// <summary>UAC task 194b fix round R (ontology answer (c)): set for a Decision Record whose Signal subjects cannot all be
+    /// known (no <c>resolvedSignalIds</c> in its <c>sprk_steps</c>, a listed Signal unreadable or gone, a subject table that
+    /// cannot be derived). The question holds what is known, so it is still decided — a secure answer is secure over every
+    /// parent — but an ordinary answer never takes it out of isolation
+    /// (<see cref="RecordOwnershipContext.DecisionRecordHeldInIsolation"/>). Why, as a sentence.</summary>
+    public string? Incomplete { get; init; }
 }
 
 /// <summary>
@@ -1895,7 +1916,8 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             var secureBu = await ResolveSecureBusinessUnitAsync(ct).ConfigureAwait(false);
             var owningBu = current.GetAttributeValue<EntityReference>(OwningBusinessUnitColumn)?.Id;
             var ownedInIsolation = secureBu.Ambiguous || secureBu.Id is { } secureBuId && (owningBu is null || owningBu == secureBuId);
-            if (RecordOwnershipContext.DecisionRecordHeldInIsolation(request.EntityLogicalName, ownedInIsolation, resolution)
+            if (RecordOwnershipContext.DecisionRecordHeldInIsolation(
+                    request.EntityLogicalName, ownedInIsolation, resolution, RecordOwnershipContext.ReparentQuestionIncomplete)
                 is { } held)
             {
                 _logger.LogWarning(

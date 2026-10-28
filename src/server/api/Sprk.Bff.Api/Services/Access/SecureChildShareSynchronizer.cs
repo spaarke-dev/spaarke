@@ -612,7 +612,22 @@ public sealed class SecureChildShareSynchronizer
     /// <see cref="SecureChildShareSyncStatus.Incomplete"/>. Removing access is never the unsafe direction, so nothing is
     /// re-checked before a revoke.</para>
     /// </remarks>
-    public async Task<SecureChildMirrorRemoval> RemoveMirrorAsync(string childLogicalName, Guid childId, CancellationToken ct)
+    public Task<SecureChildMirrorRemoval> RemoveMirrorAsync(string childLogicalName, Guid childId, CancellationToken ct) =>
+        RemoveMirrorAsync(childLogicalName, childId, heldInIsolation: false, ct);
+
+    /// <summary>
+    /// UAC task 194b fix round R (A2): takes the mirrored shares off ONE child a pass that may release HOLDS in isolation (the
+    /// rule gives it an ordinary team, but <c>SecureChildReconciler</c> keeps it on the Secure Record owner team: K3, F1-d).
+    /// The record that isolated it no longer makes it secure, so its sharees lose access through it, exactly as a released
+    /// child's do (<see cref="RemoveMirrorAsync(string, Guid, CancellationToken)"/>); unlike a released child it stays on the
+    /// Secure team, readable by nobody until a Full Access holder or the next pass places it — an under-share, never an
+    /// over-share. A child no longer owned by the Secure team is not touched (another write placed it; the next pass decides it).
+    /// </summary>
+    public Task<SecureChildMirrorRemoval> RemoveHeldMirrorAsync(string childLogicalName, Guid childId, CancellationToken ct) =>
+        RemoveMirrorAsync(childLogicalName, childId, heldInIsolation: true, ct);
+
+    private async Task<SecureChildMirrorRemoval> RemoveMirrorAsync(
+        string childLogicalName, Guid childId, bool heldInIsolation, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(childLogicalName);
         if (!SecureChildLineage.Children.TryGetValue(childLogicalName, out var table))
@@ -637,7 +652,16 @@ public sealed class SecureChildShareSynchronizer
             var team = await ResolveSecureOwnerTeamAsync(_dataverse, _configuration, ct).ConfigureAwait(false);
             if (team.Refusal is { } refusal)
                 return new SecureChildMirrorRemoval(SecureChildShareSyncStatus.Failed, 0, refusal);
-            if (team.TeamId is { } secureTeam && owningTeam == secureTeam)
+            if (heldInIsolation && (team.TeamId is not { } heldBy || owningTeam != heldBy))
+            {
+                _logger.LogWarning(
+                    "[SECURE-CHILD-SHARES] {Child} was held in isolation but is no longer owned by the Secure Record owner team; " +
+                    "its shares are NOT removed here (the next pass decides it).", child);
+                return new SecureChildMirrorRemoval(
+                    SecureChildShareSyncStatus.Incomplete, 0, $"{child} is no longer owned by the Secure Record owner team");
+            }
+
+            if (!heldInIsolation && team.TeamId is { } secureTeam && owningTeam == secureTeam)
             {
                 _logger.LogWarning(
                     "[SECURE-CHILD-SHARES] {Child} is still owned by the Secure Record owner team, so it is still isolated: its " +

@@ -10,6 +10,7 @@
 //
 // Doubles are module boundaries only (ADR-038 §4): the REAL resolver and the REAL CoreAncestorResolver over task 148's world.
 
+using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
@@ -83,6 +84,27 @@ public class ExistingRowOwnershipParityTests
         TimeProvider.System, NullLogger<DecisionRecordWriter>.Instance, new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing);
 
     private static EntityReference Ref(string table, Guid id) => new(table, id);
+
+    /// <summary>A Decision Record's <c>sprk_steps</c> as <c>DecisionRecordWriter</c> writes it: the review, the Signals it resolved.</summary>
+    private static string Steps(params Guid[] resolvedSignals) => JsonSerializer.Serialize(new
+    {
+        reviewId = Guid.NewGuid().ToString("D"),
+        resolvedSignalIds = resolvedSignals.Select(s => s.ToString("D")),
+        steps = Array.Empty<object>(),
+    });
+
+    /// <summary>A Signal about <paramref name="subject"/> (its pair id repeated by its subject lookup), closed during the review:
+    /// resolved, and NOT linked to the record (no <c>sprk_decisionrecord</c>) — only the record's <c>sprk_steps</c> names it.</summary>
+    private Guid ClosedSignalAbout(string subjectLookup, string subjectTable, Guid subject, params (string Column, object Value)[] more)
+    {
+        var signal = Guid.NewGuid();
+        _world.Add("sprk_signal", signal, more
+            .Prepend(("sprk_signalstatus", new Microsoft.Xrm.Sdk.OptionSetValue(Sprk.Bff.Api.Services.Signals.SignalWriter.SignalStatusResolved)))
+            .Prepend(("sprk_regardingrecordid", subject.ToString("D")))
+            .Prepend((subjectLookup, Ref(subjectTable, subject)))
+            .ToArray());
+        return signal;
+    }
 
     /// <summary>A row with <paramref name="columns"/> in the order given, and the same row with them reversed.</summary>
     private static (Entity Row, Entity Reversed) RowBothWays(string table, params (string Column, object Value)[] columns)
@@ -260,8 +282,8 @@ public class ExistingRowOwnershipParityTests
         var core = signalQuestion.Parents[0];
         core.Should().Be(new RecordOwnershipParent("sprk_project", project));
         var recordId = Guid.NewGuid();
-        // The also-resolved Signal, about the event, linked to this record (the job's query reads it).
-        _world.Add("sprk_signal", Guid.NewGuid(), ("sprk_regardingevent", Ref("sprk_event", @event)), ("sprk_decisionrecord", Ref("sprk_decisionrecord", recordId)));
+        // The also-resolved Signal, about the event: closed during the review, so only the record's sprk_steps names it (round R).
+        var alsoResolved = ClosedSignalAbout("sprk_regardingevent", "sprk_event", @event);
         var request = new DecisionRecordRequest(
             Guid.NewGuid(), Guid.NewGuid(), new DecisionRecordCore(core.EntityLogicalName, core.RecordId, CatalogMatter), new DecisionRecordRef("sprk_todo", todo),
             Guid.NewGuid(), null, [], [], null, [], new Dictionary<string, object?>(), null, null, null,
@@ -278,6 +300,7 @@ public class ExistingRowOwnershipParityTests
                 ("sprk_corerecordtype", Ref("sprk_recordtype_ref", CatalogProject)),
                 ("sprk_corerecordid", project.ToString("D")),
                 ("sprk_regardingrecordid", todo.ToString("D")),
+                ("sprk_steps", Steps(alsoResolved)),
             };
             var shaped = new Entity("sprk_decisionrecord", recordId);
             foreach (var (column, value) in reverse ? columns.Reverse() : columns)
@@ -287,15 +310,13 @@ public class ExistingRowOwnershipParityTests
 
         (await ExistingParentsAsync(Shaped(false))).Should().Equal(writer);
         (await ExistingParentsAsync(Shaped(true))).Should().Equal(writer);
+        (await QuestionAsync(Shaped(false))).Incomplete.Should().BeNull("every Signal its sprk_steps lists was read");
     }
 
-    [Fact(DisplayName = "194b F1-d must fire: a Decision Record's question takes a resolved Signal's SECURE subject (secure wins); a fault reading the Signals leaves it undetermined")]
-    public async Task ADecisionRecord_TakesItsSignalsSubjects_AndFailsClosed()
+    /// <summary>A Decision Record about the ordinary <paramref name="matter"/> (core and subject), with <paramref name="steps"/>.</summary>
+    private static Entity DecisionRecordAbout(Guid matter, string? steps)
     {
-        var (matter, secureEvent, recordId) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
-        _world.OrdinaryRoot("sprk_matter", matter).SecureChild("sprk_event", secureEvent);
-        _world.Add("sprk_signal", Guid.NewGuid(), ("sprk_regardingevent", Ref("sprk_event", secureEvent)), ("sprk_decisionrecord", Ref("sprk_decisionrecord", recordId)));
-        var row = new Entity("sprk_decisionrecord", recordId)
+        var row = new Entity("sprk_decisionrecord", Guid.NewGuid())
         {
             ["sprk_matter"] = Ref("sprk_matter", matter),
             ["sprk_regardingmatter"] = Ref("sprk_matter", matter),
@@ -303,13 +324,109 @@ public class ExistingRowOwnershipParityTests
             ["sprk_corerecordid"] = matter.ToString("D"),
             ["sprk_regardingrecordid"] = matter.ToString("D"),
         };
+        if (steps is not null)
+            row["sprk_steps"] = steps;
+        return row;
+    }
+
+    [Fact(DisplayName = "194b R (ontology c) must fire: a Decision Record's question takes the SECURE subject of a Signal its sprk_steps lists — closed during the review, never linked — and no link to it is read")]
+    public async Task ADecisionRecord_TakesTheSubjectsOfTheSignalsItsStepsList()
+    {
+        var (matter, secureEvent) = (Guid.NewGuid(), Guid.NewGuid());
+        _world.OrdinaryRoot("sprk_matter", matter).SecureChild("sprk_event", secureEvent);
+        var closed = ClosedSignalAbout("sprk_regardingevent", "sprk_event", secureEvent);
+        var row = DecisionRecordAbout(matter, Steps(closed));
 
         var question = await QuestionAsync(row);
+
+        question.Incomplete.Should().BeNull();
         question.Context.Parents.Should().Contain(new RecordOwnershipParent("sprk_event", secureEvent));
         (await Resolver.ResolveOwnerAsync(question.Context, CancellationToken.None)).OwningTeamId.Should().Be(SecureTeam);
+        _world.Queries.Where(q => q.EntityName == "sprk_signal").SelectMany(q => q.Criteria.Conditions)
+            .Should().OnlyContain(c => c.AttributeName == "sprk_signalid", "the Signals are read by the ids the record lists, never by a link");
+    }
 
-        _world.FailingQueriesOf("sprk_signal");
-        (await QuestionAsync(row)).Undetermined.Should().Contain("Signals");
+    [Fact(DisplayName = "194b R (K1) must fire: a Decision Record that resolved more Signals than one read names is read whole, in pages — the secure subject of the LAST listed Signal is asked")]
+    public async Task ADecisionRecordsSignals_AreReadInPages_NoneLeftOut()
+    {
+        var (matter, @event, secureEvent) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        _world.OrdinaryRoot("sprk_matter", matter).Add("sprk_event", @event, ("owningteam", Ref("team", TeamB)))
+            .SecureChild("sprk_event", secureEvent);
+        var listed = Enumerable.Range(0, 2 * DecisionCommitService.ResolvedSignalReadPage)
+            .Select(_ => ClosedSignalAbout("sprk_regardingevent", "sprk_event", @event))
+            .Append(ClosedSignalAbout("sprk_regardingevent", "sprk_event", secureEvent))
+            .ToArray();
+
+        var question = await QuestionAsync(DecisionRecordAbout(matter, Steps(listed)));
+
+        question.Incomplete.Should().BeNull();
+        question.Context.Parents.Should().Contain(new RecordOwnershipParent("sprk_event", secureEvent));
+        _world.Queries.Count(q => q.EntityName == "sprk_signal").Should().Be(3, "201 ids in pages of 100");
+        _world.Queries.Where(q => q.EntityName == "sprk_signal")
+            .Should().OnlyContain(q => q.Criteria.Conditions.Single().Values.Count <= DecisionCommitService.ResolvedSignalReadPage);
+    }
+
+    [Fact(DisplayName = "194b R (ontology c) must fire: a Decision Record's question is INCOMPLETE — never undetermined — when the Signals it resolved cannot all be known: no sprk_steps, no resolvedSignalIds, a Signal gone, unreadable, or with an underivable subject")]
+    public async Task ADecisionRecordsQuestion_IsIncomplete_WhenItsSignalsCannotAllBeKnown()
+    {
+        var (matter, @event) = (Guid.NewGuid(), Guid.NewGuid());
+        _world.OrdinaryRoot("sprk_matter", matter).Add("sprk_event", @event, ("owningteam", Ref("team", TeamB)));
+        var known = ClosedSignalAbout("sprk_regardingevent", "sprk_event", @event);
+        var unreadable = ClosedSignalAbout("sprk_regardingevent", "sprk_event", @event);
+        // Pair id set, but no subject lookup repeats it: its subject table cannot be derived.
+        var underivable = ClosedSignalAbout("sprk_regardingevent", "sprk_event", Guid.NewGuid());
+        _world.Set("sprk_signal", underivable, "sprk_regardingevent", Ref("sprk_event", @event));
+        _world.FailingIdListReadsOf("sprk_signal", unreadable);
+
+        var cases = new (string? Steps, string Why)[]
+        {
+            (null, "no sprk_steps"),
+            ("{\"reviewId\":\"x\",\"steps\":[]}", "does not list resolvedSignalIds"),
+            ("not json", "does not list resolvedSignalIds"),
+            (Steps(known, Guid.NewGuid()), "no longer exists"),
+            (Steps(known, unreadable), "could not be read"),
+            (Steps(known, underivable), "cannot be derived"),
+        };
+        foreach (var (steps, why) in cases)
+        {
+            var question = await QuestionAsync(DecisionRecordAbout(matter, steps));
+            question.Undetermined.Should().BeNull(why);
+            question.Incomplete.Should().Contain(why);
+            question.Context.Parents[0].Should().Be(new RecordOwnershipParent("sprk_matter", matter), "what is known is still asked");
+        }
+
+        var whole = await QuestionAsync(DecisionRecordAbout(matter, Steps(known)));
+        whole.Incomplete.Should().BeNull();
+        whole.Context.Parents.Should().Contain(new RecordOwnershipParent("sprk_event", @event));
+        (await QuestionAsync(DecisionRecordAbout(matter, Steps()))).Incomplete.Should().BeNull("a record that resolved none (the gate's) is whole");
+    }
+
+    [Fact(DisplayName = "194b R (ontology c) parity must fire: a Decision Record whose resolved Signal has a SECURE core and stamp but an ordinary subject gets the writer's answer (ordinary) — only the Signal's subject is asked")]
+    public async Task ADecisionRecordWhoseSignalHasASecureCore_GetsTheWritersAnswer()
+    {
+        var (matter, secureMatter, @event) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        _world.OrdinaryRoot("sprk_matter", matter).SecureRoot("sprk_matter", secureMatter)
+            .Add("sprk_event", @event, ("owningteam", Ref("team", TeamB)));
+        var row = DecisionRecordAbout(matter, steps: null);
+        // Linked to the record too (it was not closed during the review): a link names the Signal, never its core or stamps.
+        var signal = ClosedSignalAbout("sprk_regardingevent", "sprk_event", @event,
+            ("sprk_matter", Ref("sprk_matter", secureMatter)), ("sprk_regardingmatter", Ref("sprk_matter", secureMatter)),
+            ("sprk_corerecordtype", Ref("sprk_recordtype_ref", CatalogMatter)), ("sprk_corerecordid", secureMatter.ToString("D")),
+            ("sprk_decisionrecord", Ref("sprk_decisionrecord", row.Id)));
+        row["sprk_steps"] = Steps(signal);
+        var request = new DecisionRecordRequest(
+            Guid.NewGuid(), Guid.NewGuid(), new DecisionRecordCore("sprk_matter", matter, CatalogMatter), new DecisionRecordRef("sprk_matter", matter),
+            Guid.NewGuid(), null, [], [], null, [signal], new Dictionary<string, object?>(), null, null, null,
+            SignalSubjects: [new DecisionRecordRef("sprk_event", @event)]);
+        var writerOwner = await DecisionRecordWriter().ResolveOwnerAsync(request, CancellationToken.None);
+        writerOwner.Resolution.IsSecureOwner.Should().BeFalse("the writer asks about the Signal's subject only, never its core or stamps");
+
+        var question = await QuestionAsync(row);
+
+        question.Incomplete.Should().BeNull();
+        question.Context.Parents.Should().NotContain(new RecordOwnershipParent("sprk_matter", secureMatter));
+        var answer = await Resolver.ResolveOwnerAsync(question.Context with { WhenUnfiled = UnfiledOwnership.KeepCreator }, CancellationToken.None);
+        answer.OwningTeamId.Should().Be(writerOwner.Resolution.OwningTeamId);
     }
 
     [Fact(DisplayName = "194b K5 must fire: one pass reads a record type's catalog row and a subject's stamps ONCE, however many rows share them")]

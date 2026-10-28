@@ -227,6 +227,14 @@ public sealed record SecureChildReconcileReport(
     public int ChildrenNeedingF3 => Tables.Sum(t => t.NeedsF3);
 
     /// <summary>
+    /// UAC task 194b fix round R (A2): the rows this pass HELD in isolation although the rule gives them an ordinary team (K3:
+    /// the To Do job's no-core rule; F1-d: a Decision Record whose question is incomplete), each with why (its
+    /// <see cref="SecureChildRowChange.Detail"/>). A pass that may release took their mirrored shares off (a row whose removal
+    /// did not complete is <see cref="SecureChildRowOutcome.Failed"/>). Holding does not make a pass incomplete.
+    /// </summary>
+    public IReadOnlyList<SecureChildRowChange> HeldInIsolation { get; init; } = Array.Empty<SecureChildRowChange>();
+
+    /// <summary>
     /// Rows NOT in their invariant state after this pass: refused + failed (+ planned, report-only) — a child whose mirrored
     /// shares could not be removed is among the failed — plus children whose shares are not in line.
     /// </summary>
@@ -1399,7 +1407,7 @@ public sealed class SecureChildReconciler
                 anchor.RecordId, "the Secure Record owner team could not be read");
         }
 
-        var pass = new Pass(this, mode, anchor, anchorIsolated, unsecuring: false, mayRelease, secureTeamId, ct, refileChildPass: true);
+        var pass = new Pass(this, mode, anchor, anchorIsolated, unsecuring: false, mayRelease, secureTeamId, ct);
         try
         {
             await pass.LoadDescendantsAsync().ConfigureAwait(false);
@@ -1471,18 +1479,11 @@ public sealed class SecureChildReconciler
 
         private ExistingRowReads Reads => _reads ??= new ExistingRowReads(_owner._dataverse, _owner._coreAncestors, _owner._links);
 
-        // UAC task 194b fix round (F1-d): the pass after a re-file (AfterRefileAsync's child pass), as opposed to a root's
-        // provisioning, sweep or Unsecure pass. The never-out rule for a Decision Record holds in the root passes (Unsecure OUT);
-        // a re-file's own release (ontology task 144, C2 §5 item 6) is not one of its named callers.
-        private readonly bool _refileChildPass;
-
         public Pass(
             SecureChildReconciler owner, SecureChildReconcileMode mode, RecordOwnershipParent root, bool rootIsolated,
-            bool unsecuring, bool mayRelease, Guid secureTeamId, CancellationToken ct, OrdinaryMove? ordinary = null,
-            bool refileChildPass = false)
+            bool unsecuring, bool mayRelease, Guid secureTeamId, CancellationToken ct, OrdinaryMove? ordinary = null)
         {
             _ordinary = ordinary;
-            _refileChildPass = refileChildPass;
             _owner = owner;
             _mode = mode;
             _root = root;
@@ -1957,6 +1958,35 @@ public sealed class SecureChildReconciler
                     };
                 }
 
+                // 3a'. HELD in isolation by a pass that may release (fix round R, A2): the row stays on the Secure team, but
+                // the record that isolated it is no longer secure for it, so its mirror of that record's sharees comes off,
+                // exactly as a released row's does: no sharee keeps access through a held row. Holding only removes access.
+                foreach (var row in ordered)
+                {
+                    var key = (row.LogicalName, row.Id);
+                    if (!decisions[key].HeldInIsolation || results[key].Outcome == SecureChildRowOutcome.Failed
+                        || !IsIsolated(current[key]) || IsGrant(row.LogicalName))
+                    {
+                        continue;
+                    }
+
+                    var removal = await _owner._shares.RemoveHeldMirrorAsync(row.LogicalName, row.Id, _ct).ConfigureAwait(false);
+                    mirrorRevoked += removal.SharesRevoked;
+                    if (removal.IsComplete)
+                        continue;
+
+                    mirrorIncomplete++;
+                    Log.LogWarning("[SECURE-CHILD-RECONCILE] {Table} {Id}: held in isolation, but its mirrored shares were not " +
+                        "all removed ({Status}: {Detail}); the next pass removes the rest.", row.LogicalName, row.Id,
+                        removal.Status, removal.Detail);
+                    results[key] = results[key] with
+                    {
+                        Outcome = SecureChildRowOutcome.Failed,
+                        Detail = $"held in isolation ({results[key].Detail}), but its mirrored shares could not all be removed " +
+                                 $"({removal.Detail}); the next pass removes the rest",
+                    };
+                }
+
                 // 3b. INTO isolation: the root's sharees mirrored onto every Secure-team-owned child (task 149) — the rows
                 // put back above included.
                 if (_anchorIsRoot && _rootIsolated)
@@ -2003,17 +2033,23 @@ public sealed class SecureChildReconciler
                 "[SECURE-CHILD-RECONCILE] root={Table} {RootId} mode={Mode} isolated={Isolated} unsecuring={Unsecuring} " +
                 "mayRelease={MayRelease} status={Status} examined={Examined} alreadyCorrect={AlreadyCorrect} changed={Changed} " +
                 "wouldChange={WouldChange} untouched={Untouched} refused={Refused} failed={Failed} needsF3={NeedsF3} " +
-                "shares={Shares} mirrorRevoked={MirrorRevoked} mirrorIncomplete={MirrorIncomplete}",
+                "shares={Shares} mirrorRevoked={MirrorRevoked} mirrorIncomplete={MirrorIncomplete} held={Held}",
                 _root.EntityLogicalName, _root.RecordId, _mode, _rootIsolated, _unsecuring, _mayRelease, status,
                 tables.Sum(t => t.Examined), tables.Sum(t => t.AlreadyCorrect), tables.Sum(t => t.Changed),
                 tables.Sum(t => t.WouldChange), tables.Sum(t => t.Untouched), tables.Sum(t => t.Refused),
                 tables.Sum(t => t.Failed), tables.Sum(t => t.NeedsF3), shares?.Status.ToString() ?? "-", mirrorRevoked,
-                mirrorIncomplete);
+                mirrorIncomplete, keys.Count(k => decisions[k].HeldInIsolation));
 
             return new SecureChildReconcileReport(
                 status, _mode, _root.EntityLogicalName, _root.RecordId, _rootIsolated, tables, _changes, shares,
                 mirrorRevoked, mirrorIncomplete, null)
             {
+                HeldInIsolation = ordered
+                    .Where(r => decisions[(r.LogicalName, r.Id)].HeldInIsolation)
+                    .Select(r => (Row: r, Result: results[(r.LogicalName, r.Id)]))
+                    .Select(h => new SecureChildRowChange(
+                        h.Row.LogicalName, h.Row.Id, h.Result.Previous, h.Result.Target, h.Result.Outcome, h.Result.Detail))
+                    .ToList(),
                 OrdinaryWritesAttempted = _ordinaryWritesAttempted,
                 OrdinaryHandOffDocumentIds = _documentHandOff.Where(d => d.Value).Select(d => d.Key).OrderBy(id => id).ToList(),
                 IsolatedDocumentIds = ordered
@@ -2188,16 +2224,17 @@ public sealed class SecureChildReconciler
 
             // 194b fix round: a row isolated when the pass began that no rule here may take out — even Unsecure (a row this pass
             // moved in may still go back to its own start owner: that undoes the pass's own move). K3: the To Do job keeps a
-            // no-core row's owner (its own predicate); F1-d: a Decision Record's commit-time parents are not all stored. Held
-            // isolated (an under-share, never an over-share) and reported.
+            // no-core row's owner (its own predicate); F1-d (fix round R): a Decision Record whose question is incomplete — in
+            // every pass, the re-file pass included. Held isolated and reported; fix round R (A2): a pass that may release takes
+            // its mirrored shares off as it does a released row's (HeldInIsolation), so no sharee keeps access through it.
             if (move == RowMove.Out && IsIsolated(start)
                 && (question.NoCoreOwnerRule
-                    ?? (_refileChildPass ? null : RecordOwnershipContext.DecisionRecordHeldInIsolation(table, ownedInIsolation: true, resolution)))
+                    ?? RecordOwnershipContext.DecisionRecordHeldInIsolation(table, ownedInIsolation: true, resolution, question.Incomplete))
                 is { } held)
             {
                 Log.LogWarning("[SECURE-CHILD-RECONCILE] {Table} {Id}: the rule gives it team {Target}, out of isolation, but it " +
                     "is held isolated ({Why}).", table, row.Id, target, held);
-                return new(RowMove.Stay, SecureChildRowOutcome.Untouched, resolution, held);
+                return new(RowMove.Stay, SecureChildRowOutcome.Untouched, resolution, held, HeldInIsolation: true);
             }
 
             var kind = current == DataversePrincipalRef.Team(target)
@@ -2249,7 +2286,8 @@ public sealed class SecureChildReconciler
             try
             {
                 var answer = await _owner._ownership.ResolveOwnerAsync(ContextFor(row), _ct).ConfigureAwait(false);
-                if (RecordOwnershipContext.DecisionRecordHeldInIsolation(row.LogicalName, ownedInIsolation: true, answer) is { } held)
+                if (RecordOwnershipContext.DecisionRecordHeldInIsolation(
+                        row.LogicalName, ownedInIsolation: true, answer, QuestionFor(row).Incomplete) is { } held)
                 {
                     Log.LogWarning("[SECURE-CHILD-RECONCILE] ordinary move {Table} {Id}: {Why}.", row.LogicalName, row.Id, held);
                     return new(RowMove.Stay, SecureChildRowOutcome.Untouched, answer, held);
@@ -2496,7 +2534,10 @@ public sealed class SecureChildReconciler
         }
 
         /// <summary>One round's decision for one row: the move, and the resolution the rule answered (when it gave an owner).</summary>
-        private sealed record RowDecision(RowMove Move, SecureChildRowOutcome Kind, RecordOwnerResolution? Resolution, string? Detail)
+        /// <param name="HeldInIsolation">Fix round R (A2): the rule gives the row an ordinary team, but a rule of
+        /// <see cref="DecideRowAsync"/> holds it in isolation (K3, F1-d) — in a pass that may release, its mirror comes off.</param>
+        private sealed record RowDecision(
+            RowMove Move, SecureChildRowOutcome Kind, RecordOwnerResolution? Resolution, string? Detail, bool HeldInIsolation = false)
         {
             public Guid? Target => Resolution is { IsOwned: true } r ? r.OwningTeamId : null;
         }

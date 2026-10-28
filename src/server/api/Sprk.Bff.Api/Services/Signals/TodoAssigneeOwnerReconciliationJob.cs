@@ -954,28 +954,11 @@ public sealed class TodoAssigneeOwnerReconciliationJob : IScheduledJob
         // not decided (Unverified), never written past an unchecked secure subject.
         if (!run.HostMap.ContainsKey(SignalTable))
             throw new InvalidOperationException("the Signal columns were not probed, so the record's resolved subjects cannot be read");
-        return await ResolvedSignalSubjectsAsync(run.Entities, run.Hosts(SignalTable).Parents, recordId, ct).ConfigureAwait(false);
-    }
-
-    /// <summary>The Signal table's ownership-parent lookups (its lineage, <see cref="SecureChildLineage"/>), unprobed.</summary>
-    internal static IReadOnlyList<string> SignalParentColumns { get; } = SecureChildLineage.Children[SignalTable].Lookups
-        .Where(l => RecordOwnershipResolver.IsOwnershipParent(l.Value))
-        .Select(l => l.Key)
-        .ToArray();
-
-    /// <summary>
-    /// The subjects of every Signal whose <c>sprk_decisionrecord</c> is <paramref name="recordId"/> (each Signal's ownership-parent
-    /// lookups among <paramref name="signalParentColumns"/>). UAC task 194b fix round (F1-d): shared with the ownership reconciler's
-    /// existing-row question for a Decision Record. A fault propagates.
-    /// </summary>
-    internal static async Task<List<RecordOwnershipParent>> ResolvedSignalSubjectsAsync(
-        IGenericEntityService entities, IReadOnlyList<string> signalParentColumns, Guid recordId, CancellationToken ct)
-    {
         var lineage = SecureChildLineage.Children[SignalTable].Lookups;
-        var columns = signalParentColumns;
+        var columns = run.Hosts(SignalTable).Parents;
         var query = new QueryExpression(SignalTable) { ColumnSet = new ColumnSet(columns.ToArray()), NoLock = true };
         query.Criteria.AddCondition(SignalDecisionRecordColumn, ConditionOperator.Equal, recordId);
-        var signals = await entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+        var signals = await run.Entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
         return signals.Entities
             .SelectMany(s => columns
                 .Select(c => s.GetAttributeValue<EntityReference>(c) is { } r && r.Id != Guid.Empty

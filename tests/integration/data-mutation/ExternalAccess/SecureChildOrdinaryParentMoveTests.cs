@@ -60,10 +60,18 @@ public class SecureChildOrdinaryParentMoveTests
 
     private readonly ConditionalOwnerWebApi _webApi;
 
+    /// <summary>The share table the reconciler's synchronizer reads and writes (194b fix round R: a held row's mirror).</summary>
+    private readonly FakeRecordShareTable _shares = new();
+
+    /// <summary>A user the secure matter was shared with: its mirror sits on every isolated child.</summary>
+    private static readonly Guid Sharee = Guid.Parse("5e000000-0000-4000-8000-000000194501");
+
+    private const int CollaborateMask = 1 | 2 | 4 | 16;
+
     public SecureChildOrdinaryParentMoveTests() => _webApi = new ConditionalOwnerWebApi(() => _world);
 
     private SecureChildReconciler Reconciler() =>
-        SecureChildShareWorld.ReconcilerOver(() => _world, new FakeRecordShareTable(), _webApi);
+        SecureChildShareWorld.ReconcilerOver(() => _world, _shares, _webApi);
 
     /// <summary>The matter, ordinary, reassigned from business unit A (the general unit) to B: owned by B's default team.</summary>
     private void MatterMovedToB(Guid? id = null) =>
@@ -563,17 +571,20 @@ public class SecureChildOrdinaryParentMoveTests
             .Which.Should().Match<SecureChildRowChange>(c => c.Outcome == SecureChildRowOutcome.Untouched && c.Detail!.Contains("F1-d"));
     }
 
-    [Fact(DisplayName = "194b F1-d must fire: an Unsecure HOLDS a Decision Record in isolation and reports it, while the Signal beside it is released")]
+    [Fact(DisplayName = "194b F1-d must fire: an Unsecure HOLDS a Decision Record whose question is incomplete in isolation, takes its mirror off and reports it held, while the Signal beside it is released")]
     public async Task AnUnsecure_HoldsADecisionRecord_AndReleasesTheSignal()
     {
         var unsecured = Guid.NewGuid();
         _world.FlaggedNotIsolatedRoot(Matter, unsecured);
         MatterMovedToB();
         var (record, signal) = (Guid.NewGuid(), Guid.NewGuid());
+        // No sprk_steps: the Signals it resolved are not known, so its question is incomplete (fix round R).
         OntologyRow("sprk_decisionrecord", record, TeamRef(SecureChildShareWorld.SecureTeam), core: unsecured, subject: unsecured,
             ("sprk_matter", Matter, unsecured), ("sprk_regardingmatter", Matter, unsecured));
         OntologyRow("sprk_signal", signal, TeamRef(SecureChildShareWorld.SecureTeam), core: unsecured, subject: unsecured,
             ("sprk_matter", Matter, unsecured), ("sprk_regardingmatter", Matter, unsecured));
+        _shares.Seed("sprk_decisionrecord", record, DataversePrincipalRef.User(Sharee), CollaborateMask);
+        _shares.Seed("sprk_signal", signal, DataversePrincipalRef.User(Sharee), CollaborateMask);
 
         var report = await Reconciler().ReconcileAsync(
             Matter, unsecured, SecureChildReconcileMode.Apply, SecureChildPassTrigger.Unsecure, CancellationToken.None);
@@ -582,7 +593,13 @@ public class SecureChildOrdinaryParentMoveTests
         _world.OwnerWrites.Should().NotContain(w => w.Id == record);
         report.Changes.Should().ContainSingle(c => c.Id == record)
             .Which.Should().Match<SecureChildRowChange>(c => c.Outcome == SecureChildRowOutcome.Untouched && c.Detail!.Contains("F1-d"));
+        _shares.MaskOf("sprk_decisionrecord", record, DataversePrincipalRef.User(Sharee)).Should().BeNull(
+            "the held record's mirror of the unsecured matter's sharees comes off, as a released record's does");
+        report.HeldInIsolation.Should().ContainSingle().Which.Should().Match<SecureChildRowChange>(
+            h => h.Id == record && h.Detail!.Contains("incomplete"));
+        report.MirrorRemovalsIncomplete.Should().Be(0, "the held row's mirror came off whole");
         _world.OwnerOf("sprk_signal", signal).Should().Be(DataversePrincipalRef.Team(GeneralTeam), "only a Decision Record is held");
+        _shares.MaskOf("sprk_signal", signal, DataversePrincipalRef.User(Sharee)).Should().BeNull();
     }
 
     [Fact(DisplayName = "194b K3 must fire: an Unsecure never takes a no-core row the To Do job keeps OUT of isolation — held and reported with the job's rule")]
@@ -595,6 +612,8 @@ public class SecureChildOrdinaryParentMoveTests
         OntologyRow("sprk_signal", signal, TeamRef(SecureChildShareWorld.SecureTeam), core: null, subject: TodoId,
             ("sprk_regardingtodo", "sprk_todo", TodoId), ("sprk_matter", Matter, unsecured));
 
+        _shares.Seed("sprk_signal", signal, DataversePrincipalRef.User(Sharee), CollaborateMask);
+
         var report = await Reconciler().ReconcileAsync(
             Matter, unsecured, SecureChildReconcileMode.Apply, SecureChildPassTrigger.Unsecure, CancellationToken.None);
 
@@ -603,6 +622,10 @@ public class SecureChildOrdinaryParentMoveTests
         report.Changes.Should().ContainSingle(c => c.Id == signal)
             .Which.Should().Match<SecureChildRowChange>(c => c.Outcome == SecureChildRowOutcome.Untouched
                                                              && c.Detail!.Contains("TodoAssigneeOwnerReconciliationJob"));
+        _shares.MaskOf("sprk_signal", signal, DataversePrincipalRef.User(Sharee)).Should().BeNull(
+            "fix round R (A2): a row held by the To Do job's rule loses the unsecured matter's mirror too");
+        report.HeldInIsolation.Should().ContainSingle().Which.Id.Should().Be(signal);
+        report.MirrorRemovalsIncomplete.Should().Be(0, "the held row's mirror came off whole");
     }
 
     [Fact(DisplayName = "194b F1-b must fire: Make Secure on R moves a Signal filed under R INTO isolation even when its core's catalog read faults (a 429) — its stored parents are secure")]
