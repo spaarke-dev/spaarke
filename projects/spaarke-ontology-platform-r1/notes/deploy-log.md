@@ -434,3 +434,7 @@ Criterion 89 (blank the writer client id, expect the writer-failure alert to fir
   - Open v2 Signals keep v2's plan (Assign Task only) until the next re-evaluation pass, nightly at 02:30Z. That pass closes them as Superseded and raises v3 Signals, which offer Create budget, then Assign Task.
   - Matters whose v2 item was Acted are not re-raised (D-119).
   - The job was not triggered manually.
+- **Re-evaluation run by hand (owner asked, 2026-10-28):**
+  - `POST /api/admin/jobs/signal-reevaluation/trigger` at 13:02:40Z → run `5414d2d6`, ManualAdmin; Succeeded at 13:04:02Z (82 s).
+  - Result: policiesEvaluated 6, hits 149, supersededClosed 54, reraised 54, written 2, unchanged 86. Zero refused, policyFailures, accessDenied and anomalies.
+  - Read-back, `sprk_signalstatus` (`statecode` stays Active by design): v2 has 56 Resolved (54 superseded, plus 2 Acted); v3 has 54 Open.
