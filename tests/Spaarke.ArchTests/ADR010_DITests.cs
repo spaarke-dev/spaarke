@@ -409,6 +409,11 @@ public class ADR010_DITests
         // OfficeSubmissionEmailSaveContractTests. Falsifiable: if the from-email tests drive the real OfficeService, lower by 1.
         // A third 095 interface (IEntityAccessTarget, for EntityAccessFilter) was replaced by a concrete type check (ADR-010 Path C).
         // Measured: the printed list at 172 before that removal, 171 after.
+        // ───────── Ceiling unchanged at 171, 2026-10-28 (ebilling-r1 task 094) ─────────
+        // ISubmitInvoiceFromEmail -> SubmitInvoiceFromEmailOperation: 094's operation replaced the stand-in (deleted), so the mapping is still
+        // one of the 171. The seam stays justified: 095's service and contract tests fake the operation (its outcomes, the replay's source,
+        // the requeue), and the operation's own tests drive it over the intake's fakes. Falsifiable: if those tests drive the real
+        // operation, register the concrete and lower to 170.
         const int knownOneToOneCeiling = 171;
 
         Assert.True(

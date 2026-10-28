@@ -1815,6 +1815,213 @@ public class InvoiceSubmissionPersisterTests
         store.FileStatusAtTotals.Should().Equal([StoredFileStatus.Servable]);
     }
 
+    // ── Task 094 (from-email, ISubmitInvoiceFromEmail): the submission names no document; its Invoice part is staged under ForUpload with its
+    // source (the marked .eml) recorded, and its Supporting parts beside it. The persister builds every part's row in the commit, runs step 3
+    // on the .eml and guards it at the version that check read ──
+
+    private static readonly Guid EmailCommunication = Guid.Parse("09400000-0000-4000-8000-0000000000c1");
+    private static readonly byte[] EmailPdf = "%PDF-1.7 invoice from email"u8.ToArray();
+    private static readonly byte[] EmailXlsx = "PK timesheet from email"u8.ToArray();
+    private static readonly Guid EmailSupportingFile = StoredFileIds.ForAttachment(Submission, "eml-part-1");
+
+    private static string Sha(byte[] bytes) => Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes));
+
+    /// <summary>
+    /// Stages the parts exactly as <see cref="SubmitInvoiceFromEmailOperation"/> does (its <see cref="SubmitInvoiceFromEmailOperation.SpecOf"/>),
+    /// for <see cref="Submission"/> with <see cref="Document"/> as the <c>.eml</c>, read at <paramref name="version"/>.
+    /// </summary>
+    private static void StageFromEmail(Store store, long version, bool withSupporting = true, Guid? supportingSource = null)
+    {
+        var parts = new List<FromEmailMarkedPart> { new(0, "Invoice 1001.pdf", Sha(EmailPdf), FromEmailMarks.Invoice) };
+        if (withSupporting)
+        {
+            parts.Add(new(1, "Timesheet.xlsx", Sha(EmailXlsx), FromEmailMarks.Supporting));
+        }
+
+        var input = new FromEmailSubmitInput
+        {
+            SourceEmlDocumentId = Document,
+            CommunicationId = EmailCommunication,
+            CoreRecord = new InvoiceCoreRecord(InvoiceCoreRecordKind.Matter, Matter),
+            FirmId = Firm,
+            FirmInvoiceNumber = "INV-100",
+            MarkedParts = parts.Select(p => p with { StoredFileId = FromEmailSubmissionKey.StoredFileIdFor(Submission, p) }).ToList(),
+            SubmissionId = Submission,
+            JobId = Guid.NewGuid(),
+            Generation = 1,
+            Mode = FromEmailModes.New,
+            CallerSystemUserId = Submitter,
+        };
+        var supporting = withSupporting ? new[] { 1 } : Array.Empty<int>();
+        foreach (var part in input.MarkedParts)
+        {
+            var (spec, manifest) = SubmitInvoiceFromEmailOperation.SpecOf(input, part, version, supporting);
+            if (part.Mark == FromEmailMarks.Supporting && supportingSource is { } other)
+            {
+                spec = spec with { SourceDocumentId = other };
+            }
+
+            var bytes = part.Mark == FromEmailMarks.Invoice ? EmailPdf : EmailXlsx;
+            store.Files.Service.StageAsync(spec, new MemoryStream(bytes), manifest, CancellationToken.None).GetAwaiter().GetResult()
+                .IsStaged.Should().BeTrue();
+        }
+    }
+
+    /// <summary>A from-email store: the submission is Channel Internal and names no document; nothing but the email's parts is staged.</summary>
+    private static Store FromEmailStore(Action<Store>? beforeTransaction = null)
+    {
+        var store = new Store { Staged = false, BeforeTransaction = beforeTransaction };
+        store.Submission["sprk_channel"] = new OptionSetValue((int)InvoiceSubmissionChannel.Internal);
+        return store;
+    }
+
+    private static Entity FileCreate(Store store, Guid fileId) =>
+        store.Transactions.Single().OfType<CreateRequest>().Single(c => c.Target.LogicalName == StoredFileSchema.Entity && c.Target.Id == fileId).Target;
+
+    [Fact(DisplayName = "094 from-email: every part's Stored File row commits in the ONE transaction with its source (the .eml, its communication, the part, the version, the SHA-256), Firm-visible No, created by the submitter; the .eml is guarded; every part ends Servable; nothing links the .eml")]
+    public async Task FromEmail_CommitsEveryPartWithItsSource_GuardsTheEml_AndFlipsEveryPart()
+    {
+        var outcome = await new ProcessorHarness { Channel = InvoiceSubmissionChannel.Internal }.RunAsync();
+        var store = FromEmailStore();
+        StageFromEmail(store, version: store.DocumentVersion);
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Committed);
+        store.Transactions.Single().Select(Describe).Should().Equal(
+            "Create sprk_invoice", "Create sprk_storedfile", "Create sprk_storedfile", "Create sprk_billingevent", "Create sprk_invoiceapproval",
+            "Update sprk_document", "Update sprk_invoicesubmission");
+
+        var invoicePdf = FileCreate(store, FileId);
+        invoicePdf.GetAttributeValue<OptionSetValue>(StoredFileSchema.Purpose).Value.Should().Be((int)StoredFilePurpose.InvoicePdf);
+        invoicePdf.GetAttributeValue<string>(StoredFileSchema.SourceAttachmentIdentity).Should().Be("eml-part-0");
+        invoicePdf.GetAttributeValue<string>(StoredFileSchema.SourceSha256).Should().Be(Sha(EmailPdf));
+        var supporting = FileCreate(store, EmailSupportingFile);
+        supporting.GetAttributeValue<OptionSetValue>(StoredFileSchema.Purpose).Value.Should().Be((int)StoredFilePurpose.InvoiceSupportingFile);
+        supporting.GetAttributeValue<string>(StoredFileSchema.SourceAttachmentIdentity).Should().Be("eml-part-1");
+        supporting.GetAttributeValue<string>(StoredFileSchema.SourceSha256).Should().Be(Sha(EmailXlsx));
+        supporting.GetAttributeValue<string>(StoredFileSchema.Name).Should().Be("INV-100.2-1.xlsx", "the tracking number and the ordinal, never the attachment's name");
+        foreach (var row in new[] { invoicePdf, supporting })
+        {
+            row.GetAttributeValue<bool>(StoredFileSchema.FirmVisible).Should().BeFalse();
+            row.GetAttributeValue<EntityReference>(StoredFileSchema.SourceDocument).Id.Should().Be(Document);
+            row.GetAttributeValue<EntityReference>(StoredFileSchema.SourceCommunication).Id.Should().Be(EmailCommunication);
+            row.GetAttributeValue<string>(StoredFileSchema.SourceVersion).Should().Be("7");
+            row.GetAttributeValue<EntityReference>(RecordCreatorPerson.Column).Id.Should().Be(Submitter, "the submission's creator person (OP-5)");
+        }
+
+        var guard = store.Transactions.Single().OfType<UpdateRequest>().Single(u => u.Target.LogicalName == "sprk_document");
+        guard.Target.Id.Should().Be(Document);
+        guard.ConcurrencyBehavior.Should().Be(ConcurrencyBehavior.IfRowVersionMatches);
+        guard.Target.RowVersion.Should().Be("7");
+        guard.Target.Attributes.Keys.Should().Equal(new[] { "sprk_invoicereviewstatus" });
+        store.DocumentReads.Count(c => c.Contains("sprk_relatedmatter")).Should().Be(2, "step 3 before the build, step 5 (the gate) after the commit");
+        store.Files.Dataverse.Rows.Values.Select(r => (StoredFileStatus)r.GetAttributeValue<OptionSetValue>(StoredFileSchema.Status).Value)
+            .Should().HaveCount(2).And.OnlyContain(s => s == StoredFileStatus.Servable);
+        store.Submission.GetAttributeValue<EntityReference>("sprk_document").Should().BeNull("a from-email submission never names the .eml");
+        store.Isolation.OwnerWrites.Should().BeEmpty("the .eml is never re-owned");
+    }
+
+    [Fact(DisplayName = "094 from-email: the guard pins the .eml at the version step 3 READ, not the version the parts were read at (the .eml's finalization writes its row after the intake; the parts' bytes are pinned by their SHA-256)")]
+    public async Task FromEmail_TheEmlMovedOnSinceTheIntake_GuardsTheLiveVersion_AndCommits()
+    {
+        var outcome = await new ProcessorHarness { Channel = InvoiceSubmissionChannel.Internal }.RunAsync();
+        var store = FromEmailStore();
+        StageFromEmail(store, version: 5);
+        store.DocumentVersion = 9;
+
+        (await store.Build().PersistAsync(outcome, null)).Status.Should().Be(SubmissionPersistStatus.Committed);
+
+        store.Transactions.Single().OfType<UpdateRequest>().Single(u => u.Target.LogicalName == "sprk_document").Target.RowVersion.Should().Be("9");
+        FileCreate(store, FileId).GetAttributeValue<string>(StoredFileSchema.SourceVersion).Should().Be("5", "the version the parts were read out of");
+    }
+
+    [Fact(DisplayName = "094 from-email (must fire): a write to the .eml between step 3 and the commit faults the guard: SourceChanged, nothing committed, no staged part deleted")]
+    public async Task FromEmail_AWriteBetweenTheCheckAndTheCommit_IsSourceChanged()
+    {
+        var outcome = await new ProcessorHarness { Channel = InvoiceSubmissionChannel.Internal }.RunAsync();
+        var store = FromEmailStore(s => s.DocumentVersion++);
+        StageFromEmail(store, version: store.DocumentVersion);
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.SourceChanged);
+        store.Files.Dataverse.Rows.Should().BeEmpty();
+        store.Submission.GetAttributeValue<EntityReference>("sprk_invoice").Should().BeNull();
+        store.Files.Gateway.Calls.Should().NotContain(c => c.StartsWith("delete ", StringComparison.Ordinal), "the parts are the caller's bytes: nothing re-stages them");
+    }
+
+    [Fact(DisplayName = "094 from-email (must fire): the .eml linked to another invoice is refused at step 3, before anything is built")]
+    public async Task FromEmail_TheEmlIsLinkedToAnotherInvoice_IsRefused_NoTransaction()
+    {
+        var outcome = await new ProcessorHarness { Channel = InvoiceSubmissionChannel.Internal }.RunAsync();
+        var store = FromEmailStore();
+        store.DocumentRow = new Entity("sprk_document", Document) { ["sprk_invoice"] = new EntityReference("sprk_invoice", Guid.NewGuid()) };
+        StageFromEmail(store, version: store.DocumentVersion);
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Refused);
+        result.ReasonCode.Should().Be(InvoiceSubmissionErrors.DocumentAlreadyInvoiced);
+        store.Transactions.Should().BeEmpty();
+    }
+
+    [Theory(DisplayName = "094 from-email (must fire): a listed Supporting part that is missing or records another source is Refused file_unservable before any write")]
+    [InlineData("missing")]
+    [InlineData("another source")]
+    public async Task FromEmail_ASupportingPartIsMissingOrNotThisEmails_IsRefused_NoTransaction(string fault)
+    {
+        var outcome = await new ProcessorHarness { Channel = InvoiceSubmissionChannel.Internal }.RunAsync();
+        var store = FromEmailStore();
+        StageFromEmail(store, version: store.DocumentVersion, supportingSource: fault == "another source" ? Guid.NewGuid() : null);
+        if (fault == "missing")
+        {
+            var parent = new StoredFileParent(StoredFileParentKind.Invoice, InvoiceId);
+            await store.Files.Gateway.DeleteIfExistsAsync(
+                StoredFileSchema.ContainerOf(StoredFilePurpose.InvoiceSupportingFile), StoredFileBlobName.Build(store.Files.TenantId, parent, EmailSupportingFile),
+                ifMatch: null, CancellationToken.None);
+        }
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Refused);
+        result.ReasonCode.Should().Be(SubmissionReasonCodes.FileUnservable);
+        store.Transactions.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "094 from-email (must fire): a sourced stage on a submission that is not Channel Internal is Refused document_unavailable before any read of the .eml")]
+    public async Task FromEmail_ASourcedStageOnAnSpaSubmission_IsRefused()
+    {
+        var outcome = await new ProcessorHarness().RunAsync();
+        var store = new Store { Staged = false };
+        StageFromEmail(store, version: store.DocumentVersion);
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Refused);
+        result.ReasonCode.Should().Be(SubmissionReasonCodes.DocumentUnavailable);
+        store.DocumentReads.Should().BeEmpty();
+        store.Transactions.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "094 x 098 end to end: a from-email invoice the REAL persister commits (Channel Internal, no document link, every Stored File sourced from the .eml) is visible to its own firm",
+        Skip = "098 at f2446e638e hides it (source_link_unreadable): its rule 3 is being reworked in 098 round 4 for this shape; unskip when that head is merged (notes/094-submit-invoice.md)")]
+    public async Task FromEmailInvoice_CommittedByThePersister_IsVisibleToTheFirm()
+    {
+        var outcome = await new ProcessorHarness { Channel = InvoiceSubmissionChannel.Internal }.RunAsync();
+        var store = FromEmailStore();
+        StageFromEmail(store, version: store.DocumentVersion);
+        (await store.Build().PersistAsync(outcome, null)).Status.Should().Be(SubmissionPersistStatus.Committed);
+        var world = new Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld();
+        ProjectForTheFirm(store, world, withStoredFiles: true);
+
+        var decision = await world.NewService(identity: null)
+            .HideInvoicesForAsync(FirmContact(), [InvoiceId], world.RootFlags);
+
+        decision.IsVisible(InvoiceId).Should().BeTrue(decision.HiddenSummary());
+        decision.Faulted.Should().BeFalse();
+    }
+
     private sealed class Store
     {
         public Entity Submission { get; } = new("sprk_invoicesubmission", InvoiceSubmissionPersisterTests.Submission)

@@ -128,11 +128,21 @@ ProblemDetails (ADR-019). Own refusals carry `errorCode` (submission routes, Inv
 | 409 | `ebilling.submission.correction_not_allowed` NEW | Correction refused | `reason`: `invoice_status` (+`invoiceStatus`), `different_firm`, `different_core_record` | no | §9.1 Existing invoice |
 | 404 | `sdap.access.deny.record_unavailable` (reasonCode) | Correction: `invoiceId` the caller cannot Write, or absent | – | no | ProblemDetailsHelper.cs:357-367; 097 constraint 1 |
 | 409 | RecordOwnerRefused reasonCode | No owner team for the new rows | – | no | InvoiceSubmissionHttp.cs:108 |
+| 403 | `ebilling.submission.source_forbidden` | Step 1 (task 094): the caller has no Read on the saved `.eml` or on its communication. Added 2026-10-28 (094) | – | no | InvoiceSubmissionEndpoints.PrepareSourceAsync |
+| 404 | `ebilling.submission.document_not_found` | Step 1 (task 094): the saved `.eml` no longer exists. Added 2026-10-28 (094) | – | no | as above |
+| 422 | `ebilling.submission.source_communication_mismatch` | Step 1 (task 094): the saved `.eml` is not that communication's. Added 2026-10-28 (094) | – | no | as above |
+| 403 | `COMMUNICATION_REFILE_FORBIDDEN` (the communication re-file route's own ProblemDetails, returned as it is) | Step A (task 094): the communication is unfiled and the caller may not file it under the record. Nothing of the submission is written. Added 2026-10-28 (094) | as that route | no | CommunicationEndpoints re-file |
+| 409 | `ebilling.submission.document_core_record_mismatch` | Also from step A (task 094): the unfiled communication is held under a secure record and cannot be filed here. Added 2026-10-28 (094) | – | no | InvoiceSubmissionEndpoints.SourceFiling |
+| 409 | `ebilling.submission.document_already_submitted` | Also (task 094): other bytes are already staged under this attempt (the same email, record and marking submitted with other Invoice or Supporting files). Added 2026-10-28 (094) | – | no | SubmitInvoiceFromEmailOperation |
+| 422 | `ebilling.submission.storage_not_configured` | Task 094: the Finance file store is not configured. Added 2026-10-28 (094) | – | no | as above |
+| 503 | `ebilling.tracking.unavailable` | Task 094: no tracking number could be allocated. Added 2026-10-28 (094) | – | yes | as above |
 | as `/office/save` | `OFFICE_004`/`005`/`006` (400), `OFFICE_020` (409), `OFFICE_022` (403), `OFFICE_012` (502, retry), `OFFICE_INTERNAL` (500) | Passed through from the in-process save | as there | – | OfficeErrorCodes.cs:226-249 |
 
 **`marks_invalid` reasons:** `invoice_count` (zero or more than one Invoice), `unknown_mark`, `inline_attachment`, `unmarked_attachment` (a non-inline entry with no mark), `duplicate_mark` (two marks on one entry), `ambiguous_attachment` (two non-inline entries share all three identity fields; OP-3). `invoice_not_pdf` (the entry marked `Invoice` is not a PDF: its content type does not contain `pdf` and its name does not end in `.pdf`; model 9.1 "PDF only"; added 2026-10-27 at word-add-in-r1's review, matching the 118a component). A `DontSave` mark matching no entry is accepted.
 
 **`email_unidentifiable` reasons:** `no_message_id`; `email_not_found` (Graph 403/404); `earlier_save_unlinked` (duplicate onto an unlinked or task-130 Restricted .eml); `no_communication`; `eml_ambiguous` (none or several candidates after the SHA check). Clients may show a reason and must accept unknown ones.
+
+**After step A (task 094, added 2026-10-28):** a refusal that comes after step A filed the communication keeps the filing, and its `detail` ends with "The communication was filed under the record first; that filing is kept." The 503 `ebilling.submission.failed` and `record_unavailable` rows also cover the saved `.eml` that could not be read at submit time. Step A runs only after the read-only refusals (step 1, the firm, the core record, the owner) on every path that creates an attempt, including a concurrent retry that loses the create race.
 
 **Order:** filter refusals (401, 403, 400 shape, 429, 503 disabled) come before any handler refusal. The handler checks marks (400), then bytes (422), then the rest. Nothing is written before a refusal except step A's filing (§9.1).
 
@@ -179,6 +189,10 @@ Field names and codes in this file are binding once word-add-in-r1 agrees (095 P
 | Failed | `ebilling.submission.file_scan_timeout` | The malware scan of a marked file did not finish in time (about 19 minutes across retries; task 092). A re-attempt is allowed (EB-D-160). Added 2026-10-27, agreed by word-add-in-r1 |
 | Failed | `ebilling.submission.file_unservable` | A marked file could not be stored or verified (task 092) |
 | Failed | `ebilling.submission.source_check_failed` | NEW (094 step 5): the source's filing or isolation re-check failed at commit |
+| Failed | `ebilling.submission.document_already_invoiced` | Added 2026-10-28 (094 step 3 on the `.eml`): the saved `.eml` was linked to another invoice before the commit |
+| Failed | `ebilling.submission.document_rejected` | Added 2026-10-28 (094 step 3): the saved `.eml` was rejected as not an invoice before the commit |
+| Failed | `ebilling.submission.document_core_record_mismatch` | Added 2026-10-28 (094 step 3): the saved `.eml` is filed under or held by another record at commit |
+| Failed | `ebilling.submission.document_not_found` | Added 2026-10-28 (094 step 3): the saved `.eml` was deleted before the commit |
 | Failed | `ebilling.submission.processing_failed` | Any other processing failure |
 | Rejected | `ebilling.submission.blocked` | A blocking rule rejected the invoice |
 | Rejected | `ebilling.submission.returned` | Returned to the firm |

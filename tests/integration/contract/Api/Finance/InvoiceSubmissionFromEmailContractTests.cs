@@ -614,7 +614,7 @@ public sealed class InvoiceSubmissionFromEmailContractTests : IAsyncLifetime
     [Fact]
     public async Task Failed_TheOperationIsNotAvailable_Is503SubmissionFailed_BeforeAnyWrite()
     {
-        // Until task 094 registers its adapter, the NotYetAvailable seam answers exactly this.
+        // Task 094's operation is always available; the route's gate still answers exactly this for a seam that is not (the contract row).
         _world.Operation.Available = false;
 
         var response = await PostAsync();

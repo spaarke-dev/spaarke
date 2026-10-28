@@ -224,7 +224,7 @@ public class FromEmailSubmissionServiceTests
     }
 
     [Fact]
-    public async Task Operation_NotYetAvailable_Is503Failed_BeforeTheSave()
+    public async Task Operation_NotAvailable_Is503Failed_BeforeTheSave()
     {
         var world = new W();
         world.Operation.Available = false;
@@ -242,16 +242,6 @@ public class FromEmailSubmissionServiceTests
 
         (await Run(world)).ErrorCode.Should().Be("ebilling.submission.record_unavailable");
         RefusedBeforeAnyWrite(world);
-    }
-
-    [Fact]
-    public async Task TheRealNotYetAvailableSeam_IsUnavailable_AndThrowsIfCalled()
-    {
-        var seam = new SubmitInvoiceFromEmailNotYetAvailable();
-
-        seam.IsAvailable.Should().BeFalse();
-        await FluentActions.Awaiting(() => seam.RequeueAsync(Guid.NewGuid(), Guid.NewGuid(), null, CancellationToken.None))
-            .Should().ThrowAsync<SubmitInvoiceFromEmailNotYetAvailableException>();
     }
 
     // ── the replay of K (contract section 5) and EB-D-160 ───────────────────────────────────────────────────────

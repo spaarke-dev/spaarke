@@ -353,6 +353,39 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             checkedDocument = document;
         }
 
+        // Task 094 (from-email, ISubmitInvoiceFromEmail): the submission names no document (092), and its Invoice part is staged under
+        // ForUpload like an upload's PDF; the stage recorded its SOURCE (the marked .eml, its communication, the version the parts were read
+        // at) in the blob's metadata, so that record decides. Its .eml gets step 3 here exactly as a source document does (filed under the
+        // core record only by the D-140 chain, isolated nowhere else, not linked to another invoice), and the transaction carries the guard
+        // on the .eml at the version THIS check read (BuildExistingDocumentGuard). The parts are the bytes the caller marked, read out of
+        // the .eml at intake and recorded with their SHA-256, so a later version of the .eml row (its finalization writes it) does not make
+        // them stale: the guard pins the filing and isolation this check judged, not the bytes.
+        StagedSource? fromEmail = null;
+        if (!sourceDocument)
+        {
+            var staged = await _files.ReadStagedSourceAsync(
+                StoredFilePurpose.InvoicePdf, new StoredFileParent(StoredFileParentKind.Invoice, InvoiceIdFor(submissionId)),
+                StoredFileIds.ForUpload(submissionId), ct).ConfigureAwait(false);
+            if (staged is { SourceDocumentId: { } emlId })
+            {
+                if (outcome.Submission.Channel != InvoiceSubmissionChannel.Internal || staged.SourceVersion is null)
+                {
+                    _logger.LogWarning("Invoice submission {SubmissionId}: its staged email part has no usable source record; nothing persisted", submissionId);
+                    return Result(SubmissionPersistStatus.Refused, submissionId, SubmissionReasonCodes.DocumentUnavailable);
+                }
+
+                var (emlRefusal, emlRow) = await CheckExistingDocumentAsync(submissionId, emlId, InvoiceIdFor(submissionId), outcome.CoreRecord!, ct)
+                    .ConfigureAwait(false);
+                if (emlRefusal is not null)
+                {
+                    return emlRefusal;
+                }
+
+                checkedDocument = emlRow;
+                fromEmail = staged;
+            }
+        }
+
         // D-130 (3) / D-131: the submitter, recorded at intake on the submission as sprk_createdbyperson (a systemuser: the SPA caller's linked
         // user or the internal caller) and, for the SPA channel, as sprk_submitter (the caller's contact). Read before anything is built.
         //   person present                  -> stamped on the invoice, every line and the approval (D-130 3);
@@ -408,11 +441,30 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         // the flip after the commit recomputes the hash by streaming). No usable blob: no invoice (nothing written yet).
         StoredFileRowSpec? fileSpec = null;
         StagedBlob? stagedFile = null;
+        IReadOnlyList<(StoredFileRowSpec Spec, StagedBlob Blob)> supporting = [];
         if (!sourceDocument)
         {
             fileSpec = InvoiceSubmissionService.UploadFileSpec(
                 submissionId, clientFileName: null, outcome.Submission.Channel, outcome.Submission.TrackingNumber);
-            stagedFile = await _files.GetStagedAsync(fileSpec, ct).ConfigureAwait(false);
+            if (fromEmail is not null)
+            {
+                // From-email: the Invoice part's row records its source (Firm-visible No: a copy with a source never is), and every Supporting
+                // part staged with it gets its row in this transaction too.
+                fileSpec = FromEmailPartSpec(fileSpec, fromEmail);
+                stagedFile = fromEmail.Blob;
+                var parts = await ReadFromEmailSupportingAsync(outcome.Submission, fromEmail, ct).ConfigureAwait(false);
+                if (parts is null)
+                {
+                    return Result(SubmissionPersistStatus.Refused, submissionId, SubmissionReasonCodes.FileUnservable);
+                }
+
+                supporting = parts;
+            }
+            else
+            {
+                stagedFile = await _files.GetStagedAsync(fileSpec, ct).ConfigureAwait(false);
+            }
+
             if (stagedFile is null)
             {
                 _logger.LogWarning("Invoice submission {SubmissionId}: its staged PDF {FileId} is missing or unusable; nothing persisted",
@@ -480,6 +532,12 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             requests.Add(_files.BuildRow(fileSpec, stagedFile!, owner, submitter));
         }
 
+        foreach (var (partSpec, partBlob) in supporting)
+        {
+            // From-email (task 094): a Supporting part's row, the same rules (Not yet servable, owned like the invoice, Firm-visible No).
+            requests.Add(_files.BuildRow(partSpec, partBlob, owner, submitter));
+        }
+
         foreach (var copy in outcome.StagedFiles)
         {
             // Task 094 (9.1 step 4): the source copy's row, the same rules (Not yet servable, owned like the invoice), Firm-visible No.
@@ -493,7 +551,8 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         }
 
         var guardIndex = -1;
-        if (sourceDocument)
+        var guardedSource = sourceDocument ? documentId : fromEmail?.SourceDocumentId;
+        if (guardedSource is not null)
         {
             // The guard: no link, only the version check at the staged version (see BuildExistingDocumentGuard; the check above proved the
             // version read is the staged one).
@@ -556,15 +615,16 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             // delivery (the submission is Failed, no invoice). Task 094 (9.1 step 4): a guard fault otherwise means the source changed, so the
             // job re-stages it under the new version and commits once more (SourceChanged); any other fault is the transaction's own Retry.
             // Either way the staged copy is deleted (PersistAsync); the upload's blob never is.
-            if (sourceDocument && await RecheckExistingDocumentAsync(submissionId, documentId!.Value, invoiceId, core, ct).ConfigureAwait(false) is { } refusedNow)
+            if (guardedSource is { } guarded && await RecheckExistingDocumentAsync(submissionId, guarded, invoiceId, core, ct).ConfigureAwait(false) is { } refusedNow)
             {
                 return refusedNow;
             }
 
-            if (sourceDocument && ex.FailedRequestIndex == guardIndex)
+            if (guardedSource is not null && ex.FailedRequestIndex == guardIndex)
             {
+                // A from-email submission has no job-staged copy, so the job retries the delivery and step 3 reads the .eml again.
                 _logger.LogInformation("Invoice submission {SubmissionId}: the guard on its source {DocumentId} failed; nothing persisted, re-stage",
-                    submissionId, documentId);
+                    submissionId, guardedSource);
                 return Result(SubmissionPersistStatus.SourceChanged, submissionId, SubmissionReasonCodes.SourceChanged);
             }
 
@@ -629,6 +689,61 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             },
             ConcurrencyBehavior = ConcurrencyBehavior.IfRowVersionMatches,
         };
+    }
+
+    /// <summary>The from-email attachment identity of the part at <paramref name="ordinal"/> (its Supporting file id derives from it too).</summary>
+    internal static string EmlPartIdentity(int ordinal) => "eml-part-" + ordinal.ToString(CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// Task 094 (from-email): <paramref name="spec"/> with the source its stage recorded: the marked <c>.eml</c>, its communication, the part's
+    /// attachment identity, the version the parts were read at and the part's SHA-256 (a byte copy: the blob's own). Firm-visible No.
+    /// </summary>
+    private static StoredFileRowSpec FromEmailPartSpec(StoredFileRowSpec spec, StagedSource staged) => spec with
+    {
+        FirmVisible = false,
+        SourceDocumentId = staged.SourceDocumentId,
+        SourceCommunicationId = staged.SourceCommunicationId,
+        SourceAttachmentIdentity = staged.SourceAttachmentIdentity,
+        SourceVersion = staged.SourceVersion,
+        SourceSha256 = staged.Blob.Sha256,
+    };
+
+    /// <summary>
+    /// Task 094 (from-email): the Supporting parts the Invoice part's stage listed, each read back from its own stage, which must record the
+    /// same <c>.eml</c>. Null when one is missing or records another source (nothing is written: the submission is Failed
+    /// <see cref="SubmissionReasonCodes.FileUnservable"/>). Names carry the tracking number and the ordinal, never the attachment's name.
+    /// </summary>
+    private async Task<IReadOnlyList<(StoredFileRowSpec Spec, StagedBlob Blob)>?> ReadFromEmailSupportingAsync(
+        SubmissionSnapshot submission, StagedSource invoicePart, CancellationToken ct)
+    {
+        var parent = new StoredFileParent(StoredFileParentKind.Invoice, InvoiceIdFor(submission.SubmissionId));
+        var parts = new List<(StoredFileRowSpec, StagedBlob)>(invoicePart.SupportingOrdinals.Count);
+        foreach (var ordinal in invoicePart.SupportingOrdinals.Distinct())
+        {
+            var identity = EmlPartIdentity(ordinal);
+            var fileId = StoredFileIds.ForAttachment(submission.SubmissionId, identity);
+            var staged = await _files.ReadStagedSourceAsync(StoredFilePurpose.InvoiceSupportingFile, parent, fileId, ct).ConfigureAwait(false);
+            if (staged is null || staged.SourceDocumentId != invoicePart.SourceDocumentId || staged.SourceAttachmentIdentity != identity)
+            {
+                _logger.LogWarning("Invoice submission {SubmissionId}: its staged email part {Ordinal} is missing or records another source; nothing persisted",
+                    submission.SubmissionId, ordinal);
+                return null;
+            }
+
+            var name = $"{submission.TrackingNumber.Trim()}-{ordinal.ToString(CultureInfo.InvariantCulture)}";
+            var spec = FromEmailPartSpec(new StoredFileRowSpec
+            {
+                FileId = fileId,
+                Purpose = StoredFilePurpose.InvoiceSupportingFile,
+                Parent = parent,
+                Name = (name.Length > 100 ? name[..100] : name) + (staged.Extension ?? string.Empty),
+                ContentType = staged.ContentType is { Length: > 0 and <= StoredFileSchema.ContentTypeMaxLength } type ? type : "application/octet-stream",
+                SubmissionId = submission.SubmissionId,
+            }, staged);
+            parts.Add((spec, staged.Blob));
+        }
+
+        return parts;
     }
 
     /// <summary>

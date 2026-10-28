@@ -471,6 +471,27 @@ public sealed record StoredFileRowSpec
 /// <param name="Reused">True when the same bytes were already stored under the id (a retry).</param>
 public sealed record StagedBlob(string Container, string BlobPath, string Sha256, long SizeBytes, bool Reused);
 
+/// <summary>
+/// ebilling-r1 task 094 (from-email): what a from-email Invoice part's stage records beside its own source facts: the ordinals of the
+/// Supporting parts staged with it (each under <c>StoredFileIds.ForAttachment(submission, "eml-part-{n}")</c>) and the part's file
+/// extension. Nothing else of the email (no name, no subject) is recorded.
+/// </summary>
+internal sealed record StagedSourceManifest(IReadOnlyList<int> SupportingOrdinals, string? Extension);
+
+/// <summary>
+/// ebilling-r1 task 094 (from-email): a staged blob read back with the source facts its stage recorded
+/// (<see cref="StoredFileService.ReadStagedSourceAsync"/>). Every fact is null when the stage recorded none (an upload).
+/// </summary>
+internal sealed record StagedSource(
+    StagedBlob Blob,
+    Guid? SourceDocumentId,
+    Guid? SourceCommunicationId,
+    long? SourceVersion,
+    string? SourceAttachmentIdentity,
+    IReadOnlyList<int> SupportingOrdinals,
+    string? Extension,
+    string? ContentType);
+
 /// <summary>The answer of a stage: the blob, or a refusal code (nothing written).</summary>
 public sealed record StageResult(StagedBlob? Blob, string? RefusalCode)
 {

@@ -1,6 +1,6 @@
 # Task 094 — Submit Invoice from a source Document
 
-> Project: ebilling-r1 (model `procedure-and-file-model.md` §5, §9.1; owner K, EB-D-158). Branch `task/ebill-094-submit-invoice` (merged `origin/work/ebilling-r1` @ `ecb534d03e` and 098 @ `2f50cddec9`). Rigor FULL, opus @ high. Built and tested only: **no deploy, no live Dataverse or Azure write, no Key Vault change.** `StoredFileReconcileJob` stays disabled. Core `5a5ffabfa8`; fix round (uac review + adversarial review addendum) on top, §9.
+> Project: ebilling-r1 (model `procedure-and-file-model.md` §5, §9.1; owner K, EB-D-158). Branch `task/ebill-094-submit-invoice` (merged `origin/work/ebilling-r1` @ `ecb534d03e`, 098 @ `2f50cddec9` and @ `f2446e638e`, 095 @ `85464826b6`). Rigor FULL, opus @ high. Built and tested only: **no deploy, no live Dataverse or Azure write, no Key Vault change.** `StoredFileReconcileJob` stays disabled. Core `5a5ffabfa8`; fix round (uac review + adversarial review addendum) on top, §9.
 
 ## 1. What was built
 
@@ -52,7 +52,7 @@
 | `SubmissionCommitGate` | 092's `FlipUploadFileAsync` in the persister | Moved and generalized (one gate, every channel) instead of a second flip | No step 5 re-run, no undo: a source re-filed after the commit leaves a Servable copy under the wrong record (uac-r2 conditions 1, 3). |
 | `SubmissionCommitGate.NoteUndoHeldAsync` | `AdminAttentionText.Merge` | One note write | A dead-lettered held undo carries no operator signal (F2-a). |
 | `StagedSourceCopy`, `SubmissionFileSource`, `SubmissionSnapshot.FileSource`, `StagedFiles` | `SubmissionSnapshot.DocumentId` | A null document no longer decides the channel (092 review item 1) | The job cannot tell a copy from an upload. |
-| `StoredFileService.DeleteForUndoAsync`, `DeleteBlobForUndoAsync`, `ReadRowsForInvoiceAsync`, `StoredFileCompensation` | `DeleteStagedAsync` (refuses when a row exists) | The undo must delete a row that exists, and its blob before the row's transaction | The undo cannot remove the file, or leaves the invoice without its file row (§9.2). |
+| `StoredFileService.WithdrawForUndoAsync`, `DeleteBlobForUndoAsync`, `ReadRowsForInvoiceAsync` | `DeleteStagedAsync` (refuses when a row exists) | The undo must withdraw a row that exists, then delete its blob, before the one transaction that deletes the rows and the invoice | The undo cannot remove the file, or leaves the invoice without its file row (§9.2). |
 | `StoredFileService.CountCopiesOfDocumentAsync`, `DocumentCheckoutService.CountStoredFileCopiesAsync`, `InvoiceSourceDeleteResult`, `ProblemDetailsHelper.DocumentIsInvoiceSource` / `DocumentInUse` | `CountChildDocumentsAsync`, `DeleteResult`, `HasChildDocuments` | Same pre-check slot, own answer | Restrict refuses the document row after its SPE file was deleted (ontology-r1 088 gate F1); the user is told about "children" that do not exist (F1-c). |
 | Codes and notes in §1 | `SubmissionReasonCodes`, `InvoiceSubmissionErrors`, `AdminAttentionText`, `DocumentCheckoutService` | Extended in place | The outcomes have no stable code (118, 095 contracts pin them). |
 
@@ -63,7 +63,7 @@ DI: `SubmissionCommitGate` replaces `InvoiceDocumentRefile` (one registration ou
 | # | Seed | Result | Restored |
 |---|---|---|---|
 | 1 | `SubmissionCommitGate.SourcesStillCoveredAsync` returns true unconditionally | `Source_RefiledAfterTheCommit_IsUndone` fails (with the roots, re-run-fault and idempotence undo tests and the happy path's read count): 5 failed | yes, file identical to before |
-| 2 | `CompensateAsync` skips `DeleteForUndoAsync` | the refiled-source undo test fails, with roots, re-run fault, idempotence, upload flip-failure undo and undo-held: 6 failed | yes |
+| 2 | `CompensateAsync` skips the file rows' delete (then `DeleteForUndoAsync`; since round 4 the rows go in the rows-and-invoice transaction) | the refiled-source undo test fails, with roots, re-run fault, idempotence, upload flip-failure undo and undo-held: 6 failed | yes |
 
 Guard controls: `SubmitInvoiceSourceUntouchedGuardTests.Detector_MustFireAndMustNotFire`. Delete pre-check: must-fire (external 409, internal 409, Dataverse route 409, read fault 503) and must-not-fire (unreferenced document deletes; another document's copies do not refuse).
 
@@ -90,7 +90,7 @@ Guard controls: `SubmitInvoiceSourceUntouchedGuardTests.Detector_MustFireAndMust
 ## 7. For 118 (command) and 095 (from email)
 
 - 118: `POST /api/finance/invoice-submissions/from-document`, body `{communicationId, documentId, coreRecord: {kind: matter|project|workassignment, id}, firmId, firmInvoiceNumber, poNumber?}`. **`communicationId` is required** (the route is "an email attachment, a document of a communication"; a document with no communication is not submitted here; K7). 202 `{submissionId, jobId, trackingNumber, statusUrl}`; refusals per §2 (ProblemDetails with `errorCode`; a blank number is a 400 field error `firmInvoiceNumber`). A refusal after A filed the communication carries "that filing is kept".
-- 095: the gate already reads its sources from the file rows (`sprk_sourcedocument`), so a from-email copy is re-run and undone like a document copy. The `ISubmitInvoiceFromEmail` implementation is folded in once 095's fix head is pushed (coordinator), with the uac-r2 095 K5 hand-offs: `sprk_createdbyperson` = caller on everything it creates, A on the duplicate path (as the hook now runs on the earlier-submission path), Read on the `.eml` and its communication; no reliance on `IdempotencyFilter`'s old double call; no assumption that a generation's creator matches earlier ones; bytes staged from the `.eml` as read back (base64 parts).
+- 095: the gate already reads its sources from the file rows (`sprk_sourcedocument`), so a from-email copy is re-run and undone like a document copy. The `ISubmitInvoiceFromEmail` implementation is built (§10.6), with the uac-r2 095 K5 hand-offs: `sprk_createdbyperson` = caller on everything it creates, A on the duplicate path (as the hook now runs on the earlier-submission path), Read on the `.eml` and its communication; no reliance on `IdempotencyFilter`'s old double call; no assumption that a generation's creator matches earlier ones; bytes staged from the `.eml` as read back (base64 parts).
 
 ## 8. Dependencies, open questions, known limits
 
@@ -100,7 +100,7 @@ Guard controls: `SubmitInvoiceSourceUntouchedGuardTests.Detector_MustFireAndMust
 - **Open — A and the undo:** A survives a later undo and a later refusal by design (the answer and the note say so). A refusal by A is returned as the re-file route's answer, not a submission code.
 - **Open — confirm route:** it now requires Read on the document and on its communication; a reviewer who could confirm before may be refused.
 - **Open — Delete:** deleting a document with a copy is 409 until the Stored File is removed; there is no user path to remove a Stored File.
-- **Open — ISS-012 (#2374, owner decision; addendum K2):** a transient fault in step 5 undoes the commit and ends the submission Failed; D-139 then refuses the document on the internal routes for good. Extend EB-D-160's re-attempt, or make a re-run fault a retry while the file is Not yet servable. Not built.
+- **Closed — ISS-012 (#2374):** owner decision EB-D-167, built in `1091efa81b` (§10.4).
 - **Follow-up — DEF-048 (#2372, owner OK; F1-1):** field-secure `sprk_invoicesubmission.sprk_document` so users cannot re-point a submission (the BFF already fails such a row closed).
 - **Known limit (uac K2 = addendum K3) — DEF-049 (#2373):** step 6 and the undo read "the invoice's files"; before O-14 upload-to-invoice or 150 export files under an invoice, both must key to the submission's own file ids.
 - **Known limit (uac K1):** the copy's Stored File row (name, size, SHA, source ids) is readable by the invoice's readers. The name is now the tracking number, never the source's file name (one line, done); the source ids and hash stay visible to them.
@@ -137,8 +137,62 @@ Guard controls: `SubmitInvoiceSourceUntouchedGuardTests.Detector_MustFireAndMust
 
 ### 9.2 Undo order (deviation from model 9.1, stated)
 
-Model 9.1 orders the undo "Stored File blob and row, approval, lines, invoice". The fix round deletes: the approval; the lines; the file blobs; then the Stored File rows AND the invoice in ONE `ExecuteTransactionAsync` (all or nothing); then the four submission columns and the "removed" note. Rationale: `sprk_storedfile.sprk_invoice` is RemoveLink, and the 098 external predicate (`ExternalInvoiceVisibility`) hides an invoice when any of its sources is hidden and shows an invoice with no source file. Deleting the file row first (as 9.1 orders it) leaves, on any fault after it, an invoice with no file row: visible on the external plane although its source is restricted. In the fix round's order no partial state leaves the invoice without its file row; a blob deleted before a rolled-back transaction leaves a Not yet servable row with no blob (never served), finished by the next delivery. More than 50 file rows (only a data fault) are reduced one by one, keeping at least one, before the transaction.
+Model 9.1 orders the undo "Stored File blob and row, approval, lines, invoice". The fix round deletes: the approval; the lines; the file blobs; then the Stored File rows AND the invoice in ONE `ExecuteTransactionAsync` (all or nothing); then the four submission columns and the "removed" note. Rationale: `sprk_storedfile.sprk_invoice` is RemoveLink, and the 098 external predicate (`ExternalInvoiceVisibility`) hides an invoice when any of its sources is hidden and shows an invoice with no source file. Deleting the file row first (as 9.1 orders it) leaves, on any fault after it, an invoice with no file row: visible on the external plane although its source is restricted. In the fix round's order no partial state leaves the invoice without its file row; a blob deleted before a rolled-back transaction leaves a Not yet servable row with no blob (never served), finished by the next delivery. More than 50 file rows (only a data fault) hold the undo with nothing deleted (uac-r2 K2, §10.2). Since §10.2 the rows are also withdrawn (Removed) before any blob goes; the model's §9.1 now states this order (amended 2026-10-28).
 
 ### 9.3 Issues filed (project-defer-issue-tracking)
 
 DEF-048 #2372, DEF-049 #2373, ISS-012 #2374, ISS-013 #2375 (`notes/defer-issues.md`; ids provisional, renumber on merge).
+
+## 10. Round 4 (2026-10-28): 095 fold-in, uac-r2 conditions, EB-D-167, from-email operation
+
+### 10.1 Merges
+
+- 095 @ `85464826b6` (`718ee42b5d`); 098 @ `f2446e638e` (`cdff7a9ece`, kept on the coordinator's word). The 098 round-4 head is merged over it when the coordinator sends it; no other 098 head is merged. The persister's content-team change waits for uac's R4b sha (EB-D-168).
+
+### 10.2 uac-r2 conditions
+
+| Item | Change | Tests |
+|---|---|---|
+| K2 | The undo reads the invoice's file rows FIRST; more than `MaxFiles` holds the undo with nothing deleted (the read is unordered, so dropping a "surplus" could keep a sourceless row). | `InvoiceSubmissionPersisterTests.Undo_MoreRowsThanOneTransaction_HoldsWithNothingDeleted`, `Undo_ExactlyMaxFilesRows_Completes` |
+| (b) | Every row is withdrawn (Removed, conditional on the version read) before any blob goes: a held undo never leaves a Servable row without its blob. | `Undo_HeldAfterTheBlobDelete_LeavesTheServableRowWithdrawn_NeverServed`, `Undo_HeldBeforeTheFileStep_WithdrawsNothing` |
+| (c) | `procedure-and-file-model.md` §9.1 step 5 amended to the code's undo order (path B): file rows read with the cap hold, approval, lines, rows withdrawn, blobs, one transaction (rows + invoice), columns. | — (notes) |
+| K1 | Step A's "filed" covers the D-140 hop, over the shape set. | `StepAFilingCoversTheHopTests.WhenTheHopReportsFiled_StepAReadsFiled`, `TheShapeSet_CoversBothHopsAndAnUnfiledCase` |
+| K3 (known limit, recorded here only; #2372 not edited) | Only the BFF creates submissions and writes their document column. A submission's id is derived deterministically, so a user who holds direct Create on `sprk_invoicesubmission` could create that row first and make the confirm answer 409; they gain no read by it. Tied to UAC 191 (the census of users' direct table rights, model §5.2). | — |
+
+### 10.3 InvoicePdf writer guard
+
+An Invoice PDF Stored File row is created only inside the persister's commit, with its invoice (`StoredFileService` refuses one outside it). ArchTest `InvoicePdfWriterGuardTests.AnInvoicePdfIsCreatedOnlyWithItsInvoice` with `Detector_MustFireAndMustNotFire`; unit `StoredFileServiceTests.InvoicePdf_OutsideTheCommit_IsRefused_NothingWritten`, control `SupportingFile_OntoTheInvoice_IsCreated`. End to end with 098's predicate: `InvoiceSubmissionPersisterTests.UploadInvoice_CommittedByThePersister_IsVisibleToTheFirm(Spa/Internal)`, control `InternalUpload_WithoutItsStoredFileRow_IsHidden`.
+
+### 10.4 EB-D-167 (closes ISS-012, #2374)
+
+After a **Failed** attempt the confirm (and Submit Invoice from a document) starts a new attempt: generation g's derived id (`ExistingDocumentSubmissionIdFor(doc, g)`, at most `MaxExistingDocumentGeneration` = 50), created by the caller, every check run again; **Rejected** stays 409 (D-139). Interpretation recorded: "the upload routes" in the decision are the document-keyed internal entries (confirm, from-document); a file upload mints a fresh id per request and needs no generation. The allocator skips tracking numbers held by undone attempts (`44c3ca9bc5`). Tests: `InvoiceSubmissionExistingDocumentTests.Retry_AfterFailed_IsANewAttempt`, `AnotherUsersFailedAttempt_GivesANewAttemptByThisCaller`, `Retry_AfterTwoFailedAttempts_IsAttemptThree`, `Retry_AfterFailed_RunsEveryCheck`, `TwoConcurrentRetries_AfterFailed_MakeExactlyOneNewAttempt`, `GenerationIds_KeepGenerationOne_AndAreTheDocumentsOwn`; `InvoiceReviewWritePathTests.Confirm_RetryAfterTheSubmissionFailed_IsANewAttempt_AndMarks`, `Confirm_RetryAfterTheSubmissionWasRejected_Is409_AndDoesNotMark`; `TrackingNumberAllocatorTests.ANumberHeldByAnUndoneAttempt_IsSkipped`, `MoreUndoneAttemptsThanMaxAttempts_AreAllSkipped`, `UndoneAttemptsBeyondTheSkipBound_AreRefused`, `ANumberHeldByANumberedRow_IsALostRace_NotASkip`.
+
+### 10.5 What a from-email submission writes (sent to the coordinator for 098 round 4)
+
+- The submission: id `FromEmailSubmissionKey.SubmissionIdFor(K, generation)`, created through the allocator; Channel **Internal**; `sprk_createdbyperson` = the caller (`CallerSystemUserId`) on every generation; **`sprk_document` empty**.
+- The Invoice part: an Invoice PDF Stored File `StoredFileIds.ForUpload(submissionId)` under the invoice (`InvoiceIdFor`), Firm-visible No, `sprk_sourcedocument` = the `.eml`, `sprk_sourcecommunication` = its communication, `sprk_sourceattachmentidentity` = `eml-part-{ordinal}`, `sprk_sourceversion`, `sprk_sourcesha256`; named `{tracking}.pdf`.
+- Each Supporting part: an Invoice supporting file `StoredFileIds.ForAttachment(submissionId, "eml-part-{n}")` with the same source columns; named `{tracking}-{n}{ext}` (never the attachment's name).
+- Every row is written only in the persister's commit transaction, created by the submission's creator person.
+
+### 10.6 The from-email operation (`SubmitInvoiceFromEmailOperation`)
+
+Replaces 095's not-yet-available stand-in (one scoped registration; the ADR-010 single-implementation count stays 171). In order, nothing written before the first stage:
+
+1. Step 1, read-only (`PrepareSourceAsync` with `documentReadChecked: false`): the caller's Read on the `.eml` and on its communication; the `.eml` must be that communication's.
+2. The intake's checks (`InvoiceSubmissionService.DecideForFromEmailAsync`): the number, the firm active and linked, the core record, the owner, with `RequestedBy` = the caller's systemuser, so the creator person is the caller on every generation; the seam reads nothing of an earlier generation's creator.
+3. Step A, after those refusals: on every path that creates an attempt, including 095's duplicate path (the earlier `.eml` of the same email is the source) and a concurrent retry that then loses the create race (`AlreadyCreated`). 095's replay of an existing attempt creates nothing and runs no step A (the attempt that created the row ran it).
+4. The marked parts, read out of the saved `.eml` by `EmlMarkedPartReader` (ordinal, name, SHA-256; its `versionnumber` is the source version).
+5. Each part staged under its Stored File id with its source written into the blob's metadata (`sourcedocument`, `sourcecommunication`, `sourceversion`, `sourceattachment`; the Invoice part also lists the Supporting ordinals, `emlparts`; a Supporting part its `extension`). `StoredFileService.ReadStagedSourceAsync` reads them back. ContentConflict 409 `document_already_submitted`; NotConfigured 422 `storage_not_configured`.
+6. The row with exactly the attempt's id (`AlreadyCreated` is the race answer; Refused 503 `ebilling.tracking.unavailable`), then the job. No compensation: the ids are deterministic, so a loser that deleted "its" blobs or row would delete the winner's; a row whose job was not queued is re-queued by the retry's replay (`RequeueAsync`). `ReadAttemptSourceAsync` answers from the Invoice part's stage metadata (the `.eml` and the part's SHA), null for an upload.
+
+Refusals after step A filed end with "The communication was filed under the record first; that filing is kept." A step-1 or step-A answer that carries `errorCode` becomes the operation's refusal; any other (the re-file route's own, the owner refusal's ProblemDetails) is returned by the route as it is (`FromEmailRouteAnswerException`, caught in `InvoiceSubmissionFromEmailHttp`).
+
+**The persister.** It recognises a from-email submission from the Invoice part's stage metadata (a recorded `.eml`); it requires Channel Internal and a recorded version (else Refused `document_unavailable`), runs step 3 (`CheckExistingDocumentAsync`) on the `.eml`, builds every part's row in the one transaction (a listed Supporting part that is missing or records another source: Refused `file_unservable`), and adds the guard on the `.eml`. The commit gate re-runs every file's source and flips every file.
+
+**Version guard decision (amendment to model §9.1 step 4, stated):** the `.eml`'s guard is at the version step 3 read in this delivery, not the version the parts were read at. The in-process save's finalization writes the `.eml` row after the intake, so a staging-version pin would never commit. The bytes are pinned instead by the SHA-256 recorded at intake from the caller's marks; the guard pins the filing and isolation step 3 judged. A guard failure is `SourceChanged`; with no job-staged copy, the job retries the delivery and step 3 reads the `.eml` again.
+
+Tests: `SubmitInvoiceFromEmailOperationTests` (20): `Submit_StagesEveryPartWithItsSource_AndCreatesThisIdWithNoDocument_ChannelInternal_CreatedByTheCaller`, `Submit_GenerationTwo_IsCreatedByThisCaller_WhoeverMadeTheEarlierAttempt` (both callers), `Submit_StepOneRefuses_IsThatRefusal_BeforeTheChecks_AndWritesNothing`, `Submit_StepOneAnswersWithoutAnErrorCode_IsTheRoutesAnswer`, `Submit_TheFirmIsNotLinked_IsRefusedByTheIntake_AndStepAIsNotRun`, `Submit_StepARuns_AfterTheReadOnlyChecks_AndBeforeAnyWrite`, `Submit_StepARefusesTheFiling_IsTheRefileRoutesAnswer_AndWritesNothing`, `Submit_StepARefusesWithASubmissionCode_IsThatRefusal`, `Submit_TheEmlCannotBeReadAfterFiling_Is503_SayingTheFilingIsKept_AndWritesNothing`, `Submit_APartDiffersFromItsMark_Is503_AndWritesNothing`, `Submit_TheRowAlreadyExists_IsAlreadyCreated_NoJob_NothingDeleted`, `Submit_TheJobCannotBeQueued_Is503_AndKeepsTheRowAndTheBlobs`, `Submit_NoTrackingNumber_Is503TrackingUnavailable`, `Submit_OtherBytesAreStagedUnderThisAttempt_Is409DocumentAlreadySubmitted_NoRow`, `Submit_TheStoreIsNotConfigured_Is422StorageNotConfigured`, `Submit_AnInconsistentInput_IsAWiringDefect`, `ReadAttemptSource_IsTheEmlAndTheInvoicePartsSha_FromWhatTheStageRecorded`, `ReadAttemptSource_AnUploadOrNothingStaged_IsNull`, `Requeue_QueuesTheJob_AndIsFalseWhenTheQueueRefuses`. Persister: `InvoiceSubmissionPersisterTests.FromEmail_CommitsEveryPartWithItsSource_GuardsTheEml_AndFlipsEveryPart`, `FromEmail_TheEmlMovedOnSinceTheIntake_GuardsTheLiveVersion_AndCommits`, `FromEmail_AWriteBetweenTheCheckAndTheCommit_IsSourceChanged`, `FromEmail_TheEmlIsLinkedToAnotherInvoice_IsRefused_NoTransaction`, `FromEmail_ASupportingPartIsMissingOrNotThisEmails_IsRefused_NoTransaction` (missing, another source), `FromEmail_ASourcedStageOnAnSpaSubmission_IsRefused`. 095's contract suite (§9 of `095-from-email-contract.md`) is unchanged and green; its §6 and §9 gained the operation's codes (marked "Added 2026-10-28 (094)").
+
+### 10.7 Finding: from-email invoices and 098 at `f2446e638e`
+
+`InvoiceSubmissionPersisterTests.FromEmailInvoice_CommittedByThePersister_IsVisibleToTheFirm` commits a from-email invoice through the real persister and asks 098's predicate: at `f2446e638e` it is **hidden** from its own firm (`source_link_unreadable`). The coordinator has the shape (§10.5) and 098 round 4 reworks rule 3; the test is skipped with that reason and is unskipped when the round-4 head is merged. No 098 file was changed here.

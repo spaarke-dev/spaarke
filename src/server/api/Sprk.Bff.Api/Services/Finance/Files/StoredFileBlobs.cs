@@ -64,6 +64,16 @@ public sealed class StoredFileBlobs
     /// <summary>Blob metadata keys written at stage (lower case: metadata keys are C# identifiers on the wire).</summary>
     internal const string MetadataSha256 = "sha256", MetadataPurpose = "purpose", MetadataSubmission = "submissionid", MetadataEnvironment = "environment";
 
+    /// <summary>
+    /// ebilling-r1 task 094 (from-email): the staged file's SOURCE, recorded at stage so the job that writes the row in another process
+    /// reads it back (<see cref="StoredFileService.ReadStagedSourceAsync"/>): the source document, its communication, its version, the
+    /// attachment identity, and, on a from-email Invoice part only, the ordinals of the Supporting parts staged with it and a file
+    /// extension. Written only when the spec carries them; values are ASCII.
+    /// </summary>
+    internal const string MetadataSourceDocument = "sourcedocument", MetadataSourceCommunication = "sourcecommunication",
+        MetadataSourceVersion = "sourceversion", MetadataSourceAttachment = "sourceattachment", MetadataEmlParts = "emlparts",
+        MetadataExtension = "extension";
+
     /// <summary>The environment marker of the test constructor's default.</summary>
     internal const string TestEnvironment = "storedfile-test.crm.dynamics.com";
 
@@ -241,7 +251,7 @@ public sealed class StoredFileBlobs
     /// <exception cref="RequestFailedException">A storage fault (the caller retries; nothing is half-written: the create is atomic).</exception>
     public async Task<StageResult> StageAsync(
         StoredFilePurpose purpose, StoredFileParent parent, Guid fileId, Stream content, string contentType, Guid? submissionId,
-        CancellationToken ct)
+        CancellationToken ct, IReadOnlyDictionary<string, string>? sourceMetadata = null)
     {
         ArgumentNullException.ThrowIfNull(content);
         var gateway = _gateway;
@@ -311,6 +321,12 @@ public sealed class StoredFileBlobs
             if (Environment is not null)
             {
                 metadata[MetadataEnvironment] = Environment;
+            }
+
+            foreach (var (key, value) in sourceMetadata ?? new Dictionary<string, string>())
+            {
+                // Task 094: the source facts never replace the stage's own keys.
+                metadata.TryAdd(key, value);
             }
 
             var outcome = await gateway.CreateIfNotExistsAsync(container, name, source, contentType, metadata, ct).ConfigureAwait(false);

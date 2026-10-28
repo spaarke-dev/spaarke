@@ -4,8 +4,9 @@ namespace Sprk.Bff.Api.Services.Finance.Submission;
 /// ebilling-r1 task 095: THE seam between the from-email route and task 094's Submit Invoice operation ("submit this source to the
 /// Submit Invoice operation"). 095 resolves everything the route owns (the marks, the bytes, the firm, the replay, the in-process
 /// <c>.eml</c> save and its resolution from the communication) and hands the operation one <see cref="FromEmailSubmitInput"/>; 094
-/// implements it (model §9.1 steps 1 to 6). Until 094 merges, <see cref="SubmitInvoiceFromEmailNotYetAvailable"/> stands in and the
-/// route answers 503 <see cref="InvoiceSubmissionErrors.Failed"/> before any write.
+/// implements it (model §9.1 steps 1 to 6): <see cref="SubmitInvoiceFromEmailOperation"/>, which replaced 095's not-yet-available
+/// stand-in (task 094). A seam that reports <see cref="IsAvailable"/> false still makes the route answer 503
+/// <see cref="InvoiceSubmissionErrors.Failed"/> before any write.
 /// </summary>
 /// <remarks>
 /// <para><b>Why no adapter onto today's intake.</b> <see cref="InvoiceSubmissionService.SubmitExistingDocumentAsync"/> would point the
@@ -35,7 +36,7 @@ namespace Sprk.Bff.Api.Services.Finance.Submission;
 /// </remarks>
 internal interface ISubmitInvoiceFromEmail
 {
-    /// <summary>False until task 094's operation is wired: the route then refuses before any write.</summary>
+    /// <summary>True for task 094's operation; false makes the route refuse before any write.</summary>
     bool IsAvailable { get; }
 
     /// <summary>Submits the resolved source. Never throws for a refusal.</summary>
@@ -111,6 +112,12 @@ internal sealed record FromEmailSubmitInput
     public Guid? CallerObjectId { get; init; }
 
     public string? CorrelationId { get; init; }
+
+    /// <summary>
+    /// Task 094: the request the operation acts for. Step 1 checks the caller's own Read on the <c>.eml</c> and its communication, and
+    /// step A files an unfiled communication as the caller, both through this request (its token and its scoped services).
+    /// </summary>
+    public HttpContext? Http { get; init; }
 }
 
 internal enum FromEmailSubmitOutcome
@@ -147,26 +154,4 @@ internal sealed record FromEmailSubmitResult
 
     public static FromEmailSubmitResult Refused(int status, string errorCode, string detail) =>
         new() { Outcome = FromEmailSubmitOutcome.Refused, Status = status, ErrorCode = errorCode, Detail = detail };
-}
-
-/// <summary>Thrown by <see cref="SubmitInvoiceFromEmailNotYetAvailable"/> if it is ever called past its <see cref="ISubmitInvoiceFromEmail.IsAvailable"/> gate.</summary>
-internal sealed class SubmitInvoiceFromEmailNotYetAvailableException()
-    : InvalidOperationException("The Submit Invoice operation for a from-email source is task 094's and is not available yet.");
-
-/// <summary>
-/// The stand-in until task 094 (ebilling-r1, EB-D-158 early start): not available, so the route refuses 503
-/// <see cref="InvoiceSubmissionErrors.Failed"/> before any write. Every member past the gate throws, as defence in depth.
-/// </summary>
-internal sealed class SubmitInvoiceFromEmailNotYetAvailable : ISubmitInvoiceFromEmail
-{
-    public bool IsAvailable => false;
-
-    public Task<FromEmailSubmitResult> SubmitAsync(FromEmailSubmitInput input, CancellationToken ct) =>
-        throw new SubmitInvoiceFromEmailNotYetAvailableException();
-
-    public Task<bool> RequeueAsync(Guid submissionId, Guid jobId, string? correlationId, CancellationToken ct) =>
-        throw new SubmitInvoiceFromEmailNotYetAvailableException();
-
-    public Task<FromEmailAttemptSource?> ReadAttemptSourceAsync(Guid submissionId, CancellationToken ct) =>
-        throw new SubmitInvoiceFromEmailNotYetAvailableException();
 }

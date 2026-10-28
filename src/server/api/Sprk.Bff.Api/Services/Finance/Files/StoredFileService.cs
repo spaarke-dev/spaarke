@@ -69,7 +69,14 @@ public sealed class StoredFileService
     /// under an existing id are refusals with nothing written; the same bytes under an existing id are reused (a retry).
     /// </summary>
     /// <exception cref="RequestFailedException">A storage fault.</exception>
-    public Task<StageResult> StageAsync(StoredFileRowSpec spec, Stream content, CancellationToken ct)
+    public Task<StageResult> StageAsync(StoredFileRowSpec spec, Stream content, CancellationToken ct) => StageAsync(spec, content, manifest: null, ct);
+
+    /// <summary>
+    /// <see cref="StageAsync(StoredFileRowSpec, Stream, CancellationToken)"/>, recording the spec's source facts in the blob's metadata
+    /// (task 094: the job that writes the row reads them back, <see cref="ReadStagedSourceAsync"/>) and, for a from-email Invoice part,
+    /// <paramref name="manifest"/>: the Supporting parts staged with it and the file extension.
+    /// </summary>
+    internal Task<StageResult> StageAsync(StoredFileRowSpec spec, Stream content, StagedSourceManifest? manifest, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(spec);
         ArgumentNullException.ThrowIfNull(content);
@@ -79,7 +86,88 @@ public sealed class StoredFileService
             return Task.FromResult(StageResult.Refused(StoredFileRefusal.InvalidRequest));
         }
 
-        return _blobs.StageAsync(spec.Purpose, spec.Parent, spec.FileId, content, spec.ContentType, spec.SubmissionId, ct);
+        return _blobs.StageAsync(spec.Purpose, spec.Parent, spec.FileId, content, spec.ContentType, spec.SubmissionId, ct, SourceMetadataOf(spec, manifest));
+    }
+
+    /// <summary>The source facts of <paramref name="spec"/> (and the manifest) as blob metadata; ASCII only (an identity that is not is left out).</summary>
+    internal static IReadOnlyDictionary<string, string> SourceMetadataOf(StoredFileRowSpec spec, StagedSourceManifest? manifest)
+    {
+        var metadata = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (spec.SourceDocumentId is { } document)
+            metadata[StoredFileBlobs.MetadataSourceDocument] = document.ToString("D");
+        if (spec.SourceCommunicationId is { } communication)
+            metadata[StoredFileBlobs.MetadataSourceCommunication] = communication.ToString("D");
+        if (spec.SourceVersion is { } version)
+            metadata[StoredFileBlobs.MetadataSourceVersion] = StoredFileSourceVersion.ToCanonical(version);
+        if (spec.SourceAttachmentIdentity is { } identity && IsMetadataToken(identity))
+            metadata[StoredFileBlobs.MetadataSourceAttachment] = identity;
+        if (manifest is not null)
+        {
+            if (manifest.SupportingOrdinals.Count > 0)
+                metadata[StoredFileBlobs.MetadataEmlParts] = string.Join(",", manifest.SupportingOrdinals.Select(o => o.ToString(CultureInfo.InvariantCulture)));
+            if (manifest.Extension is { } extension && IsExtension(extension))
+                metadata[StoredFileBlobs.MetadataExtension] = extension;
+        }
+
+        return metadata;
+    }
+
+    /// <summary>A file extension the metadata may carry: a dot and 1 to 10 ASCII letters or digits.</summary>
+    internal static bool IsExtension(string value) =>
+        value.Length is >= 2 and <= 11 && value[0] == '.' && value.Skip(1).All(char.IsAsciiLetterOrDigit);
+
+    private static bool IsMetadataToken(string value) =>
+        value.Length is > 0 and <= 200 && value.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.');
+
+    /// <summary>
+    /// ebilling-r1 task 094 (from-email): the blob staged under <paramref name="fileId"/> and the source facts its stage recorded
+    /// (<see cref="StageAsync(StoredFileRowSpec, Stream, StagedSourceManifest?, CancellationToken)"/>), read back by its name (built from
+    /// the typed purpose, parent and id). <c>null</c> when no usable blob is there (as <see cref="GetStagedAsync"/>). A fault throws.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The store is not configured.</exception>
+    internal async Task<StagedSource?> ReadStagedSourceAsync(StoredFilePurpose purpose, StoredFileParent parent, Guid fileId, CancellationToken ct)
+    {
+        if (!Enum.IsDefined(purpose) || StoredFileSchema.ParentKindOf(purpose) != parent.Kind || parent.Id == Guid.Empty || fileId == Guid.Empty)
+        {
+            return null;
+        }
+
+        if (!_blobs.IsConfigured)
+        {
+            throw new InvalidOperationException("The Finance file store is not configured; a staged file cannot be read.");
+        }
+
+        var container = StoredFileSchema.ContainerOf(purpose);
+        var name = StoredFileBlobName.Build(_blobs.TenantId, parent, fileId);
+        var properties = await _blobs.GetPropertiesAsync(container, name, ct).ConfigureAwait(false);
+        if (properties is null || StagedSha256Of(properties) is not { } sha || !StoredFileSize.TryToColumnValue(properties.ContentLength, out _))
+        {
+            return null;
+        }
+
+        var metadata = properties.Metadata;
+        string? Value(string key) => metadata.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value) ? value : null;
+        var ordinals = new List<int>();
+        foreach (var token in (Value(StoredFileBlobs.MetadataEmlParts) ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (!int.TryParse(token, NumberStyles.None, CultureInfo.InvariantCulture, out var ordinal))
+            {
+                _logger.LogWarning("Stored file {FileId}: its staged part list is not readable", fileId);
+                return null;
+            }
+
+            ordinals.Add(ordinal);
+        }
+
+        return new StagedSource(
+            new StagedBlob(container, name, sha, properties.ContentLength, Reused: true),
+            Guid.TryParse(Value(StoredFileBlobs.MetadataSourceDocument), out var document) && document != Guid.Empty ? document : null,
+            Guid.TryParse(Value(StoredFileBlobs.MetadataSourceCommunication), out var communication) && communication != Guid.Empty ? communication : null,
+            long.TryParse(Value(StoredFileBlobs.MetadataSourceVersion), NumberStyles.None, CultureInfo.InvariantCulture, out var version) ? version : null,
+            Value(StoredFileBlobs.MetadataSourceAttachment),
+            ordinals,
+            Value(StoredFileBlobs.MetadataExtension) is { } extension && IsExtension(extension) ? extension : null,
+            string.IsNullOrWhiteSpace(properties.ContentType) ? null : properties.ContentType);
     }
 
     /// <summary>

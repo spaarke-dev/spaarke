@@ -240,6 +240,7 @@ internal sealed class FromEmailSubmissionService
             CallerSystemUserId = callerId,
             CallerObjectId = Guid.TryParse(CallerResolution.ResolveObjectId(http.User), out var oid) ? oid : null,
             CorrelationId = http.TraceIdentifier,
+            Http = http,
         }, ct);
 
         switch (result.Outcome)

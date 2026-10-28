@@ -952,7 +952,8 @@ public class InvoiceSubmissionService
     /// order: the firm is active, the core record's fields derive (013), the firm is one of the record's assigned law firms (D-106 / D-110), and
     /// an owner team resolves. Reads only; nothing is written.
     /// </summary>
-    private async Task<IntakeDecision> DecideAsync(InvoiceSubmissionRequest request, CallerPrincipal? spaCaller, CancellationToken ct)
+    private async Task<IntakeDecision> DecideAsync(
+        InvoiceSubmissionRequest request, CallerPrincipal? spaCaller, CancellationToken ct, Guid? requesterSystemUserId = null)
     {
         var core = request.CoreRecord;
         switch (await IsActiveFirmAsync(request.FirmId, ct))
@@ -1002,7 +1003,7 @@ public class InvoiceSubmissionService
         var owner = await _ownership.ResolveOwnerAsync(
             RecordOwnershipContext.ForParents(new RecordOwnershipParent?[] { new(core.EntityLogicalName, core.RecordId) }) with
             {
-                RequestedBy = RecordRequester.Of(systemUserId: spaCaller?.SystemUserId, objectId: request.CallerObjectId),
+                RequestedBy = RecordRequester.Of(systemUserId: requesterSystemUserId ?? spaCaller?.SystemUserId, objectId: request.CallerObjectId),
             },
             ct);
         if (!owner.IsOwned)
@@ -1013,6 +1014,30 @@ public class InvoiceSubmissionService
         // The owner team and the creator person go on the row here, in the member that builds it (RecordOwnerAssignmentCensusTests).
         owner.ApplyTo(row);
         return new(null, row, decided.ResolverFields, owner);
+    }
+
+    /// <summary>
+    /// Task 094 (from-email, <see cref="SubmitInvoiceFromEmailOperation"/>): the checks every entry runs before it writes (<see cref="DecideAsync"/>:
+    /// the firm active, the core record's fields, the firm link D-106, the owner), with the submission's creator person the caller's own
+    /// <paramref name="callerSystemUserId"/> (OP-5; every generation, whoever made an earlier one). Reads only. The answer: a refusal, or the
+    /// submission row (core lookup, owner and creator person set) and its resolver fields.
+    /// </summary>
+    internal async Task<(InvoiceSubmissionOutcome? Refusal, Entity? Row, InvoiceFamilyResolverFields? ResolverFields)> DecideForFromEmailAsync(
+        InvoiceSubmissionRequest request, Guid callerSystemUserId, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (callerSystemUserId == Guid.Empty || request.Channel != InvoiceSubmissionChannel.Internal)
+        {
+            throw new ArgumentException("A from-email submission is internal and names its caller's systemuser.", nameof(request));
+        }
+
+        if (ValidateFields(request) is { } invalid)
+        {
+            return (invalid, null, null);
+        }
+
+        var decision = await DecideAsync(request, spaCaller: null, ct, callerSystemUserId);
+        return (decision.Refusal, decision.Row, decision.ResolverFields);
     }
 
     private InvoiceSubmissionOutcome? Validate(InvoiceSubmissionRequest request)
