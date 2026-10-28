@@ -351,9 +351,148 @@ public sealed class ExternalInvoiceVisibilityTests
         var matter = Guid.NewGuid();
         _world.Flags[matter] = RootRecordFlags.None;
         _world.SubmissionSource(invoice, permission: Standard, matter: matter);
-        _world.Submission(invoice, document: null); // a submission naming no document is not a source
 
         await ShouldBeVisible(caller, invoice);
+    }
+
+    // Review round 2: a submission whose document link is empty hides the invoice (a submission with no document is refused
+    // before any invoice exists, so the shape is never a legitimate one).
+
+    [Theory, MemberData(nameof(ExternalCallers))]
+    public async Task ConfirmRoute_ASubmissionWhoseDocumentLinkIsEmpty_HidesTheInvoice(string caller)
+    {
+        var invoice = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        _world.Flags[matter] = RootRecordFlags.None;
+        _world.SubmissionSource(invoice, permission: Standard, matter: matter);
+        _world.Submission(invoice, document: null);
+
+        await ShouldBeHidden(caller, invoice, InvoiceHiddenReason.SourceLinkUnreadable);
+    }
+
+    [Theory, MemberData(nameof(ExternalCallers))]
+    public async Task ConfirmRoute_ADocumentLinkEmptiedAfterTheInvoiceWasCreated_HidesTheInvoice(string caller)
+    {
+        var invoice = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        _world.Flags[matter] = RootRecordFlags.None;
+        _world.SubmissionSource(invoice, permission: Restricted, matter: matter);
+        await ShouldBeHidden(caller, invoice, InvoiceHiddenReason.SourceHidden);
+
+        _world.SetSubmissions(invoice, "_sprk_document_value", null);
+
+        await ShouldBeHidden(caller, invoice, InvoiceHiddenReason.SourceLinkUnreadable);
+    }
+
+    // Review round 3: the submission's channel (the shared InvoiceSubmissionChannel enum) decides what an empty document link
+    // means. Spa is never a document source; Internal with an empty link is hidden unless the invoice has a sourceless
+    // InvoicePdf (the internal upload's own PDF); an unknown channel is hidden.
+
+    [Theory, MemberData(nameof(ExternalCallers))]
+    public async Task SpaUpload_NoSubmissionDocument_AndASourcelessInvoicePdf_IsVisible(string caller)
+    {
+        var invoice = Guid.NewGuid();
+        _world.Submission(invoice, document: null, channel: InvoiceWorld.SpaChannel);
+        _world.StoredFileRaw(invoice, rawSource: null, purpose: InvoiceWorld.InvoicePdf);
+
+        await ShouldBeVisible(caller, invoice);
+    }
+
+    [Theory, MemberData(nameof(ExternalCallers))]
+    public async Task InternalUpload_NoSubmissionDocument_AndASourcelessInvoicePdf_IsVisible(string caller)
+    {
+        var invoice = Guid.NewGuid();
+        _world.Submission(invoice, document: null, channel: InvoiceWorld.InternalChannel);
+        _world.StoredFileRaw(invoice, rawSource: null, purpose: InvoiceWorld.InvoicePdf);
+
+        await ShouldBeVisible(caller, invoice);
+    }
+
+    [Theory, MemberData(nameof(ExternalCallers))]
+    public async Task Internal_AnEmptyDocumentLink_AndNoStoredFile_IsHidden(string caller)
+    {
+        var invoice = Guid.NewGuid();
+        _world.Submission(invoice, document: null, channel: InvoiceWorld.InternalChannel);
+
+        await ShouldBeHidden(caller, invoice, InvoiceHiddenReason.SourceLinkUnreadable);
+    }
+
+    [Theory, MemberData(nameof(ExternalCallers))]
+    public async Task Internal_AnEmptyDocumentLink_AndOnlyASourcelessSupportingFile_IsHidden(string caller)
+    {
+        var invoice = Guid.NewGuid();
+        _world.Submission(invoice, document: null, channel: InvoiceWorld.InternalChannel);
+        _world.StoredFileRaw(invoice, rawSource: null, purpose: InvoiceWorld.InvoiceSupportingFile);
+
+        await ShouldBeHidden(caller, invoice, InvoiceHiddenReason.SourceLinkUnreadable);
+    }
+
+    [Theory]
+    [InlineData("contact", 999)]
+    [InlineData("contact", null)]
+    [InlineData("contact", "internal")]
+    [InlineData("flagged-systemuser", 999)]
+    [InlineData("flagged-systemuser", null)]
+    [InlineData("flagged-systemuser", "internal")]
+    public async Task AnUnknownOrUnreadableChannel_HidesTheInvoice(string caller, object? channel)
+    {
+        var invoice = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        _world.Flags[matter] = RootRecordFlags.None;
+        _world.Submission(invoice, _world.Document(Guid.NewGuid(), permission: Standard, matter: matter), channel);
+
+        await ShouldBeHidden(caller, invoice, InvoiceHiddenReason.SourceKindUnknown);
+    }
+
+    [Theory, MemberData(nameof(ExternalCallers))]
+    public async Task AnEmptySubmissionLink_PlusAStoredFileWithARestrictedSource_IsHidden_DecidedByTheFile(string caller)
+    {
+        var invoice = Guid.NewGuid();
+        _world.Submission(invoice, document: null, channel: InvoiceWorld.SpaChannel);
+        _world.Source(invoice, permission: Restricted);
+
+        await ShouldBeHidden(caller, invoice, InvoiceHiddenReason.SourceHidden);
+    }
+
+    /// <summary>
+    /// "No source at all": an InvoicePdf that carries any one source column is NOT the upload's own PDF, so an Internal
+    /// submission with an empty document link keeps the invoice hidden; with every source column empty it is visible.
+    /// </summary>
+    [Theory]
+    [InlineData("contact", "document", false)]
+    [InlineData("contact", "communication", false)]
+    [InlineData("contact", "attachment", false)]
+    [InlineData("contact", "none", true)]
+    [InlineData("flagged-systemuser", "document", false)]
+    [InlineData("flagged-systemuser", "communication", false)]
+    [InlineData("flagged-systemuser", "attachment", false)]
+    [InlineData("flagged-systemuser", "none", true)]
+    public async Task InternalUpload_AnInvoicePdfCarryingAnySource_IsNotTheUploadsOwnPdf(string caller, string column, bool visible)
+    {
+        var invoice = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        _world.Flags[matter] = RootRecordFlags.None;
+        _world.Submission(invoice, document: null, channel: InvoiceWorld.InternalChannel);
+        switch (column)
+        {
+            case "document": // a readable document: the empty submission link still hides
+                _world.StoredFileRaw(invoice, _world.Document(Guid.NewGuid(), permission: Standard, matter: matter).ToString());
+                break;
+            case "communication":
+                _world.StoredFileRaw(invoice, rawSource: null, sourceCommunication: Guid.NewGuid());
+                break;
+            case "attachment":
+                _world.StoredFileRaw(invoice, rawSource: null, attachmentIdentity: "AAMkAD-attachment-1");
+                break;
+            default:
+                _world.StoredFileRaw(invoice, rawSource: null);
+                break;
+        }
+
+        if (visible)
+            await ShouldBeVisible(caller, invoice);
+        else
+            await ShouldBeHidden(caller, invoice, InvoiceHiddenReason.SourceLinkUnreadable);
     }
 
     [Theory, MemberData(nameof(ExternalCallers))]
@@ -814,7 +953,18 @@ internal sealed class InvoiceWorld : HttpMessageHandler
 
     public void StoredFile(Guid invoice, Guid? source) => StoredFileRaw(invoice, source?.ToString());
 
+    public const int InvoicePdf = (int)Sprk.Bff.Api.Services.Finance.Files.StoredFilePurpose.InvoicePdf;
+    public const int InvoiceSupportingFile = (int)Sprk.Bff.Api.Services.Finance.Files.StoredFilePurpose.InvoiceSupportingFile;
+    public const int SpaChannel = (int)Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionChannel.Spa;
+    public const int InternalChannel = (int)Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionChannel.Internal;
+
+    /// <summary>A Stored File of <paramref name="invoice"/>, purpose InvoicePdf.</summary>
     public void StoredFileRaw(Guid invoice, object? rawSource, Guid? sourceCommunication = null, string? attachmentIdentity = null) =>
+        StoredFileRaw(invoice, rawSource, InvoicePdf, sourceCommunication, attachmentIdentity);
+
+    /// <summary>A Stored File of <paramref name="invoice"/> with an explicit <paramref name="purpose"/> (raw; null allowed).</summary>
+    public void StoredFileRaw(
+        Guid invoice, object? rawSource, object? purpose, Guid? sourceCommunication = null, string? attachmentIdentity = null) =>
         Seed("sprk_storedfiles", new Dictionary<string, object?>
         {
             ["sprk_storedfileid"] = Guid.NewGuid().ToString(),
@@ -822,17 +972,22 @@ internal sealed class InvoiceWorld : HttpMessageHandler
             ["_sprk_sourcedocument_value"] = rawSource,
             ["_sprk_sourcecommunication_value"] = sourceCommunication?.ToString(),
             ["sprk_sourceattachmentidentity"] = attachmentIdentity,
+            ["sprk_purpose"] = purpose,
             ["sprk_name"] = "file.pdf",
         });
 
-    /// <summary>A submission of <paramref name="invoice"/> naming <paramref name="document"/> (the confirm route's only record
-    /// of its source: <c>sprk_invoicesubmission.sprk_document</c>).</summary>
-    public void Submission(Guid invoice, Guid? document) =>
+    /// <summary>A submission of <paramref name="invoice"/> naming <paramref name="document"/> on <paramref name="channel"/>
+    /// (Internal by default: the confirm route's only record of its source is <c>sprk_invoicesubmission.sprk_document</c>).</summary>
+    public void Submission(Guid invoice, Guid? document) => Submission(invoice, document, InternalChannel);
+
+    /// <summary>A submission with an explicit raw <paramref name="channel"/> (null and unknown values allowed).</summary>
+    public void Submission(Guid invoice, Guid? document, object? channel) =>
         Seed("sprk_invoicesubmissions", new Dictionary<string, object?>
         {
             ["sprk_invoicesubmissionid"] = Guid.NewGuid().ToString(),
             ["_sprk_invoice_value"] = invoice.ToString(),
             ["_sprk_document_value"] = document?.ToString(),
+            ["sprk_channel"] = channel,
             ["sprk_name"] = "SUB-0001",
         });
 
@@ -879,8 +1034,24 @@ internal sealed class InvoiceWorld : HttpMessageHandler
         var row = new Dictionary<string, object?> { [family.IdColumn] = id.ToString() };
         if (family.InvoiceLink is { } invoiceLink) row[invoiceLink] = invoice?.ToString();
         if (family.LineLink is { } lineLink) row[lineLink] = line?.ToString();
+        // A confirm-route submission: Internal, naming a clean document.
+        if (table == "sprk_invoicesubmission" && invoice is not null)
+        {
+            row["_sprk_document_value"] = Document(Guid.NewGuid()).ToString();
+            row["sprk_channel"] = InternalChannel;
+        }
         Seed(family.EntitySet, row);
         return id;
+    }
+
+    /// <summary>Sets <paramref name="column"/> on every submission of <paramref name="invoice"/>.</summary>
+    public void SetSubmissions(Guid invoice, string column, object? value)
+    {
+        lock (_sets)
+        {
+            foreach (var row in _sets["sprk_invoicesubmissions"].Where(r => (string?)r["_sprk_invoice_value"] == invoice.ToString()))
+                row[column] = value;
+        }
     }
 
     public void SetDocument(Guid id, string column, object? value)
