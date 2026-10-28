@@ -123,6 +123,13 @@
  * - The dead `onSetStandingGrant` wiring is removed (the modal has had no
  *   standing-grant control since task 073 UAT v1.0.24 #5).
  *
+ * v1.0.58 (task 193 G3b): `fetchExistingGrants` maps a grant's `pairedWith` (`kind: 'share'`, the user's
+ *   `systemUserId`) — the share an "Add person" workforce-app grant goes with. In the bundled modal, Add person says
+ *   whether the record shows in the colleague's workforce app (until when, or why not) and that the share itself has no
+ *   end date; Current Access lists a share and its paired grant together, the revoke confirmations say what each removes
+ *   (the share removes both; the grant alone keeps the share), and `pairedGrantEnded: false` adds "Workforce-app access
+ *   will be removed within a day."
+ *
  * v1.0.57 (task 193 F-final): no change in this file's logic. In the bundled modal, a user picked directly and a user
  *   suggestion (`/share-user`) are shares too, so their notices also lead with "Shared with X" (pending related records
  *   included), with the same count of the other items.
@@ -425,6 +432,8 @@ interface IRecordGrantDto {
   /** Date Only, `yyyy-MM-dd`; null on a legacy unbounded grant. */
   expiresDate?: string | null;
   isExpired?: boolean;
+  /** Task 193 G2: the share this workforce-app grant goes with (`kind: 'share'`, the user's systemUserId); absent otherwise. */
+  pairedWith?: { id?: unknown; kind?: unknown } | null;
 }
 // Back-compat default when the host entity is unknown/unavailable (e.g. a
 // harness environment where `context.page` isn't populated) — preserves the
@@ -1244,6 +1253,11 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
         expiresDate: g.expiresDate ?? undefined,
         isExpired: g.isExpired === true,
         provenance: isOrgGrant ? ('organization' as const) : undefined,
+        // Task 193 G3b: the share an "Add person" grant goes with — Current Access lists the two together.
+        pairedWith:
+          g.pairedWith?.kind === 'share' && typeof g.pairedWith.id === 'string' && g.pairedWith.id
+            ? { id: g.pairedWith.id, kind: 'share' as const }
+            : undefined,
       };
     });
     return { grants, truncated: body.truncated === true };
@@ -1545,7 +1559,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       title: (this.context.parameters.title?.raw as string) || undefined,
       showTitle,
       showVersion,
-      versionText: 'v1.0.57 • Built 2026-10-28',
+      versionText: 'v1.0.58 • Built 2026-10-28',
       // Task 175 (owner round 87): only the options at or above the parent's floor.
       accessPermissionOptions: accessPermissionPill.options,
       // Labels pulled from each bound field's Dataverse metadata so they
