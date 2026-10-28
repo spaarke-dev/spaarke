@@ -45,6 +45,8 @@ public enum DecisionParameterKind
 /// matter's business-unit currency). The wizard shows it as prefilled; the commit route resolves an omitted value to the same source.</param>
 /// <param name="NotBefore">Task 167 (D-193): for a Date, the code of another Date of the same step it must not be earlier than.
 /// The wizard flags it and the executor refuses it; equal dates are fine.</param>
+/// <param name="MaxLength">Task 167 (D-193 review F4-4): for a Text, the most characters the target column holds. The wizard step flags a longer
+/// value before Record decision, and the executor refuses it too. Null (every other parameter) means no declared limit.</param>
 public sealed record DecisionActionParameter(
     string Code,
     string Label,
@@ -55,7 +57,8 @@ public sealed record DecisionActionParameter(
     IReadOnlyList<DecisionParameterOption>? Options = null,
     string? OptionsSource = null,
     string? DefaultSource = null,
-    string? NotBefore = null);
+    string? NotBefore = null,
+    int? MaxLength = null);
 
 /// <summary>One fixed choice: the stable <see cref="Value"/> the commit route receives and the <see cref="Label"/> the
 /// user sees.</summary>
@@ -200,7 +203,8 @@ public static class DecisionActionCatalog
                 new("category", "Category", DecisionParameterKind.Choice, Required: false,
                     OptionsSource: "metadata:sprk_budget.sprk_budgetcategory"),
                 new("year", "Year", DecisionParameterKind.Text, Required: false,
-                    Hint: "The budget year, up to four characters, for example 2026"),
+                    Hint: "The budget year, up to four characters, for example 2026",
+                    MaxLength: CreateBudgetExecutor.BudgetYearMaxLength),
                 new("startDate", "Start date", DecisionParameterKind.Date, Required: false),
                 new("endDate", "End date", DecisionParameterKind.Date, Required: false, NotBefore: "startDate"),
                 new("period", "Period", DecisionParameterKind.Choice, Required: false,

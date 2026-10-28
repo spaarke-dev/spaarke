@@ -831,6 +831,19 @@ public class DecisionActionCatalogTests
     private static DecisionActionParameter Param(DecisionActionDefinition action, string code) => action.Parameters.Single(p => p.Code == code);
 
     [Fact]
+    public void CreateBudget_YearDeclaresItsMaxLength_AndTheDtoCarriesIt_NoOtherParameterDoes_D193F44()
+    {
+        DecisionActionCatalog.TryGet("create-budget", out var create).Should().BeTrue();
+        Param(create, "year").MaxLength.Should().Be(4, "sprk_budgetyear is a 4-character Text column; the wizard enforces the same limit the executor does");
+        Param(create, "year").MaxLength.Should().Be(CreateBudgetExecutor.BudgetYearMaxLength);
+
+        var dto = DecisionActionDto.From(create, isRecommended: false);
+        dto.Parameters.Single(p => p.Code == "year").MaxLength.Should().Be(4);
+        dto.Parameters.Where(p => p.Code != "year").Should().OnlyContain(p => p.MaxLength == null, "must not fire: no other parameter declares a limit");
+        DecisionActionCatalog.All.Where(a => a.Code != "create-budget").SelectMany(a => a.Parameters).Should().OnlyContain(p => p.MaxLength == null);
+    }
+
+    [Fact]
     public void NoOtherActionDeclaresADefaultSourceOrANotBefore_MustNotFire_D193()
     {
         DecisionActionCatalog.All.Where(a => a.Code != "create-budget")

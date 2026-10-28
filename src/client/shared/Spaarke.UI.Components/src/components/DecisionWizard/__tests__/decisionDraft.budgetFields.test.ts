@@ -12,6 +12,8 @@ import {
   dateOrderMessage,
   emptyDraft,
   hasUnrecordedChoices,
+  lengthMessage,
+  parameterValid,
   reviewReady,
   stepValid,
   withDecision,
@@ -19,7 +21,14 @@ import {
 } from '../decisionDraft';
 import type { ItemDraft } from '../decisionDraft';
 import { withTemplatedDefaults } from '../templatedDrafts';
-import { EURO_ID, DOLLAR_ID, createBudget, createBudgetPlan, pathBItem, reviseBudget } from '../__fixtures__/decisionWizardFixtures';
+import {
+  EURO_ID,
+  DOLLAR_ID,
+  createBudget,
+  createBudgetPlan,
+  pathBItem,
+  reviseBudget,
+} from '../__fixtures__/decisionWizardFixtures';
 
 const ID = '12345678-1234-4234-8234-123456789abc';
 const scope = actionScope('create-budget');
@@ -43,7 +52,9 @@ describe('the server default (the matter business unit currency)', () => {
 
   it('is sent when the user changes nothing, and replaced when the user picks another currency', () => {
     expect(buildReview(createBudgetPlan, filled()).actions[0].values).toMatchObject({ currency: EURO_ID });
-    expect(buildReview(createBudgetPlan, filled({ currency: DOLLAR_ID })).actions[0].values).toMatchObject({ currency: DOLLAR_ID });
+    expect(buildReview(createBudgetPlan, filled({ currency: DOLLAR_ID })).actions[0].values).toMatchObject({
+      currency: DOLLAR_ID,
+    });
   });
 
   it('is not sent when the user clears it (an omitted currency is the server default again)', () => {
@@ -114,5 +125,32 @@ describe('the posted review', () => {
   it('refuses a Category that is not one of the plan options (the commit would)', () => {
     expect(stepValid(createBudget, filled({ category: '999' }), scope)).toBe(false);
     expect(stepValid(createBudget, filled({ category: '100000000' }), scope)).toBe(true);
+  });
+});
+
+describe('a Text parameter longer than its declared maxLength (review F4-4)', () => {
+  const year = createBudget.parameters.find(p => p.code === 'year')!;
+
+  it('is flagged in words and keeps the step from going on', () => {
+    const d = filled({ year: '20266' });
+
+    expect(year.maxLength).toBe(4);
+    expect(lengthMessage(year, '20266')).toBe('Year can be at most 4 characters.');
+    expect(parameterValid(year, '20266')).toBe(false);
+    expect(stepValid(createBudget, d, scope)).toBe(false);
+    expect(reviewReady(createBudgetPlan, d)).toBe(false);
+  });
+
+  it.each([['2026'], ['  2026  '], ['26'], ['']])('must not fire: %j', value => {
+    expect(lengthMessage(year, value)).toBeNull();
+    expect(stepValid(createBudget, filled({ year: value }), scope)).toBe(true);
+  });
+
+  it('must not fire: a parameter that declares no limit (an older plan) accepts any length', () => {
+    const reason = createBudget.parameters.find(p => p.code === 'reason')!;
+
+    expect(reason.maxLength).toBeUndefined();
+    expect(lengthMessage(reason, 'x'.repeat(5000))).toBeNull();
+    expect(lengthMessage({ ...year, maxLength: null }, '20266')).toBeNull();
   });
 });

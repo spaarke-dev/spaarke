@@ -93,7 +93,7 @@ export const createBudget: DecisionAction = {
       ],
       optionsSource: 'metadata:sprk_budget.sprk_budgetcategory',
     },
-    { code: 'year', label: 'Year', kind: 'Text', required: false },
+    { code: 'year', label: 'Year', kind: 'Text', required: false, maxLength: 4 },
     { code: 'startDate', label: 'Start date', kind: 'Date', required: false },
     { code: 'endDate', label: 'End date', kind: 'Date', required: false, notBefore: 'startDate' },
     {

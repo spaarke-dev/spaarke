@@ -229,9 +229,22 @@ export function parseMoney(value: string): number | null {
   return Number(text.replace(/,/g, ''));
 }
 
+/**
+ * Task 167 (D-193, review F4-4): a Text that is longer than the column holds (`maxLength`, declared by the catalog and enforced again
+ * by the executor), so the user hears it on the step and not as a refusal at Record decision. The message to show, or null. Measured
+ * on the trimmed value, which is what the step sends.
+ */
+export function lengthMessage(parameter: DecisionParameter, value: string): string | null {
+  if (parameter.maxLength == null || parameter.maxLength <= 0) return null;
+  return value.trim().length > parameter.maxLength
+    ? `${parameter.label} can be at most ${parameter.maxLength} characters.`
+    : null;
+}
+
 /** Whether one field is acceptable: a required field must be filled; a filled field must be well formed. */
 export function parameterValid(parameter: DecisionParameter, value: string): boolean {
   if (isBlank(value)) return !parameter.required;
+  if (lengthMessage(parameter, value) !== null) return false;
   switch (parameter.kind) {
     case 'Money':
       return parseMoney(value) !== null;

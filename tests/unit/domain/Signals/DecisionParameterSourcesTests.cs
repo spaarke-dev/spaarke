@@ -304,6 +304,56 @@ public class DecisionParameterSourcesTests
     }
 
     [Fact]
+    public async Task Currency_Omitted_WhenTheDefaultCurrencyIsInactive_IsRefusedWithAMessageThatDoesNotBlameAChoice_F43()
+    {
+        // The business unit's currency exists but is not among the active ones: the active-only query finds nothing.
+        var world = new CurrencyWorld(BuCurrencyId, BaseCurrencyId);
+
+        var defaulted = await Build(entities: world.Entities).ResolveBudgetCurrencyAsync(MatterId, null, CancellationToken.None);
+        var chosen = await Build(entities: world.Entities).ResolveBudgetCurrencyAsync(MatterId, BuCurrencyId.ToString("D"), CancellationToken.None);
+
+        defaulted.IsResolved.Should().BeFalse("it still fails closed");
+        defaulted.Refusal.Should().Be("This matter's business-unit currency is inactive; choose a currency.");
+        chosen.IsResolved.Should().BeFalse();
+        chosen.Refusal.Should().Be("That is not an existing, active currency. Choose one of the listed currencies.",
+            "must not fire: a currency the user chose keeps the original message");
+    }
+
+    [Fact]
+    public async Task Currency_AResolvedAnswer_IsReadOncePerRequestPerMatterAndRequestedCurrency_F42()
+    {
+        var world = new CurrencyWorld(BuCurrencyId, BaseCurrencyId, (BuCurrencyId, "EUR"), (BaseCurrencyId, "USD"));
+        var sources = Build(entities: world.Entities);
+
+        var first = await sources.ResolveBudgetCurrencyAsync(MatterId, null, CancellationToken.None);
+        var second = await sources.ResolveBudgetCurrencyAsync(MatterId, null, CancellationToken.None);
+        var third = await sources.ResolveBudgetCurrencyAsync(MatterId, "  ", CancellationToken.None);
+
+        second.Should().BeSameAs(first);
+        third.Should().BeSameAs(first, "blank is the same question as omitted");
+        world.Queries.Should().ContainSingle(q => q.EntityName == "transactioncurrency", "one currency read for three asks");
+        world.Entities.Verify(e => e.RetrieveAsync("sprk_matter", MatterId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Once);
+        world.Entities.Verify(e => e.RetrieveAsync("businessunit", BusinessUnitId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Once);
+
+        // must not fire: a different requested currency is a different question, and it is read.
+        var other = await sources.ResolveBudgetCurrencyAsync(MatterId, BaseCurrencyId.ToString("D"), CancellationToken.None);
+        other.Id.Should().Be(BaseCurrencyId);
+        world.Queries.Count(q => q.EntityName == "transactioncurrency").Should().Be(2);
+    }
+
+    [Fact]
+    public async Task Currency_ARefusalIsNeverRemembered_SoALaterAskReadsAgain_F42()
+    {
+        var world = new CurrencyWorld(BuCurrencyId, BaseCurrencyId);
+        var sources = Build(entities: world.Entities);
+
+        await sources.ResolveBudgetCurrencyAsync(MatterId, null, CancellationToken.None);
+        await sources.ResolveBudgetCurrencyAsync(MatterId, null, CancellationToken.None);
+
+        world.Queries.Count(q => q.EntityName == "transactioncurrency").Should().Be(2, "a failure is not cached");
+    }
+
+    [Fact]
     public async Task Currency_ACurrencyWithNoIsoCode_IsRefused_NeverABlankSprkCurrency()
     {
         var world = new CurrencyWorld(BuCurrencyId, BaseCurrencyId, (BuCurrencyId, ""));

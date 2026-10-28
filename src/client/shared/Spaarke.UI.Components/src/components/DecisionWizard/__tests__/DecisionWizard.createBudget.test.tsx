@@ -12,7 +12,14 @@ import '@testing-library/jest-dom';
 import * as React from 'react';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import type { DecisionReview } from '../decisionWizardTypes';
-import { DOLLAR_ID, EURO_ID, PATH_B_ID, createBudgetPlan, pathBItem, pathBPlan } from '../__fixtures__/decisionWizardFixtures';
+import {
+  DOLLAR_ID,
+  EURO_ID,
+  PATH_B_ID,
+  createBudgetPlan,
+  pathBItem,
+  pathBPlan,
+} from '../__fixtures__/decisionWizardFixtures';
 import { makeLoader, makeService, renderWizard } from './decisionTestKit';
 
 const enter = (element: HTMLElement, value: string) => fireEvent.change(element, { target: { value } });
@@ -56,7 +63,11 @@ describe('the Create budget step', () => {
     ]);
     expect(Array.from(select(/^Category/).options).map(o => o.textContent)).toEqual(['Choose...', 'Fees', 'Expenses']);
     expect(Array.from(select(/^Period/).options).map(o => o.textContent)).toEqual(['Choose...', 'Annual', 'Quarter 1']);
-    expect(Array.from(select(/^Currency/).options).map(o => o.textContent)).toEqual(['Choose...', 'US Dollar (USD)', 'Euro (EUR)']);
+    expect(Array.from(select(/^Currency/).options).map(o => o.textContent)).toEqual([
+      'Choose...',
+      'US Dollar (USD)',
+      'Euro (EUR)',
+    ]);
   });
 
   it('starts Currency at the business unit default, marked as prefilled, and lets the user change it', async () => {
@@ -81,11 +92,28 @@ describe('the Create budget step', () => {
     enter(screen.getByLabelText(/^Start date/), '2026-06-02');
     enter(screen.getByLabelText(/^End date/), '2026-06-01');
 
-    expect(within(screen.getByTestId('field-endDate')).getByText('End date cannot be before Start date.')).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId('field-endDate')).getByText('End date cannot be before Start date.')
+    ).toBeInTheDocument();
     expect(button('Next')).toBeDisabled();
 
     enter(screen.getByLabelText(/^End date/), '2026-06-02');
     expect(screen.queryByText('End date cannot be before Start date.')).toBeNull();
+    expect(button('Next')).toBeEnabled();
+  });
+
+  it('says so when the Year is longer than the column holds, and Next stays disabled until it is fixed (review F4-4)', async () => {
+    setup();
+    await openStep();
+    enter(screen.getByRole('textbox', { name: /^Budget amount/ }), '250000');
+    enter(screen.getByRole('textbox', { name: /^Reason for the budget/ }), 'No budget was ever set');
+
+    enter(screen.getByRole('textbox', { name: /^Year/ }), '20266');
+    expect(within(screen.getByTestId('field-year')).getByText('Year can be at most 4 characters.')).toBeInTheDocument();
+    expect(button('Next')).toBeDisabled();
+
+    enter(screen.getByRole('textbox', { name: /^Year/ }), '2026');
+    expect(screen.queryByText('Year can be at most 4 characters.')).toBeNull();
     expect(button('Next')).toBeEnabled();
   });
 

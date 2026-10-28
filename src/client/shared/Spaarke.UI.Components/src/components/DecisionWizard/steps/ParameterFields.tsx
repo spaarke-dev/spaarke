@@ -29,7 +29,15 @@ import {
 import { DismissRegular, SearchRegular } from '@fluentui/react-icons';
 import { LookupField } from '../../LookupField/LookupField';
 import type { ILookupItem } from '../../../types/LookupTypes';
-import { dateOrderMessage, fieldLabel, fieldValue, parameterValid, withLookup, withValue } from '../decisionDraft';
+import {
+  dateOrderMessage,
+  fieldLabel,
+  fieldValue,
+  lengthMessage,
+  parameterValid,
+  withLookup,
+  withValue,
+} from '../decisionDraft';
 import type { StepScope } from '../decisionDraft';
 import { useDecisionItem } from '../decisionItemContext';
 import type { DecisionAction, DecisionParameter } from '../decisionWizardTypes';
@@ -217,8 +225,9 @@ const ScalarParameter: React.FC<FieldProps> = ({ parameter, scope, action }) => 
   const value = fieldValue(draft, scope, parameter.code);
   const typed = draft.values[scope]?.[parameter.code] !== undefined;
   const prefilled = !typed && value !== '';
-  // Task 167 (D-193): End date before Start date is named in words; any other invalid value keeps the kind's generic text.
-  const order = dateOrderMessage(action, parameter, draft, scope);
+  // Task 167 (D-193): End date before Start date, and a Text over its column length, are named in words; any other invalid value
+  // keeps the kind's generic text.
+  const order = dateOrderMessage(action, parameter, draft, scope) ?? lengthMessage(parameter, value);
   const invalid = (value.trim() !== '' && !parameterValid(parameter, value)) || order !== null;
   const set = (next: string) => update(d => withValue(d, scope, parameter.code, next));
   const hint = prefilled ? 'Prefilled from this item. Edit it as needed.' : (parameter.hint ?? undefined);

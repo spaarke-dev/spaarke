@@ -295,7 +295,7 @@ public sealed record DecisionActionDto(
             a.Parameters.Select(p => new DecisionParameterDto(p.Code, p.Label, p.Kind.ToString(), p.Required, p.Hint, p.LookupEntity,
                 OptionsOf(p, parameterFacts), p.OptionsSource,
                 p.DefaultSource is not null && parameterFacts is not null && parameterFacts.DefaultsBySource.TryGetValue(p.DefaultSource, out var start) ? start : null,
-                p.NotBefore)).ToList(),
+                p.NotBefore, p.MaxLength)).ToList(),
             a.EffectLines,
             a.Excludes,
             a.Composer,
@@ -324,7 +324,8 @@ public sealed record DecisionParameterDto(
     IReadOnlyList<DecisionOptionDto>? Options,
     string? OptionsSource,
     string? DefaultValue = null,
-    string? NotBefore = null);
+    string? NotBefore = null,
+    int? MaxLength = null);
 
 public sealed record DecisionOptionDto(string Value, string Label);
 

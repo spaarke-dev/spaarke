@@ -71,6 +71,7 @@ public class DecisionParameterSources
     private readonly IGenericEntityService _entities;
     private readonly ITenantCache _cache;
     private readonly ILogger<DecisionParameterSources> _logger;
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<(Guid MatterId, string Requested), BudgetCurrency> _resolvedCurrencies = new();
 
     public DecisionParameterSources(
         IDataverseUserClient user, IGenericEntityService entities, ITenantCache cache, ILogger<DecisionParameterSources> logger)
@@ -208,9 +209,25 @@ public class DecisionParameterSources
     /// The currency a budget under <paramref name="matterId"/> gets: <paramref name="requested"/> when the user chose one, else the
     /// default (<see cref="DefaultCurrencyAsync"/>). Either way it must be an existing, ACTIVE currency with an ISO code, so
     /// <c>sprk_currency</c> is never blank. A refusal carries the text for the wizard; a fault in Dataverse throws.
+    /// A RESOLVED answer is remembered for the life of this (scoped, per-request) instance, keyed by (matter, requested currency), because
+    /// the commit asks the same question from the preflight, the executor's re-run of it and the write; that is a within-request de-dupe of
+    /// data, not an authorization decision, and nothing outlives the request. A refusal or a fault is never remembered.
     /// </summary>
     public virtual async Task<BudgetCurrency> ResolveBudgetCurrencyAsync(Guid matterId, string? requested, CancellationToken ct)
     {
+        var key = (matterId, requested?.Trim().ToLowerInvariant() ?? string.Empty);
+        if (_resolvedCurrencies.TryGetValue(key, out var known))
+            return known;
+
+        var resolved = await ResolveBudgetCurrencyCoreAsync(matterId, requested, ct).ConfigureAwait(false);
+        if (resolved.IsResolved)
+            _resolvedCurrencies[key] = resolved;
+        return resolved;
+    }
+
+    private async Task<BudgetCurrency> ResolveBudgetCurrencyCoreAsync(Guid matterId, string? requested, CancellationToken ct)
+    {
+        var defaulted = string.IsNullOrWhiteSpace(requested);
         Guid currencyId;
         if (!string.IsNullOrWhiteSpace(requested))
         {
@@ -229,7 +246,9 @@ public class DecisionParameterSources
         query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);
         var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
         if (rows.Entities.FirstOrDefault() is not { } row)
-            return new BudgetCurrency(null, null, "That is not an existing, active currency. Choose one of the listed currencies.");
+            return new BudgetCurrency(null, null, defaulted
+                ? "This matter's business-unit currency is inactive; choose a currency."
+                : "That is not an existing, active currency. Choose one of the listed currencies.");
 
         var iso = row.GetAttributeValue<string>("isocurrencycode")?.Trim();
         return string.IsNullOrWhiteSpace(iso)
