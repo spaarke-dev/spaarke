@@ -209,6 +209,56 @@ public sealed class SecureRecordSetupProcedureTests
         dv.TeamRoles[named].Should().Equal(role.Id);
     }
 
+    [Fact]
+    public async Task Contain_MatchesSystemAdministratorByRoleTemplateId_WhateverItIsNamed()
+    {
+        var dv = await ConfiguredEnvAsync();
+        var unit = dv.Unit(Set.BusinessUnitName)!;
+        var defaultTeam = dv.DefaultTeamOf(unit.Id).Id;
+        var named = dv.Team(unit.Id, SecureRecordSetupProcedure.OwnerTeamName, false)!.Id;
+        var renamedAdmin = dv.AddRole(unit.Id, "Platform Administrator",
+            roleTemplateId: SecureRecordSetupProcedure.SystemAdministratorRoleTemplateId);
+        dv.TeamRoles[defaultTeam].Add(renamedAdmin);
+        dv.TeamRoles[named].Add(renamedAdmin);
+
+        (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>();
+
+        dv.TeamRoles[defaultTeam].Should().NotContain(renamedAdmin, "the role is System Administrator by its template id");
+        dv.TeamRoles[named].Should().NotContain(renamedAdmin);
+    }
+
+    [Fact]
+    public async Task Contain_LeavesACustomRoleNamedSystemAdministrator()
+    {
+        var dv = await ConfiguredEnvAsync();
+        var unit = dv.Unit(Set.BusinessUnitName)!;
+        var defaultTeam = dv.DefaultTeamOf(unit.Id).Id;
+        var lookalike = dv.AddRole(unit.Id, SecureRecordSetupProcedure.SystemAdministratorRoleName);   // no template id
+        dv.TeamRoles[defaultTeam].Add(lookalike);
+
+        (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>(
+            "a custom role that only carries the name is not the platform role, so S9 does not report it either");
+
+        dv.TeamRoles[defaultTeam].Should().Contain(lookalike);
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Verify_RefusesWhenSystemAdministratorRemovalDidNotStick_MatchedByTemplateId()
+    {
+        var dv = await ConfiguredEnvAsync();
+        var unit = dv.Unit(Set.BusinessUnitName)!;
+        var defaultTeam = dv.DefaultTeamOf(unit.Id).Id;
+        var renamedAdmin = dv.AddRole(unit.Id, "Platform Administrator",
+            roleTemplateId: SecureRecordSetupProcedure.SystemAdministratorRoleTemplateId);
+        dv.TeamRoles[defaultTeam].Add(renamedAdmin);
+        dv.TeamRoleDisassociationsIgnored = true;
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.VerifyFailed, FailureClass.Resumable);
+
+        refused.Diagnostic.Should().Contain($"still holds '{SecureRecordSetupProcedure.SystemAdministratorRoleName}'");
+    }
+
     // ------------------------------------------------------------ S11 / S12 / S13
 
     [Fact]
@@ -638,6 +688,28 @@ public sealed class SecureRecordSetupProcedureTests
                     permissions.Add(new SecureSetupFieldPermission(dv.StandingGrantProfileId, "sprk_externalparty", 4, 4, 4));
                 },
                 SecureRecordSetupRejectionCodes.StandingGrantLockIncomplete, FailureClass.Resumable },
+            { "Standing Grant Administrators cannot create the standing grant (4/0/4)", dv =>
+                    Replace(dv, SecureRecordSetupProcedure.StandingGrantColumn, dv.StandingGrantProfileId, 4, 0, 4),
+                SecureRecordSetupRejectionCodes.StandingGrantLockIncomplete, FailureClass.Resumable },
+            { "Standing Grant Administrators cannot update the standing grant (4/4/0)", dv =>
+                    Replace(dv, SecureRecordSetupProcedure.StandingGrantColumn, dv.StandingGrantProfileId, 4, 4, 0),
+                SecureRecordSetupRejectionCodes.StandingGrantLockIncomplete, FailureClass.Resumable },
+            { "Readers may update the standing grant (4/0/4)", dv =>
+                    dv.ColumnPermissions(SecureRecordSetupProcedure.StandingGrantColumn).Add(new SecureSetupFieldPermission(
+                        dv.ReaderProfileId, SecureRecordSetupProcedure.StandingGrantTable, 4, 0, 4)),
+                SecureRecordSetupRejectionCodes.StandingGrantLockOtherWriter, FailureClass.QuarantineRequired },
+            { "Writers may update the standing grant (4/0/4)", dv =>
+                    dv.ColumnPermissions(SecureRecordSetupProcedure.StandingGrantColumn).Add(new SecureSetupFieldPermission(
+                        dv.WriterProfileId, SecureRecordSetupProcedure.StandingGrantTable, 4, 0, 4)),
+                SecureRecordSetupRejectionCodes.StandingGrantLockOtherWriter, FailureClass.QuarantineRequired },
+            { "another profile may create the standing grant (0/4/0)", dv =>
+                    dv.ColumnPermissions(SecureRecordSetupProcedure.StandingGrantColumn).Add(new SecureSetupFieldPermission(
+                        dv.AddProfile("Contact Admins"), SecureRecordSetupProcedure.StandingGrantTable, 0, 4, 0)),
+                SecureRecordSetupRejectionCodes.StandingGrantLockOtherWriter, FailureClass.QuarantineRequired },
+            { "another profile may only update the standing grant (0/0/4)", dv =>
+                    dv.ColumnPermissions(SecureRecordSetupProcedure.StandingGrantColumn).Add(new SecureSetupFieldPermission(
+                        dv.AddProfile("Contact Admins"), SecureRecordSetupProcedure.StandingGrantTable, 0, 0, 4)),
+                SecureRecordSetupRejectionCodes.StandingGrantLockOtherWriter, FailureClass.QuarantineRequired },
             { "Access Administrator role missing from the root unit", dv => dv.Roles.RemoveAll(r => r.Id == dv.AccessAdministratorRoleId),
                 SecureRecordSetupRejectionCodes.NoAccessEntryRolesIncomplete, FailureClass.Resumable },
             { "Core User role missing from the root unit", dv => dv.Roles.RemoveAll(r => r.Id == dv.CoreUserRoleId),
@@ -717,8 +789,103 @@ public sealed class SecureRecordSetupProcedureTests
                         .Add(new SecureSetupFieldPermission(dv.AddProfile("Contact Admins"), "contact", 4, 0, 0));
                 },
                 SecureRecordSetupRejectionCodes.InviteCodeHashLockOtherAccess, FailureClass.QuarantineRequired },
+
+            // ---- S19 (#2317): the access level's lock ----
+            { "contact.sprk_accesspermissiongrant not secured", dv =>
+                    dv.SecuredColumns[LevelKey] = false,
+                SecureRecordSetupRejectionCodes.AccessLevelLockIncomplete, FailureClass.Resumable },
+            { "contact.sprk_accesspermissiongrant absent", dv => dv.SecuredColumns.Remove(LevelKey),
+                SecureRecordSetupRejectionCodes.AccessLevelLockIncomplete, FailureClass.Resumable },
+            { "Standing Grant Administrators cannot create the access level", dv =>
+                    Replace(dv, Level, dv.StandingGrantProfileId, 4, 0, 4),
+                SecureRecordSetupRejectionCodes.AccessLevelLockIncomplete, FailureClass.Resumable },
+            { "Readers cannot read the access level", dv =>
+                    dv.ColumnPermissions(Level).RemoveAll(p => p.ProfileId == dv.ReaderProfileId),
+                SecureRecordSetupRejectionCodes.AccessLevelLockIncomplete, FailureClass.Resumable },
+            { "Writers cannot update the access level", dv => Replace(dv, Level, dv.WriterProfileId, 4, 0, 0),
+                SecureRecordSetupRejectionCodes.AccessLevelLockIncomplete, FailureClass.Resumable },
+            { "Readers may update the access level (4/0/4)", dv => Replace(dv, Level, dv.ReaderProfileId, 4, 0, 4),
+                SecureRecordSetupRejectionCodes.AccessLevelLockOtherWriter, FailureClass.QuarantineRequired },
+            { "another profile may create the access level", dv =>
+                    dv.ColumnPermissions(Level).Add(new SecureSetupFieldPermission(
+                        dv.AddProfile("Contact Admins"), SecureRecordSetupProcedure.StandingGrantTable, 4, 4, 0)),
+                SecureRecordSetupRejectionCodes.AccessLevelLockOtherWriter, FailureClass.QuarantineRequired },
+            { "another profile may only update the access level (0/0/4)", dv =>
+                    dv.ColumnPermissions(Level).Add(new SecureSetupFieldPermission(
+                        dv.AddProfile("Contact Admins"), SecureRecordSetupProcedure.StandingGrantTable, 0, 0, 4)),
+                SecureRecordSetupRejectionCodes.AccessLevelLockOtherWriter, FailureClass.QuarantineRequired },
+
+            // ---- S22 (#2317): the BFF-only columns and the removed-on marker, once they ship ----
+            { "contact.sprk_externalinvitedemailhash present but not secured", dv =>
+                {
+                    dv.AddBffOnlyColumns();
+                    dv.SecuredColumns[InviteKey(SecureRecordSetupProcedure.InvitedEmailHashColumn)] = false;
+                },
+                SecureRecordSetupRejectionCodes.BffOnlyColumnLockIncomplete, FailureClass.Resumable },
+            { "Writers cannot update contact.sprk_externalinvitedtenantid", dv =>
+                {
+                    dv.AddBffOnlyColumns();
+                    Replace(dv, SecureRecordSetupProcedure.InvitedTenantIdColumn, dv.WriterProfileId, 4, 4, 0);
+                },
+                SecureRecordSetupRejectionCodes.BffOnlyColumnLockIncomplete, FailureClass.Resumable },
+            { "Readers can READ contact.sprk_externalinvitedemailhash", dv =>
+                {
+                    dv.AddBffOnlyColumns();
+                    dv.ColumnPermissions(SecureRecordSetupProcedure.InvitedEmailHashColumn).Add(new SecureSetupFieldPermission(
+                        dv.ReaderProfileId, SecureRecordSetupProcedure.InviteTable, 4, 0, 0));
+                },
+                SecureRecordSetupRejectionCodes.BffOnlyColumnLockOtherAccess, FailureClass.QuarantineRequired },
+            { "another profile can read contact.sprk_externalinvitedtenantid", dv =>
+                {
+                    dv.AddBffOnlyColumns();
+                    dv.ColumnPermissions(SecureRecordSetupProcedure.InvitedTenantIdColumn).Add(new SecureSetupFieldPermission(
+                        dv.AddProfile("Contact Admins"), SecureRecordSetupProcedure.InviteTable, 4, 0, 0));
+                },
+                SecureRecordSetupRejectionCodes.BffOnlyColumnLockOtherAccess, FailureClass.QuarantineRequired },
+            { "contact.sprk_externalaccessremovedon present but not secured", dv =>
+                {
+                    dv.AddBffOnlyColumns();
+                    dv.SecuredColumns[InviteKey(SecureRecordSetupProcedure.AccessRemovedOnColumn)] = false;
+                },
+                SecureRecordSetupRejectionCodes.AccessRemovedOnLockIncomplete, FailureClass.Resumable },
+            { "Readers cannot read contact.sprk_externalaccessremovedon", dv =>
+                {
+                    dv.AddBffOnlyColumns();
+                    dv.ColumnPermissions(SecureRecordSetupProcedure.AccessRemovedOnColumn).RemoveAll(p => p.ProfileId == dv.ReaderProfileId);
+                },
+                SecureRecordSetupRejectionCodes.AccessRemovedOnLockIncomplete, FailureClass.Resumable },
+            { "Readers may update contact.sprk_externalaccessremovedon", dv =>
+                {
+                    dv.AddBffOnlyColumns();
+                    Replace(dv, SecureRecordSetupProcedure.AccessRemovedOnColumn, dv.ReaderProfileId, 4, 0, 4);
+                },
+                SecureRecordSetupRejectionCodes.AccessRemovedOnLockOtherWriter, FailureClass.QuarantineRequired },
+            { "another profile may create contact.sprk_externalaccessremovedon", dv =>
+                {
+                    dv.AddBffOnlyColumns();
+                    dv.ColumnPermissions(SecureRecordSetupProcedure.AccessRemovedOnColumn).Add(new SecureSetupFieldPermission(
+                        dv.AddProfile("Contact Admins"), SecureRecordSetupProcedure.InviteTable, 4, 4, 0));
+                },
+                SecureRecordSetupRejectionCodes.AccessRemovedOnLockOtherWriter, FailureClass.QuarantineRequired },
         };
         return data;
+    }
+
+    // #2317 helpers.
+    private const string Level = SecureRecordSetupProcedure.AccessLevelColumn;
+
+    private static readonly string LevelKey =
+        FakeSecureRecordSetupDataverse.ColumnKey(SecureRecordSetupProcedure.StandingGrantTable, Level);
+
+    private static string InviteKey(string column) => FakeSecureRecordSetupDataverse.ColumnKey(SecureRecordSetupProcedure.InviteTable, column);
+
+    /// <summary>Replaces the row of <paramref name="profileId"/> on <paramref name="column"/> with read/create/update as given.</summary>
+    private static void Replace(FakeSecureRecordSetupDataverse dv, string column, Guid profileId, int read, int create, int update)
+    {
+        var permissions = dv.ColumnPermissions(column);
+        var table = permissions.First(p => p.ProfileId == profileId).EntityName;
+        permissions.RemoveAll(p => p.ProfileId == profileId);
+        permissions.Add(new SecureSetupFieldPermission(profileId, table, read, create, update));
     }
 
     [Theory]
@@ -793,8 +960,190 @@ public sealed class SecureRecordSetupProcedureTests
 
         var applied = (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>().Subject;
 
-        applied.State.Notes.Should().ContainSingle().Which.Should().Contain("present, secured");
-        applied.State.Notes.Should().NotContain(n => n.Contains("absent", StringComparison.Ordinal));
+        var codeHashNotes = applied.State.Notes!
+            .Where(n => n.Contains(SecureRecordSetupProcedure.InviteCodeHashColumn, StringComparison.Ordinal)).ToArray();
+        codeHashNotes.Should().ContainSingle().Which.Should().Contain("present, secured");
+        codeHashNotes.Should().NotContain(n => n.Contains("absent", StringComparison.Ordinal));
+    }
+
+    // ------------------------------------------------------------ S19/S22 (#2317): access level, BFF-only columns, removed-on
+
+    [Fact]
+    public async Task AccessLevel_AsShipped_Passes_TheReadersProfileMayRead_AndSystemAdministratorIsExempt()
+    {
+        var dv = NewEnv();   // Standing Grant Administrators 4/4/4, Readers 4/0/0, Writers 4/0/4, System Administrator 4/4/4
+
+        (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>();
+        dv.Writes.Should().NotContain(w => w.Contains(Level, StringComparison.OrdinalIgnoreCase), "S19 verifies the lock, never writes it");
+    }
+
+    [Fact]
+    public async Task StandingGrant_AsShipped_Passes_TheReadersProfileMayRead_AndSystemAdministratorIsExempt()
+    {
+        var dv = NewEnv();   // Standing Grant Administrators 4/4/4
+        var standing = dv.ColumnPermissions(SecureRecordSetupProcedure.StandingGrantColumn);
+        standing.Add(new SecureSetupFieldPermission(dv.SystemAdministratorProfileId, SecureRecordSetupProcedure.StandingGrantTable, 4, 4, 4));
+        standing.Add(new SecureSetupFieldPermission(dv.ReaderProfileId, SecureRecordSetupProcedure.StandingGrantTable, 4, 0, 0));
+        // A grant on the same column name on another table is not this column's lock.
+        standing.Add(new SecureSetupFieldPermission(dv.AddProfile("Contact Admins"), "sprk_externalparty", 4, 4, 4));
+
+        (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>();
+        dv.Writes.Should().NotContain(w => w.Contains(SecureRecordSetupProcedure.StandingGrantColumn, StringComparison.OrdinalIgnoreCase),
+            "S19 verifies the lock, never writes it");
+    }
+
+    [Fact]
+    public async Task StandingGrantOtherWriter_NamesTheProfile_AndTheRule()
+    {
+        var dv = NewEnv();
+        var admins = dv.AddProfile("Contact Admins");
+        dv.ColumnPermissions(SecureRecordSetupProcedure.StandingGrantColumn).Add(new SecureSetupFieldPermission(
+            admins, SecureRecordSetupProcedure.StandingGrantTable, 0, 0, 4));
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.StandingGrantLockOtherWriter,
+            FailureClass.QuarantineRequired);
+
+        refused.Diagnostic.Should().Contain(admins.ToString()).And.Contain("contact.sprk_standinggrant")
+            .And.Contain("Only Standing Grant Administrators and System Administrator may create or update the standing grant");
+    }
+
+    // ------------------------------------------------------------ S18/S19: an environment on SpaarkeMaster 1.2.3.1
+
+    /// <summary>
+    /// The contact columns as SpaarkeMaster 1.2.3.1 leaves them: the identity plane, collision and access-level columns exist
+    /// but are not secured and carry no profile rows; the three BFF-only columns do not exist (NewEnvironment omits them).
+    /// </summary>
+    private static void ShapeAsSpaarkeMaster1231(FakeSecureRecordSetupDataverse dv, bool identityPlaneAndCollisionToo)
+    {
+        if (identityPlaneAndCollisionToo)
+        {
+            foreach (var (table, column) in SecureRecordSetupProcedure.IdentityLinkColumns
+                         .Where(c => c.Column.StartsWith("sprk_identity", StringComparison.Ordinal)))
+            {
+                dv.SecuredColumns[FakeSecureRecordSetupDataverse.ColumnKey(table, column)] = false;
+                dv.ColumnPermissions(column).Clear();
+            }
+        }
+        dv.SecuredColumns[LevelKey] = false;
+        dv.ColumnPermissions(Level).Clear();
+    }
+
+    [Fact]
+    public async Task SpaarkeMaster1231Environment_IsRefusedAtS18_NamingTheMinimumVersionAndTheScript()
+    {
+        var dv = NewEnv();
+        ShapeAsSpaarkeMaster1231(dv, identityPlaneAndCollisionToo: true);
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.IdentityLinkLockIncomplete, FailureClass.Resumable);
+
+        refused.Diagnostic.Should().Contain("contact.sprk_identityplane")
+            .And.Contain("SpaarkeMaster 1.2.4.0 or later")
+            .And.Contain(ResumeRemedy);
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task SpaarkeMaster1231AccessLevel_IsRefusedAtS19_NamingTheMinimumVersionAndTheScript()
+    {
+        var dv = NewEnv();
+        ShapeAsSpaarkeMaster1231(dv, identityPlaneAndCollisionToo: false);
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.AccessLevelLockIncomplete, FailureClass.Resumable);
+
+        refused.Diagnostic.Should().Contain("contact.sprk_accesspermissiongrant")
+            .And.Contain("SpaarkeMaster 1.2.4.0 or later")
+            .And.Contain(ResumeRemedy);
+        dv.Writes.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// A resume does not re-run a completed H6, so the remedy names the script for an environment past it. C5: -Apply, then
+    /// resume; -Verify runs after H7b (which adds the BFF to Standing Grant Administrators), before the BFF deploy.
+    /// </summary>
+    private const string ResumeRemedy =
+        "a new run imports it at H6 once it is published; in an environment already past H6 (a resume does not re-run a " +
+        "completed H6) run scripts/Set-ExternalAccessContactSecuritySchema.ps1 -Apply, then resume. H7b re-checks the locks " +
+        "itself and adds the BFF to Standing Grant Administrators. Run -Verify (exit 0) after H7b completes, before the BFF " +
+        "deploy. Nothing was written.";
+
+    /// <summary>
+    /// C5: the contact-locks remedy never asks for -Verify before the resume (it cannot pass until H7b has added the BFF to
+    /// Standing Grant Administrators), and names no manual membership step.
+    /// </summary>
+    [Fact]
+    public void TheContactLocksRemedy_ResumesAfterApply_AndVerifiesAfterH7b()
+    {
+        var remedy = SecureRecordSetupProcedure.LocksRemedy("1.2.4.0");
+
+        remedy.Should().Contain(ResumeRemedy)
+            .And.NotContain("-Verify (exit 0), then resume")
+            .And.NotContain("S20");
+        remedy.IndexOf("-Apply, then resume", StringComparison.Ordinal).Should()
+            .BeLessThan(remedy.IndexOf("Run -Verify (exit 0) after H7b completes", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// The standing-grant field and its profile ship only in the package, so the remedy for an environment past H6 is a hand
+    /// import of the release, never the contact schema script (which writes neither).
+    /// </summary>
+    private const string StandingGrantRemedy =
+        "It requires SpaarkeMaster 1.2.0.0 or later: a new run imports it at H6; in an environment already past H6 (a resume " +
+        "does not re-run a completed H6), import it by hand with scripts/solution-authoring/Import-SpaarkeMasterPackage.ps1 " +
+        "-EnvironmentUrl <org> -PackageType managed, then resume. Nothing was written.";
+
+    [Fact]
+    public async Task StandingGrantLockIncomplete_NamesTheMinimumVersionAndTheImportScriptForAnEnvironmentPastH6()
+    {
+        var dv = NewEnv();
+        dv.SecuredColumns[FakeSecureRecordSetupDataverse.ColumnKey("contact", "sprk_standinggrant")] = false;
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.StandingGrantLockIncomplete, FailureClass.Resumable);
+
+        refused.Diagnostic.Should().Contain("contact.sprk_standinggrant")
+            .And.Contain(StandingGrantRemedy)
+            .And.NotContain(SecureRecordSetupProcedure.ContactSecuritySchemaScript);
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task BffOnlyColumnsAndRemovedOn_Absent_Pass_AndRecordTheAbsentOutcome()
+    {
+        var dv = NewEnv();   // the release that carries them has not landed
+
+        var applied = (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>().Subject;
+
+        foreach (var column in SecureRecordSetupProcedure.BffOnlyColumns.Append(SecureRecordSetupProcedure.AccessRemovedOnColumn))
+        {
+            applied.State.Notes.Should().ContainSingle(n => n.Contains(column, StringComparison.Ordinal)
+                                                           && n.Contains(CodeHashAbsentNote, StringComparison.Ordinal));
+        }
+        dv.Writes.Should().NotContain(w => w.Contains("external", StringComparison.OrdinalIgnoreCase), "S22 verifies, never writes");
+    }
+
+    [Fact]
+    public async Task BffOnlyColumnsAndRemovedOn_AsShipped_Pass_WithPresentNotes()
+    {
+        var dv = NewEnv();
+        dv.AddBffOnlyColumns();
+
+        var applied = (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>().Subject;
+
+        foreach (var column in SecureRecordSetupProcedure.BffOnlyColumns.Append(SecureRecordSetupProcedure.AccessRemovedOnColumn))
+        {
+            applied.State.Notes.Should().ContainSingle(n => n.Contains(column, StringComparison.Ordinal)
+                                                           && n.Contains("present, secured", StringComparison.Ordinal));
+        }
+    }
+
+    [Fact]
+    public async Task BffOnlyColumn_WithAZeroZeroZeroReadersRow_Passes()
+    {
+        var dv = NewEnv();
+        dv.AddBffOnlyColumns();
+        dv.ColumnPermissions(SecureRecordSetupProcedure.InvitedEmailHashColumn).Add(new SecureSetupFieldPermission(
+            dv.ReaderProfileId, SecureRecordSetupProcedure.InviteTable, 0, 0, 0));
+
+        (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>("0/0/0 grants nothing, the same as no row");
     }
 
     [Fact]

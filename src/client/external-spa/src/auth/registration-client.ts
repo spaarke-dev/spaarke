@@ -121,6 +121,7 @@ export function validateRegistrationInput(input: RegistrationInput): Registratio
  *   - licensed_user_link_required     403: this address belongs to a licensed Spaarke user; link the accounts instead.
  *   - registration_contact_conflict   403: the records disagree; an administrator must resolve it.
  *   - registration_email_missing      403: the sign-in carried no email address.
+ *   - contact_not_invited             403: no current invitation names this sign-in; a new invitation is the fix.
  *   - invalid                         400: the BFF refused a value.
  *   - signin                          401: the sign-in is no longer accepted.
  *   - blocked                         any OTHER 403 / 409 deny code (e.g. `registration_home_identity_required`): the
@@ -132,6 +133,7 @@ export type RegistrationRefusal =
   | 'licensed_user_link_required'
   | 'registration_contact_conflict'
   | 'registration_email_missing'
+  | 'contact_not_invited'
   | 'invalid'
   | 'signin'
   | 'blocked'
@@ -144,6 +146,7 @@ const REGISTRATION_REASONS: Record<string, RegistrationRefusal> = {
   'sdap.access.licensed_user_link_required': 'licensed_user_link_required',
   'sdap.access.registration_contact_conflict': 'registration_contact_conflict',
   'sdap.access.registration_email_missing': 'registration_email_missing',
+  'sdap.access.deny.contact_not_invited': 'contact_not_invited',
 };
 
 function refusalOfRegistration(err: unknown): RegistrationRefusal {

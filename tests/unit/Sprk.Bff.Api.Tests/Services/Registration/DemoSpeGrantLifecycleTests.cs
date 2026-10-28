@@ -335,7 +335,8 @@ public class DemoSpeGrantLifecycleTests
             Mock.Of<IHttpClientFactory>(f => f.CreateClient(It.IsAny<string>()) == new HttpClient()),
             NullLogger<RegistrationDataverseService>.Instance,
             new ContactIdentityBinderFactory(
-                Mock.Of<IHttpClientFactory>(), NullLoggerFactory.Instance, Tenants(CustomerTenant), new FakeTimeProvider(Now)),
+                Mock.Of<IHttpClientFactory>(), NullLoggerFactory.Instance, Tenants(CustomerTenant), new FakeTimeProvider(Now), FactoryConfiguration()),
+            InertOwnEnvironmentBinder(),
             new NullMembershipCacheInvalidator(NullLogger<NullMembershipCacheInvalidator>.Instance));
 
     /// <summary>

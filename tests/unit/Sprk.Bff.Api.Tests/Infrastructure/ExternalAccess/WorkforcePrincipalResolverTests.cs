@@ -111,8 +111,10 @@ public class WorkforcePrincipalResolverTests
     [Fact]
     public async Task ResolveAsync_TheBindingReceivesTheEmailFromTheToken_PreferredUsernameIncluded()
     {
-        // The email claim chain is threaded from the token to the first-sign-in bind.
+        // The email claim chain is threaded from the token to the first-sign-in bind (which needs the invite stamp for
+        // that email, naming the token's tenant).
         _store.AddContact(TestContactId, email: TestEmail);
+        _store.StampInvite(TestContactId, TestEmail, CustomerTenant);
         var dataverse = new Mock<IDataverseService>();
         SetupSystemUserLookup(dataverse, TestOid, systemUserId: null);
 
@@ -569,6 +571,31 @@ public class WorkforcePrincipalResolverTests
         result.Principal.SystemUserId.Should().BeNull();
         result.Principal.Oid.Should().Be(HomeOid.ToString("D"));
         result.Principal.TenantId.Should().Be(HomeTenant.ToString("D"));
+        _store.Reads.Should().Equal("home-link", "home-contact");
+        AssertNothingWritten(dataverse, identity);
+    }
+
+    /// <summary>
+    /// The WorkforceHome contact is resolved by (tid, oid) alone: the invite stamp is neither read nor needed, so a contact
+    /// with no stamp, or a stamp for another address and tenant, resolves the same.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Home_ResolvesByTidAndOid_TheInviteStampIsNeverConsulted(bool foreignStamp)
+    {
+        AddHomeContact(TestContactId, HomeTenant, HomeOid);
+        if (foreignStamp)
+        {
+            _store.StampInvite(TestContactId, "someone.else@elsewhere.example", OtherHomeTenant);
+        }
+
+        var (sut, dataverse, identity) = HomeSut();
+
+        var result = await sut.ResolveAsync(HomeUser(), CancellationToken.None);
+
+        result.IsResolved.Should().BeTrue(result.DenyCode);
+        result.Principal!.ContactId.Should().Be(TestContactId);
         _store.Reads.Should().Equal("home-link", "home-contact");
         AssertNothingWritten(dataverse, identity);
     }

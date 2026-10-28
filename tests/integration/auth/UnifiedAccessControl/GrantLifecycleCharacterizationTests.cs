@@ -247,7 +247,7 @@ public class GrantLifecycleCharacterizationTests
         GrantExternalAccessEndpoint.CreateGrantAsync(
             request, ExternalGrantRootType.Project, ProjectId, Today, FullAccessGrantor,
             callerOid: null, client.Object, OpenRecordPolicy, NoAccessListClear,
-            new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), NullLogger.Instance, CancellationToken.None);
+            Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.UnlinkedIdentityStore(), new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), NullLogger.Instance, CancellationToken.None);
 
     /// <summary>
     /// Owner round 80: the core as <c>/grant</c> and <c>/invite-and-grant</c> call it — a dateless re-add over a lapsed
@@ -258,7 +258,7 @@ public class GrantLifecycleCharacterizationTests
         GrantExternalAccessEndpoint.CreateGrantAsync(
             request, ExternalGrantRootType.Project, ProjectId, Today, FullAccessGrantor,
             callerOid: null, client.Object, OpenRecordPolicy, NoAccessListClear,
-            new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), NullLogger.Instance, CancellationToken.None, reAddRestoresLapsed: true);
+            Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.UnlinkedIdentityStore(), new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), NullLogger.Instance, CancellationToken.None, reAddRestoresLapsed: true);
 
     /// <summary>
     /// Task 139: the grant core takes the grantor's ceiling as a REQUIRED input. The upsert behaviour this class pins
@@ -1351,7 +1351,7 @@ public class GrantLifecycleCharacterizationTests
         => GrantExternalAccessEndpoint.CreateGrantAsync(
             request, ExternalGrantRootType.Project, ProjectId, Today, FullAccessGrantor,
             callerOid: null, client.Object, new GrantPolicyTestDoubles.FlagStubParticipationService(flags),
-            NoAccessListClear, new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), NullLogger.Instance,
+            NoAccessListClear, Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.UnlinkedIdentityStore(), new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), NullLogger.Instance,
             CancellationToken.None);
 
     /// <summary>
@@ -1437,7 +1437,7 @@ public class GrantLifecycleCharacterizationTests
         var faulted = await GrantExternalAccessEndpoint.CreateGrantAsync(
             Request(), ExternalGrantRootType.Project, ProjectId, Today, FullAccessGrantor, callerOid: null,
             client.Object, throwing, NoAccessListClear,
-            new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), NullLogger.Instance, CancellationToken.None);
+            Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.UnlinkedIdentityStore(), new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), NullLogger.Instance, CancellationToken.None);
         var realRestricted = await GrantUnder(
             client, Request(), new RootRecordFlags(IsSecure: true, IsRestricted: true));
 
@@ -1596,11 +1596,11 @@ public class GrantLifecycleCharacterizationTests
 
         await GrantExternalAccessEndpoint.CreateGrantAsync(
             Request(contactId: Guid.Empty, organizationId: OrganizationId), ExternalGrantRootType.Project, ProjectId, Today,
-            FullAccessGrantor, callerOid: null, client.Object, participations, NoAccessListClear, new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), NullLogger.Instance,
+            FullAccessGrantor, callerOid: null, client.Object, participations, NoAccessListClear, Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.UnlinkedIdentityStore(), new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), NullLogger.Instance,
             CancellationToken.None);
         await GrantExternalAccessEndpoint.CreateGrantAsync(
             Request(contactId: OtherContactId, organizationId: OrganizationId), ExternalGrantRootType.Project, ProjectId,
-            Today, FullAccessGrantor, callerOid: null, client.Object, participations, NoAccessListClear, new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), NullLogger.Instance,
+            Today, FullAccessGrantor, callerOid: null, client.Object, participations, NoAccessListClear, Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.UnlinkedIdentityStore(), new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), NullLogger.Instance,
             CancellationToken.None);
 
         participations.Invalidations.Select(i => (Contacts: i.Contacts.ToList(), Organizations: i.Organizations.ToList()))
@@ -1640,7 +1640,7 @@ public class GrantLifecycleCharacterizationTests
 
         var outcome = await GrantExternalAccessEndpoint.CreateGrantAsync(
             Request(contactId: Guid.Empty, organizationId: OrganizationId), ExternalGrantRootType.Project, ProjectId, Today,
-            FullAccessGrantor, callerOid: null, client.Object, participations, NoAccessListClear, new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), NullLogger.Instance,
+            FullAccessGrantor, callerOid: null, client.Object, participations, NoAccessListClear, Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.UnlinkedIdentityStore(), new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), NullLogger.Instance,
             CancellationToken.None);
 
         outcome.Refusal.Should().BeNull("precondition: the organization grant is written");

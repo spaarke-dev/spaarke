@@ -6353,13 +6353,16 @@ public partial class RouteAuthorizationGuardTests
         Assert.Empty(UnusedEntryViolations(used, CreditedForms.Select(c => c.Form)));
     }
 
-    [Fact(DisplayName = "Task 167 controls: admin credit is exactly five mechanisms, and the admin pin fires both ways")]
-    public void Admin_NegativeControl_PinFiresAndOnlyFiveMechanismsCount()
+    [Fact(DisplayName = "Task 167 controls: admin credit is exactly six mechanisms, and the admin pin fires both ways")]
+    public void Admin_NegativeControl_PinFiresAndOnlySixMechanismsCount()
     {
         // Five since customer-provisioning task 230b added AddKeylessProofAuthorizationFilter (an application role on
-        // an app-only token, held only by the L2 Worker identity). A sixth needs the same review.
+        // an app-only token, held only by the L2 Worker identity). Six since external-access-r3 slice C3 added
+        // AddExternalAccessAdministratorAuthorizationFilter (standing-grant administrators profile membership, direct or
+        // through a team, the caller from WhoAmI over their own token; reviewed with that slice). A seventh needs the same review.
         Assert.Equal(new[]
         {
+            "AddExternalAccessAdministratorAuthorizationFilter",
             "AddKeylessProofAuthorizationFilter",
             "AddRegistrationAuthorizationFilter", "AddSpeAdminAuthorizationFilter",
             "RequireAuthorization(\"SystemAdmin\")", "RequireAuthorization(AuthPolicies.RagApiKey)",
