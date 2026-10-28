@@ -150,7 +150,8 @@ public static class InviteExternalUserEndpoint
         if (organizationProblem is not null)
             return organizationProblem;
 
-        logger.LogInformation("[EXT-INVITE] Onboarding external user {Email}", request.Email);
+        logger.LogInformation("[EXT-INVITE] Onboarding an external user on {RootType} {RootId} (trace {TraceId})",
+            root.Type, root.Id, httpContext.TraceIdentifier);
 
         var portalUrl = configuration["ExternalAccess:PortalUrl"]
             ?? throw new InvalidOperationException("ExternalAccess:PortalUrl is not configured.");
@@ -200,7 +201,8 @@ public static class InviteExternalUserEndpoint
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "[EXT-INVITE] Failed to onboard external user {Email}", request.Email);
+            logger.LogError(ex, "[EXT-INVITE] Failed to onboard an external user on {RootType} {RootId} (trace {TraceId})",
+                root.Type, root.Id, httpContext.TraceIdentifier);
             return Results.Problem(
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Internal Server Error",
@@ -472,8 +474,8 @@ public static class InviteExternalUserEndpoint
         {
             case InviteContactAction.Refuse:
                 logger.LogWarning(
-                    "[EXT-INVITE] Refused invite for {Email} ({ReasonCode}) — no CIAM account created",
-                    email, resolution.ReasonCode);
+                    "[EXT-INVITE] Refused the invite for contact {ContactId} ({ReasonCode}) — no CIAM account created",
+                    resolution.ContactId, resolution.ReasonCode);
                 return new ProvisionOutcome(resolution.ContactId ?? Guid.Empty, "Refused",
                     new InviteRefusal(resolution.ReasonCode!, resolution.Message ?? "The invite was refused."));
 
@@ -483,8 +485,8 @@ public static class InviteExternalUserEndpoint
                 // "Failed to onboard" 500, and never read as "no such contact".
                 var code = resolution.ReasonCode ?? ContactBindingDecision.InviteContactLookupFailed;
                 logger.LogWarning(
-                    "[EXT-INVITE] Contact lookup for {Email} could not be read ({ReasonCode}) — nothing created",
-                    email, code);
+                    "[EXT-INVITE] The invite email's contact lookup could not be read ({ReasonCode}) — nothing created",
+                    code);
                 // The last fallback is deliberately NOT the decision's wording, so a test can tell which one reached
                 // the client (third fix round, verifier INFO finding).
                 return new ProvisionOutcome(resolution.ContactId ?? Guid.Empty, "LookupFailed",

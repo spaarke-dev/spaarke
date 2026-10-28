@@ -29,6 +29,11 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// <see cref="Guid.Empty"/>, <paramref name="Invite"/> is <c>null</c>, and <paramref name="GrantedAccessLevel"/>,
 /// <paramref name="Narrowed"/> and <paramref name="NotificationFailed"/> describe the share. <c>null</c> for a grant. Additive.
 /// </param>
+/// <param name="ExpiryNotApplied">
+/// Task 193: <c>true</c> when the record was SHARED with <paramref name="SharedWithUser"/> and the request carried an expiry:
+/// a share has no end date (as when the colleague is picked directly), so the expiry was not applied. Absent otherwise
+/// (never sent as <c>false</c>). Additive.
+/// </param>
 public record GrantAccessResponse(
     Guid AccessRecordId,
     bool SpeContainerMembershipGranted,
@@ -36,4 +41,6 @@ public record GrantAccessResponse(
     bool Narrowed = false,
     bool NotificationFailed = false,
     GrantInviteResult? Invite = null,
-    SharedWithUser? SharedWithUser = null);
+    SharedWithUser? SharedWithUser = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    bool? ExpiryNotApplied = null);

@@ -356,11 +356,12 @@ public class GrantAccessNotificationTests
     }
 
     /// <summary>
-    /// Task 193 (C-fix): a represented contact is shared with, and a share holds no expiry, so a request carrying one is
-    /// refused (422 expiry_not_supported_for_internal_user): nothing changes and nobody is told.
+    /// Task 193 (expiry ruling (c)): a represented contact is shared with, with no end date, whatever expiry the request
+    /// carried (the answer says expiryNotApplied); the user gains access, so they are told. The old contact grant row and its
+    /// date are left as they were.
     /// </summary>
     [Fact]
-    public async Task Grant_ToARepresentedContact_WithAnExpiry_Is422_ChangesNothing_AndTellsNobody()
+    public async Task Grant_ToARepresentedContact_WithAnExpiry_SharesWithNoEndDate_AndTellsThem()
     {
         var (contact, _) = Colleague();
         _h.Grants.Seed(ExternalGrantRootType.Matter, _matter, contact, null, (int)ExternalAccessLevel.Collaborate, Today.AddDays(60));
@@ -370,11 +371,10 @@ public class GrantAccessNotificationTests
             _h.Grants, _h.Participations, _h.AccessibleRecords, new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), new EverythingProbe(),
             _h.Materializer, _h.Notifier, _h.Invites, Context(), NullLogger<Program>.Instance, _h.Time, CancellationToken.None, _h.ContactShare);
 
-        result.Should().BeOfType<ProblemHttpResult>().Which.ProblemDetails.Extensions["reasonCode"].Should()
-            .Be(ContactInternalUserShare.ExpiryNotSupportedReasonCode);
-        _h.Grants.ActiveRowsOf(_matter, contact).Single().ExpiresDate.Should().Be(Today.AddDays(60), "nothing was written");
-        _h.Shares.Writes.Should().BeEmpty();
-        _h.SentNotifications.Should().BeEmpty();
+        OkBody<GrantAccessResponse>(result).ExpiryNotApplied.Should().BeTrue();
+        _h.Grants.ActiveRowsOf(_matter, contact).Single().ExpiresDate.Should().Be(Today.AddDays(60), "the old row is untouched");
+        _h.Shares.Writes.Should().NotBeEmpty();
+        _h.SentNotifications.Should().ContainSingle();
     }
 
     [Fact]

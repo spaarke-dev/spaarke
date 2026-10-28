@@ -42,6 +42,11 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// is empty (the colleague uses the model-driven app), <paramref name="EmailSent"/> is <c>null</c>, and the level fields
 /// describe the share. <c>null</c> otherwise. Additive.
 /// </param>
+/// <param name="ExpiryNotApplied">
+/// Task 193: <c>true</c> when the record was SHARED with <paramref name="SharedWithUser"/> and the request carried an expiry:
+/// a share has no end date (as when the colleague is picked directly), so the expiry was not applied. Absent otherwise
+/// (never sent as <c>false</c>). Additive.
+/// </param>
 public record InviteAndGrantResponse(
     Guid ContactId,
     string OnboardStatus,
@@ -52,4 +57,6 @@ public record InviteAndGrantResponse(
     bool NotificationFailed = false,
     bool? EmailSent = null,
     string? EmailErrorCode = null,
-    SharedWithUser? SharedWithUser = null);
+    SharedWithUser? SharedWithUser = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    bool? ExpiryNotApplied = null);

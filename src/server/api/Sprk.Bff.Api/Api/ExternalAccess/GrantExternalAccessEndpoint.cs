@@ -133,12 +133,13 @@ public static class GrantExternalAccessEndpoint
         // core at the requested level (no grant row); several → 409; unreadable → 503 (never a contact grant instead);
         // nobody → the grant below, unchanged. The share core answers a disabled, non-person or Restricted-barred user with
         // its own refusal. An organization grant is not a person and never asks.
-        // A share carries no expiry, so a requested ExpiryDate is refused for it (422), never dropped.
+        // A share has no end date (as when the user is picked directly): a requested ExpiryDate is not applied to it, and the
+        // answer says so (expiryNotApplied), never silently.
         if (!isOrgGrant)
         {
             var decision = await contactShare.DecideAsync(
-                request.ContactId, root.Type, root.Id, request.AccessLevel, request.ExpiryDate, dataverseClient,
-                participations, callerAccessProbe, assignedAccess, accessNotifier, httpContext, logger, ct);
+                request.ContactId, root.Type, root.Id, request.AccessLevel, dataverseClient, participations,
+                callerAccessProbe, assignedAccess, accessNotifier, httpContext, logger, ct);
 
             if (decision.Result is { } answered)
                 return answered;
@@ -151,7 +152,8 @@ public static class GrantExternalAccessEndpoint
                     Narrowed: share.Narrowed,
                     NotificationFailed: share.NotificationFailed,
                     Invite: null,
-                    SharedWithUser: sharedWith));
+                    SharedWithUser: sharedWith,
+                    ExpiryNotApplied: request.ExpiryDate is not null ? true : null));
         }
 
         // ── Resolve caller identity for granted-by reference ─────────────────

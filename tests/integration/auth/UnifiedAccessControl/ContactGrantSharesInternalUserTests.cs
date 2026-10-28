@@ -117,6 +117,7 @@ public class ContactGrantSharesInternalUserTests
         body.AccessRecordId.Should().Be(Guid.Empty);
         body.GrantedAccessLevel.Should().Be(ExternalAccessLevel.Collaborate);
         body.Invite.Should().BeNull("an internal user is never invited");
+        body.ExpiryNotApplied.Should().BeNull("no expiry was sent, so there is nothing to report");
         _h.Shares.MaskOf(MatterTable, _matter, DataversePrincipalRef.User(user)).Should().Be(CollaborateMask);
         _h.Grants.Rows.Should().BeEmpty("a share, not a contact grant");
         _h.Ciam.Attempts.Should().BeEmpty();
@@ -241,17 +242,37 @@ public class ContactGrantSharesInternalUserTests
         Status(result).Should().Be(StatusCodes.Status200OK);
     }
 
-    /// <summary>C-fix: a share holds no expiry, so a requested one is refused (422), never silently dropped.</summary>
+    /// <summary>
+    /// C-fix2 (expiry ruling (c)): picking a colleague through their contact behaves exactly like picking them as a user —
+    /// shared with no end date. The expiry the request carried is not applied, and the answer says so.
+    /// </summary>
     [Fact]
-    public async Task Grant_ContactRepresentingOneUser_WithAnExpiry_Is422ExpiryNotSupported_AndWritesNothing()
+    public async Task Grant_ContactRepresentingOneUser_WithAnExpiry_SharesWithNoEndDate_AndSaysExpiryNotApplied()
     {
-        var (contact, _) = Colleague();
+        var (contact, user) = Colleague();
 
         var result = await Grant(contact, expiry: Today.AddDays(30));
 
-        Status(result).Should().Be(StatusCodes.Status422UnprocessableEntity);
-        ReasonCode(result).Should().Be("sdap.access.grant.expiry_not_supported_for_internal_user");
-        NothingWritten();
+        var body = result.Should().BeOfType<Ok<GrantAccessResponse>>().Subject.Value!;
+        body.SharedWithUser!.SystemUserId.Should().Be(user);
+        body.ExpiryNotApplied.Should().BeTrue();
+        _h.Shares.MaskOf(MatterTable, _matter, DataversePrincipalRef.User(user)).Should().Be(CollaborateMask);
+        _h.Grants.Rows.Should().BeEmpty("no grant row, so no expiry anywhere");
+        _h.Grants.WriteCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Grant_ExpiryNotApplied_IsAbsentFromTheWireWhenNoExpiryWasSent()
+    {
+        var (contact, _) = Colleague();
+
+        var withNone = await Grant(contact);
+
+        var json = System.Text.Json.JsonSerializer.Serialize(
+            withNone.Should().BeOfType<Ok<GrantAccessResponse>>().Subject.Value,
+            new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+        json.Should().NotContain("expiryNotApplied");
+        json.Should().Contain("sharedWithUser");
     }
 
     [Fact]
@@ -294,6 +315,7 @@ public class ContactGrantSharesInternalUserTests
         body.OnboardStatus.Should().Be(InviteAndGrantExternalUserEndpoint.SharedWithInternalUserStatus);
         body.SharedWithUser.Should().Be(new SharedWithUser(user, "Ada Lovelace"));
         body.AccessRecordId.Should().Be(Guid.Empty);
+        body.ExpiryNotApplied.Should().BeNull("no expiry was sent");
         _h.Shares.MaskOf(MatterTable, _matter, DataversePrincipalRef.User(user)).Should().Be(CollaborateMask);
         _h.Ciam.Attempts.Should().BeEmpty("never CIAM-invite an internal user");
         _h.Emails.InviteUrls.Should().BeEmpty();
@@ -302,17 +324,21 @@ public class ContactGrantSharesInternalUserTests
         _h.Identities.Contacts[contact].Flag.Should().BeNull("decided before the binder's link refusal, which flags");
     }
 
-    /// <summary>C-fix: the same refusal on /invite-and-grant: a share holds no expiry; nothing is shared, invited or granted.</summary>
+    /// <summary>C-fix2: the same on /invite-and-grant — shared with no end date, never invited, and the answer says so.</summary>
     [Fact]
-    public async Task InviteAndGrant_ExistingContactLinkedToOneInternalUser_WithAnExpiry_Is422_AndWritesNothing()
+    public async Task InviteAndGrant_ExistingContactLinkedToOneInternalUser_WithAnExpiry_SharesWithNoEndDate_AndSaysExpiryNotApplied()
     {
-        Colleague();
+        var (_, user) = Colleague();
 
         var result = await InviteAndGrant(expiry: Today.AddDays(30));
 
-        Status(result).Should().Be(StatusCodes.Status422UnprocessableEntity);
-        ReasonCode(result).Should().Be(ContactInternalUserShare.ExpiryNotSupportedReasonCode);
-        NothingWritten();
+        var body = result.Should().BeOfType<Ok<InviteAndGrantResponse>>().Subject.Value!;
+        body.SharedWithUser!.SystemUserId.Should().Be(user);
+        body.ExpiryNotApplied.Should().BeTrue();
+        _h.Shares.MaskOf(MatterTable, _matter, DataversePrincipalRef.User(user)).Should().Be(CollaborateMask);
+        _h.Grants.Rows.Should().BeEmpty("no grant row, so no expiry anywhere");
+        _h.Ciam.Attempts.Should().BeEmpty();
+        _h.Emails.InviteUrls.Should().BeEmpty();
     }
 
     [Fact]
