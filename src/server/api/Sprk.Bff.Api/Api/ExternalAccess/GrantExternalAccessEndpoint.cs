@@ -139,7 +139,8 @@ public static class GrantExternalAccessEndpoint
         {
             var decision = await contactShare.DecideAsync(
                 request.ContactId, root.Type, root.Id, request.AccessLevel, dataverseClient, participations,
-                callerAccessProbe, assignedAccess, accessNotifier, httpContext, logger, ct);
+                callerAccessProbe, assignedAccess, accessNotifier, accessibleRecords, request.OrganizationId,
+                request.ExpiryDate is not null, httpContext, logger, ct);
 
             if (decision.Result is { } answered)
                 return answered;

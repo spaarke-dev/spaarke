@@ -187,7 +187,8 @@ public static class InviteAndGrantExternalUserEndpoint
             var existingContactId = activeContacts[0].ContactId;
             var decision = await contactShare.DecideAsync(
                 existingContactId, grantRoot.Type, grantRoot.Id, (ExternalAccessLevel)request.AccessLevel,
-                dataverseClient, participations, callerAccessProbe, assignedAccess, accessNotifier, httpContext, logger, ct);
+                dataverseClient, participations, callerAccessProbe, assignedAccess, accessNotifier, accessibleRecords,
+                request.OrganizationId, request.ExpiryDate is not null, httpContext, logger, ct);
 
             if (decision.Result is { } answered)
                 return answered;

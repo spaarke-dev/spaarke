@@ -44,11 +44,12 @@ public class ContactGrantSharesInternalUserTests
         TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(), _h.WorkforceIdentity);
 
     private Task<IResult> Grant(
-        Guid contactId, ExternalAccessLevel level = ExternalAccessLevel.Collaborate, DateOnly? expiry = null) =>
+        Guid contactId, ExternalAccessLevel level = ExternalAccessLevel.Collaborate, DateOnly? expiry = null,
+        Guid? firm = null, AccessRights callerRights = EveryRight) =>
         GrantExternalAccessEndpoint.GrantAccessAsync(
-            new GrantAccessRequest(contactId, Guid.Empty, level, expiry, null, "matter", _matter),
+            new GrantAccessRequest(contactId, Guid.Empty, level, expiry, firm, "matter", _matter),
             _h.Grants, _h.Participations, _h.AccessibleRecords, _h.Ownership, _h.OwnerPrivileges,
-            new InternalUserShareTests.StubCallerRightsProbe(EveryRight),
+            new InternalUserShareTests.StubCallerRightsProbe(callerRights),
             _h.Materializer, _h.Notifier, _h.Invites, InternalUserShareCoreTests.Rig.Caller(), NullLogger<Program>.Instance,
             _h.Time, CancellationToken.None, Decision());
 
@@ -416,6 +417,149 @@ public class ContactGrantSharesInternalUserTests
         _h.Shares.Writes.Should().NotBeEmpty("the share stands; the ledger is never a reason to undo it");
         _h.Grants.WriteCount.Should().Be(0, "still no contact grant row");
         row.State.Should().Be(AssignedAccessState.PendingConfirmation, "the write failed, and the next pass repairs it");
+    }
+
+    // ── V-fix F1-a: a share whose related records are not all updated yet still says who it was shared with ─────────
+
+    /// <summary>A secure matter whose related documents cannot be read: the record's own share lands, then
+    /// <c>children_incomplete</c>.</summary>
+    private void RelatedRecordsUnreadable()
+        => _h.ChildWorld = Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.Standard()
+            .SecureRoot(MatterTable, _matter)
+            .FailingQueriesOf("sprk_document");
+
+    private static IDictionary<string, object?> Extensions(IResult result)
+        => result.Should().BeOfType<ProblemHttpResult>().Subject.ProblemDetails.Extensions;
+
+    [Fact]
+    public async Task Grant_SharedContact_WhenRelatedRecordsAreIncomplete_NamesTheUser_SaysNoEndDate_AndAdoptsTheSuggestion()
+    {
+        var (contact, user) = Colleague();
+        var row = Suggestion(_matter, contact);
+        RelatedRecordsUnreadable();
+
+        var result = await Grant(contact, expiry: DateOnly.FromDateTime(_h.Time.GetUtcNow().UtcDateTime).AddDays(30));
+
+        ReasonCode(result).Should().Be(InternalShareEndpoints.ChildrenIncompleteReasonCode);
+        var extensions = Extensions(result);
+        extensions["sharedWithUser"].Should().Be(new SharedWithUser(user, "Ada Lovelace"));
+        extensions["expiryNotApplied"].Should().Be(true);
+        _h.Shares.Writes.Should().NotBeEmpty("the record's own share stands");
+        _h.Grants.WriteCount.Should().Be(0, "no contact grant row");
+        row.State.Should().Be(AssignedAccessState.Adopted);
+        row.SystemUserId.Should().Be(user);
+    }
+
+    [Fact]
+    public async Task Grant_SharedContact_WhenRelatedRecordsAreIncomplete_WithNoExpiry_SaysNothingAboutAnEndDate()
+    {
+        var (contact, user) = Colleague();
+        RelatedRecordsUnreadable();
+
+        var result = await Grant(contact);
+
+        ReasonCode(result).Should().Be(InternalShareEndpoints.ChildrenIncompleteReasonCode);
+        var extensions = Extensions(result);
+        extensions["sharedWithUser"].Should().Be(new SharedWithUser(user, "Ada Lovelace"));
+        extensions.Should().NotContainKey("expiryNotApplied");
+    }
+
+    // ── V-fix item 5: the caller's own rights cap a share made through a contact, as they cap a grant ───────────────
+
+    [Fact]
+    public async Task Grant_ColleaguesContact_AboveTheCallersOwnLevel_IsSharedAtTheCallersLevel_AndSaysNarrowed()
+    {
+        var (contact, user) = Colleague();
+        const AccessRights collaborateOnly = AccessRights.Read | AccessRights.Write | AccessRights.Append
+                                             | AccessRights.AppendTo | AccessRights.Share; // no Delete
+
+        var result = await Grant(contact, ExternalAccessLevel.FullAccess, callerRights: collaborateOnly);
+
+        var body = result.Should().BeOfType<Ok<GrantAccessResponse>>().Subject.Value!;
+        body.SharedWithUser!.SystemUserId.Should().Be(user);
+        body.Narrowed.Should().BeTrue();
+        body.GrantedAccessLevel.Should().Be(ExternalAccessLevel.Collaborate);
+        _h.Shares.MaskOf(MatterTable, _matter, DataversePrincipalRef.User(user)).Should().Be(CollaborateMask);
+    }
+
+    [Fact]
+    public async Task Grant_ColleaguesContact_WhenTheCallerHoldsNothingGrantable_Is403CallerCannotGrant_AndWritesNothing()
+    {
+        var (contact, _) = Colleague();
+
+        var result = await Grant(contact, ExternalAccessLevel.ViewOnly, callerRights: AccessRights.None);
+
+        Status(result).Should().Be(StatusCodes.Status403Forbidden);
+        ReasonCode(result).Should().Be(InternalShareEndpoints.CallerCannotGrantReasonCode);
+        NothingWritten();
+    }
+
+    // ── V-fix item 3 (owner ruling: fail closed): a No Access entry still blocks adding a contact, on every record ─────
+
+    [Fact]
+    public async Task Grant_ColleaguesContact_OnTheNoAccessListOfAnOrdinaryRecord_Is422GranteeDenied_AndWritesNothing()
+    {
+        var (contact, _) = Colleague();
+        _h.DenyList.DenyContactOnRecord(contact, _matter);
+
+        var result = await Grant(contact);
+
+        Status(result).Should().Be(StatusCodes.Status422UnprocessableEntity);
+        ReasonCode(result).Should().Be(GrantPolicyDecision.GranteeDenied.ReasonCode);
+        NothingWritten();
+    }
+
+    [Fact]
+    public async Task Grant_ColleaguesContact_WhoseFirmIsOnTheNoAccessList_Is422GranteeDenied_AndWritesNothing()
+    {
+        var (contact, _) = Colleague();
+        var firm = Guid.NewGuid();
+        _h.Participations.ContactOrganizations[contact] = new[] { firm };
+        _h.DenyList.DenyOrganizationOnRecord(firm, _matter);
+
+        var result = await Grant(contact);
+
+        Status(result).Should().Be(StatusCodes.Status422UnprocessableEntity);
+        ReasonCode(result).Should().Be(GrantPolicyDecision.GranteeDenied.ReasonCode);
+        NothingWritten();
+    }
+
+    [Fact]
+    public async Task Grant_ColleaguesContact_WhenTheRequestNamesAFirmOnTheNoAccessList_Is422GranteeDenied_AndWritesNothing()
+    {
+        var (contact, _) = Colleague();
+        var firm = Guid.NewGuid();
+        _h.DenyList.DenyOrganizationOnRecord(firm, _matter);
+
+        var result = await Grant(contact, firm: firm);
+
+        Status(result).Should().Be(StatusCodes.Status422UnprocessableEntity);
+        ReasonCode(result).Should().Be(GrantPolicyDecision.GranteeDenied.ReasonCode);
+        NothingWritten();
+    }
+
+    [Fact]
+    public async Task Grant_ColleaguesContact_WithAnotherContactOnTheNoAccessList_IsShared()
+    {
+        var (contact, user) = Colleague();
+        _h.DenyList.DenyContactOnRecord(Guid.NewGuid(), _matter);
+
+        var result = await Grant(contact);
+
+        result.Should().BeOfType<Ok<GrantAccessResponse>>().Subject.Value!.SharedWithUser!.SystemUserId.Should().Be(user);
+    }
+
+    [Fact]
+    public async Task InviteAndGrant_ColleaguesContact_OnTheNoAccessList_Is422GranteeDenied_AndWritesNothing()
+    {
+        var (contact, _) = Colleague();
+        _h.DenyList.DenyContactOnRecord(contact, _matter);
+
+        var result = await InviteAndGrant();
+
+        Status(result).Should().Be(StatusCodes.Status422UnprocessableEntity);
+        ReasonCode(result).Should().Be(GrantPolicyDecision.GranteeDenied.ReasonCode);
+        NothingWritten();
     }
 
     [Fact]

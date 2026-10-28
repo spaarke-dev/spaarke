@@ -204,6 +204,39 @@ public class AuthorizationGateTimingTests
         denied.Asks.Should().Be(unknown.Asks).And.Be(3);
     }
 
+    /// <summary>
+    /// #2334 at the delegation filter: every Manage Access route behind <c>AddDelegationRuleFilter()</c> (/grant,
+    /// /invite-and-grant, /share-user, /revoke, ...) denies an unknown record and one the caller cannot see with the same
+    /// 403, after the same work.
+    /// </summary>
+    [Fact]
+    public async Task DelegationFilter_AnUnknownAndADeniedRecord_AreTheSame403_AfterTheSameWork()
+    {
+        var unknown = new TimingProbe();
+        var denied = new TimingProbe();
+
+        var a = await Delegation(unknown, Unknown);
+        var b = await Delegation(denied, Denied);
+
+        StatusOf(a.Result).Should().Be(StatusCodes.Status403Forbidden);
+        StatusOf(b.Result).Should().Be(StatusCodes.Status403Forbidden);
+        a.NextCalled.Should().BeFalse();
+        b.NextCalled.Should().BeFalse();
+        denied.Waits.Should().Equal(unknown.Waits).And.Equal(NotFoundSchedule);
+        denied.Asks.Should().Be(unknown.Asks).And.Be(3);
+    }
+
+    private static async Task<(object? Result, bool NextCalled)> Delegation(TimingProbe probe, Guid recordId)
+    {
+        // A grant request names its record in the body; resolving it reads nothing from Dataverse.
+        var client = (DataverseWebApiClient)System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(
+            typeof(DataverseWebApiClient));
+        var filter = new Sprk.Bff.Api.Api.ExternalAccess.DelegationRuleFilter(
+            probe, client, NullLogger<Sprk.Bff.Api.Api.ExternalAccess.DelegationRuleFilter>.Instance);
+        return await RunFilter(filter, new Sprk.Bff.Api.Api.ExternalAccess.Dtos.GrantAccessRequest(
+            Guid.NewGuid(), Guid.Empty, ExternalAccessLevel.ViewOnly, null, null, "matter", recordId));
+    }
+
     [Fact]
     public async Task QuickCreateSourceCheck_AnUnknownAndADeniedSource_AreTheSame403_AfterTheSameWork()
     {

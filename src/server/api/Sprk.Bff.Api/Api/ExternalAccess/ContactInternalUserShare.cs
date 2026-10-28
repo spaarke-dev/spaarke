@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.Extensions.Options;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
@@ -93,6 +94,9 @@ public sealed class ContactInternalUserShare
         CallerRecordAccessProbe callerAccessProbe,
         AssignedAccessMaterializer assignedAccess,
         GrantAccessNotifier accessNotifier,
+        IAccessibleRecordSetService accessibleRecords,
+        Guid? firmOrganizationId,
+        bool expiryRequested,
         HttpContext httpContext,
         ILogger logger,
         CancellationToken ct)
@@ -144,6 +148,15 @@ public sealed class ContactInternalUserShare
         }
 
         var userId = users[0].SystemUserId;
+
+        // The record's No Access list, on EVERY record (owner ruling, V-fix item 3): staff named this contact, so an entry
+        // naming the contact, its organizations or the firm the request names refuses exactly as /grant did before task
+        // 193 (422 grantee_denied; a check that cannot be completed refuses 503), and nothing is written. A user picked
+        // directly keeps the share core's rule (the wall applies on secure records only).
+        if (await NoAccessRefusalAsync(accessibleRecords, contactId, firmOrganizationId, rootType, rootId, httpContext, logger, ct)
+                .ConfigureAwait(false) is { } refused)
+            return ContactShareDecision.Answered(refused);
+
         logger.LogInformation(
             "[CONTACT-SHARE] Contact {ContactId} represents internal user {SystemUserId}; sharing {RootType} {RootId} with " +
             "them instead of a contact grant.", contactId, userId, rootType, rootId);
@@ -155,6 +168,9 @@ public sealed class ContactInternalUserShare
 
         if (shared.Shared is not { } confirmed)
             return ContactShareDecision.Answered(shared.Result); // the share core's refusal, as /share-user answers it
+
+        // From here the record's own share is in place: the 200, or children_incomplete (some related records are not
+        // updated yet), which is answered below with who was shared with, as the 200 is.
 
         // The contact's Assigned-To suggestions on this record are answered by this share: Adopted, stamped with the user,
         // so they are no longer offered (the share core adopts by user only, and a suggestion written before the contact
@@ -177,7 +193,63 @@ public sealed class ContactInternalUserShare
                 userId, rootType, rootId);
         }
 
-        return ContactShareDecision.SharedWith(new SharedWithUser(userId, fullName), confirmed.Response);
+        var sharedWith = new SharedWithUser(userId, fullName);
+        if (shared.ChildrenIncomplete)
+        {
+            // The children_incomplete ProblemDetails is the answer (the share stands); it says who was shared with, and that a
+            // requested expiry was not applied, exactly as the 200 does.
+            if (shared.Result is ProblemHttpResult { ProblemDetails: { } problem })
+            {
+                problem.Extensions["sharedWithUser"] = sharedWith;
+                if (expiryRequested)
+                    problem.Extensions["expiryNotApplied"] = true;
+            }
+
+            return ContactShareDecision.Answered(shared.Result);
+        }
+
+        return ContactShareDecision.SharedWith(sharedWith, confirmed.Response);
+    }
+
+    /// <summary>
+    /// The write-time No Access check /grant applies (<see cref="IAccessibleRecordSetService.CheckGranteeNoAccessAsync"/>,
+    /// fail closed): <c>null</c> when allowed, else the 422 <c>grantee_denied</c> or the 503 <c>no_access_unverifiable</c>
+    /// answer. Nothing is written either way.
+    /// </summary>
+    private static async Task<IResult?> NoAccessRefusalAsync(
+        IAccessibleRecordSetService accessibleRecords, Guid contactId, Guid? firmOrganizationId,
+        ExternalGrantRootType rootType, Guid rootId, HttpContext httpContext, ILogger logger, CancellationToken ct)
+    {
+        var organizations = firmOrganizationId is { } firm && firm != Guid.Empty ? new[] { firm } : Array.Empty<Guid>();
+        NoAccessCheckAnswer answer;
+        try
+        {
+            answer = await accessibleRecords.CheckGranteeNoAccessAsync(
+                ExternalGrantRoot.LogicalNameFor(rootType), rootId, contactId, organizations, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            logger.LogError(ex,
+                "[CONTACT-SHARE] DENY-LIST-UNREADABLE: the No Access check for {RootType} {RootId} threw; nothing was shared " +
+                "(fail closed).", rootType, rootId);
+            return GrantExternalAccessEndpoint.PolicyRefusalProblem(GrantPolicyDecision.GranteeDenyListUnreadable, httpContext);
+        }
+
+        switch (answer)
+        {
+            case NoAccessCheckAnswer.Allowed:
+                return null;
+            case NoAccessCheckAnswer.Denied:
+                logger.LogInformation(
+                    "[CONTACT-SHARE] Contact {ContactId} is on the No Access list of {RootType} {RootId}; nothing was shared.",
+                    contactId, rootType, rootId);
+                return GrantExternalAccessEndpoint.PolicyRefusalProblem(GrantPolicyDecision.GranteeDenied, httpContext);
+            default:
+                logger.LogError(
+                    "[CONTACT-SHARE] DENY-LIST-UNREADABLE: the No Access check for {RootType} {RootId} could not be completed " +
+                    "({Answer}); nothing was shared (fail closed).", rootType, rootId, answer);
+                return GrantExternalAccessEndpoint.PolicyRefusalProblem(GrantPolicyDecision.GranteeDenyListUnreadable, httpContext);
+        }
     }
 
     private static IResult Refused(HttpContext httpContext, int statusCode, string title, string reasonCode, string detail)

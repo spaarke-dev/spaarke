@@ -589,6 +589,56 @@ public class ExistingCiamAccountInviteTests
     }
 
     /// <summary>
+    /// Task 193 (V-fix item 4): no invite log line names the invitee's email — it names the contact id and the trace id
+    /// instead — on the new-account and ExistingAccount paths, with the invite email sent or failed, and through
+    /// /invite-and-grant. MUTATION: putting {Email} back into any of these templates fails its row.
+    /// </summary>
+    [Theory]
+    [InlineData("new-account", false)]
+    [InlineData("existing-account", false)]
+    [InlineData("new-account", true)]
+    [InlineData("existing-account", true)]
+    [InlineData("invite-and-grant", false)]
+    public async Task NoInviteLogLine_CarriesTheInviteeEmail(string path, bool emailFails)
+    {
+        var log = new BindingLogCapture<Program>();
+        var contact = ContactOnBranch(path == "invite-and-grant" ? "new-account" : path);
+        if (emailFails)
+        {
+            _h.Emails.InviteEmailFailure = MailboxThrottled();
+        }
+
+        if (path == "invite-and-grant")
+        {
+            (await InviteAndGrant(log)).Should().BeOfType<Ok<InviteAndGrantResponse>>();
+        }
+        else
+        {
+            await Invite(logger: log);
+        }
+
+        log.Messages.Should().NotBeEmpty("the invite logs its steps");
+        log.Messages.Should().NotContain(m => m.Contains(Email, StringComparison.OrdinalIgnoreCase));
+        log.Messages.Should().Contain(m => m.Contains("[EXT-INVITE]") && m.Contains(contact.ToString()),
+            "the contact id identifies the invite in place of the email");
+    }
+
+    /// <summary>
+    /// Task 193 (V-fix item 4): the failed-oid-write exception (it reaches the 500 handler's log) names the contact, never
+    /// the invitee's email. MUTATION: putting the email back into the message fails this test.
+    /// </summary>
+    [Fact]
+    public async Task AFailedOidWrite_ItsExceptionMessage_NamesTheContact_NotTheEmail()
+    {
+        var contact = UnboundContact();
+        _h.Identities.FailBind = true;
+
+        var thrown = await FluentActions.Invoking(() => Invite()).Should().ThrowAsync<InvalidOperationException>();
+
+        thrown.Which.Message.Should().NotContainEquivalentOf(Email).And.Contain(contact.ToString("D"));
+    }
+
+    /// <summary>
     /// Owner Q6: a failed oid write after the marker landed keeps the 500, and its reason now says "retry the invite"
     /// (no email was sent, so nobody holds a code; the first sign-in no longer repairs it).
     /// </summary>

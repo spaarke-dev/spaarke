@@ -58,7 +58,7 @@ internal static class InternalUserShareCore
             request, recordShare, dataverseClient, participations, cache, callerAccessProbe, secureChildShares,
             noAccessGuard, relatedRoots, assignedAccess, accessNotifier, httpContext, logger, confirmed, ct,
             workforceIdentity);
-        return new InternalUserShareResult(result, confirmed.Shared);
+        return new InternalUserShareResult(result, confirmed.Shared, confirmed.ChildrenIncomplete);
     }
 
     private static async Task<IResult> ShareCoreAsync(
@@ -301,11 +301,11 @@ internal static class InternalUserShareCore
             await assignedAccess.MarkShareAdoptedAsync(root.Type, root.Id, systemUserId, CancellationToken.None);
 
             // Still fanned out: a repeat of a share whose fan-out was incomplete is how a caller completes it.
-            return await ChildrenIncompleteAfterShareAsync(
-                       secureChildShares, relatedRoots, root, systemUserId, OutcomeUnchanged, current, httpContext, logger,
-                       callerOid, ct)
-                   ?? confirmed.Ok(user, new ShareRecordWithUserResponse(
-                       systemUserId, RecordShareLevels.LevelForMask(current), current, OutcomeUnchanged, narrowed));
+            return confirmed.RootShared(user, new ShareRecordWithUserResponse(
+                    systemUserId, RecordShareLevels.LevelForMask(current), current, OutcomeUnchanged, narrowed),
+                await ChildrenIncompleteAfterShareAsync(
+                    secureChildShares, relatedRoots, root, systemUserId, OutcomeUnchanged, current, httpContext, logger,
+                    callerOid, ct));
         }
 
         // ── Write, then confirm what Dataverse stored ─────────────────────────
@@ -365,23 +365,30 @@ internal static class InternalUserShareCore
                == GrantNotificationOutcome.Failed;
 
         // ── Task 149: the root write is confirmed; now its secure children (a no-op for an ordinary record) ──
-        return await ChildrenIncompleteAfterShareAsync(
-                   secureChildShares, relatedRoots, root, systemUserId, outcome, granted.AccessRightsMask, httpContext, logger,
-                   callerOid, ct, notificationFailed)
-               ?? confirmed.Ok(user, new ShareRecordWithUserResponse(
-                   systemUserId, RecordShareLevels.LevelForMask(granted.AccessRightsMask), granted.AccessRightsMask,
-                   outcome, narrowed, notificationFailed));
+        return confirmed.RootShared(user, new ShareRecordWithUserResponse(
+                systemUserId, RecordShareLevels.LevelForMask(granted.AccessRightsMask), granted.AccessRightsMask,
+                outcome, narrowed, notificationFailed),
+            await ChildrenIncompleteAfterShareAsync(
+                secureChildShares, relatedRoots, root, systemUserId, outcome, granted.AccessRightsMask, httpContext, logger,
+                callerOid, ct, notificationFailed));
     }
 
-    /// <summary>Records the user a confirmed 200 was for.</summary>
+    /// <summary>Records the user the record's own share was confirmed for: the 200, or the <c>children_incomplete</c>
+    /// answer (the record's share is in place; some related records are not updated yet).</summary>
     private sealed class Confirmation
     {
         public SharedInternalUser? Shared { get; private set; }
 
-        public IResult Ok(SystemUserRow user, ShareRecordWithUserResponse response)
+        public bool ChildrenIncomplete { get; private set; }
+
+        public IResult RootShared(SystemUserRow user, ShareRecordWithUserResponse response, IResult? childrenIncomplete)
         {
             Shared = new SharedInternalUser(user.Id, response);
-            return TypedResults.Ok(response);
+            if (childrenIncomplete is null)
+                return TypedResults.Ok(response);
+
+            ChildrenIncomplete = true;
+            return childrenIncomplete;
         }
     }
 }
@@ -389,8 +396,11 @@ internal static class InternalUserShareCore
 /// <summary>What <see cref="InternalUserShareCore.ShareAsync"/> did.</summary>
 /// <param name="Result">The <c>/share-user</c> answer: the confirmed 200, or the refusal (nothing written, or — for
 /// <c>children_incomplete</c> — the record's own share in place).</param>
-/// <param name="Shared">The user the record was confirmed shared with; <c>null</c> unless <paramref name="Result"/> is the 200.</param>
-internal sealed record InternalUserShareResult(IResult Result, SharedInternalUser? Shared);
+/// <param name="Shared">The user the record's own share was confirmed for; <c>null</c> when nothing was shared (a refusal or
+/// an unconfirmed write).</param>
+/// <param name="ChildrenIncomplete">The record's share is confirmed, but <paramref name="Result"/> is the
+/// <c>children_incomplete</c> answer (some related records are not updated yet), not the 200.</param>
+internal sealed record InternalUserShareResult(IResult Result, SharedInternalUser? Shared, bool ChildrenIncomplete = false);
 
 /// <summary>An internal user a record was confirmed shared with. The display name is not read here: the eligibility read
 /// selects no name, and /share-user's query stays as it was (a caller that shows the name reads it, display only).</summary>

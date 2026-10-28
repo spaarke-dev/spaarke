@@ -220,7 +220,10 @@ internal sealed class DelegationRuleFilter : IEndpointFilter
         AccessRights rights;
         try
         {
-            rights = await _probe.GetCallerRightsAsync(callerToken, target.Value.EntitySet, target.Value.RecordId, ct);
+            // The gate question (#2334): an unknown id and a record the caller cannot see answer after the same work, so
+            // the uniform denial below cannot be told apart by time either.
+            rights = await _probe.GetCallerRightsForAuthorizationGateAsync(
+                callerToken, target.Value.EntitySet, target.Value.RecordId, ct);
         }
         catch (Exception ex)
         {
