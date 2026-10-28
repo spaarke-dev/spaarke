@@ -523,7 +523,11 @@ public sealed class DataverseReadQueryHandler : IToolHandler
                     "record's GUID. To map GUIDs to display names, query the referenced table " +
                     "(dataverse.describe shows the related table per lookup column).");
             }
-            if (rawPageLength >= translation.Top)
+            // ebilling-r1 task 098 review round 1 (F2): for an external caller on an invoice-family table the cap is measured
+            // on the rows LEFT VISIBLE, so a hidden invoice can never be told apart from a missing one by this warning. The
+            // raw-page rule above (task 188, F1-5) is unchanged for every other path, documents included.
+            var capMeasure = guardInvoices ? rows.Count : rawPageLength;
+            if (capMeasure >= translation.Top)
             {
                 warnings.Add($"Result set reached the row cap ({translation.Top}). Narrow the WHERE clause or raise TOP (max {DataverseSqlQueryTranslator.MaxTop}).");
             }
