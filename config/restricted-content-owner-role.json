@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "description": "The tables the 'Restricted Content Owner' role holds Read on, at User (Basic) depth, so that Dataverse accepts the memberless 'Spaarke Restricted Content Owners' team in the ROOT business unit as the OWNER of an ordinary row of the hard-deny tables (owner round 131, the 086 ruling; RecordOwnershipResolver.RestrictedContentTableSet). Dataverse refuses an owner whose roles lack Read on the table ('Read Privilege Check For Owner failed ... is missing prv<Read> privilege'), and the BFF refuses the write with record_owner_restricted_content_team_unresolved when the team is missing, outside the root business unit or has a member. This file is the ONE list. scripts/Set-RestrictedContentOwnerTeam.ps1 and RestrictedContentOwnerRoleGuardTests read it. Do not copy it anywhere else.",
+  "howToExtend": [
+    "The tables are exactly RecordOwnershipResolver.RestrictedContentTables. Add or remove a table there first (an owner ruling), then here; RestrictedContentOwnerRoleGuardTests fails the build while the two differ.",
+    "'privilegeName' is the Read privilege's name from metadata (EntityDefinitions(LogicalName='x')/Privileges, PrivilegeType eq 'Read'). The casing follows the schema name. The script checks it against metadata and refuses a mismatch.",
+    "Then run: scripts/Set-RestrictedContentOwnerTeam.ps1 -EnvironmentUrl <url> (dry run), then -Apply (owner go), then -Verify.",
+    "Never add a depth, an access type or a member here. The role grants Read at User (Basic) depth and nothing else; the team has no members, ever, and holds no other role. Ordinary rows of these tables sit in the root business unit, so no user-facing role may grant Read on them at business-unit depth or deeper (task 191)."
+  ],
+  "teamName": "Spaarke Restricted Content Owners",
+  "roleName": "Restricted Content Owner",
+  "businessUnit": "root",
+  "access": "Read",
+  "depth": "Basic",
+  "tables": [
+    {
+      "logicalName": "sprk_policy",
+      "privilegeName": "prvReadsprk_Policy",
+      "reason": "Owner round 131 (the 086 ruling): a rule's ordinary answer is this team, in place of a business unit's default team (RecordOwnershipResolver.OrdinaryExitAsync). An Unsecure moves a team-owned rule out of isolation to it, and the ordinary pass moves a rule still on a default team to it (SecureChildReconciler, R4b-2). An author-owned rule keeps its author (rule 1).",
+      "evidence": "No refusal of its own is recorded: the probe is a Dataverse write, made only after the owner's go (the team does not exist yet). Read-only, spaarkedev1, 2026-10-28: metadata names the table's Read privilege prvReadsprk_Policy (Id=eda1df58-8428-4b7a-827c-d9c9ebf6140f); no team named 'Spaarke Restricted Content Owners' and no role named like 'Restricted Content' exists. Dataverse refuses an owner team that lacks it with the 'Read Privilege Check For Owner failed ... is missing prv<Read> privilege' check config/secure-record-owner-role.json records verbatim for sprk_policyversion and sprk_invoice.",
+      "addedBy": "unified-access-control-r2 task 194b R4b-3"
+    },
+    {
+      "logicalName": "sprk_policyversion",
+      "privilegeName": "prvReadsprk_PolicyVersion",
+      "reason": "Owner round 131: a rule version follows its rule (sprk_policyversion.sprk_policy); its ordinary answer is this team, so the reconciler moves a team-owned version to it as it does the rule. OntologyAdminAuthoringService's publish binds no owner on an ordinary answer, so a published version stays its author's (rule 1).",
+      "evidence": "No refusal of its own is recorded (probe after the owner's go). Read-only, spaarkedev1, 2026-10-28: metadata names prvReadsprk_PolicyVersion (Id=22640ee9-da29-474e-87db-18e04b320ded). The same privilege's absence was refused verbatim for the Secure Record Owners team on 2026-10-19 (config/secure-record-owner-role.json, #2084).",
+      "addedBy": "unified-access-control-r2 task 194b R4b-3"
+    },
+    {
+      "logicalName": "sprk_storedfile",
+      "privilegeName": "prvReadsprk_StoredFile",
+      "reason": "Owner round 131: a hard-deny table. ebilling's StoredFileService resolves its owner through ResolveOwnerAsync and binds it with owner.ApplyTo, app-only, so an ordinary stored file is owned by this team once that writer ships.",
+      "evidence": "No refusal of its own is recorded (probe after the owner's go). Read-only, spaarkedev1, 2026-10-28: metadata names prvReadsprk_StoredFile (Id=ef068f7b-6a82-4c37-bf25-95c0129e0b47). Without it Dataverse refuses the owner with the check config/secure-record-owner-role.json records verbatim for sprk_invoice.",
+      "addedBy": "unified-access-control-r2 task 194b R4b-3"
+    },
+    {
+      "logicalName": "sprk_ruleset",
+      "privilegeName": "prvReadsprk_ruleset",
+      "reason": "Owner round 131: a hard-deny table. ebilling's RuleSetService resolves its owner through ResolveOwnerAsync and binds it with owner.ApplyTo, app-only, so an ordinary rule set is owned by this team once that writer ships.",
+      "evidence": "No refusal of its own is recorded (probe after the owner's go). Read-only, spaarkedev1, 2026-10-28: metadata names prvReadsprk_ruleset (Id=717306f0-6f28-42d0-83ca-5ce3a9fe8e42; the schema name is lower case). Without it Dataverse refuses the owner with the check config/secure-record-owner-role.json records verbatim for sprk_invoice.",
+      "addedBy": "unified-access-control-r2 task 194b R4b-3"
+    },
+    {
+      "logicalName": "sprk_procedureassignment",
+      "privilegeName": "prvReadsprk_procedureassignment",
+      "reason": "Owner round 131: a hard-deny table. ebilling's ProcedureAssignmentService resolves its owner through ResolveOwnerAsync and binds it with owner.ApplyTo, app-only, so an ordinary procedure assignment is owned by this team once that writer ships.",
+      "evidence": "No refusal of its own is recorded (probe after the owner's go). Read-only, spaarkedev1, 2026-10-28: metadata names prvReadsprk_procedureassignment (Id=287f9674-9656-4006-9eda-ad999cbc69a0; the schema name is lower case). Without it Dataverse refuses the owner with the check config/secure-record-owner-role.json records verbatim for sprk_invoice.",
+      "addedBy": "unified-access-control-r2 task 194b R4b-3"
+    }
+  ]
+}
