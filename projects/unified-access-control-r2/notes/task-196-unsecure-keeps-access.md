@@ -43,3 +43,9 @@
   - M11: the Assigned-To Declined side effect, fixed by 196.
 - Existing gap, filed separately (M12): the JIT Office-edit prune lists only `sprk_issecure = true` records, so JIT writer grants on an un-secured record's container are never pruned.
 - Effort: about 5-6 dev-days. About 40 tests to touch (list in the map report).
+
+## Input from the 194b R4b security review (2026-10-28)
+- **196b must decide this:** on Unsecure, an isolated hard-deny row goes to the memberless restricted-content team, or stays Secure if refused. The user who owned it before Make Secure does not get it back.
+- **Why:** under round 137 ("author wins") and rounds 135/138 ("Unsecure keeps all access"), that author should keep the row.
+- **Constraint:** the reconciler's "author" is the current owning user, and after Make Secure that's the Secure team, so the pre-secure author must come from a recorded value, never guessed.
+- Options for 196b: record the author at Make Secure, or rely on 196b's mirror shares.
