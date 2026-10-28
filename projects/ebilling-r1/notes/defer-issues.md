@@ -206,7 +206,7 @@ Owner choice: (1) separate batches for secure invoices, owned by the Secure Reco
 
 | Field | Value |
 |---|---|
-| **Status** | Open: owner decision (task 094 review, addendum K2) |
+| **Status** | Closed - owner decision EB-D-167 (2026-10-28), built in task 094: after a Failed attempt the confirm starts a new attempt (the next generation's derived id, created by the caller, every check run again); Rejected stays 409 (D-139) |
 | **Urgency** | next-round |
 | **Filed** | 2026-10-28 |
 | **Source** | ebilling-r1 task 094 adversarial review |

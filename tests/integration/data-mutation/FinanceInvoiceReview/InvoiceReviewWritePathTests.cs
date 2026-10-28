@@ -369,15 +369,15 @@ public class InvoiceReviewWritePathTests
         failure.Message.Should().Contain(submissionId.ToString()).And.Contain("no longer exists");
     }
 
-    [Fact(DisplayName = "050a review #4: a retry after the submission ended Failed is 409 submission_already_ended and the document is NOT re-marked")]
-    public async Task Confirm_RetryAfterTheSubmissionFailed_Is409_AndDoesNotMark()
+    [Fact(DisplayName = "050a review #4 (D-139): a retry after the submission ended Rejected is 409 submission_already_ended and the document is NOT re-marked")]
+    public async Task Confirm_RetryAfterTheSubmissionWasRejected_Is409_AndDoesNotMark()
     {
         var request = NewRequest();
         _records.ExistingDocument(request.DocumentId, reviewStatus: ToReview);
         TheIntakeHolds(request.DocumentId);
         TheSubmissionWasStored(new InvoiceSubmissionReceipt(
             InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(request.DocumentId), Guid.Empty, "INV-42.1", request.DocumentId), request);
-        _intake.Submission!["sprk_processingstatus"] = new OptionSetValue((int)InvoiceSubmissionStatus.Failed);
+        _intake.Submission!["sprk_processingstatus"] = new OptionSetValue((int)InvoiceSubmissionStatus.Rejected);
 
         var outcome = await Sut().ConfirmInvoiceAsync(request, "corr-ended");
 
@@ -385,6 +385,26 @@ public class InvoiceReviewWritePathTests
         outcome.ErrorCode.Should().Be(InvoiceSubmissionErrors.SubmissionAlreadyEnded);
         _records.Writes.Should().BeEmpty("the document is not re-marked");
         _intake.JobsSent.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "EB-D-167: a confirm retried after the submission ended Failed is a NEW attempt (generation 2, its job queued) and the document is marked")]
+    public async Task Confirm_RetryAfterTheSubmissionFailed_IsANewAttempt_AndMarks()
+    {
+        var request = NewRequest();
+        _records.ExistingDocument(request.DocumentId, reviewStatus: ToReview);
+        TheIntakeHolds(request.DocumentId);
+        var first = InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(request.DocumentId);
+        TheSubmissionWasStored(new InvoiceSubmissionReceipt(first, Guid.Empty, "INV-42.1", request.DocumentId), request);
+        _intake.Submission!["sprk_processingstatus"] = new OptionSetValue((int)InvoiceSubmissionStatus.Failed);
+        _intake.Submissions[first] = _intake.Submission;
+
+        var outcome = await Sut().ConfirmInvoiceAsync(request, "corr-again");
+
+        outcome.Kind.Should().Be(InvoiceSubmissionOutcomeKind.Received);
+        outcome.Receipt!.SubmissionId.Should().Be(InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(request.DocumentId, 2));
+        _intake.Allocations.Should().ContainSingle().Which.SubmissionId.Should().Be(outcome.Receipt.SubmissionId);
+        _intake.JobsSent.Should().ContainSingle().Which.JobId.Should().Be(InvoiceSubmissionService.ExistingDocumentJobIdFor(request.DocumentId, 2));
+        _records.StatusOf(request.DocumentId).Should().Be(Confirmed);
     }
 
     [Fact(DisplayName = "050a review #3 / #7: a retry naming ANOTHER matter is 409 and the document is not re-marked")]

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
@@ -188,6 +189,43 @@ public class InvoiceSubmissionService
     public static Guid ExistingDocumentJobIdFor(Guid documentId) => InvoiceSubmissionPersister.IdOf($"ebilling-confirm-job-{documentId:D}");
 
     /// <summary>
+    /// EB-D-167 (owner 2026-10-28; closes ISS-012): the most attempts one document's confirm can make (the first and every new attempt
+    /// after a Failed one), the from-email route's bound (<see cref="FromEmailSubmissionKey.MaxGeneration"/>).
+    /// </summary>
+    internal const int MaxExistingDocumentGeneration = FromEmailSubmissionKey.MaxGeneration;
+
+    /// <summary>
+    /// EB-D-167: the submission id of the <paramref name="generation"/>-th attempt to confirm <paramref name="documentId"/>. Generation 1 is
+    /// <see cref="ExistingDocumentSubmissionIdFor(Guid)"/> unchanged (every existing row keeps its id); a later one is derived from the
+    /// document and the generation, so one attempt per generation exists and two concurrent retries meet on the same id.
+    /// </summary>
+    public static Guid ExistingDocumentSubmissionIdFor(Guid documentId, int generation) => generation <= 1
+        ? ExistingDocumentSubmissionIdFor(documentId)
+        : InvoiceSubmissionPersister.IdOf(string.Create(CultureInfo.InvariantCulture, $"ebilling-confirm-submission-{documentId:D}-attempt-{generation}"));
+
+    /// <summary>EB-D-167: the processing job id of that attempt (generation 1 unchanged).</summary>
+    public static Guid ExistingDocumentJobIdFor(Guid documentId, int generation) => generation <= 1
+        ? ExistingDocumentJobIdFor(documentId)
+        : InvoiceSubmissionPersister.IdOf(string.Create(CultureInfo.InvariantCulture, $"ebilling-confirm-job-{documentId:D}-attempt-{generation}"));
+
+    /// <summary>
+    /// EB-D-167 (fix round F1-1 kept): true when <paramref name="submissionId"/> is one of the ids the intake derives for
+    /// <paramref name="documentId"/>'s attempts. A document is a source only for a submission created FOR it.
+    /// </summary>
+    internal static bool IsExistingDocumentSubmissionIdOf(Guid documentId, Guid submissionId)
+    {
+        for (var generation = 1; generation <= MaxExistingDocumentGeneration; generation++)
+        {
+            if (ExistingDocumentSubmissionIdFor(documentId, generation) == submissionId)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// The document's core-record lookups (050a review #3): the confirm's core record must be the one the document is filed under, if any. The
     /// kinds match <see cref="InvoiceCoreRecordKind"/>.
     /// </summary>
@@ -315,23 +353,54 @@ public class InvoiceSubmissionService
         }
 
         var number = request.FirmInvoiceNumber!.Trim();
-        var submissionId = ExistingDocumentSubmissionIdFor(documentId);
-        var jobId = ExistingDocumentJobIdFor(documentId);
 
-        // ── 2. The earlier submission for this document, if any: the retry's answer ──
-        InvoiceSubmissionView? earlier;
+        // ── 2. The latest attempt for this document, if any: the retry's answer. EB-D-167 (owner 2026-10-28): the attempts are walked by
+        //       their derived ids while each one ended Failed; after a Failed one this request is a NEW attempt (the next generation,
+        //       created by this caller, through every check below), whoever made the failed one. Rejected keeps D-139 (409). ──
+        InvoiceSubmissionView? earlier = null;
+        var earlierGeneration = 0;
         try
         {
-            earlier = await GetAsync(submissionId, ct);
+            for (var g = 1; g <= MaxExistingDocumentGeneration; g++)
+            {
+                if (await GetAsync(ExistingDocumentSubmissionIdFor(documentId, g), ct) is not { } attempt)
+                {
+                    break;
+                }
+
+                (earlier, earlierGeneration) = (attempt, g);
+                if (attempt.Status != nameof(InvoiceSubmissionStatus.Failed))
+                {
+                    break;
+                }
+            }
         }
         catch (SdapProblemException ex)
         {
             return InvoiceSubmissionOutcome.Refused(ex.StatusCode, ex.Code, ex.Detail ?? ex.Title);
         }
 
+        if (earlier is not null && earlier.Status != nameof(InvoiceSubmissionStatus.Failed))
+        {
+            return await AnswerWithEarlierAsync(
+                request, number, earlier, documentId, ExistingDocumentJobIdFor(documentId, earlierGeneration), request.FileSourceBeforeWrite, ct);
+        }
+
+        var generation = earlierGeneration + 1;
+        if (generation > MaxExistingDocumentGeneration)
+        {
+            _logger.LogInformation("Invoice submission: document {DocumentId} reached {Max} attempts; refused (409)", documentId, MaxExistingDocumentGeneration);
+            return InvoiceSubmissionOutcome.Refused(StatusCodes.Status409Conflict, InvoiceSubmissionErrors.SubmissionAlreadyEnded,
+                "The document was already submitted as an invoice too many times. Nothing was saved.");
+        }
+
+        var submissionId = ExistingDocumentSubmissionIdFor(documentId, generation);
+        var jobId = ExistingDocumentJobIdFor(documentId, generation);
         if (earlier is not null)
         {
-            return await AnswerWithEarlierAsync(request, number, earlier, documentId, jobId, request.FileSourceBeforeWrite, ct);
+            _logger.LogInformation(
+                "Invoice submission {EarlierId} of document {DocumentId} ended Failed; this request is attempt {Generation} ({SubmissionId})",
+                earlier.SubmissionId, documentId, generation, submissionId);
         }
 
         // ── 3. The document: present, holding a file, not already an invoice's, not rejected, linking the route's communication, not filed
@@ -448,8 +517,8 @@ public class InvoiceSubmissionService
     /// <summary>
     /// A retry (or a concurrent create, review #5): the document's confirm submission exists. The same firm, record and firm invoice number get
     /// it back (re-queued while it is still Received); anything else is 409 and names nothing about it. One that already ended Failed or
-    /// Rejected is 409 <see cref="InvoiceSubmissionErrors.SubmissionAlreadyEnded"/> naming that status, and the caller does not re-mark the
-    /// document (review #4; owner 2026-10-20, D-139: a new attempt after a terminal status is a later feature).
+    /// Rejected is 409 <see cref="InvoiceSubmissionErrors.SubmissionAlreadyEnded"/>, and the caller does not re-mark the document (review #4;
+    /// D-139). A new attempt after Failed is EB-D-167 (<see cref="SubmitExistingDocumentAsync"/> step 2), not an answer from here.
     /// </summary>
     /// <remarks>Fix round F1-b: <paramref name="fileSource"/> (step A, the retry's own request) runs only once the answer is known to be the
     /// earlier submission itself (the same details, not ended), never before a refusal.</remarks>
@@ -474,11 +543,14 @@ public class InvoiceSubmissionService
 
         if (earlier.Status is nameof(InvoiceSubmissionStatus.Failed) or nameof(InvoiceSubmissionStatus.Rejected))
         {
+            // D-139 after Rejected. Failed reaches here only as the answer to a concurrent create that has already failed (step 2 starts a
+            // new attempt after a Failed one, EB-D-167): submitting again starts the next attempt.
             _logger.LogInformation("Invoice submission {SubmissionId}: the confirm of document {DocumentId} already ended {Status}; refused (409)",
                 earlier.SubmissionId, documentId, earlier.Status);
             return InvoiceSubmissionOutcome.Refused(StatusCodes.Status409Conflict, InvoiceSubmissionErrors.SubmissionAlreadyEnded,
-                $"The document was already submitted as an invoice and that submission ended {earlier.Status}. Nothing was saved; " +
-                "a new attempt for the same document is not available yet.");
+                earlier.Status == nameof(InvoiceSubmissionStatus.Rejected)
+                    ? "The document was already submitted as an invoice and that submission was rejected. Nothing was saved."
+                    : "The document's latest submission as an invoice failed. Nothing was saved; submit it again to start a new attempt.");
         }
 
         var filed = fileSource is not null && await fileSource(ct);

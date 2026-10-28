@@ -102,6 +102,12 @@ public sealed class InvoiceSubmissionServiceTests
         public bool OtherCoreRecordsExist = true;
         public Entity? Submission;
 
+        /// <summary>
+        /// Task 094 (EB-D-167): submissions by id. When any is listed, a read by id answers ONLY from here (a missing id is not found), and the
+        /// allocator stores <see cref="StoredOnCreate"/> under the id it was asked to create; otherwise <see cref="Submission"/> answers every id.
+        /// </summary>
+        public readonly Dictionary<Guid, Entity> Submissions = new();
+
         /// <summary>050a review #5: non-null, the allocator's create stores this row as <see cref="Submission"/> (what a concurrent creator left).</summary>
         public Entity? StoredOnCreate;
 
@@ -258,7 +264,14 @@ public sealed class InvoiceSubmissionServiceTests
                     ct.ThrowIfCancellationRequested();
                     if (StoredOnCreate is { } stored)
                     {
-                        Submission = stored;
+                        if (Submissions.Count > 0)
+                        {
+                            Submissions[id] = stored;
+                        }
+                        else
+                        {
+                            Submission = stored;
+                        }
                     }
 
                     return Allocation;
@@ -292,6 +305,11 @@ public sealed class InvoiceSubmissionServiceTests
             if (SubmissionReadFailure is { } failure)
             {
                 throw failure;
+            }
+
+            if (Submissions.Count > 0)
+            {
+                return Submissions.TryGetValue(id, out var byId) ? byId : null!;
             }
 
             return Submission!;

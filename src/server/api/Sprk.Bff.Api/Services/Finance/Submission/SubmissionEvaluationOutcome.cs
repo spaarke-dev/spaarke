@@ -159,7 +159,7 @@ public sealed record SubmissionSnapshot
         // document (ExistingDocumentSubmissionIdFor; the confirm and the from-document route both use it, after checking the caller's Read on
         // the document). Any other submission naming a document (a sprk_document written onto an upload submission afterwards, or a derived
         // submission re-pointed at another document) would have the job copy and extract a document no one checked: it fails closed.
-        if (documentId is { } source && row.Id != InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(source))
+        if (documentId is { } source && !InvoiceSubmissionService.IsExistingDocumentSubmissionIdOf(source, row.Id))
         {
             return (null, SubmissionReasonCodes.DocumentUnavailable);
         }

@@ -608,21 +608,178 @@ public sealed class InvoiceSubmissionExistingDocumentTests
 
     // ── 050a review #4: a retry after the submission ended ──
 
-    [Theory(DisplayName = "050a review #4 (owner 2026-10-20, D-139): a retry whose submission ended Failed or Rejected is 409 submission_already_ended naming the status; nothing is written or queued")]
-    [InlineData("Failed")]
-    [InlineData("Rejected")]
-    public async Task Retry_AfterTheSubmissionEnded_Is409_NamingTheStatus(string status)
+    [Fact(DisplayName = "050a review #4 (D-139, must not fire for EB-D-167): a retry whose submission ended Rejected is 409 submission_already_ended; nothing is written or queued")]
+    public async Task Retry_AfterRejected_Is409_SubmissionAlreadyEnded()
     {
         var h = NewHarness();
-        h.Submission = Earlier(status: status);
+        h.Submission = Earlier(status: "Rejected");
 
         var outcome = await h.Build().SubmitExistingDocumentAsync(Confirm(), CancellationToken.None);
 
         outcome.StatusCode.Should().Be(StatusCodes.Status409Conflict);
         outcome.ErrorCode.Should().Be(InvoiceSubmissionErrors.SubmissionAlreadyEnded).And.Be("ebilling.submission.submission_already_ended");
-        outcome.Detail.Should().Contain(status);
+        outcome.Detail.Should().Contain("rejected");
         outcome.Receipt.Should().BeNull("the review service marks the document only on Received");
         ShouldHaveWrittenNothing(h);
+    }
+
+    // ── EB-D-167 (owner 2026-10-28; closes ISS-012 #2374): after a Failed attempt the confirm starts a NEW attempt ──
+
+    private static readonly Guid SecondAttempt = InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(DocumentId, 2);
+    private static readonly Guid SecondJob = InvoiceSubmissionService.ExistingDocumentJobIdFor(DocumentId, 2);
+
+    /// <summary>An earlier attempt row at <paramref name="id"/> (created by <paramref name="creator"/>), as the undo leaves a committed one.</summary>
+    private static Entity Attempt(Guid id, string status, Guid? creator = null, bool undone = false)
+    {
+        var row = Earlier(status: status);
+        row.Id = id;
+        if (undone)
+        {
+            row.Attributes.Remove(TrackingNumberAllocator.FirmInvoiceNumberColumn);
+        }
+
+        if (creator is { } person)
+        {
+            row[RecordCreatorPerson.Column] = new EntityReference("systemuser", person);
+        }
+
+        return row;
+    }
+
+    [Fact(DisplayName = "EB-D-167 (must fire): a retry after the document's submission ended Failed is a NEW attempt - generation 2's id and job, every check run again, created by this caller, the allocator numbering it")]
+    public async Task Retry_AfterFailed_IsANewAttempt()
+    {
+        var h = NewHarness();
+        h.Submissions[SubmissionId] = Attempt(SubmissionId, "Failed", undone: true);
+        var caller = Guid.NewGuid();
+
+        var outcome = await h.Build().SubmitExistingDocumentAsync(Confirm() with { CallerObjectId = caller }, CancellationToken.None);
+
+        outcome.Kind.Should().Be(InvoiceSubmissionOutcomeKind.Received);
+        outcome.Receipt!.SubmissionId.Should().Be(SecondAttempt);
+        outcome.Receipt.JobId.Should().Be(SecondJob);
+        var allocation = h.Allocations.Should().ContainSingle().Subject;
+        allocation.SubmissionId.Should().Be(SecondAttempt, "the next generation, numbered by the allocator ({number}.{n+1})");
+        allocation.Fields!["sprk_document"].Should().BeEquivalentTo(new EntityReference("sprk_document", DocumentId));
+        h.JobsSent.Should().ContainSingle().Which.JobId.Should().Be(SecondJob);
+        h.OwnerContexts.Should().ContainSingle().Which.RequestedBy!.ObjectId.Should().Be(caller, "the new attempt is created by THIS caller");
+        h.SubmissionReads.Should().Equal(SubmissionId, SecondAttempt);
+    }
+
+    [Fact(DisplayName = "EB-D-167 (must fire): another user's Failed attempt on the confirm route gives a new attempt by THIS caller (the creator of the failed one is not assumed or required)")]
+    public async Task AnotherUsersFailedAttempt_GivesANewAttemptByThisCaller()
+    {
+        var h = NewHarness();
+        h.OwnerAnswer = RecordOwnerResolution.Owned(Guid.NewGuid()) with { CreatedByPerson = Guid.Parse("0000c0de-0000-4000-8000-000000000167") };
+        h.Submissions[SubmissionId] = Attempt(SubmissionId, "Failed", creator: Guid.NewGuid());
+        var caller = Guid.NewGuid();
+
+        var outcome = await h.Build().SubmitExistingDocumentAsync(Confirm() with { CallerObjectId = caller }, CancellationToken.None);
+
+        outcome.Receipt!.SubmissionId.Should().Be(SecondAttempt);
+        h.OwnerContexts.Should().ContainSingle().Which.RequestedBy!.ObjectId.Should().Be(caller);
+        h.Allocations.Single().Fields![RecordCreatorPerson.Column].Should().BeEquivalentTo(
+            new EntityReference("systemuser", Guid.Parse("0000c0de-0000-4000-8000-000000000167")), "sprk_createdbyperson is this caller's person");
+    }
+
+    [Fact(DisplayName = "EB-D-167: the walk passes every Failed attempt - after attempts 1 and 2 failed, the retry is attempt 3")]
+    public async Task Retry_AfterTwoFailedAttempts_IsAttemptThree()
+    {
+        var h = NewHarness();
+        h.Submissions[SubmissionId] = Attempt(SubmissionId, "Failed");
+        h.Submissions[SecondAttempt] = Attempt(SecondAttempt, "Failed", undone: true);
+
+        var outcome = await h.Build().SubmitExistingDocumentAsync(Confirm(), CancellationToken.None);
+
+        outcome.Receipt!.SubmissionId.Should().Be(InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(DocumentId, 3));
+    }
+
+    [Fact(DisplayName = "EB-D-167 (must not fire): a Rejected attempt after a Failed one stands (D-139) - 409, no new attempt")]
+    public async Task Rejected_AfterAFailedAttempt_Is409_NoNewAttempt()
+    {
+        var h = NewHarness();
+        h.Submissions[SubmissionId] = Attempt(SubmissionId, "Failed");
+        h.Submissions[SecondAttempt] = Attempt(SecondAttempt, "Rejected");
+
+        var outcome = await h.Build().SubmitExistingDocumentAsync(Confirm(), CancellationToken.None);
+
+        outcome.ErrorCode.Should().Be(InvoiceSubmissionErrors.SubmissionAlreadyEnded);
+        ShouldHaveWrittenNothing(h);
+    }
+
+    [Fact(DisplayName = "EB-D-167: the new attempt runs EVERY check again - a document filed under another record since is 409, nothing written")]
+    public async Task Retry_AfterFailed_RunsEveryCheck()
+    {
+        var h = NewHarness();
+        h.Submissions[SubmissionId] = Attempt(SubmissionId, "Failed");
+        h.ExistingDocument!["sprk_matter"] = new EntityReference("sprk_matter", Guid.NewGuid());
+
+        var outcome = await h.Build().SubmitExistingDocumentAsync(Confirm(), CancellationToken.None);
+
+        outcome.ErrorCode.Should().Be(InvoiceSubmissionErrors.DocumentCoreRecordMismatch);
+        ShouldHaveWrittenNothing(h);
+    }
+
+    [Fact(DisplayName = "EB-D-167 race: two concurrent retries after a Failed attempt make exactly ONE new attempt - the loser meets the winner's row (AlreadyCreated) and is answered with it")]
+    public async Task TwoConcurrentRetries_AfterFailed_MakeExactlyOneNewAttempt()
+    {
+        var h = NewHarness();
+        h.Submissions[SubmissionId] = Attempt(SubmissionId, "Failed");
+        // The winner committed generation 2 between the loser's walk and its create: the create of the same id is AlreadyCreated.
+        h.Allocation = TrackingNumberResult.AlreadyCreated("INV-7.2", 2);
+        h.StoredOnCreate = Attempt(SecondAttempt, "Received");
+
+        var outcome = await h.Build().SubmitExistingDocumentAsync(Confirm(), CancellationToken.None);
+
+        outcome.Kind.Should().Be(InvoiceSubmissionOutcomeKind.Received);
+        outcome.Receipt!.SubmissionId.Should().Be(SecondAttempt, "the winner's attempt, never a third");
+        h.Allocations.Should().ContainSingle().Which.SubmissionId.Should().Be(SecondAttempt, "both racers ask for the same generation's id");
+        h.Submissions.Keys.Should().BeEquivalentTo(new[] { SubmissionId, SecondAttempt });
+    }
+
+    [Fact(DisplayName = "EB-D-167 race (must not fire): the loser whose details differ from the winner's new attempt is 409 document_already_submitted, nothing queued")]
+    public async Task TwoConcurrentRetries_LoserWithOtherDetails_Is409()
+    {
+        var h = NewHarness();
+        h.Submissions[SubmissionId] = Attempt(SubmissionId, "Failed");
+        h.Allocation = TrackingNumberResult.AlreadyCreated("INV-8.1", 1);
+        var winner = Attempt(SecondAttempt, "Received");
+        winner[TrackingNumberAllocator.FirmInvoiceNumberColumn] = "INV-8";
+        h.StoredOnCreate = winner;
+
+        var outcome = await h.Build().SubmitExistingDocumentAsync(Confirm(), CancellationToken.None);
+
+        outcome.ErrorCode.Should().Be(InvoiceSubmissionErrors.DocumentAlreadySubmitted);
+        h.JobsSent.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "EB-D-167: a document whose every allowed attempt failed is 409 submission_already_ended, nothing written")]
+    public async Task AfterTheLastAllowedAttempt_Is409()
+    {
+        var h = NewHarness();
+        for (var g = 1; g <= InvoiceSubmissionService.MaxExistingDocumentGeneration; g++)
+        {
+            var id = InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(DocumentId, g);
+            h.Submissions[id] = Attempt(id, "Failed");
+        }
+
+        var outcome = await h.Build().SubmitExistingDocumentAsync(Confirm(), CancellationToken.None);
+
+        outcome.ErrorCode.Should().Be(InvoiceSubmissionErrors.SubmissionAlreadyEnded);
+        ShouldHaveWrittenNothing(h);
+    }
+
+    [Fact(DisplayName = "EB-D-167: generation 1 keeps the original derived ids; later generations are distinct and each is recognised as the document's own")]
+    public void GenerationIds_KeepGenerationOne_AndAreTheDocumentsOwn()
+    {
+        InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(DocumentId, 1).Should().Be(SubmissionId);
+        InvoiceSubmissionService.ExistingDocumentJobIdFor(DocumentId, 1).Should().Be(JobId);
+        var ids = Enumerable.Range(1, InvoiceSubmissionService.MaxExistingDocumentGeneration)
+            .Select(g => InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(DocumentId, g)).ToList();
+        ids.Should().OnlyHaveUniqueItems();
+        ids.Should().OnlyContain(id => InvoiceSubmissionService.IsExistingDocumentSubmissionIdOf(DocumentId, id));
+        InvoiceSubmissionService.IsExistingDocumentSubmissionIdOf(Guid.NewGuid(), SecondAttempt).Should().BeFalse();
+        InvoiceSubmissionService.IsExistingDocumentSubmissionIdOf(DocumentId, Guid.NewGuid()).Should().BeFalse();
     }
 
     // ── 050a review #5: the concurrent-create path compares the core record too ──
