@@ -23,11 +23,36 @@ FULL rigor, from the POML. Executed on opus at high effort.
 - `FamilyKind` (`Filing = 1`, with no zero member, so an uninitialised kind is never Filing).
 - `EdgeKind`: `FilingCore`, `Pair`, `Stamp`, `LineageHop`.
 - `Edge(FamilyKind, ChildTable, LookupColumn, ParentTable, EdgeKind, InSecureFamily, RecordNumberColumn)`.
-- `All`, which holds 139 rows across 31 child tables.
+- `All`, which holds 141 rows across 31 child tables.
 - `Of(kind)`.
-- `SecureLineageView()`, which has the shape of `SecureChildLineage.Children`.
+- `SecureLineageView()`, which has the shape of `SecureChildLineage.Children`. It is for the parity check only and is
+  never a source for an isolation walk.
 - `CoreAncestorChildrenView()`, which has the shape of `CoreAncestorResolver.IntermediateRootColumns`.
 - `RecordNumberColumnOf(table)`, plus `PairIdColumn` and `PairTypeColumn`.
+- `DetailTables`: display only, outside the access pin.
+
+`CoreTables`, `StampColumns`, `PairIdColumn` and `PairTypeColumn` are derived from `CoreAncestorResolver`, never
+restated.
+
+## UAC-r2 review
+
+**UAC-r2 review: content ruling 2026-10-28 on a38396afcf, OK with changes 1-3 applied.** UAC re-checks the final head.
+
+1. Row added: `sprk_analysis.sprk_documentid → sprk_document`, a LineageHop in the Secure family. It is the analysis's
+   ownership primary.
+2. Row added: `sprk_communication.sprk_communicationthread → sprk_communicationthread`, a LineageHop in the Secure
+   family. A message in a record thread takes the thread's filing.
+3. New guard: every SecureChildLineage lookup to an ownership parent that is not a citation must be a row or baselined.
+
+The ruling also kept the three service-request rows (Filing, `InSecureFamily = false`), added `DetailTables`, and
+changed some wording; no other row changed.
+
+`DetailTables`: `sprk_eventlog`, `sprk_emailreviewlog`, `sprk_attachmentartifact`, `sprk_emailartifact`,
+`sprk_spendsignal`, `sprk_spendsnapshot`, `sprk_billingevent` and `sprk_analysisoutput`. The default family view and push
+(040) skip them. `sprk_kpiassessment` is not detail, because it is user-entered.
+
+Further candidates (notes only, not in the set): `sprk_communicationparticipant`, `sprk_communicationattachment`,
+`sprk_fileversion` and `sprk_policyversion`.
 
 ### EdgeKind rule (pinned)
 
@@ -48,57 +73,33 @@ FULL rigor, from the POML. Executed on opus at high effort.
    so the shared predicate (`SecureRecordOwnerTeam.IsInSecureBusinessUnit` +
    `SecureChildShareSynchronizer.ResolveSecureBusinessUnitAsync`) is not needed here.
 
-## Seeding decisions for UAC-r2 content review
+## Seeding decisions (as reviewed by UAC-r2)
 
 The rule I applied: an edge in an existing registry is a filing edge unless an existing registry's own code or remarks
 says it is not. `SecureChildLineage` disclaims being a filing classification ("every lookup is kept, on purpose"), so
-being listed there is not a filing claim. Every exclusion is listed in the baseline.
+being listed there is not a filing claim. UAC-r2 then ruled on the edge cases. Every exclusion is in the baseline.
 
-**Left out of the registry because an existing registry says the link is not filing:**
+**Left out of the registry:**
 
 - `sprk_document.sprk_currentversionid`, `sprk_document.sprk_canonicaldocument` and `sprk_analysis.sprk_outputfileid`.
-  The SecureChildLineage remarks call them not filing.
-- `sprk_analysis.sprk_documentid`. The CoreAncestorResolver.StampSourceColumns remarks say it is the analysed input,
-  not what the analysis is filed under. **Flag:** the UAC definition lists analyses among "direct filing lookups". If
-  UAC wants the analysed document as a filing parent, add the row and delete the baseline line.
-- `sprk_communication.sprk_communicationthread`. The OwnershipParentEntities remarks call a thread a grouping container:
-  a message is filed under its regarding.
+  The SecureChildLineage remarks call them not filing. These are the three narrowing-only lookups `SecureLineageView`
+  omits.
+- `sprk_workassignment.sprk_regardingcommunication`. It is not a filing (`SecureRootInheritance.cs:426-427`); the storage
+  resolver holds it.
+- A service request's own regarding lookups, because it is a root.
+- Isolation-only parents, because a family never decides isolation:
+  - a Decision Record's resolved-Signal subjects (`sprk_steps`);
+  - a frozen core that no longer matches the live stamp.
 
-**Included on UAC-r2's round-2 statement** ("ServiceRequestRelations is a service request's OWN family"). All nine
-ServiceRequestRelations edges are included with `InSecureFamily = false`. Two of them read against other wording, so
-please confirm:
-
-- `sprk_signal.sprk_regardingservicerequest` and `sprk_decisionrecord.sprk_regardingservicerequest`. The ontology
-  wording (design §12.2, POML context) lists Signal's edges as the 8 regarding lookups "excluding
-  sprk_regardingservicerequest". I read that as describing the SECURE lineage (§12.2 says "already in
-  SecureChildLineage"). CoreAncestorResolver also treats these columns as root columns.
-- `sprk_document.sprk_relatedservicerequest`. SecureChildLineage's `DocumentLinksThatAreNotFiling` names the service
-  request, but its stated reason is that a service request is its own root outside the Secure walk, not that the link
-  is not filing.
-
-I did not treat these as the POML escalation trigger ("two registries disagree on whether an edge is FILING"). The
-content owner has already answered: ServiceRequestRelations is the service request's family, and the other registries'
-exclusions are about the Secure walk. **If UAC-r2 disagrees, drop the rows and add baseline lines.**
-
-**Included, but possibly "system rows".** UAC's definition excludes "system rows" without naming the tables. These are
-included because they are seeded from SecureChildLineage:
-
-- `sprk_eventlog`
-- `sprk_emailreviewlog`
-- `sprk_analysisoutput`
-- `sprk_attachmentartifact`
-- `sprk_emailartifact`
-- `sprk_billingevent`
-- `sprk_kpiassessment`
-- `sprk_spendsignal`
-- `sprk_spendsnapshot`
-
-UAC to confirm.
+**Service-request rows (kept, UAC-r2 ruling).** All nine ServiceRequestRelations edges are Filing with
+`InSecureFamily = false`. SecureChildLineage.cs:51's "not a filing parent" describes only the Secure lineage map, and UAC
+rewords it in 194b. Code remark cites `RecordOwnershipResolver.cs:1157-1160` and `FilingParentOf` `:660-680`.
 
 **Not included:**
 
 - The work assignment's pair. It counts only by repeating a typed lookup (`SecureRootInheritance` #1616), so it is
   never an edge of its own.
+- Pair edges on child tables, such as the memo. UAC confirmed none.
 - `sprk_procedureassignment`, `sprk_invoicelineitem`, N:N associations, citations, people and organization lookups,
   grant rows, and `sprk_policy.sprk_currentversion`. None of them is in the source registries; the unit tests pin
   their absence.
@@ -114,168 +115,170 @@ service request, analysis, budget, decision record, document, event, invoice, re
 | SecureChildLineage | document.sprk_currentversionid → fileversion | only in SCL | its current version, not filing |
 | SecureChildLineage | document.sprk_canonicaldocument → document | only in SCL | its canonical copy, not filing |
 | SecureChildLineage | analysis.sprk_outputfileid → document | only in SCL | its output file, not filing |
-| SecureChildLineage | analysis.sprk_documentid → document | only in SCL | the analysed input (CAR remarks) |
-| SecureChildLineage | communication.sprk_communicationthread → thread | only in SCL | grouping container (OPE remarks) |
+| CoreAncestorResolver.StampSourceColumns | analysis.sprk_documentid → document | only in registry | the analysis's ownership primary, not a stamp source (CoreAncestorResolver.cs:212-214) |
 | CoreAncestorResolver children | decisionrecord.sprk_matter / sprk_project / sprk_workassignment → core | only in registry (3 lines) | typed decision context, not a stamp or root column (D-34) |
 | CoreAncestorResolver children | signal.sprk_matter → matter | only in registry | typed core lookup, not a stamp column |
 | CoreAncestorResolver children | document.sprk_relatedservicerequest → servicerequest | only in registry | service request family; the stamp topology excludes it by name |
-| OwnershipParentEntities | sprk_billingevent, sprk_kpiassessment, sprk_spendsignal, sprk_memo | only in OPE (4 lines) | an ownership parent no filing lookup names |
+| OwnershipParentEntities | sprk_billingevent | only in OPE | an ownership parent through sprk_invoicelineitem.sprk_billingevent, which waits for ebilling (#2348) |
+| OwnershipParentEntities | sprk_kpiassessment, sprk_spendsignal, sprk_memo | only in OPE (3 lines) | an ownership parent no filing lookup names |
 | OwnershipParentEntities | sprk_decisionrecord, sprk_emailartifact | only in registry (2 lines) | a lineage parent only; ownership does not list it |
+| OwnershipParentEntities | sprk_communicationthread | only in registry | grouping container, never an ownership parent (RecordOwnershipResolver.cs:1150); a message takes its record thread's filing |
 
 Every other view agrees exactly:
 
 - TypedFilingColumns;
 - IntermediateFilingColumns;
 - the pair;
-- StampSourceColumns;
 - ServiceRequestRelations;
-- the rest of SecureChildLineage and CoreAncestorResolver children.
+- the rest of StampSourceColumns, SecureChildLineage and CoreAncestorResolver children.
 
 ## Registry rows (for UAC-r2 content review)
 
 All rows are `FamilyKind = Filing`. This table is the same as the content pin (`PinnedAccessRows`) plus the display column.
 
-| # | Child table | Lookup / pair | Parent | EdgeKind | InSecureFamily | RecordNumberColumn |
-|---|---|---|---|---|---|---|
-| 1 | sprk_agreement | sprk_regardingdocument | sprk_document | LineageHop | yes | — |
-| 2 | sprk_agreement | sprk_regardingmatter | sprk_matter | Stamp | yes | — |
-| 3 | sprk_agreement | sprk_regardingproject | sprk_project | Stamp | yes | — |
-| 4 | sprk_analysis | sprk_regardingbudget | sprk_budget | LineageHop | yes | sprk_analysis_number |
-| 5 | sprk_analysis | sprk_regardingcommunication | sprk_communication | LineageHop | yes | sprk_analysis_number |
-| 6 | sprk_analysis | sprk_regardingdocument | sprk_document | LineageHop | yes | sprk_analysis_number |
-| 7 | sprk_analysis | sprk_regardinginvoice | sprk_invoice | LineageHop | yes | sprk_analysis_number |
-| 8 | sprk_analysis | sprk_regardingmatter | sprk_matter | Stamp | yes | sprk_analysis_number |
-| 9 | sprk_analysis | sprk_regardingproject | sprk_project | Stamp | yes | sprk_analysis_number |
-| 10 | sprk_analysis | sprk_regardingservicerequest | sprk_servicerequest | Stamp | no | sprk_analysis_number |
-| 11 | sprk_analysis | sprk_regardingworkassignment | sprk_workassignment | Stamp | yes | sprk_analysis_number |
-| 12 | sprk_analysisoutput | sprk_analysisid | sprk_analysis | LineageHop | yes | — |
-| 13 | sprk_attachmentartifact | sprk_document | sprk_document | LineageHop | yes | — |
-| 14 | sprk_attachmentartifact | sprk_emailartifact | sprk_emailartifact | LineageHop | yes | — |
-| 15 | sprk_billingevent | sprk_invoice | sprk_invoice | LineageHop | yes | — |
-| 16 | sprk_billingevent | sprk_matter | sprk_matter | LineageHop | yes | — |
-| 17 | sprk_billingevent | sprk_project | sprk_project | LineageHop | yes | — |
-| 18 | sprk_budget | sprk_matter | sprk_matter | LineageHop | yes | sprk_budgetnumber |
-| 19 | sprk_budget | sprk_project | sprk_project | LineageHop | yes | sprk_budgetnumber |
-| 20 | sprk_budgetbucket | sprk_budget | sprk_budget | LineageHop | yes | — |
-| 21 | sprk_budgetrevision | sprk_budget | sprk_budget | LineageHop | yes | — |
-| 22 | sprk_budgetrevision | sprk_matter | sprk_matter | LineageHop | yes | — |
-| 23 | sprk_communication | sprk_regardinganalysis | sprk_analysis | LineageHop | yes | — |
-| 24 | sprk_communication | sprk_regardingbudget | sprk_budget | LineageHop | yes | — |
-| 25 | sprk_communication | sprk_regardingevent | sprk_event | LineageHop | yes | — |
-| 26 | sprk_communication | sprk_regardinginvoice | sprk_invoice | LineageHop | yes | — |
-| 27 | sprk_communication | sprk_regardingmatter | sprk_matter | Stamp | yes | — |
-| 28 | sprk_communication | sprk_regardingproject | sprk_project | Stamp | yes | — |
-| 29 | sprk_communication | sprk_regardingreportcard | sprk_reportcard | LineageHop | yes | — |
-| 30 | sprk_communication | sprk_regardingservicerequest | sprk_servicerequest | Stamp | no | — |
-| 31 | sprk_communication | sprk_regardingworkassignment | sprk_workassignment | Stamp | yes | — |
-| 32 | sprk_communicationattachment | sprk_communication | sprk_communication | LineageHop | yes | — |
-| 33 | sprk_communicationattachment | sprk_document | sprk_document | LineageHop | yes | — |
-| 34 | sprk_communicationparticipant | sprk_communication | sprk_communication | LineageHop | yes | — |
-| 35 | sprk_communicationthread | sprk_regardinganalysis | sprk_analysis | LineageHop | yes | — |
-| 36 | sprk_communicationthread | sprk_regardingbudget | sprk_budget | LineageHop | yes | — |
-| 37 | sprk_communicationthread | sprk_regardingevent | sprk_event | LineageHop | yes | — |
-| 38 | sprk_communicationthread | sprk_regardinginvoice | sprk_invoice | LineageHop | yes | — |
-| 39 | sprk_communicationthread | sprk_regardingmatter | sprk_matter | Stamp | yes | — |
-| 40 | sprk_communicationthread | sprk_regardingproject | sprk_project | Stamp | yes | — |
-| 41 | sprk_communicationthread | sprk_regardingservicerequest | sprk_servicerequest | Stamp | no | — |
-| 42 | sprk_communicationthread | sprk_regardingworkassignment | sprk_workassignment | Stamp | yes | — |
-| 43 | sprk_decisionrecord | sprk_matter | sprk_matter | LineageHop | yes | sprk_decisionnumber |
-| 44 | sprk_decisionrecord | sprk_project | sprk_project | LineageHop | yes | sprk_decisionnumber |
-| 45 | sprk_decisionrecord | sprk_regardingcommunication | sprk_communication | LineageHop | yes | sprk_decisionnumber |
-| 46 | sprk_decisionrecord | sprk_regardingdocument | sprk_document | LineageHop | yes | sprk_decisionnumber |
-| 47 | sprk_decisionrecord | sprk_regardingevent | sprk_event | LineageHop | yes | sprk_decisionnumber |
-| 48 | sprk_decisionrecord | sprk_regardinginvoice | sprk_invoice | LineageHop | yes | sprk_decisionnumber |
-| 49 | sprk_decisionrecord | sprk_regardingmatter | sprk_matter | Stamp | yes | sprk_decisionnumber |
-| 50 | sprk_decisionrecord | sprk_regardingproject | sprk_project | Stamp | yes | sprk_decisionnumber |
-| 51 | sprk_decisionrecord | sprk_regardingservicerequest | sprk_servicerequest | Stamp | no | sprk_decisionnumber |
-| 52 | sprk_decisionrecord | sprk_regardingtodo | sprk_todo | LineageHop | yes | sprk_decisionnumber |
-| 53 | sprk_decisionrecord | sprk_regardingworkassignment | sprk_workassignment | Stamp | yes | sprk_decisionnumber |
-| 54 | sprk_decisionrecord | sprk_workassignment | sprk_workassignment | LineageHop | yes | sprk_decisionnumber |
-| 55 | sprk_document | sprk_invoice | sprk_invoice | LineageHop | yes | sprk_document_number |
-| 56 | sprk_document | sprk_matter | sprk_matter | LineageHop | yes | sprk_document_number |
-| 57 | sprk_document | sprk_parentdocument | sprk_document | LineageHop | yes | sprk_document_number |
-| 58 | sprk_document | sprk_project | sprk_project | LineageHop | yes | sprk_document_number |
-| 59 | sprk_document | sprk_relatedagreement | sprk_agreement | LineageHop | yes | sprk_document_number |
-| 60 | sprk_document | sprk_relatedcommunication | sprk_communication | LineageHop | yes | sprk_document_number |
-| 61 | sprk_document | sprk_relatedevent | sprk_event | LineageHop | yes | sprk_document_number |
-| 62 | sprk_document | sprk_relatedinvoice | sprk_invoice | LineageHop | yes | sprk_document_number |
-| 63 | sprk_document | sprk_relatedmatter | sprk_matter | LineageHop | yes | sprk_document_number |
-| 64 | sprk_document | sprk_relatedproject | sprk_project | LineageHop | yes | sprk_document_number |
-| 65 | sprk_document | sprk_relatedservicerequest | sprk_servicerequest | LineageHop | no | sprk_document_number |
-| 66 | sprk_document | sprk_relatedtodo | sprk_todo | LineageHop | yes | sprk_document_number |
-| 67 | sprk_document | sprk_relatedworkassignment | sprk_workassignment | LineageHop | yes | sprk_document_number |
-| 68 | sprk_document | sprk_workassignment | sprk_workassignment | LineageHop | yes | sprk_document_number |
-| 69 | sprk_emailartifact | sprk_document | sprk_document | LineageHop | yes | — |
-| 70 | sprk_emailreviewlog | sprk_communication | sprk_communication | LineageHop | yes | — |
-| 71 | sprk_event | sprk_regardingagreement | sprk_agreement | LineageHop | yes | sprk_eventnumber |
-| 72 | sprk_event | sprk_regardinganalysis | sprk_analysis | LineageHop | yes | sprk_eventnumber |
-| 73 | sprk_event | sprk_regardingbudget | sprk_budget | LineageHop | yes | sprk_eventnumber |
-| 74 | sprk_event | sprk_regardingcommunication | sprk_communication | LineageHop | yes | sprk_eventnumber |
-| 75 | sprk_event | sprk_regardingevent | sprk_event | LineageHop | yes | sprk_eventnumber |
-| 76 | sprk_event | sprk_regardinginvoice | sprk_invoice | LineageHop | yes | sprk_eventnumber |
-| 77 | sprk_event | sprk_regardingmatter | sprk_matter | Stamp | yes | sprk_eventnumber |
-| 78 | sprk_event | sprk_regardingproject | sprk_project | Stamp | yes | sprk_eventnumber |
-| 79 | sprk_event | sprk_regardingreportcard | sprk_reportcard | LineageHop | yes | sprk_eventnumber |
-| 80 | sprk_event | sprk_regardingservicerequest | sprk_servicerequest | Stamp | no | sprk_eventnumber |
-| 81 | sprk_event | sprk_regardingworkassignment | sprk_workassignment | Stamp | yes | sprk_eventnumber |
-| 82 | sprk_eventlog | sprk_event | sprk_event | LineageHop | yes | — |
-| 83 | sprk_fileversion | sprk_document | sprk_document | LineageHop | yes | — |
-| 84 | sprk_invoice | sprk_matter | sprk_matter | LineageHop | yes | sprk_invoicenumber |
-| 85 | sprk_invoice | sprk_project | sprk_project | LineageHop | yes | sprk_invoicenumber |
-| 86 | sprk_invoice | sprk_regardingagreement | sprk_agreement | LineageHop | yes | sprk_invoicenumber |
-| 87 | sprk_kpiassessment | sprk_matter | sprk_matter | LineageHop | yes | — |
-| 88 | sprk_kpiassessment | sprk_project | sprk_project | LineageHop | yes | — |
-| 89 | sprk_kpiassessment | sprk_reportcard | sprk_reportcard | LineageHop | yes | — |
-| 90 | sprk_memo | sprk_regardingagreement | sprk_agreement | LineageHop | yes | — |
-| 91 | sprk_memo | sprk_regardinganalysis | sprk_analysis | LineageHop | yes | — |
-| 92 | sprk_memo | sprk_regardingbudget | sprk_budget | LineageHop | yes | — |
-| 93 | sprk_memo | sprk_regardingcommunication | sprk_communication | LineageHop | yes | — |
-| 94 | sprk_memo | sprk_regardingdocument | sprk_document | LineageHop | yes | — |
-| 95 | sprk_memo | sprk_regardingevent | sprk_event | LineageHop | yes | — |
-| 96 | sprk_memo | sprk_regardinginvoice | sprk_invoice | LineageHop | yes | — |
-| 97 | sprk_memo | sprk_regardingmatter | sprk_matter | Stamp | yes | — |
-| 98 | sprk_memo | sprk_regardingproject | sprk_project | Stamp | yes | — |
-| 99 | sprk_memo | sprk_regardingservicerequest | sprk_servicerequest | Stamp | no | — |
-| 100 | sprk_memo | sprk_regardingworkassignment | sprk_workassignment | Stamp | yes | — |
-| 101 | sprk_memo | sprk_reportcard | sprk_reportcard | LineageHop | yes | — |
-| 102 | sprk_policy | sprk_matter | sprk_matter | LineageHop | yes | — |
-| 103 | sprk_policyversion | sprk_policy | sprk_policy | LineageHop | yes | — |
-| 104 | sprk_project | sprk_regardingrecordid | sprk_matter | Pair | yes | sprk_projectnumber |
-| 105 | sprk_project | sprk_regardingrecordid | sprk_project | Pair | yes | sprk_projectnumber |
-| 106 | sprk_reportcard | sprk_regardingmatter | sprk_matter | Stamp | yes | sprk_reportcardnumber |
-| 107 | sprk_reportcard | sprk_regardingproject | sprk_project | Stamp | yes | sprk_reportcardnumber |
-| 108 | sprk_signal | sprk_decisionrecord | sprk_decisionrecord | LineageHop | yes | sprk_signalnumber |
-| 109 | sprk_signal | sprk_matter | sprk_matter | LineageHop | yes | sprk_signalnumber |
-| 110 | sprk_signal | sprk_regardingcommunication | sprk_communication | LineageHop | yes | sprk_signalnumber |
-| 111 | sprk_signal | sprk_regardingdocument | sprk_document | LineageHop | yes | sprk_signalnumber |
-| 112 | sprk_signal | sprk_regardingevent | sprk_event | LineageHop | yes | sprk_signalnumber |
-| 113 | sprk_signal | sprk_regardinginvoice | sprk_invoice | LineageHop | yes | sprk_signalnumber |
-| 114 | sprk_signal | sprk_regardingmatter | sprk_matter | Stamp | yes | sprk_signalnumber |
-| 115 | sprk_signal | sprk_regardingproject | sprk_project | Stamp | yes | sprk_signalnumber |
-| 116 | sprk_signal | sprk_regardingservicerequest | sprk_servicerequest | Stamp | no | sprk_signalnumber |
-| 117 | sprk_signal | sprk_regardingtodo | sprk_todo | LineageHop | yes | sprk_signalnumber |
-| 118 | sprk_signal | sprk_regardingworkassignment | sprk_workassignment | Stamp | yes | sprk_signalnumber |
-| 119 | sprk_spendsignal | sprk_matter | sprk_matter | LineageHop | yes | — |
-| 120 | sprk_spendsignal | sprk_project | sprk_project | LineageHop | yes | — |
-| 121 | sprk_spendsignal | sprk_snapshot | sprk_spendsnapshot | LineageHop | yes | — |
-| 122 | sprk_spendsnapshot | sprk_matter | sprk_matter | LineageHop | yes | — |
-| 123 | sprk_spendsnapshot | sprk_project | sprk_project | LineageHop | yes | — |
-| 124 | sprk_todo | sprk_regardingagreement | sprk_agreement | LineageHop | yes | — |
-| 125 | sprk_todo | sprk_regardinganalysis | sprk_analysis | LineageHop | yes | — |
-| 126 | sprk_todo | sprk_regardingbudget | sprk_budget | LineageHop | yes | — |
-| 127 | sprk_todo | sprk_regardingcommunication | sprk_communication | LineageHop | yes | — |
-| 128 | sprk_todo | sprk_regardingdocument | sprk_document | LineageHop | yes | — |
-| 129 | sprk_todo | sprk_regardingevent | sprk_event | LineageHop | yes | — |
-| 130 | sprk_todo | sprk_regardinginvoice | sprk_invoice | LineageHop | yes | — |
-| 131 | sprk_todo | sprk_regardingmatter | sprk_matter | Stamp | yes | — |
-| 132 | sprk_todo | sprk_regardingproject | sprk_project | Stamp | yes | — |
-| 133 | sprk_todo | sprk_regardingreportcard | sprk_reportcard | LineageHop | yes | — |
-| 134 | sprk_todo | sprk_regardingservicerequest | sprk_servicerequest | Stamp | no | — |
-| 135 | sprk_todo | sprk_regardingworkassignment | sprk_workassignment | Stamp | yes | — |
-| 136 | sprk_workassignment | sprk_regardingevent | sprk_event | FilingCore | yes | sprk_workassignmentnumber |
-| 137 | sprk_workassignment | sprk_regardinginvoice | sprk_invoice | FilingCore | yes | sprk_workassignmentnumber |
-| 138 | sprk_workassignment | sprk_regardingmatter | sprk_matter | FilingCore | yes | sprk_workassignmentnumber |
-| 139 | sprk_workassignment | sprk_regardingproject | sprk_project | FilingCore | yes | sprk_workassignmentnumber |
+| # | Child table | Lookup / pair | Parent | EdgeKind | InSecureFamily | RecordNumberColumn | Detail |
+|---|---|---|---|---|---|---|---|
+| 1 | sprk_agreement | sprk_regardingdocument | sprk_document | LineageHop | yes | — |  |
+| 2 | sprk_agreement | sprk_regardingmatter | sprk_matter | Stamp | yes | — |  |
+| 3 | sprk_agreement | sprk_regardingproject | sprk_project | Stamp | yes | — |  |
+| 4 | sprk_analysis | sprk_documentid | sprk_document | LineageHop | yes | sprk_analysis_number |  |
+| 5 | sprk_analysis | sprk_regardingbudget | sprk_budget | LineageHop | yes | sprk_analysis_number |  |
+| 6 | sprk_analysis | sprk_regardingcommunication | sprk_communication | LineageHop | yes | sprk_analysis_number |  |
+| 7 | sprk_analysis | sprk_regardingdocument | sprk_document | LineageHop | yes | sprk_analysis_number |  |
+| 8 | sprk_analysis | sprk_regardinginvoice | sprk_invoice | LineageHop | yes | sprk_analysis_number |  |
+| 9 | sprk_analysis | sprk_regardingmatter | sprk_matter | Stamp | yes | sprk_analysis_number |  |
+| 10 | sprk_analysis | sprk_regardingproject | sprk_project | Stamp | yes | sprk_analysis_number |  |
+| 11 | sprk_analysis | sprk_regardingservicerequest | sprk_servicerequest | Stamp | no | sprk_analysis_number |  |
+| 12 | sprk_analysis | sprk_regardingworkassignment | sprk_workassignment | Stamp | yes | sprk_analysis_number |  |
+| 13 | sprk_analysisoutput | sprk_analysisid | sprk_analysis | LineageHop | yes | — | detail |
+| 14 | sprk_attachmentartifact | sprk_document | sprk_document | LineageHop | yes | — | detail |
+| 15 | sprk_attachmentartifact | sprk_emailartifact | sprk_emailartifact | LineageHop | yes | — | detail |
+| 16 | sprk_billingevent | sprk_invoice | sprk_invoice | LineageHop | yes | — | detail |
+| 17 | sprk_billingevent | sprk_matter | sprk_matter | LineageHop | yes | — | detail |
+| 18 | sprk_billingevent | sprk_project | sprk_project | LineageHop | yes | — | detail |
+| 19 | sprk_budget | sprk_matter | sprk_matter | LineageHop | yes | sprk_budgetnumber |  |
+| 20 | sprk_budget | sprk_project | sprk_project | LineageHop | yes | sprk_budgetnumber |  |
+| 21 | sprk_budgetbucket | sprk_budget | sprk_budget | LineageHop | yes | — |  |
+| 22 | sprk_budgetrevision | sprk_budget | sprk_budget | LineageHop | yes | — |  |
+| 23 | sprk_budgetrevision | sprk_matter | sprk_matter | LineageHop | yes | — |  |
+| 24 | sprk_communication | sprk_communicationthread | sprk_communicationthread | LineageHop | yes | — |  |
+| 25 | sprk_communication | sprk_regardinganalysis | sprk_analysis | LineageHop | yes | — |  |
+| 26 | sprk_communication | sprk_regardingbudget | sprk_budget | LineageHop | yes | — |  |
+| 27 | sprk_communication | sprk_regardingevent | sprk_event | LineageHop | yes | — |  |
+| 28 | sprk_communication | sprk_regardinginvoice | sprk_invoice | LineageHop | yes | — |  |
+| 29 | sprk_communication | sprk_regardingmatter | sprk_matter | Stamp | yes | — |  |
+| 30 | sprk_communication | sprk_regardingproject | sprk_project | Stamp | yes | — |  |
+| 31 | sprk_communication | sprk_regardingreportcard | sprk_reportcard | LineageHop | yes | — |  |
+| 32 | sprk_communication | sprk_regardingservicerequest | sprk_servicerequest | Stamp | no | — |  |
+| 33 | sprk_communication | sprk_regardingworkassignment | sprk_workassignment | Stamp | yes | — |  |
+| 34 | sprk_communicationattachment | sprk_communication | sprk_communication | LineageHop | yes | — |  |
+| 35 | sprk_communicationattachment | sprk_document | sprk_document | LineageHop | yes | — |  |
+| 36 | sprk_communicationparticipant | sprk_communication | sprk_communication | LineageHop | yes | — |  |
+| 37 | sprk_communicationthread | sprk_regardinganalysis | sprk_analysis | LineageHop | yes | — |  |
+| 38 | sprk_communicationthread | sprk_regardingbudget | sprk_budget | LineageHop | yes | — |  |
+| 39 | sprk_communicationthread | sprk_regardingevent | sprk_event | LineageHop | yes | — |  |
+| 40 | sprk_communicationthread | sprk_regardinginvoice | sprk_invoice | LineageHop | yes | — |  |
+| 41 | sprk_communicationthread | sprk_regardingmatter | sprk_matter | Stamp | yes | — |  |
+| 42 | sprk_communicationthread | sprk_regardingproject | sprk_project | Stamp | yes | — |  |
+| 43 | sprk_communicationthread | sprk_regardingservicerequest | sprk_servicerequest | Stamp | no | — |  |
+| 44 | sprk_communicationthread | sprk_regardingworkassignment | sprk_workassignment | Stamp | yes | — |  |
+| 45 | sprk_decisionrecord | sprk_matter | sprk_matter | LineageHop | yes | sprk_decisionnumber |  |
+| 46 | sprk_decisionrecord | sprk_project | sprk_project | LineageHop | yes | sprk_decisionnumber |  |
+| 47 | sprk_decisionrecord | sprk_regardingcommunication | sprk_communication | LineageHop | yes | sprk_decisionnumber |  |
+| 48 | sprk_decisionrecord | sprk_regardingdocument | sprk_document | LineageHop | yes | sprk_decisionnumber |  |
+| 49 | sprk_decisionrecord | sprk_regardingevent | sprk_event | LineageHop | yes | sprk_decisionnumber |  |
+| 50 | sprk_decisionrecord | sprk_regardinginvoice | sprk_invoice | LineageHop | yes | sprk_decisionnumber |  |
+| 51 | sprk_decisionrecord | sprk_regardingmatter | sprk_matter | Stamp | yes | sprk_decisionnumber |  |
+| 52 | sprk_decisionrecord | sprk_regardingproject | sprk_project | Stamp | yes | sprk_decisionnumber |  |
+| 53 | sprk_decisionrecord | sprk_regardingservicerequest | sprk_servicerequest | Stamp | no | sprk_decisionnumber |  |
+| 54 | sprk_decisionrecord | sprk_regardingtodo | sprk_todo | LineageHop | yes | sprk_decisionnumber |  |
+| 55 | sprk_decisionrecord | sprk_regardingworkassignment | sprk_workassignment | Stamp | yes | sprk_decisionnumber |  |
+| 56 | sprk_decisionrecord | sprk_workassignment | sprk_workassignment | LineageHop | yes | sprk_decisionnumber |  |
+| 57 | sprk_document | sprk_invoice | sprk_invoice | LineageHop | yes | sprk_document_number |  |
+| 58 | sprk_document | sprk_matter | sprk_matter | LineageHop | yes | sprk_document_number |  |
+| 59 | sprk_document | sprk_parentdocument | sprk_document | LineageHop | yes | sprk_document_number |  |
+| 60 | sprk_document | sprk_project | sprk_project | LineageHop | yes | sprk_document_number |  |
+| 61 | sprk_document | sprk_relatedagreement | sprk_agreement | LineageHop | yes | sprk_document_number |  |
+| 62 | sprk_document | sprk_relatedcommunication | sprk_communication | LineageHop | yes | sprk_document_number |  |
+| 63 | sprk_document | sprk_relatedevent | sprk_event | LineageHop | yes | sprk_document_number |  |
+| 64 | sprk_document | sprk_relatedinvoice | sprk_invoice | LineageHop | yes | sprk_document_number |  |
+| 65 | sprk_document | sprk_relatedmatter | sprk_matter | LineageHop | yes | sprk_document_number |  |
+| 66 | sprk_document | sprk_relatedproject | sprk_project | LineageHop | yes | sprk_document_number |  |
+| 67 | sprk_document | sprk_relatedservicerequest | sprk_servicerequest | LineageHop | no | sprk_document_number |  |
+| 68 | sprk_document | sprk_relatedtodo | sprk_todo | LineageHop | yes | sprk_document_number |  |
+| 69 | sprk_document | sprk_relatedworkassignment | sprk_workassignment | LineageHop | yes | sprk_document_number |  |
+| 70 | sprk_document | sprk_workassignment | sprk_workassignment | LineageHop | yes | sprk_document_number |  |
+| 71 | sprk_emailartifact | sprk_document | sprk_document | LineageHop | yes | — | detail |
+| 72 | sprk_emailreviewlog | sprk_communication | sprk_communication | LineageHop | yes | — | detail |
+| 73 | sprk_event | sprk_regardingagreement | sprk_agreement | LineageHop | yes | sprk_eventnumber |  |
+| 74 | sprk_event | sprk_regardinganalysis | sprk_analysis | LineageHop | yes | sprk_eventnumber |  |
+| 75 | sprk_event | sprk_regardingbudget | sprk_budget | LineageHop | yes | sprk_eventnumber |  |
+| 76 | sprk_event | sprk_regardingcommunication | sprk_communication | LineageHop | yes | sprk_eventnumber |  |
+| 77 | sprk_event | sprk_regardingevent | sprk_event | LineageHop | yes | sprk_eventnumber |  |
+| 78 | sprk_event | sprk_regardinginvoice | sprk_invoice | LineageHop | yes | sprk_eventnumber |  |
+| 79 | sprk_event | sprk_regardingmatter | sprk_matter | Stamp | yes | sprk_eventnumber |  |
+| 80 | sprk_event | sprk_regardingproject | sprk_project | Stamp | yes | sprk_eventnumber |  |
+| 81 | sprk_event | sprk_regardingreportcard | sprk_reportcard | LineageHop | yes | sprk_eventnumber |  |
+| 82 | sprk_event | sprk_regardingservicerequest | sprk_servicerequest | Stamp | no | sprk_eventnumber |  |
+| 83 | sprk_event | sprk_regardingworkassignment | sprk_workassignment | Stamp | yes | sprk_eventnumber |  |
+| 84 | sprk_eventlog | sprk_event | sprk_event | LineageHop | yes | — | detail |
+| 85 | sprk_fileversion | sprk_document | sprk_document | LineageHop | yes | — |  |
+| 86 | sprk_invoice | sprk_matter | sprk_matter | LineageHop | yes | sprk_invoicenumber |  |
+| 87 | sprk_invoice | sprk_project | sprk_project | LineageHop | yes | sprk_invoicenumber |  |
+| 88 | sprk_invoice | sprk_regardingagreement | sprk_agreement | LineageHop | yes | sprk_invoicenumber |  |
+| 89 | sprk_kpiassessment | sprk_matter | sprk_matter | LineageHop | yes | — |  |
+| 90 | sprk_kpiassessment | sprk_project | sprk_project | LineageHop | yes | — |  |
+| 91 | sprk_kpiassessment | sprk_reportcard | sprk_reportcard | LineageHop | yes | — |  |
+| 92 | sprk_memo | sprk_regardingagreement | sprk_agreement | LineageHop | yes | — |  |
+| 93 | sprk_memo | sprk_regardinganalysis | sprk_analysis | LineageHop | yes | — |  |
+| 94 | sprk_memo | sprk_regardingbudget | sprk_budget | LineageHop | yes | — |  |
+| 95 | sprk_memo | sprk_regardingcommunication | sprk_communication | LineageHop | yes | — |  |
+| 96 | sprk_memo | sprk_regardingdocument | sprk_document | LineageHop | yes | — |  |
+| 97 | sprk_memo | sprk_regardingevent | sprk_event | LineageHop | yes | — |  |
+| 98 | sprk_memo | sprk_regardinginvoice | sprk_invoice | LineageHop | yes | — |  |
+| 99 | sprk_memo | sprk_regardingmatter | sprk_matter | Stamp | yes | — |  |
+| 100 | sprk_memo | sprk_regardingproject | sprk_project | Stamp | yes | — |  |
+| 101 | sprk_memo | sprk_regardingservicerequest | sprk_servicerequest | Stamp | no | — |  |
+| 102 | sprk_memo | sprk_regardingworkassignment | sprk_workassignment | Stamp | yes | — |  |
+| 103 | sprk_memo | sprk_reportcard | sprk_reportcard | LineageHop | yes | — |  |
+| 104 | sprk_policy | sprk_matter | sprk_matter | LineageHop | yes | — |  |
+| 105 | sprk_policyversion | sprk_policy | sprk_policy | LineageHop | yes | — |  |
+| 106 | sprk_project | sprk_regardingrecordid | sprk_matter | Pair | yes | sprk_projectnumber |  |
+| 107 | sprk_project | sprk_regardingrecordid | sprk_project | Pair | yes | sprk_projectnumber |  |
+| 108 | sprk_reportcard | sprk_regardingmatter | sprk_matter | Stamp | yes | sprk_reportcardnumber |  |
+| 109 | sprk_reportcard | sprk_regardingproject | sprk_project | Stamp | yes | sprk_reportcardnumber |  |
+| 110 | sprk_signal | sprk_decisionrecord | sprk_decisionrecord | LineageHop | yes | sprk_signalnumber |  |
+| 111 | sprk_signal | sprk_matter | sprk_matter | LineageHop | yes | sprk_signalnumber |  |
+| 112 | sprk_signal | sprk_regardingcommunication | sprk_communication | LineageHop | yes | sprk_signalnumber |  |
+| 113 | sprk_signal | sprk_regardingdocument | sprk_document | LineageHop | yes | sprk_signalnumber |  |
+| 114 | sprk_signal | sprk_regardingevent | sprk_event | LineageHop | yes | sprk_signalnumber |  |
+| 115 | sprk_signal | sprk_regardinginvoice | sprk_invoice | LineageHop | yes | sprk_signalnumber |  |
+| 116 | sprk_signal | sprk_regardingmatter | sprk_matter | Stamp | yes | sprk_signalnumber |  |
+| 117 | sprk_signal | sprk_regardingproject | sprk_project | Stamp | yes | sprk_signalnumber |  |
+| 118 | sprk_signal | sprk_regardingservicerequest | sprk_servicerequest | Stamp | no | sprk_signalnumber |  |
+| 119 | sprk_signal | sprk_regardingtodo | sprk_todo | LineageHop | yes | sprk_signalnumber |  |
+| 120 | sprk_signal | sprk_regardingworkassignment | sprk_workassignment | Stamp | yes | sprk_signalnumber |  |
+| 121 | sprk_spendsignal | sprk_matter | sprk_matter | LineageHop | yes | — | detail |
+| 122 | sprk_spendsignal | sprk_project | sprk_project | LineageHop | yes | — | detail |
+| 123 | sprk_spendsignal | sprk_snapshot | sprk_spendsnapshot | LineageHop | yes | — | detail |
+| 124 | sprk_spendsnapshot | sprk_matter | sprk_matter | LineageHop | yes | — | detail |
+| 125 | sprk_spendsnapshot | sprk_project | sprk_project | LineageHop | yes | — | detail |
+| 126 | sprk_todo | sprk_regardingagreement | sprk_agreement | LineageHop | yes | — |  |
+| 127 | sprk_todo | sprk_regardinganalysis | sprk_analysis | LineageHop | yes | — |  |
+| 128 | sprk_todo | sprk_regardingbudget | sprk_budget | LineageHop | yes | — |  |
+| 129 | sprk_todo | sprk_regardingcommunication | sprk_communication | LineageHop | yes | — |  |
+| 130 | sprk_todo | sprk_regardingdocument | sprk_document | LineageHop | yes | — |  |
+| 131 | sprk_todo | sprk_regardingevent | sprk_event | LineageHop | yes | — |  |
+| 132 | sprk_todo | sprk_regardinginvoice | sprk_invoice | LineageHop | yes | — |  |
+| 133 | sprk_todo | sprk_regardingmatter | sprk_matter | Stamp | yes | — |  |
+| 134 | sprk_todo | sprk_regardingproject | sprk_project | Stamp | yes | — |  |
+| 135 | sprk_todo | sprk_regardingreportcard | sprk_reportcard | LineageHop | yes | — |  |
+| 136 | sprk_todo | sprk_regardingservicerequest | sprk_servicerequest | Stamp | no | — |  |
+| 137 | sprk_todo | sprk_regardingworkassignment | sprk_workassignment | Stamp | yes | — |  |
+| 138 | sprk_workassignment | sprk_regardingevent | sprk_event | FilingCore | yes | sprk_workassignmentnumber |  |
+| 139 | sprk_workassignment | sprk_regardinginvoice | sprk_invoice | FilingCore | yes | sprk_workassignmentnumber |  |
+| 140 | sprk_workassignment | sprk_regardingmatter | sprk_matter | FilingCore | yes | sprk_workassignmentnumber |  |
+| 141 | sprk_workassignment | sprk_regardingproject | sprk_project | FilingCore | yes | sprk_workassignmentnumber |  |
 
 ## Tests
 
@@ -287,10 +290,21 @@ The test scope is the POML's guards and controls only. Two unit tests go one lin
 
 | Suite | Result |
 |---|---|
-| `RecordFamilyEdgesGuardTests` (ArchTests) | 9/9 pass |
-| `RecordFamilyEdgesTests` (unit, theories expanded) | 42/42 pass |
+| `RecordFamilyEdgesGuardTests` (ArchTests) at `43e8cf0402` | 13/13 pass |
+| `RecordFamilyEdgesTests` (unit, theories expanded) at `43e8cf0402` | 41/41 pass |
 | `verify-suites.sh` at `b42d0109b1` | Spaarke.sln: 0 warnings, 0 errors. Filtered Sprk.Bff.Api.Tests: 5659 pass, 7 skipped, 0 fail. ArchTests: 1586 pass, 1 fail (`DocumentLinkVocabularyGuardTests`, fixed below). |
-| After the fix | ArchTests (full): 1586/1586 pass. Targeted units (`RecordFamilyEdges`, `CoreAncestor`, `SecureChildLineage`, `DocumentLinkFields`): 280/280 pass. |
+| At `43e8cf0402` | ArchTests (full): 1590/1590 pass. Targeted ArchTests (`RecordFamilyEdges`, `DocumentLinkVocabulary`, `SecureChildLineage`, `SecureFamilyConsistency`): 22/22 pass. Targeted units (`RecordFamilyEdges`, `CoreAncestor`, `SecureChildLineage`, `DocumentLinkFields`): 279/279 pass. |
+
+Since `a38396afcf`, two tests were added to the guard file and two changed in the unit file:
+
+- Guard file:
+  - `DetailTables_LeaveTheIsolationViewsUnchanged`;
+  - the ownership-lineage guard: 1 fact plus 2 controls.
+    - Must-fire: with the `sprk_analysis.sprk_documentid` row removed, the gap list is exactly
+      `sprk_analysis.sprk_documentid -> sprk_document`. That is the defect UAC change 1 fixed.
+    - Must-not-fire: a citation, a non-parent target and a baselined lookup produce no gap. The main fact passes on
+      the current registry.
+- Unit file: the Matter → Project test is reshaped, and the tautological record-number test is deleted.
 
 The guard tests:
 
@@ -317,12 +331,12 @@ There is no "old file" for a new registry, so I mutated the new code instead:
 
 ## Publish size and CVE
 
-- Publish delta: `publish-delta.ps1 -MasterSha 078f62bcad -BranchSha b42d0109b1`, zipped with Compress-Archive.
-  - master: 39,729,357 bytes, 192 files;
-  - branch: 39,732,223 bytes, 192 files;
-  - **delta +2,866 bytes**, total 37.89 MB.
-  - Measured on the first commit. The follow-up fix changes only how one static class builds its document rows, with
-    no package or file added, so the delta stays in the same few-KB range. It was not re-measured.
+- Publish delta, re-measured on the code head: `publish-delta.ps1 -MasterSha 078f62bcad -BranchSha 43e8cf0402`, zipped
+  with Compress-Archive.
+  - master: 39,729,337 bytes, 192 files;
+  - branch: 39,732,496 bytes, 192 files;
+  - **delta +3,159 bytes**, total 37.89 MB.
+  - The first measurement, at `b42d0109b1`, was +2,866 bytes.
 - CVE: `dotnet list package --vulnerable --include-transitive` reports that "The given project `Sprk.Bff.Api` has no
   vulnerable packages given the current sources."
 
@@ -339,9 +353,17 @@ Code review covered the three files.
   `TypeInitializationException`). It is fixed and documented on the field.
 - **F2 (fixed):** `ParityProblems_RealBaseline_DescribesOnlyRealDisagreements` duplicated the main parity fact, which
   already fails on stale lines, and went beyond the POML's test scope. I removed it.
-- **K1:** `RecordFamilyEdges.All` is internal and unfiltered. A future reader could take it directly instead of
-  `Of(Filing)`. Today every row is Filing, so this is not a defect on any path. When a second kind lands, that task
-  should add a source-scan guard: no `RecordFamilyEdges.All` outside the file and its guards.
+- **Review round 1 (independent review of `a38396afcf`), fixed in `43e8cf0402`:**
+  - F2, docs: the registries are "checked against" this one, not views of it. `SecureLineageView` is parity-check only:
+    it omits narrowing-only lookups, so swapping it in would widen a mirror, which is fail-open.
+  - F2, second copies: the core constants are now derived from `CoreAncestorResolver`, with one order comment.
+  - Weak test: the Matter → Project test is reshaped, and the tautological test is deleted.
+- **K1:** `RecordFamilyEdges.All` is unfiltered. A future reader could take it instead of `Of(Filing)`. Every row is
+  Filing today. When a second kind lands, add a source-scan guard.
+- **K1:** the "UAC-r2 review:" PR line is not mechanically enforced. The pin's failure message requires it; a reviewer
+  checks the PR.
+- **K3:** `CoreAncestorChildrenView`'s core-parent filter is not exercised by a mutation run. Its C2 test and control
+  cover the Filing filter only.
 - **K4:** The pin and parity keys are lower-cased, so a case-only change to a logical name is not caught. Dataverse
   logical names are always lower-case.
 - Metrics: `RecordFamilyEdges.cs` is about 300 lines of declarative data plus two views. It is cohesive: one
@@ -370,6 +392,12 @@ access walks, family reader (071) and push (040) consume. It has no endpoint, no
   - `CoreAncestorResolver.IntermediateRootColumns` / `StampSourceColumns`;
   - `RecordOwnershipResolver.OwnershipParentEntities`;
   - `ExternalDataService.ServiceRequestRelations`.
+
+  Overlaps:
+  - `CoreAncestorResolver`'s core set, stamp lookups and pair columns. These are now derived from it, not restated.
+  - The Dataverse catalog column `sprk_recordtype_ref.sprk_regardingrecordnumberfield` (`Entities/sprk_RecordType_Ref/Entity.xml:643`).
+    It is a per-record-type number field. `RecordNumberColumns` covers every family table, including those with no
+    record-type row, so it stays code-side and display-only.
 - **Extension:** no. Each serves one walk with its own shape. This registry is their checked union, and the parity test
   leaves them untouched.
 - **Cost of doing nothing:** 071 and 040 would each declare an eighth copy of the hierarchy, and drift like the missing
@@ -377,6 +405,11 @@ access walks, family reader (071) and push (040) consume. It has no endpoint, no
 
 ## Rework line
 
-Rework: 2 fixes, the document rows derived from `DocumentLinkFields` (an existing guard fired) and the removal of the
-redundant test. No escalation fired; the service-request classification
-is flagged above for UAC-r2 confirmation.
+Rework:
+
+- 2 self-review fixes: the document rows derived from `DocumentLinkFields`, and the redundant test removed.
+- Review round 1: 3 F2 items fixed.
+- UAC-r2 content ruling: 2 rows added, 1 guard added, `DetailTables` added, and the wording changes.
+
+Rows went 139 → 141; the baseline stayed at 16. No escalation fired. UAC-r2 kept the service-request rows, and UAC
+re-checks the final head.
