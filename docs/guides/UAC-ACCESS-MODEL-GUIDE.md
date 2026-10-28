@@ -379,7 +379,7 @@ Assigned-To automatic grants are not limited by anyone's role.
 | **Spaarke Basic User** | Read and AppendTo at Deep on matter, project, work assignment and document; Read on the grant table; no Write or Share | Default role for B2B guest users; cannot manage access |
 | **Spaarke Access Administrator** | Create, Read, Write, Append, AppendTo on `sprk_noaccessentry` at Global | Authors No Access entries; assigned together with a role that holds Share |
 | **Secure Record Owner** | User (Basic) depth on the secure table set | Held only by the Secure Record Owners team; created by provisioning, not in the solution |
-| **Restricted Content Owner** | Read at User (Basic) depth on exactly the five hard-deny tables (`config/restricted-content-owner-role.json`) | Held only by the memberless Spaarke Restricted Content Owners team in the root business unit; created by `scripts/Set-RestrictedContentOwnerTeam.ps1`, not in the solution |
+| **Restricted Content Owner** | Read at User (Basic) depth on exactly the five hard-deny tables (`config/restricted-content-owner-role.json`) | Created once in the root business unit (Dataverse copies it into every unit); each customer unit's copy is held only by that unit's memberless Spaarke Restricted Content Owners team. Set up per customer unit by `scripts/Set-RestrictedContentOwnerTeam.ps1`, not in the solution |
 
 Partners are contacts, not systemusers, and hold no Dataverse role.
 
@@ -422,11 +422,17 @@ least as strict as the matter.
   no parent, the acting user's business unit). If any parent is Secure, it is owned by the Secure Record Owners team. If
   the owner cannot be decided, the write is refused.
 - **Hard-deny tables** (`sprk_storedfile`, `sprk_procedureassignment`, `sprk_ruleset`, `sprk_policy`,
-  `sprk_policyversion`; owner round 131): where the answer would be a business unit's default team, the row is owned by the
-  memberless **Spaarke Restricted Content Owners** team in the root business unit instead. A Secure answer still goes to
-  Secure Record Owners. A row its author keeps (the ontology save, a publish that binds no owner, an author-owned row
-  that is re-filed) keeps its author. If that team is missing, has a member or is outside the root unit, the write is
-  refused (`record_owner_restricted_content_team_unresolved`).
+  `sprk_policyversion`; owner rounds 131 and 136): where the answer would be a business unit's default team, the row is
+  owned instead by the memberless **Spaarke Restricted Content Owners** team of the **customer's top business unit**: from
+  the answer's business unit, Spaarke walks up to the root's direct child (the customer unit provisioning H10 creates, a
+  sibling of Secure Record) and uses the team there. The root holds only Spaarke product data, so customer rows never go
+  there. A Secure answer still goes to Secure Record Owners. A row its author keeps (the ontology save, a publish that
+  binds no owner, an author-owned row that is re-filed) keeps its author. The write is refused
+  (`record_owner_restricted_content_team_unresolved`) when the answer is in the root itself (an unfiled row created by a
+  user homed in the root, or one filed under a record owned there), when the top unit is Secure Record, when the parent
+  chain cannot be read or loops, and when the team in that unit is missing, there are two, or it has a member. The
+  reconciler's ordinary pass leaves an author-owned row, or one owned by a non-default team, where it is and reports it,
+  without refusing it.
 - **A Decision Record** is also filed under the subject of every Signal it resolved (the ids its `sprk_steps` lists). A
   Secure pass reaches it through those Signals even when it lies outside the record's own family, so it moves into
   isolation, or out, with them.
@@ -714,17 +720,23 @@ teams.)
 |---|---|---|
 | **Secure Record Owners** (named, non-default, in the Secure Record business unit) | Every Secure record, its family, and the grant rows on it | **None, ever** — that is what makes the record reachable only by shares. Spaarke refuses to add anyone to a team in that business unit. |
 | A business unit's **default owner team** | Ordinary records, children created through Spaarke, grant rows on ordinary records, contacts created by registration (the customer business unit's team) | Everyone in the business unit (managed by the platform) |
-| **Spaarke Restricted Content Owners** (named, non-default, in the ROOT business unit) | Ordinary rows of the five hard-deny tables (stored files, procedure assignments, rule sets, rules, rule versions) | **None, ever.** Its role holds Read at Basic on those five tables only. |
+| **Spaarke Restricted Content Owners** (named, non-default, one in EACH customer's top business unit; never the root) | Ordinary rows of the five hard-deny tables (stored files, procedure assignments, rule sets, rules, rule versions) under that customer unit | **None, ever.** Its copy of the role holds Read at Basic on those five tables only. |
 
-**The hard-deny tables' rows sit in the root business unit**, so two rules follow:
-- **No user-facing (non-admin) role may hold Read on these tables at Local (business unit), Deep or Global depth.** A
-  user homed in the root unit with Local or Deep Read, or any user with Global Read, would read every one of them.
-  Unified-access-control-r2 task 191 must never grant such a depth on them.
+**The hard-deny tables' ordinary rows sit in the customer's top business unit** (the team's unit;
+`RestrictedContentOwnerTeam.CustomerTopBusinessUnitAsync`), whichever unit below it the answer came from. Dataverse depth
+then decides who reaches them: Business Unit (Local) depth reaches them for a holder homed in that unit; Deep (Parent:
+Child) for a holder homed in that unit or above it (the root); Global for everyone. A holder homed in a unit BELOW the
+customer's top unit does not reach them with Deep or Business Unit depth. So two rules follow:
+- **No user-facing (non-admin) role may hold Read on these tables at a depth that reaches the team's rows.** That is no
+  Global Read, no Deep Read held by a user homed in the customer's top unit or the root, and no Business Unit Read held
+  by a user homed in the customer's top unit. Customer users are homed in that unit (H11), so in practice: no Business
+  Unit, Deep or Global Read on these five tables for a user-facing role. Unified-access-control-r2 task 191 must never
+  grant such a depth on them.
 - **Administrator roles are the exception, and they depend on where the admin is homed.** Spaarke Ontology Administrator
-  holds its rule and rule-version privileges at Deep, not Global, so only an admin homed in the root business unit can
-  read, publish or retire a rule owned by the restricted-content team. On dev today the only holder is homed in the
-  root unit, so nothing breaks. An Ontology Administrator homed in a child unit would no longer see those rules on their
-  admin tab, and could not publish or retire them. No role was changed for this.
+  holds its rule and rule-version privileges at Deep, not Global. An Ontology Administrator homed in the customer's top
+  unit (or above it, in the root) reads, publishes and retires the rules the restricted-content team owns; one homed in a
+  child unit of it does not, and would no longer see those rules on their admin tab. On dev today the only holder is
+  homed in the root, so nothing breaks. No role was changed for this.
 
 Other ways teams matter:
 

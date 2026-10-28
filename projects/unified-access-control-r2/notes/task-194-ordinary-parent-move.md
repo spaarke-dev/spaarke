@@ -621,6 +621,8 @@ entry, and loses its mirror.
 > So this team moves there. Everything below is the root-unit version as built. The R4b-2 root-unit check, the config,
 > the script and the docs change with the revised brief, which also carries the ontology re-check items F2 (an
 > author-owned policy row goes Incomplete when the team cannot be resolved) and F3 (five missing tests).
+>
+> **Superseded by R4b-2c below** (the team in the customer's top business unit; F2 and F3 done).
 
 **Built.**
 - `config/restricted-content-owner-role.json` is the ONE definition, in the same structure as
@@ -694,6 +696,128 @@ Local, Deep or Global depth: a root-unit user with Local or Deep Read, or anyone
 - `docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md`, I-6: the hard-deny exception, the walk reaching a Decision
   Record through its Signals, and the setup script.
 - `docs/guides/UAC-ACCESS-MODEL-GUIDE.md`: the role table, the ownership rules and the owner-team table.
+
+### R4b-2c: the team lives in the customer's top business unit (owner round 136; as built)
+
+> Supersedes the root-unit parts of R4b-2 and R4b-3 above. The owner's ruling: the Spaarke root business unit holds only
+> Spaarke product data. Customer records, configured or working, belong to the customer's own top business unit, the direct
+> child of the root that provisioning H10 creates (`customerBusinessUnitId`, a sibling of Secure Record).
+
+**The rule as built (`RestrictedContentOwnerTeam`, `RecordOwnershipResolver.OrdinaryExitAsync`).**
+- The ordinary answer is a business unit's default team: the primary parent's unit, or the acting user's. The exit now takes
+  that unit (both call sites pass it).
+- `CustomerTopBusinessUnitAsync` walks up from that unit to the root's direct child, reading `businessunit.parentbusinessunitid`
+  by id. It uses a visited set and a bound of 32 levels.
+- `IdentifyAsync(top, secureBu)` refuses a top unit that is the Secure Record unit. It then finds the named non-default Owner
+  team IN that unit (TOP 2) and reads its members (TOP 5).
+- Fail closed, each a named status, refusal `record_owner_restricted_content_team_unresolved`, and one Error log carrying the
+  status and the business-unit ids (no user, no name):
+
+  | Status | When |
+  |---|---|
+  | `AnswerIsRootBusinessUnit` | the answer's unit is the root itself |
+  | `CustomerBusinessUnitIsSecureRecord` | the top unit is Secure Record |
+  | `ParentChainUnreadable` | a unit on the walk is gone |
+  | `ParentChainLoops` | a unit is met twice, or the bound is passed |
+  | `OwnerTeamNotFound` / `OwnerTeamAmbiguous` / `OwnerTeamHasMembers` | the team in the top unit |
+  | `SecureBusinessUnitAmbiguous` | defensive only: every entry point refuses an ambiguous Secure unit before the exit |
+
+- A Dataverse fault propagates, as the resolver's other reads do.
+- Per pass (`RecordOwnerLookupCache`): the outcome per ANSWER unit (the walk) and the identity per CUSTOMER unit (the team).
+  `RestrictedContentOwnerTeams` lists each distinct outcome; the reconciler report carries that list (it was one identity).
+- `InPlaceOfDefaultTeamId` still names the replaced default team, so the ordinary pass's business-unit comparison is
+  unchanged: it compares with the answer's own unit, not the customer's top unit.
+- The derived rule was kept. No reason was found for a configured business-unit id instead. H10 records the unit, H4b
+  writes it as `ExternalAccess__CustomerBusinessUnitId`, and the walk derives the same unit from the data. It also covers an
+  environment with several customer units (dev has four direct children besides Secure Record) without a per-unit setting.
+
+**F2 (`SecureChildReconciler.DecideOrdinaryRowCoreAsync`).** On that refusal, a row the ordinary pass never moves is now
+reported Untouched with a detail, not Refused. Those rows are a user-owned row (the I-6 detail) and a row owned by a team
+that is not a default team. Picked over "decide Stay before asking", which would have duplicated the Stay decisions above
+the ask. With the team absent, an author-owned policy and a non-default-team policy leave the pass Completed. A
+default-team policy is still Refused, and the pass is Incomplete.
+
+**Not changed, reported (same class as F2, outside the brief).** The same refusal also hits `ReparentAsync` for a user-owned
+hard-deny row:
+- before the write, the re-file is refused;
+- in the settle, `RecordOwnerUnsettledException` is thrown;
+- yet the row would keep its author once the team resolved (the R4b-2b kept-author rule).
+
+On dev no writer re-files these tables: the 6 policies have no matter, and the ontology save and publish do not ask. So it
+is latent. The fix is the F2 treatment at both points: Unchanged with `AuthorKeptRestrictedContentReason` when
+`OwningUser` is set.
+
+**F3 tests (`SecureChildOrdinaryParentMoveTests`).**
+- (a) An over-match: the steps mention Signal B outside `resolvedSignalIds`. The record is read into the pass and stays at its
+  core's team.
+- (b) The discovery in the ordinary pass: the record is read in, and stays AlreadyCorrect at its core's team while E2
+  follows the matter to B.
+- (c) A fault in the steps read (new world helper `FailingLikeReadsOf`) or in the link read: the pass is Failed and nothing
+  is written.
+- (d) A Signal linked under a found record (only through `sprk_signal.sprk_decisionrecord`) is walked below it. It is decided
+  by its own question: a Decision Record is not an ownership parent (`OwnershipParentEntities`), so the link files nothing.
+- (e) 250 Signals: two text-match reads of at most 200 each, and the record resolving the last Signal is found.
+
+**Config, script, guard.**
+- `businessUnit` is `customer`.
+- `Set-RestrictedContentOwnerTeam.ps1` takes a mandatory `-CustomerBusinessUnitName` or `-CustomerBusinessUnitId`. It
+  refuses the root, Secure Record and a unit that is not a direct child of the root.
+- The role is created once in the root, because Dataverse copies a root role into every unit. Each customer unit's copy is
+  assigned to that unit's team.
+- An assignment counts as allowed only for a team of that name in a customer top unit holding that unit's copy.
+- `-Verify` lists other customer top units that lack the team, as information only.
+- The guard requires `customer`, and must fire on `root`.
+
+**Dev, read-only (2026-10-28).**
+
+| Business unit | Parent | Enabled users (humans) | Matters | Projects | Work assignments | Hard-deny rows |
+|---|---|---|---|---|---|---|
+| Spaarke (root) | — | 172 (14) | 5 | 6 | 25 | 6 policies + 9 versions, all user-owned |
+| Spaarke Business Unit 1 (`customerBusinessUnitId`) | root | 2 (2) | 57 | 19 | 5 | 0 |
+| Secure Record | root | 0 | 2 | 3 | 2 | 0 |
+| Spaarke Demo / Spaarke Dev 1 / Spaarke Test 1 | root | 0 | 0 | 0 | 0 | 0 |
+
+Stored files, rule sets and procedure assignments: 0 rows anywhere.
+
+**What would be refused on dev.** Any ordinary hard-deny write whose answer is in the root:
+- a row filed under one of the root's 5 matters, 6 projects or 25 work assignments (or under a root-owned policy);
+- an unfiled create by one of the root's 172 users, through a writer that asks with the table and does not keep its creator.
+
+None runs today:
+- the ontology save asks no question (waiver);
+- the publish asks a hand-built question that names no table;
+- the reconciler leaves the 15 user-owned policy rows (F2);
+- no writer for the other three tables runs yet.
+
+The ebilling writers are the first that would hit it.
+
+**Smallest dev arrangement (proposed; the owner approves).**
+1. Run the script against Spaarke Business Unit 1: dry run, `-Apply`, `-Verify`. It creates the team there and creates the
+   role once in the root.
+2. Before ebilling's writers run on dev, either home their users in Business Unit 1, or file their rows under Business
+   Unit 1 records. Moving the root-owned matters, projects and work assignments is an owner decision; nothing needs to move
+   for today's writers.
+3. Demo, Dev 1 and Test 1 hold no users and no records, so they need no team until they do.
+4. The Ontology Administrator holder is homed in the root, and Deep from the root covers Business Unit 1, so that admin
+   keeps working.
+
+**Dry run (read-only, spaarkedev1, 2026-10-28).**
+- The run found the root `Spaarke`, Secure Record, and the customer unit `Spaarke Business Unit 1`
+  (`cb15f587-baa0-f111-aaac-000d3a99d1d7`). It reported TEAM MISSING and ROLE MISSING.
+- INFO: Demo, Dev 1 and Test 1 lack the team.
+- Plan:
+  1. create the team in Business Unit 1;
+  2. create the role in the root;
+  3. add the five Read privileges at Basic;
+  4. strip any other privilege;
+  5. assign the Business Unit 1 copy;
+  6. read back.
+- `-CustomerBusinessUnitName Spaarke` refuses (the root). `'Secure Record'` refuses. `-Verify` exits 1 on the two missing
+  items.
+
+**Later (not this run).** Run a live report-only pass on dev against a root with more than one Signal below it. It proves
+Dataverse accepts the steps text-match OR query (`sprk_steps like '%<id>%'`, up to 200 per query). Record its duration and
+the Decision Record count, and compare them with a direct query of the same records.
 
 ### Issues to file (issue-ready text; the coordinator files them)
 
