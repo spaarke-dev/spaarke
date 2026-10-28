@@ -4,7 +4,7 @@
     <title>RecordFamilyEdges — the canonical Filing edge registry, parity ratchet, content pin, Filing-only isolation guard (FR-29)</title>
     <phase>7 W7 Record family service and Family tool</phase>
     <gate>startable (UAC 194 merged de38296499)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New BFF code surface; access-adjacent registry that UAC's isolation views are checked against; ArchTest guards.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -91,6 +91,9 @@
     <criterion testable="true">Test scope: the guards and controls above only; anything beyond needs a one-line justification in the notes.</criterion>
     <criterion testable="true">BFF build 0 errors; ArchTests and unit tests green; publish-size delta and CVE recorded; UAC-r2 content review recorded.</criterion>
   </acceptance-criteria>
+
+  <notes>Completed 2026-10-28: PR #2367, merge 57fd095350. RecordFamilyEdges: 141 internal Filing rows, 16-line baseline, parity + content pin + C2 + SecureChildLineage-ownership guards, DetailTables. One adversarial pass (2 F2 fixed) and UAC-r2 content ruling (+analysis→document, +message→thread; service-request rows kept) — "UAC-r2 review: OK for task 070 at 810c741e85" (carries to b670de7085). Publish +3,159 B; no CVE. Details: notes/task-070-notes.md.
+rework: fix-round-1 task 070</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

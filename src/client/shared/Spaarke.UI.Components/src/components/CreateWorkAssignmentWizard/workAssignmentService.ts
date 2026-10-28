@@ -71,6 +71,9 @@ function _getCurrentUserId(): string {
   return getXrmUserId() ?? '';
 }
 
+/** Shown when a chosen Assigned To contact could not be sent (task 038 fix round 1). */
+const ASSIGNED_TO_NOT_SET_WARNING = 'Assigned To could not be set; the record uses its Assigned To Internal value.';
+
 // ---------------------------------------------------------------------------
 // WorkAssignmentService class
 // ---------------------------------------------------------------------------
@@ -470,6 +473,26 @@ export class WorkAssignmentService {
     if (form.matterTypeId) bindLookup('sprk_mattertype_ref', 'sprk_mattertype_refs', form.matterTypeId, 'mattertype');
     if (form.practiceAreaId)
       bindLookup('sprk_practicearea_ref', 'sprk_practicearea_refs', form.practiceAreaId, 'practicearea');
+
+    // Assigned To (contact) -- task 038 / FR-37. `sprk_workassignment.sprk_assignedto` targets CONTACT in the live
+    // schema (nav prop `sprk_AssignedTo`); the entity also has look-alike contact lookups (assigned attorney /
+    // paralegal, `sprk_assignedto1`, `sprk_assignedtointernal`), so it is resolved by exact column, never by
+    // substring or by referenced entity. A BLANK picker writes NOTHING -- no bind and no null: the server (task 037,
+    // FR-36) fills the column from Assigned To Internal only when the create leaves it UNSET, and an explicit null
+    // would block that default. The default is never computed here.
+    if (form.assignedToId) {
+      const assignedToNavProp = toNavPropMap(navProps)['sprk_assignedto'];
+      if (assignedToNavProp) {
+        entity[`${assignedToNavProp}@odata.bind`] = `/contacts(${cleanGuid(form.assignedToId)})`;
+      } else {
+        console.warn(
+          '[WorkAssignmentService] sprk_workassignment.sprk_assignedto nav-prop not found; Assigned To not set'
+        );
+        // The person chose a contact that cannot be sent: say so (the dialog shows result.warnings) instead of
+        // silently giving the record its server default.
+        warnings.push(ASSIGNED_TO_NOT_SET_WARNING);
+      }
+    }
 
     // Assign Work lookups (if provided)
     if (assignWork) {

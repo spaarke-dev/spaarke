@@ -474,6 +474,19 @@ ontology D-191)
     - a supplied Assigned To is kept;
     - no Assigned To Internal leaves Assigned To blank, with a structured warning.
 
+37. **FR-37 Assigned To on the Create Work Assignment wizard** (owner, 2026-10-27, approving the task list).
+    - The wizard's Enter Info step gains an optional "Assigned To" contact picker. It reuses the contact search
+      and nav-prop binding that the follow-on event step already uses.
+    - Left blank, the payload omits `sprk_assignedto` (never a null bind), so FR-36's server default applies.
+      The client does not pre-fill or compute the default, because the rule is declared once, on the server.
+    - When chosen, the contact is sent as a supplied value and takes the server's supplied-value path (Assigned-To
+      policy and materialiser).
+
+    Acceptance:
+    - choosing contact Y creates the work assignment with Assigned To = Y;
+    - leaving it blank sends no `sprk_assignedto` key, so the record gets FR-36's default;
+    - the field is optional and the step's validity rules are unchanged.
+
     (The Work Assignment Number, #2353, is a Dataverse autonumber `WRK-{SEQNUM:6}`, applied on dev 2026-10-27 with the
     owner's OK; PR #2358. No code.)
 
@@ -624,6 +637,7 @@ ontology D-191)
   - the Matter → Project pair edge needs UAC task 195 merged (the server writes the pair; dev backfill);
   - FR-34/FR-35 ship with task 040 (needs 019 → 017 → ebilling #1911);
   - FR-36 needs a UAC-r2 diff review.
+  - FR-37 ships after FR-36 (task 037), so a blank field gets the server default.
 
 ### External Dependencies
 
@@ -659,6 +673,7 @@ ontology D-191)
 | Procedure assignments (2026-10-27) | In the Family list? | Out | FR-29 |
 | Project → Matter (2026-10-27, #2352) | Filing edge | The regarding pair only; the N:N stays an association | FR-29, FR-34 |
 | WA Assigned To (2026-10-27, #2354) | Default | The record's own Assigned To Internal | FR-36 |
+| WA wizard Assigned To (2026-10-27) | Field on the wizard? | Yes, it can be added: an optional picker on Enter Info; blank uses the FR-36 default | FR-37 |
 | WA Number (2026-10-27, #2353) | Generation | Autonumber `WRK-{SEQNUM:6}` (dev applied, PR #2358) | — |
 
 ## Assumptions

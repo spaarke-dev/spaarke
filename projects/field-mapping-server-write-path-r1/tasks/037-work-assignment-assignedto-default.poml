@@ -4,7 +4,7 @@
     <title>Work Assignment Assigned To defaults to its own Assigned To Internal at create (FR-36, #2354)</title>
     <phase>3 W3 Product creators onto the service (create defaults amendment 2026-10-27)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies BFF .cs on the create path; writes an access-conferring column (sprk_assignedto); UAC-r2 review gate.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -95,7 +95,10 @@
     <criterion testable="true">BFF build 0 errors; filtered suites and ArchTests green; publish-size delta and CVE result recorded; UAC-r2 review recorded before merge.</criterion>
   </acceptance-criteria>
 
-  <notes>Owner 2026-10-27; #2354. UAC-r2 conditions 1-4 (2026-10-27) are the constraints above. #2353 (Number) is not part of this task: it is a Dataverse autonumber WRK-{SEQNUM:6} (applied on dev, PR #2358).</notes>
+  <notes>Completed 2026-10-28: PR #2370, merge eaa500c656. Declared once (RecordTableRules ServerDefault.CopiedFrom), applied on OwnedChildWrite and RecordCreationService step 3½; copy of a server-set source is server-set (chat "for" person costs no AppendTo; chat-created WAs now get Assigned To = caller's contact). One full adversarial pass (F1-F4 fixed), a scoped re-check (F3 test gap fixed), UAC-r2 review gate (F3 test gap fixed, K3 guard added) — "UAC-r2 review: OK for task 037 at 153886087b". K2 is binding in 017. Publish +3,679 B; no CVE. Details: notes/task-037-notes.md.
+rework: fix-round-2 task 037
+
+  Owner 2026-10-27; #2354. UAC-r2 conditions 1-4 (2026-10-27) are the constraints above. #2353 (Number) is not part of this task: it is a Dataverse autonumber WRK-{SEQNUM:6} (applied on dev, PR #2358).</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

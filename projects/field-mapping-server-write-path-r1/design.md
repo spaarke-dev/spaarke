@@ -529,10 +529,11 @@ describe.
   - child → grandchild: the `SecureChildLineage` hops.
   - Depth is 4. The walk goes down from the record, plus up to its root.
 - **Not family:** citations, people and organization lookups, N:N associations, grant rows, system rows.
-- **Service requests:** a service request is a core record with its own family, outside the Secure family.
+- **Detail tables (UAC-r2 2026-10-28):** `RecordFamilyEdges.DetailTables` (event log, email review log, attachment artifact, email artifact, spend signal, spend snapshot, billing event, analysis output) stay registry rows but the default Family view and push skip them; hiding them hides no user record. KPI assessments are shown. An analysis is filed under its document (`sprk_analysis.sprk_documentid`, its ownership primary); a message is filed under its record thread (`sprk_communication.sprk_communicationthread`).
+- **Service requests (UAC-r2 ruling 2026-10-28):** a service request is a core root outside the Secure family. Its `ServiceRequestRelations` lookups are Filing edges of its own family (ownership parent, re-file column, ordinary reconcile walk); the Secure lineage never walks them. `InSecureFamily = false` means "not walked by the Secure lineage". Secure-if-any does read the service request, but no writer puts one in the Secure Record business unit.
   - Expected behaviour, not a bug: a budget inquiry creates a `sprk_servicerequest` regarding the matter. Because the service request is its own root, the matter's Family view does not list the inquiries sent from it.
 - **Ontology tables (ontology review, 2026-10-27; already in `SecureChildLineage`):**
-  - `sprk_signal` is a child of its typed `sprk_matter`, of its subject (the 8 `sprk_regarding*` lookups, excluding `sprk_regardingservicerequest`), and of its Decision Record (`sprk_signal.sprk_decisionrecord`). It is never a child of a policy, a policy version or a core record type.
+  - `sprk_signal` is a child of its typed `sprk_matter`, of its subject (the 8 `sprk_regarding*` lookups; `sprk_regardingservicerequest` is a Filing edge of the service request's own family, not the Secure family — UAC-r2 2026-10-28), and of its Decision Record (`sprk_signal.sprk_decisionrecord`). It is never a child of a policy, a policy version or a core record type.
   - `sprk_decisionrecord` is a child of its typed core lookups (matter, project, work assignment) and of its subject's regarding lookups. It is never a child of `sprk_action` or a policy version.
   - `sprk_budgetrevision` is a child of `sprk_budget` and `sprk_matter`.
   - `sprk_policy` → `sprk_matter` and `sprk_policyversion` → `sprk_policy` (#2084): the EDGE always exists, but a policy is a MEMBER only when its `sprk_matter` is set (a matter-scoped rule). `sprk_policy.sprk_currentversion` is excluded (a loop).
@@ -776,3 +777,16 @@ Still open: classify `sprk_procedureassignment` and record-scoped ruleset rules 
 - **Query count:** the worst case is about (edges per level × 4 levels) batched reads per view, 100 or more for a big matter. Measure p95 on dev and record it. Narrow each level to the edges whose parent table is present only if it hurts in practice.
 - **Truncation favours the anchor:** in a truncated full-family view, the anchor's ancestor chain and its own subtree are filled first. Siblings' branches are the ones cut, and "load more" reaches them (UAC C4; tested).
 - **Permissiveness:** the view is exactly as permissive as Dataverse read for the caller, never more. Gaps Dataverse itself has today (e.g. the flagged-external systemuser reading Restricted rows, UAC task 191) show here as they do in the MDA.
+
+### 12.12 The family abstraction contract (UAC-r2 round 130, 2026-10-28, owner decision; #2362)
+
+The structured family entity (`sprk_securefamily`) is **not built now**; it is on the roadmap. Until it exists, W7 is the family:
+
+- **`RecordFamilyEdges` + `RecordFamilyReader` + `GET /api/v1/records/{table}/{id}/family` are the family abstraction.** Every caller reads a family through them (the reader in the BFF, the endpoint from clients), never through raw parent lookups. Push (task 040) finds a source's children through the edges and the primary-parent rule, not through `ResolveParentLookup` or a hand-written lookup.
+- **The implementation can be replaced, the contract cannot.** If `sprk_securefamily` is built later, it replaces how the reader finds members; the reader's public surface, the FR-31 response and the callers stay the same. The reader therefore exposes no lookup names, edge internals or storage details (registry rows stay `internal` data the reader consumes).
+- **Membership stays computed:** the primary-parent rule via `InPrimaryOrder` (UAC 194b), the Matter → Project pair edge only (UAC 195), no stored family key.
+- **W7 adds no family lookup column and no family table.**
+- **Binding now (round 130):**
+  - every ownership write goes through `RecordOwnershipResolver` (W7 is read-only and writes none);
+  - new code that tests isolation does so through UAC's one shared predicate keyed on the Secure Record business unit, never a hard-coded team id. W7 does not decide isolation (Dataverse read does, as the caller); 070's C2 guard and any test fixture follow the same rule.
+  - The predicate (UAC-r2, 2026-10-28): `SecureRecordOwnerTeam.IsInSecureBusinessUnit(owningBusinessUnitId, secureBusinessUnitId)` → `bool?` (`Infrastructure/Dataverse/SecureRecordOwnerTeam.cs`). Select `owningbusinessunit` on the rows checked; `null` = cannot tell → fail closed. The Secure BU id comes from `SecureChildShareSynchronizer.ResolveSecureBusinessUnitAsync` → `(Id, Ambiguous)`: Ambiguous → refuse; no id → the environment has no Secure Record BU; a fault propagates. Resolve once per request or pass. UAC 194b moves the resolver to `SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync` (a one-line rename at merge). Never compare `ownerid` with the Secure Record Owners team id.
