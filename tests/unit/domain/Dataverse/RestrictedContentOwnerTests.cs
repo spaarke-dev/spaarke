@@ -235,4 +235,66 @@ public class RestrictedContentOwnerTests
         resolution.OwningTeamId.Should().Be(ContentTeam);
         directory.Assignments.Should().NotContain(a => a.TeamId == GeneralTeam || a.TeamId == ChildTeam);
     }
+
+    /// <summary>R4b-2b (rule 1): a row of <paramref name="table"/> owned by its author (the caller), filed under the ordinary
+    /// matter, re-filed under <paramref name="to"/>.</summary>
+    private static async Task<(FakeDirectory Directory, RecordOwnerResolution Resolution)> ReFileAuthorOwnedAsync(
+        string table, string column, Guid to, FakeDirectory? seeded = null)
+    {
+        var directory = (seeded ?? World()).WithRecord(table, Policy, GeneralBu, extra: new()
+        {
+            [column] = new EntityReference("sprk_matter", OrdinaryMatter),
+            ["owninguser"] = new EntityReference("systemuser", FakeDirectory.CallerUserId),
+            ["ownerid"] = new EntityReference("systemuser", FakeDirectory.CallerUserId),
+        });
+        var request = new RecordReparent
+        {
+            EntityLogicalName = table,
+            RecordId = Policy,
+            ParentChanges = new Dictionary<string, EntityReference?> { [column] = new EntityReference("sprk_matter", to) },
+        };
+
+        var resolution = await directory.Resolver().ReparentAsync(
+            request,
+            _ =>
+            {
+                directory.Write(table, Policy, new Dictionary<string, object?> { [column] = new EntityReference("sprk_matter", to) });
+                return Task.CompletedTask;
+            },
+            CancellationToken.None);
+        return (directory, resolution);
+    }
+
+    [Fact]
+    public async Task ReFilingAnAuthorOwnedPolicyToAnotherOrdinaryMatter_KeepsItsAuthor()
+    {
+        var otherMatter = Guid.NewGuid();
+        var (directory, resolution) = await ReFileAuthorOwnedAsync(
+            "sprk_policy", "sprk_matter", otherMatter, World().WithRecord("sprk_matter", otherMatter, GeneralBu, owningTeam: GeneralTeam));
+
+        resolution.IsOwned.Should().BeFalse("rule 1: the content team never replaces a kept creator");
+        resolution.Reason.Should().Be(RecordOwnershipContext.AuthorKeptRestrictedContentReason);
+        directory.Assignments.Should().BeEmpty("the author keeps the row, as the ordinary pass keeps it");
+    }
+
+    [Fact]
+    public async Task ReFilingAnAuthorOwnedPolicyUnderASecureMatter_StillTakesItIntoIsolation()
+    {
+        var (directory, resolution) = await ReFileAuthorOwnedAsync("sprk_policy", "sprk_matter", SecureMatter);
+
+        resolution.OwningTeamId.Should().Be(SecureNamedTeam, "a Secure answer is never a kept creator's");
+        directory.Assignments.Should().ContainSingle().Which.TeamId.Should().Be(SecureNamedTeam);
+    }
+
+    [Fact]
+    public async Task ReFilingAnAuthorOwnedRowOfAnotherTable_IsStillReOwnedToTheDefaultTeam()
+    {
+        var otherMatter = Guid.NewGuid();
+        var (directory, resolution) = await ReFileAuthorOwnedAsync(
+            "sprk_event", "sprk_regardingmatter", otherMatter,
+            World().WithRecord("sprk_matter", otherMatter, GeneralBu, owningTeam: GeneralTeam));
+
+        resolution.OwningTeamId.Should().Be(GeneralTeam, "the kept-author rule is the hard-deny tables' only");
+        directory.Assignments.Should().ContainSingle().Which.TeamId.Should().Be(GeneralTeam);
+    }
 }

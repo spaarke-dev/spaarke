@@ -738,6 +738,11 @@ public sealed record RecordOwnershipContext
 
     internal const string DecisionRecordTable = "sprk_decisionrecord";
 
+    /// <summary>R4b-2b (rule 1): why a re-file leaves an author-owned row of a hard-deny table with its author.</summary>
+    internal const string AuthorKeptRestrictedContentReason =
+        "an author-owned row of a restricted-content table keeps its author when its answer is ordinary; the restricted-content "
+        + "owner team replaces only a business unit's default team (R4b-2 rule 1)";
+
     /// <summary>The Decision Record's step envelope, which lists the Signals it resolved (<c>resolvedSignalIds</c>).</summary>
     internal const string DecisionRecordStepsColumn = "sprk_steps";
     private const string TodoTable = "sprk_todo";
@@ -1646,6 +1651,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     private const string BusinessUnitColumn = "businessunitid";
     private const string OwningBusinessUnitColumn = "owningbusinessunit";
     private const string OwningTeamColumn = "owningteam";
+    private const string OwningUserColumn = "owninguser";
     private const string OwnerColumn = "ownerid";
     private const string IsSecureColumn = "sprk_issecure";
 
@@ -2284,7 +2290,11 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// </remarks>
     private sealed record RowOwnership(
         string? Version, Guid? OwningTeam, Guid? OwningBusinessUnit, IReadOnlyCollection<RecordOwnershipParent> Parents,
-        IReadOnlyDictionary<string, Guid> LineageLookups, IReadOnlyList<RecordOwnershipParent> SecureOnlyParents);
+        IReadOnlyDictionary<string, Guid> LineageLookups, IReadOnlyList<RecordOwnershipParent> SecureOnlyParents)
+    {
+        /// <summary>R4b-2b: the user who owns the row (its author), when a user does.</summary>
+        public Guid? OwningUser { get; init; }
+    }
 
     /// <summary>Every lineage-only lookup (<see cref="RecordReparent.LineageOnlyTargetOf"/>) <paramref name="row"/> holds,
     /// column → row id (#2143 round 3). An empty lookup is absent, as the every-column read returns it.</summary>
@@ -2416,7 +2426,10 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                     .Select(c => c.Value).Concat(threadParents),
                 request),
             LineageOnlyLookupsOf(request.EntityLogicalName, row),
-            SecureOnlyColumns(request.EntityLogicalName, OwnershipParentColumnsOf(row)));
+            SecureOnlyColumns(request.EntityLogicalName, OwnershipParentColumnsOf(row)))
+        {
+            OwningUser = row.GetAttributeValue<EntityReference>(OwningUserColumn)?.Id is { } user && user != Guid.Empty ? user : null,
+        };
     }
 
     /// <summary>
@@ -2508,6 +2521,14 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             if (state.OwningTeam == teamId)
             {
                 return (target, filingIsOwn); // already owned by the team its current parents resolve to
+            }
+
+            // R4b-2b (rule 1): the restricted-content team replaces a default-team answer only, never a kept creator. An
+            // author-owned row of a hard-deny table whose answer is ordinary keeps its author, as the ordinary pass keeps it
+            // (SecureChildReconciler never writes a user-owned row there); a Secure answer still takes it into isolation.
+            if (state.OwningUser is not null && target.InPlaceOfDefaultTeamId is not null)
+            {
+                return (RecordOwnerResolution.Unchanged(RecordOwnershipContext.AuthorKeptRestrictedContentReason), filingIsOwn);
             }
 
             if (!target.IsSecureOwner
