@@ -96,6 +96,14 @@ internal sealed class OwnershipDirectory
             .WithBusinessUnit(SecureBu, SecureBuName, parent: GeneralBu)
             .WithBusinessUnit(CustomerChildBu, "Litigation", parent: ChildBu);
 
+        // R4b-4 (A-F2): an ACCESS team and a GROUP team with the restricted-content name, in the same unit and inserted
+        // BEFORE the real one, so a team query that dropped teamtype = 0 (Owner) matches two rows (or a decoy first).
+        directory
+            .WithTeam(Guid.NewGuid(), ChildBu, isDefault: false, teamType: 1,
+                Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeam.DefaultOwnerTeamName)
+            .WithTeam(Guid.NewGuid(), ChildBu, isDefault: false, teamType: 2,
+                Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeam.DefaultOwnerTeamName);
+
         if (withRestrictedContentTeam)
         {
             directory.WithTeam(RestrictedContentTeam, ChildBu, isDefault: false, teamType: 0,

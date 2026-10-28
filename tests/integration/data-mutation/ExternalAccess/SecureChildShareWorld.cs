@@ -107,6 +107,12 @@ internal sealed class SecureChildShareWorld
         // R4b-2c: the customer's top unit, beside the Secure Record unit, holds the restricted-content owner team.
         world.Add("businessunit", CustomerBu, ("name", "Spaarke Business Unit 1"), ("parentbusinessunitid", new EntityReference("businessunit", GeneralBu)));
         world.Team(CustomerTeam, CustomerBu, "Spaarke Business Unit 1", isDefault: true, teamType: 0);
+        // R4b-4 (A-F2): an ACCESS team and a GROUP team with the restricted-content name, before the real one, so a team
+        // query that dropped teamtype = 0 (Owner) matches two rows (or a decoy first).
+        world.Team(Guid.NewGuid(), CustomerBu,
+            Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeam.DefaultOwnerTeamName, isDefault: false, teamType: 1);
+        world.Team(Guid.NewGuid(), CustomerBu,
+            Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeam.DefaultOwnerTeamName, isDefault: false, teamType: 2);
         world.Team(RestrictedContentTeam, CustomerBu,
             Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeam.DefaultOwnerTeamName, isDefault: false, teamType: 0);
         world.User(SomeUser, GeneralBu);
