@@ -26,6 +26,24 @@ namespace Sprk.Bff.Api.Api.Ai;
 /// </summary>
 public static class AnalysisEndpoints
 {
+    /// <summary>
+    /// THE ownership question for an analysis PROMOTED from a chat session (task 146): its document (when it has one), then
+    /// its regarding record — secure-if-any, so an analysis of an ordinary document filed to a secure matter is the named
+    /// Secure team's; the document is the primary. UAC task 194b fix round, slice 3: one builder, which the existing-row parity
+    /// test calls.
+    /// </summary>
+    internal static Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext OwnershipOfPromotedAnalysis(
+        Guid? documentId, string? regardingTable, Guid? regardingId) =>
+        Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForParents(new[]
+        {
+            documentId is { } docId
+                ? new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent("sprk_document", docId)
+                : null,
+            regardingTable is not null && regardingId is { } regId
+                ? new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(regardingTable, regId)
+                : null,
+        });
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
@@ -150,8 +168,7 @@ public static class AnalysisEndpoints
             // Task 146: the analysis is a child of its document — owned by the document's team (the named Secure team
             // for a document of a secure record). A refusal creates nothing and is a 409 with a stable reason code.
             var owner = await ownership.ResolveOwnerAsync(
-                Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForParents(
-                    new[] { new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent("sprk_document", request.DocumentId) })
+                Sprk.Bff.Api.Services.Ai.AppOnlyAnalysisService.OwnershipOfNewAnalysis(request.DocumentId)
                     with { RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfCaller(httpContext.User) },
                 cancellationToken);
             if (!owner.IsOwned)
@@ -1192,15 +1209,8 @@ public static class AnalysisEndpoints
         // document filed to a secure matter is the named Secure team's. Resolved before any write; a refusal is a 409
         // and the session is untouched; a Dataverse fault propagates as the request's 5xx.
         var owner = await ownership.ResolveOwnerAsync(
-            Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForParents(new[]
-            {
-                documentId is { } docId
-                    ? new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent("sprk_document", docId)
-                    : null,
-                regarding is not null
-                    ? new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(regarding.EntityLogicalName, regarding.RecordId)
-                    : null,
-            }) with { RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfCaller(httpContext.User) },
+            OwnershipOfPromotedAnalysis(documentId, regarding?.EntityLogicalName, regarding?.RecordId)
+                with { RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfCaller(httpContext.User) },
             cancellationToken);
         if (!owner.IsOwned)
         {

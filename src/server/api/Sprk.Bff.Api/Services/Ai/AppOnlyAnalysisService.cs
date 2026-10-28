@@ -112,6 +112,16 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
     }
 
     /// <summary>
+    /// THE ownership question for a NEW analysis of <paramref name="documentId"/> (unified-access-control-r2 task 146): its
+    /// document, alone. Every create of an analysis anchored on a document asks it — this service,
+    /// <c>AnalysisEndpoints</c>' create route and <c>AnalysisResultPersistence</c> (UAC task 194b fix round, slice 3: one builder,
+    /// so the reconciler's existing-row question is pinned against the writers' own, not a copy).
+    /// </summary>
+    internal static Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext OwnershipOfNewAnalysis(Guid documentId) =>
+        Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForParents(
+            new[] { new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent("sprk_document", documentId) });
+
+    /// <summary>
     /// Creates the analysis record OWNED by the analysed document's team (unified-access-control-r2 task 146) — the
     /// named Secure team for a document of a secure record. Returns <c>null</c> on a REFUSAL (logged): analysis creation
     /// here is best-effort, so a refusal is a skipped row, never a failed profile (word-add-in-r1 note 080 §6.6). A
@@ -120,10 +130,7 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
     private async Task<Guid?> TryCreateOwnedAnalysisAsync(
         Guid documentId, string name, Guid? playbookId, CancellationToken cancellationToken)
     {
-        var owner = await _ownership.ResolveOwnerAsync(
-            Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForParents(
-                new[] { new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent("sprk_document", documentId) }),
-            cancellationToken);
+        var owner = await _ownership.ResolveOwnerAsync(OwnershipOfNewAnalysis(documentId), cancellationToken);
 
         if (!owner.IsOwned)
         {

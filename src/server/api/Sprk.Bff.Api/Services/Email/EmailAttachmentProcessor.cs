@@ -12,6 +12,32 @@ namespace Sprk.Bff.Api.Services.Email;
 /// </summary>
 public class EmailAttachmentProcessor : IEmailAttachmentProcessor
 {
+    /// <summary>
+    /// THE ownership question for an attachment's document (task 146): its parent email document first, then the record the
+    /// email is associated with (secure-if-any). UAC task 194b fix round, slice 3: one builder, which the existing-row parity
+    /// test calls.
+    /// </summary>
+    /// <param name="parentDocumentId">The email's document (<see cref="Guid.Empty"/> when there is none).</param>
+    /// <param name="associatedEntityType">The associated record's type as the request names it (mapped through
+    /// <see cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.ToTargetLogicalName"/>), or none.</param>
+    /// <param name="associatedEntityId">The associated record, or none.</param>
+    internal static Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext OwnershipOfAttachmentDocument(
+        Guid parentDocumentId, string? associatedEntityType, Guid? associatedEntityId)
+    {
+        var associatedLogicalName = string.IsNullOrWhiteSpace(associatedEntityType)
+            ? null
+            : Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.ToTargetLogicalName(associatedEntityType);
+        return Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForParents(new[]
+        {
+            parentDocumentId != Guid.Empty
+                ? new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent("sprk_document", parentDocumentId)
+                : null,
+            associatedLogicalName is not null && associatedEntityId is { } associatedId
+                ? new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(associatedLogicalName, associatedId)
+                : null,
+        });
+    }
+
     private readonly SpeFileStore _speFileStore;
     private readonly IDocumentDataverseService _documentService;
     private readonly EmailProcessingOptions _options;
@@ -277,19 +303,8 @@ public class EmailAttachmentProcessor : IEmailAttachmentProcessor
             // record (secure-if-any). A REFUSAL returns null — this method's per-attachment failure contract — and
             // creates no row (the bytes above are already in the container this request named, as on any record
             // failure). A Dataverse fault falls to the catch below, the same contract.
-            var associatedLogicalName = string.IsNullOrWhiteSpace(request.AssociatedEntityType)
-                ? null
-                : Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.ToTargetLogicalName(request.AssociatedEntityType);
             var owner = await _ownership.ResolveOwnerAsync(
-                Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForParents(new[]
-                {
-                    request.ParentDocumentId != Guid.Empty
-                        ? new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent("sprk_document", request.ParentDocumentId)
-                        : null,
-                    associatedLogicalName is not null && request.AssociatedEntityId is { } associatedId
-                        ? new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(associatedLogicalName, associatedId)
-                        : null,
-                }),
+                OwnershipOfAttachmentDocument(request.ParentDocumentId, request.AssociatedEntityType, request.AssociatedEntityId),
                 cancellationToken);
             if (!owner.IsOwned)
             {

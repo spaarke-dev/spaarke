@@ -241,16 +241,24 @@ public sealed class IncomingAssociationResolver
         WithholdIntermediateTheRowCannotPlace(row);
 
         var stamps = await DeriveCoreAncestorStampsAsync(Guid.Empty, row, decision, ct).ConfigureAwait(false);
-        var parents = decision.RegardingWrites.Values
-            .OfType<EntityReference>()
-            .Concat(stamps.Values)
-            .Select(r => new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(r.LogicalName, r.Id));
+        return OwnershipContextOf(decision.RegardingWrites.Values.OfType<EntityReference>(), stamps.Values);
+    }
 
-        return Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForParents(parents) with
+    /// <summary>
+    /// The ownership question for a new communication filed through <paramref name="regardingWrites"/> with the core-ancestor
+    /// <paramref name="stamps"/> derived from them: every one a parent (secure-if-any), the regarding writes first; with none it
+    /// keeps its creator (E1). UAC task 194b fix round, slice 3: the static tail of
+    /// <see cref="OwnershipContextForNewRecordAsync"/>, which the .eml parity test calls (the archive is owned as its
+    /// communication is).
+    /// </summary>
+    internal static Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext OwnershipContextOf(
+        IEnumerable<EntityReference> regardingWrites, IEnumerable<EntityReference> stamps) =>
+        Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForParents(
+            regardingWrites.Concat(stamps)
+                .Select(r => new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(r.LogicalName, r.Id))) with
         {
             WhenUnfiled = Sprk.Bff.Api.Services.Dataverse.UnfiledOwnership.KeepCreator,
         };
-    }
 
     /// <summary>
     /// Evaluate-only path (task 074, Path C): runs the deterministic + (cost-gated) AI rungs and applies the

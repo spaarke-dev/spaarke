@@ -3,9 +3,9 @@
 //   - Path:     `tests/integration/data-mutation/RecordOwnership/**`
 //   - Justification: UAC task 194b — the ownership question the reconciler asks about an EXISTING row
 //     (RecordOwnershipContext.ForExistingRowAsync) is the one the row's WRITER asked when it created it: the same parents in the
-//     same order, so the same primary and the same secure-if-any set. Pins that parity per writer (SignalWriter,
-//     DecisionRecordWriter, the analysis create paths, EmailAttachmentProcessor, IncomingCommunicationProcessor) through the
-//     writers' own context builders where they have one, and the order-invariance that was the defect (49 of 52 planned moves on
+//     same order, so the same primary and the same secure-if-any set. Pins that parity for SignalWriter and
+//     DecisionRecordWriter through the writers' own seams (the analysis and email document writers:
+//     WriterBuilderOwnershipParityTests), and the order-invariance that was the defect (49 of 52 planned moves on
 //     dev were wrong because the attribute order chose the primary).
 //
 // Doubles are module boundaries only (ADR-038 §4): the REAL resolver and the REAL CoreAncestorResolver over task 148's world.
@@ -357,72 +357,6 @@ public class ExistingRowOwnershipParityTests
             // The pass asks with ContextFor's settings (an unfiled row keeps its creator); B is the resolver's, shared by both.
             var passContext = question.Context with { WhenUnfiled = UnfiledOwnership.KeepCreator };
             (await Resolver.ResolveOwnerAsync(passContext, CancellationToken.None)).OwningTeamId.Should().Be(writerOwner.OwningTeamId);
-        }
-    }
-
-
-
-    // ── The analysis create paths ─────────────────────────────────────────────────────────────────────────────────
-
-    [Fact(DisplayName = "194b parity: an analysis asks about its document first, as AnalysisEndpoints (create, promote) and AppOnlyAnalysisService do")]
-    public async Task AnAnalysis_IsAskedAsItsWritersAsk()
-    {
-        var (document, matter) = (Guid.NewGuid(), Guid.NewGuid());
-        // AnalysisEndpoints' promote path: the document, then the regarding record; create and AppOnlyAnalysisService: the document.
-        var promote = RecordOwnershipContext.ForParents(new[]
-        {
-            new RecordOwnershipParent("sprk_document", document), new RecordOwnershipParent("sprk_matter", matter),
-        });
-        var create = RecordOwnershipContext.ForParents(new[] { new RecordOwnershipParent("sprk_document", document) });
-        var (promoted, promotedReversed) = RowBothWays("sprk_analysis",
-            ("sprk_regardingmatter", Ref("sprk_matter", matter)), ("sprk_documentid", Ref("sprk_document", document)));
-        var (created, _) = RowBothWays("sprk_analysis", ("sprk_documentid", Ref("sprk_document", document)));
-
-        (await ExistingParentsAsync(promoted)).Should().Equal(promote.Parents);
-        (await ExistingParentsAsync(promotedReversed)).Should().Equal(promote.Parents);
-        (await ExistingParentsAsync(created)).Should().Equal(create.Parents);
-    }
-
-    // ── The email document writers ────────────────────────────────────────────────────────────────────────────────
-
-    [Fact(DisplayName = "194b parity: an attachment document asks about its parent document first, then the associated record, as EmailAttachmentProcessor does")]
-    public async Task AnAttachmentDocument_IsAskedAsEmailAttachmentProcessorAsks()
-    {
-        var (parentDocument, matter) = (Guid.NewGuid(), Guid.NewGuid());
-        var writer = RecordOwnershipContext.ForParents(new[]
-        {
-            new RecordOwnershipParent("sprk_document", parentDocument), new RecordOwnershipParent("sprk_matter", matter),
-        });
-        var (row, reversed) = RowBothWays("sprk_document",
-            ("sprk_matter", Ref("sprk_matter", matter)), ("sprk_parentdocument", Ref("sprk_document", parentDocument)));
-
-        (await ExistingParentsAsync(row)).Should().Equal(writer.Parents);
-        (await ExistingParentsAsync(reversed)).Should().Equal(writer.Parents);
-    }
-
-    [Theory(DisplayName = "194b parity: an .eml document of a communication is owned as IncomingCommunicationProcessor owns it — like its communication's filing — in either attribute order")]
-    [InlineData(true)]  // the communication kept its user owner (run-as-user, client-created, pre-146): looked through (I-6)
-    [InlineData(false)] // the communication is team-owned by its filing's team
-    public async Task AnEmlDocument_IsOwnedAsIncomingCommunicationProcessorOwnsIt(bool userOwnedCommunication)
-    {
-        var (matterInB, communication) = (Guid.NewGuid(), Guid.NewGuid());
-        _world.Add("sprk_matter", matterInB, ("owningteam", Ref("team", TeamB)), ("sprk_issecure", false));
-        if (userOwnedCommunication)
-            _world.UserOwnedChild("sprk_communication", communication, ("sprk_regardingmatter", "sprk_matter", matterInB));
-        else
-            _world.Add("sprk_communication", communication, ("owningteam", Ref("team", TeamB)), ("sprk_regardingmatter", Ref("sprk_matter", matterInB)));
-        // The processor owns the archive with the owner it resolved for the communication: the records the email is filed to.
-        var writerAnswer = await Resolver.ResolveOwnerAsync(
-            RecordOwnershipContext.ForParents(new[] { new RecordOwnershipParent("sprk_matter", matterInB) }), CancellationToken.None);
-        var (row, reversed) = RowBothWays("sprk_document",
-            ("sprk_relatedcommunication", Ref("sprk_communication", communication)), ("sprk_matter", Ref("sprk_matter", matterInB)));
-        var (onlyTheCommunication, _) = RowBothWays("sprk_document", ("sprk_relatedcommunication", Ref("sprk_communication", communication)));
-
-        foreach (var document in new[] { row, reversed, onlyTheCommunication })
-        {
-            var question = await QuestionAsync(document);
-            (await Resolver.ResolveOwnerAsync(question.Context, CancellationToken.None)).OwningTeamId
-                .Should().Be(writerAnswer.OwningTeamId).And.Be(TeamB);
         }
     }
 }
