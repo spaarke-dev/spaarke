@@ -20,8 +20,10 @@
 
       customer-configuration-owner-role.json  'Spaarke Customer Configuration Owners' / 'Customer Configuration Owner'
           R4b-3b (field-mapping #2399, owner shape A): customer configuration rows (the declared configuration tables) are
-          owned by this team. The BFF does not resolve it: seeders own customer configuration rows to this team. Users keep
-          reading the rows through their own roles (Spaarke Core User, Deep).
+          owned by this team. The BFF does not resolve it. Field-mapping's seeder (its task 004) and provisioning's H12b
+          seeder (FR-39) WILL own new configuration rows to this team; until they ship, rows stay with the seeding identity
+          and an operator re-owns them to this team after setup. Users keep reading the rows through their own roles
+          (Spaarke Core User, Deep).
 
     Every customer top unit needs both set up BEFORE a BFF with the rule, or a seeder, writes its rows.
 
@@ -39,6 +41,9 @@
                  then reads everything back and checks it as -Verify does. It never removes a member, moves a team, takes a
                  role off another principal or takes another role off a team: each of those is drift an owner decides, and
                  -Apply refuses before writing anything, for every declared team.
+                 A dry run exits 0 with the plan, or exits 1 with the OWNER DECISION NEEDED summary when any drift is
+                 one -Apply refuses (a member, another role, the wrong team type, a default team, a role assigned
+                 elsewhere): such a plan cannot be applied as it stands.
       -Verify    Read-only. Exits 1 and names each drift of the NAMED customer unit, per declared team: the team or role
                  missing; the team not an Owner team or a default team; any member; any other role on the team; the role
                  (or a copy of it) assigned to anything but a team of its name in a customer top unit; a declared privilege
@@ -46,7 +51,8 @@
                  a team is listed as information only (not a failure). Exits 0 when the named unit has no drift.
 
     REFUSED: a customer unit that is the root, that is the Secure Record unit, or that is not a direct child of the root;
-    two config files that declare the same team, the same role or the same table.
+    no business unit, or more than one, named -SecureBusinessUnitName (Secure Record exists by this step, H7b, so a name
+    that matches nothing is a wrong name and would let the Secure Record unit pass as a customer unit); two config files that declare the same team, the same role or the same table.
 
     FAIL CLOSED: every read that fails stops the run (exit 1); nothing is decided on a partial read.
 
@@ -107,7 +113,8 @@ param(
     [string[]]$ConfigPaths
 )
 
-# THE declared owner roles, one config file each (RestrictedContentOwnerRoleGuardTests requires every one to be named here).
+# THE declared owner roles, one config file each. RestrictedContentOwnerRoleGuardTests requires this array (its uncommented
+# entries) to EQUAL the guard's declared set: no declared file missing, no other file added.
 $DeclaredRoleFiles = @(
     'restricted-content-owner-role.json',
     'customer-configuration-owner-role.json'
@@ -207,10 +214,14 @@ try {
     $rootId = $roots[0].businessunitid
     Write-Host "Root BU     : $($roots[0].name) ($rootId)"
 
+    # FAIL CLOSED (R4b-4): the Secure Record unit exists by this step (H7b), so a name that matches no unit is a wrong
+    # -SecureBusinessUnitName (a non-default SecureRecord:BusinessUnitName) and would let Secure Record pass as a customer unit.
     $secureUnits = @($units | Where-Object { $_.name -eq $SecureBusinessUnitName })
+    if ($secureUnits.Count -eq 0) { throw "No business unit is named '$SecureBusinessUnitName'. The Secure Record unit exists by this step (H7b); pass its name (SecureRecord:BusinessUnitName) as -SecureBusinessUnitName." }
     if ($secureUnits.Count -gt 1) { throw "More than one business unit is named '$SecureBusinessUnitName'; the Secure Record unit cannot be told apart." }
-    $secureId = if ($secureUnits.Count -eq 1) { $secureUnits[0].businessunitid } else { $null }
-    Write-Host ("Secure BU   : {0}" -f $(if ($secureId) { "$SecureBusinessUnitName ($secureId)" } else { "(none named '$SecureBusinessUnitName')" }))
+    $secureId = $secureUnits[0].businessunitid
+    if (-not $secureId) { throw "The business unit named '$SecureBusinessUnitName' has no id." }
+    Write-Host "Secure BU   : $SecureBusinessUnitName ($secureId)"
 
     $found = if ($PSCmdlet.ParameterSetName -eq 'ById') {
         @($units | Where-Object { $_.businessunitid -eq $CustomerBusinessUnitId.ToString() })
@@ -221,7 +232,7 @@ try {
     $customer = $found[0]
     $customerId = $customer.businessunitid
     if ($customerId -eq $rootId) { throw "Refused: $named is the ROOT business unit. The root holds only Spaarke product data; customer records go to the customer's own top unit (owner round 136)." }
-    if ($secureId -and $customerId -eq $secureId) { throw "Refused: $named is the Secure Record business unit, never a customer unit." }
+    if ($customerId -eq $secureId) { throw "Refused: $named is the Secure Record business unit, never a customer unit." }
     if ($customer._parentbusinessunitid_value -ne $rootId) {
         throw "Refused: $named is not a direct child of the root (its parent is $($customer._parentbusinessunitid_value)). The teams live in the customer's TOP unit; the BFF walks up to it from any unit below."
     }
@@ -229,6 +240,7 @@ try {
 
     # Every customer top unit: a direct child of the root that is not the Secure Record unit.
     $customerTops = @($units | Where-Object { $_._parentbusinessunitid_value -eq $rootId -and $_.businessunitid -ne $secureId })
+    if (@($customerTops | ForEach-Object businessunitid) -contains $secureId) { throw 'The Secure Record unit was counted as a customer top unit. Nothing was decided.' }
 
     # ── Each table's Read privilege, from METADATA ──────────────────────────────────────────────────────────
     foreach ($d in $defs) {
@@ -474,6 +486,11 @@ try {
         foreach ($line in (Get-Plan $x.Def $x.State)) { $step++; Write-Host ("  {0}. {1}" -f $step, $line) -ForegroundColor Cyan }
     }
     if ($IsDryRun) {
+        if ($ownerOnly.Count -gt 0) {
+            # R4b-4 (B-K4): a plan -Apply refuses is not a plan to run; the dry run fails with the owner-decision summary.
+            Write-Host "`nDRY RUN: no writes. OWNER DECISION NEEDED: $($ownerOnly.Count) finding(s) above; -Apply refuses until an owner settles them. Exit 1." -ForegroundColor Red
+            exit 1
+        }
         Write-Host "`nDRY RUN: no writes. Re-run with -Apply (owner go), then -Verify." -ForegroundColor Cyan
         exit 0
     }
