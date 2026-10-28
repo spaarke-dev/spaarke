@@ -354,7 +354,7 @@ export const RecordFamilyModal: React.FC<RecordFamilyModalProps> = ({
     0,
     ordered.findIndex(m => familyKey(m) === activeKey)
   );
-  const activeMember = ordered[activeIndex];
+  const activeMember = activeIndex < ordered.length ? ordered[activeIndex] : undefined;
 
   const loadMore = React.useCallback(() => {
     if (state.kind !== 'ready' || !state.continuation || loadingMore) return;
@@ -541,8 +541,8 @@ export const RecordFamilyModal: React.FC<RecordFamilyModalProps> = ({
         index: activeIndex,
         total: ordered.length,
         onNavigate: dir => {
-          const next = ordered[dir === 'next' ? activeIndex + 1 : activeIndex - 1];
-          if (next) setCurrentKey(familyKey(next));
+          const nextIndex = dir === 'next' ? activeIndex + 1 : activeIndex - 1;
+          if (nextIndex >= 0 && nextIndex < ordered.length) setCurrentKey(familyKey(ordered[nextIndex]));
         },
       }}
     >
