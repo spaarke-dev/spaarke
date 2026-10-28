@@ -94,6 +94,8 @@ The firm fields are part of the idempotency key K (section 4): the same email, r
 | Same K, latest submission ended **Failed** | **A new attempt** (EB-D-160): 202 with a NEW `submissionId`, `jobId` and `trackingNumber` (`{firmInvoiceNumber}.{n+1}` through the allocator). Ids derive from K plus a generation; generation 1 is the first attempt's derivation. Two concurrent retries of one Failed K create exactly one new attempt; the other gets its 202 replay |
 | Same K, latest submission ended **Rejected** | 409 `ebilling.submission.submission_already_ended` (D-139 stands for Rejected) |
 | Same K, other details differ (Invoice part SHA-256; firm or number after OP-1) | 409 `ebilling.submission.document_already_submitted` (:457-467) |
+| Another caller submits the same email and marking, and the latest submission (by someone else) ended **Failed** | **A new attempt created by this caller** (EB-D-165, owner 2026-10-28, uac-r2 recommended): 202 with a NEW `submissionId`, `jobId` and `trackingNumber`, as in the Failed row above; the new submission's creator is this caller. Added 2026-10-28 |
+| Another caller, same email, the latest submission (by someone else) is Received, Processing, Accepted or Rejected | 409 `ebilling.submission.document_already_submitted`, detail: "This email was already submitted as an invoice for this record by someone else. Nothing was saved." (names no person or id; 095 review F1-2). Same code as today; only the text changes |
 | Same header, different K | Not a replay: handled as its own operation |
 | Same header, first request still running | 409 `OFFICE_IDEMPOTENCY_CONFLICT`; retry shortly (IdempotencyFilter.cs:255-272) |
 | Different marking, mode or invoice | A different K: a new submission (§9.1) |
