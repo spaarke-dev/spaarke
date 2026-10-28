@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="167c" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>A secure matter's budget currency defaults to the customer business unit's currency (D-198)</title>
+    <phase>11 UAT</phase>
+    <gate>startable: #2414 (the owning business unit is read as the caller) is merged to docs as f634761a63</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Access-tagged: it uses uac-r2's Secure Record unit predicate and a deployment configuration value in Sprk.Bff.Api (.cs), and it modifies tests.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>One method in one file, with the rule, the names and the tests fixed by uac-r2; nothing to design.</model-tier-reason>
+    <effort>high</effort>
+    <deps>167, 167b (#2414)</deps>
+    <tags>bff,api,access,testing</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <parallel-group>M</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Owner ruling D-198 (2026-10-28), confirmed by uac-r2. A secure matter is owned by the Secure Record business unit, which has no Default Currency, so its budget currency defaulted to the organization base currency. Default it to the currency of the deployment's customer business unit instead.</prompt>
+  <role>SPAARKE BFF engineer (Signals decision actions).</role>
+  <goal>`DecisionParameterSources.DefaultCurrencyAsync` returns the configured customer business unit's currency when the matter's owning business unit is the Secure Record unit. It falls back to the organization base currency when that unit is not configured, is invalid, or has no currency. Every non-secure matter behaves exactly as today.</goal>
+
+  <context>
+    <background>
+      <ul>
+        <li>Where: `src/server/api/Sprk.Bff.Api/Services/Signals/Actions/DecisionParameterSources.cs`, `DefaultCurrencyAsync`. After #2414 it reads the matter's `_owningbusinessunit_value` as the caller. Then, app-only, it reads the business unit's `transactioncurrencyid`, then `organization.basecurrencyid`.</li>
+        <li>The customer business unit: `ExternalAccessOptions.CustomerBusinessUnitId` (`Infrastructure/ExternalAccess/ExternalAccessOptions.cs:54`, key `ExternalAccess:CustomerBusinessUnitId`). Each deployment has exactly one (provisioning H10, a child of the root).</li>
+        <li>The Secure Record unit: reuse `SecureChildShareSynchronizer.ResolveSecureBusinessUnitAsync(dataverse, configuration, ct)` (`Services/Access/SecureChildShareSynchronizer.cs:1293`), which returns `(Guid? Id, bool Ambiguous)`, together with `SecureRecordOwnerTeam.IsInSecureBusinessUnit(Guid? owningBusinessUnitId, Guid secureBusinessUnitId)` (`Infrastructure/Dataverse/SecureRecordOwnerTeam.cs:287`), which returns `bool?`. Do NOT copy `RecordOwnershipResolver`'s private copy (D-191).</li>
+        <li>Dev facts (2026-10-28): Secure Record `d9ec0b6f…` has no currency, and its parent is the root (Spaarke, USD). Spaarke Business Unit 1 is USD. Spaarke Demo, Dev 1 and Test 1 have no currency.</li>
+      </ul>
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Signals/Actions/DecisionParameterSources.cs</file>
+      <file>tests/unit/domain/Signals/DecisionParameterSourcesTests.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Access/SecureChildShareSynchronizer.cs (read only)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/SecureRecordOwnerTeam.cs (read only)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalAccessOptions.cs (read only)</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>`DefaultCurrencyAsync` (D-193, #2414); uac-r2's Secure Record unit resolver and predicate; `ExternalAccessOptions.CustomerBusinessUnitId`.</existing>
+    <extension>Extend the existing method with one branch, using the existing resolver, predicate and option. No new service, registration or configuration key.</extension>
+    <cost-of-doing-nothing>In a multi-currency organization, every secure matter's budget is prefilled with the base currency, not the customer's (owner UAT round 2, item 5; D-198).</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="D-198 / uac-r2">Use the customer business unit ONLY when the predicate says the matter's owning unit IS the Secure Record unit (true). Ambiguous, a null id, or a null predicate result means undeterminable, and the matter is treated as not secure (its own unit's currency, then the base currency).</constraint>
+    <constraint source="uac-r2">Treat as unconfigured when the configured customer unit is absent, is the Secure Record unit itself, or is the root: use the base currency and log a Warning. Never take the Secure Record unit's or the root's currency as the customer's.</constraint>
+    <constraint source="#2414">The owning-unit read stays as the caller. Reads of organization configuration (business unit currency, base currency, active currencies) stay app-only. Nothing reads record data app-only. Faults still throw (the commit answers 503); refusals still fall back.</constraint>
+    <constraint source="D-193">Non-secure matters behave exactly as today, and a non-secure matter never reads `CustomerBusinessUnitId`. The per-request memo, fail-closed refusals and existing messages are unchanged.</constraint>
+    <constraint source="CLAUDE.md">Use `python`, never `python3`. No --no-verify, no bare stash, no sub-agents. No Dataverse writes, no deploys. Never run the unfiltered Sprk.Bff.Api.Tests.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor. Read the five files above at origin/docs/ontology-platform-design.</step>
+    <step order="1">Write the failing tests first:
+      <ul>
+        <li>(1) A secure matter gets the customer unit's currency.</li>
+        <li>(2) The customer unit is unset → base currency.</li>
+        <li>(3) The customer unit equals Secure Record → base currency. Also the root → base currency.</li>
+        <li>(4) A non-secure matter never reads `CustomerBusinessUnitId` (must-not-fire).</li>
+        <li>(5) The Secure Record unit is ambiguous or unresolved → treated as not secure.</li>
+        <li>(6) The customer unit has no currency → base currency.</li>
+      </ul>
+    </step>
+    <step order="2">Implement it. Update the class remarks. Run the filtered BFF tests and the full ArchTests. Measure the publish-size delta. Open a PR into `docs/ontology-platform-design` that cites D-198.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">A secure matter's default currency is the customer business unit's currency. With that unit unset, invalid or without a currency, the default is the base currency.</criterion>
+    <criterion testable="true">Must-not-fire: a non-secure matter's result and reads are unchanged, and it never reads `CustomerBusinessUnitId`. An ambiguous or unresolved Secure Record unit is treated as not secure.</criterion>
+    <criterion testable="true">No app-only read of record data. A fault still throws, and a refusal still falls back.</criterion>
+    <criterion testable="true">Test scope: tests (1)–(6) plus the existing DecisionParameterSources tests. Anything beyond needs a one-line justification.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If the resolver or predicate signatures differ from the background, or the resolver cannot be called from this scoped service without a new registration, STOP and report.</trigger>
+  </escalation>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ontology-platform-r1/notes/decisions.md (D-191, D-193, D-198)</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+</task>
