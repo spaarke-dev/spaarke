@@ -241,21 +241,25 @@ public sealed class IncomingAssociationResolver
         WithholdIntermediateTheRowCannotPlace(row);
 
         var stamps = await DeriveCoreAncestorStampsAsync(Guid.Empty, row, decision, ct).ConfigureAwait(false);
-        return OwnershipContextOf(decision.RegardingWrites.Values.OfType<EntityReference>(), stamps.Values);
+        return OwnershipContextOf(decision.RegardingWrites, stamps);
     }
 
     /// <summary>
     /// The ownership question for a new communication filed through <paramref name="regardingWrites"/> with the core-ancestor
-    /// <paramref name="stamps"/> derived from them: every one a parent (secure-if-any), the regarding writes first; with none it
-    /// keeps its creator (E1). UAC task 194b fix round, slice 3: the static tail of
+    /// <paramref name="stamps"/> derived from them (each keyed by the lookup it is written to): every one a parent
+    /// (secure-if-any); with none it keeps its creator (E1). UAC task 194b fix round, slice 3: the static tail of
     /// <see cref="OwnershipContextForNewRecordAsync"/>, which the .eml parity test calls (the archive is owned as its
-    /// communication is).
+    /// communication is). Fix round R (B1): in <c>sprk_communication</c>'s primary order over every lookup the row will hold
+    /// (<see cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.InPrimaryOrder{TValue}"/>), the order the reconciler
+    /// asks the written row in — never the order the rungs wrote, so the PRIMARY (an ordinary row's business unit) is the
+    /// same for both. A stamp never shares a lookup with a regarding write (the derivation skips those).
     /// </summary>
     internal static Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext OwnershipContextOf(
-        IEnumerable<EntityReference> regardingWrites, IEnumerable<EntityReference> stamps) =>
+        IEnumerable<KeyValuePair<string, EntityReference>> regardingWrites, IEnumerable<KeyValuePair<string, EntityReference>> stamps) =>
         Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForParents(
-            regardingWrites.Concat(stamps)
-                .Select(r => new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(r.LogicalName, r.Id))) with
+            Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.InPrimaryOrder(
+                    CommunicationEntity, regardingWrites.Concat(stamps).Where(w => w.Value is { } r && r.Id != Guid.Empty))
+                .Select(w => new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(w.Value.LogicalName, w.Value.Id))) with
         {
             WhenUnfiled = Sprk.Bff.Api.Services.Dataverse.UnfiledOwnership.KeepCreator,
         };

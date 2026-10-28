@@ -98,6 +98,35 @@ public class WriterBuilderOwnershipParityTests
         (await ExistingParentsAsync(row)).Should().Equal(AnalysisEndpoints.OwnershipOfPromotedAnalysis(null, "sprk_matter", matter).Parents);
     }
 
+    // ── The inbound communication writer (fix round R, B1) ──────────────────────────────────────────────────────────
+
+    [Fact(DisplayName = "194b R (B1) parity must fire: an inbound communication whose decision writes the project FIRST and the matter is asked in sprk_communication's primary order — the writer's primary is the reconciler's (the matter), and both give the same owner, in either attribute order")]
+    public async Task AnInboundCommunication_FiledProjectFirst_IsAskedInThePrimaryOrder()
+    {
+        var (matterInB, generalProject) = (Guid.NewGuid(), Guid.NewGuid());
+        _world.Add("sprk_matter", matterInB, ("owningteam", Ref("team", TeamB)), ("sprk_issecure", false));
+        _world.Add("sprk_project", generalProject, ("owningteam", Ref("team", SecureChildShareWorld.GeneralTeam)), ("sprk_issecure", false));
+        // The decision's RegardingWrites, project first (the order a rung wrote them in).
+        var writes = new Dictionary<string, EntityReference>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["sprk_regardingproject"] = Ref("sprk_project", generalProject),
+            ["sprk_regardingmatter"] = Ref("sprk_matter", matterInB),
+        };
+
+        var writer = IncomingAssociationResolver.OwnershipContextOf(writes, []);
+        var (row, reversed) = RowBothWays("sprk_communication",
+            ("sprk_regardingproject", Ref("sprk_project", generalProject)), ("sprk_regardingmatter", Ref("sprk_matter", matterInB)));
+
+        writer.Parents.Should().HaveElementAt(0, new RecordOwnershipParent("sprk_matter", matterInB),
+            "the matter is sprk_communication's primary before the project");
+        (await ExistingParentsAsync(row)).Should().Equal(writer.Parents);
+        (await ExistingParentsAsync(reversed)).Should().Equal(writer.Parents);
+        var written = await Resolver.ResolveOwnerAsync(writer, CancellationToken.None);
+        written.OwningTeamId.Should().Be(TeamB);
+        (await Resolver.ResolveOwnerAsync((await QuestionAsync(row)).Context, CancellationToken.None)).OwningTeamId
+            .Should().Be(written.OwningTeamId);
+    }
+
     // ── The email document writers ────────────────────────────────────────────────────────────────────────────────
 
     [Theory(DisplayName = "194b parity: an attachment document asks about its parent document first, then the associated record, as EmailAttachmentProcessor's builder does — whichever spelling the request used")]
@@ -130,9 +159,10 @@ public class WriterBuilderOwnershipParityTests
 
         // The communication's owner, as the inbound path asks it: its regarding write and the stamps derived from it.
         var stamps = (await CoreAncestors.ResolveStampsAsync("sprk_matter", matterInB, CancellationToken.None)).Stamps
-            .Select(s => Ref(s.EntityType, s.RecordId));
+            .Select(s => System.Collections.Generic.KeyValuePair.Create(s.LookupAttribute, Ref(s.EntityType, s.RecordId)));
         var communicationOwner = await Resolver.ResolveOwnerAsync(
-            IncomingAssociationResolver.OwnershipContextOf([Ref("sprk_matter", matterInB)], stamps), CancellationToken.None);
+            IncomingAssociationResolver.OwnershipContextOf([System.Collections.Generic.KeyValuePair.Create("sprk_regardingmatter", Ref("sprk_matter", matterInB))], stamps),
+            CancellationToken.None);
         var built = IncomingCommunicationProcessor.ArchivedEmlDocument(
             new Message { Subject = "Re: terms" }, "email.eml", communication, "item-1", "drive-1", communicationOwner);
 
