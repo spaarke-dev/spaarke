@@ -147,10 +147,16 @@ internal sealed record FromEmailSubmitResult
 
     public string? Detail { get; init; }
 
+    /// <summary>
+    /// <see cref="FromEmailSubmitOutcome.AlreadyCreated"/>: step A filed the communication for THIS request before the create lost the race
+    /// (review round 5), so a refusal the route answers it with says the filing is kept (contract section 6, "After step A").
+    /// </summary>
+    public bool Filed { get; init; }
+
     public static FromEmailSubmitResult Received(string trackingNumber) =>
         new() { Outcome = FromEmailSubmitOutcome.Received, TrackingNumber = trackingNumber };
 
-    public static FromEmailSubmitResult AlreadyCreated() => new() { Outcome = FromEmailSubmitOutcome.AlreadyCreated };
+    public static FromEmailSubmitResult AlreadyCreated(bool filed = false) => new() { Outcome = FromEmailSubmitOutcome.AlreadyCreated, Filed = filed };
 
     public static FromEmailSubmitResult Refused(int status, string errorCode, string detail) =>
         new() { Outcome = FromEmailSubmitOutcome.Refused, Status = status, ErrorCode = errorCode, Detail = detail };

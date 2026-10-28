@@ -35,13 +35,15 @@ namespace Sprk.Bff.Api.Services.Finance.Submission;
 /// <item>The intake's checks (<see cref="InvoiceSubmissionService.DecideForFromEmailAsync"/>): the number, the firm active and linked
 /// (D-106), the core record's fields and the owner, with the caller's own systemuser as the creator person on EVERY generation (OP-5,
 /// EB-D-165: whoever made an earlier attempt).</item>
+/// <item>The marked parts, read out of the saved <c>.eml</c> (<see cref="EmlMarkedPartReader"/>: ordinal, name and SHA-256 must match;
+/// its <c>versionnumber</c> is the source version). Read-only, so before step A (review round 5): a <c>.eml</c> that is gone, holds no
+/// file or no longer carries a part as marked is a permanent 422, a read fault a 503, and neither leaves a filing behind.</item>
 /// <item>Step A, after those refusals (on the fresh path and on the duplicate path alike): an unfiled communication is filed under the
 /// record as the caller; a filed one is left as it is.</item>
-/// <item>The marked parts, read out of the saved <c>.eml</c> (<see cref="EmlMarkedPartReader"/>: ordinal, name and SHA-256 must match;
-/// its <c>versionnumber</c> is the source version), each staged under its Stored File id with its source recorded (the <c>.eml</c>, its
-/// communication, the part's identity, the version, the SHA-256; the Invoice part also lists the Supporting parts). Firm-visible No.</item>
+/// <item>Each part staged under its Stored File id with its source recorded (the <c>.eml</c>, its communication, the part's identity, the
+/// version, the SHA-256; the Invoice part also lists the Supporting parts). Firm-visible No.</item>
 /// <item>The submission, created with exactly <see cref="FromEmailSubmitInput.SubmissionId"/> by the allocator (Channel Internal, NO
-/// <c>sprk_document</c>); its <see cref="TrackingNumberOutcome.AlreadyCreated"/> is the race answer.</item>
+/// <c>sprk_document</c>); its <see cref="TrackingNumberOutcome.AlreadyCreated"/> is the race answer, carrying whether step A filed.</item>
 /// <item>The job <see cref="FromEmailSubmitInput.JobId"/>. The persister builds every part's row in the commit (the only writer of an
 /// Invoice PDF row), runs step 3 on the <c>.eml</c> and guards it at the version that check read.</item>
 /// </list>
@@ -110,7 +112,36 @@ internal class SubmitInvoiceFromEmailOperation : ISubmitInvoiceFromEmail
             return Answer(refusal, filed: false, input);
         }
 
-        // ── 3. Step A, after the read-only refusals ──
+        // ── 3. The marked parts, out of the saved .eml: read-only, so before step A (review round 5, pass-2 F1-2 / uac-r2 K2-b: a refused
+        //       submission never leaves a filing behind). A part that is gone or differs from its mark is permanent (a retry reads the same
+        //       .eml), so it is a 422, never a 503 the client would retry. ──
+        var read = await _reader.ReadAsync(submissionId, input.SourceEmlDocumentId, input.MarkedParts, ct);
+        switch (read.Outcome)
+        {
+            case EmlMarkedPartReadOutcome.Read when read.RowVersion is not null:
+                break;
+            case EmlMarkedPartReadOutcome.Transient:
+                return Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.CoreRecordUnavailable,
+                    "The saved email could not be read right now. Nothing was submitted; try again shortly.", filed: false);
+            case EmlMarkedPartReadOutcome.EmailSaveFailed:
+                _logger.LogWarning("From-email submission {SubmissionId}: .eml {EmlDocumentId} is gone or holds no file; refused (422)",
+                    submissionId, input.SourceEmlDocumentId);
+                return Refused(StatusCodes.Status422UnprocessableEntity, FromEmailSubmissionErrors.EmailSaveFailed,
+                    "The saved email is no longer there or holds no file, so nothing was submitted. Save the invoice PDF and submit it through the invoice upload instead.",
+                    filed: false);
+            case EmlMarkedPartReadOutcome.DocumentUnavailable:
+                _logger.LogWarning("From-email submission {SubmissionId}: the marked parts of .eml {EmlDocumentId} do not match their marks; refused (422)",
+                    submissionId, input.SourceEmlDocumentId);
+                return Refused(StatusCodes.Status422UnprocessableEntity, SubmissionReasonCodes.DocumentUnavailable,
+                    "The marked files could not be read unchanged from the saved email, so nothing was submitted. Save the invoice PDF and submit it through the invoice upload instead.",
+                    filed: false);
+            default:
+                _logger.LogWarning("From-email submission {SubmissionId}: .eml {EmlDocumentId} was read without a row version", submissionId, input.SourceEmlDocumentId);
+                return Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.Failed,
+                    "The invoice could not be submitted right now. Nothing was submitted; try again shortly.", filed: false);
+        }
+
+        // ── 4. Step A, after every read-only refusal ──
         var filed = false;
         if (prepared.FileSource is { } fileSource)
         {
@@ -122,22 +153,6 @@ internal class SubmitInvoiceFromEmailOperation : ISubmitInvoiceFromEmail
             {
                 return Answer(ex.Answer, filed: false);
             }
-        }
-
-        // ── 4. The marked parts, out of the saved .eml ──
-        var read = await _reader.ReadAsync(submissionId, input.SourceEmlDocumentId, input.MarkedParts, ct);
-        switch (read.Outcome)
-        {
-            case EmlMarkedPartReadOutcome.Read when read.RowVersion is not null:
-                break;
-            case EmlMarkedPartReadOutcome.Transient:
-                return Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.CoreRecordUnavailable,
-                    "The saved email could not be read right now. Nothing was submitted; try again shortly.", filed);
-            default:
-                _logger.LogWarning("From-email submission {SubmissionId}: the marked parts of .eml {EmlDocumentId} could not be read ({Outcome})",
-                    submissionId, input.SourceEmlDocumentId, read.Outcome);
-                return Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.Failed,
-                    "The invoice could not be submitted right now. Nothing was submitted; try again shortly.", filed);
         }
 
         // From here on no write observes the caller's token (InvoiceSubmissionService's rule): a write that started finishes.
@@ -220,7 +235,7 @@ internal class SubmitInvoiceFromEmailOperation : ISubmitInvoiceFromEmail
         {
             case TrackingNumberOutcome.AlreadyCreated:
                 _logger.LogInformation("From-email submission {SubmissionId} already existed (a concurrent request of the same attempt)", submissionId);
-                return FromEmailSubmitResult.AlreadyCreated();
+                return FromEmailSubmitResult.AlreadyCreated(filed);
             case TrackingNumberOutcome.Refused:
                 _logger.LogWarning("From-email submission {SubmissionId}: no tracking number could be allocated ({Reason})", submissionId, allocation.Reason);
                 return Refused(StatusCodes.Status503ServiceUnavailable, TrackingNumberReasons.Unavailable,
@@ -329,6 +344,10 @@ internal class SubmitInvoiceFromEmailOperation : ISubmitInvoiceFromEmail
         if (input.SubmissionId == Guid.Empty || input.JobId == Guid.Empty || input.SourceEmlDocumentId == Guid.Empty
             || input.CommunicationId == Guid.Empty || input.CallerSystemUserId == Guid.Empty || input.Generation < 1
             || string.IsNullOrWhiteSpace(input.FirmInvoiceNumber) || input.Mode != FromEmailModes.New
+            // Review round 5 (pass-2 F4-2): the route's body shape and 095's own checks refuse these first, with the contract's answers.
+            || input.FirmId == Guid.Empty || input.CoreRecord is null || input.CoreRecord.RecordId == Guid.Empty
+            || input.FirmInvoiceNumber.Trim().Length > TrackingNumberAllocator.MaxFirmInvoiceNumberLength
+            || input.PoNumber?.Trim().Length > InvoiceSubmissionService.MaxPoNumberLength
             || input.MarkedParts.Count(p => p.Mark == FromEmailMarks.Invoice) != 1
             || input.MarkedParts.Any(p => p.Mark is not (FromEmailMarks.Invoice or FromEmailMarks.Supporting)
                 || p.StoredFileId != FromEmailSubmissionKey.StoredFileIdFor(input.SubmissionId, p))
@@ -349,8 +368,14 @@ internal class SubmitInvoiceFromEmailOperation : ISubmitInvoiceFromEmail
     private static string AfterFiling(string detail) =>
         InvoiceSubmissionService.AfterFiling(InvoiceSubmissionOutcome.Refused(0, string.Empty, detail), filed: true).Detail ?? detail;
 
-    /// <summary>The intake's refusal; an owner refusal is the route's own ProblemDetails (contract section 6: RecordOwnerRefused reasonCode).</summary>
-    private static FromEmailSubmitResult Answer(InvoiceSubmissionOutcome outcome, bool filed, FromEmailSubmitInput input)
+    /// <summary>
+    /// The intake's refusal; an owner refusal is the route's own ProblemDetails (contract section 6: RecordOwnerRefused reasonCode). Contract
+    /// section 6 is the add-in's closed set (review round 5, pass-2 F4-2), so the intake's own codes are mapped onto it: a firm or firm-link
+    /// read fault (<c>firm_unverifiable</c>, the internal intake's) is 503 <c>record_unavailable</c>, as 095's own firm check answers it, and
+    /// <c>record_unavailable</c> is always the 503 the contract lists. <see cref="Validate"/> makes the field codes unreachable (095 checks
+    /// them first); any other code would be a defect and answers 503 <c>failed</c>.
+    /// </summary>
+    private FromEmailSubmitResult Answer(InvoiceSubmissionOutcome outcome, bool filed, FromEmailSubmitInput input)
     {
         if (outcome.Kind == InvoiceSubmissionOutcomeKind.OwnerRefused)
         {
@@ -358,7 +383,22 @@ internal class SubmitInvoiceFromEmailOperation : ISubmitInvoiceFromEmail
                 outcome.OwnerRefusal!, "invoice submission", input.Http?.TraceIdentifier ?? input.CorrelationId ?? string.Empty));
         }
 
-        return Refused(outcome.StatusCode, outcome.ErrorCode!, outcome.Detail ?? "The invoice was not submitted.", filed);
+        var detail = outcome.Detail ?? "The invoice was not submitted.";
+        switch (outcome.ErrorCode)
+        {
+            case InvoiceSubmissionErrors.FirmInvalid or InvoiceSubmissionErrors.FirmNotLinked:
+                return Refused(outcome.StatusCode, outcome.ErrorCode, detail, filed);
+            case InvoiceSubmissionErrors.FirmUnverifiable or InvoiceSubmissionErrors.CoreRecordUnavailable:
+                return Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.CoreRecordUnavailable,
+                    outcome.StatusCode == StatusCodes.Status503ServiceUnavailable
+                        ? detail
+                        : "The record cannot take an invoice submission right now. Nothing was submitted; try again shortly.",
+                    filed);
+            default:
+                _logger.LogError("From-email submission {SubmissionId}: the intake answered {Code}, which contract section 6 does not list; answered 503",
+                    input.SubmissionId, outcome.ErrorCode);
+                return NotQueued(filed);
+        }
     }
 
     /// <summary>

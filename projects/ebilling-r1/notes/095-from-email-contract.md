@@ -2,6 +2,8 @@
 
 > **Agreed by word-add-in-r1 at 717cf238d9 (2026-10-27).** Changes 2026-10-28 (095 review round 1, for word-add-in-r1's agreement): firm details out of K (sections 2, 4, 5); EB-D-165 rows (section 5); new 422 `attachment_not_preserved` and two body-shape keys (section 6); `firmId` and `poNumber` rules (section 2); 500 `OFFICE_AUTH_ERROR` and the firms route's 404 (sections 6, 8). Earlier changes: EB-D-160 (re-attempt after Failed, section 5), agreed by word-add-in-r1 2026-10-27; `marks_invalid` reason `invoice_not_pdf` (2026-10-27, from their review).
 
+Changes 2026-10-28 (094 review round 5, for word-add-in-r1's agreement): 503 `earlier_attempt_being_removed` (sections 5, 6, 9); 422 `email_save_failed` and `document_unavailable` as synchronous refusals before step A, where the submit answered a 503 before (section 6); the `record_unavailable` row covers the firm and record checks (section 6); a race loser's refusal says the filing is kept (section 6, "After step A").
+
 Binding for 095 and word-add-in-r1; changes need word-add-in-r1's agreement first. Behaviour is model §9.1 (v5.9 FINAL); this pins names, statuses and codes only. Citations: `work/ebilling-r1` @ 786d1ea17a, under `src/server/api/Sprk.Bff.Api/` unless shown. NEW = no existing code to follow.
 
 ## 1. Route
@@ -120,7 +122,7 @@ ProblemDetails (ADR-019). Own refusals carry `errorCode` (submission routes, Inv
 | 422 | `ebilling.submission.marked_file_missing` NEW | Invoice/Supporting mark with no entry or no `contentBase64` | `fileName`, `mark` | no | §9.1 step 0 |
 | 422 | `ebilling.submission.email_unidentifiable` NEW | Permanent: email can't be identified; `detail` names the internal upload route | `reason` | no | §9.1 F1-c |
 | 503 | `ebilling.submission.email_unavailable` NEW | Graph timeout, 429 or 5xx | `Retry-After` header (Graph's value, else 5) | yes | §9.1 F1-c |
-| 503 | `ebilling.submission.record_unavailable` | Transient Dataverse fault | – | yes | InvoiceSubmissionContracts.cs:289 |
+| 503 | `ebilling.submission.record_unavailable` | Transient Dataverse fault. Also (task 094) any firm, firm-link or core-record check of the submission that cannot be completed, and a fault reading the marked files out of the saved `.eml`; this route never sends the internal intake's `firm_unverifiable`. Changed 2026-10-28 (094) | – | yes | InvoiceSubmissionContracts.cs:289 |
 | 503 | `ebilling.submission.failed` | The job could not be queued | – | yes | :290 |
 | 409 | `ebilling.submission.document_core_record_mismatch` | The communication is filed under another core record | – | no | :279 |
 | 422 | `ebilling.submission.attachment_not_preserved` NEW | A marked file could not be kept byte-for-byte in the saved email (checked after the `.eml` is built, before it is uploaded); nothing is saved or submitted. `detail` names the internal upload route. Added 2026-10-28 (095 review F1) | – | no | OfficeService.SaveCoreAsync |
@@ -136,6 +138,8 @@ ProblemDetails (ADR-019). Own refusals carry `errorCode` (submission routes, Inv
 | 409 | `ebilling.submission.document_already_submitted` | Also (task 094): other bytes are already staged under this attempt (the same email, record and marking submitted with other Invoice or Supporting files). Added 2026-10-28 (094) | – | no | SubmitInvoiceFromEmailOperation |
 | 422 | `ebilling.submission.storage_not_configured` | Task 094: the Finance file store is not configured. Added 2026-10-28 (094) | – | no | as above |
 | 503 | `ebilling.tracking.unavailable` | Task 094: no tracking number could be allocated. Added 2026-10-28 (094) | – | yes | as above |
+| 422 | `ebilling.submission.email_save_failed` | Task 094: the saved `.eml` is gone or holds no file when the submission reads its marked files. Nothing is submitted and nothing is filed; `detail` names the internal upload route. The same code is the section 9 outcome when the job finds it. Added 2026-10-28 (094) | – | no | SubmitInvoiceFromEmailOperation |
+| 422 | `ebilling.submission.document_unavailable` | Task 094: a marked file is not in the saved `.eml` as marked (missing, or another name or content at its position). Nothing is submitted and nothing is filed; `detail` names the internal upload route. The same code is the section 9 outcome. Added 2026-10-28 (094) | – | no | as above |
 | 503 | `ebilling.submission.earlier_attempt_being_removed` | The latest attempt of this email ended Failed (`source_check_failed` or `file_unservable`) and what it committed is still being removed, so no new attempt is made yet. Nothing is written. Once the removal completes, the same request makes the new attempt (section 5). Added 2026-10-28 (094) | – | yes | FromEmailSubmissionService (replay of K) |
 | as `/office/save` | `OFFICE_004`/`005`/`006` (400), `OFFICE_020` (409), `OFFICE_022` (403), `OFFICE_012` (502, retry), `OFFICE_INTERNAL` (500) | Passed through from the in-process save | as there | – | OfficeErrorCodes.cs:226-249 |
 
@@ -143,7 +147,7 @@ ProblemDetails (ADR-019). Own refusals carry `errorCode` (submission routes, Inv
 
 **`email_unidentifiable` reasons:** `no_message_id`; `email_not_found` (Graph 403/404); `earlier_save_unlinked` (duplicate onto an unlinked or task-130 Restricted .eml); `no_communication`; `eml_ambiguous` (none or several candidates after the SHA check). Clients may show a reason and must accept unknown ones.
 
-**After step A (task 094, added 2026-10-28):** a refusal that comes after step A filed the communication keeps the filing, and its `detail` ends with "The communication was filed under the record first; that filing is kept." The 503 `ebilling.submission.failed` and `record_unavailable` rows also cover the saved `.eml` that could not be read at submit time. Step A runs only after the read-only refusals (step 1, the firm, the core record, the owner) on every path that creates an attempt, including a concurrent retry that loses the create race.
+**After step A (task 094, added 2026-10-28):** a refusal that comes after step A filed the communication keeps the filing, and its `detail` ends with "The communication was filed under the record first; that filing is kept." This includes a concurrent retry that filed and then lost the create race (Changed 2026-10-28, 094 review round 5). Step A runs only after the read-only refusals (step 1, the firm, the core record, the owner, the read of the marked files out of the saved `.eml`) on every path that creates an attempt, including that retry. Changed 2026-10-28 (094 review round 5): the marked files are read before step A, so a read fault (503 `record_unavailable`), a `.eml` that is gone or holds no file (422 `email_save_failed`) and a marked file the `.eml` no longer carries as marked (422 `document_unavailable`) file nothing.
 
 **Order:** filter refusals (401, 403, 400 shape, 429, 503 disabled) come before any handler refusal. The handler checks marks (400), then bytes (422), then the rest. Nothing is written before a refusal except step A's filing (§9.1).
 

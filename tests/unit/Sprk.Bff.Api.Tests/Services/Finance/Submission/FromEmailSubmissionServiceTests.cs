@@ -371,6 +371,48 @@ public class FromEmailSubmissionServiceTests
         world.Operation.Requeues.Should().BeEmpty();
     }
 
+    /// <summary>
+    /// Review round 5: the race loser's step A filed the communication before its create lost; the 409 it is answered with keeps the
+    /// filing and says so (contract section 6, "After step A"), as the source-document route's race answer does.
+    /// </summary>
+    [Fact]
+    public async Task ReAttempt_TheRaceLoserFiledTheCommunication_Its409SaysTheFilingIsKept()
+    {
+        var world = new W();
+        var k = W.K();
+        world.AddAttempt(k, 1, InvoiceSubmissionStatus.Failed, creator: W.OtherCallerId);
+        world.Operation.Answer = input =>
+        {
+            world.AddAttempt(k, input.Generation, InvoiceSubmissionStatus.Received, creator: W.OtherCallerId, tracking: "1001.2", eml: Guid.NewGuid());
+            return FromEmailSubmitResult.AlreadyCreated(filed: true);
+        };
+
+        var outcome = await Run(world);
+
+        (outcome.Status, outcome.ErrorCode).Should().Be((409, "ebilling.submission.document_already_submitted"));
+        outcome.Detail.Should().EndWith(InvoiceSubmissionService.FilingKeptSentence)
+            .And.NotContain("Nothing was saved", "the filing this request made is kept");
+    }
+
+    [Fact]
+    public async Task ConcurrentRetry_TheRaceLoserFiled_ItsReplayIsThe202_Unchanged()
+    {
+        var world = new W();
+        var k = W.K();
+        world.AddAttempt(k, 1, InvoiceSubmissionStatus.Failed);
+        world.Operation.Answer = input =>
+        {
+            world.AddAttempt(k, input.Generation, InvoiceSubmissionStatus.Received, tracking: "1001.2", eml: W.EmlId);
+            return FromEmailSubmitResult.AlreadyCreated(filed: true);
+        };
+
+        var outcome = await Run(world);
+
+        outcome.Receipt.Should().Be(new FromEmailReceipt(
+            FromEmailSubmissionKey.SubmissionIdFor(k, 2), FromEmailSubmissionKey.JobIdFor(k, 2), "1001.2", W.EmlId));
+        outcome.Detail.Should().BeNull();
+    }
+
     // ── contract section 5: the same email and Invoice part with other details (095 review F2) ─────────────────
 
     /// <summary>F2 must-fire: another firm invoice number, or another firm, on a live attempt is 409, and nothing is written.</summary>

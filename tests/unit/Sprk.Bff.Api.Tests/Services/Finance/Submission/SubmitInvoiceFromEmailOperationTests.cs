@@ -1,6 +1,7 @@
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Moq;
@@ -243,20 +244,21 @@ public sealed class SubmitInvoiceFromEmailOperationTests
     }
 
     [Fact]
-    public async Task Submit_StepARuns_AfterTheReadOnlyChecks_AndBeforeAnyWrite()
+    public async Task Submit_StepARuns_AfterTheReadOnlyChecksAndThePartsRead_AndBeforeAnyWrite()
     {
-        (int Owners, int Writes, int EmlReads)? atStepA = null;
+        (int Owners, int Writes, int EmlReads, int Stages)? atStepA = null;
         var operation = Build();
         operation.StepA = _ =>
         {
-            atStepA = (H.OwnerContexts.Count, H.Writes, _emlRows.Invocations.Count);
+            atStepA = (H.OwnerContexts.Count, H.Writes, _emlRows.Invocations.Count, H.Stages.Count);
             return Task.FromResult(false);
         };
 
         var result = await operation.SubmitAsync(Input(), CancellationToken.None);
 
         result.Outcome.Should().Be(FromEmailSubmitOutcome.Received);
-        atStepA.Should().Be((1, 0, 0), "the owner check ran, nothing was staged or created, the .eml's parts were not read yet");
+        atStepA.Should().Be((1, 0, 1, 0),
+            "the owner check ran and the .eml's parts were read (review round 5: read-only, so before A); nothing was staged or created");
     }
 
     [Fact]
@@ -288,31 +290,189 @@ public sealed class SubmitInvoiceFromEmailOperationTests
         H.Writes.Should().Be(0);
     }
 
-    [Fact]
-    public async Task Submit_TheEmlCannotBeReadAfterFiling_Is503_SayingTheFilingIsKept_AndWritesNothing()
+    /// <summary>
+    /// Review round 5 (pass-2 F1-2, uac-r2 K2-b): the parts are read before step A, so a refusal of that read leaves no filing behind; and
+    /// the permanent outcomes are a 422, never a 503 the client would retry against the same <c>.eml</c>.
+    /// </summary>
+    [Theory]
+    [InlineData("gone")]
+    [InlineData("no file")]
+    public async Task Submit_TheEmlIsGoneOrHoldsNoFile_Is422EmailSaveFailed_BeforeStepA_NothingFiledOrWritten(string fault)
     {
-        _emlRows.Setup(r => r.RetrieveAsync("sprk_document", W.EmlId, It.IsAny<string[]>(), It.IsAny<CancellationToken>())).ThrowsAsync(W.NotFound());
+        if (fault == "gone")
+        {
+            _emlRows.Setup(r => r.RetrieveAsync("sprk_document", W.EmlId, It.IsAny<string[]>(), It.IsAny<CancellationToken>())).ThrowsAsync(W.NotFound());
+        }
+        else
+        {
+            _eml!.Attributes.Remove("sprk_graphitemid");
+        }
+
+        var stepA = 0;
         var operation = Build();
-        operation.StepA = _ => Task.FromResult(true);
+        operation.StepA = _ => { stepA++; return Task.FromResult(true); };
 
         var result = await operation.SubmitAsync(Input(), CancellationToken.None);
 
         result.Outcome.Should().Be(FromEmailSubmitOutcome.Refused);
-        result.Status.Should().Be(StatusCodes.Status503ServiceUnavailable);
-        result.ErrorCode.Should().Be(InvoiceSubmissionErrors.Failed);
-        result.Detail.Should().EndWith(InvoiceSubmissionService.FilingKeptSentence);
+        (result.Status, result.ErrorCode).Should().Be((StatusCodes.Status422UnprocessableEntity, FromEmailSubmissionErrors.EmailSaveFailed));
+        result.Detail.Should().NotContain(InvoiceSubmissionService.FilingKeptSentence).And.Contain("invoice upload");
+        stepA.Should().Be(0, "a refused submission never leaves a filing behind");
         H.Writes.Should().Be(0);
+        H.Stages.Should().BeEmpty();
+        H.Allocations.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("a part is missing")]
+    [InlineData("the parts are in another order")]
+    public async Task Submit_APartDiffersFromItsMark_Is422DocumentUnavailable_BeforeStepA_NothingFiledOrWritten(string fault)
+    {
+        if (fault == "a part is missing")
+        {
+            StoreEml(W.Invoice); // the .eml no longer carries the Supporting part at ordinal 1
+        }
+        else
+        {
+            StoreEml(W.Timesheet, W.Invoice); // ordinal 0 is not the Invoice part the mark names
+        }
+
+        var stepA = 0;
+        var operation = Build();
+        operation.StepA = _ => { stepA++; return Task.FromResult(true); };
+
+        var result = await operation.SubmitAsync(Input(), CancellationToken.None);
+
+        result.Outcome.Should().Be(FromEmailSubmitOutcome.Refused);
+        (result.Status, result.ErrorCode).Should().Be((StatusCodes.Status422UnprocessableEntity, SubmissionReasonCodes.DocumentUnavailable));
+        result.Detail.Should().NotContain(InvoiceSubmissionService.FilingKeptSentence).And.Contain("invoice upload");
+        stepA.Should().Be(0);
+        H.Writes.Should().Be(0);
+        H.Stages.Should().BeEmpty();
+        H.Allocations.Should().BeEmpty();
     }
 
     [Fact]
-    public async Task Submit_APartDiffersFromItsMark_Is503_AndWritesNothing()
+    public async Task Submit_TheEmlCannotBeReadRightNow_Is503RecordUnavailable_BeforeStepA_NothingFiledOrWritten()
     {
-        StoreEml(W.Invoice); // the .eml no longer carries the Supporting part at ordinal 1
+        _emlRows.Setup(r => r.RetrieveAsync("sprk_document", W.EmlId, It.IsAny<string[]>(), It.IsAny<CancellationToken>())).ThrowsAsync(new TimeoutException());
+        var stepA = 0;
+        var operation = Build();
+        operation.StepA = _ => { stepA++; return Task.FromResult(true); };
+
+        var result = await operation.SubmitAsync(Input(), CancellationToken.None);
+
+        (result.Status, result.ErrorCode).Should().Be((StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.CoreRecordUnavailable));
+        result.Detail.Should().NotContain(InvoiceSubmissionService.FilingKeptSentence);
+        stepA.Should().Be(0);
+        H.Writes.Should().Be(0);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Step 1, the real wiring (review round 5, pass-2 F3-1): no PrepareSourceAsync override
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// The REAL operation (step 1 is <see cref="InvoiceSubmissionEndpoints.PrepareSourceAsync"/> through the request's services) with a
+    /// caller-rights probe and an app-only reader (strict: the <c>.eml</c> and its communication filed under the matter, nothing else).
+    /// </summary>
+    private (SubmitInvoiceFromEmailOperation Operation, FromEmailSubmitInput Input, RecordingRightsProbe Probe, Mock<IGenericEntityService> AppOnly) RealStepOne()
+    {
+        var probe = new RecordingRightsProbe();
+        var appOnly = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        appOnly.Setup(e => e.RetrieveAsync("sprk_document", W.EmlId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_document", W.EmlId) { ["sprk_relatedcommunication"] = new EntityReference("sprk_communication", W.CommunicationId) });
+        appOnly.Setup(e => e.RetrieveAsync("sprk_communication", W.CommunicationId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_communication", W.CommunicationId) { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", W.MatterId) });
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>(probe);
+        services.AddSingleton(appOnly.Object);
+        var http = new DefaultHttpContext { TraceIdentifier = "trace-094-step-1", RequestServices = services.BuildServiceProvider() };
+        http.Request.Headers.Authorization = "Bearer caller-token";
+        var operation = new SubmitInvoiceFromEmailOperation(H.Build(), H.Allocator.Object, H.Files.Service, H.Jobs.Object,
+            new EmlMarkedPartReader(_emlRows.Object, _world.Spe.Object, NullLogger<EmlMarkedPartReader>.Instance),
+            NullLogger<SubmitInvoiceFromEmailOperation>.Instance);
+        return (operation, Input() with { Http = http }, probe, appOnly);
+    }
+
+    [Theory]
+    [InlineData("the .eml")]
+    [InlineData("its communication")]
+    public async Task Submit_RealStepOne_TheCallerCannotRead_Is403SourceForbidden_NoStage_NoAllocation_NoStepA(string denied)
+    {
+        var (operation, input, probe, appOnly) = RealStepOne();
+        if (denied == "its communication")
+        {
+            probe.Grant("sprk_documents", W.EmlId, AccessRights.Read);
+        }
+
+        var result = await operation.SubmitAsync(input, CancellationToken.None);
+
+        result.Outcome.Should().Be(FromEmailSubmitOutcome.Refused);
+        (result.Status, result.ErrorCode).Should().Be((StatusCodes.Status403Forbidden, InvoiceSubmissionErrors.SourceForbidden));
+        probe.Calls.Should().Contain(c => c.Set == (denied == "the .eml" ? "sprk_documents" : "sprk_communications") && c.Token == "caller-token",
+            "the caller's own Read is asked, with the caller's token");
+        H.OwnerContexts.Should().BeEmpty("refused before the intake's checks");
+        _emlRows.Invocations.Should().BeEmpty("the parts are not read");
+        H.Stages.Should().BeEmpty();
+        H.Allocations.Should().BeEmpty();
+        H.Writes.Should().Be(0);
+        appOnly.Verify(e => e.RetrieveAsync("sprk_communication", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never,
+            "step A (which reads the communication's filing) never runs");
+    }
+
+    [Fact]
+    public async Task Submit_RealStepOne_TheCallerReadsBoth_PassesStepOne_AndAFiledCommunicationIsNotFiledAgain()
+    {
+        var (operation, input, probe, appOnly) = RealStepOne();
+        probe.Grant("sprk_documents", W.EmlId, AccessRights.Read);
+        probe.Grant("sprk_communications", W.CommunicationId, AccessRights.Read);
+
+        var result = await operation.SubmitAsync(input, CancellationToken.None);
+
+        result.Outcome.Should().Be(FromEmailSubmitOutcome.Received, "the control: the same wiring passes a caller who can read both");
+        H.Allocations.Should().ContainSingle();
+        appOnly.Verify(e => e.RetrieveAsync("sprk_communication", W.CommunicationId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Once,
+            "step A read the communication's filing and found it filed");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // The intake's refusals are contract section 6's codes (review round 5, pass-2 F4-2)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// <summary>Every (status, code) the intake's checks can reach the add-in with, as contract section 6 lists them.</summary>
+    private static readonly (int Status, string Code)[] SectionSixIntakeAnswers =
+    [
+        (StatusCodes.Status400BadRequest, InvoiceSubmissionErrors.FirmInvalid),
+        (StatusCodes.Status403Forbidden, InvoiceSubmissionErrors.FirmNotLinked),
+        (StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.CoreRecordUnavailable),
+    ];
+
+    [Theory]
+    [InlineData("the firm cannot be read", 503, "ebilling.submission.record_unavailable")]
+    [InlineData("the firm's link cannot be read", 503, "ebilling.submission.record_unavailable")]
+    [InlineData("the record cannot be read", 503, "ebilling.submission.record_unavailable")]
+    [InlineData("the record is gone", 503, "ebilling.submission.record_unavailable")]
+    [InlineData("the firm is inactive", 400, "ebilling.submission.firm_invalid")]
+    [InlineData("the firm is not linked", 403, "ebilling.submission.firm_not_linked")]
+    public async Task Submit_TheIntakeRefuses_WithAContractSectionSixCode_AndItsStatus(string fault, int status, string code)
+    {
+        switch (fault)
+        {
+            case "the firm cannot be read": H.FirmReadFailure = new TimeoutException(); break;
+            case "the firm's link cannot be read": H.LinksUnreadable = true; break;
+            case "the record cannot be read": H.MatterReadFailure = new TimeoutException(); break;
+            case "the record is gone": H.Matter = null; break;
+            case "the firm is inactive": H.Firm!["statecode"] = new OptionSetValue(1); break;
+            case "the firm is not linked": H.Links.Clear(); break;
+        }
 
         var result = await Build().SubmitAsync(Input(), CancellationToken.None);
 
         result.Outcome.Should().Be(FromEmailSubmitOutcome.Refused);
-        result.Status.Should().Be(StatusCodes.Status503ServiceUnavailable);
+        (result.Status, result.ErrorCode).Should().Be((status, code));
+        SectionSixIntakeAnswers.Should().Contain((result.Status, result.ErrorCode!), "no code outside contract section 6 reaches the add-in");
         H.Writes.Should().Be(0);
     }
 
@@ -320,14 +480,19 @@ public sealed class SubmitInvoiceFromEmailOperationTests
     // After the first write: no compensation (deterministic ids)
     // ═══════════════════════════════════════════════════════════════════════════
 
-    [Fact]
-    public async Task Submit_TheRowAlreadyExists_IsAlreadyCreated_NoJob_NothingDeleted()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Submit_TheRowAlreadyExists_IsAlreadyCreated_CarryingWhetherStepAFiled_NoJob_NothingDeleted(bool stepAFiled)
     {
         H.Allocation = TrackingNumberResult.AlreadyCreated("1001.1", 1);
+        var operation = Build();
+        operation.StepA = _ => Task.FromResult(stepAFiled);
 
-        var result = await Build().SubmitAsync(Input(), CancellationToken.None);
+        var result = await operation.SubmitAsync(Input(), CancellationToken.None);
 
         result.Outcome.Should().Be(FromEmailSubmitOutcome.AlreadyCreated);
+        result.Filed.Should().Be(stepAFiled, "the route's answer to the race says the filing is kept only when this request filed (review round 5)");
         H.JobsSent.Should().BeEmpty();
         H.Deleted.Should().BeEmpty();
         H.BlobDeletes.Should().BeEmpty("the winner's blobs share these ids");
@@ -397,10 +562,19 @@ public sealed class SubmitInvoiceFromEmailOperationTests
         var input = Input();
         var wrongId = input with { MarkedParts = input.MarkedParts.Select(p => p with { StoredFileId = Guid.NewGuid() }).ToList() };
         var correction = input with { Mode = FromEmailModes.Correction };
+        // Review round 5 (pass-2 F4-2): the fields 095 and the route refuse first, so the intake's own field codes never reach the add-in.
+        var noFirm = input with { FirmId = Guid.Empty };
+        var noRecord = input with { CoreRecord = new InvoiceCoreRecord(InvoiceCoreRecordKind.Matter, Guid.Empty) };
+        var longNumber = input with { FirmInvoiceNumber = new string('9', TrackingNumberAllocator.MaxFirmInvoiceNumberLength + 1) };
+        var longPo = input with { PoNumber = new string('P', InvoiceSubmissionService.MaxPoNumberLength + 1) };
 
-        await Build().Invoking(o => o.SubmitAsync(wrongId, CancellationToken.None)).Should().ThrowAsync<ArgumentException>();
-        await Build().Invoking(o => o.SubmitAsync(correction, CancellationToken.None)).Should().ThrowAsync<ArgumentException>();
+        foreach (var defect in new[] { wrongId, correction, noFirm, noRecord, longNumber, longPo })
+        {
+            await Build().Invoking(o => o.SubmitAsync(defect, CancellationToken.None)).Should().ThrowAsync<ArgumentException>();
+        }
+
         H.Writes.Should().Be(0);
+        H.OwnerContexts.Should().BeEmpty();
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
