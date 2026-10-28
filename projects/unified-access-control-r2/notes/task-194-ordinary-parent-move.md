@@ -198,7 +198,37 @@ never relaxed: the look-through keeps the original parents in the secure-if-any 
 - Dev (read-only, 2026-10-27): 69 To Dos; 2 carry a document beside a matter, both in the matter's unit; none names two
   record lookups. 0 To Do answers change under F1-a.
 
+**Fix round, slice 2 (F1-b, F1-c, F1-d, K3, K5, F2, Signal and Decision Record parity of F3).**
+- F1-c: the assignee rule (`ExistingRowOwnership.NoCoreOwnerRule`) is set only for a no-core row whose subject is a To Do
+  AND that `TodoAssigneeOwnerReconciliationJob` selects: `SelectsAsync`, the job's own steps extracted as shared statics
+  (`ClassifyToDoAsync`, `KeepsRowsOf`, `HasLiveCoreStamp`, `IsOwnedByUser`), which the job's `DecideRowAsync` also calls. Every
+  other no-core row is decided over `[subject, ..rest]`, as its writer decided it. A To Do read that faults, or no links, makes
+  the row undetermined.
+- F1-d: a Decision Record's question appends every resolved Signal's ownership lookups (the job's
+  `ResolvedSignalSubjectsAsync`, extracted; a fault makes it undetermined). One never-out predicate,
+  `RecordOwnershipContext.DecisionRecordHeldInIsolation`, has three callers: a root's secure pass on a move OUT of a row
+  isolated at the pass's start (Unsecure included: held, reported Untouched with the reason; NOT the child pass after an
+  F3-permitted re-file, `AfterRefileAsync`, whose release ontology task 144 criterion 3 pins — open question for the
+  coordinator), the ordinary pass at its isolated /
+  Secure-BU check (reported), and `ReparentAsync` after the owner is resolved and before the F3 check or any write
+  (refused `ParentUndetermined`, logged). A move into isolation is never held.
+- K3: the secure pass never moves a job-kept no-core row OUT of a start-isolated position (held, reported with the job's
+  rule); a move IN still happens.
+- F1-b: an undetermined row in the secure pass is resolved over the parents it stores; a Secure answer moves it IN (or keeps
+  it isolated: secure-if-any over a subset that is secure is secure over the whole). Any other answer still fails.
+- K5: `ExistingRowReads` caches the catalog row by record type and the stamps by subject for one pass.
+- F3: parity goes through the real writers: `SignalWriter.OwnershipOfAsync` (core through `PickStampAsync`, and the owner)
+  and `DecisionRecordWriter.OwnershipParentsForAsync` (the write's own filing and owner step: the regarding builder, the derived cores, `SignalSubjects`).
+- F2 count (read-only, dev, 2026-10-27): 13 no-core Signals (2 event subjects, 11 To Do subjects; 2 of the To Dos filed under
+  an unfiled user-owned event) and 3 no-core Decision Records (unfiled communications). 0 writer answers change under B. B
+  stays: it lives in the resolver (`ResolveFromParentsAsync`), so the writers' no-core contexts and the reconciler's no-core
+  question make the same choice from one place (pinned by the owner-equality parity test).
+- Reparent limit: no isolation decision depends on the fallback order. Secure-if-any reads every parent and every
+  un-team-owned parent's filing (`ReadUnownedChildLineageAsync`) regardless of order; the order only picks the ordinary team,
+  and a primary look-through past its bound refuses.
+
 **Known gaps (not 194b).**
-- `DecisionRecordWriter` also names the subjects of every Signal the record resolves; those are not on the row, so the
-  existing-row question lacks them (secure-if-any only; the primary is unaffected).
-- The secure pass still decides a no-core row over its parents, so it can still be taken INTO isolation (fails closed).
+- A Decision Record's existing-row question names every ownership lookup of each resolved Signal (the job's read), a superset
+  of the writer's `SignalSubjects` when a Signal carries more than its subject (secure-if-any only reads more).
+- A gate Decision Record on an unfiled communication is owned by the communication's user (D-144); the reconciler asks it as
+  a plain row (keep-creator), so it is never moved.
