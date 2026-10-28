@@ -354,6 +354,70 @@ public class ContactGrantSharesInternalUserTests
         NothingWritten();
     }
 
+    // ── D1-fix2 (i): the contact's Assigned-To suggestions are answered by the share ──────────────────────────────────
+
+    private const string AttorneyField = "sprk_assignedattorney1";
+
+    private AssignedAccessLedgerRow Suggestion(Guid rootId, Guid contact, string field = AttorneyField,
+        AssignedAccessState state = AssignedAccessState.PendingConfirmation, Guid? systemUserId = null)
+        => _h.Store.SeedRow(ExternalGrantRootType.Matter, rootId, field,
+            new AssignedSubject(AssignedSubjectKind.Contact, contact), state, systemUserId: systemUserId);
+
+    [Fact]
+    public async Task Grant_SharedContact_AdoptsItsStaleSuggestion_StampedWithTheUser_AndItIsNoLongerOffered()
+    {
+        var (contact, user) = Colleague();
+        // Written before the contact was linked to the user: the row carries no user, so adopting by user cannot find it.
+        var row = Suggestion(_matter, contact);
+
+        var result = await Grant(contact);
+
+        result.Should().BeOfType<Ok<GrantAccessResponse>>().Subject.Value!.SharedWithUser!.SystemUserId.Should().Be(user);
+        row.State.Should().Be(AssignedAccessState.Adopted);
+        row.Reason.Should().Be(AssignedAccessReason.ManualGrant);
+        row.SystemUserId.Should().Be(user);
+        var listed = await _h.Materializer.ListAsync(ExternalGrantRootType.Matter, _matter, CancellationToken.None);
+        listed.Should().NotContain(e => e.SubjectId == contact && e.State == nameof(AssignedAccessState.PendingConfirmation),
+            "GET /assigned-access no longer offers the suggestion the share answered");
+    }
+
+    [Fact]
+    public async Task Grant_SharedContact_LeavesOtherRecords_OtherContacts_AndOtherStatesUntouched()
+    {
+        var (contact, _) = Colleague();
+        var otherMatter = Guid.NewGuid();
+        var otherContact = Guid.NewGuid();
+        var onOtherRecord = Suggestion(otherMatter, contact);
+        var ofOtherContact = Suggestion(_matter, otherContact, "sprk_assignedattorney2");
+        var declined = Suggestion(_matter, contact, "sprk_assignedparalegal1", AssignedAccessState.Declined);
+
+        var result = await Grant(contact);
+
+        result.Should().BeOfType<Ok<GrantAccessResponse>>();
+        onOtherRecord.State.Should().Be(AssignedAccessState.PendingConfirmation);
+        onOtherRecord.SystemUserId.Should().BeNull();
+        ofOtherContact.State.Should().Be(AssignedAccessState.PendingConfirmation);
+        ofOtherContact.SystemUserId.Should().BeNull();
+        declined.State.Should().Be(AssignedAccessState.Declined);
+        declined.SystemUserId.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Grant_SharedContact_WhenTheLedgerWriteFails_KeepsTheShare_AndAnswers200()
+    {
+        var (contact, user) = Colleague();
+        var row = Suggestion(_matter, contact);
+        _h.Store.FailLedgerUpdates = true;
+
+        var result = await Grant(contact);
+
+        var body = result.Should().BeOfType<Ok<GrantAccessResponse>>().Subject.Value!;
+        body.SharedWithUser!.SystemUserId.Should().Be(user);
+        _h.Shares.Writes.Should().NotBeEmpty("the share stands; the ledger is never a reason to undo it");
+        _h.Grants.WriteCount.Should().Be(0, "still no contact grant row");
+        row.State.Should().Be(AssignedAccessState.PendingConfirmation, "the write failed, and the next pass repairs it");
+    }
+
     [Fact]
     public async Task InviteAndGrant_WhenTheEmailLookupFails_Is503ContactLookupFailed_AndWritesNothing()
     {

@@ -156,6 +156,12 @@ public sealed class ContactInternalUserShare
         if (shared.Shared is not { } confirmed)
             return ContactShareDecision.Answered(shared.Result); // the share core's refusal, as /share-user answers it
 
+        // The contact's Assigned-To suggestions on this record are answered by this share: Adopted, stamped with the user,
+        // so they are no longer offered (the share core adopts by user only, and a suggestion written before the contact
+        // was linked carries none). Ledger-only, after the confirmed share; never thrown, and a failed write keeps the share.
+        await assignedAccess.MarkContactShareAdoptedAsync(rootType, rootId, contactId, userId, CancellationToken.None)
+            .ConfigureAwait(false);
+
         // Display only, AFTER the confirmed share: a name that cannot be read is null, never a failure of the share.
         string? fullName = null;
         try

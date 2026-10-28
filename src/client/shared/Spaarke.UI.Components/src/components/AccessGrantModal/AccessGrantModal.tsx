@@ -1705,8 +1705,23 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       const suggestedContactIds = new Set(
         assignedList.filter(e => e.state === 'PendingConfirmation').map(e => e.subjectId)
       );
+      // Task 193 (D1-fix2): a contact that stands for a colleague is shared with that colleague, not granted, so no
+      // grant row hides it. It is hidden only when BOTH server reads say so: its Assigned-To ledger entry names the user
+      // it represents, AND that user holds a share in Current Access now (so removing the share offers it again). A read
+      // that failed is an empty list here, so the contact stays offered.
+      const sharedUserIds = new Set(userShareList.map(s => cleanGuid(s.contactId)));
+      const sharedContactIds = new Set(
+        assignedList.flatMap(e =>
+          e.systemUserId && sharedUserIds.has(cleanGuid(e.systemUserId)) ? [cleanGuid(e.subjectId)] : []
+        )
+      );
       setCandidates(
-        candidateList.filter(c => !currentAccessContactIds.has(c.contactId) && !suggestedContactIds.has(c.contactId))
+        candidateList.filter(
+          c =>
+            !currentAccessContactIds.has(c.contactId) &&
+            !suggestedContactIds.has(c.contactId) &&
+            !sharedContactIds.has(cleanGuid(c.contactId))
+        )
       );
       setAssignedEntries(assignedList);
       setSecureOwnerInfo(ownerInfo);

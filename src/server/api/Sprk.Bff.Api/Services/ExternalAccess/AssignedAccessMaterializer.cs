@@ -2129,6 +2129,22 @@ public sealed class AssignedAccessMaterializer
             new AssignedAccessLedgerWrite(AssignedAccessState.Adopted, AssignedAccessReason.ManualGrant, null, systemUserId), ct);
 
     /// <summary>
+    /// Task 193 (#2338): a <c>/grant</c> on a contact was answered with a CONFIRMED share to the user that contact represents.
+    /// The contact's suggestions on this root (<see cref="AssignedAccessState.PendingConfirmation"/> only) become Adopted,
+    /// stamped with that user. <see cref="MarkShareAdoptedAsync"/> matches rows by user, so it cannot find a suggestion
+    /// written before the contact was linked to the user (no user on the row); without this, that suggestion stays
+    /// offered after the share. Never throws: a failed write is logged and the share stands.
+    /// </summary>
+    public Task<int> MarkContactShareAdoptedAsync(
+        ExternalGrantRootType rootType, Guid rootId, Guid contactId, Guid systemUserId, CancellationToken ct)
+    {
+        var subject = new AssignedSubject(AssignedSubjectKind.Contact, contactId);
+        return MarkAsync(rootType, rootId, r => r.Subject == subject,
+            r => r.State == AssignedAccessState.PendingConfirmation,
+            new AssignedAccessLedgerWrite(AssignedAccessState.Adopted, AssignedAccessReason.ManualGrant, null, systemUserId), ct);
+    }
+
+    /// <summary>
     /// Dismiss a suggestion (owner A3: Dismiss = Declined): the entry's subject, on its root, if it is
     /// <see cref="AssignedAccessState.PendingConfirmation"/>. Returns <c>null</c> when no such pending entry is on the root.
     /// Exceptions propagate (the endpoint answers ProblemDetails).
