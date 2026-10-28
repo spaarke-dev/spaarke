@@ -13,7 +13,7 @@ namespace Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess;
 ///   <item><c>roles?fetchXml=</c>: evaluates the query's role condition (by <c>name</c> or <c>roletemplateid</c>) against
 ///     the roles the user holds (<see cref="Roles"/>), so it is the QUERY that decides;</item>
 ///   <item><c>fieldpermissions?fetchXml=</c>: the asked-for columns the user's own (<see cref="DirectGrants"/>) or team
-///     (<see cref="TeamGrants"/>) profiles grant Read on;</item>
+///     (<see cref="TeamGrants"/>) profiles grant Read on, each row naming <see cref="GrantsTable"/>;</item>
 ///   <item><c>contacts(id)</c> and <c>contacts?</c>: <see cref="ContactBody"/> and <see cref="ContactsBody"/>.</item>
 /// </list>
 /// With <see cref="ProofFaults"/> every proof read answers 503. Every request URI is recorded in <see cref="Requests"/>.
@@ -29,6 +29,9 @@ internal sealed class ReadProofHttp : IHttpClientFactory
     public HashSet<string> DirectGrants { get; } = new(StringComparer.OrdinalIgnoreCase);
 
     public HashSet<string> TeamGrants { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The table each granted row names (<c>entityname</c>); default <c>contact</c>.</summary>
+    public string GrantsTable { get; set; } = "contact";
 
     public bool ProofFaults { get; set; }
 
@@ -87,7 +90,7 @@ internal sealed class ReadProofHttp : IHttpClientFactory
             var grants = path.Contains("teamprofiles", StringComparison.Ordinal) ? TeamGrants : DirectGrants;
             var asked = Regex.Matches(path, "<value>([^<]+)</value>").Select(m => m.Groups[1].Value);
             return (HttpStatusCode.OK, Values(asked.Where(grants.Contains)
-                .Select(c => (object)new { attributelogicalname = c })));
+                .Select(c => (object)new { attributelogicalname = c, entityname = GrantsTable })));
         }
 
         if (path.StartsWith("contacts(", StringComparison.Ordinal))
