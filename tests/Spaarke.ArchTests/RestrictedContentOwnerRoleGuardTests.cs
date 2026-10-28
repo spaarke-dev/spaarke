@@ -8,11 +8,12 @@ using Xunit;
 namespace Spaarke.ArchTests;
 
 /// <summary>
-/// unified-access-control-r2 task 194b R4b-3 (owner round 131, the 086 ruling): <c>config/restricted-content-owner-role.json</c>
-/// is the ONE definition of the memberless root-business-unit owner team's role, which
-/// <c>scripts/Set-RestrictedContentOwnerTeam.ps1</c> applies and verifies. The role must hold Read only, at Basic, and only on
-/// the hard-deny tables (<see cref="RecordOwnershipResolver.RestrictedContentTables"/>): these rows sit in the root business
-/// unit, so any wider grant reaches every one of them. The file's team name is the BFF's compiled default
+/// unified-access-control-r2 task 194b R4b-3 (owner round 131, the 086 ruling) and R4b-2c (owner round 136):
+/// <c>config/restricted-content-owner-role.json</c> is the ONE definition of the role of the memberless owner team each
+/// customer's top business unit holds, which <c>scripts/Set-RestrictedContentOwnerTeam.ps1</c> applies and verifies per unit
+/// (<c>businessUnit</c> is <c>customer</c>: never the root, never Secure Record). The role must hold Read only, at Basic, and
+/// only on the hard-deny tables (<see cref="RecordOwnershipResolver.RestrictedContentTables"/>): these rows sit in the
+/// customer's top business unit, so any wider grant reaches every one of them there. The file's team name is the BFF's compiled default
 /// (<see cref="RestrictedContentOwnerTeam.DefaultOwnerTeamName"/>), a fail-closed lookup key.
 /// Enforced by: this guard (the live file must give no finding; each seeded bad document must give its finding).
 /// </summary>
@@ -46,8 +47,8 @@ public class RestrictedContentOwnerRoleGuardTests
             findings.Add($"access is '{Text(file, "access")}', not Read");
         if (Text(file, "depth") != "Basic")
             findings.Add($"depth is '{Text(file, "depth")}', not Basic");
-        if (Text(file, "businessUnit") != "root")
-            findings.Add($"businessUnit is '{Text(file, "businessUnit")}', not root");
+        if (Text(file, "businessUnit") != "customer")
+            findings.Add($"businessUnit is '{Text(file, "businessUnit")}', not customer");
         if (Text(file, "teamName") != RestrictedContentOwnerTeam.DefaultOwnerTeamName)
             findings.Add($"teamName is '{Text(file, "teamName")}', not the BFF's default '{RestrictedContentOwnerTeam.DefaultOwnerTeamName}'");
         if (string.IsNullOrWhiteSpace(Text(file, "roleName")))
@@ -147,8 +148,8 @@ public class RestrictedContentOwnerRoleGuardTests
             Mutated(f => f["teamName"] = "Spaarke Restricted Content Owner")
         },
         {
-            "a business unit other than the root",
-            Mutated(f => f["businessUnit"] = "Secure Record")
+            "a business unit other than each customer's",
+            Mutated(f => f["businessUnit"] = "root")
         },
         {
             "a missing hard-deny table",
@@ -181,5 +182,7 @@ public class RestrictedContentOwnerRoleGuardTests
             Findings(Mutated(f => f["tables"]![1]!.AsObject()["privilegeName"] = f["tables"]![0]!["privilegeName"]!.GetValue<string>())),
             f => f.Contains("duplicate privilege name", StringComparison.Ordinal));
         Assert.Contains(Findings(Mutated(f => f["teamName"] = "x")), f => f.StartsWith("teamName is", StringComparison.Ordinal));
+        Assert.Contains(Findings(Mutated(f => f["businessUnit"] = "root")),
+            f => f == "businessUnit is 'root', not customer");
     }
 }
