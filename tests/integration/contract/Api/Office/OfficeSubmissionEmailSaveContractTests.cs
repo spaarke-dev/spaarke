@@ -206,6 +206,35 @@ public class OfficeSubmissionEmailSaveContractTests
         world.FinalizationPayloads.Should().BeEmpty();
     }
 
+    /// <summary>
+    /// Through the real save pipeline: a marked LF text file reaches storage byte-for-byte, and the parts the save reports are those of
+    /// the stored bytes. Without base64 the part is written 7-bit with the writer's newlines, and the save refuses it.
+    /// </summary>
+    [Fact]
+    public async Task SubmissionSave_AMarkedLfTextFile_ReachesStorageByteForByte()
+    {
+        var world = new OfficeVersionSaveWorld();
+        world.CommunicationsByMessageId[MessageId] = CommunicationId;
+        using var factory = new OfficeVersionSaveTestWebAppFactory(world);
+        var csv = Encoding.ASCII.GetBytes("date,hours\n2026-10-01,7.5\n2026-10-02,8\n");
+        var request = SubmissionSave(selected: new List<string>());
+        request = request with
+        {
+            Email = request.Email! with
+            {
+                Attachments = new List<AttachmentReference> { Attachment("Invoice 1001.pdf", PdfBytes, "application/pdf"), Attachment("hours.csv", csv, "text/csv") },
+            },
+        };
+
+        var outcome = await SaveAsync(factory, request, new[] { EmlMimeParts.Sha256Hex(PdfBytes), EmlMimeParts.Sha256Hex(csv) });
+
+        outcome.Refusal.Should().BeNull();
+        outcome.Response!.Success.Should().BeTrue();
+        var created = world.Documents.Values.Should().ContainSingle().Subject;
+        using var storedEml = new MemoryStream(world.SpeItems[created.ItemId!].Versions.Single());
+        EmlMimeParts.Read(storedEml).Select(p => p.Sha256).Should().Equal(EmlMimeParts.Sha256Hex(PdfBytes), EmlMimeParts.Sha256Hex(csv));
+    }
+
     [Fact]
     public async Task SubmissionSave_TwoIdenticalMarkedFiles_NeedTwoParts()
     {
