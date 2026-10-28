@@ -128,6 +128,11 @@ public static class ExternalAccessModule
         services.AddScoped<ExternalInvoiceHiding>(sp =>
             (caller, invoiceIds, ct) => sp.GetRequiredService<ExternalDataService>().HideInvoicesForAsync(
                 caller, invoiceIds, sp.GetRequiredService<ExternalParticipationService>().GetEffectiveRootRecordFlagsAsync, ct));
+        // Review round 4b: the external submission routes' seam (list and single read): with an invoice, the predicate above;
+        // without one, the submission's own source. Same caller rule and fault rule as ExternalInvoiceHiding.
+        services.AddScoped<ExternalInvoiceSubmissionHiding>(sp =>
+            (caller, submissions, ct) => sp.GetRequiredService<ExternalDataService>().HideSubmissionsForAsync(
+                caller, submissions, sp.GetRequiredService<ExternalParticipationService>().GetEffectiveRootRecordFlagsAsync, ct));
         services.AddScoped<AppOnlyInvoiceFamilyHiding>(sp =>
             (table, rowIds, ct) => sp.GetRequiredService<ExternalDataService>().HideInvoiceFamilyRowsAsync(
                 table, rowIds, sp.GetRequiredService<ExternalParticipationService>().GetEffectiveRootRecordFlagsAsync, ct));

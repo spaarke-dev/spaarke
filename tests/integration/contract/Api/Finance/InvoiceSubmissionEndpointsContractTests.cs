@@ -54,9 +54,11 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
     private readonly StubResolver _resolver = new();
     private readonly RecordingAccessDataSource _access = new();
     private WebApplication _app = null!;
-    private Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceHidingStub _invoiceHiding =
-        Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceHidingStub.NoneHidden();
-    private bool _registerInvoiceHiding = true;
+    // ebilling-r1 task 098 (review round 4b): the submission routes' seam is the REAL ExternalDataService.HideSubmissionsForAsync over
+    // an app-only Web API double (InvoiceWorld): a test seeds the invoice's and the documents' rows the way their writers do.
+    private readonly Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld _world = new();
+    private readonly List<InvoiceSubmissionView[]> _submissionDecisions = new();
+    private bool _registerSubmissionHiding = true;
     private HttpClient _client = null!;
 
     public InvoiceSubmissionEndpointsContractTests()
@@ -95,9 +97,13 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         builder.Services.AddSingleton(_h.Build());
         builder.Services.AddSingleton<ExternalParticipationService>(_participations);
         builder.Services.AddSingleton<ICallerPrincipalResolver>(_resolver);
-        // ebilling-r1 task 098: the (a') invoice predicate, as AddExternalAccess registers it; hides nothing unless a test says so.
-        if (_registerInvoiceHiding)
-            builder.Services.AddScoped<ExternalInvoiceHiding>(_ => (caller, ids, ct) => _invoiceHiding.Seam(caller, ids, ct));
+        // ebilling-r1 task 098: the submission routes' (a') seam, as AddExternalAccess registers it (each call recorded).
+        if (_registerSubmissionHiding)
+            builder.Services.AddScoped<ExternalInvoiceSubmissionHiding>(_ => (caller, submissions, ct) =>
+            {
+                lock (_submissionDecisions) _submissionDecisions.Add(submissions.ToArray());
+                return _world.NewService(SubmissionIdentity.Object).HideSubmissionsForAsync(caller, submissions, _world.RootFlags, ct);
+            });
 
         builder.WebHost.UseTestServer();
         _app = builder.Build();
@@ -195,12 +201,14 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         _access.Grant(FinanceAuthorizationFilter.VendorOrganizationEntitySet, FirmId, AccessRights.AppendTo);
     }
 
+    /// <summary>A stored submission as the external (SPA) route writes it: channel Spa, no document (review round 4b: writer shape).</summary>
     private Entity StoredSubmission(Guid id, Guid firmId) => _h.Submission = new Entity("sprk_invoicesubmission", id)
     {
         ["sprk_trackingnumber"] = "INV-1.1",
         ["sprk_vendororg"] = new EntityReference("sprk_organization", firmId),
         ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId),
         ["sprk_processingstatus"] = new OptionSetValue(100000000),
+        ["sprk_channel"] = new OptionSetValue((int)InvoiceSubmissionChannel.Spa),
     };
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -967,10 +975,62 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // ebilling-r1 task 098 surface (c): a submission whose invoice the (a') predicate hides
+    // ebilling-r1 task 098 surface (c): the submission read and list, decided by ONE seam (review round 4b): a submission with an
+    // invoice by the invoice predicate, one without by its own source. The seam is the real ExternalDataService over InvoiceWorld.
     // ═══════════════════════════════════════════════════════════════════════════
 
     private static readonly Guid HiddenInvoice = Guid.Parse("09800000-0000-4000-8000-00000000c0de");
+    private static readonly Guid FlaggedSystemUser = Guid.Parse("09800000-0000-4000-8000-0000000000f2");
+    private const int RestrictedPermission = 100000002;
+    private const int StandardPermission = 100000000;
+
+    /// <summary>The identity the seam asks about a systemuser caller: the test's systemuser is flagged external.</summary>
+    private Mock<Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver> SubmissionIdentity { get; } = FlaggedIsExternal();
+
+    private static Mock<Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver> FlaggedIsExternal()
+    {
+        var identity = new Mock<Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver>(MockBehavior.Strict);
+        identity.Setup(i => i.IsExternalAsync(FlaggedSystemUser, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        return identity;
+    }
+
+    public static TheoryData<string> ExternalCallerKinds => new() { "contact", "flagged-systemuser" };
+
+    /// <summary>The caller of the external routes: a CIAM contact, or a flagged-external systemuser linked to the same contact.</summary>
+    private void CallerIs(string kind) => _resolver.Principal = kind switch
+    {
+        "contact" => Collaborator(AccessRights.Read | AccessRights.Create | AccessRights.Write),
+        "flagged-systemuser" => new CallerPrincipal
+        {
+            Plane = CallerPrincipalPlane.Workforce,
+            ContactId = InvoiceSubmissionServiceTests.ContactId,
+            SystemUserId = FlaggedSystemUser,
+            ProjectAccess = Array.Empty<CallerProjectAccess>(),
+            MatterAccess = new Dictionary<Guid, AccessRights> { [MatterId] = AccessRights.Read | AccessRights.Create | AccessRights.Write },
+        },
+        _ => throw new ArgumentOutOfRangeException(nameof(kind)),
+    };
+
+    /// <summary>A submission row of the caller's firm on the matter, as <c>ToView</c> reads it.</summary>
+    private static Entity SubmissionRow(
+        string number, int? channel, Guid? document = null, Guid? invoice = null,
+        InvoiceSubmissionStatus status = InvoiceSubmissionStatus.Received)
+    {
+        var row = new Entity("sprk_invoicesubmission", Guid.NewGuid())
+        {
+            ["sprk_trackingnumber"] = number,
+            ["sprk_vendororg"] = new EntityReference("sprk_organization", FirmId),
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId),
+            ["sprk_processingstatus"] = new OptionSetValue((int)status),
+        };
+        if (channel is { } c) row["sprk_channel"] = new OptionSetValue(c);
+        if (document is { } d) row["sprk_document"] = new EntityReference("sprk_document", d);
+        if (invoice is { } i) row[InvoiceSubmissionService.InvoiceColumn] = new EntityReference("sprk_invoice", i);
+        return row;
+    }
+
+    private const int Spa = (int)InvoiceSubmissionChannel.Spa;
+    private const int Internal = (int)InvoiceSubmissionChannel.Internal;
 
     private Entity StoredSubmissionWithInvoice(Guid id, Guid invoice)
     {
@@ -984,25 +1044,50 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
                 It.Is<Microsoft.Xrm.Sdk.Query.QueryExpression>(q => q.EntityName == "sprk_invoicesubmission"), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new EntityCollection(rows.ToList()));
 
-    [Fact]
-    public async Task Task098_get_of_a_submission_whose_invoice_is_hidden_is_the_same_404_as_a_missing_one()
-    {
-        var id = Guid.NewGuid();
-        StoredSubmissionWithInvoice(id, HiddenInvoice);
-        _invoiceHiding = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceHidingStub.Hiding(HiddenInvoice);
-        var hidden = await SendAsync(HttpMethod.Get, $"/api/v1/external/invoice-submissions/{id}");
+    private static string WithoutCorrelation(string body) =>
+        System.Text.RegularExpressions.Regex.Replace(body, "\"correlationId\":\"[^\"]*\"", "\"correlationId\":\"-\"");
 
+    /// <summary>GET of <paramref name="row"/>, asserted to be the SAME 404 (status and body) as a missing submission.</summary>
+    private async Task ReadIsTheSameAsMissingAsync(Entity row, string because)
+    {
+        _h.Submission = row;
+        var withheld = await SendAsync(HttpMethod.Get, $"/api/v1/external/invoice-submissions/{row.Id}");
         _h.Submission = null;
         var missing = await SendAsync(HttpMethod.Get, $"/api/v1/external/invoice-submissions/{Guid.NewGuid()}");
 
-        hidden.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        withheld.StatusCode.Should().Be(HttpStatusCode.NotFound, because);
         missing.StatusCode.Should().Be(HttpStatusCode.NotFound);
-        static string WithoutCorrelation(string body) =>
-            System.Text.RegularExpressions.Regex.Replace(body, "\"correlationId\":\"[^\"]*\"", "\"correlationId\":\"-\"");
-        WithoutCorrelation(await hidden.Content.ReadAsStringAsync()).Should().Be(
+        WithoutCorrelation(await withheld.Content.ReadAsStringAsync()).Should().Be(
             WithoutCorrelation(await missing.Content.ReadAsStringAsync()),
-            "a hidden invoice's submission and a missing submission are indistinguishable (only the per-request id differs)");
-        _invoiceHiding.Calls.Should().ContainSingle().Which.Should().Equal(HiddenInvoice);
+            "a withheld submission and a missing submission are indistinguishable (only the per-request id differs)");
+    }
+
+    private async Task<HttpStatusCode> ReadStatusAsync(Entity row)
+    {
+        _h.Submission = row;
+        return (await SendAsync(HttpMethod.Get, $"/api/v1/external/invoice-submissions/{row.Id}")).StatusCode;
+    }
+
+    private async Task<string> ListBodyAsync(params Entity[] rows)
+    {
+        ListReturns(rows);
+        var response = await SendAsync(HttpMethod.Get, "/api/v1/external/invoice-submissions");
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        return await response.Content.ReadAsStringAsync();
+    }
+
+    // ── With an invoice: the invoice predicate decides (as before review round 4b) ──
+
+    [Fact]
+    public async Task Task098_get_of_a_submission_whose_invoice_is_hidden_is_the_same_404_as_a_missing_one()
+    {
+        _world.Source(HiddenInvoice, permission: RestrictedPermission);
+        var id = Guid.NewGuid();
+
+        await ReadIsTheSameAsMissingAsync(StoredSubmissionWithInvoice(id, HiddenInvoice), "its invoice is hidden");
+
+        _submissionDecisions.Should().ContainSingle().Which.Should().ContainSingle()
+            .Which.InvoiceId.Should().Be(HiddenInvoice);
     }
 
     [Theory]
@@ -1013,12 +1098,12 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         if (kind == "no predicate")
         {
             await DisposeAsync();
-            _registerInvoiceHiding = false;
+            _registerSubmissionHiding = false;
             await InitializeAsync();
         }
         else
         {
-            _invoiceHiding = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceHidingStub.Faulting();
+            _world.Faults["sprk_storedfiles"] = HttpStatusCode.ServiceUnavailable;
         }
 
         var id = Guid.NewGuid();
@@ -1032,9 +1117,10 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
     [Fact]
     public async Task Task098_get_of_a_submission_whose_invoice_is_visible_or_absent_is_200_as_before()
     {
+        var invoice = Guid.NewGuid();
+        _world.SpaUpload(invoice);
         var withInvoice = Guid.NewGuid();
-        StoredSubmissionWithInvoice(withInvoice, Guid.NewGuid());
-        _invoiceHiding = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceHidingStub.Hiding(HiddenInvoice);
+        StoredSubmissionWithInvoice(withInvoice, invoice);
         (await SendAsync(HttpMethod.Get, $"/api/v1/external/invoice-submissions/{withInvoice}")).StatusCode.Should().Be(HttpStatusCode.OK);
 
         var withoutInvoice = Guid.NewGuid();
@@ -1054,48 +1140,131 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         body.Should().NotContain(invoice.ToString(), "the invoice link is read for the predicate only");
     }
 
-    [Theory]
-    [InlineData("hidden")]
-    [InlineData("fault")]
-    public async Task Task098_list_omits_a_submission_whose_invoice_is_hidden_and_keeps_the_others(string kind)
+    [Fact]
+    public async Task Task098_list_omits_a_submission_whose_invoice_is_hidden_and_keeps_the_others_in_one_decision()
     {
-        var hiddenRow = new Entity("sprk_invoicesubmission", Guid.NewGuid())
-        {
-            ["sprk_trackingnumber"] = "INV-HIDDEN",
-            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId),
-            [InvoiceSubmissionService.InvoiceColumn] = new EntityReference("sprk_invoice", HiddenInvoice),
-        };
-        var noInvoice = new Entity("sprk_invoicesubmission", Guid.NewGuid())
-        {
-            ["sprk_trackingnumber"] = "INV-PENDING",
-            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId),
-        };
-        ListReturns(hiddenRow, noInvoice);
-        _invoiceHiding = kind == "hidden"
-            ? Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceHidingStub.Hiding(HiddenInvoice)
-            : Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceHidingStub.Faulting();
+        _world.Source(HiddenInvoice, permission: RestrictedPermission);
 
-        var response = await SendAsync(HttpMethod.Get, "/api/v1/external/invoice-submissions");
+        var body = await ListBodyAsync(
+            SubmissionRow("INV-HIDDEN", Spa, invoice: HiddenInvoice, status: InvoiceSubmissionStatus.Accepted),
+            SubmissionRow("INV-PENDING", Spa));
 
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        var body = await response.Content.ReadAsStringAsync();
         body.Should().Contain("INV-PENDING").And.NotContain("INV-HIDDEN");
-        _invoiceHiding.Calls.Should().ContainSingle("one predicate call for the page").Which.Should().Equal(HiddenInvoice);
+        _submissionDecisions.Should().ContainSingle("one decision for the page").Which.Should().HaveCount(2);
     }
 
     [Fact]
     public async Task Task098_list_keeps_a_submission_whose_invoice_is_visible()
     {
-        ListReturns(new Entity("sprk_invoicesubmission", Guid.NewGuid())
-        {
-            ["sprk_trackingnumber"] = "INV-VISIBLE",
-            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId),
-            [InvoiceSubmissionService.InvoiceColumn] = new EntityReference("sprk_invoice", Guid.NewGuid()),
-        });
-        _invoiceHiding = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceHidingStub.Hiding(HiddenInvoice);
+        var invoice = Guid.NewGuid();
+        _world.SpaUpload(invoice);
 
-        (await (await SendAsync(HttpMethod.Get, "/api/v1/external/invoice-submissions")).Content.ReadAsStringAsync())
+        (await ListBodyAsync(SubmissionRow("INV-VISIBLE", Spa, invoice: invoice, status: InvoiceSubmissionStatus.Accepted)))
             .Should().Contain("INV-VISIBLE");
+    }
+
+    // ── Without an invoice: the submission's own source decides (review round 4b), on BOTH routes ──
+
+    public static TheoryData<string, InvoiceSubmissionStatus> CallerKindsAtStatusesWithoutAnInvoice()
+    {
+        var data = new TheoryData<string, InvoiceSubmissionStatus>();
+        foreach (var kind in new[] { "contact", "flagged-systemuser" })
+        {
+            foreach (var status in new[] { InvoiceSubmissionStatus.Received, InvoiceSubmissionStatus.Processing, InvoiceSubmissionStatus.Failed })
+                data.Add(kind, status);
+        }
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(CallerKindsAtStatusesWithoutAnInvoice))]
+    public async Task Task098_4b_an_isolated_submission_document_without_an_invoice_is_withheld_on_the_read_and_the_list(
+        string caller, InvoiceSubmissionStatus status)
+    {
+        CallerIs(caller);
+        var isolated = _world.Document(Guid.NewGuid(), permission: RestrictedPermission);
+
+        await ReadIsTheSameAsMissingAsync(
+            SubmissionRow("INV-ISOLATED", Internal, isolated, status: status), "its own document is isolated");
+        var body = await ListBodyAsync(SubmissionRow("INV-ISOLATED", Internal, isolated, status: status), SubmissionRow("INV-SPA", Spa));
+
+        body.Should().Contain("INV-SPA").And.NotContain("INV-ISOLATED");
+    }
+
+    [Theory]
+    [MemberData(nameof(ExternalCallerKinds))]
+    public async Task Task098_4b_without_an_invoice_an_internal_empty_link_or_an_unknown_channel_is_withheld_on_the_read_and_the_list(
+        string caller)
+    {
+        CallerIs(caller);
+
+        await ReadIsTheSameAsMissingAsync(SubmissionRow("INV-EMPTY", Internal), "an Internal submission with no source to decide by");
+        await ReadIsTheSameAsMissingAsync(SubmissionRow("INV-UNKNOWN", channel: null), "an unknown channel");
+        var body = await ListBodyAsync(SubmissionRow("INV-EMPTY", Internal), SubmissionRow("INV-UNKNOWN", 999), SubmissionRow("INV-SPA", Spa));
+
+        body.Should().Contain("INV-SPA").And.NotContain("INV-EMPTY").And.NotContain("INV-UNKNOWN");
+    }
+
+    [Theory]
+    [MemberData(nameof(ExternalCallerKinds))]
+    public async Task Task098_4b_without_an_invoice_spa_and_a_readable_internal_document_are_visible_on_the_read_and_the_list(string caller)
+    {
+        CallerIs(caller);
+        var readable = _world.Document(Guid.NewGuid(), permission: StandardPermission);
+        var spa = SubmissionRow("INV-SPA", Spa);
+        var internalReadable = SubmissionRow("INV-READABLE", Internal, readable, status: InvoiceSubmissionStatus.Processing);
+
+        (await ReadStatusAsync(spa)).Should().Be(HttpStatusCode.OK);
+        (await ReadStatusAsync(internalReadable)).Should().Be(HttpStatusCode.OK);
+        var body = await ListBodyAsync(spa, internalReadable);
+
+        body.Should().Contain("INV-SPA").And.Contain("INV-READABLE");
+    }
+
+    [Theory]
+    [MemberData(nameof(ExternalCallerKinds))]
+    public async Task Task098_4b_a_failed_source_read_withholds_on_the_read_and_the_list(string caller)
+    {
+        CallerIs(caller);
+        var readable = _world.Document(Guid.NewGuid(), permission: StandardPermission);
+        _world.Faults["sprk_documents"] = HttpStatusCode.ServiceUnavailable;
+
+        await ReadIsTheSameAsMissingAsync(SubmissionRow("INV-READABLE", Internal, readable), "its source could not be read");
+        var body = await ListBodyAsync(SubmissionRow("INV-READABLE", Internal, readable), SubmissionRow("INV-SPA", Spa));
+
+        body.Should().Be("[]", "a failed read withholds every submission the decision was asked about");
+    }
+
+    [Fact]
+    public async Task Task098_list_withholds_every_asked_submission_when_the_invoice_read_fails()
+    {
+        _world.Faults["sprk_storedfiles"] = HttpStatusCode.ServiceUnavailable;
+
+        var body = await ListBodyAsync(
+            SubmissionRow("INV-WITH", Spa, invoice: Guid.NewGuid(), status: InvoiceSubmissionStatus.Accepted), SubmissionRow("INV-PENDING", Spa));
+
+        body.Should().Be("[]", "a failed read withholds every submission the decision was asked about");
+    }
+
+    [Fact]
+    public async Task Task098_4b_the_external_routes_never_return_the_document_id_and_the_internal_route_still_does()
+    {
+        var readable = _world.Document(Guid.NewGuid(), permission: StandardPermission);
+        var row = SubmissionRow("INV-READABLE", Internal, readable);
+
+        _h.Submission = row;
+        var one = await (await SendAsync(HttpMethod.Get, $"/api/v1/external/invoice-submissions/{row.Id}")).Content.ReadAsStringAsync();
+        var list = await ListBodyAsync(row);
+        _access.Grant(FinanceAuthorizationFilter.InvoiceSubmissionEntitySet, row.Id, AccessRights.Read);
+        var internalResponse = await SendAsync(HttpMethod.Get, $"/api/finance/invoice-submissions/{row.Id}");
+
+        one.Should().Contain("INV-READABLE").And.NotContain(readable.ToString()).And.NotContain("documentId");
+        list.Should().Contain("INV-READABLE").And.NotContain(readable.ToString()).And.NotContain("documentId");
+        internalResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var internalBody = JsonDocument.Parse(await internalResponse.Content.ReadAsStringAsync());
+        internalBody.RootElement.GetProperty("documentId").GetGuid().Should().Be(readable, "the internal route's contract is unchanged");
+        internalBody.RootElement.TryGetProperty("channelValue", out _).Should().BeFalse("the raw channel is server-side only");
     }
 
     [Fact]
