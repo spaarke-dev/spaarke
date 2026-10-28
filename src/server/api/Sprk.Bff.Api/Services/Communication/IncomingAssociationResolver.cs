@@ -764,8 +764,12 @@ public sealed class IncomingAssociationResolver
     /// If the (rare) full document would exceed the cap, fall back to a compact decision-only document so
     /// the record still carries the essential audit trail.
     /// </summary>
-    private static string SerializeProvenance(AssociationProvenance provenance)
+    internal static string SerializeProvenance(AssociationProvenance provenance)
     {
+        // The stored column holds ids and reason codes only (AssociationProvenance.ToStoredForm). This is the one
+        // server-side writer of sprk_associationprovenance; the in-memory decision keeps the rungs' full text for the
+        // live suggestion routes, which trim to what the caller can read.
+        provenance = provenance.ToStoredForm();
         var json = JsonSerializer.Serialize(provenance, ProvenanceJsonOptions);
         if (json.Length <= ProvenanceMaxLength)
             return json;

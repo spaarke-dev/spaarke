@@ -26,6 +26,99 @@ public sealed record AssociationProvenance
 
     /// <summary>Metadata-only structural signals (rung 3) — category + obligations, recorded regardless of the association decision (always-run pass).</summary>
     public required IReadOnlyList<SignalTrace> Signals { get; init; }
+
+    /// <summary>
+    /// <see cref="Version"/> of the stored form (<see cref="ToStoredForm"/>): every contributor's
+    /// <see cref="ContributorTrace.Provenance"/> is a closed-set reason code. Version 1 rows carried each rung's raw
+    /// provenance text.
+    /// </summary>
+    public const int StoredFormVersion = 2;
+
+    /// <summary>
+    /// The form written to <c>sprk_associationprovenance</c>. A stored association trace holds ids and reason codes
+    /// only — nothing taken from a candidate record's content. Per candidate it keeps the field, target entity,
+    /// target id, confidences and the written / conflict flags; per contributor the rung, its confidence and a
+    /// reason code (<see cref="StoredReasonCode"/>). The decision and the signals (classification of the message
+    /// itself) are kept as they are.
+    /// </summary>
+    public AssociationProvenance ToStoredForm() => this with
+    {
+        Version = StoredFormVersion,
+        Candidates = Candidates
+            .Select(c => c with
+            {
+                Contributors = c.Contributors
+                    .Select(k => k with { Provenance = StoredReasonCode(k.Rung, k.Provenance) })
+                    .ToList(),
+            })
+            .ToList(),
+    };
+
+    private static readonly HashSet<string> StoredLocations = new(StringComparer.Ordinal) { "subject", "body", "attachment" };
+    private static readonly HashSet<string> StoredMatchKinds = new(StringComparer.Ordinal) { "name", "number" };
+
+    /// <summary>
+    /// A contributor's stored reason code, built from closed sets only: the rung in kebab case (e.g.
+    /// <c>record-name-match</c>), then <c>:where=</c><i>subject|body|attachment</i> and <c>:matched=</c><i>name|number</i>
+    /// when the rung's provenance names one of those values. Every other part of the provenance text is dropped.
+    /// </summary>
+    internal static string StoredReasonCode(string rung, string? provenance)
+    {
+        var code = new System.Text.StringBuilder(Kebab(rung));
+        if (ClosedSetToken(provenance, "where=", StoredLocations) is { } where)
+        {
+            code.Append(":where=").Append(where);
+        }
+
+        if (ClosedSetToken(provenance, "matched=", StoredMatchKinds) is { } matched)
+        {
+            code.Append(":matched=").Append(matched);
+        }
+
+        return code.ToString();
+    }
+
+    /// <summary>The value of the first <c>:</c>-delimited segment that starts with <paramref name="key"/>, when it is in <paramref name="allowed"/>.</summary>
+    private static string? ClosedSetToken(string? provenance, string key, HashSet<string> allowed)
+    {
+        if (string.IsNullOrEmpty(provenance))
+        {
+            return null;
+        }
+
+        foreach (var segment in provenance.Split(':'))
+        {
+            if (segment.StartsWith(key, StringComparison.Ordinal))
+            {
+                var value = segment[key.Length..];
+                return allowed.Contains(value) ? value : null;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary><c>RecordNameMatch</c> → <c>record-name-match</c>; anything that is not a plain identifier → <c>unknown</c>.</summary>
+    private static string Kebab(string rung)
+    {
+        if (string.IsNullOrEmpty(rung) || !rung.All(char.IsAsciiLetterOrDigit))
+        {
+            return "unknown";
+        }
+
+        var kebab = new System.Text.StringBuilder(rung.Length + 4);
+        for (var i = 0; i < rung.Length; i++)
+        {
+            if (char.IsUpper(rung[i]) && i > 0)
+            {
+                kebab.Append('-');
+            }
+
+            kebab.Append(char.ToLowerInvariant(rung[i]));
+        }
+
+        return kebab.ToString();
+    }
 }
 
 /// <summary>The final ladder decision.</summary>
