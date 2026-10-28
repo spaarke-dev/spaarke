@@ -52,6 +52,9 @@ controls whose answer does not change: two requests ask twice, background work a
 - `tests/integration/data-mutation/Signals/DecisionCommitServiceTests.CallerIdentityCount.cs` — real commit service + shipped probe (wire seams): one
   WhoAmI, every rights question asked. Rig change: class made `partial`, optional `ProbeOverride` (existing tests untouched).
 
+Runs (rebased on 2260916112): new tests 19/19; filtered `Sprk.Bff.Api.Tests` (DecisionCommit|Signals|CallerRecordAccessProbe|Dataverse|Probe|
+ExternalAccess|UnifiedAccessControl|Ontology) 8907 passed / 0 failed / 2 skipped; `Spaarke.ArchTests` 1593/1593.
+
 Test scope beyond the stated contract: none.
 
 ## The three 400s (constraint "400s") — not ours; documented for the main session to file
@@ -109,3 +112,10 @@ decisions" holds). The entity-set cache is in-process metadata with profiling pr
 In the BFF: the change removes repeated round trips inside the existing synchronous commit route and the shared Dataverse client; nothing new runs
 outside a request, so ADR-052 placement does not apply. No endpoint, DI registration, package or background work added (ADR-010: static helper, no
 registration).
+
+## Publish size and packages (§10)
+
+`dotnet publish -c Release` of `origin/docs/ontology-platform-design` 2260916112 (fresh worktree `C:\wts-170b`) vs this branch, each zipped
+with `Compress-Archive`: raw 132,477,704 → 132,484,312 B (**+6,608 B**), zip 39,736,827 → 39,738,541 B (**+1,714 B**), 192 → 192 files.
+`Sprk.Bff.Api.dll` +4,608 B, `Spaarke.Dataverse.dll` +512 B. Total ≈ 39.7 MB zipped (< 55 MB review line). No package added;
+`dotnet list package --vulnerable --include-transitive`: no vulnerable packages.
