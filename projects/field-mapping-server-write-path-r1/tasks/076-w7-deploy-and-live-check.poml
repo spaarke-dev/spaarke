@@ -3,7 +3,7 @@
   <metadata>
     <title>W7 deploy to dev + live Family check (BFF via R3 batch, PCF, code page, web resource)</title>
     <phase>7 W7 Record family service and Family tool</phase>
-    <gate>072, 074, 075, 038 complete; owner go for the BFF deploy in R3's session</gate>
+    <gate>072, 074, 038 complete (075 ships with 040, owner 2026-10-28); owner go for the BFF deploy in R3's session</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>Deployment-touching; live verification of an access-safe read path.</rigor-reason>
@@ -13,7 +13,7 @@
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Deployment; ordered and irreversible steps.</parallel-reason>
-    <deps>072, 074, 075, 038</deps>
+    <deps>072, 074, 038</deps>
     <tags>deploy, dataverse, pcf, bff-api</tags>
     <estimated-effort>3-4 hours</estimated-effort>
   </metadata>
@@ -48,7 +48,7 @@
 
   <steps mode="prescriptive">
     <step order="1">Ask R3 (SendMessage) to include the W7 BFF commits in its next dev candidate; wait for its read-back.</step>
-    <step order="2">Deploy the PCF, the RecordFamily code page, the web resource and the CreateWorkAssignmentWizard code page (038) with their skills; the Console carries 038 on its next Deploy-SpaarkeAi.ps1 run (record whether it was included). Record versions.</step>
+    <step order="2">Deploy the TrackingFieldTrio PCF (074) and the CreateWorkAssignmentWizard code page (038) — NOT sprk_fieldmapping_push.js or the RecordFamily code page, which ship with 040 (owner, 2026-10-28) with their skills; the Console carries 038 on its next Deploy-SpaarkeAi.ps1 run (record whether it was included). Record versions.</step>
     <step order="3">Live check as the owner: a Matter with projects (pair-filed, after UAC 195), work assignments, documents and events — the Family view lists them with numbers. Then 038: create a work assignment from a matter with Assigned To chosen, and one with it blank; the first keeps the chosen contact, the second gets its Assigned To Internal.</step>
     <step order="4">Live check as a narrower user: a record under an unreadable parent is absent, and nothing reveals it.</step>
     <step order="5">Read App Insights for /records/*/family: 0 5xx; p95 recorded (design §12.11 query-count limit).</step>
