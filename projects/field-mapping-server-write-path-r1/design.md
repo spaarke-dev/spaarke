@@ -790,3 +790,48 @@ The structured family entity (`sprk_securefamily`) is **not built now**; it is o
   - every ownership write goes through `RecordOwnershipResolver` (W7 is read-only and writes none);
   - new code that tests isolation does so through UAC's one shared predicate keyed on the Secure Record business unit, never a hard-coded team id. W7 does not decide isolation (Dataverse read does, as the caller); 070's C2 guard and any test fixture follow the same rule.
   - The predicate (UAC-r2, 2026-10-28): `SecureRecordOwnerTeam.IsInSecureBusinessUnit(owningBusinessUnitId, secureBusinessUnitId)` → `bool?` (`Infrastructure/Dataverse/SecureRecordOwnerTeam.cs`). Select `owningbusinessunit` on the rows checked; `null` = cannot tell → fail closed. The Secure BU id comes from `SecureChildShareSynchronizer.ResolveSecureBusinessUnitAsync` → `(Id, Ambiguous)`: Ambiguous → refuse; no id → the environment has no Secure Record BU; a fault propagates. Resolve once per request or pass. UAC 194b moves the resolver to `SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync` (a one-line rename at merge). Never compare `ownerid` with the Secure Record Owners team id.
+
+## 13. Customer configuration ownership and a server-owned search index (addendum 2026-10-28, #2399; DRAFT for UAC-r2 and provisioning review)
+
+### 13.1 Why
+
+- **Live defect #2399 (dev, 2026-10-28).** A child-BU user's Work Assignment create was refused with the uniform 404.
+  - The wizard binds the user's BU index (`EntityCreationService.resolveUserBuDefaults`).
+  - Step 5 asks AppendTo as the caller on that `sprk_aisearchindex` row.
+  - The row is owned in the root BU, which Core User's Deep Read and AppendTo cannot reach.
+- **Same defect, mapping configuration.** All `sprk_fieldmappingprofile` and `sprk_fieldmappingrule` rows are root-owned too. For child-BU users the client mapping engine maps nothing, and the Push Updates `hasSourceProfile` query hides the button.
+- **Owner rule (UAC round 136).** The root BU holds Spaarke product data only. Customer configuration belongs in the customer's top BU.
+- **UAC-r2 review.** Global AppendTo on the index would let any user route documents into any BU's index, so the owner chose re-ownership instead of widening the role.
+
+### 13.2 Components
+
+| # | Change | Owner of the code | Notes |
+|---|---|---|---|
+| a | The memberless team "Spaarke Customer Configuration Owners", plus the role "Customer Configuration Owner" (Read at Basic on `sprk_aisearchindex`, `sprk_fieldmappingprofile`, `sprk_fieldmappingrule`), with its script and guard | **UAC-r2** (194b R4b-3b) | Not this project. The script runs per customer BU and refuses the root and Secure Record. |
+| b | Re-own dev's 11 index rows, 7 profiles and 40 rules to that team in Spaarke Business Unit 1 | this project (live write; owner's go) | No cascade from these tables (checked on dev). Read-back required. |
+| c | **FR-38: the search index is server-owned** on every search-indexed table, on every server create path | this project | See §13.3. Amends FR-10's "an explicit value wins". |
+| d | **FR-39: the mapping seeder owns its rows to the team** | **provisioning** (`DataverseWebApiFieldMappingSeeder`, H12b), with this project | Resolves the team by name and customer top BU. Refuses if it is missing or duplicated; never falls back to the caller or the root. |
+| e | Wizards stop binding the index (`applyUserBuDefaults` / `bindLookup('sprk_aisearchindex', …)`) | this project, folded into W3 tasks 021–029 | After (c): the server applies the index itself. |
+
+### 13.3 FR-38 — the server-owned search index (proposed)
+
+- On a search-indexed table, a client-supplied `sprk_ai_search_index` is **not** a lookup the caller binds. The server **drops** it before step 5, so no AppendTo is asked on the catalog. Step 8 then applies the **owning** BU's index (FR-10, fill-only from the server's own choice).
+- A dropped value that differs from the one the server applies is logged as `client_search_index_dropped`. This is the precedent of 018's `default_value_dropped`.
+- Alternative (UAC-r2's other shape): accept a client value only when it equals the owning BU's index, and refuse otherwise (400). **Recommended: drop.** No product surface lets a user choose an index on purpose, and a refusal would break today's wizards until (e) ships.
+- Not covered: native form edits of the lookup. Those are Dataverse's own role checks; out of scope, as for every native write (W5).
+
+### 13.4 Sequencing
+
+(a) UAC sha → owner's go → (b) re-own on dev (this immediately fixes #2399) → (c) with task 017's route re-point (the child-records route then runs `RecordCreationService` step 8) → (e) in W3 → (d) with provisioning's next H12b change.
+
+### 13.5 Open questions
+
+1. **Owner:** drop or refuse for a client index (§13.3). Recommended: drop.
+2. **Provisioning:** what creates `sprk_aisearchindex` rows in a customer environment? Nothing in the control plane seeds them (only `scripts/phase-g-lookup-migration/Migrate-SearchIndexLookup.ps1` touches them). Whatever does must own them to the team.
+3. **Owner (#2410):** Basic User reads rules but not profiles.
+4. **Dev arrangement (UAC-r2):** users homed in dev's root BU won't read team-owned rows in BU1 through Deep. That is the open dev-layout item, not routed around here.
+
+### 13.6 Component justification (§11)
+
+- **FR-38.** *Existing:* FR-10's fill-only default at step 8 (`RecordCreationService.SearchIndexDefaultAsync`). *Extension:* yes. The same step owns the column, plus a drop before step 5; no new service. *Cost of doing nothing:* every child-BU user's create is refused whenever their BU names an index the caller cannot append to (#2399), and a client can route a record into another BU's index.
+- **FR-39.** *Existing:* H12b's seeder. *Extension:* yes, an owner bind on its creates. *Cost of doing nothing:* every seeded mapping row lands owned by the provisioning identity's BU instead of the customer team, which is the #2399 defect for mapping configuration.
