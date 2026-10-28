@@ -181,6 +181,203 @@ public class SubmissionMarkerWriterGuardTests
 
     private static bool KeyMatches(string name) => KeyedWrites[0].IsMatch($"update[{name}] = value;");
 
+    // ── the callers one level up (095 review F6 / uac K1) ──────────────────────────────────────────────────────────
+    //
+    // The rules above stop at CreateDocumentWithSpePointersAsync, the one member that passes the flag to the outcome. Two more rules
+    // close the path to it: only the Office save (OfficeService.SaveCoreAsync) passes submissionNarrowing to that create, and only the
+    // from-email submission (FromEmailSubmissionService.SubmitAsync) runs the submission save. A positional flag (16 top-level arguments)
+    // counts as passing it. Limits: a call through a delegate or reflection is not seen.
+
+    private const string OfficeServiceFile = "src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs";
+    private const string FromEmailServiceFile = "src/server/api/Sprk.Bff.Api/Services/Finance/Submission/FromEmailSubmissionService.cs";
+
+    /// <summary>The one member that may pass <c>submissionNarrowing</c> to <c>CreateDocumentWithSpePointersAsync</c>.</summary>
+    private static readonly Writer NarrowingCaller = new(OfficeServiceFile, "SaveCoreAsync",
+        "Task 095: the save pipeline, which passes submission is not null; SaveEmailForSubmissionAsync is its only submission entry.");
+
+    /// <summary>The one member that may call <c>SaveEmailForSubmissionAsync</c>.</summary>
+    private static readonly Writer SubmissionSaveCaller = new(FromEmailServiceFile, "SubmitAsync",
+        "Task 095: the from-email submission, after the marks, the firm, the replay of K and the communication's filing.");
+
+    /// <summary>The position of <c>submissionNarrowing</c> in the full <c>CreateDocumentWithSpePointersAsync</c> signature (1-based).</summary>
+    private const int NarrowingPosition = 16;
+
+    [Fact(DisplayName = "Task 095: only OfficeService.SaveCoreAsync passes submissionNarrowing, and only the from-email submission runs the submission save")]
+    public void TheSubmissionNarrowingIsReachedOnlyThroughTheFromEmailSubmission()
+    {
+        var uses = new List<Use>();
+        foreach (var f in SourceScan.ServerSourceFiles())
+            uses.AddRange(ScanUses(Normalize(SourceScan.Relative(f)), File.ReadAllLines(f)));
+
+        // Non-vacuity: the approved call of each is seen.
+        Assert.True(uses.Any(u => u.Kind == UseKind.NarrowingPass && u.File == NarrowingCaller.File && u.Member == NarrowingCaller.Member),
+            "OfficeService.SaveCoreAsync should be seen passing submissionNarrowing: the scan lost its signal.");
+        Assert.True(uses.Any(u => u.Kind == UseKind.SubmissionSave && u.File == SubmissionSaveCaller.File && u.Member == SubmissionSaveCaller.Member),
+            "FromEmailSubmissionService.SubmitAsync should be seen calling SaveEmailForSubmissionAsync: the scan lost its signal.");
+
+        var problems = JudgeUses(uses, NarrowingCaller, SubmissionSaveCaller);
+        Assert.True(problems.Count == 0,
+            "The from-email submission's narrowing is reached only through FromEmailSubmissionService.SubmitAsync → " +
+            "SaveEmailForSubmissionAsync → OfficeService.SaveCoreAsync (task 095):\n" + string.Join("\n", problems));
+    }
+
+    [Fact(DisplayName = "Task 095 guard control: another narrowing pass or submission-save call fires; the approved ones, plain creates and declarations do not")]
+    public void Callers_MustFireAndMustNotFire()
+    {
+        var uses = ScanUses("control.cs", CallerControlSource.Split('\n')).ToList();
+        var problems = JudgeUses(uses,
+            new Writer("control.cs", "SaveCoreAsync", "control"), new Writer("control.cs", "SubmitAsync", "control"));
+
+        // Must fire: a named pass and a positional pass elsewhere, and a submission save from another member (call and method group).
+        Assert.Contains(problems, p => p.StartsWith("NARROWING PASS", StringComparison.Ordinal) && p.Contains("OtherSaveAsync"));
+        Assert.Contains(problems, p => p.StartsWith("NARROWING PASS", StringComparison.Ordinal) && p.Contains("PositionalAsync"));
+        Assert.Contains(problems, p => p.StartsWith("SUBMISSION SAVE", StringComparison.Ordinal) && p.Contains("SneakyAsync"));
+        Assert.Contains(problems, p => p.StartsWith("SUBMISSION SAVE", StringComparison.Ordinal) && p.Contains("MethodGroup"));
+        // Must not fire: the approved members, a create without the flag (15 arguments), the declarations and a comment.
+        Assert.Equal(4, problems.Count);
+        Assert.DoesNotContain(problems, p => p.Contains(" SaveCoreAsync:") || p.Contains(" SubmitAsync:") || p.Contains(" ForwardingAsync:"));
+    }
+
+    private enum UseKind { NarrowingPass, SubmissionSave }
+
+    private sealed record Use(UseKind Kind, string File, string Member, int Line);
+
+    private static readonly Regex CreateCall = new(@"\bCreateDocumentWithSpePointersAsync\s*\(", RegexOptions.Compiled);
+
+    private static readonly Regex SubmissionSaveUse = new(
+        @"(?<!\bIOfficeSubmissionEmailSave\.)(?<!Task<SubmissionEmailSaveOutcome>\s+)\bSaveEmailForSubmissionAsync\b", RegexOptions.Compiled);
+
+    private static IEnumerable<Use> ScanUses(string file, IReadOnlyList<string> lines)
+    {
+        var bare = lines.Select(SourceScan.StripLineComment).Select(l => StringLiteral.Replace(l, "\"\"")).ToList();
+        var members = MembersByLine(bare);
+        for (var i = 0; i < bare.Count; i++)
+        {
+            foreach (Match m in SubmissionSaveUse.Matches(bare[i]))
+                yield return new Use(UseKind.SubmissionSave, file, members[i], i + 1);
+
+            foreach (Match m in CreateCall.Matches(bare[i]))
+            {
+                // A call's arguments up to its closing parenthesis (at most 40 lines: the Office save's call carries comments).
+                var text = bare[i][(m.Index + m.Length)..];
+                for (var j = i + 1; j < bare.Count && j <= i + 40; j++)
+                    text += "\n" + bare[j];
+                var (args, isDeclaration) = TopLevelArguments(text);
+                if (!isDeclaration && (args.Any(a => Regex.IsMatch(a, @"^\s*submissionNarrowing\s*:")) || args.Count >= NarrowingPosition))
+                    yield return new Use(UseKind.NarrowingPass, file, members[i], i + 1);
+            }
+        }
+    }
+
+    /// <summary>The top-level arguments of a call whose text starts just after its "("; a parameter list (a declaration) is flagged.</summary>
+    private static (List<string> Args, bool IsDeclaration) TopLevelArguments(string text)
+    {
+        var args = new List<string>();
+        var depth = 0;
+        var current = new System.Text.StringBuilder();
+        foreach (var c in text)
+        {
+            if (c is '(' or '[' or '{') depth++;
+            if (c is ')' or ']' or '}')
+            {
+                if (depth == 0)
+                {
+                    args.Add(current.ToString());
+                    break;
+                }
+
+                depth--;
+            }
+
+            if (c == ',' && depth == 0)
+            {
+                args.Add(current.ToString());
+                current.Clear();
+                continue;
+            }
+
+            current.Append(c);
+        }
+
+        // A declaration's parameters are "Type name" pairs; the overload's own signature is not a call.
+        var isDeclaration = args.Count > 0 && Regex.IsMatch(args[0].Trim(), @"^[A-Za-z_][\w.<>?]*\s+[A-Za-z_]\w*$");
+        return (args, isDeclaration);
+    }
+
+    private static List<string> JudgeUses(IEnumerable<Use> uses, Writer narrowingCaller, Writer submissionSaveCaller)
+    {
+        var problems = new List<string>();
+        foreach (var u in uses.OrderBy(u => u.File, StringComparer.Ordinal).ThenBy(u => u.Line))
+        {
+            if (u.Kind == UseKind.NarrowingPass && !(u.File == narrowingCaller.File && u.Member == narrowingCaller.Member))
+                problems.Add($"NARROWING PASS from {u.File}:{u.Line} {u.Member}: only {narrowingCaller.Member} passes submissionNarrowing.");
+            else if (u.Kind == UseKind.SubmissionSave && !(u.File == submissionSaveCaller.File && u.Member == submissionSaveCaller.Member))
+                problems.Add($"SUBMISSION SAVE from {u.File}:{u.Line} {u.Member}: only {submissionSaveCaller.Member} runs SaveEmailForSubmissionAsync.");
+        }
+
+        return problems;
+    }
+
+    // The callers' control source. It is never compiled; only the detector reads it.
+    private const string CallerControlSource = """
+        internal interface IOfficeSubmissionEmailSave
+        {
+            Task<SubmissionEmailSaveOutcome> SaveEmailForSubmissionAsync(
+                SaveRequest request, IReadOnlyList<string> marked, string userId, HttpContext http, CancellationToken ct);
+        }
+
+        internal sealed class Control
+        {
+            async Task<SubmissionEmailSaveOutcome> IOfficeSubmissionEmailSave.SaveEmailForSubmissionAsync(
+                SaveRequest request, IReadOnlyList<string> marked, string userId, HttpContext http, CancellationToken ct)
+            {
+                return await SaveCoreAsync(request, userId, http, new SubmissionSaveState(), ct);
+            }
+
+            private async Task<SaveResponse> SaveCoreAsync(SaveRequest request, string userId, HttpContext http, SubmissionSaveState? submission, CancellationToken ct)
+            {
+                var created = await _persistence.CreateDocumentWithSpePointersAsync(
+                    request, drive, item, url, name, docName, size, userId, ct,
+                    // a comment, with commas, inside the call
+                    pre, team, person,
+                    emailCommunicationId: communication,
+                    submissionNarrowing: submission is not null);
+                return created;
+            }
+
+            private async Task OtherSaveAsync(SaveRequest request)
+            {
+                await _persistence.CreateDocumentWithSpePointersAsync(request, d, i, u, n, n, s, user, ct, submissionNarrowing: true);
+            }
+
+            private async Task PositionalAsync(SaveRequest request)
+            {
+                await _persistence.CreateDocumentWithSpePointersAsync(request, d, i, u, n, n, s, user, ct, p, t, c, e, j, f, true);
+            }
+
+            public Task<(Guid, bool, Guid?)> ForwardingAsync(SaveRequest request, string driveId)
+                => _persistence.CreateDocumentWithSpePointersAsync(
+                    request, d, i, u, n, n, s, user, ct, p, t, c, e, j, f);
+
+            public async Task<FromEmailSubmissionOutcome> SubmitAsync(FromEmailSubmissionInput input, CancellationToken ct)
+            {
+                var outcome = await _save.SaveEmailForSubmissionAsync(request, shas, user, http, ct);
+                // _save.SaveEmailForSubmissionAsync(request, shas, user, http, ct); in a comment
+                return outcome;
+            }
+
+            private async Task SneakyAsync(SaveRequest request)
+            {
+                await ((IOfficeSubmissionEmailSave)this).SaveEmailForSubmissionAsync(request, shas, user, http, ct);
+            }
+
+            private void MethodGroup()
+            {
+                Func<SaveRequest, IReadOnlyList<string>, string, HttpContext, CancellationToken, Task<SubmissionEmailSaveOutcome>> run = _save.SaveEmailForSubmissionAsync;
+            }
+        }
+        """;
+
     // ── rules ────────────────────────────────────────────────────────────────────────────────────────────────────
 
     private static List<string> Judge(Scan scan, IReadOnlyList<Writer> approved, IReadOnlyList<Writer> callers, Writer submissionCaller)
