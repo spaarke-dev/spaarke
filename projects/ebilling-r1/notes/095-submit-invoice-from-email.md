@@ -227,3 +227,9 @@ Findings from the adversarial review and uac-r2's review, fixed on this branch. 
 - uac K3: 409 `document_core_record_mismatch` is accepted as the answer per D-140.
 - uac K5, handed to task 094: `sprk_createdbyperson` = the caller on the submission row; model step A on the duplicate path; the caller's Read on the `.eml` and its communication.
 - #2363 (filed by uac): plain `/office/save` CRLF. The base64 change in `BuildEmlFromMetadata` applies to every email save, so it should also fix #2363's `.eml` attachment bytes; #2363 stays open for its own verification.
+
+### Acceptance conditions (uac-r2 at cc7bb5eeee, 2026-10-28)
+
+- **K1, one level down:** `SubmissionMarkerWriterGuardTests` now also requires that `new SubmissionSaveState`, and `SaveCoreAsync` with a submission that is not a literal null, appear only in the explicit `IOfficeSubmissionEmailSave.SaveEmailForSubmissionAsync`. Control lines `BackdoorAsync` and `PassThroughAsync` must fire; `SaveAsync` and `PlainSaveAsync` (null, named or positional) must not. Seeded in the real source (a new `OfficeService` member calling `SaveCoreAsync(..., new SubmissionSaveState(), ...)`): the guard went red.
+- **The byte-for-byte proof:** `OfficeSubmissionEmailSaveContractTests` lives under `tests/integration/contract/` and compiles into `Sprk.Bff.Api.Tests` (the contract glob), not `Sprk.Bff.Api.IntegrationTests`. Added `SubmissionSave_AMarkedLfTextFile_ReachesStorageByteForByte` (through the real save pipeline). With the base64 line removed, 4 of its 13 tests went red, this one included.
+- **K2:** filed as DEF-050 (#2390): the loser of a re-attempt race keeps its own `.eml`; a request-path delete would race the queued finalization job.

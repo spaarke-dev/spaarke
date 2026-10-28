@@ -10,6 +10,38 @@
 
 ## Open (in priority order)
 
+### DEF-050 — Orphaned submission-marked .eml after a from-email re-attempt race
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-28 |
+| **Source** | uac-r2 acceptance review of task 095 at cc7bb5eeee (condition K2) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2390 |
+
+**Description**
+
+On the from-email route (task 095), two users who re-attempt one Failed submission at once (EB-D-165) both run their own in-process email save before the submission create. The deterministic id lets only one create; the loser answers 409 `document_already_submitted`, but the `.eml` its save created stays. It is own-Restricted and marked, so nothing leaks, but no submission names it and nothing removes it (the same holds for the same-caller race, 095 notes section 7 K1). Each race leaves one orphaned Restricted `.eml` and its SPE file under the core record.
+
+Not fixed in the request path: the save has already queued its upload-finalization job, so a delete would race the worker; it would need a new SPE and row delete on the request path; and on the duplicate path the `.eml` is the caller's earlier save, which must not be deleted.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Services/Finance/Submission/FromEmailSubmissionService.cs` — `SubmitAsync`, the `FromEmailSubmitOutcome.AlreadyCreated` case
+- `src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs` — `SaveCoreAsync` (queues the finalization job before returning)
+- `tests/unit/Sprk.Bff.Api.Tests/Services/Finance/Submission/FromEmailSubmissionServiceTests.cs` — `ReAttempt_TwoCallersRaceOnOneFailedAttempt_ExactlyOneNewGeneration_TheOtherGets409`
+
+**Suggested fix** (if known)
+
+A scheduled sweep (ADR-036 `IScheduledJob`) of `.eml` documents with `sprk_restrictedbysubmission = true`, older than a grace period, that no submission's Stored File names as its source (`sprk_sourcedocument`), once task 094 records the source.
+
+**Estimated effort**: 1-2 days, after task 094.
+**Blockers**: task 094 (records each submission's source `.eml`).
+**Related**: EB-D-165; `notes/095-submit-invoice-from-email.md` sections 7 (K1) and 10.
+
+---
+
 ### ISS-009 — Before merging to master: every BFF environment must define CONTENT_UNDERSTANDING_ENDPOINT (task 043)
 
 | Field | Value |

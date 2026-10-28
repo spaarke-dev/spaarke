@@ -202,6 +202,19 @@ public class SubmissionMarkerWriterGuardTests
     /// <summary>The position of <c>submissionNarrowing</c> in the full <c>CreateDocumentWithSpePointersAsync</c> signature (1-based).</summary>
     private const int NarrowingPosition = 16;
 
+    /// <summary>
+    /// The one member that may make a submission state (<c>new SubmissionSaveState</c>) or run <c>SaveCoreAsync</c> with a non-null
+    /// submission: the explicit implementation of <c>IOfficeSubmissionEmailSave.SaveEmailForSubmissionAsync</c> (uac-r2 095 K1). Any other
+    /// member doing either would reach the narrowed create without the from-email submission's checks.
+    /// </summary>
+    private static readonly Writer SubmissionStateMaker = new(OfficeServiceFile, ExplicitSubmissionSave,
+        "Task 095: the submission save's one entry; it makes the state and hands it to SaveCoreAsync.");
+
+    private const string ExplicitSubmissionSave = "IOfficeSubmissionEmailSave.SaveEmailForSubmissionAsync";
+
+    /// <summary>The position of <c>submission</c> in <c>SaveCoreAsync</c>'s signature (1-based).</summary>
+    private const int SubmissionStatePosition = 4;
+
     [Fact(DisplayName = "Task 095: only OfficeService.SaveCoreAsync passes submissionNarrowing, and only the from-email submission runs the submission save")]
     public void TheSubmissionNarrowingIsReachedOnlyThroughTheFromEmailSubmission()
     {
@@ -214,8 +227,10 @@ public class SubmissionMarkerWriterGuardTests
             "OfficeService.SaveCoreAsync should be seen passing submissionNarrowing: the scan lost its signal.");
         Assert.True(uses.Any(u => u.Kind == UseKind.SubmissionSave && u.File == SubmissionSaveCaller.File && u.Member == SubmissionSaveCaller.Member),
             "FromEmailSubmissionService.SubmitAsync should be seen calling SaveEmailForSubmissionAsync: the scan lost its signal.");
+        Assert.True(uses.Count(u => u.Kind == UseKind.SubmissionState && u.File == SubmissionStateMaker.File && u.Member == SubmissionStateMaker.Member) >= 2,
+            "The explicit SaveEmailForSubmissionAsync should be seen making the state and passing it to SaveCoreAsync: the scan lost its signal.");
 
-        var problems = JudgeUses(uses, NarrowingCaller, SubmissionSaveCaller);
+        var problems = JudgeUses(uses, NarrowingCaller, SubmissionSaveCaller, SubmissionStateMaker);
         Assert.True(problems.Count == 0,
             "The from-email submission's narrowing is reached only through FromEmailSubmissionService.SubmitAsync → " +
             "SaveEmailForSubmissionAsync → OfficeService.SaveCoreAsync (task 095):\n" + string.Join("\n", problems));
@@ -226,23 +241,37 @@ public class SubmissionMarkerWriterGuardTests
     {
         var uses = ScanUses("control.cs", CallerControlSource.Split('\n')).ToList();
         var problems = JudgeUses(uses,
-            new Writer("control.cs", "SaveCoreAsync", "control"), new Writer("control.cs", "SubmitAsync", "control"));
+            new Writer("control.cs", "SaveCoreAsync", "control"), new Writer("control.cs", "SubmitAsync", "control"),
+            new Writer("control.cs", ExplicitSubmissionSave, "control"));
 
         // Must fire: a named pass and a positional pass elsewhere, and a submission save from another member (call and method group).
         Assert.Contains(problems, p => p.StartsWith("NARROWING PASS", StringComparison.Ordinal) && p.Contains("OtherSaveAsync"));
         Assert.Contains(problems, p => p.StartsWith("NARROWING PASS", StringComparison.Ordinal) && p.Contains("PositionalAsync"));
         Assert.Contains(problems, p => p.StartsWith("SUBMISSION SAVE", StringComparison.Ordinal) && p.Contains("SneakyAsync"));
         Assert.Contains(problems, p => p.StartsWith("SUBMISSION SAVE", StringComparison.Ordinal) && p.Contains("MethodGroup"));
-        // Must not fire: the approved members, a create without the flag (15 arguments), the declarations and a comment.
-        Assert.Equal(4, problems.Count);
-        Assert.DoesNotContain(problems, p => p.Contains(" SaveCoreAsync:") || p.Contains(" SubmitAsync:") || p.Contains(" ForwardingAsync:"));
+        // Must fire (uac-r2 K1): a submission state made, or SaveCoreAsync run with one, outside the explicit implementation.
+        Assert.Contains(problems, p => p.StartsWith("SUBMISSION STATE", StringComparison.Ordinal) && p.Contains("BackdoorAsync:"));
+        Assert.Contains(problems, p => p.StartsWith("SUBMISSION STATE", StringComparison.Ordinal) && p.Contains("PassThroughAsync:"));
+        // Must not fire: the approved members, a create without the flag (15 arguments), SaveCoreAsync with a null submission (named
+        // or positional), the declarations and a comment. BackdoorAsync is reported twice: it makes a state and passes it.
+        Assert.Equal(2, problems.Count(p => p.Contains("BackdoorAsync:")));
+        Assert.Equal(7, problems.Count);
+        Assert.DoesNotContain(problems, p => p.Contains(" SaveCoreAsync:") || p.Contains(" SubmitAsync:") || p.Contains(" ForwardingAsync:")
+            || p.Contains(" SaveAsync:") || p.Contains(" PlainSaveAsync:") || p.Contains(ExplicitSubmissionSave + ":"));
     }
 
-    private enum UseKind { NarrowingPass, SubmissionSave }
+    private enum UseKind { NarrowingPass, SubmissionSave, SubmissionState }
 
     private sealed record Use(UseKind Kind, string File, string Member, int Line);
 
     private static readonly Regex CreateCall = new(@"\bCreateDocumentWithSpePointersAsync\s*\(", RegexOptions.Compiled);
+
+    private static readonly Regex NewSubmissionState = new(@"\bnew\s+SubmissionSaveState\b", RegexOptions.Compiled);
+
+    private static readonly Regex SaveCoreCall = new(@"\bSaveCoreAsync\s*\(", RegexOptions.Compiled);
+
+    private static readonly Regex ExplicitSubmissionSaveDeclaration = new(
+        @"\bTask<SubmissionEmailSaveOutcome>\s+IOfficeSubmissionEmailSave\.SaveEmailForSubmissionAsync\s*\(", RegexOptions.Compiled);
 
     private static readonly Regex SubmissionSaveUse = new(
         @"(?<!\bIOfficeSubmissionEmailSave\.)(?<!Task<SubmissionEmailSaveOutcome>\s+)\bSaveEmailForSubmissionAsync\b", RegexOptions.Compiled);
@@ -251,10 +280,31 @@ public class SubmissionMarkerWriterGuardTests
     {
         var bare = lines.Select(SourceScan.StripLineComment).Select(l => StringLiteral.Replace(l, "\"\"")).ToList();
         var members = MembersByLine(bare);
+        MarkExplicitSubmissionSave(bare, members);
         for (var i = 0; i < bare.Count; i++)
         {
             foreach (Match m in SubmissionSaveUse.Matches(bare[i]))
                 yield return new Use(UseKind.SubmissionSave, file, members[i], i + 1);
+
+            foreach (Match m in NewSubmissionState.Matches(bare[i]))
+                yield return new Use(UseKind.SubmissionState, file, members[i], i + 1);
+
+            foreach (Match m in SaveCoreCall.Matches(bare[i]))
+            {
+                var text = bare[i][(m.Index + m.Length)..];
+                for (var j = i + 1; j < bare.Count && j <= i + 20; j++)
+                    text += "\n" + bare[j];
+                var (args, isDeclaration) = TopLevelArguments(text);
+                if (isDeclaration)
+                    continue;
+
+                // The submission argument: named, else the 4th positional. Only a literal null is "no submission".
+                var named = args.FirstOrDefault(a => Regex.IsMatch(a, @"^\s*submission\s*:"));
+                var submission = named is not null ? named[(named.IndexOf(':') + 1)..]
+                    : args.Count >= SubmissionStatePosition ? args[SubmissionStatePosition - 1] : "null";
+                if (submission.Trim() != "null")
+                    yield return new Use(UseKind.SubmissionState, file, members[i], i + 1);
+            }
 
             foreach (Match m in CreateCall.Matches(bare[i]))
             {
@@ -265,6 +315,34 @@ public class SubmissionMarkerWriterGuardTests
                 var (args, isDeclaration) = TopLevelArguments(text);
                 if (!isDeclaration && (args.Any(a => Regex.IsMatch(a, @"^\s*submissionNarrowing\s*:")) || args.Count >= NarrowingPosition))
                     yield return new Use(UseKind.NarrowingPass, file, members[i], i + 1);
+            }
+        }
+    }
+
+    /// <summary>
+    /// The member detector does not name an explicit interface implementation (its name is dotted), so the lines of
+    /// <c>IOfficeSubmissionEmailSave.SaveEmailForSubmissionAsync</c>'s declaration and body are attributed to it here.
+    /// </summary>
+    private static void MarkExplicitSubmissionSave(IReadOnlyList<string> bare, string[] members)
+    {
+        for (var i = 0; i < bare.Count; i++)
+        {
+            if (!ExplicitSubmissionSaveDeclaration.IsMatch(bare[i]))
+                continue;
+
+            var depth = 0;
+            var opened = false;
+            for (var j = i; j < bare.Count; j++)
+            {
+                members[j] = ExplicitSubmissionSave;
+                foreach (var c in bare[j])
+                {
+                    if (c == '{') { depth++; opened = true; }
+                    else if (c == '}') depth--;
+                }
+
+                if (opened && depth == 0)
+                    break;
             }
         }
     }
@@ -304,7 +382,7 @@ public class SubmissionMarkerWriterGuardTests
         return (args, isDeclaration);
     }
 
-    private static List<string> JudgeUses(IEnumerable<Use> uses, Writer narrowingCaller, Writer submissionSaveCaller)
+    private static List<string> JudgeUses(IEnumerable<Use> uses, Writer narrowingCaller, Writer submissionSaveCaller, Writer submissionStateMaker)
     {
         var problems = new List<string>();
         foreach (var u in uses.OrderBy(u => u.File, StringComparer.Ordinal).ThenBy(u => u.Line))
@@ -313,6 +391,8 @@ public class SubmissionMarkerWriterGuardTests
                 problems.Add($"NARROWING PASS from {u.File}:{u.Line} {u.Member}: only {narrowingCaller.Member} passes submissionNarrowing.");
             else if (u.Kind == UseKind.SubmissionSave && !(u.File == submissionSaveCaller.File && u.Member == submissionSaveCaller.Member))
                 problems.Add($"SUBMISSION SAVE from {u.File}:{u.Line} {u.Member}: only {submissionSaveCaller.Member} runs SaveEmailForSubmissionAsync.");
+            else if (u.Kind == UseKind.SubmissionState && !(u.File == submissionStateMaker.File && u.Member == submissionStateMaker.Member))
+                problems.Add($"SUBMISSION STATE from {u.File}:{u.Line} {u.Member}: only {submissionStateMaker.Member} makes a submission state or passes one to SaveCoreAsync.");
         }
 
         return problems;
@@ -331,8 +411,25 @@ public class SubmissionMarkerWriterGuardTests
             async Task<SubmissionEmailSaveOutcome> IOfficeSubmissionEmailSave.SaveEmailForSubmissionAsync(
                 SaveRequest request, IReadOnlyList<string> marked, string userId, HttpContext http, CancellationToken ct)
             {
-                return await SaveCoreAsync(request, userId, http, new SubmissionSaveState(), ct);
+                var state = new SubmissionSaveState { MarkedSha256 = marked };
+                if (state is not null) { }
+                return await SaveCoreAsync(request, userId, http, state, ct);
             }
+
+            public Task<SaveResponse> SaveAsync(SaveRequest request, string userId, HttpContext http, CancellationToken ct = default)
+                => SaveCoreAsync(request, userId, http, submission: null, ct);
+
+            private Task<SaveResponse> PlainSaveAsync(SaveRequest request, string userId, HttpContext http)
+                => SaveCoreAsync(request, userId, http, null, CancellationToken.None);
+
+            private async Task<SaveResponse> BackdoorAsync(SaveRequest request, string userId, HttpContext http)
+            {
+                return await SaveCoreAsync(request, userId, http, new SubmissionSaveState(), CancellationToken.None);
+            }
+
+            private Task<SaveResponse> PassThroughAsync(SaveRequest request, SubmissionSaveState? carried)
+                => SaveCoreAsync(request, "u", null!,
+                    submission: carried, CancellationToken.None);
 
             private async Task<SaveResponse> SaveCoreAsync(SaveRequest request, string userId, HttpContext http, SubmissionSaveState? submission, CancellationToken ct)
             {
