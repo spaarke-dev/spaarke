@@ -1,7 +1,8 @@
 /**
  * invoiceSubmissionMessages.ts — user text for ebilling's from-email invoice submission (task 133 A1).
  *
- * Every code pinned in `projects/ebilling-r1/notes/095-from-email-contract.md` (pinned at fd70b8e1f6) §5 (replays),
+ * Every code pinned in `projects/ebilling-r1/notes/095-from-email-contract.md` (pinned at fd70b8e1f6; the 2026-10-28
+ * review round at cc7bb5eeee, task/ebill-095-from-email) §5 (replays),
  * §6 (refusals, with the `marks_invalid`, `email_unidentifiable` and `correction_not_allowed` reasons) and §9 (final
  * outcomes) has its own sentence here, in the catalog pattern of `errorMessages.ts`. No server prose is pinned (§9:
  * "the add-in localises"), so the server's `detail` is never shown in place of these. A code this file does not know
@@ -10,6 +11,16 @@
 
 /** §6: the permanent "this email can't be identified" refusal (the view then offers uploading in Spaarke). */
 export const EMAIL_UNIDENTIFIABLE_CODE = 'ebilling.submission.email_unidentifiable';
+
+/**
+ * §6 refusals that cannot work from Outlook, so the view also suggests uploading in Spaarke: the email can't be
+ * identified, or a marked file can't be kept byte for byte in the saved email (422, 2026-10-28; its `detail` names the
+ * internal upload route).
+ */
+export const PERMANENT_SUBMISSION_CODES: ReadonlySet<string> = new Set([
+  EMAIL_UNIDENTIFIABLE_CODE,
+  'ebilling.submission.attachment_not_preserved',
+]);
 
 /** What a sentence may name. */
 export interface InvoiceMessageContext {
@@ -114,19 +125,22 @@ export const SUBMISSION_ERROR_MESSAGES: Readonly<Record<string, Entry>> = {
   'ebilling.submission.submission_already_ended':
     'This email was already submitted with these same details, and the invoice was rejected. You can follow it in ' +
     `Spaarke. ${NOTHING}`,
-  'ebilling.submission.document_already_submitted': `This invoice was already submitted from this email with different details. ${NOTHING}`,
+  'ebilling.submission.document_already_submitted': `This email was already submitted as an invoice for this record. You can follow it in Spaarke. ${NOTHING}`,
   OFFICE_IDEMPOTENCY_CONFLICT: f => `This submission is still being sent. ${tryAgain(f)}`,
   // §6 access and filters
   OFFICE_AUTH_001: `Your sign-in has expired. Sign in again, then submit. ${NOTHING}`,
   OFFICE_AUTH_002: `Your sign-in has expired. Sign in again, then submit. ${NOTHING}`,
   'sdap.access.deny.internal_callers_only': `Only internal Spaarke users can submit invoices. ${NOTHING}`,
   'sdap.access.error.system_failure': f => `Spaarke couldn't check your access right now. ${NOTHING} ${tryAgain(f)}`,
-  'sdap.access.deny.insufficient_rights': `You don't have permission to submit invoices to this record. ${NOTHING}`,
+  // 2026-10-28: the access probe faulted (500, retryable, carries a correlationId).
+  OFFICE_AUTH_ERROR: f => `Spaarke couldn't check your access right now. ${NOTHING} ${tryAgain(f)}`,
+  // 2026-10-28: also a firm id that doesn't exist (the filter's check on the firm runs before firm_invalid).
+  'sdap.access.deny.insufficient_rights': `You don't have permission to submit invoices to this record or for this firm. ${NOTHING}`,
   OFFICE_009: `You don't have permission to submit invoices to this record. ${NOTHING}`,
   OFFICE_015: f => `Too many saves in a short time. ${NOTHING} ${tryAgain(f)}`,
   'ebilling.disabled': `Invoice submission is turned off in Spaarke. ${NOTHING}`,
   // §2 firm fields
-  'ebilling.submission.firm_invalid': `The chosen firm isn't a firm in Spaarke. ${NOTHING}`,
+  'ebilling.submission.firm_invalid': `The chosen firm isn't an active firm in Spaarke. ${NOTHING}`,
   'ebilling.submission.firm_not_linked': `The chosen firm isn't linked to this record. ${NOTHING}`,
   'ebilling.submission.firm_invoice_number_required': `Enter the firm's invoice number. ${NOTHING}`,
   // §6 handler refusals
@@ -142,6 +156,7 @@ export const SUBMISSION_ERROR_MESSAGES: Readonly<Record<string, Entry>> = {
   'ebilling.submission.record_unavailable': f =>
     `Spaarke couldn't reach the record right now. ${NOTHING} ${tryAgain(f)}`,
   'ebilling.submission.failed': f => `The submission couldn't be queued. ${NOTHING} ${tryAgain(f)}`,
+  'ebilling.submission.attachment_not_preserved': `One of the marked files couldn't be saved exactly as attached. ${NOTHING}`,
   'ebilling.submission.document_core_record_mismatch': `This email is filed under a different matter, project or work assignment. Submit the invoice to that record. ${NOTHING}`,
   'ebilling.submission.correction_not_allowed': fromReasons(CORRECTION_REASON_MESSAGES, CORRECTION_FALLBACK),
   'sdap.access.deny.record_unavailable': `The invoice isn't available to you: it may not exist, or you can't change it. ${NOTHING}`,
@@ -175,6 +190,8 @@ export const INVOICE_OUTCOME_MESSAGES: Readonly<Record<string, Entry>> = {
   'ebilling.submission.source_check_failed':
     "The email's filing couldn't be confirmed, so the invoice was not processed.",
   'ebilling.submission.processing_failed': "The invoice couldn't be processed.",
+  'ebilling.submission.file_scan_timeout':
+    "The malware scan of a marked file didn't finish in time, so the invoice was not processed. Submit it again.",
   'ebilling.submission.blocked': 'The invoice was rejected by a billing rule.',
   'ebilling.submission.returned': 'The invoice was returned to the firm.',
 };
@@ -188,6 +205,7 @@ export function isRetryableSubmissionRefusal(status: number, code: string | unde
   if (code === 'ebilling.disabled') return false;
   if (
     code === 'sdap.access.error.system_failure' ||
+    code === 'OFFICE_AUTH_ERROR' ||
     code === 'OFFICE_IDEMPOTENCY_CONFLICT' ||
     code === 'OFFICE_012' ||
     code === 'OFFICE_015'

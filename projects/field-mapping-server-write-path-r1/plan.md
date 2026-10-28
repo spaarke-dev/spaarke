@@ -144,6 +144,18 @@ describe; the 06x tasks consolidate them.
 - **Dependencies**: 062 edits root `CLAUDE.md` + `.claude/CHANGELOG.md` (main session only; sub-agents cannot write
   `.claude/`).
 
+### Phase 7 — W7 Record family service and Family tool (070–076; plus 037) — spec amendment 2026-10-27
+
+Detail: design.md §12; spec FR-29…FR-36.
+- 070 `RecordFamilyEdges` (Filing edges, seeded from UAC 194 `de38296499`; parity ratchet, content pin, Filing-only isolation guard).
+- 071 `RecordFamilyReader` (OBO, pruned, primary-parent rule from UAC 194b, caps, protected continuation) → 072 `GET /api/v1/records/{table}/{id}/family`.
+- 073 `RecordFamilyModal` (BrowseModal) → 074 TrackingFieldTrio Family tool (Matter, Project, WA, Event) and 075 Push Updates ribbon → code-page dialog.
+- 076 deploy + live check (BFF via R3 batch).
+- FR-34 (preview, includeAssignedTo, childIds, pair edges) folds into 040, which now also depends on 070, 071 and UAC 195.
+- 037 (FR-36): Work Assignment `sprk_assignedto` defaults to its own Assigned To Internal (UAC-r2 review gate). Startable now.
+- 038 (FR-37): optional Assigned To contact picker on the Create Work Assignment wizard; blank omits the key so FR-36 applies. After 037; deployed in 076.
+- Out of band: #2353 Work Assignment Number autonumber `WRK-{SEQNUM:6}` (dev applied 2026-10-27; PR #2358).
+
 ### Wrap-up (090)
 
 Test diet, lessons learned, README status, worktree sync.

@@ -398,6 +398,11 @@ describe('loadInvoiceFirms (§8)', () => {
     mockFetch.mockResolvedValueOnce(res(503, { errorCode: 'ebilling.submission.record_unavailable' }));
     await expect(loadInvoiceFirms(target, config)).rejects.toThrow(/couldn't list the firms/);
   });
+
+  it('a 404 record_unavailable (the read gate, 2026-10-28) says the record is not available, never []', async () => {
+    mockFetch.mockResolvedValueOnce(res(404, { reasonCode: 'sdap.access.deny.record_unavailable' }));
+    await expect(loadInvoiceFirms(target, config)).rejects.toThrow(/This record isn't available to you/);
+  });
 });
 
 describe('createInvoiceSubmitHandler — submit, then follow the status', () => {
@@ -433,6 +438,21 @@ describe('createInvoiceSubmitHandler — submit, then follow the status', () => 
       kind: 'permanent',
       message: "Spaarke couldn't find this email in your mailbox, so it can't be submitted from Outlook.",
     });
+  });
+
+  it('attachment_not_preserved (422, 2026-10-28) is permanent: nothing was saved, upload in Spaarke', async () => {
+    mockFetch.mockResolvedValueOnce(res(422, { errorCode: 'ebilling.submission.attachment_not_preserved' }));
+    const outcome = await createInvoiceSubmitHandler({ config, email: emailSource(), poll })(INPUT, { actionId: 'a' });
+    expect(outcome).toEqual({
+      kind: 'permanent',
+      message: "One of the marked files couldn't be saved exactly as attached. Nothing was submitted.",
+    });
+  });
+
+  it('OFFICE_AUTH_ERROR (500, 2026-10-28) is retryable', async () => {
+    mockFetch.mockResolvedValueOnce(res(500, { errorCode: 'OFFICE_AUTH_ERROR', correlationId: 'c-1' }));
+    const outcome = await createInvoiceSubmitHandler({ config, email: emailSource(), poll })(INPUT, { actionId: 'a' });
+    expect(outcome).toMatchObject({ kind: 'retryable', message: expect.stringMatching(/couldn't check your access/) });
   });
 
   it('accepted but still processing at the cap is not a failure', async () => {

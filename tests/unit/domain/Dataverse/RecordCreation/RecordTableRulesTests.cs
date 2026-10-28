@@ -316,4 +316,133 @@ public class RecordTableRulesTests
     [InlineData("sprk_project", "sprk_projecttype_ref")]
     public void IsNeverAReference_DoesNotFire_OnTheDeclaredReferences(string table, string column) =>
         RecordCreationService.IsNeverAReference(table, RecordTableRules.Get(table), column).Should().BeFalse();
+
+    // ── Task 037 (FR-36): the work assignment's Assigned To, copied from its own Assigned To Internal ────────────────
+
+    private static readonly Guid Internal = Guid.Parse("a0370000-0000-4000-8000-0000000000c1");
+    private static readonly Guid Chosen = Guid.Parse("a0370000-0000-4000-8000-0000000000c2");
+
+    private static DataverseWriteItemMapper.MappedLookup ContactIn(string column, Guid id) => new(column, "contact", "contacts", id);
+
+    private static DataverseWriteItemMapper.MappedItem Row(
+        IReadOnlyList<DataverseWriteItemMapper.MappedLookup> lookups, params string[] otherColumns) =>
+        new("{}", [.. otherColumns, .. lookups.Select(l => l.Column)]) { Lookups = lookups, ClearedColumns = [] };
+
+    [Fact]
+    public void CopiedDefault_IsDeclaredExactlyOnce_TheWorkAssignmentsAssignedTo_FromItsAssignedToInternal()
+    {
+        var copied = RecordTableRules.All
+            .SelectMany(r => r.ServerDefaults.Where(d => d.CopiedFrom is not null).Select(d => (r.Table, d.Column, d.CopiedFrom)))
+            .ToList();
+
+        copied.Should().Equal([("sprk_workassignment", "sprk_assignedto", "sprk_assignedtointernal")],
+            "FR-36 is declared once, on the work assignment's rule, and no other table copies a column");
+    }
+
+    /// <summary>
+    /// Task 037 fix round 2 (UAC-r2 K3): the declaration rule a copied default must keep — its TARGET is never a filing lookup.
+    /// A copy of a server-set source is server-set (no AppendTo), but RecordCreationService's "a server-set lookup is never a
+    /// filing lookup" refusal runs BEFORE step 3½ extends the server-set set, and OwnedChildWrite has no such refusal: a copy
+    /// onto a filing lookup would file the row under a record nobody asked about. Filing = the create paths' own predicate
+    /// (<see cref="RecordCreationService.IsFilingLookup(string, string)"/>: lineage, ownership-parent and secure-root filing
+    /// columns), or a column whose referenced table is an ownership parent
+    /// (<see cref="RecordReparent.FilingParentOf"/> → <see cref="RecordOwnershipResolver.IsOwnershipParent"/>).
+    /// </summary>
+    private static string? CopiedOntoAFilingLookup(string table, ServerDefault copied)
+    {
+        if (copied.CopiedFrom is null)
+            return null;
+        var target = copied.Column;
+        return RecordCreationService.IsFilingLookup(table, target)
+               || RecordOwnershipResolver.IsOwnershipParent(RecordReparent.FilingParentOf(table, target))
+            ? target
+            : null;
+    }
+
+    [Fact]
+    public void CopiedDefault_NoDeclaredCopyTargetsAFilingLookup()
+    {
+        RecordTableRules.All
+            .SelectMany(r => r.ServerDefaults.Select(d => (r.Table, Target: CopiedOntoAFilingLookup(r.Table, d))))
+            .Where(c => c.Target is not null)
+            .Should().BeEmpty("a copied default (server-set when its source is) must never be a lookup that files the row");
+    }
+
+    [Fact]
+    public void CopiedDefault_FilingTargetGuard_MustNotFire_OnTheRealAssignedToRule()
+    {
+        var real = RecordTableRules.Get("sprk_workassignment").ServerDefaults.Single(d => d.CopiedFrom is not null);
+
+        CopiedOntoAFilingLookup("sprk_workassignment", real).Should().BeNull("sprk_assignedto is a person, not a filing lookup");
+    }
+
+    [Theory]
+    [InlineData("sprk_workassignment", "sprk_regardingmatter")] // a secure root's filing column
+    [InlineData("sprk_todo", "sprk_regardingmatter")]           // a child's lineage lookup to an ownership parent
+    public void CopiedDefault_FilingTargetGuard_MustFire_OnASyntheticCopyOntoAFilingLookup(string table, string target)
+    {
+        var synthetic = new ServerDefault(target, "a synthetic control", "copied onto a filing lookup")
+        {
+            CopiedFrom = "sprk_assignedtointernal",
+        };
+
+        CopiedOntoAFilingLookup(table, synthetic).Should().Be(target);
+    }
+
+    [Fact]
+    public void CopiedDefaultsFor_AssignedToUnset_FillsItWithTheBoundAssignedToInternal_AsIs()
+    {
+        var fill = RecordTableRules.CopiedDefaultsFor(
+                RecordTableRules.Get("sprk_workassignment"), Row([ContactIn("sprk_assignedtointernal", Internal)], "sprk_name"))
+            .Should().ContainSingle().Subject;
+
+        fill.Default.Column.Should().Be("sprk_assignedto");
+        fill.Source.Should().Be(ContactIn("sprk_assignedtointernal", Internal), "the reference is copied unchanged (contact → contact)");
+    }
+
+    [Fact]
+    public void CopiedDefaultsFor_ASuppliedAssignedTo_FillsNothing()
+    {
+        RecordTableRules.CopiedDefaultsFor(RecordTableRules.Get("sprk_workassignment"),
+                Row([ContactIn("sprk_assignedtointernal", Internal), ContactIn("sprk_assignedto", Chosen)]))
+            .Should().BeEmpty("the caller's value wins");
+    }
+
+    [Fact]
+    public void CopiedDefaultsFor_AnExplicitNullAssignedTo_FillsNothing_UnsetIsAbsentOnly()
+    {
+        var cleared = new DataverseWriteItemMapper.MappedItem("{}", ["sprk_assignedtointernal", "sprk_assignedto"])
+        {
+            Lookups = [ContactIn("sprk_assignedtointernal", Internal)],
+            ClearedColumns = ["sprk_assignedto"],
+        };
+
+        RecordTableRules.CopiedDefaultsFor(RecordTableRules.Get("sprk_workassignment"), cleared)
+            .Should().BeEmpty("an explicit null is the caller's choice, not an unset column");
+    }
+
+    [Fact]
+    public void CopiedDefaultsFor_AssignedToInternalUnsetOrCleared_NamesTheFill_WithNoSource()
+    {
+        var unset = Row([], "sprk_name");
+        var cleared = new DataverseWriteItemMapper.MappedItem("{}", ["sprk_assignedtointernal"]) { ClearedColumns = ["sprk_assignedtointernal"] };
+
+        foreach (var row in new[] { unset, cleared })
+        {
+            var fill = RecordTableRules.CopiedDefaultsFor(RecordTableRules.Get("sprk_workassignment"), row).Should().ContainSingle().Subject;
+            fill.Default.Column.Should().Be("sprk_assignedto");
+            fill.Source.Should().BeNull("no source: the column stays blank (the create paths log a warning)");
+        }
+    }
+
+    [Theory]
+    [InlineData("sprk_matter")]
+    [InlineData("sprk_project")]
+    [InlineData("sprk_todo")]
+    [InlineData("sprk_notaregisteredtable")]
+    public void CopiedDefaultsFor_AnyOtherTable_FillsNothing(string table)
+    {
+        RecordTableRules.CopiedDefaultsFor(RecordTableRules.Find(table), Row([ContactIn("sprk_assignedtointernal", Internal)]))
+            .Should().BeEmpty();
+    }
 }
