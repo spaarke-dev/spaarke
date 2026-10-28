@@ -214,6 +214,13 @@ public sealed record SecureChildReconcileReport(
     /// </summary>
     public IReadOnlyList<Guid> OrdinaryHandOffDocumentIds { get; init; } = Array.Empty<Guid>();
 
+    /// <summary>
+    /// UAC task 194b R4b-2: the restricted-content owner team as this pass identified it — its status and the member check
+    /// (<see cref="Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeamIdentity.MembersFound"/>) — when a hard-deny
+    /// row of the pass asked for it; <c>null</c> when none did.
+    /// </summary>
+    public Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeamIdentity? RestrictedContentOwnerTeam { get; init; }
+
     /// <summary>Rows re-owned by this pass.</summary>
     public int ChildrenReowned => Tables.Sum(t => t.Changed);
 
@@ -2063,6 +2070,7 @@ public sealed class SecureChildReconciler
                         h.Row.LogicalName, h.Row.Id, h.Result.Previous, h.Result.Target, h.Result.Outcome, h.Result.Detail))
                     .ToList(),
                 OrdinaryWritesAttempted = _ordinaryWritesAttempted,
+                RestrictedContentOwnerTeam = _lookupCache.RestrictedContentOwnerTeam,
                 OrdinaryHandOffDocumentIds = _documentHandOff.Where(d => d.Value).Select(d => d.Key).OrderBy(id => id).ToList(),
                 IsolatedDocumentIds = ordered
                     .Where(r => string.Equals(r.LogicalName, DocumentTable, StringComparison.OrdinalIgnoreCase)
@@ -2485,9 +2493,16 @@ public sealed class SecureChildReconciler
                     $"the team the rule gives it ({target:D}) does not exist or has no business unit");
             }
 
+            // R4b-2: a hard-deny row's answer is the restricted-content owner team (root business unit). A row this pass never
+            // moves (user-owned, or owned by a non-default team) is still compared with the business unit its ordinary answer
+            // names — the default team that team replaced — so its report is the one it had before (rule 1: keep the creator).
+            var ordinaryBu = resolution.InPlaceOfDefaultTeamId is { } replaced
+                ? (await TeamFactsAsync(replaced).ConfigureAwait(false)).BusinessUnit
+                : targetBu;
+
             if (current.Value.Kind != DataversePrincipalKind.Team)
             {
-                return new(RowMove.Stay, SecureChildRowOutcome.Untouched, resolution, rowBu == targetBu
+                return new(RowMove.Stay, SecureChildRowOutcome.Untouched, resolution, rowBu == ordinaryBu
                     ? null
                     : "owned by a user, and the rule gives it a team in another business unit: reported, not moved (I-6 " +
                       "interim — a row created outside the product keeps its creator)");
@@ -2495,7 +2510,7 @@ public sealed class SecureChildReconciler
 
             if (!owningTeam!.Value.IsDefault)
             {
-                return new(RowMove.Stay, SecureChildRowOutcome.Untouched, resolution, owningTeam.Value.BusinessUnit == targetBu
+                return new(RowMove.Stay, SecureChildRowOutcome.Untouched, resolution, owningTeam.Value.BusinessUnit == ordinaryBu
                     ? null
                     : "owned by a team that is not a business unit's default team, and the rule gives it a team in another " +
                       "business unit: reported, not moved");
@@ -2670,6 +2685,8 @@ public sealed class SecureChildReconciler
                 SecureOnlyParents = IsGrant(row.LogicalName)
                     ? Array.Empty<RecordOwnershipParent>()
                     : QuestionFor(row).Context.SecureOnlyParents,
+                // R4b-2: a hard-deny row's ordinary answer is the restricted-content owner team (RecordOwnershipResolver).
+                ChildEntityLogicalName = row.LogicalName,
                 WhenUnfiled = UnfiledOwnership.KeepCreator,
                 UnsecuringRoot = _unsecuring ? _root : null,
                 PlannedOwningTeams = _planned.Count > 0 ? new Dictionary<RecordOwnershipParent, Guid>(_planned) : null,

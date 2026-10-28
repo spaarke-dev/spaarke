@@ -1461,7 +1461,7 @@ public class SecureChildOrdinaryParentMoveTests
     /// and their <c>versionnumber</c> (as task 183's tests answer it): a stale version is Dataverse's 412, a missing row its
     /// 404; a write that lands bumps the version and, as Dataverse does, the row's <c>modifiedon</c>.
     /// </summary>
-    private sealed class ConditionalOwnerWebApi : DataverseWebApiClient
+    internal sealed class ConditionalOwnerWebApi : DataverseWebApiClient
     {
         private readonly Func<SecureChildShareWorld> _world;
 
