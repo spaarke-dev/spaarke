@@ -810,15 +810,52 @@ The structured family entity (`sprk_securefamily`) is **not built now**; it is o
 | a | The memberless team "Spaarke Customer Configuration Owners", plus the role "Customer Configuration Owner" (Read at Basic on `sprk_aisearchindex`, `sprk_fieldmappingprofile`, `sprk_fieldmappingrule`), with its script and guard | **UAC-r2** (194b R4b-3b) | Not this project. The script runs per customer BU and refuses the root and Secure Record. |
 | b | Re-own dev's 11 index rows, 7 profiles and 40 rules to that team in Spaarke Business Unit 1 | this project (live write; owner's go) | No cascade from these tables (checked on dev). Read-back required. |
 | c | **FR-38: the search index is server-owned** on every search-indexed table, on every server create path | this project | See §13.3. Amends FR-10's "an explicit value wins". |
-| d | **FR-39: the mapping seeder owns its rows to the team** | **provisioning** (`DataverseWebApiFieldMappingSeeder`, H12b), with this project | Resolves the team by name and customer top BU. Refuses if it is missing or duplicated; never falls back to the caller or the root. |
+| d | **FR-39: the mapping seeder owns its rows to the team** | **provisioning** (owns it; one PR with H10's team creation; this project reviews) | H10 creates the memberless team right after it resolves the customer BU and records its id in `InterStepState`. H12b (which always runs after H10) binds `ownerid` to that id, and fails closed if it is missing. Today the seeder sets no owner: on ACME, 3 profiles and 20 rules are root-owned by the control-plane identity. Provisioning re-owns them after its owner's OK. |
 | e | Wizards stop binding the index (`applyUserBuDefaults` / `bindLookup('sprk_aisearchindex', …)`) | this project, folded into W3 tasks 021–029 | After (c): the server applies the index itself. |
 
 ### 13.3 FR-38 — the server-owned search index (proposed)
 
-- On a search-indexed table, a client-supplied `sprk_ai_search_index` is **not** a lookup the caller binds. The server **drops** it before step 5, so no AppendTo is asked on the catalog. Step 8 then applies the **owning** BU's index (FR-10, fill-only from the server's own choice).
+- On a search-indexed table, a client-supplied `sprk_ai_search_index` is **not** a lookup the caller binds. The server **drops** it before step 5, so no AppendTo is asked on the catalog. Step 8 then applies the index of the record's **final owning BU** (FR-10; UAC-r2 condition 1).
+  - "Final" means after the ownership step (194b's resolver): a Secure Record BU owner, the restricted-content team in the customer top BU, or a parent-inherited owner.
+  - It is never the caller's BU and never the client's value.
+- **An owning BU with no index** (always the case for Secure Record today): the column stays **empty** and the server logs `search_index_unset_for_owner_bu`. It does not walk up to the root and does not use the caller's index.
+  - Tests pin both cases: a secure record, and a BU with no index.
+- **Every BFF write path, not only creates (UAC-r2 condition 2).** An update or PATCH through the BFF that carries `sprk_ai_search_index` gets the same drop, so a client cannot repoint an existing record. Native form edits stay out of scope.
 - A dropped value that differs from the one the server applies is logged as `client_search_index_dropped`. This is the precedent of 018's `default_value_dropped`.
+  - The log carries **ids only**: record, table, dropped index id, applied index id. No names or emails (UAC-r2 condition 4).
 - Alternative (UAC-r2's other shape): accept a client value only when it equals the owning BU's index, and refuse otherwise (400). **Recommended: drop.** No product surface lets a user choose an index on purpose, and a refusal would break today's wizards until (e) ships.
 - Not covered: native form edits of the lookup. Those are Dataverse's own role checks; out of scope, as for every native write (W5).
+
+### 13.3b Business-unit moves (UAC-r2 condition 3)
+
+**Answer: the index affects discoverability only, so a move is a known limit, not a recompute.**
+
+- **Indexing:** `SearchIndexNameResolver` picks the index once, at indexing time: the document's index, then its parent's, then the parent's owning BU's, then the default.
+- **Search:** the index searched never comes from the caller's BU. It is the tenant default, a session or deployment index, or a request-named allow-listed one.
+- **Trimming:** the search paths trim hits by the caller's live Dataverse Read.
+  - `/api/ai/rag/search`: `TrimToReadableDocumentsAsync`, one authorization check per hit.
+  - Semantic search: per-row parent authorization (`AuthorizeRowsByParentAsync`).
+  - `IndexRetrieveNode`: a per-row record-key check.
+  - Every path also has a tenant filter.
+
+So a moved record left in its old index:
+- **is not disclosed** to someone who can no longer read it on those paths;
+- **may be missed** by someone who now can, if they search a different index, until it is re-indexed.
+
+Filed as a known limit (#2413). Not recomputed at a move.
+
+**Open for UAC-r2 (not this project's change):** retrieval through `RagService.SearchAsync` alone (chat and playbook) filters by the caller's Entra `privilege_group_ids` and tenant. A per-row Dataverse Read check on those paths was not verified here.
+
+### 13.3a FR-39 — the seeder's owner rules (UAC-r2 review, 2026-10-28)
+
+- Resolve the team exactly as 194b's setup script does, and reuse 194b's team resolver if the seeder can reference it (no copy):
+  - the BU is a **direct child of the root**, never the root or Secure Record;
+  - the team is an **owner team** (teamtype 0), **not** a default team, with **exactly one** match.
+- Refuse a team that has **members**. Membership and role drift are otherwise the setup script's `-Verify` job; no second verifier.
+- **Set the owner on the create itself** (`ownerid@odata.bind` → `/teams(<id>)`). Never create-then-assign: a row is never owned by the provisioning identity.
+- **Ordering.** The team and role setup runs **before H12b**. Without the role, Dataverse refuses the owner (0x80040299). The seeder then stops with a clear error and never retries under another owner.
+- **Re-runs and upserts.** An existing row whose owner is not the team is **reassigned** to it, at least reported as drift; never left silently.
+- Whatever creates `sprk_aisearchindex` rows in a customer environment (§13.5 question 2) follows the same rules.
 
 ### 13.4 Sequencing
 
@@ -827,7 +864,9 @@ The structured family entity (`sprk_securefamily`) is **not built now**; it is o
 ### 13.5 Open questions
 
 1. **Owner:** drop or refuse for a client index (§13.3). Recommended: drop.
-2. **Provisioning:** what creates `sprk_aisearchindex` rows in a customer environment? Nothing in the control plane seeds them (only `scripts/phase-g-lookup-migration/Migrate-SearchIndexLookup.ps1` touches them). Whatever does must own them to the team.
+2. **Owner and UAC-r2: are `sprk_aisearchindex` rows wanted in customer environments?** Provisioning's answer (2026-10-28): nothing creates them there. H2b creates the Azure AI Search index, not a Dataverse row, and ACME has 0 rows. The BFF's `DataverseAllowedIndexesProvider` falls back to appsettings.
+   - Without rows, FR-38 leaves the column empty on every customer record, and indexing uses the appsettings fallback.
+   - If rows are wanted per customer, provisioning seeds them in H12a, owned by the team.
 3. **Owner (#2410):** Basic User reads rules but not profiles.
 4. **Dev arrangement (UAC-r2):** users homed in dev's root BU won't read team-owned rows in BU1 through Deep. That is the open dev-layout item, not routed around here.
 
