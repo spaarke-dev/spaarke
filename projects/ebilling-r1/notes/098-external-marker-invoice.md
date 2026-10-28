@@ -151,7 +151,7 @@ One adversarial pass (Opus) found three fix-now findings (F1, F2, F3), one minor
 | F4: the internal-systemuser theory ignored its flag | It drives the real `SystemUserIdentityResolver` with `sprk_isexternal` false and blank | `AnInternalSystemuser_IsNeverHiddenByThisRule_AndNothingIsRead` |
 | K1 (cheap): a Stored File with a source communication or attachment but no document counted as "no source" | Both columns are selected; such a row hides the invoice (`source_link_unreadable`) | `AStoredFileWithASourceCommunicationOrAttachment_ButNoDocument_HidesTheInvoice` |
 
-F1 counts every submission's document as a source, including SPA uploads. An SPA upload also writes `sprk_invoicesubmission.sprk_document`, so its uploaded document is decided by the same rules. This scope is accepted by the main session (2026-10-28) because it only ever hides more. The POML's "an invoice with no source (SPA upload)" no longer describes these invoices. They stay visible unless their own document fails rules 2–4 or the roots term for the caller.
+SPA uploads (corrected in round 3): after 092, uploads carry no submission document. Both the SPA upload and the internal upload store their file as a Stored File, so an upload invoice is decided by its `InvoicePdf`. A sourceless `InvoicePdf` leaves it visible. On this branch's base, which predates 092, an SPA upload still writes `sprk_invoicesubmission.sprk_document`. Round 3 ignores that link for the Spa channel.
 
 Recorded, not fixed here:
 - **Undo ordering (report K1 #6)** is handed to 094. The step-5 undo deletes the Stored File before the invoice, so a partial undo leaves a visible invoice with no source. 094 reorders the undo (invoice before its Stored File) or hides invoices of Failed submissions. With F1 in place, the submission's `sprk_document` still names the source while the submission row exists.
@@ -169,7 +169,7 @@ Seeding proofs for this round: skipping the submission read failed 8 tests (the 
 
 uac-r2 re-checked `41a0ec7a6d`.
 
-Fixed: a submission whose document link is empty hides the invoice (`source_link_unreadable`). This is safe for real data: the submission evaluation refuses a submission with no document before any invoice exists (`SubmissionEvaluationOutcome.cs:128-131`, `DocumentMissing`), and the persister is the only writer of a submission's invoice.
+Fixed (narrowed by round 3 to the Internal channel): a submission whose document link is empty hides the invoice (`source_link_unreadable`). This is safe for real data: the submission evaluation refuses a submission with no document before any invoice exists (`SubmissionEvaluationOutcome.cs:128-131`, `DocumentMissing`), and the persister is the only writer of a submission's invoice.
 - Tests: `ConfirmRoute_ASubmissionWhoseDocumentLinkIsEmpty_HidesTheInvoice` and `ConfirmRoute_ADocumentLinkEmptiedAfterTheInvoiceWasCreated_HidesTheInvoice`, for both callers. `ConfirmRoute_ASubmissionsReadableDocument_LeavesTheInvoiceVisible` now covers only the readable document. The taint-closure fixture gives each submission row a document, as a real submission has.
 - Seeding proof: with the old submission filter restored, the two new tests failed for both callers (4 failures); the file was restored.
 
@@ -182,6 +182,34 @@ Known limits, recorded:
 
   The interface branch added in round 1 is proven only by its fixture today; no real external-plane caller uses it yet.
 - **K3. Cost.** The submission read adds ⌈N/50⌉ reads per call. The `[EXT-INVOICE-VISIBILITY]` cost line logs it as `submissionReads`.
+
+## Review round 3, 2026-10-28
+
+The submission read also selects `sprk_channel`, mapped through the shared `InvoiceSubmissionChannel` enum. The Stored File read selects `sprk_purpose` in the same batch. Both reads now return every row of the invoice, and the 2000-row cap per chunk counts all of them. Neither adds a request. The rules:
+
+1. **Spa channel:** never a document source. The invoice's Stored Files decide.
+2. **Internal channel with a document:** decided by that document, as before.
+3. **Internal channel with an empty document link:** hidden, unless the invoice has a Stored File with purpose `InvoicePdf` and no source at all (no document, communication or attachment identity). That file is the internal upload's own invoice PDF. A sourceless `InvoiceSupportingFile` does not count, and neither does an `InvoicePdf` that carries any one source column.
+4. **A channel that is unknown, unreadable or not in the enum:** hidden (`source_kind_unknown`). So is a value added to the enum later, until it is decided here.
+
+Tests, each for both callers:
+- Must not fire: `SpaUpload_NoSubmissionDocument_AndASourcelessInvoicePdf_IsVisible`, `InternalUpload_NoSubmissionDocument_AndASourcelessInvoicePdf_IsVisible`.
+- Must fire:
+  - `Internal_AnEmptyDocumentLink_AndNoStoredFile_IsHidden`;
+  - `Internal_AnEmptyDocumentLink_AndOnlyASourcelessSupportingFile_IsHidden`;
+  - `AnUnknownOrUnreadableChannel_HidesTheInvoice` (999, null, a string);
+  - `AnEmptySubmissionLink_PlusAStoredFileWithARestrictedSource_IsHidden_DecidedByTheFile`.
+- `InternalUpload_AnInvoicePdfCarryingAnySource_IsNotTheUploadsOwnPdf`: one case per source column (hidden) and the all-empty case (visible).
+- The round 2 tests still pass, because a confirm-route submission is Internal with no Stored File.
+
+Seeding proofs (each restored afterwards):
+- Counting any sourceless file as the upload's PDF failed the supporting-file test (2).
+- Dropping the unknown-channel hide failed the unknown-channel theory (6).
+- Dropping the Spa exemption failed the SPA upload test and the decided-by-the-file test (4).
+
+Known limits, recorded:
+- **A write-time source-kind marker** on the submission would remove the remaining data-fault class. Filed under #2372 (schema, owner OK, tied to 191).
+- **The writer guard** (an `InvoicePdf` is created only in the same commit as its invoice) is built on the 094 branch, not here: this base does not include 092's persister.
 
 ## Escalation
 
