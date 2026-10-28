@@ -14,6 +14,8 @@ Branch `fix/uac-193-add-person` (worktree C:/wt193), based on 078f62bcad (R3 #23
 | D1-fix | d6d78cde4b | /invite-and-grant → /grant parity; dead 503 branch removed; host tsc passes |
 | D1-fix2 | 833fddbcdd | A shared contact is no longer offered (ledger adopt + Available hide) |
 | D2 | a7d0f8186d | TrackingFieldTrio 1.0.55, builds, guide |
+| V-fix | e09dc75dd9 | F1-a children_incomplete share path; delegation-filter timing (#2334); No Access on the contact route; invite logs; "Shared with X"; TrackingFieldTrio 1.0.56 |
+| F-final | 9e0bfdcb88, 528daa090d | No invitee email in CIAM provisioner/mailer logs or send correlation ids; stale comments; unused params; user shares lead with "Shared with X"; TrackingFieldTrio 1.0.57 |
 
 ## Behaviour changes (owner sign-off table for the PR)
 | Case | Before | After |
@@ -49,6 +51,9 @@ Branch `fix/uac-193-add-person` (worktree C:/wt193), based on 078f62bcad (R3 #23
 - K: re-adding a represented contact that already holds a contact grant shares and leaves the grant row as it was (still visible and revocable in Current Access).
 - K: the /invite Retry doesn't ask who the contact represents (rare: the contact gets linked between the grant and the Retry).
 - Filed: #2371 (inactive contact: /grant writes a dormant row; the contact-side route refuses); #2377 (an internal user's email with no active contact still gets a CIAM invite).
+
+## Gates (F-final, 528daa090d)
+Unit (touched) 9167/0/3 · ArchTests 1577 · BFF integration 186/0/8 · Spe integration 353/0/23 · jest (modal) 311 · tsc 0 · lint ratchet ok · PCF build PASS (1.0.57) · 0 warnings. Remaining demo-registration log sites added to #2134. Publish delta: re-measure before the PR.
 
 ## Gates (D1-fix2 / D2)
 Unit (touched): 8921/0/2 · ArchTests 1577 · BFF integration 186/0/8 · Spe integration 353/0/23 · jest (modal) 306 · lint ratchet ok · PCF build PASS (1.03 MiB, +9.4 KB) · no CVE. Publish delta: +7.4 KB at Run C; re-measure before the PR.
