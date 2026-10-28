@@ -371,6 +371,7 @@ public class SubjectStandingGrantReaderTests
                         {
                             rows.Entities.Add(new Entity("fieldpermission", Guid.NewGuid())
                             {
+                                ["entityname"] = ContactEntity,
                                 ["attributelogicalname"] = "sprk_accesspermissiongrant",
                             });
                         }
@@ -528,11 +529,14 @@ public class SubjectStandingGrantReaderTests
             c.AttributeName == "roletemplateid" && (Guid)c.Values[0] == SecuredColumnReadProof.SystemAdministratorRoleTemplateId);
         foreach (var fieldPermission in queries.Where(q => q.EntityName == "fieldpermission"))
         {
+            // The table is checked in code (Dataverse refuses a query condition on fieldpermission.entityname given a
+            // logical name), so the query selects entityname and has no condition on it.
             fieldPermission.Criteria.Conditions.Select(c => (c.AttributeName, c.Values[0]))
                 .Should().BeEquivalentTo(new (string, object)[]
                 {
-                    ("entityname", "contact"), ("attributelogicalname", "sprk_accesspermissiongrant"), ("canread", 4),
+                    ("attributelogicalname", "sprk_accesspermissiongrant"), ("canread", 4),
                 });
+            fieldPermission.ColumnSet.Columns.Should().Contain("entityname");
         }
     }
 
