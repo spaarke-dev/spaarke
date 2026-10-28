@@ -68,6 +68,7 @@ using Sprk.Provisioning.ControlPlane.Reconciler;
 using Sprk.Provisioning.ControlPlane.Registry;
 using Sprk.Provisioning.ControlPlane.Rollback;
 using Sprk.Provisioning.ControlPlane.Worker.Dispatch;
+using Sprk.Provisioning.ControlPlane.Infrastructure.Http;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -589,7 +590,11 @@ builder.Services.AddScoped<H4bBulkAppSettingsHandler>();
 builder.Services.Configure<AiSeedChainOptions>(
     builder.Configuration.GetSection(nameof(AiSeedChainOptions)));
 builder.Services.AddSingleton<ISeedManifestReader, EmbeddedSeedManifestReader>();
-builder.Services.AddHttpClient<ISeedManifestRunner, DataverseWebApiSeedWriter>();
+// T186 audit: one bounded retry of Dataverse/Graph 429s (any method) and 408/502/503/504 + transport
+// failures (GET/HEAD only) for every Worker client that calls Dataverse or Graph REST — see the handler.
+builder.Services.AddTransient<TransientHttpRetryHandler>();
+builder.Services.AddHttpClient<ISeedManifestRunner, DataverseWebApiSeedWriter>()
+    .AddHttpMessageHandler<TransientHttpRetryHandler>();
 builder.Services.AddScoped<H12aAiSeedChainHandler>();
 
 // Task 071: H12b app-config seed handler + four IAppConfigSeeder registrations.
@@ -622,7 +627,8 @@ builder.Services.PostConfigure<SolutionImportOptions>(o => o.Validate());
 // T218b review: the per-request timeout is the option, not HttpClient's silent 100 s default.
 builder.Services.AddHttpClient(DataverseWebApiSolutionImporter.HttpClientName)
     .ConfigureHttpClient((sp, client) =>
-        client.Timeout = sp.GetRequiredService<IOptions<SolutionImportOptions>>().Value.DataverseWebApiRequestTimeout);
+        client.Timeout = sp.GetRequiredService<IOptions<SolutionImportOptions>>().Value.DataverseWebApiRequestTimeout)
+    .AddHttpMessageHandler<TransientHttpRetryHandler>();
 // A44.5 (task 205i): FR-39 ordered credential factory for the L2 Worker's
 // OWN Dataverse auth as the customer's BFF app-reg (D-13) — consumed by H7's writer +
 // H6's importer/verifier. Mirrors master's DataverseServiceClientImpl
@@ -648,7 +654,8 @@ builder.Services.AddSingleton<ISolutionImporter>(sp =>
 // plain typed-client registration applies directly, no manual factory lambda / named client required.
 builder.Services.AddHttpClient<ISolutionVerifier, DataverseWebApiSolutionVerifier>()
     .ConfigureHttpClient((sp, client) =>
-        client.Timeout = sp.GetRequiredService<IOptions<SolutionImportOptions>>().Value.DataverseWebApiRequestTimeout);
+        client.Timeout = sp.GetRequiredService<IOptions<SolutionImportOptions>>().Value.DataverseWebApiRequestTimeout)
+    .AddHttpMessageHandler<TransientHttpRetryHandler>();
 // HANDLER-08 (F14) org-settings applier + its canonical contract. Task 253
 // (G38): DataverseWebApiOrgSettingsContractApplier — one organization GET +
 // PATCH as H6's importer identity — replaced the `pac org update-settings`
@@ -657,7 +664,8 @@ builder.Services.AddHttpClient<ISolutionVerifier, DataverseWebApiSolutionVerifie
 // depends on no application a fresh environment lacks.
 builder.Services.AddHttpClient<IOrgSettingsContractApplier, DataverseWebApiOrgSettingsContractApplier>()
     .ConfigureHttpClient((sp, client) =>
-        client.Timeout = sp.GetRequiredService<IOptions<SolutionImportOptions>>().Value.DataverseWebApiRequestTimeout);
+        client.Timeout = sp.GetRequiredService<IOptions<SolutionImportOptions>>().Value.DataverseWebApiRequestTimeout)
+    .AddHttpMessageHandler<TransientHttpRetryHandler>();
 builder.Services.AddSingleton<IOrgSettingsContractManifest, StaticOrgSettingsContractManifest>();
 builder.Services.AddScoped<H6SolutionImportHandler>();
 
@@ -713,7 +721,8 @@ builder.Services.AddOptions<EnvVarValuesOptions>()
         return true;
     }, "EnvVarValues options failed validation — see inner exception (Validate throws).")
     .ValidateOnStart();
-builder.Services.AddHttpClient(DataverseWebApiEnvVarValuesWriter.HttpClientName);
+builder.Services.AddHttpClient(DataverseWebApiEnvVarValuesWriter.HttpClientName)
+    .AddHttpMessageHandler<TransientHttpRetryHandler>();
 builder.Services.AddScoped<IEnvVarValuesWriter, DataverseWebApiEnvVarValuesWriter>();
 builder.Services.AddScoped<H7DataverseEnvVarValuesHandler>();
 // T256: H7b Secure Record setup — signs in exactly as H7 (EnvVarValuesOptions + the FR-39 factory above).
@@ -772,7 +781,8 @@ builder.Services.AddSingleton<ISpeContainerProvisioner, GraphContainerProvisione
 builder.Services.AddSingleton<ISpeContainerVerifier, GraphAppOnlyContainerVerifier>();
 // unified-access-control-r2 task 165, owner round 35 item 1: H8 binds the container it creates to the customer environment's
 // root business unit — read through this typed-HttpClient seam (same idiom as H10's Dataverse collaborators).
-builder.Services.AddHttpClient<IDataverseRootBusinessUnitReader, DataverseWebApiRootBusinessUnitReader>();
+builder.Services.AddHttpClient<IDataverseRootBusinessUnitReader, DataverseWebApiRootBusinessUnitReader>()
+    .AddHttpMessageHandler<TransientHttpRetryHandler>();
 builder.Services.AddScoped<H8SpeContainerHandler>();
 
 // Task 053 (Batch 3E): H10 Dataverse App User + Graph app-role parity handler
@@ -791,10 +801,14 @@ builder.Services.AddScoped<H8SpeContainerHandler>();
 builder.Services.Configure<H10DataverseAppUserGraphParityOptions>(
     builder.Configuration.GetSection(nameof(H10DataverseAppUserGraphParityOptions)));
 builder.Services.AddSingleton<IGraphAppRolesRegistry, L2GraphAppRolesRegistry>();
-builder.Services.AddHttpClient<IDataverseAppUserCreator, DataverseWebApiAppUserCreator>();
-builder.Services.AddHttpClient<IDataverseAppUserVerifier, DataverseWebApiAppUserVerifier>();
-builder.Services.AddHttpClient<IGraphAppRoleGranter, GraphRestAppRoleGranter>();
-builder.Services.AddHttpClient<IGraphAppRoleParityVerifier, GraphRestAppRoleParityVerifier>();
+builder.Services.AddHttpClient<IDataverseAppUserCreator, DataverseWebApiAppUserCreator>()
+    .AddHttpMessageHandler<TransientHttpRetryHandler>();
+builder.Services.AddHttpClient<IDataverseAppUserVerifier, DataverseWebApiAppUserVerifier>()
+    .AddHttpMessageHandler<TransientHttpRetryHandler>();
+builder.Services.AddHttpClient<IGraphAppRoleGranter, GraphRestAppRoleGranter>()
+    .AddHttpMessageHandler<TransientHttpRetryHandler>();
+builder.Services.AddHttpClient<IGraphAppRoleParityVerifier, GraphRestAppRoleParityVerifier>()
+    .AddHttpMessageHandler<TransientHttpRetryHandler>();
 builder.Services.AddScoped<H10DataverseAppUserGraphParityHandler>();
 
 // Task 054 (Batch 3F): H11 user-provisioning handler (D6 identity-preset
@@ -812,12 +826,17 @@ builder.Services.AddOptions<H11UserProvisioningOptions>()
     .Validate(o => o.GuestSecurityRoleNames.TrueForAll(n => !string.IsNullOrWhiteSpace(n)),
         "H11UserProvisioningOptions:GuestSecurityRoleNames holds a blank role name.")
     .ValidateOnStart();
-builder.Services.AddHttpClient<IGraphUserProvisioner, GraphRestUserProvisioner>();
-builder.Services.AddHttpClient<IB2BInvitationClient, GraphRestB2BInvitationClient>();
-builder.Services.AddHttpClient<IB2BConsentVerifier, GraphRestB2BConsentVerifier>();
+builder.Services.AddHttpClient<IGraphUserProvisioner, GraphRestUserProvisioner>()
+    .AddHttpMessageHandler<TransientHttpRetryHandler>();
+builder.Services.AddHttpClient<IB2BInvitationClient, GraphRestB2BInvitationClient>()
+    .AddHttpMessageHandler<TransientHttpRetryHandler>();
+builder.Services.AddHttpClient<IB2BConsentVerifier, GraphRestB2BConsentVerifier>()
+    .AddHttpMessageHandler<TransientHttpRetryHandler>();
 // Task 232 (D2, G10): the environment security group (Graph) and the guest's Dataverse user + role(s) (Web API).
-builder.Services.AddHttpClient<IEnvironmentSecurityGroupClient, GraphRestEnvironmentSecurityGroupClient>();
-builder.Services.AddHttpClient<IDataverseGuestUserWriter, DataverseWebApiGuestUserWriter>();
+builder.Services.AddHttpClient<IEnvironmentSecurityGroupClient, GraphRestEnvironmentSecurityGroupClient>()
+    .AddHttpMessageHandler<TransientHttpRetryHandler>();
+builder.Services.AddHttpClient<IDataverseGuestUserWriter, DataverseWebApiGuestUserWriter>()
+    .AddHttpMessageHandler<TransientHttpRetryHandler>();
 builder.Services.AddScoped<H11UserProvisioningHandler>();
 
 // Task 072 (Batch 3F): H12c runtime references handler + ONE collaborator
@@ -895,7 +914,9 @@ builder.Services.AddSingleton<IBffArtifactDownloader>(sp =>
     var logger = sp.GetRequiredService<ILogger<BlobArtifactDownloader>>();
     return new BlobArtifactDownloader(artifactsContainer, options, logger);
 });
-builder.Services.AddHttpClient<IKuduZipDeployer, KuduZipDeployer>();
+// T186 L45: HttpClient's default 100 s Timeout cut the zip-deploy off live; BffDeployOptions.KuduZipDeployTimeout
+// (the deployer's own linked token over POST + status poll) is the one ceiling.
+builder.Services.AddHttpClient<IKuduZipDeployer, KuduZipDeployer>(client => client.Timeout = Timeout.InfiniteTimeSpan);
 builder.Services.AddSingleton<IAppServiceSlotSwapper>(sp =>
 {
     var credential = sp.GetRequiredService<TokenCredential>();

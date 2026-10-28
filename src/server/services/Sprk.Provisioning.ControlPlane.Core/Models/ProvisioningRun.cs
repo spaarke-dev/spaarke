@@ -203,6 +203,114 @@ public sealed class ProvisioningRun
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public QuarantineInfo? Quarantine { get; set; }
 
+    /// <summary>
+    /// Every handler whose last attempt failed and has not since succeeded, in failure order.
+    /// <para>
+    /// T186 L41: a run records ONE failure (<see cref="CurrentPhase"/> / <see cref="ErrorDetail"/>), so a second
+    /// failure hid the first. Live, H8 failed, then H6 (dispatched earlier) failed and became the run's failure;
+    /// resume re-ran only H6, and the reconciler kept re-sending H8's already-processed attempt, which the dispatcher
+    /// completes without invoking — the run showed Running with H8, H4b, H9 and H7 waiting forever. Resume re-dispatches
+    /// every handler listed here, and the reconciler does not re-send them (<c>DagAdvancer.ComputeReadyHandlers</c>).
+    /// </para>
+    /// </summary>
+    [JsonPropertyName("failedHandlers")]
+    public IList<string> FailedHandlers { get; set; } = new List<string>();
+
+    /// <summary>
+    /// Automatic (RetryableWithCleanup) re-dispatches each handler has used since it last succeeded or an operator
+    /// last re-dispatched it. T186 L44: the auto-retry re-enqueued with no limit — live, H9 failing at its slot guard
+    /// ran ~370 times in 12 minutes. <c>HandlerOutcomeApplier</c> stops re-enqueueing at
+    /// <c>RollbackTransitions.MaxAutoRetries</c> and leaves the run Failed for a resume. Unlike
+    /// <see cref="HandlerRetryAttempts"/> (which only ever grows, because it feeds the MessageId), this count is reset.
+    /// </summary>
+    [JsonPropertyName("handlerAutoRetries")]
+    [Newtonsoft.Json.JsonConverter(typeof(NewtonsoftVerbatimKeysDictionaryConverter<int>), true)]
+    public IDictionary<string, int> HandlerAutoRetries { get; set; }
+        = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>An operator re-dispatch (resume, gate advance) gives the handler a fresh auto-retry budget (T186 L44).</summary>
+    public void ResetAutoRetries(string handlerId) => HandlerAutoRetries.Remove(handlerId);
+
+    /// <summary>
+    /// The run-status transition for a handler failure the run does not retry by itself: the run takes
+    /// <paramref name="status"/> (<see cref="RunStatus.Failed"/> or <see cref="RunStatus.Quarantined"/>) with
+    /// <paramref name="handlerId"/> as its current phase, and the handler is recorded in <see cref="FailedHandlers"/>
+    /// so a later failure of another handler cannot hide it (T186 L41).
+    /// <para>
+    /// A Quarantined run is never downgraded to Failed by another handler's failure (quarantine is cleared explicitly),
+    /// and a Cancelled run keeps its status; the failure is still recorded.
+    /// </para>
+    /// </summary>
+    public void MarkPhaseFailed(string handlerId, RunStatus status, string errorDetail)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(handlerId);
+        if (status is not (RunStatus.Failed or RunStatus.Quarantined))
+        {
+            throw new ArgumentOutOfRangeException(nameof(status), status, "A handler failure leaves the run Failed or Quarantined.");
+        }
+
+        if (!FailedHandlers.Contains(handlerId, StringComparer.Ordinal))
+        {
+            FailedHandlers.Add(handlerId);
+        }
+
+        if (Status == RunStatus.Cancelled
+            || (Status == RunStatus.Quarantined && status == RunStatus.Failed
+                && !string.Equals(CurrentPhase, handlerId, StringComparison.Ordinal)))
+        {
+            return;
+        }
+
+        Status = status;
+        CurrentPhase = handlerId;
+        ErrorDetail = errorDetail;
+    }
+
+    private void RemoveFailedHandler(string handlerId)
+    {
+        for (var i = FailedHandlers.Count - 1; i >= 0; i--)
+        {
+            if (string.Equals(FailedHandlers[i], handlerId, StringComparison.Ordinal))
+            {
+                FailedHandlers.RemoveAt(i);
+            }
+        }
+    }
+
+    /// <summary>
+    /// The run-status transition every handler applies when it succeeds: the run is <see cref="RunStatus.Running"/>
+    /// with <paramref name="handlerId"/> as its current phase, so the reconciler fans out.
+    /// <para>
+    /// T186 L37: a handler must not overwrite ANOTHER handler's stop. Per-customer messages run one at a time, so a
+    /// sibling dispatched earlier can finish after a branch has parked the run — live, H5 succeeded right after H3 put
+    /// the run in <see cref="RunStatus.WaitingOnGate"/> (admin consent), wrote Running/H5, and the run stalled with no
+    /// gate to advance. A WaitingOnGate, Failed or Quarantined run whose current phase is another handler keeps that
+    /// status and phase (the success is still recorded in CompletedPhases by the caller); the handler that owns the stop
+    /// (its own gate re-verified) moves the run on. A Cancelled run is never revived.
+    /// </para>
+    /// </summary>
+    public void MarkPhaseSucceeded(string handlerId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(handlerId);
+
+        RemoveFailedHandler(handlerId);
+        ResetAutoRetries(handlerId);
+
+        if (Status == RunStatus.Cancelled)
+        {
+            return;
+        }
+
+        if (Status is RunStatus.WaitingOnGate or RunStatus.Failed or RunStatus.Quarantined
+            && !string.Equals(CurrentPhase, handlerId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        Status = RunStatus.Running;
+        CurrentPhase = handlerId;
+    }
+
     // TTL: REMOVED 2026-08-18 (Phase F acceptance discovery). Cosmos SDK uses its
     // own default serializer (Newtonsoft-based) which ignores System.Text.Json
     // [JsonIgnore(WhenWritingNull)] attributes and emits `"ttl": null`. Cosmos
@@ -332,6 +440,15 @@ public sealed class QuarantineInfo
     [JsonPropertyName("clearedAt")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public DateTimeOffset? ClearedAt { get; set; }
+
+    /// <summary>
+    /// UTC timestamp of the first resume after the clear (T186 L55). That resume also re-dispatches every ready
+    /// handler, because the dispatcher completed their envelopes without running them while the run was quarantined;
+    /// later resumes do not.
+    /// </summary>
+    [JsonPropertyName("resumedAt")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? ResumedAt { get; set; }
 }
 
 /// <summary>

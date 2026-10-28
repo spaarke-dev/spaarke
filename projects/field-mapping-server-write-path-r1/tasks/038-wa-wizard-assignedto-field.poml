@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="038" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Create Work Assignment wizard: optional Assigned To contact picker on Enter Info (FR-37)</title>
+    <phase>3 W3 Product creators onto the service (create defaults amendment 2026-10-27)</phase>
+    <gate>037 complete (merged)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies shared .tsx/.ts (wizard step, form state, create service).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Copies an existing in-wizard pattern exactly (follow-on event step's contact picker and nav-prop bind, task 097).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>037</deps>
+    <tags>frontend, react, fluent-ui, testing</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add an optional "Assigned To" contact picker to the Create Work Assignment wizard's Enter Info step. When a contact is chosen, bind it to `sprk_workassignment.sprk_assignedto` in the create payload. When it is left blank, omit the key entirely so the server's FR-36 default (task 037) applies.</prompt>
+  <role>SPAARKE front-end developer, shared Fluent v9 wizard components.</role>
+  <goal>A person creating a work assignment can name its Assigned To. Leaving it blank gives the record its Assigned To Internal, set by the server.</goal>
+
+  <context>
+    <background>spec.md FR-37 (owner, 2026-10-27, approving the task list: "the wizard form does not include an 'Assigned to' field - this field could be added"). FR-36 / task 037 makes the server fill `sprk_assignedto` from `sprk_assignedtointernal` only when the request leaves it UNSET. An explicit value or an explicit null from the caller wins, so the client must omit the key when blank. Both columns are CONTACT lookups on dev. The wizard posts to `POST /api/v1/child-records/sprk_workassignment`. Hosts: the `src/solutions/CreateWorkAssignmentWizard` code page and the Console (SpaarkeAi quick start). Their deploys are in task 076.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateWorkAssignmentWizard/EnterInfoStep.tsx (add the field after Priority / Response Due Date; extend the onFormValues Pick)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateWorkAssignmentWizard/formTypes.ts (add assignedToId / assignedToName to ICreateWorkAssignmentFormState and its empty state)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateWorkAssignmentWizard/workAssignmentService.ts (create payload ~:373: bind only when assignedToId is set)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateWorkAssignmentWizard/WorkAssignmentWizardDialog.tsx (~:349 Pick type; ~:445 summary line "Assigned To: name" when set)</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/CreateWorkAssignmentWizard/CreateFollowOnEventStep.tsx (~:115-190: LookupField + searchContactsAsLookup, value/onChange shape)</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/CreateWorkAssignmentWizard/workAssignmentService.ts (~:640-655: nav-prop discovery for a contact lookup named sprk_assignedto, warning when absent)</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/CreateWorkAssignmentWizard/__tests__/workAssignmentService.followOnAssignee.test.ts (test shape to copy: adversarial nav-prop metadata, exact bind target)</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/CreateWorkAssignmentWizard/__tests__/workAssignmentService.assignedTo.test.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-37 / FR-36">Blank picker → the create payload contains NO key for sprk_assignedto (no `@odata.bind`, no null). Never pre-fill or compute the default on the client.</constraint>
+    <constraint source="FR-37">Chosen contact → exactly one bind, `{navProp}@odata.bind = /contacts({guid})`, where navProp is the sprk_workassignment nav-prop whose ReferencingAttribute is `sprk_assignedto` (not _1/_2/internal/external, not a systemuser lookup). Copy the follow-on event step's resolution.</constraint>
+    <constraint source="FR-37">The field is optional; isValid on Enter Info keeps its current rule (name, priority, response due date).</constraint>
+    <constraint source="ADR-021">Fluent v9 components and semantic tokens only; dark-mode safe. Same LookupField as the follow-on step; label "Assigned To"; hint "Leave blank to use the Assigned To Internal value".</constraint>
+    <constraint source="ADR-038">Tests next to the existing wizard tests; cover the contract and the negative cases listed in the criteria only.</constraint>
+    <constraint source="CLAUDE.md §12">Node install in src/solutions/*: `npm install --legacy-peer-deps --no-audit --no-fund`. No deploy in this task (task 076).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare FULL rigor; confirm 037 is merged (its fill-only-on-UNSET rule is what makes "blank" correct).</step>
+    <step order="1">Write the service tests (criteria 1-3); confirm the chosen-contact case fails.</step>
+    <step order="2">Add the form fields, the picker on Enter Info, the payload bind and the summary line.</step>
+    <step order="3">Run the wizard's tests, lint and typecheck; build the CreateWorkAssignmentWizard code page to confirm it compiles.</step>
+    <step order="4">Record results in notes/task-038-notes.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the child-records route does not run the Assigned-To policy on a supplied `sprk_assignedto` (so a caller could name any contact without a check), STOP and escalate to the main session for UAC-r2. Do not add a client-side check instead.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>The follow-on event step already has a contact picker and bind (task 097); the work assignment create payload has no Assigned To.</existing>
+    <extension>Extends the existing step, form state and payload builder. No new component, service or endpoint.</extension>
+    <cost-of-doing-nothing>The person creating the work assignment cannot name who it is assigned to; it always gets the Assigned To Internal default.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/CreateWorkAssignmentWizard/EnterInfoStep.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/CreateWorkAssignmentWizard/workAssignmentService.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/CreateWorkAssignmentWizard/__tests__/workAssignmentService.assignedTo.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Chosen contact Y → the payload has exactly one `{navProp}@odata.bind` = `/contacts(Y)` for the sprk_assignedto nav-prop, resolved correctly when look-alike contact lookups and a systemuser lookup are listed first.</criterion>
+    <criterion testable="true">Blank → the payload has no key containing `sprk_assignedto` or its nav-prop (no bind, no null).</criterion>
+    <criterion testable="true">Nav-prop not found → no bind, a console warning, and the create still proceeds (same as the follow-on step).</criterion>
+    <criterion testable="true">Enter Info validity is unchanged with the field blank; the summary shows "Assigned To: {name}" only when set.</criterion>
+    <criterion testable="true">Test scope: the cases above only; anything beyond needs a one-line justification in the notes.</criterion>
+    <criterion testable="true">Wizard tests, lint and typecheck pass; the CreateWorkAssignmentWizard code page builds.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Assigned To on the wizard">
+      <steps><step>Create Work Assignment from a matter; pick a contact in Assigned To; finish</step><step>Repeat leaving it blank</step></steps>
+      <expected>First record: Assigned To = the chosen contact. Second: Assigned To = its Assigned To Internal.</expected>
+    </test>
+  </ui-tests>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

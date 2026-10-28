@@ -379,6 +379,9 @@ public class RecordOwnerAssignmentCensusTests
         new OwnerSeam("ExternalDataService.cs", "RequireOwner", Refusal),
         // R3 task 047 (UAC re-check F3): the WorkforceHome contact create refuses an empty owning team.
         new OwnerSeam("ContactIdentityStore.cs", "CreatePayload", Refusal),
+        // ISS-005 (#1673 review F1): the invite's contact create binds the customer business unit's default team, or refuses.
+        // Slice C2c: that create is the binder's guarded invite create (the invite service calls it).
+        new OwnerSeam("ContactIdentityBinder.cs", "CreateInviteContactGuardedAsync", Refusal),
     };
 
     /// <summary>The refusal every seam throws: "... refusing to create ... app-owned ..." (a stray throw elsewhere in
@@ -483,8 +486,16 @@ public class RecordOwnerAssignmentCensusTests
         new OwnerWriteEntry("ContactIdentityStore.cs", "CreatePayload", 1, OwnerWriteKind.Seam,
             "R3 task 047 (ADR-028 A9 registration): a WorkforceHome contact is a person, not a secure record's child; its owner is "
             + "the default team of the configured customer business unit (ExternalAccess:CustomerBusinessUnitId; the Secure Record "
-            + "business unit is refused by id), resolved by the binder before the create. Every other plane writes no owner, and "
-            + "CreatePayload throws on an empty team."),
+            + "business unit is refused by id), resolved by the binder before the create. ISS-005 (#1673): the Workforce plane's "
+            + "creates (first sign-in, licensed-user link) are owned by the same team, resolved by the same binder lookup and "
+            + "refused the same way when it does not resolve; a binder over ANOTHER environment binds none. The rule is "
+            + "plane-independent (the CIAM plane creates nothing today); CreatePayload throws on an empty team on any plane."),
+        new OwnerWriteEntry("ContactIdentityBinder.cs", "CreateInviteContactGuardedAsync", 1, OwnerWriteKind.Seam,
+            "ISS-005 (#1673 review F1; slice C2c moved the create into the binder's guarded invite create, which checks for a "
+            + "removal immediately before it writes): the invite's new contact is owned by the default team of the customer business unit "
+            + "(ExternalAccess:CustomerBusinessUnitId), resolved by the binder's one owner lookup before anything is written; the "
+            + "invite is refused (sdap.access.registration_owner_unconfigured) when it does not resolve, and the builder throws on an "
+            + "empty team. A contact the invite reuses is never re-owned."),
 
         new OwnerWriteEntry("DocumentCheckoutService.cs", "CreateFileVersionAsync", 1, OwnerWriteKind.Routed,
             "A file version is content of its document (ContentOf)."),
@@ -541,12 +552,16 @@ public class RecordOwnerAssignmentCensusTests
             "out of isolation whose mirrored shares could not all be removed (back on the Secure team, so no later pass reads " +
             "it as never isolated), or a row the pass pulled into isolation whose support then left (back on its ordinary " +
             "owner); read back."),
-        new OwnerWriteEntry("SecureChildReconciler.cs", "ReownOrdinaryRowAsync", 1, OwnerWriteKind.OrdinaryReown,
+        // UAC task 194: the write moved, unchanged, into the member both entry points share (ReownOrdinaryRowAsync forwards to
+        // it with its two-table contract; the reconciler's ordinary-parent-move pass calls it for any lineage child).
+        new OwnerWriteEntry("SecureChildReconciler.cs", "ReownOrdinaryRowCoreAsync", 1, OwnerWriteKind.OrdinaryReown,
             "UAC task 183 (owner round 96, D-135 item 2): an ORDINARY sprk_decisionrecord or sprk_signal re-owned to the ordinary " +
             "team ontology task 148's job names (the To Do's assignee's team) — refused when the row's owner, its business unit " +
             "or the team is in the Secure Record business unit, or the row is user-owned. The write is a conditional Web API PATCH " +
             "(If-Match on the guard read's versionnumber; a 412 is Conflict, a 404 NotFound) that shares the pass's evict and " +
-            "read-back (WriteOwnerAndReadBackAsync). No identity gains Write on a Decision Record."),
+            "read-back (WriteOwnerAndReadBackAsync). No identity gains Write on a Decision Record. UAC task 194 (#2339): the same " +
+            "member re-owns a default-team-owned lineage child of a reassigned ORDINARY record to the team IRecordOwnershipResolver " +
+            "answers for it (ReconcileOrdinaryParentMoveAsync), behind the same guards."),
         // The Office quick-create of a MATTER or PROJECT (a root) writes its owner through the unified create below
         // (RecordCreationService.cs: OwnedCreateFields, IsolatedCreateFields) since field mapping task 018; task 018c deleted
         // the Office creation core and its three owner writes (CreateMatterAsync, CreateProjectAsync, IsolateProjectCreate).

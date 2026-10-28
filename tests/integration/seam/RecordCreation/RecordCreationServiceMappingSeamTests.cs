@@ -104,6 +104,11 @@ public sealed partial class RecordCreationServiceMappingSeamTests
     private Func<string, RecordTableRule?> _tableRules = RecordTableRules.Find;
     private Func<SecureRootFilingGate> _rootFiling = SecureRootFilingGateFixtures.NothingSecure;
 
+    /// <summary>Task 037: the service's scope factory (a host with the "Assigned *" materializer) and logger, when a test sets them.</summary>
+    private IServiceScopeFactory? _scopes;
+    private ILogger<RecordCreationService>? _logger;
+    private Action<string, Guid, Dictionary<string, object?>>? _onCreate;
+
     public RecordCreationServiceMappingSeamTests()
     {
         _callerRead = MappingSourceCallerReadDouble.MirroringAppReads(_sourceReader);
@@ -131,6 +136,7 @@ public sealed partial class RecordCreationServiceMappingSeamTests
 
                 _creates.Add((table, id, fields));
                 Materialize(table, id, fields);
+                _onCreate?.Invoke(table, id, fields); // task 037: a test's own view of the created row
             })
             .Returns(Task.CompletedTask);
 
@@ -1128,8 +1134,8 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         return new RecordCreationService(
             new JournalingResolver(_world.Resolver(null), _journal), _appOnly.Object, _sourceReader.Object,
             _rootFiling(), restamper, shares,
-            new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(), _publisher,
-            NullLogger<RecordCreationService>.Instance)
+            _scopes ?? new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(), _publisher,
+            _logger ?? NullLogger<RecordCreationService>.Instance)
         {
             TableRules = t => _tableRules(t),
         };

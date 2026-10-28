@@ -59,8 +59,9 @@ public sealed class DataverseWebApiSeedWriterTests
     private const string TenantId = "00000000-1111-2222-3333-444444444444";
     private const string EnvUrl = "https://spaarke-acme.crm.dynamics.com";
 
+    // T186 L53: the Web API's ENTITY SET names (plural) — not the table logical names type-lookups.json is keyed by.
     private static readonly string[] TypeLookupEntitySets =
-        { "sprk_analysisactiontype", "sprk_aiskilltype", "sprk_aiknowledgetype", "sprk_aitooltype" };
+        { "sprk_analysisactiontypes", "sprk_aiskilltypes", "sprk_aiknowledgetypes", "sprk_aitooltypes" };
 
     // ---------- T1 happy path ----------
 
@@ -78,7 +79,7 @@ public sealed class DataverseWebApiSeedWriterTests
         posts.Should().HaveCount(44, "type-lookups(19) + knowledge(10) + skills(10) + output-types(5)");
 
         var gets = handler.Requests.Where(r => r.Method == HttpMethod.Get).ToList();
-        gets.Should().HaveCount(44, "one existence-check GET per seeded row");
+        gets.Should().HaveCount(54, "one existence-check GET per seeded row + one id lookup per knowledge type (5) and skill type (5)");
 
         success.StdoutSummary.Should().Contain("44 row(s) upserted across 12 artifact(s)");
         success.StdoutSummary.Should().Contain("[type-lookups] OK");
@@ -98,12 +99,45 @@ public sealed class DataverseWebApiSeedWriterTests
         // is FULLY seeded before either dependent artifact's first request —
         // the 4 type-lookup entity sets never overlap with sprk_analysisknowledges
         // or sprk_analysisskills, so index comparison is unambiguous.
-        var lastTypeLookupIndex = handler.Requests.FindLastIndex(r => TypeLookupEntitySets.Contains(EntitySetOf(r)));
+        // Type-row CREATES only: knowledge/skills read their types' ids by name afterwards (T186 L53).
+        var lastTypeLookupIndex = handler.Requests.FindLastIndex(r =>
+            r.Method == HttpMethod.Post && TypeLookupEntitySets.Contains(EntitySetOf(r)));
         var firstKnowledgeIndex = handler.Requests.FindIndex(r => EntitySetOf(r) == "sprk_analysisknowledges");
         var firstSkillIndex = handler.Requests.FindIndex(r => EntitySetOf(r) == "sprk_analysisskills");
         lastTypeLookupIndex.Should().BeGreaterThanOrEqualTo(0);
         firstKnowledgeIndex.Should().BeGreaterThan(lastTypeLookupIndex);
         firstSkillIndex.Should().BeGreaterThan(lastTypeLookupIndex);
+    }
+
+    [Fact]
+    public async Task T186_L53_KnowledgeAndSkillBinds_UseTheIdsThisEnvironmentGaveTheTypes_NotTheSeedFileGuids()
+    {
+        // T186 L53 — on a new stamp type-lookups creates the type rows with NEW ids; the GUIDs in knowledge.json /
+        // skills.json are the source environment's and do not exist there.
+        var handler = new FakeDataverseHandler();
+
+        var outcome = await BuildWriter(handler).InvokeAsync(BuildRequest(), CancellationToken.None);
+
+        outcome.Should().BeOfType<SeedManifestInvocationOutcome.Success>();
+        var typeIds = handler.CreatedIds
+            .Where(kv => kv.Key.StartsWith("sprk_aiknowledgetypes::", StringComparison.Ordinal)
+                      || kv.Key.StartsWith("sprk_aiskilltypes::", StringComparison.Ordinal))
+            .Select(kv => kv.Value.ToString())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        typeIds.Should().HaveCount(10, "type-lookups created 5 knowledge types and 5 skill types");
+
+        foreach (var (entitySet, bind) in new[] { ("sprk_analysisknowledges", "sprk_KnowledgeTypeId@odata.bind"), ("sprk_analysisskills", "sprk_SkillTypeId@odata.bind") })
+        {
+            var posts = handler.PostBodies.Where(p => p.EntitySet == entitySet).ToList();
+            posts.Should().HaveCount(10);
+            foreach (var post in posts)
+            {
+                using var doc = JsonDocument.Parse(post.Body);
+                var target = doc.RootElement.GetProperty(bind).GetString()!;
+                var id = Regex.Match(target, @"\(([0-9a-fA-F-]{36})\)").Groups[1].Value;
+                typeIds.Should().Contain(id, $"{bind} must point at a type row this environment created");
+            }
+        }
     }
 
     // ---------- T2 idempotency (acceptance criterion 2) ----------
@@ -288,6 +322,12 @@ public sealed class DataverseWebApiSeedWriterTests
         public HashSet<string> ExistingKeys { get; } = new(StringComparer.Ordinal);
         public string? FailPostForEntitySet { get; set; }
 
+        /// <summary>T186 L53: the id this fake environment gave each created row ({entitySet}::{name}) — never the seed file's GUID.</summary>
+        public Dictionary<string, Guid> CreatedIds { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>Each POST's entity set and body, captured before the writer disposes the request.</summary>
+        public List<(string EntitySet, string Body)> PostBodies { get; } = new();
+
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Requests.Add(request);
@@ -296,9 +336,14 @@ public sealed class DataverseWebApiSeedWriterTests
             if (request.Method == HttpMethod.Get)
             {
                 var name = ExtractFilterName(request.RequestUri!.Query);
-                var exists = ExistingKeys.Contains($"{entitySet}::{name}");
+                var key = $"{entitySet}::{name}";
+                var exists = ExistingKeys.Contains(key);
+                var select = Regex.Match(Uri.UnescapeDataString(request.RequestUri!.Query), @"\$select=([a-z_]+)").Groups[1].Value;
+                var idColumn = select != "sprk_name" && CreatedIds.TryGetValue(key, out var id)
+                    ? $",\"{select}\":\"{id}\""
+                    : string.Empty;
                 var json = exists
-                    ? $"{{\"value\":[{{\"sprk_name\":\"{name}\"}}]}}"
+                    ? $"{{\"value\":[{{\"sprk_name\":\"{name}\"{idColumn}}}]}}"
                     : "{\"value\":[]}";
                 return new HttpResponseMessage(HttpStatusCode.OK)
                 {
@@ -317,9 +362,11 @@ public sealed class DataverseWebApiSeedWriterTests
                 }
 
                 var body = await request.Content!.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+                PostBodies.Add((entitySet, body));
                 using var doc = JsonDocument.Parse(body);
                 var name = doc.RootElement.GetProperty("sprk_name").GetString()!;
                 ExistingKeys.Add($"{entitySet}::{name}");
+                CreatedIds[$"{entitySet}::{name}"] = Guid.NewGuid();
                 return new HttpResponseMessage(HttpStatusCode.NoContent);
             }
 

@@ -2438,6 +2438,22 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
                         grants = null;
                         contactGrantsApplied = false;
                     }
+                    else if (await ReadRemovedMarkerAsync(resolved, ct).ConfigureAwait(false) is var linkedMarker
+                             && linkedMarker != RemovedMarkerRead.NotRemoved)
+                    {
+                        // Slice C: likewise a linked contact whose external access was removed, or whose marker cannot be
+                        // read. The systemuser's own membership is unaffected. Slice C2c: the two are logged apart.
+                        _logger.Log(linkedMarker == RemovedMarkerRead.Removed ? LogLevel.Warning : LogLevel.Error,
+                            linkedMarker == RemovedMarkerRead.Removed
+                                ? "[WF-AUTHZ] Systemuser {SystemUserId}'s linked contact {ContactId} was removed by an administrator " +
+                                  "({Marker}): its grants on {EntityType} confer nothing; the systemuser's own membership is unaffected."
+                                : "[WF-AUTHZ] Systemuser {SystemUserId}'s linked contact {ContactId}'s removed marker could not be " +
+                                  "proven empty ({Marker}): its grants on {EntityType} confer nothing (fail closed); the systemuser's " +
+                                  "own membership is unaffected.",
+                            systemUserId, resolved, linkedMarker, entityType);
+                        grants = null;
+                        contactGrantsApplied = false;
+                    }
                 }
             }
         }
@@ -2678,6 +2694,29 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         }
     }
 
+    /// <summary>
+    /// Slice C: the live read of a contact's removed marker (<see cref="IContactIdentityStore.ReadRemovedMarkerAsync"/>). A
+    /// fault is <see cref="RemovedMarkerRead.Unreadable"/> (fail closed); cancellation propagates. Never cached.
+    /// </summary>
+    private async Task<RemovedMarkerRead> ReadRemovedMarkerAsync(Guid contactId, CancellationToken ct)
+    {
+        try
+        {
+            return await _identityStore.ReadRemovedMarkerAsync(contactId, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "[WF-AUTHZ] The removed marker of Contact {ContactId} could not be read. Failing CLOSED — it confers nothing " +
+                "on this request.", contactId);
+            return RemovedMarkerRead.Unreadable;
+        }
+    }
+
     // ── workforce contact plane: grants ∪ (standing membership IFF flag set) ∪ org expansion ─────
     private Task<AccessibleRecordSet> ComposeForContactAsync(
         WorkforcePrincipal principal, string entityType, CancellationToken ct)
@@ -2723,6 +2762,39 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
                 "[WF-AUTHZ] Contact {ContactId} is {State}: its {Plane} contact-plane composition on {EntityType} is " +
                 "EMPTY — an inactive or unreadable contact confers nothing (task 137).",
                 contactId, contactState, includeDerivedMemberTerms ? "workforce" : "CIAM", entityType);
+
+            return new AccessibleRecordSet
+            {
+                PrincipalKind = WorkforcePrincipalKind.ContactOnly,
+                EntityType = entityType,
+                Rights = composed,
+                Capped = false,
+                Sources = new AccessibleRecordSetSources(
+                    SystemUserMembership: false, ContactGrants: false, StandingGrantMembership: false),
+            };
+        }
+
+        // ── Slice C: a contact whose external access an administrator removed confers nothing — read LIVE ──────────
+        // Whatever its statecode: reactivating the row does not reinstate the person. An empty marker counts only on a proven
+        // read (its own readability proof); a marker that cannot be read, or a read that faults, composes the EMPTY set.
+        var removedMarker = await ReadRemovedMarkerAsync(contactId, ct).ConfigureAwait(false);
+        if (removedMarker != RemovedMarkerRead.NotRemoved)
+        {
+            // Slice C2c: the same EMPTY set either way; the log tells an administrator's removal from an unproven read.
+            if (removedMarker == RemovedMarkerRead.Removed)
+            {
+                _logger.LogWarning(
+                    "[WF-AUTHZ] Contact {ContactId}'s external access was removed by an administrator: its {Plane} " +
+                    "contact-plane composition on {EntityType} is EMPTY.",
+                    contactId, includeDerivedMemberTerms ? "workforce" : "CIAM", entityType);
+            }
+            else
+            {
+                _logger.LogError(
+                    "[WF-AUTHZ] Contact {ContactId}'s removed marker could not be proven empty ({Marker}): its {Plane} " +
+                    "contact-plane composition on {EntityType} is EMPTY (fail closed) until the marker can be read.",
+                    contactId, removedMarker, includeDerivedMemberTerms ? "workforce" : "CIAM", entityType);
+            }
 
             return new AccessibleRecordSet
             {

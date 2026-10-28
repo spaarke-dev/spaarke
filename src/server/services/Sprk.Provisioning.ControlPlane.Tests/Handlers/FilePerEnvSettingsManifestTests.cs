@@ -52,6 +52,49 @@ public sealed class FilePerEnvSettingsManifestTests
             "(entry 3 already existed) — a smaller count would indicate a parse regression");
     }
 
+    [Theory]
+    [InlineData("AzureAd__Instance")]                // IDW10106 on every request, /healthz included
+    [InlineData("CosmosPersistence__DatabaseName")]  // four AI/workspace services throw on first resolve
+    public async Task T186_L50_TemplateDefaultTheBffCannotRunWithout_IsWrittenByH4bWithTheTemplateValue(string key)
+    {
+        // T186 L50 — the BFF artifact ships no appsettings.json (appsettings.template.json is
+        // CopyToPublishDirectory=Never), so a template literal reaches a stamp only if H4b writes it.
+        // On ACME the staging BFF answered HTTP 500 to all 120 H9 probes for want of these two.
+        var success = (PerEnvSettingsManifestReadResult.Success)await NewManifest().ReadAsync(CancellationToken.None);
+        var entry = success.Entries.SingleOrDefault(e => e.Key == key);
+
+        entry.Should().NotBeNull($"H4b must write {key}: the BFF cannot run without it and no appsettings.json ships");
+        entry!.PerEnvSource.Should().Be(PerEnvSettingSource.Literal);
+        entry.LiteralValue.Should().Be(ReadTemplateValue(key), "the stamp value stays the BFF template's default");
+    }
+
+    private static string ReadTemplateValue(string key)
+    {
+        var path = Path.Combine("src", "server", "api", "Sprk.Bff.Api", "appsettings.template.json");
+        string? file = null;
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null && file is null; dir = dir.Parent)
+        {
+            var candidate = Path.Combine(dir.FullName, path);
+            file = File.Exists(candidate) ? candidate : null;
+        }
+        file.Should().NotBeNull($"{path} is found by walking up from the test output");
+
+        // The template carries unquoted #{TOKEN}# placeholders; quote them so it parses.
+        var text = System.Text.RegularExpressions.Regex.Replace(
+            File.ReadAllText(file!), @":\s*#\{[A-Za-z0-9_]+\}#", ": \"#{TOKEN}#\"");
+        using var doc = System.Text.Json.JsonDocument.Parse(text, new System.Text.Json.JsonDocumentOptions
+        {
+            CommentHandling = System.Text.Json.JsonCommentHandling.Skip,
+            AllowTrailingCommas = true,
+        });
+        var node = doc.RootElement;
+        foreach (var part in key.Split("__"))
+        {
+            node.TryGetProperty(part, out node).Should().BeTrue($"the template defines {key}");
+        }
+        return node.GetString()!;
+    }
+
     [Fact]
     public async Task ReadAsync_RealEmbeddedManifest_EveryNonLiteralSourceResolvesThroughTheCatalog()
     {
@@ -210,6 +253,40 @@ public sealed class FilePerEnvSettingsManifestTests
         PerEnvSourceCatalog.BySourceKey["customer_id"].Resolve(
             new ProvisioningRun { RunId = "r", CustomerId = "acme", EnvironmentId = "e", TenancyModel = "Model2", Profile = "p" })
             .Should().Be("acme", "the value is the run's customerId");
+    }
+
+    [Fact]
+    public async Task ReadAsync_RealEmbeddedManifest_CustomerBusinessUnitId_IsRequiredAndSourcedFromH10()
+    {
+        // R3 073 / ADR-028 A9: the BFF's registration route answers 500 registration_owner_unconfigured without
+        // ExternalAccess__CustomerBusinessUnitId, so every stamp needs it and H10 (which creates the unit) is its producer.
+        var entries = ((PerEnvSettingsManifestReadResult.Success)await NewManifest().ReadAsync(CancellationToken.None)).Entries;
+
+        var entry = entries.Single(e => e.Key == "ExternalAccess__CustomerBusinessUnitId");
+
+        entry.Required.Should().BeTrue();
+        entry.Indexed.Should().BeFalse();
+        entry.PerEnvSource.Should().Be(PerEnvSettingSource.FromHandlerOutput);
+        entry.ParameterKey.Should().Be("customer_business_unit_id");
+        PerEnvSourceCatalog.BySourceKey["customer_business_unit_id"].ProducerHandlerId.Should().Be("H10");
+    }
+
+    [Fact]
+    public async Task ReadAsync_RealEmbeddedManifest_SessionFileStoreBlobEndpoint_IsRequiredAndSourcedFromH2a()
+    {
+        // T186 follow-up: without SessionFileStore__BlobEndpoint the stamp BFF's chat session-file store is
+        // StoreDisabled (uploads refused); the value is H2a's storagePrimaryEndpoint output.
+        var entries = ((PerEnvSettingsManifestReadResult.Success)await NewManifest().ReadAsync(CancellationToken.None)).Entries;
+
+        var entry = entries.Single(e => e.Key == "SessionFileStore__BlobEndpoint");
+
+        entry.Required.Should().BeTrue();
+        entry.Indexed.Should().BeFalse();
+        entry.PerEnvSource.Should().Be(PerEnvSettingSource.FromHandlerOutput);
+        entry.ParameterKey.Should().Be("storage_blob_endpoint");
+        PerEnvSourceCatalog.BySourceKey["storage_blob_endpoint"].ProducerHandlerId.Should().Be("H2a");
+        entries.Should().NotContain(e => e.Key == "SessionFileStore__ContainerName",
+            "the container is not written: the BFF default (ai-chunks) is the container every stamp creates");
     }
 
     [Fact]

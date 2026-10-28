@@ -78,6 +78,7 @@ public class WorkforceEmailNoHijackTests
     public async Task FirstSignIn_OfAMember_BindsTheOneUnboundMatch_InDFormat_PlaneWorkforce()
     {
         _store.AddContact(ContactA, email: Email);
+        _store.StampInvite(ContactA, Email, CustomerTenant);
 
         var result = await Resolve(WorkforceUser(Caller, CustomerTenant, email: Email.ToUpperInvariant()));
 
@@ -91,6 +92,7 @@ public class WorkforceEmailNoHijackTests
     public async Task TheNextSignIn_ResolvesByOid_EvenWhenTheEmailClaimDiffers()
     {
         _store.AddContact(ContactA, email: Email);
+        _store.StampInvite(ContactA, Email, CustomerTenant);
         await Resolve(WorkforceUser(Caller, CustomerTenant, email: Email));
         _store.Reads.Clear();
 
@@ -171,6 +173,7 @@ public class WorkforceEmailNoHijackTests
     public async Task ASquattedMirror_DeniesTheEmailBind_TheMatchedContactStaysUnbound()
     {
         _store.AddContact(ContactA, email: Email);                                     // the bind target
+        _store.StampInvite(ContactA, Email, CustomerTenant);
         _store.AddContact(ContactB, email: "squatter@customer.example", keyMirror: Caller.ToString("D"));
 
         var result = await Resolve(WorkforceUser(Caller, CustomerTenant, email: Email));
@@ -368,7 +371,8 @@ public class WorkforceEmailNoHijackTests
     public async Task AnEmptyCustomerTenantSetting_BindsAndCreatesForNobody()
     {
         _store.AddContact(ContactA, email: Email);
-        var binder = new ContactIdentityBinder(_store, Tenants(), new Microsoft.Extensions.Time.Testing.FakeTimeProvider(Now), _log);
+        var binder = new ContactIdentityBinder(_store, Tenants(), new Microsoft.Extensions.Time.Testing.FakeTimeProvider(Now), _log,
+            IdentityBinding.IdentityBindingTestKit.NoOwnerUnderTest);
 
         var result = await Resolver(binder).ResolveAsync(WorkforceUser(Caller, CustomerTenant, email: Email), CancellationToken.None);
 

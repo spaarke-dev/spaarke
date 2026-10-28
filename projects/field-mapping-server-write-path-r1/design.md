@@ -499,3 +499,294 @@ describe.
   <root-claude-md>Y</root-claude-md>  <!-- W6 updates the Field Mapping Framework and Dataverse write path pointer rows -->
 </hot-path-declaration>
 ```
+
+---
+
+## 12. W7 — Record family service and the Family tool (addendum, 2026-10-27; DRAFT for UAC-r2 and ontology review)
+
+### 12.1 Why
+
+- **Owner decisions (2026-10-27):**
+  - build ONE shared, read-only "record family" service;
+  - add a **Family** tool to the TrackingFieldTrio PCF. It opens a modal listing the record's family, with an action toolbar;
+  - the first actions are **Push field updates** and **Update Assigned To** (owner 4a). More actions come later, each with its own review;
+  - keep it in this project and follow the procedure.
+- **Current state:** about eight separate enumerations each declare their own copy of the hierarchy, and nobody checks that they agree (code map, notes/decisions.md 2026-10-27):
+  - push `BuildChildRecordQuery`;
+  - `SecureRootInheritance` up and down walks;
+  - `SecureChildLineage` / `SecureChildReconciler`;
+  - `ChildAccessPermissionReconciler`;
+  - `CoreAncestorResolver` / `CoreAncestorRestamper`;
+  - `RecordOwnershipResolver.OwnershipParentEntities`;
+  - `AccessibleRecordSetService`.
+- **Gaps:** none of them answers "what in this record's family can THIS user see". Push is one level deep and has no preview.
+
+### 12.2 The canonical family (UAC-r2, 2026-10-27; full text in notes/decisions.md)
+
+- **Filing edges only:**
+  - core → core: projects and work assignments under a matter or project (typed filing, intermediate filing, record-type pair);
+  - core → child: the four regarding stamps plus each child table's direct filing lookups;
+  - child → grandchild: the `SecureChildLineage` hops.
+  - Depth is 4. The walk goes down from the record, plus up to its root.
+- **Not family:** citations, people and organization lookups, N:N associations, grant rows, system rows.
+- **Detail tables (UAC-r2 2026-10-28):** `RecordFamilyEdges.DetailTables` (event log, email review log, attachment artifact, email artifact, spend signal, spend snapshot, billing event, analysis output) stay registry rows but the default Family view and push skip them; hiding them hides no user record. KPI assessments are shown. An analysis is filed under its document (`sprk_analysis.sprk_documentid`, its ownership primary); a message is filed under its record thread (`sprk_communication.sprk_communicationthread`).
+- **Service requests (UAC-r2 ruling 2026-10-28):** a service request is a core root outside the Secure family. Its `ServiceRequestRelations` lookups are Filing edges of its own family (ownership parent, re-file column, ordinary reconcile walk); the Secure lineage never walks them. `InSecureFamily = false` means "not walked by the Secure lineage". Secure-if-any does read the service request, but no writer puts one in the Secure Record business unit.
+  - Expected behaviour, not a bug: a budget inquiry creates a `sprk_servicerequest` regarding the matter. Because the service request is its own root, the matter's Family view does not list the inquiries sent from it.
+- **Ontology tables (ontology review, 2026-10-27; already in `SecureChildLineage`):**
+  - `sprk_signal` is a child of its typed `sprk_matter`, of its subject (the 8 `sprk_regarding*` lookups; `sprk_regardingservicerequest` is a Filing edge of the service request's own family, not the Secure family — UAC-r2 2026-10-28), and of its Decision Record (`sprk_signal.sprk_decisionrecord`). It is never a child of a policy, a policy version or a core record type.
+  - `sprk_decisionrecord` is a child of its typed core lookups (matter, project, work assignment) and of its subject's regarding lookups. It is never a child of `sprk_action` or a policy version.
+  - `sprk_budgetrevision` is a child of `sprk_budget` and `sprk_matter`.
+  - `sprk_policy` → `sprk_matter` and `sprk_policyversion` → `sprk_policy` (#2084): the EDGE always exists, but a policy is a MEMBER only when its `sprk_matter` is set (a matter-scoped rule). `sprk_policy.sprk_currentversion` is excluded (a loop).
+- **Terms (ontology):**
+  - "family", "member", "root" and "filing edge" are reuse, not invention ("Secure family", "a matter's family" #2084, "invoice family"). Ontology proposes a component-model §3 row.
+  - Keep three neighbours distinct: "subject" (what a Signal or Decision Record is about; never use it for root), "citation" (never filing), "filing" (consistent with ontology's File and File+Act dispositions).
+  - The UI word is "Family". Avoid "Related records", which reads as N:N associations.
+- **To classify before seeding** (owner, with UAC and ebilling):
+  - `sprk_procedureassignment` (one typed lookup per core record; configuration ABOUT the record, not filed content): in or out?
+  - A record-scoped ruleset's record rule is its own `sprk_policy`. It is a member only if it carries `sprk_matter`; ebilling owns that answer.
+
+### 12.3 Components
+
+**A. `RecordFamilyEdges` — the canonical edge registry (data, `Services/Dataverse`, beside `CoreAncestorResolver`)**
+
+- **One concept, with kinds (ontology, 2026-10-27; the term itself waits on the owner's component-model §3 row):**
+  - A **family** is a set of records joined by typed edges of ONE kind. W7 builds one kind only: **Filing**, a tree with one root (the core ancestor).
+  - A later peer kind for IP (for example **Priority**: continuation, divisional, foreign counterpart) is a graph with no root. It is labelled by its term of art ("Patent family"), and W7 builds nothing for it.
+  - "Secure family" is NOT a kind. It is the Filing family of a Secure root (`InSecureFamily`), and stays a qualifier.
+- **Rows:** `(FamilyKind, ChildTable, LookupColumn, ParentTable, EdgeKind = FilingCore | Stamp | LineageHop, InSecureFamily, RecordNumberColumn?, …)`. Every row is `FamilyKind = Filing` in W7.
+- **Edge TYPES live in code; edge INSTANCES live in Dataverse (ontology).**
+  - Filing edges are schema facts that UAC's isolation walks depend on. An editable table would let configuration change an access boundary, and the parity ratchet can only guard code.
+  - A future IP kind keeps its instances (matter A claims priority from matter B) in a link table, and adds ONE registry row pointing at that table.
+- **Seed:** from `SecureChildLineage`, `TypedFilingColumns` / `IntermediateFilingColumns` / pair, and `StampSourceColumns`, AFTER UAC task 194 merges. Never written from scratch.
+- **Parity test:** each existing registry is a checked view of this one, with a ratchet baseline. A new disagreement fails the build; the known ones are listed and worked down by UAC. Migrating UAC's walks onto it is UAC's call.
+- **Content ownership:** UAC-r2. Enforced by a content-pin test. Changing an edge fails the test, and its message requires a UAC review line in the PR (enforcement ladder: a test, not prose).
+  - **The pin covers the access-relevant columns only (UAC C3):** FamilyKind, ChildTable, LookupColumn, ParentTable, EdgeKind and InSecureFamily.
+  - `RecordNumberColumn` and other display fields change without a UAC review line.
+- **Isolation stays Filing-only (UAC C2):** every view of the registry that UAC's access walks use filters `FamilyKind == Filing`. That covers `SecureChildLineage` parity and the `CoreAncestorResolver` children.
+  - Enforced by a test that adds a synthetic non-Filing row and proves those views do not change.
+  - This is the guard that a later Priority row can never enter an isolation walk or I-6.
+
+**B. `RecordFamilyReader` — read-only, scoped**
+
+- **Signature:** `ReadAsync(kind, table, id, direction, continuation)`. `kind` defaults to Filing.
+- **One kind per walk (ontology 3a):** a walk never mixes kinds. A priority edge crosses separate matters, possibly Secure ones. A Filing walk that followed one would spread push and Assigned To across matters and through the isolation boundary.
+- **Generic over edges:** the walk is driven by registry rows and keeps a visited set, even for Filing. This handles a bad data loop, so a later peer kind is a data change, not a rewrite.
+- **Identity:** walks AS THE CALLER (OBO), level by level, with one batched query per (child table, lookup) per level (no N+1).
+- **Unreadable records:** the walk never passes through one. It never returns an unreadable member, and never counts or hints at hidden ones.
+  - **Up:** the walk stops at the first ancestor the caller cannot read. Nothing above it is returned, and there is no hint that it exists (UAC review F2).
+- **Continuation (UAC review F1, C1):** opaque and integrity-protected, using ASP.NET Data Protection.
+  - It is bound to the caller's `oid`, the anchor, the kind, the direction and the top it derived.
+  - A down-walk continuation cannot be replayed as a full-family walk, and a Filing one cannot be replayed as another kind.
+  - Every parent id it carries is re-checked as caller-readable before use, so a caller can never steer the walk through a record they cannot read.
+  - A tampered continuation answers exactly like an invalid one.
+- **Anchor probe:** uses the equalised gate call, so an unknown anchor and a denied anchor look the same. Kind validation (400) may run before the probe; it reveals nothing (UAC).
+- **Caps:** depth 4; 500 members per view and a per-level cap. Past a cap it returns `truncated = true`, per-table counts of what IS shown, and a per-level continuation. It never truncates silently.
+- **Truncation keeps the anchor in view (UAC C4):** a truncated full-family view still includes the anchor's ancestor chain and the anchor itself. It fills the anchor's own subtree before its siblings' subtrees.
+  - Otherwise, opening a document under a large matter could truncate the document's own branch out of the view.
+  - Covered by a K line in §12.11 and a test.
+- **Field security:** because the walk is OBO, Dataverse applies field security. A field-secured record number or status comes back null. These columns are never read app-only (UAC).
+- **One family per record (owner-approved via UAC-r2, 2026-10-27; sent to ontology for D-191):**
+  - A record filed under several parents belongs only to its PRIMARY parent's family.
+  - Up and down walks follow primary edges only.
+  - The primary parent comes from `RecordOwnershipContext.InPrimaryOrder` / `OrderedParentsOf` (UAC 194b). Never a second ordering.
+  - Isolation still uses secure-if-any over all filing parents.
+  - Only the pair is the Matter → Project edge, never an N:N row.
+- **De-duplication (ontology review):** members are unique by (table, id), and the shallowest edge is kept. Example: a Signal reached from a matter both directly and through its Decision Record appears once. Counts and the 500 cap count unique members.
+- **Fields returned:** id, table, primary name, record number (null for a table without a number column), status, modified on, parent edge, depth (owner, 2026-10-27). The record-number column per table comes from the registry. No access metadata (grants, No Access, sharees, owner team).
+- **Not an authorization input.** No cross-caller cache.
+
+**C. `GET /api/v1/records/{table}/{id}/family`**
+
+- Lives in the existing `/api/v1/records` group, with auth required, in its OWN file, `Api/Records/RecordFamilyEndpoints.cs`. `RecordNoAccessEndpoint.cs` stays one cohesive No Access responsibility (§11.5).
+- It is registered in the route-authorization ledger (`RouteAuthorizationGuardTests.Ledger`) with its mechanism, and the governed-file census is updated (UAC review F2).
+- Takes `direction` and `continuation`. The default is the FULL family (owner, 2026-10-27): up to the highest READABLE ancestor, then down from it. That ancestor is the root only when the root is readable (UAC T1). Siblings and cousins are included only when every record on the path down to them is readable. The walk's pruning rules apply to both directions. `direction=down` remains available for the push preview, which only acts below the source.
+- Takes `kind` (default Filing; any other value is refused with 400 in W7).
+- **Response shape (ontology 3c):**
+  - The walk is described from an `anchor` (the record opened). `root` is optional, because a peer family has none.
+  - Every member carries `kind` and `edgeKind`.
+- An unknown or unreadable anchor gets one uniform 404.
+
+**D. `/push` extensions (task 040; UAC 4a design)**
+
+- `includeAssignedTo` defaults to false when absent.
+- `preview: true` writes nothing. It returns, per child whose value would change: id, name, column, from → to, and the flag for each Assigned-To policy it will meet: Secure (suggestion only), Restricted (no contact grant) and Limited (no organization grant) (UAC review F2). It also returns a skipped-for-no-Write count and `truncated`.
+- `childIds` is the confirmed list. The server re-derives the children as the caller and intersects them with the list; any other id is refused per id.
+- With `includeAssignedTo`, the caller needs Write on the SOURCE (equalised probe).
+- The profile's parent lookup must be a `RecordFamilyEdges` filing edge, or the push is refused.
+- **Actions are per kind (ontology 3b):**
+  - Push field updates and Update Assigned To are defined for the Filing kind only.
+  - The server refuses them for any other kind; hiding them in the UI is not enough.
+- Unchanged: filing columns are never pushed, invariant columns are never copied, `SecureRootFilingGate` and `AssignedAccessMaterializer` run per child.
+- Sync mode becomes class-aware: Assigned-To targets 0, filing targets never, plain data 1. The values ship with 040 after the owner reviews the dry run.
+
+**E. Family modal (client, `Spaarke.UI.Components`)**
+
+- `RecordFamilyModal` is built on `SprkModal/presets/BrowseModal` (ADR-050 Layout 2, in-app).
+- It shows the family grouped by level and table, with checkboxes, a truncation notice and "load more".
+- **Action toolbar, v1:**
+  - **Push field updates:** push preview → the person confirms rows → apply → result summary.
+  - **Update Assigned To:** the same flow with `includeAssignedTo`.
+- An action never acts on unconfirmed rows. The server re-checks everything.
+
+**F. TrackingFieldTrio**
+
+- A new toolbar icon, **Family**. The shared component gains an optional `onOpenFamily` callback, the same pattern as `onOpenGrantModal` / `onOpenEmailMembers`, so existing consumers see no change.
+- The PCF (`index.ts`) wires it and renders the modal.
+- Forms: Matter, Project, Work Assignment and Event. All four already host the PCF, so no form change is needed.
+- The PCF bundle delta is measured.
+
+### 12.4 Sequencing
+
+1. **A**, after UAC 194 merges.
+2. **B + C + E + F** as a read-only Family view. This does not depend on 017.
+3. **D**, with 040. The modal's actions light up when 040 ships. 040 still depends on 019 → 017 → ebilling #1911.
+
+### 12.5 Out of scope (later, each with its own review)
+
+- Monitor or High Priority across the family; email family members (UAC: recipients from readable members' people lookups, field security respected, the existing send path).
+- Any bulk share or grant (needs UAC review first).
+- Any family table: neither a stored membership (UAC's unbuilt `sprk_securefamily`, D-191) nor a peer IP kind or its link table.
+- External users (they use `AccessibleRecordSetService`).
+- A Console entry point.
+
+### 12.6 Placement (§10) and component justification (§11)
+
+**Placement.** In the BFF: a caller-scoped Dataverse read used by PCF and code-page surfaces. CRUD only, with no AI dependency (ADR-013 is not triggered). No new packages.
+
+| Surface | Existing (checked) | Extend instead? | Cost of doing nothing |
+|---|---|---|---|
+| `RecordFamilyEdges` | Seven registries in five files | **Consolidate**: a seeded union plus a parity ratchet; existing registries untouched | The hierarchy keeps drifting (UAC 194 just found `sprk_budgetbucket` missing); every new family feature adds an eighth copy |
+| `RecordFamilyReader` | Access walks are app-only and enforce invariants; push is one level as the caller | **No**: those walks must stay app-only for isolation (UAC), and the push query is private, one level and profile-bound | The Family modal and the push preview each build their own caller walk |
+| `GET …/family` | `/api/v1/records` group | **Extend the group** | The PCF has no way to list the family |
+| `/push` `preview` / `includeAssignedTo` / `childIds` | `/push` | **Extend the existing endpoint** | Assigned-To re-push stays impossible, or becomes an unpreviewed mass access change |
+| `RecordFamilyModal` | `BrowseModal`, `AccessGrantModal` pattern | **Compose `BrowseModal`** | No user surface for family actions |
+| TrackingFieldTrio Family icon | Existing toolbar (grant, email) | **Extend the toolbar** | No entry point on the forms |
+
+- **Publish size:** measured per BFF task against a fresh master build.
+- **Hot path:** BFF Y (unchanged). SpaarkeAi N. The PCF and the shared UI library are not hot-path surfaces.
+
+### 12.7 ADR tensions
+
+| ADR | Point | Resolution |
+|---|---|---|
+| ADR-050 / MODAL-DECISION-CRITERIA | A collection browse with actions | Comply: `BrowseModal` (Layout 2), in-app from a React surface |
+| ADR-021 / ADR-022 | Fluent v9 and React 16 in a PCF | Comply: the shared library is already consumed by this PCF (`AccessGrantModal`) |
+| ADR-028 / ADR-008 | Read identity | Comply: OBO as the caller; the equalised root probe; auth required |
+| ADR-010 | DI | One scoped reader plus static registry data |
+| ADR-019 | Error text | Fixed, actionable texts; detail to logs |
+| ADR-038 | Tests | Registry parity and content pin (unit or arch), reader seam tests (as the caller, unreadable pruning, no counts, caps), endpoint contract, push preview/ids tests (UAC's list), UI component tests |
+
+None needs path A or B.
+
+### 12.8 Success criteria (W7)
+
+1. One edge registry. The parity test lists every disagreement with the existing registries, and a new one fails the build.
+2. The family view shows only caller-readable members. A readable record below an unreadable one is absent, and nothing reveals hidden members (tested with a Secure family).
+3. A truncated family says so and can load more. Nothing is dropped silently.
+   - A tampered continuation naming an unreadable parent returns nothing under it, and answers the same as an invalid continuation.
+   - With direction=up, a readable project under an unreadable Secure matter shows no ancestors.
+4. **Push:**
+   - preview writes nothing;
+   - an absent `includeAssignedTo` leaves Assigned columns untouched;
+   - a Read-only source with `includeAssignedTo` is refused (403);
+   - an unticked child keeps its value and its grants;
+   - a foreign id is refused;
+   - a Secure child gets a suggestion, not a grant.
+5. The Family tool works from the Matter, Project, Work Assignment and Event forms; existing TrackingFieldTrio consumers are unchanged.
+
+### 12.9 Open questions for the owner
+
+Owner answers, 2026-10-27:
+
+1. **The Push Updates ribbon button:** keep it, and have it open the Family view (owner confirmed 2026-10-27).
+2. **Columns per member:** name, **record number** (blank where a table has none), record type, status and modified on.
+3. **Default view:** the full family, all the way up and down (§12.3 C).
+4. **`sprk_procedureassignment`:** OUT of the Family view (owner, 2026-10-27; UAC-r2 agrees). It is billing configuration; its access lineage is unchanged.
+
+The family as a data-model concept, including future patent and trademark families, has been raised with ontology-r1. See §12.10.
+
+### 12.10 Reviews required before the spec amendment
+
+- **UAC-r2:** the registry (A), read identity and limits (B, C), push extensions (D).
+- **Ontology-r1:** the hierarchy vocabulary and the term "family" (terminology changes originate in its component model, root CLAUDE.md §1.1).
+
+**UAC-r2 review (2026-10-27, at eec7704ec4):** accepted with four fix-now items, all applied above:
+- F1: the continuation is integrity-protected and its parent ids are re-checked;
+- F2: up-walk pruning;
+- F2: the Limited flag in the preview;
+- F2: own endpoint file, plus the route-authorization ledger and census.
+
+A, B, D, E, F, §12.5 and §12.7 were accepted as written.
+
+**Ontology-r1 review (2026-10-27, at eec7704ec4):** the terms and the hierarchy agree. Applied in §12.2 and §12.3 B:
+- the ontology table edges;
+- the policy membership rule;
+- de-duplication by (table, id);
+- the service-request note;
+- the term guidance.
+
+Still open: classify `sprk_procedureassignment` and record-scoped ruleset rules (§12.2).
+
+**Ontology-r1, round 2 (2026-10-27, family as a data-model concept):**
+- Nothing about a family component is recorded in ontology R1 or R2: no design, no D-number, no patent or trademark family model. Ontology is asking the owner directly.
+- Recommendations applied in §12.3 A–D:
+  - one concept with kinds (Filing now; a peer IP kind later; Secure is a qualifier, not a kind);
+  - one kind per walk;
+  - actions per kind, refused server-side;
+  - anchor and optional root;
+  - `kind` and `edgeKind` on every member;
+  - a visited set;
+  - edge types in code, edge instances in Dataverse.
+- Term: **decided, D-191 (owner, 2026-10-27; ontology component model §3 "Family").**
+  - There is ONE canonical Family concept: a set of records joined by typed edges of one kind.
+  - Filing is the kind now, which is exactly W7. A peer IP kind (for example Priority) comes later and keeps the name "patent family".
+  - "Secure family" is a qualifier, not a kind.
+- **Materialised form, not foreclosed:** UAC-r2 rounds 94/100b decided an UNBUILT `sprk_securefamily` table: a single-membership lookup on every family table, an owner team per family, and nesting. UAC research note §8 leaves the owner the option to generalise it to a record family for every core root.
+  - That table would be a stored form of this same Filing family.
+  - W7's names and API must not foreclose it. If it is built, `RecordFamilyReader` may use the stored membership as an index instead of walking. The response contract does not change.
+  - W7 creates NO family table (§12.5).
+
+**UAC-r2, round 2 (2026-10-27, at 4d0bba20dd):**
+- Accepted: the `FamilyKind` column and the `kind` parameter. The full-family default is covered by the existing pruning rule.
+- Applied in §12.3 A–C and §12.11:
+  - T1: down from the highest readable ancestor;
+  - T2: the anchor in the 404 and in the probe;
+  - C1: continuation bound to oid, anchor, kind, direction and top;
+  - C2: isolation views filter Filing, with a synthetic-row test;
+  - C3: the pin covers the access columns only;
+  - C4: truncation keeps the anchor's chain and subtree;
+  - OBO field security on display columns.
+- **Seed: UAC 194 merged as PR #2349, master `de38296499` (2026-10-27).** Component A is seeded from that commit.
+  - It adds `sprk_budgetbucket` → `sprk_budget` to `SecureChildLineage`.
+  - Service requests are walked in ordinary mode through `ExternalDataService.ServiceRequestRelations`. That list is a service request's OWN family (it is its own root, §12.2), not part of a matter's.
+  - `sprk_invoicelineitem` stays out until ebilling deploys it (#2348).
+  - Grant rows do not follow an ordinary move (#2341). This does not affect a read-only view.
+- **Matter → Project edge (#2352). Owner decided (a), the regarding pair only, 2026-10-27.**
+  - The existing Project↔Matter N:N stays as an association (for example, related matters). It is not a filing edge and confers nothing.
+  - The background below is kept for reference.
+  - A project is filed under a matter by its regarding PAIR (`sprk_regardingrecordid` + `sprk_regardingrecordtype`), the edge UAC's inheritance already keys on (`SecureRootInheritance` task 158).
+  - CreateProjectWizard writes only the N:N `sprk_Project_Matter_nn` and never the pair, so no dev project is filed under its matter today.
+  - UAC-r2 recommends (a): the pair, one root per project, written by the wizard, with the 7 N:N-linked dev projects backfilled. UAC owns or reviews that fix. The alternative, (b), is a typed lookup kept in agreement with the pair. (c), promoting the N:N, is rejected: Filing is single-root.
+  - **For W7:**
+    - A models the pair as the Matter → Project filing edge (an EdgeKind for a pair).
+    - B queries a pair edge by (id, record type).
+    - D's parent-edge check (task 040) accepts a pair edge, not only an N:1 lookup. This replaces `ResolveParentLookup`'s lookup-only rule for push.
+
+### 12.11 Known limits (one line each in the PR)
+
+- **Query count:** the worst case is about (edges per level × 4 levels) batched reads per view, 100 or more for a big matter. Measure p95 on dev and record it. Narrow each level to the edges whose parent table is present only if it hurts in practice.
+- **Truncation favours the anchor:** in a truncated full-family view, the anchor's ancestor chain and its own subtree are filled first. Siblings' branches are the ones cut, and "load more" reaches them (UAC C4; tested).
+- **Permissiveness:** the view is exactly as permissive as Dataverse read for the caller, never more. Gaps Dataverse itself has today (e.g. the flagged-external systemuser reading Restricted rows, UAC task 191) show here as they do in the MDA.
+
+### 12.12 The family abstraction contract (UAC-r2 round 130, 2026-10-28, owner decision; #2362)
+
+The structured family entity (`sprk_securefamily`) is **not built now**; it is on the roadmap. Until it exists, W7 is the family:
+
+- **`RecordFamilyEdges` + `RecordFamilyReader` + `GET /api/v1/records/{table}/{id}/family` are the family abstraction.** Every caller reads a family through them (the reader in the BFF, the endpoint from clients), never through raw parent lookups. Push (task 040) finds a source's children through the edges and the primary-parent rule, not through `ResolveParentLookup` or a hand-written lookup.
+- **The implementation can be replaced, the contract cannot.** If `sprk_securefamily` is built later, it replaces how the reader finds members; the reader's public surface, the FR-31 response and the callers stay the same. The reader therefore exposes no lookup names, edge internals or storage details (registry rows stay `internal` data the reader consumes).
+- **Membership stays computed:** the primary-parent rule via `InPrimaryOrder` (UAC 194b), the Matter → Project pair edge only (UAC 195), no stored family key.
+- **W7 adds no family lookup column and no family table.**
+- **Binding now (round 130):**
+  - every ownership write goes through `RecordOwnershipResolver` (W7 is read-only and writes none);
+  - new code that tests isolation does so through UAC's one shared predicate keyed on the Secure Record business unit, never a hard-coded team id. W7 does not decide isolation (Dataverse read does, as the caller); 070's C2 guard and any test fixture follow the same rule.
+  - The predicate (UAC-r2, 2026-10-28): `SecureRecordOwnerTeam.IsInSecureBusinessUnit(owningBusinessUnitId, secureBusinessUnitId)` → `bool?` (`Infrastructure/Dataverse/SecureRecordOwnerTeam.cs`). Select `owningbusinessunit` on the rows checked; `null` = cannot tell → fail closed. The Secure BU id comes from `SecureChildShareSynchronizer.ResolveSecureBusinessUnitAsync` → `(Id, Ambiguous)`: Ambiguous → refuse; no id → the environment has no Secure Record BU; a fault propagates. Resolve once per request or pass. UAC 194b moves the resolver to `SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync` (a one-line rename at merge). Never compare `ownerid` with the Secure Record Owners team id.

@@ -1019,6 +1019,23 @@ public sealed class RecordRepairModeTests
         Field(outcome, RecordRepairPart.Owner, "ownerid").ReasonCode.Should().Be(RecordRepairReason.OwnerRootSecure);
     }
 
+    [Fact]
+    public async Task AWorkAssignmentWithAnAssignedToInternalAndNoAssignedTo_IsNeverGivenTheCopiedDefault_CreateOnly()
+    {
+        // Task 037 (FR-36, UAC-r2 condition 1): the copied default (Assigned To from Assigned To Internal) is a create-time
+        // fill; the repair pass never back-fills it.
+        var id = _world.RowOf("sprk_workassignment", Directory.ChildBu, new Dictionary<string, object>
+        {
+            ["ownerid"] = new EntityReference("team", Directory.ChildTeam),
+            ["sprk_assignedtointernal"] = new EntityReference("contact", Guid.Parse("a0370000-0000-4000-8000-0000000000c1")),
+        });
+
+        await _world.RepairAsync("sprk_workassignment", id);
+
+        _world.Writes.SelectMany(w => w.Fields.Keys).Should().NotContain("sprk_assignedto");
+        _world.Directory.Row("sprk_workassignment", id).Attributes.Should().NotContainKey("sprk_assignedto");
+    }
+
     private static FieldMappingRuleEntity[] ServerOwnedRules() =>
     [
         RepairWorld.DefaultText("sprk_accesspermission", "100000001", 1),

@@ -247,6 +247,139 @@ public class CallerPrincipalResolverTests
         body.Should().NotContain("new.hire@customer.example");
     }
 
+    /// <summary>
+    /// The Workforce plane's contact_not_invited (an email bind needs a current invite stamp naming this sign-in) has the
+    /// CIAM plane's shape: 403, the one reasonCode, and an "invite again" detail that names no leg, address or id. Before,
+    /// it was the default Forbidden with no detail.
+    /// </summary>
+    [Fact]
+    public async Task WorkforceStrategy_ContactNotInvited_Is403_WithTheInviteAgainDetail()
+    {
+        var resolver = new Mock<IWorkforcePrincipalResolver>();
+        resolver.Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(WorkforcePrincipalResolution.Denied(
+                WorkforceDenyReason.PrincipalNotResolved, ContactBindingDecision.DenyContactNotInvited));
+        var strategy = new WorkforcePrincipalStrategy(
+            resolver.Object, new Mock<IAccessibleRecordSetService>(MockBehavior.Strict).Object,
+            Mock.Of<ILogger<WorkforcePrincipalStrategy>>());
+        var http = new DefaultHttpContext
+        {
+            User = Principal(("oid", Guid.NewGuid().ToString()), ("acct", "0"), ("email", "partner@customer.example")),
+            RequestServices = new ServiceCollection().AddLogging().BuildServiceProvider(),
+        };
+        http.Response.Body = new MemoryStream();
+
+        var body = await DenyBodyAsync(await strategy.ResolveAsync(http, CancellationToken.None), http);
+
+        http.Response.StatusCode.Should().Be(StatusCodes.Status403Forbidden);
+        using var json = System.Text.Json.JsonDocument.Parse(body);
+        json.RootElement.GetProperty("reasonCode").GetString().Should().Be(ContactBindingDecision.DenyContactNotInvited);
+        var detail = json.RootElement.GetProperty("detail").GetString();
+        detail.Should().Be(WorkforcePrincipalStrategy.WorkforceNotInvitedDetail).And.Contain("invite you again");
+        detail.Should().NotContain("@").And.NotContain("tenant");
+        body.Should().NotContain("partner@customer.example");
+    }
+
+    /// <summary>
+    /// On the Workforce plane a person whose external access an administrator removed is answered exactly as the ordinary
+    /// not-invited refusal (status, reason code, title, detail), and the strategy's log keeps the specific decision code.
+    /// MUST NOT FIRE: another deny (an inactive contact) keeps its own code.
+    /// </summary>
+    [Theory]
+    [InlineData(ContactBindingDecision.DenyContactRemoved, ContactBindingDecision.DenyContactNotInvited)]
+    [InlineData(ContactBindingDecision.DenyContactInactive, ContactBindingDecision.DenyContactInactive)]
+    public async Task WorkforceStrategy_ARemovedContact_IsAnsweredAsNotInvited_AndTheLogKeepsTheDecisionCode(
+        string decisionCode, string answeredCode)
+    {
+        var (ordinary, _) = await WorkforceDenyAsync(ContactBindingDecision.DenyContactNotInvited);
+        var (answer, log) = await WorkforceDenyAsync(decisionCode);
+
+        answer.GetProperty("reasonCode").GetString().Should().Be(answeredCode);
+        if (answeredCode == ContactBindingDecision.DenyContactNotInvited)
+        {
+            answer.GetProperty("status").GetInt32().Should().Be(ordinary.GetProperty("status").GetInt32());
+            answer.GetProperty("title").GetString().Should().Be(ordinary.GetProperty("title").GetString());
+            answer.GetProperty("detail").GetString().Should().Be(ordinary.GetProperty("detail").GetString());
+        }
+
+        log.Messages.Should().Contain(m => m.Contains(decisionCode), "operators still see the decision's own code");
+    }
+
+    private static async Task<(System.Text.Json.JsonElement Answer, BindingLogCapture<WorkforcePrincipalStrategy> Log)>
+        WorkforceDenyAsync(string denyCode)
+    {
+        var resolver = new Mock<IWorkforcePrincipalResolver>();
+        resolver.Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(WorkforcePrincipalResolution.Denied(WorkforceDenyReason.PrincipalNotResolved, denyCode));
+        var log = new BindingLogCapture<WorkforcePrincipalStrategy>();
+        var strategy = new WorkforcePrincipalStrategy(
+            resolver.Object, new Mock<IAccessibleRecordSetService>(MockBehavior.Strict).Object, log);
+        var http = new DefaultHttpContext
+        {
+            User = Principal(("oid", Guid.NewGuid().ToString()), ("acct", "0"), ("email", "partner@customer.example")),
+            RequestServices = new ServiceCollection().AddLogging().BuildServiceProvider(),
+        };
+        http.Response.Body = new MemoryStream();
+
+        var body = await DenyBodyAsync(await strategy.ResolveAsync(http, CancellationToken.None), http);
+
+        http.Response.StatusCode.Should().Be(StatusCodes.Status403Forbidden);
+        using var json = System.Text.Json.JsonDocument.Parse(body);
+        return (json.RootElement.Clone(), log);
+    }
+
+    [Fact]
+    public async Task WorkforceStrategy_OwnerUnconfigured_Is500_WithRegistrationsReasonCode()
+    {
+        // ISS-005 (#1673): a first sign-in that cannot create the caller's contact because no customer owner team resolves
+        // answers what the registration route answers for the same cause: 500 and sdap.access.registration_owner_unconfigured.
+        var resolver = new Mock<IWorkforcePrincipalResolver>();
+        resolver.Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(WorkforcePrincipalResolution.Denied(
+                WorkforceDenyReason.PrincipalNotResolved, ContactBindingDecision.DenyOwnerUnconfigured));
+        var strategy = new WorkforcePrincipalStrategy(
+            resolver.Object, new Mock<IAccessibleRecordSetService>(MockBehavior.Strict).Object,
+            Mock.Of<ILogger<WorkforcePrincipalStrategy>>());
+        var http = new DefaultHttpContext
+        {
+            User = Principal(("oid", Guid.NewGuid().ToString()), ("acct", "0"), ("email", "new.hire@customer.example")),
+            RequestServices = new ServiceCollection().AddLogging().BuildServiceProvider(),
+        };
+        http.Response.Body = new MemoryStream();
+
+        var body = await DenyBodyAsync(await strategy.ResolveAsync(http, CancellationToken.None), http);
+
+        http.Response.StatusCode.Should().Be(StatusCodes.Status500InternalServerError);
+        using var json = System.Text.Json.JsonDocument.Parse(body);
+        json.RootElement.GetProperty("reasonCode").GetString().Should().Be("sdap.access.registration_owner_unconfigured");
+        json.RootElement.GetProperty("errorCode").GetString().Should().Be("sdap.access.registration_owner_unconfigured");
+        body.Should().NotContain("new.hire@customer.example");
+    }
+
+    [Fact]
+    public async Task WorkforceStrategy_ALookupFailure_StaysA403_LikeEveryOtherSignInDeny()
+    {
+        // Must-not-fire: only the owner-unconfigured code is a 500; the lookup-failed code keeps the plane's 403.
+        var resolver = new Mock<IWorkforcePrincipalResolver>();
+        resolver.Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(WorkforcePrincipalResolution.Denied(
+                WorkforceDenyReason.PrincipalNotResolved, ContactBindingDecision.DenyContactLookupFailed));
+        var strategy = new WorkforcePrincipalStrategy(
+            resolver.Object, new Mock<IAccessibleRecordSetService>(MockBehavior.Strict).Object,
+            Mock.Of<ILogger<WorkforcePrincipalStrategy>>());
+        var http = new DefaultHttpContext
+        {
+            User = Principal(("oid", Guid.NewGuid().ToString()), ("acct", "0")),
+            RequestServices = new ServiceCollection().AddLogging().BuildServiceProvider(),
+        };
+        http.Response.Body = new MemoryStream();
+
+        var body = await DenyBodyAsync(await strategy.ResolveAsync(http, CancellationToken.None), http);
+
+        http.Response.StatusCode.Should().Be(StatusCodes.Status403Forbidden);
+        body.Should().Contain(ContactBindingDecision.DenyContactLookupFailed);
+    }
+
     // ── Workforce strategy: Tier-2 record scope = accessible set (NFR-08) ────────────────────────
 
     [Fact]
@@ -620,6 +753,7 @@ public class CallerPrincipalResolverTests
                 var invite = InviteCode.Create(invited);
                 store.AddContact(invited, email: "x@firm.example", invitedOn: IdentityBindingTestKit.Now,
                     inviteCodeHash: invite.StoredValue);
+                store.StampInvite(invited, "x@firm.example");
                 store.AddContact(Guid.NewGuid(), email: "y@firm.example", keyMirror: oid.ToString("D"));
                 presentedCode = invite.Code;
                 break;
@@ -706,6 +840,7 @@ public class CallerPrincipalResolverTests
         var store = new InMemoryContactIdentityStore();
         store.AddContact(contactId, email: InvitedEmail, invitedOn: IdentityBindingTestKit.Now,
             inviteCodeHash: invite.StoredValue);
+        store.StampInvite(contactId, InvitedEmail);
         var strategy = new CiamContactPrincipalStrategy(
             IdentityBindingTestKit.Binder(store), EmptyCiamScope(contactId).Object,
             Mock.Of<ILogger<CiamContactPrincipalStrategy>>());
@@ -732,6 +867,7 @@ public class CallerPrincipalResolverTests
         var store = new InMemoryContactIdentityStore();
         store.AddContact(contactId, email: InvitedEmail, invitedOn: IdentityBindingTestKit.Now,
             inviteCodeHash: invite.StoredValue);
+        store.StampInvite(contactId, InvitedEmail);
         var http = header switch
         {
             "absent" => CiamRequest(Guid.NewGuid(), null),
@@ -755,6 +891,63 @@ public class CallerPrincipalResolverTests
         body.Should().NotContain(invite.StoredValue);
         store.Contacts[contactId].Oid.Should().BeNull();
         store.Contacts[contactId].InviteCodeHash.Should().Be(invite.StoredValue, "a deny consumes nothing");
+    }
+
+    /// <summary>
+    /// On the CIAM plane a person whose external access an administrator removed (resolved by their bound oid, or matched by
+    /// email with a valid invite code) is answered exactly as the ordinary not-invited refusal: the same status, reason code,
+    /// title and detail. The strategy's log keeps the decision's own code (<c>contact_removed</c>), and nothing is written.
+    /// </summary>
+    [Theory]
+    [InlineData("bound-oid")]
+    [InlineData("email-with-invite")]
+    public async Task CiamStrategy_ARemovedContact_IsAnsweredExactlyAsNotInvited_AndTheLogKeepsTheDecisionCode(string how)
+    {
+        // The ordinary refusal: an invited contact, signed in without the invite's code.
+        var ordinaryStore = new InMemoryContactIdentityStore();
+        var ordinaryId = Guid.NewGuid();
+        var ordinaryInvite = InviteCode.Create(ordinaryId);
+        ordinaryStore.AddContact(ordinaryId, email: InvitedEmail, invitedOn: IdentityBindingTestKit.Now,
+            inviteCodeHash: ordinaryInvite.StoredValue);
+        ordinaryStore.StampInvite(ordinaryId, InvitedEmail);
+        var ordinaryHttp = CiamRequest(Guid.NewGuid(), null);
+        var ordinary = await new CiamContactPrincipalStrategy(
+                IdentityBindingTestKit.Binder(ordinaryStore), new Mock<IAccessibleRecordSetService>(MockBehavior.Strict).Object,
+                Mock.Of<ILogger<CiamContactPrincipalStrategy>>())
+            .ResolveAsync(ordinaryHttp, CancellationToken.None);
+        using var ordinaryJson = System.Text.Json.JsonDocument.Parse(await DenyBodyAsync(ordinary, ordinaryHttp));
+
+        // The removed person.
+        var store = new InMemoryContactIdentityStore();
+        var contactId = Guid.NewGuid();
+        var oid = Guid.NewGuid();
+        var invite = InviteCode.Create(contactId);
+        var row = how == "bound-oid"
+            ? store.AddContact(contactId, email: InvitedEmail, oid: oid.ToString("D"), plane: IdentityPlaneMarker.External)
+            : store.AddContact(contactId, email: InvitedEmail, invitedOn: IdentityBindingTestKit.Now,
+                inviteCodeHash: invite.StoredValue);
+        if (how != "bound-oid")
+            store.StampInvite(contactId, InvitedEmail);
+        row.RemovedOn = IdentityBindingTestKit.Now;
+        var log = new BindingLogCapture<CiamContactPrincipalStrategy>();
+        var http = CiamRequest(how == "bound-oid" ? oid : Guid.NewGuid(), how == "bound-oid" ? null : invite.Code);
+
+        var result = await new CiamContactPrincipalStrategy(
+                IdentityBindingTestKit.Binder(store), new Mock<IAccessibleRecordSetService>(MockBehavior.Strict).Object, log)
+            .ResolveAsync(http, CancellationToken.None);
+
+        result.IsResolved.Should().BeFalse();
+        using var json = System.Text.Json.JsonDocument.Parse(await DenyBodyAsync(result, http));
+        http.Response.StatusCode.Should().Be(ordinaryHttp.Response.StatusCode).And.Be(StatusCodes.Status403Forbidden);
+        foreach (var field in new[] { "status", "reasonCode", "title", "detail" })
+        {
+            json.RootElement.GetProperty(field).ToString().Should().Be(ordinaryJson.RootElement.GetProperty(field).ToString(), field);
+        }
+
+        json.RootElement.GetProperty("reasonCode").GetString().Should().Be(ContactBindingDecision.DenyContactNotInvited);
+        log.Messages.Should().Contain(m => m.Contains(ContactBindingDecision.DenyContactRemoved),
+            "operators still see the decision's own code");
+        store.Writes.Should().BeEmpty();
     }
 
     [Fact]
@@ -786,6 +979,7 @@ public class CallerPrincipalResolverTests
         var store = new InMemoryContactIdentityStore();
         store.AddContact(contactId, email: InvitedEmail, invitedOn: IdentityBindingTestKit.Now,
             inviteCodeHash: invite.StoredValue);
+        store.StampInvite(contactId, InvitedEmail);
         var ciam = new CiamContactPrincipalStrategy(
             IdentityBindingTestKit.Binder(store), new Mock<IAccessibleRecordSetService>(MockBehavior.Strict).Object,
             Mock.Of<ILogger<CiamContactPrincipalStrategy>>());
@@ -816,6 +1010,7 @@ public class CallerPrincipalResolverTests
         var store = new InMemoryContactIdentityStore();
         store.AddContact(contactId, email: InvitedEmail, invitedOn: IdentityBindingTestKit.Now,
             inviteCodeHash: invite.StoredValue);
+        store.StampInvite(contactId, InvitedEmail);
         var binderLog = new BindingLogCapture<ContactIdentityBinder>();
         var strategyLog = new BindingLogCapture<CiamContactPrincipalStrategy>();
         var strategy = new CiamContactPrincipalStrategy(

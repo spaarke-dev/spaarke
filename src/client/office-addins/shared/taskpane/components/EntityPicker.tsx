@@ -21,6 +21,7 @@ import {
   DocumentRegular,
   GavelRegular,
   ReceiptRegular,
+  BriefcaseRegular,
   DismissCircleRegular,
   HistoryRegular,
   ChevronDownRegular,
@@ -155,6 +156,8 @@ const ENTITY_ICONS: Record<EntityType, React.ReactElement> = {
   Invoice: <ReceiptRegular />,
   Account: <BuildingRegular />,
   Contact: <PersonRegular />,
+  // Task 133: the Invoice view's core-record type only; this picker never offers it (not in ALL_ENTITY_TYPES).
+  WorkAssignment: <BriefcaseRegular />,
 };
 
 /**
@@ -169,6 +172,7 @@ const ENTITY_BADGE_COLORS: Record<
   Invoice: 'warning',
   Account: 'success',
   Contact: 'subtle',
+  WorkAssignment: 'important',
 };
 
 /**

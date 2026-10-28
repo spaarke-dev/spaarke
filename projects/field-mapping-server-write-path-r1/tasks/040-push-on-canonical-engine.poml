@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <task id="040" project="field-mapping-server-write-path-r1">
   <metadata>
-    <title>/push applies Copy rules only on the canonical engine, selects by sync mode, returns fixed error text (FR-23)</title>
+    <title>/push applies Copy rules only on the canonical engine, selects by sync mode, returns fixed error text (FR-23); preview, includeAssignedTo, confirmed childIds, Filing-edge children incl. the pair (FR-34)</title>
     <phase>4 W4 /push</phase>
-    <gate>001+005+019 complete</gate>
+    <gate>001+005+019+070+071 complete; UAC 195 merged (pair data)</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs in Sprk.Bff.Api; tags include bff-api; adds tests at KEEP paths (TEST-MODIFYING override).</rigor-reason>
@@ -12,7 +12,7 @@
     <effort>xhigh</effort>
     <parallel-group>W4</parallel-group>
     <parallel-safe>true</parallel-safe>
-    <deps>001, 005, 019</deps>
+    <deps>001, 005, 019, 070, 071</deps>
     <tags>bff-api, field-mapping, testing, deploy</tags>
     <estimated-effort>8-12 hours</estimated-effort>
   </metadata>
@@ -39,10 +39,17 @@
   </context>
 
   <constraints>
+    <constraint source="UAC-r2 round 130 / design §12.12 (#2362)">This is the family abstraction: callers read families only through RecordFamilyReader / the family endpoint, never raw parent lookups; the public surface exposes no lookup names, edge internals or storage, so a future sprk_securefamily table can replace the implementation unchanged. No family column or table. Any isolation test uses UAC's shared Secure-Record-BU predicate, never a hard-coded team id.</constraint>
     <constraint source="project">Scope: re-file behaviour. `ReparentAsync`, the root filing gate, restamp and `AfterRefileAsync` are kept byte-for-byte in behaviour; only the per-rule value application and error text change. `RefileWriterAfterRefileGuardTests` must pass unchanged.</constraint>
     <constraint source="project">Scope: rule selection. Only rules with `sprk_syncmode` = Manual Refresh and mapping type Copy run on push; push overwrites. Default/Concat/Template rules are skipped (and counted), never errored.</constraint>
     <constraint source="ADR-019">Scope: error text (#1437). Per-child failures return one fixed actionable string; exception detail, Dataverse messages and ids go to structured logs with a correlation id, never to the response. Response shape is otherwise unchanged (NFR-07).</constraint>
     <constraint source="ADR-008">Scope: endpoint. The push route keeps its existing filters and authorization; add none and remove none. No new route.</constraint>
+    <constraint source="FR-34 / UAC 4a">Scope: request. `preview: true` writes nothing and returns per child whose value would change: id, name, column, from → to, and the flags Secure (suggestion only), Restricted (no contact grant), Limited (no organization grant); plus a skipped-for-no-Write count and truncated. `includeAssignedTo` is false when absent; when true the caller needs Write on the SOURCE (equalised probe). `childIds` is the confirmed list: the server re-derives the children as the caller and intersects; any other id is refused per id.</constraint>
+    <constraint source="FR-34 / #2352">Scope: finding children. Children are found through a RecordFamilyEdges Filing edge from the source to the target table — a typed lookup OR the regarding pair (Matter → Project) — replacing the lookup-only `ResolveParentLookup`. A profile whose target has no Filing edge from the source is refused with the existing fixed reason code. Primary-parent rule: only children whose primary parent is the source are pushed.</constraint>
+    <constraint source="UAC-r2 ruling 2026-10-28">Push skips `RecordFamilyEdges.DetailTables`; a child's primary parent follows the 071 rule (194b order, core-first for Signal/Decision Record, pair for project) — never registry row order, and "Stamp" never means secondary.</constraint>
+    <constraint source="FR-34 / ontology 3b">Scope: kinds. Push and Update Assigned To are Filing-only and refused server-side for any other kind.</constraint>
+    <constraint source="FR-34">Scope: sync mode. Class-aware migration: Assigned-To targets 0, filing targets never re-pushable, plain data 1. The values ship only after the owner reviews a dry run (005's script, -WhatIf first).</constraint>
+    <constraint source="FR-35">Scope: client. The ribbon no longer calls /push directly (task 075); the Family modal's two actions call preview → confirm → apply. Wire the modal's action handler here.</constraint>
     <constraint source="project">Scope: out of scope work. #2098 (push performance) is not addressed here; if the parity work exposes a performance finding, file it, do not fix it.</constraint>
     <constraint source="CLAUDE.md §10">Scope: BFF publish. State Placement Justification in the PR (modification inside BFF); measure publish-size delta against a fresh master build per root CLAUDE.md §10.4; run `dotnet list package --vulnerable --include-transitive`.</constraint>
     <constraint source="ADR-038">Scope: tests. Unit/contract tests at KEEP paths; no `Mock&lt;HttpMessageHandler&gt;`; no DI-registration tests; re-run the existing push contract tests unchanged.</constraint>
@@ -103,11 +110,15 @@
     <criterion testable="true">Negative: `ReparentAsync`, the root filing gate, restamp and `AfterRefileAsync` still run on push, and `RefileWriterAfterRefileGuardTests` plus existing push contract tests pass unchanged.</criterion>
     <criterion testable="true">BFF build 0 errors; all tests green; publish-size delta and CVE result recorded in the task notes.</criterion>
     <criterion testable="true">ebilling-r1 (2026-10-21): push writes stored rows with no pre-write step. When the invoice-family guard is on master (ebilling-r1 #1911), a push write to a sprk_invoice or sprk_billingevent child calls InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync (app-only, D-96) before writing. A refusal is a per-child Skipped/failed entry with a fixed message. Test it with a must-fire case and a must-not-fire case.</criterion>
+    <criterion testable="true">FR-34 (UAC list, design §12.8 item 4): preview writes nothing; an absent includeAssignedTo leaves Assigned columns untouched; a Read-only source with includeAssignedTo is refused (403); an unticked child keeps its value and grants; a foreign id is refused; a Secure child gets a suggestion, not a grant.</criterion>
+    <criterion testable="true">FR-34 / #2352: a Matter → Project push finds the project through the regarding pair and succeeds (no 409); a child filed under the source only as a SECONDARY parent is not pushed; a non-Filing kind is refused server-side.</criterion>
+    <criterion testable="true">FR-35: the Family modal's Push field updates and Update Assigned To actions run preview → confirm → apply against this endpoint (component test with the fetch double).</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-23, NFR-07. #2098 out of scope. The push web resource is unchanged unless it displays the error text.
-DI-002 / #2137 (2026-10-20): replace AuthorizePushSourceAsync's own Read check with MappingSourceReadProbe.CheckCallerReadAsync (timing-equalised; task 003). Close the push part of #2137.
+  <notes>Spec FR-23, FR-34, FR-35, NFR-07. FR-34 added by the 2026-10-27 spec amendment (W7); see design.md §12.3 D. #2098 out of scope. The push web resource is unchanged unless it displays the error text.
+DI-002 / #2137 (2026-10-20; timing half fixed by PR #2331, 2026-10-27): replace AuthorizePushSourceAsync's own Read check with MappingSourceReadProbe.CheckCallerReadAsync (task 003; always equalised since #2331). Keep the AuthorizationGateTimingTests push case green. This closes the push part of #2137's F2 (duplicate copy) item.
 UAC-r2 #2169 (2026-10-21): landed as c8c591777f on uac/189-own-narrowing (PR #2169; draft until the owner signs off). The skip is in ApplyMappingsToChildRecordsAsync's per-rule loop: InheritedAccessPermission.RefuseAppOnlyWrite(targetEntity, [rule.TargetField]) runs before ApplyMappingRule, and a refused rule becomes FieldMappingStatus.Skipped with the reason as ErrorMessage. Keep tests/integration/data-mutation/ChildAccessPermission/DocumentAccessPermissionPushTargetTests.cs (3 methods, 6 cases) green UNCHANGED. A RecordTableRules protected-target entry may replace the call only with the same normalisation (trimmed, case-insensitive) and the same per-rule Skipped shape.
+Owner 4a + UAC-r2 (2026-10-27, notes/decisions.md; design pending the owner's OK): opt-in Assigned-To re-push. includeAssignedTo (absent = false); preview:true (no writes; per-child from/to, Secure/Restricted flags, skipped-for-no-Write count); source Write required when the flag is set (equalised gate probe); confirmed explicit child-id list, re-checked per id; custom dialog with checkbox "Update all related 'Assigned To' contacts" replaces openConfirmDialog in sprk_fieldmapping_push.js. Sync-mode migration becomes class-aware (Assigned-To targets stay 0, filing targets never re-pushable, plain data 1); values ship with 040 after the owner reviews the dry run.
 DI-003 / #2181 (2026-10-21): the provisioning seeder must set sprk_syncmode = Manual Refresh on seeded Copy rules, or /push skips them in new environments. Add a seeder test, and add a deployment-guide step to run Set-FieldMappingRuleSyncMode.ps1 after an upgrade.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>

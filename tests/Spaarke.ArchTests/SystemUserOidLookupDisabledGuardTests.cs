@@ -91,14 +91,8 @@ public class SystemUserOidLookupDisabledGuardTests
     /// </summary>
     private static readonly IReadOnlyDictionary<string, BaselineEntry> Baseline = new Dictionary<string, BaselineEntry>(StringComparer.Ordinal)
     {
-        ["src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/UserProvisioning/DataverseWebApiGuestUserWriter.cs"] =
-            new(Sites: 1,
-                "EnsureGuestUserAsync's alternate-key GET systemusers(azureactivedirectoryobjectid=…) is how Dataverse ADDS a "
-                + "security-group member as a Dataverse user. An alternate-key GET cannot take a $filter, and excluding disabled "
-                + "users there would turn an existing, disabled user into a misleading 404 (\"no such user\") instead of the row "
-                + "provisioning has to assign a business unit and roles to. A deliberate exception, not a defect: once "
-                + "work/customer-provisioning-orchestration-r1 (which edits that line) merges, this entry becomes an "
-                + "`// includes disabled:` marker on the lookup and leaves the baseline"),
+        // Empty: DataverseWebApiGuestUserWriter.cs left the baseline when its lookup started selecting and checking
+        // isdisabled (#2034) - a disabled guest is now refused, not provisioned.
     };
 
     private const string Column = "azureactivedirectoryobjectid";

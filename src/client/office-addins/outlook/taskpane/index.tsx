@@ -7,6 +7,7 @@ import { HostAdapterFactory, isHostAdapterError } from '@shared/adapters';
 import type { IHostAdapter } from '@shared/adapters';
 import { OutlookAdapter } from '@shared/adapters/OutlookAdapter';
 import { authService, apiClient } from '@shared/services';
+import { readInitialAction, type InitialAction } from '@shared/taskpane/initialAction';
 
 // Version information. Like the Word pane (task 089), this is the unified package's version injected at build time
 // (`UNIFIED_PACKAGE.VERSION` → `process.env.ADDIN_PACKAGE_VERSION`). It was a hand-maintained '1.0.22' — the old
@@ -34,16 +35,13 @@ const CONFIG = {
 };
 
 /**
- * Read the `?action=` query param from the taskpane URL. Used by the Outlook
- * "Create To Do" ribbon (smart-todo-decoupling-r3 FR-27 / task 070): the manifest
- * button opens the taskpane with `?action=createTodo` which routes the App
- * to render CreateTodoView instead of the default tabs.
+ * Read the `?action=` query param from the taskpane URL. Used by the Outlook ribbon buttons that open the pane on a
+ * view: "Create To Do" (`?action=createTodo`, smart-todo-decoupling-r3 FR-27 / task 070) and "Submit Invoice"
+ * (`?action=submitInvoice`, task 133). The parsing is the shared, tested `readInitialAction`.
  */
-function readInitialAction(): 'createTodo' | undefined {
+function readInitialActionFromUrl(): InitialAction | undefined {
   try {
-    const params = new URLSearchParams(window.location.search);
-    const action = params.get('action');
-    return action === 'createTodo' ? 'createTodo' : undefined;
+    return readInitialAction(window.location.search);
   } catch {
     return undefined;
   }
@@ -283,7 +281,7 @@ async function init() {
 
   try {
     reactRoot = createRoot(container);
-    const initialAction = readInitialAction();
+    const initialAction = readInitialActionFromUrl();
     const initialSavedContext = buildDemoSavedContext();
     reactRoot.render(
       <React.StrictMode>
