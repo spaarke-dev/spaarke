@@ -4,7 +4,7 @@
     <title>Create Work Assignment wizard: optional Assigned To contact picker on Enter Info (FR-37)</title>
     <phase>3 W3 Product creators onto the service (create defaults amendment 2026-10-27)</phase>
     <gate>037 complete (merged)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies shared .tsx/.ts (wizard step, form state, create service).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -93,6 +93,9 @@
       <expected>First record: Assigned To = the chosen contact. Second: Assigned To = its Assigned To Internal.</expected>
     </test>
   </ui-tests>
+
+  <notes>Completed 2026-10-28: PR #2376, merge bbdd25b3bc. Optional Assigned To picker on Enter Info; blank sends no key (FR-36 default applies); nav-prop-missing warning; hint wired via a new optional LookupField hint prop. Review fixes in the same dialog: Back keeps Enter Info entries, AI pre-fill still runs on an empty remount, failed record read no longer seeds the previous record, clearing the email subject no longer overwrites an edited body. One adversarial pass + one scoped re-check; 340 tests across the wizard, LookupField and four sibling wizards. Details: notes/task-038-notes.md.
+rework: fix-round-2 task 038</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
