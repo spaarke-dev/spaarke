@@ -1,4 +1,5 @@
 using System.Reflection;
+using Microsoft.Xrm.Sdk;
 using Sprk.Bff.Api.Services.Dataverse;
 using Xunit;
 
@@ -17,13 +18,16 @@ namespace Spaarke.ArchTests;
 /// <see cref="RecordOwnershipContext.TargetEntityLogicalName"/> or <see cref="RecordOwnershipContext.TargetRecordId"/> — every way
 /// to name a parent without a table's order. A question that names no parent (the caller's own business unit, I-6) sets none
 /// of them and is not seen. Pinned per (outermost type, source method), read from IL (<see cref="IlCallScan"/>), so a lambda
-/// or async body counts and a comment or <c>nameof</c> does not.</para>
+/// or async body counts and a comment or <c>nameof</c> does not. The builders themselves are exempt by METADATA identity
+/// (<see cref="Builders"/>: each pinned by its signature), never by name, so a new overload that shares a builder's name is
+/// seen like any other caller (194b V-fix 6).</para>
 /// <para><b>The baseline.</b> <see cref="Exemptions"/> are PERMANENT: questions that do not decide which owner a child row
 /// gets in a table's order (each with its reason). <see cref="KnownViolations"/> is the ratchet: child-row questions not yet
 /// on the builder, each with its reason — a new one fails, and an entry that no longer builds a question must be removed.</para>
 /// <para><b>Controls.</b> <see cref="Detector_MustFireAndMustNotFire"/>: an object initialiser naming a parent, a
 /// <c>with</c> that replaces the parents and a <c>ForParents</c> call are found; a <c>ForRow</c> writer and a question naming
-/// only the caller are not.</para>
+/// only the caller are not. <see cref="Detector_ExemptsABuilderByIdentity_NotByName"/>: an overload sharing an approved
+/// builder's name is found; the approved builder is not.</para>
 /// </remarks>
 public class ChildRowOwnershipBuilderGuardTests
 {
@@ -118,6 +122,22 @@ public class ChildRowOwnershipBuilderGuardTests
             found);
     }
 
+    [Fact(DisplayName = "194b V-fix 6: control — a builder is exempt by its metadata identity; an overload sharing its name is found")]
+    public void Detector_ExemptsABuilderByIdentity_NotByName()
+    {
+        var approved = typeof(ChildRowOwnershipControlBuilders).GetMethod(
+                           nameof(ChildRowOwnershipControlBuilders.ForChild), BindingFlags.NonPublic | BindingFlags.Static, [typeof(Entity)])
+                       ?? throw new InvalidOperationException("The control's approved ForChild(Entity) is missing.");
+
+        var found = Constructions([typeof(ChildRowOwnershipControlBuilders)], [approved]);
+
+        // The synthetic ForChild(string, Guid) overload names a parent with no table order: found, though its name is a
+        // builder's. The approved ForChild(Entity) is not.
+        Assert.Equal(
+            new[] { (typeof(ChildRowOwnershipControlBuilders).FullName!, nameof(ChildRowOwnershipControlBuilders.ForChild)) },
+            found);
+    }
+
     private static readonly string[] ParentSetters =
     [
         "set_" + nameof(RecordOwnershipContext.Parents),
@@ -125,20 +145,37 @@ public class ChildRowOwnershipBuilderGuardTests
         "set_" + nameof(RecordOwnershipContext.TargetRecordId),
     ];
 
-    /// <summary>The builders themselves: the one entry point, what goes through it, and the closed opt-out.</summary>
-    private static readonly string[] Builders =
+    /// <summary>
+    /// The builders themselves — the one entry point, what goes through it, and the closed opt-out — each pinned by its
+    /// SIGNATURE and matched by metadata identity (<see cref="MemberInfo.HasSameMetadataDefinitionAs"/>), so a new overload
+    /// that shares a builder's name is not exempt (194b V-fix 6). A signature that no longer exists fails loud here.
+    /// </summary>
+    private static readonly Lazy<IReadOnlyList<MethodBase>> Builders = new(() =>
     [
-        nameof(RecordOwnershipContext.ForParents), nameof(RecordOwnershipContext.ForRow), nameof(RecordOwnershipContext.ForChild),
-        nameof(RecordOwnershipContext.ForParentsInWriterOrder), nameof(RecordOwnershipContext.ForExistingRowAsync),
-    ];
+        Builder(nameof(RecordOwnershipContext.ForParents), typeof(IEnumerable<RecordOwnershipParent>), typeof(Guid?), typeof(Guid?)),
+        Builder(nameof(RecordOwnershipContext.ForRow), typeof(string),
+            typeof(IEnumerable<KeyValuePair<string, RecordOwnershipParent>>), typeof(string), typeof(Guid?), typeof(Guid?)),
+        Builder(nameof(RecordOwnershipContext.ForChild), typeof(Entity)),
+        Builder(nameof(RecordOwnershipContext.ForParentsInWriterOrder), typeof(IEnumerable<RecordOwnershipParent>)),
+        Builder(nameof(RecordOwnershipContext.ForExistingRowAsync), typeof(Entity), typeof(ExistingRowReads), typeof(CancellationToken)),
+    ]);
+
+    private static MethodBase Builder(string name, params Type[] parameters) =>
+        typeof(RecordOwnershipContext).GetMethod(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static, parameters)
+        ?? throw new InvalidOperationException(
+            $"RecordOwnershipContext.{name}({string.Join(", ", parameters.Select(t => t.Name))}) is gone: re-pin the builder.");
 
     /// <summary>The detector: each (outermost type, source method) that names a parent outside the builders.</summary>
     private static IReadOnlyList<(string Type, string Method)> Constructions(IEnumerable<Type> types) =>
+        Constructions(types, Builders.Value);
+
+    private static IReadOnlyList<(string Type, string Method)> Constructions(IEnumerable<Type> types, IReadOnlyList<MethodBase> builders) =>
         IlCallScan.MethodReferences(types)
             .Where(r => r.Target.DeclaringType == typeof(RecordOwnershipContext)
                         && (r.Target.Name == nameof(RecordOwnershipContext.ForParents) || ParentSetters.Contains(r.Target.Name)))
+            .Where(r => !(IlCallScan.SourceMethod(r.Caller, r.CallerMethod) is { } source
+                          && builders.Any(b => b.HasSameMetadataDefinitionAs(source))))
             .Select(r => (Type: IlCallScan.Outermost(r.Caller).FullName!, Method: MethodOf(r.Caller, r.CallerMethod)))
-            .Where(c => !(c.Type == typeof(RecordOwnershipContext).FullName && Builders.Contains(c.Method)))
             .Distinct()
             .ToArray();
 
@@ -183,6 +220,19 @@ internal static class ChildRowOwnershipControlForRow
         RecordOwnershipContext.ForRow(
             "sprk_event",
             new[] { KeyValuePair.Create("sprk_regardingmatter", (RecordOwnershipParent?)new RecordOwnershipParent("sprk_matter", matterId)) });
+}
+
+/// <summary>
+/// 194b V-fix 6: builders by identity. <c>ForChild(Entity)</c> is the control's approved builder (MUST NOT FIRE);
+/// <c>ForChild(string, Guid)</c> is a synthetic overload that shares its name and names a parent with no table order (MUST FIRE).
+/// </summary>
+internal static class ChildRowOwnershipControlBuilders
+{
+    internal static RecordOwnershipContext ForChild(Entity child) =>
+        new() { Parents = [new RecordOwnershipParent(child.LogicalName, child.Id)] };
+
+    internal static RecordOwnershipContext ForChild(string table, Guid id) =>
+        new() { TargetEntityLogicalName = table, TargetRecordId = id };
 }
 
 /// <summary>MUST NOT FIRE: names only the caller (the caller's own business unit, I-6).</summary>
