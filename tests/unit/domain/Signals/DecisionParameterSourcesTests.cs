@@ -413,6 +413,7 @@ public class DecisionParameterSourcesTests
     [Theory]
     [InlineData(403, DataverseUserClientErrorCodes.AccessDenied)]
     [InlineData(404, DataverseUserClientErrorCodes.NotFound)]
+    [InlineData(0, DataverseUserClientErrorCodes.UserContextRequired)] // no caller could be established: a refusal, not a fault
     public async Task Currency_Omitted_WhenTheCallerReadIsRefused_FallsBackToTheBaseCurrency_WithoutAnAppOnlyMatterRead_D193(int status, string code)
     {
         var world = new CurrencyWorld(BuCurrencyId, BaseCurrencyId, (BuCurrencyId, "EUR"), (BaseCurrencyId, "USD"));
@@ -463,6 +464,24 @@ public class DecisionParameterSourcesTests
         var thrown = () => world.Build().ResolveBudgetCurrencyAsync(MatterId, null, CancellationToken.None);
         await thrown.Should().ThrowAsync<TimeoutException>();
 
+        world.Entities.Verify(e => e.RetrieveAsync("sprk_matter", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData(400, DataverseUserClientErrorCodes.BadRequest)]
+    [InlineData(429, DataverseUserClientErrorCodes.RateLimited)]
+    [InlineData(503, DataverseUserClientErrorCodes.ServiceError)]
+    [InlineData(0, DataverseUserClientErrorCodes.OboExchangeFailed)]
+    [InlineData(0, DataverseUserClientErrorCodes.OboNotConfigured)]
+    public async Task Currency_Omitted_EveryCallerReadFaultThatIsNotARefusal_Throws_NeverAFallbackCurrency_D193(int status, string code)
+    {
+        // Review F3 (#2414): a genuine fault must answer 503, never silently prefill the base currency.
+        var world = new CurrencyWorld(BuCurrencyId, BaseCurrencyId, (BuCurrencyId, "EUR"), (BaseCurrencyId, "USD"));
+        world.User.MatterResponse = DataverseUserResponse.Fail(status, code, "fault");
+
+        var act = () => world.Build().ResolveBudgetCurrencyAsync(MatterId, null, CancellationToken.None);
+
+        await act.Should().ThrowAsync<HttpRequestException>();
         world.Entities.Verify(e => e.RetrieveAsync("sprk_matter", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
