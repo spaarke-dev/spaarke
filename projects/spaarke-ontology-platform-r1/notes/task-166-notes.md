@@ -14,3 +14,16 @@ Rigor STANDARD (config JSON plus the tests that pin it; tests modified, so code-
 
 ## Not done here (main session, after merge)
 `Apply-DoLanePolicies.ps1` against Dataverse: `-WhatIf` first, then real (commands in the PR body). Not run by this task.
+
+## Review (Opus adversarial, 2026-10-28): no F-class findings; known limits accepted by the main session
+- **K1, what the owner sees after the apply.** An open item uses the plan of the version its Signal cites, not the current version:
+  - `DecisionPlanEndpoints.cs:180-185` → `SignalCoreRecordAccess.cs:181-191`;
+  - the commit route agrees: `DecisionCommitService.cs:1250,1278`.
+  - **So:** open v2 items keep Assign Task only until the next re-evaluation pass (nightly cron 02:30Z, `SignalReevaluationJob.cs:50`, or `POST /api/admin/jobs/signal-reevaluation/trigger`).
+  - **That pass:** it closes the v2 Signals as Superseded and raises episode n+1 citing v3, which offers Create budget, then Assign Task.
+  - **Not re-raised:** matters whose v2 item was **Acted** (`EvidenceAfter`, D-119), and matters whose dismissal still suppresses.
+  - **Check after the run:** `supersededClosed` > 0 and `reraised` > 0.
+- **K1, backdated window.** v2's `sprk_inforceto` is stamped with v3's `inForceFrom` (2026-10-28T00:00:00Z), not the apply time, so the Rules history shows v2 superseded before v3 was authored. Citations by id are unaffected (D-14). v1 → v2 followed the same pattern. Accepted.
+- **K2, two separate writes.** Stamping v2 and moving the pointer are two writes (`Apply-DoLanePolicies.ps1:384,398`). If the second fails, re-running the script recovers.
+- **K3, test coverage.** The C# test literal and the config are two copies, but the definition pin catches a config change. There is no commit-route test specific to v3; 161's commit tests cover the generic path. Accepted.
+
