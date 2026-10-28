@@ -16,7 +16,7 @@ Branch `task/ebill-098-external-marker`, based on `786d1ea17a`. Rigor FULL, opus
 
 | Surface | Where | Behaviour for a hidden invoice | Fail-closed path |
 |---|---|---|---|
-| (a) Module grid fetch over any family table | ExternalModuleDataEndpoints.cs:404-406, `HideInvoiceRowsAsync` :480 | Row absent, even when the grid does not ask for its id (the id is projected server-side and stripped) | Fault, no predicate, or an unreadable id: the row is hidden and `Truncated=true` |
+| (a) Module grid fetch over any family table | ExternalModuleDataEndpoints.cs:404-406, `HideInvoiceRowsAsync` :480 | Row absent, even when the grid does not ask for its id (the id is projected server-side and stripped) | Fault or no predicate: every row is hidden and `Truncated=true`. An unreadable id: that row is hidden and `Truncated` stays false (ExternalModuleDataEndpoints.cs:509 sets it only on a fault; corrected in review round 4a) |
 | (a) Single-record route on the invoices module | Unchanged | Already 403 for every invoice id, with no reads (pinned by test) | n/a |
 | (b) Invoice thread: list, post, delete-own | ExternalMessageEndpoints.cs `EvaluateRecordGateAsync` invoice block (~810-827) | Same answer as a non-existent or cross-tenant invoice id, with no message read and no row written | Fault or no predicate: refused the same way |
 | (b) Messages on a matter or project thread regarding an invoice, and the notification feed | ExternalMessageEndpoints.cs:514 (`SecureRootsFilter`), `RegardingInvoicesVisibleAsync` :532, ExternalNotificationFeedEndpoints.cs | Withheld from the list, the feed and the count. One predicate call per page | Fault or malformed regarding: withheld |
@@ -211,6 +211,80 @@ Known limits, recorded:
 - **A write-time source-kind marker** on the submission would remove the remaining data-fault class. Filed under #2372 (schema, owner OK, tied to 191).
 - **The writer guard** (an `InvoicePdf` is created only in the same commit as its invoice) is built on the 094 branch, not here: this base does not include 092's persister.
 - **Legacy SPA submissions** (before 092) still carry `sprk_document`; rule 1 ignores it, so such an invoice is shown whatever that document is. Accepted by the main session and uac-r2 (2026-10-28): it is the firm's own upload, never an isolated internal source; dev data is recreated, not migrated (O-13); after 092 an SPA submission cannot carry a document.
+
+## Review round 4a, 2026-10-28 (rule 3 rework)
+
+**The defect.** Rule 3 left an Internal submission with an empty document link visible only when the invoice had a fully sourceless `InvoicePdf`. 095's from-email route writes exactly that submission, but its `InvoicePdf`'s `sprk_sourcedocument` is the marked `.eml`. Every from-email invoice was therefore hidden from its own firm. The round 3 theory case "document" pinned that outcome; it is replaced.
+
+**Writer shapes** (authoritative; from 094 head `8e7d8a847b` and 095's contract). Every predicate fixture below carries its route's real submission row and real Stored File rows (`InvoiceWorld.SpaUpload`, `InternalUpload`, `FromDocument`, `FromEmail`, `SubmissionEml`, `WriterStoredFile`).
+
+| Route | Submission channel | Submission `sprk_document` | Invoice's Stored Files |
+|---|---|---|---|
+| SPA upload (092/094) | Spa | empty (094 refuses a document on Spa) | InvoicePdf at ForUpload(submissionId), no source, FirmVisible Yes |
+| Internal upload (092/094) | Internal | empty | InvoicePdf at ForUpload(submissionId), no source, FirmVisible No |
+| Confirm (050a), legacy on this base | Internal | the document | none |
+| Confirm / from-document on 094 | Internal | the document (the submission id is derived from it) | InvoicePdf copy, `sprk_sourcedocument` = that document, FirmVisible No |
+| From-email 095 (marked or unmarked `.eml`) | Internal | EMPTY | InvoicePdf at ForUpload(submissionId), FirmVisible No; source document = the `.eml`, source communication = the email's communication, attachment identity `eml-part-{n}`, source version and hash. Plus InvoiceSupportingFile rows at ForAttachment(submissionId, `eml-part-{n}`) with the same source columns |
+
+A marked and an unmarked `.eml` differ only in the `.eml`'s own `sprk_restrictedbysubmission`.
+
+**One source decision.** `ExternalInvoiceVisibility.DecideSourceDocumentsAsync(IReadOnlyCollection<Guid> sourceIds, InvoiceVisibilityReaders readers, InvoiceVisibilityCost? cost, CancellationToken ct)` returns a `SourceDocumentDecision` (`HiddenReason(id)`, `IsVisible(id)`). It holds the code that was inline in `DecideAsync`: the source read by id, the 188 narrowing with the marker-aware rule 2, the roots term and the effective flags. `DecideAsync` calls it, and the submission routes (4b) are to call the same function. An id the function was not asked about, `Guid.Empty`, an unreadable link and a source that does not come back are all hidden. A failed read throws.
+
+**The Stored File rules:**
+- A row whose `sprk_purpose` reads null hides the invoice (`source_link_unreadable`). This covers a row masked by field security: purpose and the source columns are secured (088).
+- A row with a source document is decided by that document, even when its communication or attachment identity is also set. The marker exception applies, so a marked `.eml` leaves the invoice visible to its firm (model 9.1 §625).
+- A row with a communication or attachment identity but no document hides the invoice.
+- A sourceless row of a purpose other than InvoicePdf is not a source. A supporting file never counts as the upload's own PDF; a supporting file with a source is decided by that source.
+
+**Rule 3** (Internal, empty link) is decided by the invoice's InvoicePdf:
+- sourceless (the upload's own file): visible;
+- with a source document: decided by that document;
+- communication or attachment only: hidden;
+- no InvoicePdf: hidden.
+
+Rules 1 (Spa), 2 (Internal with a document) and 4 (an unknown channel hides) are unchanged. A failed Stored File read, submission read or invoice-link read hides (`Faulted`) or throws on the AI path, as before.
+
+**Tests** (`ExternalInvoiceVisibilityTests`; each for a contact and a flagged systemuser unless noted):
+- Must not fire:
+  - `SpaUpload_NoSubmissionDocument_AndASourcelessInvoicePdf_IsVisible` and `InternalUpload_…_IsVisible`, now on the writer shapes;
+  - `WriterShape_FromDocument_AReadableDocument_IsVisible`;
+  - `WriterShape_FromEmail_AMarkedEml_IsVisibleToItsFirm`.
+- Must fire:
+  - `WriterShape_FromEmail_AnUnmarkedRestrictedEml_IsHidden`;
+  - `WriterShape_FromEmail_NoInvoicePdf_OnlySupportingFiles_IsHidden`;
+  - `WriterShape_FromEmail_ASupportingFileWithARestrictedSource_HidesTheInvoice`;
+  - `WriterShape_AStoredFileWhosePurposeReadsNull_HidesTheInvoice`;
+  - `WriterShape_FromEmail_AFieldSecurityMaskedRow_HidesTheInvoice` (visible first, then one row masked);
+  - `Internal_AnEmptyDocumentLink_AndOnlyASourcelessSupportingFile_IsHidden` (round 3, kept).
+- Fail closed:
+  - `WriterShape_FromEmail_AFailedStoredFileRead_HidesTheInvoice`;
+  - `WriterShape_FromEmail_AFailedInvoiceRead_HidesItsRows` (Fact). The rows' invoice-link read fails and the call throws; a link that is not a GUID hides the row; the predicate's own submission read fails and the invoice is hidden.
+- `Rule3_AnInternalEmptyLink_IsDecidedByTheInvoicePdf` replaces round 3's `InternalUpload_AnInvoicePdfCarryingAnySource_IsNotTheUploadsOwnPdf`. Its cases:
+  - sourceless: visible;
+  - a readable document: visible;
+  - a readable document with a communication and part: visible;
+  - a Restricted document: `source_hidden`;
+  - communication only, attachment only, and both: `source_link_unreadable`.
+- `Rule2_ASubmissionsOwnDocument_HonoursTheMarker` pins existing code: legacy confirm shape, marked `.eml` visible, unmarked hidden.
+- `DecideSourceDocuments_DecidesEachSource_AndHidesOneItWasNotAskedOrCouldNotRead` (Fact) drives the extracted function directly.
+- Fixture correction: the taint-closure `sprk_storedfile` family row now carries a purpose (supporting file), as every written row does.
+
+**Seeding proofs.** Each seed was one change, rebuilt and run against the class, then restored (`4a_seeds.py` in the session scratchpad).
+
+| Seed | Failed |
+|---|---|
+| S0, the HEAD source (before) | 17: the Rule 3 document cases (6), every from-email writer shape (marked visible, unmarked and supporting-file reasons, masked row, failed invoice read), and null purpose |
+| S1a, marker path: an InvoicePdf with a source document not counted for rule 3 | 15, including `WriterShape_FromEmail_AMarkedEml_IsVisibleToItsFirm` and the Rule 3 document cases |
+| S1b, the marker not read by the source decision | 9: the marked-`.eml` tests, including `Rule2_ASubmissionsOwnDocument_HonoursTheMarker` and the from-email marked shape |
+| S2, a communication- or attachment-only InvoicePdf counted as readable | 10: the three only-cases of the Rule 3 theory and the round 1 K1 theory |
+| S3, the null-purpose hide dropped | 4: the null-purpose and masked-row tests |
+| S4, the no-InvoicePdf hide dropped | 10: the empty-link, no-Stored-File, supporting-file-only and from-email no-PDF tests |
+
+**Correction to surface (a).** The surfaces table said an unreadable id sets `Truncated`. `ExternalModuleDataEndpoints.cs:509` sets it only on a fault (`decision.Faulted` with rows dropped) or when there is no predicate. An unreadable id hides its row and `Truncated` stays false. The table row is corrected.
+
+**Known limit K1.** `sprk_invoicesubmission.sprk_channel`, the submission's `sprk_invoice` link and submission Delete are security inputs too, like `sprk_document`. Changing one changes which rule decides the invoice. They are filed under #2372 (field-secured, BFF-only write) and tied to 191.
+
+**Observed, not changed.** A purpose value outside `StoredFilePurpose` (non-null) is treated as "not an InvoicePdf". When it is sourceless it is not a source; when it has a source, it is decided by that source. No writer creates such a value.
 
 ## Escalation
 
