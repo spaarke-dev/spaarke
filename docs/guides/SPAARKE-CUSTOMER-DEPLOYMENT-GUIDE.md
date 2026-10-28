@@ -1966,8 +1966,9 @@ The package has no `permissions`, `webApplicationInfo`, bot or knowledge capabil
    value, so a run from a fresh folder creates a second auth config. Scope is comma-separated there; `appId` is
    required by the driver and unused with `AnyApp`. The portal's **Client password authentication method** does not
    apply (no secret). The portal still shows, edits and deletes the auth config. **Sign in with the Spaarke work
-   account**, not a personal Microsoft account: the browser reuses whatever account is already signed in, and
-   `--tenant` does not stop it. A personal account fails `oauth/register` with `Request failed with status code 401`;
+   account**, not a personal Microsoft account. The same address can be both (ACME: the operator's @spaarke.com
+   address also exists as a personal account); when Microsoft asks which one, pick **Work or school account**. The
+   browser also reuses an already signed-in account, and `--tenant` stops neither. A personal account fails `oauth/register` with `Request failed with status code 401`;
    `~/.fx/account/homeId.cache.appStudio` then ends in the consumer tenant `9188040d-6c67-4c5b-b112-36a304b66dad`.
    Fix: `atk auth logout m365`, sign in again choosing the work account, re-run `atk provision` (safe — nothing was
    created).
