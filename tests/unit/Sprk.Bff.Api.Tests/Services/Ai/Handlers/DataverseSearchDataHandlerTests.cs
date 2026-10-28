@@ -434,6 +434,52 @@ public sealed class DataverseSearchDataHandlerTests : TypedToolHandlerTestFixtur
         result.Data.Should().BeNull();
     }
 
+    // Review round 5 (F1): a submission with no invoice is decided by its own source, as on the routes (the REAL seam).
+
+    private static string SubmissionHitsJson(params Guid[] submissions) =>
+        "{ \"value\": [ "
+        + "{ \"@search.score\": 9.0, \"entityname\": \"sprk_matter\", \"objectid\": \"" + MatterHit.ToString("D") + "\" }, "
+        + string.Join(", ", submissions.Select((id, i) =>
+            "{ \"@search.score\": " + (5 - i) + ".0, \"entityname\": \"sprk_invoicesubmission\", \"objectid\": \""
+            + id.ToString("D") + "\" }"))
+        + " ] }";
+
+    [Fact]
+    public async Task ExecuteChatAsync_Task098_R5_ExternalCaller_ANoInvoiceInternalSubmissionWhoseSourceIsWithheld_IsDropped()
+    {
+        AsExternalCaller();
+        var world = new Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld();
+        var withheld = world.PendingSubmission(
+            world.Document(Guid.NewGuid(), permission: Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.RestrictedPermission), Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.InternalChannel);
+        var spa = world.PendingSubmission(null, Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.SpaChannel);
+        CaptureSearchBodies(DataverseUserResponse.Ok(200, ParseJson(SubmissionHitsJson(withheld, spa))));
+        _hideInvoiceFamily = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyHidingStubs.Real(world);
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: """{"query":"contoso"}""");
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildSearchTool(), CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        ResultEntities(result).Should().Equal("sprk_matter", "sprk_invoicesubmission");
+        result.Data!.Value.GetRawText().Should().Contain(spa.ToString("D")).And.NotContain(withheld.ToString("D"));
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_Task098_R5_ExternalCaller_ANoInvoiceSpaSubmission_StaysVisible()
+    {
+        AsExternalCaller();
+        var world = new Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld();
+        var spa = world.PendingSubmission(null, Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.SpaChannel);
+        CaptureSearchBodies(DataverseUserResponse.Ok(200, ParseJson(SubmissionHitsJson(spa))));
+        _hideInvoiceFamily = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyHidingStubs.Real(world);
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: """{"query":"contoso"}""");
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildSearchTool(), CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        ResultEntities(result).Should().Equal("sprk_matter", "sprk_invoicesubmission");
+        result.Data!.Value.GetRawText().Should().Contain(spa.ToString("D"));
+    }
+
     [Fact]
     public async Task ExecuteChatAsync_Task098_InternalCaller_InvoiceFamilyHitsNeverReachThePredicate()
     {

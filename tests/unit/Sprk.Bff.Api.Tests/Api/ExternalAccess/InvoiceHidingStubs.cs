@@ -61,6 +61,13 @@ internal static class InvoiceFamilyHidingStubs
         };
     }
 
+    /// <summary>
+    /// Review round 5: the REAL seam, <see cref="ExternalDataService.HideInvoiceFamilyRowsAsync"/> over the app-only Web API double
+    /// <paramref name="world"/> (as <c>AddExternalAccess</c> binds it), for tool tests that must prove the decision itself.
+    /// </summary>
+    public static AppOnlyInvoiceFamilyHiding Real(Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld world) =>
+        (table, rowIds, ct) => world.NewService(identity: null).HideInvoiceFamilyRowsAsync(table, rowIds, world.RootFlags, ct);
+
     /// <summary>A read fault: the seam throws, so the tool call fails with no data.</summary>
     public static AppOnlyInvoiceFamilyHiding Throwing { get; } = (_, _, _) =>
         throw new ExternalDataService.DataverseUnavailableException("The invoice-family read failed (test).");

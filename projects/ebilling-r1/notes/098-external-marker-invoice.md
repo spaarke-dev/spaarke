@@ -21,9 +21,9 @@ Branch `task/ebill-098-external-marker`, based on `786d1ea17a`. Rigor FULL, opus
 | (b) Invoice thread: list, post, delete-own | ExternalMessageEndpoints.cs `EvaluateRecordGateAsync` invoice block (~810-827) | Same answer as a non-existent or cross-tenant invoice id, with no message read and no row written | Fault or no predicate: refused the same way |
 | (b) Messages on a matter or project thread regarding an invoice, and the notification feed | ExternalMessageEndpoints.cs:514 (`SecureRootsFilter`), `RegardingInvoicesVisibleAsync` :532, ExternalNotificationFeedEndpoints.cs | Withheld from the list, the feed and the count. One predicate call per page | Fault or malformed regarding: withheld |
 | (b′) Documents filed to an invoice: list, content, versions, upload | ExternalProjectDataEndpoints.cs:1415, `RightsForInvoiceAsync` → `InvoiceVisibleToAsync` :1350 | 403 with the same body as a missing invoice; nothing touched | Fault: refused the same way |
-| (c) Submission read | ExternalInvoiceSubmissionAuthorizationFilter.cs:311 → `VisibleSubmissionsAsync` (review round 4b) | `UniformRecordNotFound`, the same 404 as a missing submission. With an invoice, decided by the invoice; without one, by its own source | Fault or no seam: 404 |
-| (c) Submission list | ExternalInvoiceSubmissionEndpoints.cs:260 → `VisibleSubmissionsAsync` :276 (review round 4b) | Row omitted; the others are kept | Fault or no seam: every asked row is omitted |
-| (d) AI `read_query` | DataverseReadQueryHandler.cs:191-212, 369-418 | Invoice or line rows dropped. One seam call per table per page | The seam throws: error with no data. A row without an id is hidden |
+| (c) Submission read | ExternalInvoiceSubmissionAuthorizationFilter.cs:311 → `VisibleSubmissionsAsync` (review round 4b) | `UniformRecordNotFound`, the same 404 as a missing submission. With an invoice, decided by the invoice; without one, by its own source | Fault: retryable 503 `record_unavailable` (EB-D-169, round 5). No seam: 404, logged at Error |
+| (c) Submission list | ExternalInvoiceSubmissionEndpoints.cs:260 → `VisibleSubmissionsAsync` :276 (review round 4b) | Row omitted; the others are kept | Fault: retryable 503 `record_unavailable` (EB-D-169, round 5). No seam: every asked row is omitted, logged at Error |
+| (d) AI `read_query` | DataverseReadQueryHandler.cs:191-212, 369-418 | Invoice-family rows dropped; a submission row decided by `DecideSubmissionsAsync`, as on the routes (round 5). One seam call per table per page | The seam throws: error with no data. A row without an id is hidden |
 | (d) AI `search_data` | DataverseSearchDataHandler.cs:358-375 | Hidden hits dropped and the count adjusted. No warning reveals that anything was dropped | The seam throws: error with no data |
 | (d) AI `describe` | DataverseDescribeHandler.cs:378-453 | Same `NotFound` and message as a missing record | The seam throws: error with no data |
 
@@ -366,6 +366,48 @@ Both routes call `ExternalInvoiceSubmissionEndpoints.VisibleSubmissionsAsync` (E
 | S4, the fail-closed read dropped (a fault shows every row) | 8 | `AFailedRead_WithholdsEveryAskedSubmission_AndSaysFaulted`, the route failed-source-read test, the invoice-read list test, the read "fault" case |
 | S4b, no seam treated as nothing withheld | 1 | the read "no predicate" case |
 | S5, `documentId` returned to external callers | 1 | `Task098_4b_the_external_routes_never_return_the_document_id_and_the_internal_route_still_does` |
+
+## Review round 5, 2026-10-28 (uac-r2 re-check of `5bbd024111`)
+
+**F1. The assistant's `dataverse.*` tools decide a submission with no invoice the same way the routes do.**
+- Before: `HiddenFamilyRowsAsync` mapped an `sprk_invoicesubmission` row only to its invoice, and a row with no invoice was not hidden. `read_query`, `search_data` and `describe` could therefore return an Internal submission that the routes withhold (404).
+- Now: for `sprk_invoicesubmission`, `HiddenFamilyRowsAsync` reads each row by id app-only with its invoice link, `_sprk_document_value` and `sprk_channel` (one read per chunk), builds the `InvoiceSubmissionView` from that row, and decides the page with `DecideSubmissionsAsync`, the function the routes use. A row with an invoice keeps the invoice decision. A row that does not come back, or whose invoice link is not a GUID, is hidden. A failed read still throws, so the tool call fails with no data. The other family tables are unchanged.
+- Tests (`ExternalInvoiceVisibilityTests`):
+  - `TaintClosure_ARowOfAHiddenInvoice_IsHidden_AndOneOfAVisibleInvoiceIsNot`: for submissions, the "no invoice = visible" expectation is flipped (a submission with no invoice and no channel is hidden).
+  - `TaintClosure_ASubmissionWithoutAnInvoice_IsDecidedAsOnTheRoutes`: per source, the tool decision equals the route decision (`HideSubmissionsForAsync`). Hidden: isolated document, unmarked restricted `.eml`, Internal empty link, unknown channel, no channel. Visible: Spa, readable document, marked `.eml`.
+  - `TaintClosure_ASubmissionWhoseDocumentLinkIsNotAGuid_IsHidden`, `TaintClosure_SubmissionRows_AreReadOnce_WithTheirChannelAndDocument`, `TaintClosure_ASubmissionDecisionFault_Throws_SoTheToolReturnsNoData`.
+- Tests per tool, over the REAL seam (`InvoiceFamilyHidingStubs.Real`: `HideInvoiceFamilyRowsAsync` over `InvoiceWorld`):
+  - read_query: `ExecuteChatAsync_Task098_R5_ExternalCallerOnSubmissions_ANoInvoiceInternalSubmissionWhoseSourceIsWithheld_IsDropped` (must fire); `..._ANoInvoiceSpaSubmission_StaysVisible` (must not fire).
+  - search_data: `ExecuteChatAsync_Task098_R5_ExternalCaller_ANoInvoiceInternalSubmissionWhoseSourceIsWithheld_IsDropped`; `..._ANoInvoiceSpaSubmission_StaysVisible`.
+  - describe: `ExecuteChatAsync_Task098_R5_ExternalCaller_ANoInvoiceInternalSubmissionWhoseSourceIsWithheld_AnswersLikeAMissingOne`; `..._ANoInvoiceSpaSubmission_ReturnsTheRecord`.
+- Guard (`ExternalInvoiceVisibilityGuardTests`):
+  - `TheAssistantTools_DecideSubmissionsWithTheRoutesFunction`: `ExternalDataService.HideInvoiceFamilyRowsAsync`, `ExternalInvoiceVisibility.HiddenFamilyRowsAsync` and every other caller of `ReadInvoicesOfAsync` must reach `DecideSubmissionsAsync`. No method of the tool handlers may apply an invoice decision other than the family seam or the submission decision.
+  - Controls (`ToolSubmissionDecisionDetector_MustFireAndMustNotFire`): must fire, a family mapping decided with `DecideAsync` only and a tool deciding through `ExternalInvoiceHiding`; must not fire, a family mapping that reaches `DecideSubmissionsAsync` through a helper and a tool using `AppOnlyInvoiceFamilyHiding`.
+
+**F3. The seam's production wiring.**
+- `TheSubmissionSeam_IsRegisteredByAddExternalAccess_AndDelegatesToHideSubmissionsForAsync` builds the services through the real `AddExternalAccess` and resolves `ExternalInvoiceSubmissionHiding`. A page is decided over the module's app-only `ExternalDataService`: the Spa submission is visible, the isolated one is withheld (`source_hidden`), with one documents read.
+- `ExternalInvoiceSubmissionEndpoints.VisibleSubmissionsAsync` logs a missing seam at Error. The answer is unchanged: every row is withheld (the list omits it, the read is the not-found 404). Test: `Task098_R5_no_registered_seam_withholds_every_submission_and_logs_at_error`; `Task098_get_of_a_submission_when_no_predicate_is_registered_is_404_fail_closed` keeps the read case.
+
+**EB-D-169 (owner, 2026-10-28; replaces K2).** When a read fails while deciding which submissions a firm may see, both external routes answer a retryable 503 with `ebilling.submission.record_unavailable` (`InvoiceSubmissionService.ReadUnavailable`, the code the routes already use for a read fault).
+- The list returns 503, not 200 `[]`. The single read returns 503, not 404.
+- A faulted read never shows a row, and a row decided as withheld is still withheld: the list omits it, and the read is the same 404 as a missing submission.
+- The AI tools are unchanged: a fault fails the tool call with no data.
+- Tests (`InvoiceSubmissionEndpointsContractTests`): `EB_D_169_a_failed_source_read_is_503_on_the_read_and_the_list` (both callers), `EB_D_169_list_is_503_when_the_invoice_read_fails`, `EB_D_169_get_of_a_submission_whose_invoice_decision_read_faults_is_503_not_404`, and the peer `EB_D_169_without_a_fault_a_withheld_submission_is_still_the_404_and_omitted_from_the_list`. They replace `Task098_4b_a_failed_source_read_withholds_on_the_read_and_the_list`, `Task098_list_withholds_every_asked_submission_when_the_invoice_read_fails` and the "fault" case of the round 4b read theory.
+
+**Seeding proofs** (`r5098/seeds.py` in the session scratchpad; each seed was one change, rebuilt, run against the five unit classes and the guard class, then restored; the diff hash was identical before and after):
+
+| Seed | Failed | Tests that failed |
+|---|---|---|
+| S1, the submission branch of `HiddenFamilyRowsAsync` removed (submissions decided by their invoice only) | 12 unit + 1 guard | the three per-tool must-fire tests (read_query, search_data, describe), the five hidden cases of `TaintClosure_ASubmissionWithoutAnInvoice_IsDecidedAsOnTheRoutes`, the submission case of the taint-closure theory, the not-a-GUID, read-once and fault tests, and `TheAssistantTools_DecideSubmissionsWithTheRoutesFunction` |
+| S2, the two route files as at `5bbd024111` | 5 | `EB_D_169_a_failed_source_read_is_503_on_the_read_and_the_list` (2), `EB_D_169_list_is_503_when_the_invoice_read_fails`, `EB_D_169_get_of_a_submission_whose_invoice_decision_read_faults_is_503_not_404`, `Task098_R5_no_registered_seam_withholds_every_submission_and_logs_at_error` |
+| S3, the module binds `ExternalInvoiceSubmissionHiding` to "nothing withheld" | 1 | `TheSubmissionSeam_IsRegisteredByAddExternalAccess_AndDelegatesToHideSubmissionsForAsync` |
+
+The must-not-fire peers (Spa with no invoice, per tool) passed under every seed.
+
+**Known limits, accepted:**
+- **K1.** Internal Write/Delete at Deep on submission, invoice and document, with `sprk_channel` not field-secured: tracked as #2372. External users hold only Read at Deep, Create at Basic on submission and document, and AppendTo at Deep on document and invoice, so K1 is internal-only.
+- **K3.** Accepted as the spec states it; no change.
+- **K4.** Task 132's notification sink and 093's file route must call `DecideSubmissionsAsync` when they are built.
 
 ## Escalation
 

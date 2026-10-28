@@ -496,6 +496,56 @@ public sealed class DataverseDescribeHandlerTests : TypedToolHandlerTestFixture
         result.Data.Should().BeNull();
     }
 
+    // Review round 5 (F1): a submission with no invoice is decided by its own source, as on the routes (the REAL seam).
+
+    private Task<ToolResult> DescribeSubmissionAsync(Guid submission)
+    {
+        _dataverse
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("EntityDefinitions(LogicalName='sprk_invoicesubmission')")), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson(
+                "{ \"EntitySetName\": \"sprk_invoicesubmissions\", \"PrimaryIdAttribute\": \"sprk_invoicesubmissionid\" }")));
+        _dataverse
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("sprk_invoicesubmissions(")), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson(
+                "{ \"sprk_invoicesubmissionid\": \"" + submission.ToString("D") + "\", \"sprk_name\": \"SUB-1\" }")));
+        return CreateHandler().ExecuteChatAsync(
+            BuildChatInvocationContext(toolArgumentsJson:
+                "{\"path\":\"tables/sprk_invoicesubmission/records/" + submission.ToString("D") + "\"}"),
+            BuildDescribeTool(), CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_Task098_R5_ExternalCaller_ANoInvoiceInternalSubmissionWhoseSourceIsWithheld_AnswersLikeAMissingOne()
+    {
+        AsExternalCaller();
+        var world = new Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld();
+        var withheld = world.PendingSubmission(
+            world.Document(Guid.NewGuid(), permission: Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.RestrictedPermission), Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.InternalChannel);
+        var spa = world.PendingSubmission(null, Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.SpaChannel);
+        _hideInvoiceFamily = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyHidingStubs.Real(world);
+
+        var result = await DescribeSubmissionAsync(withheld);
+
+        result.Success.Should().BeFalse();
+        result.Data.Should().BeNull();
+        result.ErrorCode.Should().Be(DataverseUserClientErrorCodes.NotFound);
+        result.ErrorMessage.Should().Be(ExternalCallerCommunicationGuard.RecordNotVisibleMessage);
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_Task098_R5_ExternalCaller_ANoInvoiceSpaSubmission_ReturnsTheRecord()
+    {
+        AsExternalCaller();
+        var world = new Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld();
+        var spa = world.PendingSubmission(null, Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.SpaChannel);
+        _hideInvoiceFamily = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyHidingStubs.Real(world);
+
+        var result = await DescribeSubmissionAsync(spa);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        result.Data!.Value.GetProperty("fields").GetProperty("sprk_name").GetString().Should().Be("SUB-1");
+    }
+
     [Fact]
     public async Task ExecuteChatAsync_Task098_InternalCaller_AnInvoiceNeverReachesThePredicate()
     {

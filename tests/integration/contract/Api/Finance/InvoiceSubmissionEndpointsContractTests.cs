@@ -1095,21 +1095,12 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
             .Which.InvoiceId.Should().Be(HiddenInvoice);
     }
 
-    [Theory]
-    [InlineData("fault")]
-    [InlineData("no predicate")]
-    public async Task Task098_get_of_a_submission_with_an_invoice_the_predicate_cannot_decide_is_404_fail_closed(string kind)
+    [Fact]
+    public async Task Task098_get_of_a_submission_when_no_predicate_is_registered_is_404_fail_closed()
     {
-        if (kind == "no predicate")
-        {
-            await DisposeAsync();
-            _registerSubmissionHiding = false;
-            await InitializeAsync();
-        }
-        else
-        {
-            _world.Faults["sprk_storedfiles"] = HttpStatusCode.ServiceUnavailable;
-        }
+        await DisposeAsync();
+        _registerSubmissionHiding = false;
+        await InitializeAsync();
 
         var id = Guid.NewGuid();
         StoredSubmissionWithInvoice(id, Guid.NewGuid());
@@ -1117,6 +1108,31 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         var response = await SendAsync(HttpMethod.Get, $"/api/v1/external/invoice-submissions/{id}");
 
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    // -- EB-D-169 (owner, 2026-10-28): a read that fails while deciding is a retryable 503 on both external routes --
+
+    /// <summary>The retryable 503 every submission read fault answers (<c>ebilling.submission.record_unavailable</c>).</summary>
+    private static async Task ShouldBeRetryable503Async(HttpResponseMessage response, params string[] mustNotContain)
+    {
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        var body = await response.Content.ReadAsStringAsync();
+        JsonDocument.Parse(body).RootElement.GetProperty("errorCode").GetString()
+            .Should().Be(InvoiceSubmissionErrors.CoreRecordUnavailable);
+        foreach (var text in mustNotContain)
+            body.Should().NotContain(text, "a faulted read never shows a row");
+    }
+
+    [Fact]
+    public async Task EB_D_169_get_of_a_submission_whose_invoice_decision_read_faults_is_503_not_404()
+    {
+        _world.Faults["sprk_storedfiles"] = HttpStatusCode.ServiceUnavailable;
+        var id = Guid.NewGuid();
+        StoredSubmissionWithInvoice(id, Guid.NewGuid());
+
+        var response = await SendAsync(HttpMethod.Get, $"/api/v1/external/invoice-submissions/{id}");
+
+        await ShouldBeRetryable503Async(response, "trackingNumber");
     }
 
     [Fact]
@@ -1229,27 +1245,70 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
 
     [Theory]
     [MemberData(nameof(ExternalCallerKinds))]
-    public async Task Task098_4b_a_failed_source_read_withholds_on_the_read_and_the_list(string caller)
+    public async Task EB_D_169_a_failed_source_read_is_503_on_the_read_and_the_list(string caller)
     {
         CallerIs(caller);
         var readable = _world.Document(Guid.NewGuid(), permission: StandardPermission);
         _world.Faults["sprk_documents"] = HttpStatusCode.ServiceUnavailable;
 
-        await ReadIsTheSameAsMissingAsync(SubmissionRow("INV-READABLE", Internal, readable), "its source could not be read");
-        var body = await ListBodyAsync(SubmissionRow("INV-READABLE", Internal, readable), SubmissionRow("INV-SPA", Spa));
-
-        body.Should().Be("[]", "a failed read withholds every submission the decision was asked about");
+        var row = SubmissionRow("INV-READABLE", Internal, readable);
+        _h.Submission = row;
+        await ShouldBeRetryable503Async(
+            await SendAsync(HttpMethod.Get, $"/api/v1/external/invoice-submissions/{row.Id}"), "INV-READABLE");
+        ListReturns(SubmissionRow("INV-READABLE", Internal, readable), SubmissionRow("INV-SPA", Spa));
+        await ShouldBeRetryable503Async(
+            await SendAsync(HttpMethod.Get, "/api/v1/external/invoice-submissions"), "INV-READABLE", "INV-SPA");
     }
 
     [Fact]
-    public async Task Task098_list_withholds_every_asked_submission_when_the_invoice_read_fails()
+    public async Task EB_D_169_list_is_503_when_the_invoice_read_fails()
     {
         _world.Faults["sprk_storedfiles"] = HttpStatusCode.ServiceUnavailable;
-
-        var body = await ListBodyAsync(
+        ListReturns(
             SubmissionRow("INV-WITH", Spa, invoice: Guid.NewGuid(), status: InvoiceSubmissionStatus.Accepted), SubmissionRow("INV-PENDING", Spa));
 
-        body.Should().Be("[]", "a failed read withholds every submission the decision was asked about");
+        await ShouldBeRetryable503Async(
+            await SendAsync(HttpMethod.Get, "/api/v1/external/invoice-submissions"), "INV-WITH", "INV-PENDING");
+    }
+
+    [Theory]
+    [MemberData(nameof(ExternalCallerKinds))]
+    public async Task EB_D_169_without_a_fault_a_withheld_submission_is_still_the_404_and_omitted_from_the_list(string caller)
+    {
+        CallerIs(caller);
+        var isolated = _world.Document(Guid.NewGuid(), permission: RestrictedPermission);
+
+        await ReadIsTheSameAsMissingAsync(SubmissionRow("INV-ISOLATED", Internal, isolated), "decided as withheld, not faulted");
+        var body = await ListBodyAsync(SubmissionRow("INV-ISOLATED", Internal, isolated), SubmissionRow("INV-SPA", Spa));
+
+        body.Should().Contain("INV-SPA").And.NotContain("INV-ISOLATED");
+    }
+
+    /// <summary>Review round 5 (F3): a missing seam is a registration defect: logged at Error, and every row withheld.</summary>
+    [Fact]
+    public async Task Task098_R5_no_registered_seam_withholds_every_submission_and_logs_at_error()
+    {
+        var logger = new LevelLogger();
+        var views = new[] { new InvoiceSubmissionView { SubmissionId = Guid.NewGuid(), ChannelValue = Spa } };
+
+        var visible = await ExternalInvoiceSubmissionEndpoints.VisibleSubmissionsAsync(
+            Collaborator(AccessRights.Read), views, hideSubmissions: null, logger, CancellationToken.None);
+
+        visible.Should().BeEmpty();
+        logger.Levels.Should().ContainSingle().Which.Should().Be(LogLevel.Error);
+    }
+
+    private sealed class LevelLogger : ILogger
+    {
+        public List<LogLevel> Levels { get; } = new();
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            Levels.Add(logLevel);
     }
 
     [Fact]
