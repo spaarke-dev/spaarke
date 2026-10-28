@@ -217,16 +217,31 @@ public sealed class SubmitInvoiceFromEmailOperationTests
         _emlRows.Verify(r => r.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
-    [Fact]
-    public async Task Submit_StepOneAnswersWithoutAnErrorCode_IsTheRoutesAnswer()
+    /// <summary>
+    /// Review round 5: a step-1 answer without an <c>errorCode</c> (no path produces one today) is mapped onto contract section 6 as step A's
+    /// are: a 403 is <c>source_forbidden</c>, a transient answer 503 <c>record_unavailable</c>, anything else 503 <c>failed</c>. No answer
+    /// outside section 6 reaches the add-in; nothing is checked, filed or written.
+    /// </summary>
+    [Theory]
+    [InlineData(StatusCodes.Status403Forbidden, 403, "ebilling.submission.source_forbidden")]
+    [InlineData(StatusCodes.Status429TooManyRequests, 503, "ebilling.submission.record_unavailable")]
+    [InlineData(StatusCodes.Status503ServiceUnavailable, 503, "ebilling.submission.record_unavailable")]
+    [InlineData(StatusCodes.Status404NotFound, 503, "ebilling.submission.failed")]
+    [InlineData(StatusCodes.Status500InternalServerError, 503, "ebilling.submission.failed")]
+    public async Task Submit_StepOneAnswersWithoutAnErrorCode_IsMappedOntoSectionSix_NothingWritten(int stepOneStatus, int status, string code)
     {
+        var stepA = 0;
         var operation = Build();
-        var answer = Problem(StatusCodes.Status403Forbidden, errorCode: null);
-        operation.StepOne = answer;
+        operation.StepOne = Problem(stepOneStatus, errorCode: null);
+        operation.StepA = _ => { stepA++; return Task.FromResult(true); };
 
-        var act = () => operation.SubmitAsync(Input(), CancellationToken.None);
+        var result = await operation.SubmitAsync(Input(), CancellationToken.None);
 
-        (await act.Should().ThrowAsync<FromEmailRouteAnswerException>()).Which.Answer.Should().BeSameAs(answer);
+        result.Outcome.Should().Be(FromEmailSubmitOutcome.Refused);
+        (result.Status, result.ErrorCode).Should().Be((status, code));
+        result.Detail.Should().NotContain(InvoiceSubmissionService.FilingKeptSentence);
+        stepA.Should().Be(0);
+        H.OwnerContexts.Should().BeEmpty("refused before the intake's checks");
         H.Writes.Should().Be(0);
     }
 

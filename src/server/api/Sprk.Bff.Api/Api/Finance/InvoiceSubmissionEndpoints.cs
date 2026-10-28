@@ -498,7 +498,7 @@ public static class InvoiceSubmissionEndpoints
         return JsonSerializer.SerializeToElement(body);
     }
 
-    private static IResult SourceForbidden() =>
+    internal static IResult SourceForbidden() =>
         InvoiceSubmissionHttp.Refused(StatusCodes.Status403Forbidden, InvoiceSubmissionErrors.SourceForbidden,
             "The document or its communication does not exist or is not visible to the caller. Nothing was saved.");
 

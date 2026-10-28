@@ -94,7 +94,7 @@ internal class SubmitInvoiceFromEmailOperation : ISubmitInvoiceFromEmail
         var prepared = await PrepareSourceAsync(input, ct);
         if (prepared.Refusal is { } stepOne)
         {
-            return Answer(stepOne, filed: false);
+            return RouteAnswer(stepOne, submissionId, stepA: false);
         }
 
         // ── 2. The intake's checks, the caller as creator person (every generation) ──
@@ -172,7 +172,7 @@ internal class SubmitInvoiceFromEmailOperation : ISubmitInvoiceFromEmail
             }
             catch (InvoiceSubmissionEndpoints.SourceFilingRefusedException ex)
             {
-                return StepAAnswer(ex.Answer, submissionId);
+                return RouteAnswer(ex.Answer, submissionId, stepA: true);
             }
         }
 
@@ -432,8 +432,8 @@ internal class SubmitInvoiceFromEmailOperation : ISubmitInvoiceFromEmail
     }
 
     /// <summary>
-    /// A step-1 or step-A answer: a submission refusal (it carries <c>errorCode</c>) becomes this operation's refusal; any other answer (the
-    /// communication re-file route's own) is returned by the route as it is.
+    /// A submission refusal (it carries <c>errorCode</c>) as this operation's refusal. <see cref="RouteAnswer"/> hands it only those; an
+    /// answer without a status would be a defect and is returned by the route as it is.
     /// </summary>
     private static FromEmailSubmitResult Answer(IResult answer, bool filed)
     {
@@ -447,14 +447,16 @@ internal class SubmitInvoiceFromEmailOperation : ISubmitInvoiceFromEmail
     }
 
     /// <summary>
-    /// Step A's refusal. A submission refusal (it carries <c>errorCode</c>) is that refusal. The communication re-file core's own answers
-    /// carry codes contract section 6 does not list, so they are mapped onto it (review round 5; the rule of <see cref="Answer(InvoiceSubmissionOutcome, bool, FromEmailSubmitInput)"/>):
-    /// a 403 is the re-file route's own 403 <c>COMMUNICATION_REFILE_FORBIDDEN</c> (<see cref="InvoiceSubmissionEndpoints.RefileForbidden"/>,
-    /// as step A answers a caller without Write); a transient answer (408, 429, 502 to 504, or an owner that could not be settled against a
-    /// concurrent writer) is 503 <c>record_unavailable</c>; anything else is 503 <c>failed</c>. The re-file did not answer 204, so nothing
-    /// was filed.
+    /// A step-1 or step-A refusal. A submission refusal (it carries <c>errorCode</c>) is that refusal. Any other answer (step A: the
+    /// communication re-file core's own; step 1 produces none today) carries a code contract section 6 does not list, so it is mapped onto
+    /// it (review round 5; the rule of <see cref="Answer(InvoiceSubmissionOutcome, bool, FromEmailSubmitInput)"/>): a 403 is step 1's 403
+    /// <c>source_forbidden</c> (<see cref="InvoiceSubmissionEndpoints.SourceForbidden"/>), or step A's re-file route's own 403
+    /// <c>COMMUNICATION_REFILE_FORBIDDEN</c> (<see cref="InvoiceSubmissionEndpoints.RefileForbidden"/>, as step A answers a caller without
+    /// Write); a transient answer (408, 429, 502 to 504, or an owner that could not be settled against a concurrent writer) is 503
+    /// <c>record_unavailable</c>; anything else is 503 <c>failed</c>. Nothing was filed (step 1 precedes step A; the re-file did not
+    /// answer 204).
     /// </summary>
-    private FromEmailSubmitResult StepAAnswer(IResult answer, Guid submissionId)
+    private FromEmailSubmitResult RouteAnswer(IResult answer, Guid submissionId, bool stepA)
     {
         if (answer is ProblemHttpResult { ProblemDetails.Extensions: var submissionExtensions } && submissionExtensions.ContainsKey("errorCode"))
         {
@@ -469,12 +471,12 @@ internal class SubmitInvoiceFromEmailOperation : ISubmitInvoiceFromEmail
             IStatusCodeHttpResult { StatusCode: { } statusCode } => (statusCode, null),
             _ => (StatusCodes.Status500InternalServerError, (string?)null),
         };
-        _logger.LogWarning("From-email submission {SubmissionId}: step A's re-file answered {Status} ({ReasonCode}); mapped onto contract section 6",
-            submissionId, status, reason);
+        _logger.LogWarning("From-email submission {SubmissionId}: {Step} answered {Status} ({ReasonCode}); mapped onto contract section 6",
+            submissionId, stepA ? "step A's re-file" : "step 1", status, reason);
 
         if (status == StatusCodes.Status403Forbidden)
         {
-            throw InvoiceSubmissionEndpoints.RefileForbidden();
+            return stepA ? throw InvoiceSubmissionEndpoints.RefileForbidden() : Answer(InvoiceSubmissionEndpoints.SourceForbidden(), filed: false);
         }
 
         if (status is StatusCodes.Status408RequestTimeout or StatusCodes.Status429TooManyRequests or StatusCodes.Status502BadGateway
@@ -482,7 +484,10 @@ internal class SubmitInvoiceFromEmailOperation : ISubmitInvoiceFromEmail
             || reason == RecordOwnerUnsettledException.ReasonCode)
         {
             return Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.CoreRecordUnavailable,
-                "The email's communication could not be filed under the record right now. Nothing was submitted; try again shortly.", filed: false);
+                stepA
+                    ? "The email's communication could not be filed under the record right now. Nothing was submitted; try again shortly."
+                    : "The saved email or its communication could not be checked right now. Nothing was submitted; try again shortly.",
+                filed: false);
         }
 
         return NotQueued(filed: false);
