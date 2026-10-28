@@ -102,6 +102,17 @@ Raw findings as the owner reported them. Each becomes a refinement below once tr
 | 5 Uploads (162) | ✅ Documents save to the newly created record (owner's item 6; record type to confirm: WA, invoice, project). ❌ Creating a **project** as Core User fails: there is no AppendTo on `sprk_organization`, AppendTo on `contact` is user-level only, and the message shows `{0}..{6}`. Not ontology code. | uac-r2, [#2382](https://github.com/spaarke-dev/spaarke/issues/2382) (DI-130). Upload to an existing project meanwhile |
 | 6 Budget inquiry composer (160) | ⬜ Not yet tested. Corrected 2026-10-28: the owner's item 6 was the uploads check. | — |
 
+## Round 2 feedback — 2026-10-28 (owner, dev BFF `e56a3a51d4`, Console `b445886fed`)
+
+| # | Feedback | Result / follow-up |
+|---|---|---|
+| 1 | The decision wizard opens with no "two screens" | ✅ 165 verified by the owner |
+| 2 | Assign Task: add a "Send email notification" checkbox. When ticked, send a template email to the Assigned To contact with the matter link, What to do and Due, and also raise a model-driven app notification for that user | New request. Facts being gathered (reuse of the email and notification paths) |
+| 3 | Recording a decision is slow (20–30 s) | Under diagnosis (telemetry plus the commit path) |
+| 4 | The lane titles "Decide" and "Do" aren't descriptive enough. The card list should expand and collapse, default collapsed, with the title, the Start review / Work through these button and the metric cards always shown | New request. Facts being gathered |
+| 5 | Create budget makes a budget with no auto-generated budget number. Two currency fields exist: `sprk_currency` (text, required, left blank) and `transactioncurrencyid`. Why is `sprk_currency` needed? | Under investigation (schema owner, readers) |
+| 6 | Add `sprk_budgetcategory`, `sprk_budgetyear`, `sprk_budgetstartdate`, `sprk_budgetenddate`, `sprk_budgetperiod` and Currency to the Create budget step. Currency defaults from the record's business unit Default Currency (`transactioncurrencyid`) | New request, after 5 |
+
 ## Owner completion statement
 
 (not yet given)
