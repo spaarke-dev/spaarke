@@ -81,7 +81,7 @@
 
 | ID | Task | FRs | Tier / effort | Rigor | Group | Deps | Status |
 |---|---|---|---|---|---|---|---|
-| 070 | [RecordFamilyEdges registry + guards](070-record-family-edge-registry.poml) | FR-29 | opus / high | FULL | W7-A | none (UAC 194 merged) | 🔲 [open] |
+| 070 | [RecordFamilyEdges registry + guards](070-record-family-edge-registry.poml) | FR-29 | opus / high | FULL | W7-A | none (UAC 194 merged) | ✅ [done] #2367 |
 | 071 | [RecordFamilyReader (OBO walk)](071-record-family-reader.poml) | FR-30 | opus / xhigh | FULL | W7-B | 070; UAC 194b | 🔲 [open] |
 | 072 | [GET /records/{table}/{id}/family](072-record-family-endpoint.poml) | FR-31 | sonnet / high | FULL | W7-B | 071 | 🔲 [open] |
 | 073 | [RecordFamilyModal (shared UI)](073-record-family-modal.poml) | FR-32 | sonnet / high | FULL | W7-A | none | ✅ [done] #2366 |
