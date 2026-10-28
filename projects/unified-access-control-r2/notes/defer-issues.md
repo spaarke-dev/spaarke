@@ -1538,6 +1538,11 @@ its own.
 | ID | Title | GitHub Issue |
 |---|---|---|
 | D-2368 | Unsecure and ordinary creates fail on tables no default team can read (stored file, procedure assignment, rule set, policy); fix option (a), pending owner, built in 194b | https://github.com/spaarke-dev/spaarke/issues/2368 |
+| D-2377 | /invite-and-grant: an internal user's email with no active contact still gets a CIAM invite (task 193 review) | https://github.com/spaarke-dev/spaarke/issues/2377 |
+| D-2378 | 194b K-a: undetermined rows from bad data block their own root's Unsecure | https://github.com/spaarke-dev/spaarke/issues/2378 |
+| D-2379 | 194b K-b: the ordinary-moves time slice does not bound a single root's walk | https://github.com/spaarke-dev/spaarke/issues/2379 |
+| D-2380 | 194b K-c: RecordCreationService Repair has no live caller (field-mapping decides) | https://github.com/spaarke-dev/spaarke/issues/2380 |
+| D-2381 | 194b K4: an undetermined Signal or Decision Record (read fault) blocks its root's Unsecure | https://github.com/spaarke-dev/spaarke/issues/2381 |
 | D-2371 | Granting access to an inactive contact: /grant writes a dormant row, the contact-side route refuses (owner to choose one rule) | https://github.com/spaarke-dev/spaarke/issues/2371 |
 | D-2369 | read_query and semantic search: base completeness and labels on the caller-visible result set (tracked with task 191) | https://github.com/spaarke-dev/spaarke/issues/2369 |
 
