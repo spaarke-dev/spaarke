@@ -60,7 +60,8 @@
 
 - BFF **`de38296499`** (UAC 194 #2349 + field-mapping #2331; R3 deploy, verified by DLL ProductVersion 2026-10-27). Previous: `3ff2c04bf5`. Console `58ffc37da3` (run 39914343605).
 - **R3 deploy hold (2026-10-27):** #2360 (contact identity hardening) merged to master as `078f62bcad`. Until the contact security schema is applied and `-Verify` passes, no BFF built from master at or after that commit goes to dev. R3 sequences this with the owner. #2360 touches no ontology-owned file.
-- Worklist row `…5010` is in sync. POL-MATTER-NOBUDGET's current version is v2 `…6312`.
+- **Ontology OK sent to R3 (2026-10-28) for dev BFF `e56a3a51d4`** (#2357–#2386 over `de38296499`, contains R3 077, no ontology-owned or ownership files). The only change that reaches us is fm-037: a work assignment's `sprk_assignedto` is copied from `sprk_assignedtointernal` (Assign Work). Conditions: OrdinaryMovesWritesEnabled stays off; #2360's schema plus `-Verify` come first; the owner's go names the SHA in R3's session. After R3's after-notice, run a decide-lane smoke (plan route plus one zz- Assign Work commit).
+- Worklist row `…5010` is in sync. POL-MATTER-NOBUDGET's current version is **v3 `…6313`** (D-192, live 2026-10-28; re-evaluation re-raised 54 items on v3).
 - Console User (root `51c924e2-…`): 19 privileges, no policy Reads; AppendTo on policy and policyversion remains (outside D-185, left).
 - Worktrees: none for lanes. R2 is at `C:\code_files\spaarke-wt-spaarke-ontology-platform-r2`. Remove a worktree only with `Remove-WorktreeSafe.ps1`.
 - Pester 5.7.1 for local runs is at `C:\Users\RALPHS~1\AppData\Local\Temp\p571\Pester\5.7.1`.
