@@ -674,6 +674,7 @@ ontology D-191)
 | Project → Matter (2026-10-27, #2352) | Filing edge | The regarding pair only; the N:N stays an association | FR-29, FR-34 |
 | WA Assigned To (2026-10-27, #2354) | Default | The record's own Assigned To Internal | FR-36 |
 | WA wizard Assigned To (2026-10-27) | Field on the wizard? | Yes, it can be added: an optional picker on Enter Info; blank uses the FR-36 default | FR-37 |
+| Push Updates timing (2026-10-28) | When does the button switch to the Family view? | Ship 075 with 040: Push Updates keeps pushing as today until the Family view's own Push action exists | FR-35 |
 | WA Number (2026-10-27, #2353) | Generation | Autonumber `WRK-{SEQNUM:6}` (dev applied, PR #2358) | — |
 
 ## Assumptions

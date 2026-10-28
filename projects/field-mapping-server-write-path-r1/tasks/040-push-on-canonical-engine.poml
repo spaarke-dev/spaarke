@@ -39,6 +39,7 @@
   </context>
 
   <constraints>
+    <constraint source="Owner 2026-10-28 (075 timing)">075 (Push Updates opens the Family view; branch task/fm-075) merges and deploys together with 040: wire the RecordFamily code page's modal onAction to the push preview/apply, delete the "LEGACY … kept until task 040" helpers in sprk_fieldmapping_push.js, and deploy sprk_fieldmapping_push.js + the sprk_recordfamily code page in the same deploy. Push Updates must never be live without a working Push action.</constraint>
     <constraint source="UAC-r2 round 130 / design §12.12 (#2362)">This is the family abstraction: callers read families only through RecordFamilyReader / the family endpoint, never raw parent lookups; the public surface exposes no lookup names, edge internals or storage, so a future sprk_securefamily table can replace the implementation unchanged. No family column or table. Any isolation test uses UAC's shared Secure-Record-BU predicate, never a hard-coded team id.</constraint>
     <constraint source="project">Scope: re-file behaviour. `ReparentAsync`, the root filing gate, restamp and `AfterRefileAsync` are kept byte-for-byte in behaviour; only the per-rule value application and error text change. `RefileWriterAfterRefileGuardTests` must pass unchanged.</constraint>
     <constraint source="project">Scope: rule selection. Only rules with `sprk_syncmode` = Manual Refresh and mapping type Copy run on push; push overwrites. Default/Concat/Template rules are skipped (and counted), never errored.</constraint>
