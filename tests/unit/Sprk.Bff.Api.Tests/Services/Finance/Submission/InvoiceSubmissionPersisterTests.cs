@@ -2024,6 +2024,59 @@ public class InvoiceSubmissionPersisterTests
         store.Transactions.Should().BeEmpty();
     }
 
+    [Fact(DisplayName = "094 from-email step 3 (uac-r2 K4-a, must fire): the .eml filed under another core record before step 3 is Refused document_core_record_mismatch: no transaction, no file row, no invoice")]
+    public async Task FromEmail_TheEmlIsFiledElsewhereBeforeStepThree_IsRefusedCoreRecordMismatch_NothingCommitted()
+    {
+        var outcome = await new ProcessorHarness { Channel = InvoiceSubmissionChannel.Internal }.RunAsync();
+        var store = FromEmailStore();
+        store.DocumentRow = new Entity("sprk_document", Document) { ["sprk_matter"] = new EntityReference("sprk_matter", OtherMatter) };
+        StageFromEmail(store, version: store.DocumentVersion);
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Refused, "the job marks the submission Failed: no invoice exists");
+        result.ReasonCode.Should().Be(InvoiceSubmissionErrors.DocumentCoreRecordMismatch);
+        result.InvoiceId.Should().BeNull();
+        store.Transactions.Should().BeEmpty();
+        store.Files.Dataverse.Rows.Should().BeEmpty("no part's Stored File row is built");
+        store.Submission.GetAttributeValue<EntityReference>("sprk_invoice").Should().BeNull();
+    }
+
+    [Fact(DisplayName = "094 from-email step 5 (uac-r2 K4-a, must fire): the .eml filed under another core record between the commit and the gate is undone source_check_failed, BOTH parts' blobs and rows with the invoice")]
+    public async Task FromEmail_TheEmlIsFiledElsewhereBetweenTheCommitAndTheGate_IsUndone_BothPartsRemoved()
+    {
+        var outcome = await new ProcessorHarness { Channel = InvoiceSubmissionChannel.Internal }.RunAsync();
+        var store = new Store
+        {
+            Staged = false,
+            AfterCommit = s => s.DocumentRow = new Entity("sprk_document", Document) { ["sprk_matter"] = new EntityReference("sprk_matter", OtherMatter) },
+        };
+        store.Submission["sprk_channel"] = new OptionSetValue((int)InvoiceSubmissionChannel.Internal);
+        StageFromEmail(store, version: store.DocumentVersion);
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Undone);
+        result.ReasonCode.Should().Be(SubmissionReasonCodes.SourceCheckFailed);
+        result.UndoHeld.Should().BeFalse();
+        store.TotalsCalls.Should().BeEmpty("nothing runs after a failed step 5");
+        var parent = new StoredFileParent(StoredFileParentKind.Invoice, InvoiceId);
+        foreach (var (purpose, fileId) in new[] { (StoredFilePurpose.InvoicePdf, FileId), (StoredFilePurpose.InvoiceSupportingFile, EmailSupportingFile) })
+        {
+            store.Files.Dataverse.Rows.Should().NotContainKey(fileId, "every part's Stored File row is deleted");
+            store.Files.Gateway.Get(StoredFileSchema.ContainerOf(purpose), StoredFileBlobName.Build(store.Files.TenantId, parent, fileId))
+                .Should().BeNull("every part's blob is deleted");
+        }
+
+        store.InvoiceExists.Should().BeFalse();
+        store.UndoTransactions.Should().ContainSingle().Which.Select(d => d.Target.LogicalName)
+            .Should().Equal(StoredFileSchema.Entity, StoredFileSchema.Entity, "sprk_invoice");
+        store.Submission.GetAttributeValue<OptionSetValue>(InvoiceSubmissionPersister.SubmissionStatus).Value.Should().Be((int)InvoiceSubmissionStatus.Failed);
+        store.Submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionReasonCode).Should().Be(SubmissionReasonCodes.SourceCheckFailed);
+        store.Submission.Attributes.Should().NotContainKey(InvoiceSubmissionPersister.SubmissionInvoice);
+        store.Deletes.Select(d => d.Table).Should().NotContain(["sprk_communication", "sprk_document"], "the .eml and its communication are never touched");
+    }
+
     [Fact(DisplayName = "094 x 098 end to end (must not fire): a from-email invoice the REAL persister commits (Channel Internal, no document link, every Stored File sourced from the .eml) is visible to its own firm when its .eml carries the submission marker")]
     public async Task FromEmailInvoice_CommittedByThePersister_IsVisibleToTheFirm()
     {
