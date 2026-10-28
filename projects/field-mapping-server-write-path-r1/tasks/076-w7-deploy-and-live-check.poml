@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="076" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>W7 deploy to dev + live Family check (BFF via R3 batch, PCF, code page, web resource)</title>
+    <phase>7 W7 Record family service and Family tool</phase>
+    <gate>072, 074, 075, 038 complete; owner go for the BFF deploy in R3's session</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Deployment-touching; live verification of an access-safe read path.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Runs existing deploy skills and a scripted live check.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deployment; ordered and irreversible steps.</parallel-reason>
+    <deps>072, 074, 075, 038</deps>
+    <tags>deploy, dataverse, pcf, bff-api</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Deploy W7 to dev and verify the Family view live: the BFF goes out in R3's batched candidate (owner go in R3's session); deploy the TrackingFieldTrio PCF, the RecordFamily code page and sprk_fieldmapping_push.js with the deploy skills; then run the live checks below.</prompt>
+  <role>SPAARKE platform developer, deployment skills.</role>
+  <goal>On dev, the Family tool and the Push Updates button show each test record's family exactly as the caller may read it.</goal>
+
+  <context>
+    <background>Deploy via skills only (project CLAUDE.md §5). BFF deploys only through R3 on a batched candidate with the owner's go in R3's session. Live check uses a Secure family and a non-Secure family; a second test user with narrower rights checks pruning.</background>
+    <relevant-files>
+      <file role="canonical-reference">.claude/skills/pcf-deploy/SKILL.md</file>
+      <file role="canonical-reference">.claude/skills/code-page-deploy/SKILL.md</file>
+      <file role="canonical-reference">.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file role="notes">projects/field-mapping-server-write-path-r1/notes/task-076-live-check.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project CLAUDE.md §5">Dev only. BFF via R3 with the owner's go; never deploy the BFF directly from this session.</constraint>
+    <constraint source="PCF-DEPLOYMENT-GUIDE">Solution-ZIP import only (never pac pcf push); version visible in the footer.</constraint>
+    <constraint source="FR-30">Live checks are read-only; no record writes.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Ask R3 (SendMessage) to include the W7 BFF commits in its next dev candidate; wait for its read-back.</step>
+    <step order="2">Deploy the PCF, the RecordFamily code page, the web resource and the CreateWorkAssignmentWizard code page (038) with their skills; the Console carries 038 on its next Deploy-SpaarkeAi.ps1 run (record whether it was included). Record versions.</step>
+    <step order="3">Live check as the owner: a Matter with projects (pair-filed, after UAC 195), work assignments, documents and events — the Family view lists them with numbers. Then 038: create a work assignment from a matter with Assigned To chosen, and one with it blank; the first keeps the chosen contact, the second gets its Assigned To Internal.</step>
+    <step order="4">Live check as a narrower user: a record under an unreadable parent is absent, and nothing reveals it.</step>
+    <step order="5">Read App Insights for /records/*/family: 0 5xx; p95 recorded (design §12.11 query-count limit).</step>
+    <step order="6">Update TASK-INDEX.md to ✅ [done]; record results in notes/task-076-live-check.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any live check shows a record the caller cannot read, STOP, ask R3 to roll back the BFF, and escalate to UAC-r2.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="docs">projects/field-mapping-server-write-path-r1/notes/task-076-live-check.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Dev BFF ProductVersion includes the W7 commits; PCF, code page and web resource versions recorded.</criterion>
+    <criterion testable="true">Owner check: the Family tool on Matter, Project, Work Assignment and Event forms and the Push Updates button show the family with the five columns.</criterion>
+    <criterion testable="true">Narrow-user check: an unreadable branch is absent with no hint.</criterion>
+    <criterion testable="true">App Insights: 0 5xx on the family route; p95 recorded.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Family live check">
+      <steps><step>Open each of the four forms; open the Family tool; click Push Updates on a Matter</step><step>Check the console</step></steps>
+      <expected>Family shown; no console errors</expected>
+    </test>
+  </ui-tests>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

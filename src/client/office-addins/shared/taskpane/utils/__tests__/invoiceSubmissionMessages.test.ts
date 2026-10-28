@@ -45,6 +45,8 @@ const PINNED_REFUSAL_CODES = [
   'OFFICE_022',
   'OFFICE_012',
   'OFFICE_INTERNAL',
+  'ebilling.submission.attachment_not_preserved', // added 2026-10-28 at cc7bb5eeee (422)
+  'OFFICE_AUTH_ERROR', // added 2026-10-28 at cc7bb5eeee (500, the access probe faulted)
   // §2 firm fields
   'ebilling.submission.firm_invalid',
   'ebilling.submission.firm_not_linked',
@@ -80,12 +82,21 @@ const PINNED_OUTCOME_CODES = [
   'ebilling.submission.file_unservable',
   'ebilling.submission.source_check_failed',
   'ebilling.submission.processing_failed',
+  'ebilling.submission.file_scan_timeout', // added to the contract at f1ae28290e (task 092; Failed, re-attempt allowed)
   'ebilling.submission.blocked',
   'ebilling.submission.returned',
 ];
 
 const refusal = (code: string, extra: Record<string, string> = {}) =>
   describeSubmissionRefusal({ kind: 'refused', status: 400, code, ...extra });
+
+describe('invoice submission messages — document_already_submitted (EB-D-165)', () => {
+  it('is neutral: the earlier submission may be by the caller or by another user', () => {
+    const message = refusal('ebilling.submission.document_already_submitted');
+    expect(message).not.toMatch(/different details/i);
+    expect(message).toMatch(/already submitted/i);
+  });
+});
 
 describe('invoice submission messages — every pinned code is mapped', () => {
   it.each(PINNED_REFUSAL_CODES)('%s has its own sentence', code => {
@@ -175,6 +186,8 @@ describe('invoice submission messages — specifics', () => {
     expect(isRetryableSubmissionRefusal(503, 'ebilling.submission.email_unavailable')).toBe(true);
     expect(isRetryableSubmissionRefusal(429, 'OFFICE_015')).toBe(true);
     expect(isRetryableSubmissionRefusal(403, 'sdap.access.error.system_failure')).toBe(true);
+    expect(isRetryableSubmissionRefusal(500, 'OFFICE_AUTH_ERROR')).toBe(true);
+    expect(isRetryableSubmissionRefusal(422, 'ebilling.submission.attachment_not_preserved')).toBe(false);
     expect(isRetryableSubmissionRefusal(409, 'OFFICE_IDEMPOTENCY_CONFLICT')).toBe(true);
     expect(isRetryableSubmissionRefusal(503, 'ebilling.disabled')).toBe(false);
     expect(isRetryableSubmissionRefusal(409, 'ebilling.submission.submission_already_ended')).toBe(false);

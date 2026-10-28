@@ -256,3 +256,175 @@ UAC-r2 PR #2253 (#2251) adds an explicit write identity to `InheritedAccessPermi
 - Create-time mapping therefore also drops the sets #2253 adds: access tables, secure-root columns, and access-deciding columns on contact, organisation, systemuser and business unit. That matches #2220's create-side refusal.
 - The `sprk_document` + `sprk_accesspermission` create exemption stays.
 - Whichever of #2253 and 018b merges second adds the parameter, plus a must-fire test: an access-deciding contact column is dropped at create.
+
+## 2026-10-22 — Owner decisions for 017 (2a–2c); dev mapping config created
+
+**2a. FR-06 step 10: option (a).** The service derives the filing stamp (I-1, plus I-16 for To Do, Event and
+Communication) into the payload BEFORE the create and refuses when the derivation fails, then re-derives after the
+create. Documents stay post-create (#2169). This unblocks re-pointing the five pre-create stamp writers (Office To Do,
+Workspace To Do, `TaskActionCore`, `CommunicationService`, `DecisionRecordWriter`) onto the service.
+
+**2b. #1608: option (a).** The service refuses a caller-supplied server-owned column (`sprk_containerid`,
+`sprk_securitybu`, `sprk_accesspermission`, and the table's other protected columns) on every path, chat included.
+The same set applies to projects and matters. Closes #1608 when 017 lands.
+
+**2c. Matter/project number from chat: option (a).** A payload naming `sprk_matternumber` / `sprk_projectnumber` is
+refused (403 `record_creation.blocked_column`), and the chat tool description stops offering the field in the same
+change.
+- Owner note: the Dataverse autonumber is a quick interim fix; a numbering-service component may replace it.
+- That does not change the decision. The rule is "the number is owned server-side, never supplied by the caller",
+  whoever generates it. If the numbering service later accepts a user-chosen number (for example a client-matter
+  number), that becomes an explicit, validated input of the numbering service, not a free column in the create
+  payload.
+
+**2d. SystemPrincipal: still open.** Examples sent to the owner. Finding while preparing them: the refusal applies
+only to a system create of a project or work assignment filed under a record (step 6), or of a table with pre-write
+rules (step 5½; none on master yet). None of the FR-21 system creators creates a project or work assignment, so
+today's refusal blocks no real path. Revised recommendation: keep refusing (option c) and decide the narrower option
+when the first system creator of a project or work assignment is designed (§11: no caller, no cost of doing nothing).
+
+**Dev mapping config (owner-approved 2026-10-22, live write on spaarkedev1).**
+- New profile "Matter to Project (Attorney Matrix)" `69e55b30-92ce-f111-a05d-3833c5e9614d` (Matter → Project record
+  types), with 8 Copy rules: attorney 1/2, paralegal 1/2, law firm 1/2, assigned-to internal/external.
+- 7 Copy rules added to "Matter to Work Assignment (Attorney Matrix)" `7b147316-…`: everything except attorney 1,
+  which already existed.
+- Every rule: source type 1 (Lookup, local set), target type 100000001 (Lookup, global set), Parent to Child, sync
+  mode One-time (as the Event rules; 005 `-Apply` migrates them with the rest), active, execution order 1–8.
+- Lookup targets checked live: people → `contact`, law firms → `sprk_organization`, the same on matter, project
+  and work assignment. Read back: 16 rules active.
+
+**1a finding: the add-in cannot create a Project under a matter.** `SaveFlow.createRelatedRecord` posts only
+name, description, type ids and assignee. It never sends `sourceEntityType` / `sourceRecordId`, and no other client
+calls `/api/office/quickcreate` with a source. So the #2191 filed-under path (and its mapping) is reachable only
+by a direct API call today; it is covered by `SecureRootCreateRouteTests.OfficeFiling` and the Office contract
+tests. The owner smoke covers the plain Office Project only.
+
+## 2026-10-23 — Owner decision 2d: SystemPrincipal stays refused (option c)
+
+A system-principal create of a project or work assignment filed under a record keeps being refused (403
+`record_creation.system_principal_unsupported`, step 6), as task 013 built it.
+- Every person-initiated create (wizards, Office quick-create, chat, forms) is unaffected: it runs as the caller,
+  whose access is checked.
+- `RecordCreationPrincipal.ForSystem` has no caller on master, so today's refusal blocks no real path.
+- Revisit when the first system creator of a project or work assignment is designed (for example email intake that
+  opens a work assignment under a matter). Then choose between "ordinary parents only" (option a) and an app-only
+  AppendTo check on `RequestedBy` (option b; needs ADR-028 approval and must fail closed on a null `RequestedBy`).
+- 017 carries no SystemPrincipal change.
+
+## 2026-10-27 — UAC-r2 recommendations on 4a, 4b/4c, 4d (pending the owner)
+
+Asked at the owner's direction ("consult with uac-r2 directly"). Nothing applied yet. The 4a migration `-Apply` is on hold, at UAC's request.
+
+- **4a — sync mode:** classify rules; do not make every Copy rule re-pushable.
+  - Assigned-To registry targets stay One-time (0), including the 15 added on 2026-10-22. Push runs `AssignedAccessMaterializer.RunAfterWriteAsync` per child, so re-pushing an assignee is a mass access grant and revoke from one click.
+  - Filing, lineage and ownership targets are never re-pushable: that would be a mass re-file.
+  - Plain data columns are re-pushable (1).
+  - `Set-FieldMappingRuleSyncMode.ps1` becomes class-aware and prints the classification in its dry run. The values ship with task 040, in the same PR and deploy, after the owner reviews the dry-run list.
+- **4b/4c — rights on copies:** agrees with the owner for field restrictions and ordinary lookups, with three boundaries:
+  1. A mapped FILING lookup keeps the caller's AppendTo check; the whole create is refused (403). AppendTo is record-level: who may attach into a record's family. Without it, a View Only user could add rows under a record, including a Secure one. The K-2 field-security refusal on filing lookups also stays. If the owner still wants filing to bypass AppendTo, it is a UAC security decision that needs the owner's explicit sign-off in UAC's session.
+  2. Ordinary mapped lookups and values are copied regardless of the caller's AppendTo or target field security (the owner's policy). This reverses #1617's drop. Assigned* columns are safe: the materializer applies Secure, Restricted and Limited policy itself.
+  3. Never copied, whatever the rights: BFF-owned invariant columns (ownerid, sprk_issecure, sprk_accessinheritance, sprk_createdbyperson, sprk_regarding* stamps, sprk_accesspermission, contact identity/binding). Refused when a rule is authored and skipped at copy time. Also never copied: a value from a field-secured SOURCE column into a non-field-secured target (declassification); it is copied only into a field-secured target, otherwise dropped with a warning.
+  - Keep the FR-04 source Read check as the caller.
+- **4d — search index:** Secure isolation does not use the index.
+  - Retrieval is trimmed per caller by `IRetrievalAccessTrim` (fail closed), and Secure files are isolated by their SPE container.
+  - Do not stamp the index from the owning BU at create. Route by kind (files → spaarke-files-index, records → spaarke-records-index) through the tenant default.
+  - The original 4d precedence question goes away.
+  - Data clean-up for the owner: the singular `spaarke-file-index` catalog row, and the BU and document stamps on knowledge-index-v2 / spaarke-file-index.
+
+## 2026-10-27 — Owner decisions on 4b/4c and 4d; dev search-index cleanup done
+
+- **4b/4c: accepted as UAC-r2 recommended.**
+  - A mapped filing lookup keeps the caller's AppendTo check (refused, 403), and the K-2 field-security refusal stays.
+  - Ordinary mapped lookups and values are copied regardless of the caller's AppendTo or target field security. This reverses the #1617 drop and the per-value field-security drop.
+  - Never copied: BFF-owned invariant columns (refused when a rule is authored, skipped at copy time), and a field-secured SOURCE value into a non-field-secured target (dropped with a warning).
+  - The FR-04 source Read check stays, as the caller.
+  - Lands with 017, the create re-point, unless sequenced otherwise.
+- **4d: accepted.**
+  - Do not stamp `sprk_ai_search_index` from the owning BU at create. Route by kind through the tenant default (files → `spaarke-files-index`, records → `spaarke-records-index`). Secure isolation does not depend on the index.
+  - The 015 step-8 BU stamp is removed in code; tracked for 017.
+- **Dev cleanup (owner-approved 2026-10-27), done and verified:**
+  - Two catalog rows point at Azure indexes that do not exist on `spaarke-search-dev`, and both rows were already Inactive:
+    - `spaarke-file-index` (dd04e55f, "Development Files 2");
+    - `spaarke-knowledge-index-v2` (c104e55f, "Development Files 1").
+  - Set `sprk_ai_search_index` to null on every record that pointed at them: BUs "Spaarke" and "Spaarke Demo", 28 matters, 8 projects, 8 work assignments, 16 events, 4 invoices and 77 documents (143 rows). The re-query shows 0 left.
+  - A null value falls back to the tenant default (`SearchIndexResolver` and `SearchIndexNameResolver`).
+  - Left as is: "Spaarke Business Unit 1" points at the canonical `spaarke-files-index` row (fdcc183b, default), which is harmless. The catalog rows were not deleted; they stay Inactive.
+  - Not verified: whether those 77 documents are present in `spaarke-files-index`, because there is no data-plane read on the search service. They may need re-indexing.
+
+## 2026-10-27 — 4a: opt-in Assigned-To re-push on "Push Updates" (owner proposal; UAC-r2 design; pending owner OK of the design)
+
+Owner proposal: an ordinary push leaves Assigned-To rules One-time. A checkbox in the Matter/Project "Push Updates" ribbon dialog, "Update all related 'Assigned To' contacts", also re-pushes them. UAC-r2 accepts this from the access side, with this shape:
+
+1. `/push` gains `includeAssignedTo`, false when absent. Filing columns are never pushed; invariant columns are never copied.
+2. **Preview first.** `/push` with `preview: true` runs the same enumeration and rights checks with no writes. It returns, per child whose Assigned value would change: name, column, from → to, and the Secure (suggestion only) or Restricted (no contact grant) flag. It also counts the children skipped because the caller lacks Write. The dialog shows the list and this line: "Replaces the assignee on these N records. Their automatic access moves to the new assignee; access staff set by hand is kept."
+3. **Gate:** Write on the SOURCE record when `includeAssignedTo` is true, asked through the equalised gate probe. Per child, the caller's own impersonated Write applies, as today. There is no Share/Assign or role gate.
+4. **Hand-changed assignees:** the person unticks them in the preview, and the confirmed push takes an explicit child-id list. The server re-checks each id: it must be a child of the source under the rule's relationship, and writable by the caller. Any other id is refused per id. A child already equal to the parent is not listed.
+
+Unchanged: `SecureRootFilingGate` per child; `AssignedAccessMaterializer.RunAfterWriteAsync` after each child write.
+
+Expected tests:
+- preview writes nothing;
+- absent flag → Assigned columns untouched;
+- Read-only source + flag → 403;
+- an unticked child keeps its value and grants;
+- a foreign id is refused;
+- a Secure child gets a suggestion, not a grant.
+
+Placement: task 040 (push on the canonical engine). The dialog replaces `openConfirmDialog` in `sprk_fieldmapping_push.js` with a small custom dialog (MODAL-DECISION-CRITERIA). It is new surface on an existing endpoint, so the §11 three questions are answered at task-create time.
+
+Sync-mode migration (UAC-r2 4a): class-aware. Assigned-To targets stay 0; filing targets are never re-pushable; plain data → 1. The values ship with 040 after the owner reviews the dry-run list.
+
+## 2026-10-27 — New scope: record family service + TrackingFieldTrio "Family" tool (W7, in this project)
+
+- **Owner decision:**
+  - Build a shared, read-only "record family" service.
+  - Add a Family tool to the TrackingFieldTrio PCF on the Matter, Project, Work Assignment and Event forms. (The WA main form already hosts the PCF: `sprk_WorkAssignment/FormXml/main/{7e578eef-…}.xml`.)
+  - The tool opens a modal listing the family, with an action toolbar. The first actions are "Push field updates" and "Update Assigned To", using UAC's /push preview → confirmed id list. More actions later.
+- **Procedure:**
+  1. design.md addendum, including Placement Justification, §11, hot-path and ADR tensions;
+  2. UAC-r2 review (canonical family definition and access) and ontology review (hierarchy and terminology);
+  3. spec amendment (new FRs);
+  4. `task-create` for the new tasks;
+  5. TASK-INDEX.
+- **Canonical family definition:** the owner says alignment with UAC-r2 is "very important". Asked on 2026-10-27 (definition, canonical registry and owner, read identity, hidden-member counts, limits).
+  - Today there is no single family service: about 8 separate enumerations with their own registries (see the code-map summary in the UAC message).
+- **5c:** see the task-006 notes (name maps deleted; the system map can't be deleted; handed to UAC).
+- **77 documents:** no re-index (owner).
+
+## 2026-10-27 — UAC-r2: canonical record family (binding input for the W7 design; UAC reviews the addendum before task-create)
+
+1. **Definition.** A family is a tree joined ONLY by FILING edges:
+   - core → core: projects and WAs under a matter or project (`SecureRootInheritance.TypedFilingColumns` / `IntermediateFilingColumns` / record-type pair; depth 4);
+   - core → child: the four regarding stamps (`sprk_regardingmatter` / `project` / `workassignment` / `servicerequest`) plus each child table's direct filing lookups (documents, communications and threads, events, to-dos, memos, invoices, analyses, agreements, budgets, report cards);
+   - child → grandchild: the `SecureChildLineage` hops (file version → document, to-do → regarding document, communication attachment / participant → communication, budget bucket → budget, the invoice family → invoice; `MaxLineageDepth` 4).
+   - Direction: down from the record, plus up to its root. Siblings come only through the shared parent.
+   - NOT family: citations (signal / decision → policy); people and organization lookups (assigned*, attorneys, law firm, contacts); N:N associations; grant rows (`sprk_externalrecordaccess`); system rows.
+   - Policy → version is included only if a policy can be filed under a core record.
+   - A service request is a core record with its own family, NOT in the Secure family (task 194 adds its stamp to the ordinary walk only).
+2. **Registry.**
+   - ONE declared EDGE registry: (child table, lookup column, parent table, edge kind filing-core | stamp | lineage-hop, depth role, attributes such as InSecureFamily). It lives in `Services/Dataverse`, next to `CoreAncestorResolver`, as DATA.
+   - The existing registries become checked views: a parity test with a ratchet baseline.
+   - Seed it from `SecureChildLineage`, `TypedFilingColumns` / `IntermediateFilingColumns` / pair and `StampSourceColumns`. Do NOT start from scratch.
+   - Seed only AFTER UAC task 194 merges (it changes `SecureChildLineage`: budget bucket, the ordinary service-request edge). UAC will send its head.
+   - UAC owns the CONTENT. Any change needs a UAC review line, enforced by a source-scan / ArchTest note on the file.
+   - Migrating UAC's walks onto the registry is UAC's call, not this project's.
+3. **Read identity.**
+   - The walk runs as the CALLER (OBO), level by level, batched per level (no N+1).
+   - Never traverse through an unreadable record. Never count or hint at hidden members.
+   - The root read probe uses the equalised gate call.
+   - Actions re-derive the family as the caller at execution and intersect the confirmed ids; the client tree is never trusted.
+   - No app-only walk plus trim.
+4. **Limits.**
+   - Depth 4. A size cap per view (500) and per level.
+   - Past the cap: `truncated=true` plus per-table counts of what IS shown, and load more per level. Never truncate silently.
+   - Actions take only the confirmed ids.
+   - No cross-caller cache. Any per-caller cache lasts minutes at most and is evicted by the access-cache invalidators.
+5. **Never:**
+   - return an unreadable member, or its count, name or id;
+   - be an authorization input (the family list is display only);
+   - write (actions go through their own endpoints, which re-authorize per record);
+   - expose access metadata (grants, No Access, sharees, the Secure owner team);
+   - serve external users (the SPA uses `AccessibleRecordSetService`).
+
+   Anything access-changing (bulk share/grant, Monitor if it shares) needs UAC review before it is built. "Email family members" takes recipients only from the people lookups on readable members, respects field security, and uses the existing communication send path.
+- **5c follow-up:** UAC filed #2343. Recommendation: retire the `sprk_securitybu` mechanism (remove `HasLegacyPerProjectBusinessUnit` and its 409, then delete the column). Interim: hide the BU-form navigation. UAC takes the schema delete to the owner.

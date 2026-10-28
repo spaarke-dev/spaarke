@@ -1,7 +1,9 @@
 /**
  * invoiceSubmissionService.ts — the add-in's client for ebilling's from-email invoice submission (task 133 A1).
  *
- * Contract: `projects/ebilling-r1/notes/095-from-email-contract.md`, agreed 2026-10-27 at 717cf238d9, current at fd70b8e1f6 (work/ebilling-r1):
+ * Contract: `projects/ebilling-r1/notes/095-from-email-contract.md`, agreed 2026-10-27 at 717cf238d9, current at fd70b8e1f6 (work/ebilling-r1); the 2026-10-28 review round
+ * (cc7bb5eeee, task/ebill-095-from-email: key v2 without the firm fields, 422 `attachment_not_preserved`, 500
+ * `OFFICE_AUTH_ERROR`, the firms route's 404, `poNumber` at most 100 characters) agreed by word-add-in-r1:
  * - §2 `POST /api/finance/invoice-submissions/from-email` — {@link submitInvoiceFromEmail};
  * - §3 `GET statusUrl` until the status is final — {@link pollSubmission};
  * - §8 `GET /api/finance/core-records/{entityType}/{entityId}/firms` — {@link loadInvoiceFirms};
@@ -27,6 +29,7 @@ import {
   EMAIL_UNIDENTIFIABLE_CODE,
   HELD_FOR_REVIEW_MESSAGE,
   isRetryableSubmissionRefusal,
+  PERMANENT_SUBMISSION_CODES,
   type InvoiceMessageContext,
 } from '../utils/invoiceSubmissionMessages';
 import {
@@ -534,6 +537,10 @@ export async function loadInvoiceFirms(
     if (response.status === 503) {
       throw new Error("Spaarke couldn't list the firms for this record right now. Try again in a moment.");
     }
+    if (response.status === 404) {
+      // §8 (2026-10-28): the uniform read gate — no Read on the record, not found, or a refused or faulted rights read.
+      throw new Error("This record isn't available to you: it may not exist, or you can't open it.");
+    }
     throw new Error((await describeFetchFailure(response)).message);
   }
   const json: unknown = await response.json().catch(() => null);
@@ -580,7 +587,7 @@ export function createInvoiceSubmitHandler(deps: {
     }
     if (result.kind === 'refused') {
       const message = describeSubmissionRefusal(result, ctx);
-      return result.code === EMAIL_UNIDENTIFIABLE_CODE
+      return result.code !== undefined && PERMANENT_SUBMISSION_CODES.has(result.code)
         ? { kind: 'permanent', message, ...skipped }
         : { kind: 'refused', message, ...skipped };
     }
