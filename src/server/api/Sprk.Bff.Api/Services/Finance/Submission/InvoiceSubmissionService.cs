@@ -878,9 +878,9 @@ public class InvoiceSubmissionService
     internal virtual async Task<IReadOnlyList<(string Column, InvoiceCoreRecordKind Kind, Guid Id)>> ResolveCommunicationFilingAsync(
         Guid communicationId, CancellationToken ct)
     {
-        // An in-memory probe, never written (no logical name: the walk reads only its columns; uac-r2 task 146's create census counts
-        // named constructions).
-        var linkedOnly = new Entity { [DocumentRelatedCommunication] = new EntityReference(CommunicationEntity, communicationId) };
+        // An in-memory probe of a document, never written: the walk reads only its columns. Task 146's create census lists it as a
+        // Permanent waiver (095 review K2), rather than hiding it from the census by leaving out its logical name.
+        var linkedOnly = new Entity(DocumentEntity) { [DocumentRelatedCommunication] = new EntityReference(CommunicationEntity, communicationId) };
         return await ResolveFilingAsync(Guid.Empty, linkedOnly, ct) ?? Array.Empty<(string, InvoiceCoreRecordKind, Guid)>();
     }
 

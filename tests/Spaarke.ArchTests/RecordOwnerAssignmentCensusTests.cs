@@ -269,6 +269,10 @@ public class RecordOwnerAssignmentCensusTests
             "An Office job-tracking row (status and progress), authorized by its sprk_initiatedby creator lookup and "
             + "read app-only; not a child of any root in live metadata.",
             WaiverKind.Permanent),
+        new CensusEntry("InvoiceSubmissionService.cs", "sprk_document", 1, Disposition.Waived,
+            "ebilling-r1 task 095 (review K2): ResolveCommunicationFilingAsync's in-memory probe of a document linked only to the "
+            + "communication, handed to the filing walk, which reads its columns; it is never written, so there is no row to own.",
+            WaiverKind.Permanent),
         // ebilling-r1 (waiver agreed with spaarke-ontology-platform-r1 2026-10-20; PENDING the owner's rule-set scope model review,
         // because matter/project/work-assignment-level billing rules are planned): the billing rule's policy and its versions. The census
         // keys on (file, table), so the one waiver is two entries with one text: sprk_policy (1 site: CreateDraftRuleAsync's policy) and
