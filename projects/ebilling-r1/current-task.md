@@ -1,36 +1,37 @@
 # Current Task State
 
-> **Last Updated**: 2026-10-27 (context checkpoint). The 095 path is urgent (EB-D-158); word-add-in-r1 waits on 095 working end to end on dev.
+> **Last Updated**: 2026-10-28 (checkpoint after reviews of 086/094/095/098). The 095 path is urgent (EB-D-158); word-add-in-r1 waits on 095 working end to end on dev.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Branch** | work/ebilling-r1 (draft PR #1911), tip e1ba2e27d9 + later docs. Gate on e03283c381: broad 9,472 / Arch 1,557; full integration 199/8/0 and 353/23/0 (uac-r2 wants full integration counts in the master PR body; re-run on the final tip). |
-| **In flight (main session)** | **086 live steps on spaarkedev1** (owner pre-approved EB-D-158; notices to uac-r2 + R3 SENT before). Probe DONE: HTTP 403 0x80040299 "...is missing prvReadsprk_StoredFile privilege (Id=ef068f7b-6a82-4c37-bf25-95c0129e0b47) on OTC=11029 for entity 'sprk_storedfile' (LocalizedName='Stored File')", privilegeCount=43, no row. NEXT: quote it into config/secure-record-owner-role.json evidence (replace PENDING-LIVE-PROBE) on task/ebill-086-storedfile-secure-child in worktree C:\code_files\spaarke\.claude\worktrees\agent-a14f0a37a4f5512d5, commit+push; then from that worktree `scripts/Set-SecureRecordOwnerRolePrivileges.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com` (dry, expect 1 add), `-Apply`, `-Verify` (expect 40 tables); then `scripts/Set-ChildRecordCreatorPersonSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c -OntologyWriterApplicationId 69040982-612e-469e-a85f-26d5172367c5` dry, `-Apply`, `-Verify`; notices after to uac-r2 + R3. |
-| **Running agents (4)** | **094** (task/ebill-094-submit-invoice; told: merge 098 now; own 092-review K2 §9.1 undo for all channels and K4 decide by channel not null sprk_document; fill 095's ISubmitInvoiceFromEmail seam). Adversarial reviews: **098** (786d1ea17a..2f50cddec9), **086 pass 1 of 2** (22b803e1a5..6482277b9b + the merge), **095** (work...96681b8825). |
-| **Next actions** | (1) Finish 086 live steps above. (2) 092: word-add-in-r1 OK'd `ebilling.submission.file_scan_timeout` → add it to §9 outcomeReasonCode table (Failed) in notes/095-from-email-contract.md; quick scoped re-check of the fix diff bbf9cd04e8..3add11454c; merge 092 into work + gate; update `.claude/constraints/provisioning.md:269` (retired Finance__EbillingOutputContainerId). (3) Reply word-add-in-r1 with the exact errorCode/reasonCode of 095's no_message_id body-shape 400 (read 095 notes/contract tests). (4) As reviews report: route fixes to their agents, send review requests, merge. 086 needs a 2nd adversarial pass. (5) 089 (built, live done): resume agent when uac sends 194b: merge 194b, answer sprk_policy primary parent, BRR immutability test (ontology), NFR-05 guarded-child must-fire evidence (ontology challenge), POML Q10 Restrict→RemoveLink; then 2 adversarial passes; merge (expect 7 uac-file conflicts — reuse 086's resolution 22b803e1a5). (6) After 086 + 092 merge: launch 123. (7) When uac #2348 lands: add sprk_invoicelineitem to TheInvoiceFamily_FollowsAnOrdinaryMove_ThroughTheInvoice. |
+| **Branch** | work/ebilling-r1 (draft PR #1911). Gate on e03283c381: broad 9,472 / Arch 1,557; full integration 199/8/0 and 353/23/0 (re-run on the final tip for the master PR body). |
+| **Running agents (4)** | **095 fix round** (implementer opus, worktree agent-ac6e3dd4a7414fc48; items A-I: base64 attachments + marked-SHA check + `attachment_not_preserved` 422, same-email resubmission 409, EB-D-165, F1-2 text, null attachment 400, IdempotencyFilter double-invoke, writer guard, census waiver, contract text). **094 fix round** (094 agent resumed, worktree agent-a9d1b5c4b2a19392a; uac F1-a PRIVATE wording "step A decides 'unfiled' from the D-140 chain", F1-b, F1-c + EB-D-166, F2-a, F2-b, K6, K7, undo ordering; seam parked until the 095 fix head). **098 fix round** (implementer opus, worktree agent-a35ba7af6c7970aa3; submission sprk_document as source, read_query cap, interface guard, test, comm-only source). **094 adversarial review** at 5a5ffabfa8 (send its findings to the 094 agent as an addendum). |
+| **Blocked: 086 + 092 merge** | 086 adversarial F1: the ordinary owner (BU default team) lacks prvReadsprk_StoredFile, so Dataverse refuses ordinary Stored File creates (092 persister) and re-owns on Unsecure; same for 089 sprk_procedureassignment. Asked uac-r2 for the design (lean: app owner when ordinary); then owner decision. Then the 086 fix round: that fix + uac F3-1 + K1-K6 from scratchpad fix-briefs-uac-2026-10-28.md + neutral names in 086 notes + deploy-order line + adversarial K2-K6 (deploy gate "carrying 086", 080 verify covers sprk_storedfile, evidence PENDING guard, census lookup order). |
+| **Next actions** | (1) uac-r2 answer on the 086 owner rule → owner question → 086 fix round; merge 092 after. (2) As each fix head lands: send to uac-r2 for re-check; 095 fix head → 094 agent folds 095 + implements the seam; tell word-add-in-r1 the new codes (`attachment_not_preserved`, firm 403). (3) 094 adversarial findings → 094 agent. (4) 089 waits for uac 194b (see 089 row). (5) After 086+092 merge: launch 123. (6) `.claude/constraints/provisioning.md:269` (retired Finance__EbillingOutputContainerId). |
 
 ## Branch status
 | Task | Branch @ SHA | State |
 |---|---|---|
-| 092 | task/ebill-092-submission-files @ 3add11454c | Review done; F1 (scan wait, `file_scan_timeout`) + K6 fixed; K2/K4 → 094; deploy precondition: 091 + 079 FileStore settings live first. Ready to merge after re-check. |
-| 089 | task/ebill-089-assignments @ 8f4920ce0c | Live on dev (role 38/38, probes recorded). Waits for uac 194b. |
-| 086 | task/ebill-086-storedfile-secure-child @ 6482277b9b | Built on 089's tip; live steps in progress; review pass 1 running. |
-| 098 | task/ebill-098-external-marker @ 2f50cddec9 | Review running; uac-r2 must accept `AppOnlyInvoiceFamilyHiding`. |
-| 095 | task/ebill-095-from-email @ 96681b8825 | Review running; 503 until 094 fills the seam; wire unchanged (word-add-in-r1 confirmed). uac-r2 review requested. |
-| 094 | task/ebill-094-submit-invoice | Agent running. |
+| 092 | task/ebill-092-submission-files @ 3add11454c | Reviewed and fixed; merge held on the 086 owner-rule decision (its persister creates ordinary Stored Files). |
+| 089 | task/ebill-089-assignments @ 8f4920ce0c | Live on dev. Waits for uac 194b: merge it, sprk_policy primary parent, BRR immutability test, NFR-05 must-fire evidence, POML Q10 Restrict→RemoveLink; 2 adversarial passes; reuse 086's merge resolution 22b803e1a5. Also affected by the owner-rule blocker. |
+| 086 | task/ebill-086-storedfile-secure-child @ e88825a528 | Live on dev (role 40/40, creator-person PASS). Pass 1 done; blocked (above); needs pass 2 after fixes. |
+| 098 | task/ebill-098-external-marker @ 2f50cddec9 | Fix round running. |
+| 095 | task/ebill-095-from-email @ 96681b8825 | Fix round running; uac accepted with conditions. |
+| 094 | task/ebill-094-submit-invoice @ 5a5ffabfa8 | Fix round running; uac NOT ready (5 fix-now). |
 
 ## Owner decisions 2026-10-27
-**165** OP-5 allow another user's re-attempt after Failed (095 fix pending). **164** malware scanning required on production stamps, may be off on dev/test (sent to customer-provisioning for #2232). EB-D-153..161 (see notes/decisions-log.md); **162** Billing Admin Read Global → Deep (DONE: merged e03283c381, EB-D-150 exception removed per uac-r2, live on dev, -Verify PASS); **163** retire Procedure Library SPE container → new task 124 (after 116, 092); customer-provisioning told (they built nothing; #2232 is their only eBilling item, waits for #1911 on master; they have the Finance__FileStore__* settings).
+**166** a document an invoice was submitted from cannot be deleted. **165** OP-5 allow another user's re-attempt after Failed (095 fix pending). **164** malware scanning required on production stamps, may be off on dev/test (sent to customer-provisioning for #2232). EB-D-153..161 (see notes/decisions-log.md); **162** Billing Admin Read Global → Deep (DONE: merged e03283c381, EB-D-150 exception removed per uac-r2, live on dev, -Verify PASS); **163** retire Procedure Library SPE container → new task 124 (after 116, 092); customer-provisioning told (they built nothing; #2232 is their only eBilling item, waits for #1911 on master; they have the Finance__FileStore__* settings).
 
 ## Open owner questions
 - Explicit re-check button (R2) into R1?
+- Pending uac-r2 ruling → owner: ordinary owner of hard-deny tables (Stored File, Procedure Assignment); uac lean (a) app owner as a declared resolver rule. uac also answering: flagged-external direct Read on sprk_invoice, read_query document-side cap (188), SemanticSearch InvoiceName / IRetrievalAccessTrim (098 K2).
 
 ## Peer state
 - **uac-r2:** reviews owed: 086, 089 (on 194b head), 094, 095, 098, 117, 123, 091 items. Will send 194b head.
 - **ontology-r1:** agreed 089 items 1-3 (BRR immutable — needs a test), no objection to EB-D-162.
-- **word-add-in-r1:** OK'd file_scan_timeout (wants it in contract §9); always sends X-Idempotency-Key; #2359 merged (inert until manifest redeploy); release waits for end-to-end on dev.
+- **word-add-in-r1:** file_scan_timeout in contract and their PR; neutral 409 sentence in #2365 (no reason field); EB-D-165 needs nothing from them; tell them `attachment_not_preserved` + firm 403 when 095 fix lands; always sends X-Idempotency-Key; #2359 merged (inert until manifest redeploy); release waits for end-to-end on dev.
 - **R3:** #2360 merged (078f62bcad); dev stays on de38296499 until contact security schema applied; no master-built BFF to dev before that.
 
 ## Standing rules (see project CLAUDE.md)
