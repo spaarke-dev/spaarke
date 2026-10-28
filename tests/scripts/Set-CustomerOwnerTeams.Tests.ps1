@@ -1,4 +1,5 @@
-# Pester 5. Run: Invoke-Pester tests/scripts/Set-CustomerOwnerTeams.Tests.ps1
+# Pester 5 or 6. Run: Invoke-Pester tests/scripts/Set-CustomerOwnerTeams.Tests.ps1
+# CI: .github/workflows/ci-standalone-checks.yml, job owner-teams-script-tests (ubuntu-latest).
 # unified-access-control-r2 task 194b R4b-4: scripts/Set-CustomerOwnerTeams.ps1 over a mocked Dataverse (read-only: every
 # write is a test failure). Pins B-F1 (no business unit named -SecureBusinessUnitName refuses: Secure Record is never
 # accepted as a customer unit) and B-K4 (a dry run whose drift is an owner decision exits non-zero with the summary).
@@ -7,6 +8,8 @@ BeforeAll {
     $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..' '..')).Path
     $script:Script = Join-Path $script:RepoRoot 'scripts' 'Set-CustomerOwnerTeams.ps1'
     $script:Url = 'https://example.crm.dynamics.com'
+    # Mock needs the command to exist; a runner without the az CLI gets a stub (the mock replaces it in every test).
+    if (-not (Get-Command az -ErrorAction SilentlyContinue)) { function global:az { throw 'Test: az is never called unmocked.' } }
     $global:SetCustomerOwnerTeamsTest_RootId = '00000000-0000-4000-8000-000000000001'
     $global:SetCustomerOwnerTeamsTest_SecureId = '00000000-0000-4000-8000-000000000002'
     $global:SetCustomerOwnerTeamsTest_CustomerId = '00000000-0000-4000-8000-000000000003'
