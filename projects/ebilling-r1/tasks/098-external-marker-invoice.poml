@@ -4,7 +4,7 @@
     <title>(a′) on sprk_invoice: hide invoices with an isolated Submit Invoice source, and derived rows, from external callers</title>
     <phase>3 Rules (WP3) — Procedures and files (EB-D-148), wave W3-C</phase>
     <gate>088 merged (sprk_storedfile.sprk_sourcedocument, sprk_document.sprk_restrictedbysubmission); uac-r2 task 188 merged to master and into this branch (ExternalDocumentNarrowing, AppOnlyDocumentNarrowingExtensions.HiddenDocumentIdsAsync, ExternalDocumentNarrowingGuardTests); 090 merged for the file-route part; uac-r2 reviews before merge</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tenant-isolation predicate on every external surface that returns invoices or rows derived from them; fails closed; touches shared external-access and AI tool code.</rigor-reason>
     <model-tier>opus</model-tier>
