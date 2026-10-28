@@ -306,7 +306,7 @@ public static class InviteExternalUserEndpoint
     /// sign-in. A contact bound on a workforce plane is already refused by the invite decision itself. <c>null</c> when the
     /// resolution may receive a work-account invite.
     /// </summary>
-    internal static ProvisionOutcome? WorkAccountNotProvisionable(InviteContactResolution resolution, string email, ILogger logger)
+    internal static ProvisionOutcome? WorkAccountNotProvisionable(InviteContactResolution resolution, ILogger logger)
     {
         // A contact carrying the removed marker never reaches here: the invite decision refused it
         // (ContactBindingDecision.InviteContactRemovedAdminReinstate, through NotProvisionable).
@@ -468,7 +468,7 @@ public static class InviteExternalUserEndpoint
     /// provision (or to create). The ONE mapping, used by <see cref="ProvisionAsync"/> and by <c>/invite-and-grant</c>'s
     /// pre-onboarding check, so both answer a refusal and a lookup failure with the same code and message.
     /// </summary>
-    internal static ProvisionOutcome? NotProvisionable(InviteContactResolution resolution, string email, ILogger logger)
+    internal static ProvisionOutcome? NotProvisionable(InviteContactResolution resolution, ILogger logger)
     {
         switch (resolution.Action)
         {

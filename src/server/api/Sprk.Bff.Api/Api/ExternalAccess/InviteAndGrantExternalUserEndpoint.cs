@@ -262,7 +262,7 @@ public static class InviteAndGrantExternalUserEndpoint
                 extensions: new Dictionary<string, object?> { ["traceId"] = httpContext.TraceIdentifier });
         }
 
-        if (InviteExternalUserEndpoint.NotProvisionable(invitee, request.Email, logger) is { } notProvisionable)
+        if (InviteExternalUserEndpoint.NotProvisionable(invitee, logger) is { } notProvisionable)
         {
             return notProvisionable.Refusal is { } inviteRefusal
                 ? InviteExternalUserEndpoint.RefusalResult(inviteRefusal, httpContext)
@@ -271,7 +271,7 @@ public static class InviteAndGrantExternalUserEndpoint
 
         // Slice B2: a work-account invite to a contact that already carries a sign-in is refused before any grant.
         if (workAccountTenantId is not null
-            && InviteExternalUserEndpoint.WorkAccountNotProvisionable(invitee, request.Email, logger) is { Refusal: { } bound })
+            && InviteExternalUserEndpoint.WorkAccountNotProvisionable(invitee, logger) is { Refusal: { } bound })
         {
             return InviteExternalUserEndpoint.RefusalResult(bound, httpContext);
         }

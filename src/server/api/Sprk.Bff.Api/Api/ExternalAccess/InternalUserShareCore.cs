@@ -34,7 +34,8 @@ internal static class InternalUserShareCore
 {
     /// <summary>
     /// Shares <paramref name="request"/>'s record with its system user. <see cref="InternalUserShareResult.Result"/> is the
-    /// <c>/share-user</c> answer; <see cref="InternalUserShareResult.Shared"/> is set only with the confirmed 200.
+    /// <c>/share-user</c> answer; <see cref="InternalUserShareResult.Shared"/> is set whenever the record's share is confirmed:
+    /// with the 200, and with the related-records-pending 500 (<see cref="InternalUserShareResult.ChildrenIncomplete"/>).
     /// </summary>
     internal static async Task<InternalUserShareResult> ShareAsync(
         ShareRecordWithUserRequest request,

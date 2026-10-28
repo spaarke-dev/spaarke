@@ -265,7 +265,9 @@ public sealed class ContactInternalUserShare
 }
 
 /// <summary>What <see cref="ContactInternalUserShare.DecideAsync"/> decided.</summary>
-/// <param name="Result">The refusal to answer with (nothing written); <c>null</c> for the grant path or a confirmed share.</param>
+/// <param name="Result">The answer to return as is: a refusal (nothing written), or the share core's related-records-pending
+/// 500 (the record's share WAS written; its problem details name <c>sharedWithUser</c>). <c>null</c> for the grant path or a
+/// confirmed share.</param>
 /// <param name="Shared">The internal user the record was confirmed shared with; <c>null</c> otherwise.</param>
 /// <param name="ShareResponse">The share core's confirmed answer, with <paramref name="Shared"/>.</param>
 internal sealed record ContactShareDecision(IResult? Result, SharedWithUser? Shared, ShareRecordWithUserResponse? ShareResponse)

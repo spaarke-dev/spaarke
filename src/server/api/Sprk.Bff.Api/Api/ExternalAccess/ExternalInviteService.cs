@@ -533,13 +533,13 @@ public sealed class ExternalInviteService
 
         resolution ??= await binder.ResolveInviteContactAsync(request.Email, ct);
 
-        if (NotProvisionable(resolution, request.Email, logger) is { } stopped)
+        if (NotProvisionable(resolution, logger) is { } stopped)
         {
             return stopped;
         }
 
         if (workAccountTenantId is not null
-            && InviteExternalUserEndpoint.WorkAccountNotProvisionable(resolution, request.Email, logger) is { } bound)
+            && InviteExternalUserEndpoint.WorkAccountNotProvisionable(resolution, logger) is { } bound)
         {
             return bound;
         }
@@ -563,7 +563,7 @@ public sealed class ExternalInviteService
                     // (/invite-and-grant's pre-check, a grant's invite, an assignment's invite), as the guarded create does.
                     if (await binder.InviteRemovedSameEmailRefusalAsync(request.Email, ct).ConfigureAwait(false) is { } removed)
                     {
-                        return NotProvisionable(removed, request.Email, logger)
+                        return NotProvisionable(removed, logger)
                                ?? throw new InvalidOperationException("A removed-email invite refusal must not provision.");
                     }
 
@@ -592,7 +592,7 @@ public sealed class ExternalInviteService
                             dataverseClient, request.Email, request.FirstName, request.LastName, owner.TeamId, ct);
                         if (refused is not null)
                         {
-                            return NotProvisionable(refused, request.Email, logger)
+                            return NotProvisionable(refused, logger)
                                    ?? throw new InvalidOperationException("A guarded invite create refusal must not provision.");
                         }
 
@@ -658,10 +658,10 @@ public sealed class ExternalInviteService
         // Anything else falls to the marker-not-written 503 below.
         if (mark.Reread is { } reread)
         {
-            if (NotProvisionable(reread, request.Email, logger) is { } refused)
+            if (NotProvisionable(reread, logger) is { } refused)
                 return refused;
             if (workAccountTenantId is not null
-                && InviteExternalUserEndpoint.WorkAccountNotProvisionable(reread, request.Email, logger) is { } boundSince)
+                && InviteExternalUserEndpoint.WorkAccountNotProvisionable(reread, logger) is { } boundSince)
                 return boundSince;
             if (reread.Action == InviteContactAction.AlreadyProvisioned)
                 return new ProvisionOutcome(contactId, AlreadyProvisionedStatus);
@@ -773,7 +773,7 @@ public sealed class ExternalInviteService
                 // C5: an administrator removed the person while the invite was in progress. Nothing is bound and no email is
                 // sent; the invite this call wrote is retracted and the invite is answered as the removed refusal.
                 await RetractUnsentInviteAsync(binder, contactId, mark.WrittenEmailHash, logger).ConfigureAwait(false);
-                return NotProvisionable(removed, request.Email, logger)
+                return NotProvisionable(removed, logger)
                        ?? throw new InvalidOperationException("A removed-contact refusal must not provision.");
             }
 
