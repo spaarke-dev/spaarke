@@ -2074,3 +2074,12 @@ Confirmed reading:
 3. Round 131's memberless restricted-content owner team moves from the root to the customer's BU.
 4. Customer-configured reference data (event types, matter types, ...) is owned in the customer's BU. Core User's Deep Read then covers every user in that unit or below it.
    - #2401 needs no role change. On dev the gap comes only from the layout: several sibling test BUs, with the reference rows in "Spaarke Business Unit 1".
+
+## Round 137 (2026-10-28): seeded customer rules; root-homed authors
+1. **Ontology's seeded rules** (Do-lane policies, POL-MATTER-NOBUDGET; created by an operator script):
+   - Production, and so the provisioning path: the seed script owns them to the restricted-content team in the customer's top BU (R4b-2c).
+   - Dev: no change. The rows stay owned in the root. The behaviour only has to be known and built for customers.
+   - Ontology owns the script task.
+2. **Admin-tab authoring:** **author wins.** A policy stays owned by its author wherever the author is homed, the root included. No change to `SavePolicyAsync`; this is an accepted exception to round 136.
+
+Related review (field-mapping #2399): Core User Global Read + AppendTo on `sprk_aisearchindex` was NOT recommended under round 136. Recommended instead: own the index rows in the customer BU, with no role change (optional: the server applies the BU's index). The owner decides through field-mapping. UAC owns test zz-046 (`WorkAssignmentCreateLiveTests.cs:119`), whose premise is stale.
