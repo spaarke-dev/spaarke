@@ -10,7 +10,8 @@ namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 /// </summary>
 /// <remarks>
 /// <para><b>The rule (O-32).</b> An invoice is hidden when, for ANY of its Submit Invoice sources S (every non-null
-/// <c>sprk_storedfile.sprk_sourcedocument</c> on its Stored Files):
+/// <c>sprk_storedfile.sprk_sourcedocument</c> on its Stored Files, and every non-null <c>sprk_invoicesubmission.sprk_document</c>
+/// on its submissions, where the confirm route records its source; review round 1):
 /// D7 rule 2, S's own Access Permission is Restricted, EXCEPT when S is an .eml carrying the submission marker
 /// (<see cref="ExternalDocumentNarrowing.SubmissionMarkerField"/>); rule 3, a Restricted ancestor on S's parent chain; rule 4,
 /// the 065 communication rule on S or its chain; or ANY root S is filed under (its six root links and the live roots of its
@@ -21,14 +22,15 @@ namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 /// <see cref="ExternalDataService"/>, the only app-only seam allowed to call the core decision); the roots term is
 /// <see cref="ExternalMultiRootRule.ReadLiveParentsAsync"/> + <see cref="ChildRowRoots"/> over the document row and
 /// <c>ExternalParticipationService.GetEffectiveRootRecordFlagsAsync</c>.</para>
-/// <para><b>Fail closed.</b> A Stored File page that may be cut short, a source link that is not a GUID, a source that does
+/// <para><b>Fail closed.</b> A Stored File or submission page that may be cut short, a source link that is not a GUID, a
+/// Stored File with a source communication or attachment identity but no source document, a source that does
 /// not come back, an unreadable own value, marker, chain or communication, a root that cannot be resolved and a flag that
 /// cannot be read each hide the invoice. A failed read THROWS; the caller-aware seam
 /// (<see cref="ExternalDataService.HideInvoicesForAsync"/>) turns that into "every asked invoice hidden".</para>
 /// <para><b>Taint closure.</b> <see cref="HiddenFamilyRowsAsync"/> maps a row of the invoice family (lines, submissions,
 /// approvals, external identifiers, corrections, Decision Records, Signals, Stored Files) to its invoice, directly or through
 /// its invoice line, read app-only, and hides it with its invoice.</para>
-/// <para><b>Cost.</b> One Stored File read per 50 invoices; one source read per 50 sources; the 188 decision (one read per hop
+/// <para><b>Cost.</b> One Stored File read and one submission read per 50 invoices; one source read per 50 sources; the 188 decision (one read per hop
 /// level, at most three, plus the communication and thread reads); one live-parent walk; one effective-flag read per root type
 /// (at most three). Logs carry counts only (ADR-015).</para>
 /// <para><b>Component Justification (CLAUDE.md §11):</b> (1) Existing — <see cref="ExternalDocumentNarrowing"/> decides
@@ -115,49 +117,14 @@ internal static class ExternalInvoiceVisibility
         if (asked.Count == 0)
             return new InvoiceVisibilityResult(asked, hidden, faulted: false, cost);
 
-        // (1) The sources: every non-null source document on each invoice's Stored Files, one read per chunk.
+        // (1) The sources: every non-null source document on each invoice's Stored Files AND on its submissions (the confirm
+        //     route, InvoiceSubmissionService.SubmitExistingDocumentAsync, records its source only on
+        //     sprk_invoicesubmission.sprk_document), one read per chunk each. Both reads fail closed the same way.
         var sourcesOf = new Dictionary<Guid, List<Guid>>();
-        var chunks = await CommunicationOpenThreadGate.ReadChunksAsync(asked, (chunk, c) => readers.Query(StoredFileSet,
-            $"$select={StoredFileIdField},{StoredFileInvoiceValue},{StoredFileSourceValue}" +
-            $"&$filter=({string.Join(" or ", chunk.Select(id => $"{StoredFileInvoiceValue} eq {id:D}"))})" +
-            $" and {StoredFileSourceValue} ne null&$top={MaxSourceFilesPerChunk + 1}", c), ct).ConfigureAwait(false);
-        foreach (var (chunk, rows) in chunks)
-        {
-            cost.StoredFileReads++;
-            var inChunk = chunk.ToHashSet();
-            if (rows.Count > MaxSourceFilesPerChunk)
-            {
-                foreach (var id in chunk)
-                    hidden.TryAdd(id, InvoiceHiddenReason.SourcesTruncated);
-                continue;
-            }
-
-            foreach (var row in rows)
-            {
-                var invoice = LinkOf(row, StoredFileInvoiceValue);
-                if (invoice is not { } invoiceId || !inChunk.Contains(invoiceId))
-                {
-                    // An answer the filter cannot have produced: which invoice it belongs to is unknown, so none is decided.
-                    foreach (var id in chunk)
-                        hidden.TryAdd(id, InvoiceHiddenReason.SourceLinkUnreadable);
-                    break;
-                }
-
-                switch (LinkOf(row, StoredFileSourceValue))
-                {
-                    case null:
-                        break; // not a source (the filter asks for none)
-                    case var source when source == ExternalDocumentNarrowing.UnreadableLink:
-                        hidden.TryAdd(invoiceId, InvoiceHiddenReason.SourceLinkUnreadable);
-                        break;
-                    case { } source:
-                        if (!sourcesOf.TryGetValue(invoiceId, out var list))
-                            sourcesOf[invoiceId] = list = new List<Guid>();
-                        list.Add(source);
-                        break;
-                }
-            }
-        }
+        await CollectSourcesAsync(StoredFileSources, asked, readers.Query, sourcesOf, hidden, () => cost.StoredFileReads++, ct)
+            .ConfigureAwait(false);
+        await CollectSourcesAsync(SubmissionSources, asked, readers.Query, sourcesOf, hidden, () => cost.SubmissionReads++, ct)
+            .ConfigureAwait(false);
 
         var pending = sourcesOf.Where(kv => !hidden.ContainsKey(kv.Key)).ToList();
         var sourceIds = pending.SelectMany(kv => kv.Value).Distinct().ToList();
@@ -260,6 +227,91 @@ internal static class ExternalInvoiceVisibility
 
             return null;
         }
+    }
+
+    /// <summary>
+    /// Where an invoice's Submit Invoice sources are recorded: an entity set, its primary id, its invoice lookup, its source
+    /// document lookup, and the columns that name a source this rule cannot check (a row with one of them but no source
+    /// document hides its invoice: the source is unknowable, as 090's file route treats it).
+    /// </summary>
+    private sealed record SourceLinks(string EntitySet, string IdColumn, string InvoiceValue, string SourceValue,
+        IReadOnlyList<string> UnknowableSourceColumns);
+
+    /// <summary>The Stored Files of an invoice (094, 095): the source document, or a source communication or attachment
+    /// identity with no document (a shape the schema allows and no writer creates today; hidden as unreadable).</summary>
+    private static readonly SourceLinks StoredFileSources = new(StoredFileSet, StoredFileIdField, StoredFileInvoiceValue,
+        StoredFileSourceValue,
+        new[]
+        {
+            "_" + Sprk.Bff.Api.Services.Finance.Files.StoredFileSchema.SourceCommunication + "_value",
+            Sprk.Bff.Api.Services.Finance.Files.StoredFileSchema.SourceAttachmentIdentity,
+        });
+
+    /// <summary>The submissions of an invoice: <c>sprk_invoicesubmission.sprk_document</c> (the confirm route records its source
+    /// only there; review round 1, F1).</summary>
+    private static readonly SourceLinks SubmissionSources = new(
+        "sprk_invoicesubmissions", "sprk_invoicesubmissionid", "_sprk_invoice_value", "_sprk_document_value",
+        Array.Empty<string>());
+
+    /// <summary>
+    /// Reads the source links of <paramref name="asked"/> from one table, one read per chunk, into
+    /// <paramref name="sourcesOf"/>. A chunk whose read may be cut short, a row the filter cannot have produced, a source link
+    /// that is not a GUID and an unknowable source each hide the invoice (or the chunk) in <paramref name="hidden"/>. A failed
+    /// read THROWS.
+    /// </summary>
+    private static async Task CollectSourcesAsync(
+        SourceLinks links, IReadOnlyList<Guid> asked, CommunicationOpenThreadGate.RowQuery query,
+        Dictionary<Guid, List<Guid>> sourcesOf, Dictionary<Guid, InvoiceHiddenReason> hidden, Action counted, CancellationToken ct)
+    {
+        var anySource = string.Join(" or ", new[] { links.SourceValue }.Concat(links.UnknowableSourceColumns).Select(c => $"{c} ne null"));
+        var select = new[] { links.IdColumn, links.InvoiceValue, links.SourceValue }.Concat(links.UnknowableSourceColumns);
+        var chunks = await CommunicationOpenThreadGate.ReadChunksAsync(asked, (chunk, c) => query(links.EntitySet,
+            $"$select={string.Join(",", select)}" +
+            $"&$filter=({string.Join(" or ", chunk.Select(id => $"{links.InvoiceValue} eq {id:D}"))})" +
+            $" and ({anySource})&$top={MaxSourceFilesPerChunk + 1}", c), ct).ConfigureAwait(false);
+        foreach (var (chunk, rows) in chunks)
+        {
+            counted();
+            var inChunk = chunk.ToHashSet();
+            if (rows.Count > MaxSourceFilesPerChunk)
+            {
+                foreach (var id in chunk)
+                    hidden.TryAdd(id, InvoiceHiddenReason.SourcesTruncated);
+                continue;
+            }
+
+            foreach (var row in rows)
+            {
+                var invoice = LinkOf(row, links.InvoiceValue);
+                if (invoice is not { } invoiceId || !inChunk.Contains(invoiceId))
+                {
+                    // An answer the filter cannot have produced: which invoice it belongs to is unknown, so none is decided.
+                    foreach (var id in chunk)
+                        hidden.TryAdd(id, InvoiceHiddenReason.SourceLinkUnreadable);
+                    break;
+                }
+
+                switch (LinkOf(row, links.SourceValue))
+                {
+                    case null:
+                        // No source document. A source communication or attachment with no document cannot be checked.
+                        if (links.UnknowableSourceColumns.Any(column => IsSet(row, column)))
+                            hidden.TryAdd(invoiceId, InvoiceHiddenReason.SourceLinkUnreadable);
+                        break;
+                    case var source when source == ExternalDocumentNarrowing.UnreadableLink:
+                        hidden.TryAdd(invoiceId, InvoiceHiddenReason.SourceLinkUnreadable);
+                        break;
+                    case { } source:
+                        if (!sourcesOf.TryGetValue(invoiceId, out var list))
+                            sourcesOf[invoiceId] = list = new List<Guid>();
+                        list.Add(source);
+                        break;
+                }
+            }
+        }
+
+        static bool IsSet(IReadOnlyDictionary<string, JsonElement> row, string column) =>
+            row.TryGetValue(column, out var value) && value.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined);
     }
 
     /// <summary>
@@ -425,11 +477,12 @@ internal enum InvoiceHiddenReason
 internal sealed class InvoiceVisibilityCost
 {
     internal int StoredFileReads { get; set; }
+    internal int SubmissionReads { get; set; }
     internal int SourceReads { get; set; }
     internal int Sources { get; set; }
     internal int NarrowingReads { get; set; }
     internal int RootFlagReads { get; set; }
-    internal int Reads => StoredFileReads + SourceReads + NarrowingReads + RootFlagReads;
+    internal int Reads => StoredFileReads + SubmissionReads + SourceReads + NarrowingReads + RootFlagReads;
 }
 
 /// <summary>The predicate's answer for one request. An invoice it was not asked about is NOT visible.</summary>

@@ -172,6 +172,7 @@ public class ExternalInvoiceVisibilityGuardTests
             typeof(InvoiceGuardControlMentionOnly), typeof(InvoiceGuardControlHidesInALambda),
             typeof(InvoiceGuardControlHidesThroughAHelper), typeof(InvoiceGuardControlNoInvoices),
             typeof(InvoiceGuardControlLineReadOnly), typeof(InvoiceGuardControlCallsAFamilyReader),
+            typeof(InvoiceGuardControlCallsAFamilyReaderThroughItsInterface), typeof(InvoiceGuardControlCallsAnUnrelatedInterface),
         };
         var scan = Scan(fixtures.SelectMany(IlCallScan.WithNested), inScope: _ => true);
 
@@ -180,6 +181,7 @@ public class ExternalInvoiceVisibilityGuardTests
             new[]
             {
                 $"{typeof(InvoiceGuardControlCallsAFamilyReader).FullName}::ListAsync",
+                $"{typeof(InvoiceGuardControlCallsAFamilyReaderThroughItsInterface).FullName}::ListAsync",
                 $"{typeof(InvoiceGuardControlLineReadOnly).FullName}::ListAsync",
                 $"{typeof(InvoiceGuardControlMentionOnly).FullName}::ListAsync",
             }.Order(StringComparer.Ordinal).ToArray(),
@@ -187,6 +189,8 @@ public class ExternalInvoiceVisibilityGuardTests
         Assert.Contains($"{typeof(InvoiceGuardControlHidesInALambda).FullName}::ListAsync", scan.Reaches);
         Assert.Contains($"{typeof(InvoiceGuardControlHidesThroughAHelper).FullName}::ListAsync", scan.Reaches);
         Assert.DoesNotContain(scan.Surfaces.Keys, k => k.StartsWith(typeof(InvoiceGuardControlNoInvoices).FullName!, StringComparison.Ordinal));
+        Assert.DoesNotContain(scan.Surfaces.Keys,
+            k => k.StartsWith(typeof(InvoiceGuardControlCallsAnUnrelatedInterface).FullName!, StringComparison.Ordinal));
     }
 
     [Fact(DisplayName = "Task 098: the family-table token matches a whole table name, not a lookup column on another table")]
@@ -224,6 +228,7 @@ public class ExternalInvoiceVisibilityGuardTests
         Assert.Equal(new[] { "093", "130", "152" }, PendingSurfaces.Keys.Order(StringComparer.Ordinal).ToArray());
         Assert.Contains("Sprk.Bff.Api.Services.Finance.Files.StoredFileService", FamilyReaderTypes.Keys);
         Assert.Contains("Sprk.Bff.Api.Services.Finance.InvoiceSearchService", FamilyReaderTypes.Keys);
+        Assert.Contains(typeof(Sprk.Bff.Api.Services.Finance.IInvoiceSearchService), FamilyReaderInterfaces.Value); // F3: 152 calls it so
         Assert.Contains("Sprk.Bff.Api.Services.Finance.FirmFindingsProjection", NamedExternalTypes.Keys);
         Assert.Contains("Sprk.Bff.Api.Api.Finance.FirmOutcomeEndpoints", NamedExternalTypes.Keys);
         Assert.True(InScope(typeof(ExternalInvoiceSubmissionEndpoints)), "093's routes live in the external-plane namespace.");
@@ -509,8 +514,22 @@ public class ExternalInvoiceVisibilityGuardTests
             return $"ExternalDataService.{Normalize(target.Name)}";
         if (FamilyReaderTypes.ContainsKey(outermost.FullName ?? string.Empty) && !target.IsConstructor)
             return $"{outermost.Name}.{target.Name}";
+        // Review round 1 (F3): consumers call a reader through its interface (IInvoiceSearchService), so the IL call target is
+        // the interface; a call through an interface a listed reader implements is a surface too.
+        if (declaring.IsInterface && FamilyReaderInterfaces.Value.Contains(declaring.IsConstructedGenericType ? declaring.GetGenericTypeDefinition() : declaring))
+            return $"{declaring.Name}.{target.Name}";
         return null;
     }
+
+    /// <summary>The BFF's own interfaces a listed family reader type implements (a call through one reaches the reader).</summary>
+    private static readonly Lazy<IReadOnlySet<Type>> FamilyReaderInterfaces = new(() =>
+        FamilyReaderTypes.Keys
+            .Select(name => typeof(Program).Assembly.GetType(name))
+            .OfType<Type>()
+            .SelectMany(reader => reader.GetInterfaces())
+            .Where(i => i.Assembly == typeof(Program).Assembly)
+            .Select(i => i.IsConstructedGenericType ? i.GetGenericTypeDefinition() : i)
+            .ToHashSet());
 
     private static bool IsReach(MethodBase method) =>
         method.DeclaringType is { } declaring
@@ -549,6 +568,18 @@ internal sealed class InvoiceGuardControlCallsAFamilyReader(Sprk.Bff.Api.Service
 {
     internal Task ListAsync(Guid firm, CancellationToken ct) =>
         service.ListAsync(new[] { firm }, Array.Empty<Guid>(), Array.Empty<Guid>(), Array.Empty<Guid>(), ct);
+}
+
+/// <summary>MUST FIRE (review round 1, F3): searches invoices through the reader's INTERFACE without the predicate.</summary>
+internal sealed class InvoiceGuardControlCallsAFamilyReaderThroughItsInterface(Sprk.Bff.Api.Services.Finance.IInvoiceSearchService search)
+{
+    internal Task ListAsync(string query, CancellationToken ct) => search.SearchAsync(query, null, 10, ct);
+}
+
+/// <summary>MUST NOT BE A SURFACE: calls through a BFF interface no listed family reader implements.</summary>
+internal sealed class InvoiceGuardControlCallsAnUnrelatedInterface(Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver identity)
+{
+    internal Task<bool> ListAsync(Guid user, CancellationToken ct) => identity.IsExternalAsync(user, ct);
 }
 
 /// <summary>MUST NOT FIRE: reads invoices, then applies the predicate inside a lambda.</summary>

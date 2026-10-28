@@ -1991,9 +1991,10 @@ public class ExternalDataService
             return;
         _logger.Log(level,
             "[EXT-INVOICE-VISIBILITY] cost plane={Plane} invoices={Invoices} hidden={Hidden} ({Reasons}) sources={Sources} "
-            + "storedFileReads={StoredFileReads} sourceReads={SourceReads} narrowingReads={NarrowingReads} rootFlagReads={RootFlagReads}",
+            + "storedFileReads={StoredFileReads} submissionReads={SubmissionReads} sourceReads={SourceReads} "
+            + "narrowingReads={NarrowingReads} rootFlagReads={RootFlagReads}",
             plane, invoices, decision.Hidden.Count, decision.HiddenSummary(), cost.Sources,
-            cost.StoredFileReads, cost.SourceReads, cost.NarrowingReads, cost.RootFlagReads);
+            cost.StoredFileReads, cost.SubmissionReads, cost.SourceReads, cost.NarrowingReads, cost.RootFlagReads);
     }
 
     /// <summary>

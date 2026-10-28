@@ -45,6 +45,7 @@ Branch `task/ebill-098-external-marker`, based on `786d1ea17a`. Rigor FULL, opus
 
 The cost per call to `DecideAsync` for N invoices:
 - Stored File reads: ⌈N/50⌉, each with `$top=2001`. More than 2000 rows hides the whole chunk (`SourcesTruncated`).
+- Submission reads (review round 1): ⌈N/50⌉, the same cap and the same fail-closed rules.
 - Source document reads: ⌈S/50⌉ for S distinct sources.
 - 188 decision: at most 3 hop reads, plus the communication and thread reads.
 - One live-parent walk.
@@ -138,6 +139,31 @@ The touched classes added to the unit filter were DataverseDescribe, DataverseRe
 - Invoice upload reads the predicate twice: once in the rights gate and once in the upload gate. The extra read only adds cost; correctness is unaffected.
 - The guard's pending 093, 130 and 152 entries are keyed by the guard's primitives (reader types, named external types, the external-plane namespace), not by method names, because those methods do not exist on this branch yet.
 - One adversarial-review pass instead of two, as the operator directed.
+
+## Review round 1, 2026-10-28
+
+One adversarial pass (Opus) found three fix-now findings (F1, F2, F3), one minor test defect (F4) and three known limits (K1–K3). F2 was fixed and then reverted at uac-r2's direction (see the known limits below). Fixed in scope:
+
+| Finding | Fix | Tests |
+|---|---|---|
+| F1: confirm-route invoices never hidden (the source is only on `sprk_invoicesubmission.sprk_document`) | The predicate also reads `_sprk_document_value` of the invoice's submissions (filtered by `_sprk_invoice_value`) in the same batched pass, under the same rules. It only ever hides more. A fault hides every asked invoice; more than 2000 rows hides the chunk | `ConfirmRoute_*` (5) in `ExternalInvoiceVisibilityTests` |
+| F3: the guard missed calls through `IInvoiceSearchService` | A call through a BFF interface that a listed reader type implements is a surface | Controls `InvoiceGuardControlCallsAFamilyReaderThroughItsInterface` (must fire), `InvoiceGuardControlCallsAnUnrelatedInterface` (must not) |
+| F4: the internal-systemuser theory ignored its flag | It drives the real `SystemUserIdentityResolver` with `sprk_isexternal` false and blank | `AnInternalSystemuser_IsNeverHiddenByThisRule_AndNothingIsRead` |
+| K1 (cheap): a Stored File with a source communication or attachment but no document counted as "no source" | Both columns are selected; such a row hides the invoice (`source_link_unreadable`) | `AStoredFileWithASourceCommunicationOrAttachment_ButNoDocument_HidesTheInvoice` |
+
+F1 counts every submission's document as a source, including SPA uploads. An SPA upload also writes `sprk_invoicesubmission.sprk_document`, so its uploaded document is decided by the same rules. This scope is accepted by the main session (2026-10-28) because it only ever hides more. The POML's "an invoice with no source (SPA upload)" no longer describes these invoices. They stay visible unless their own document fails rules 2–4 or the roots term for the caller.
+
+Recorded, not fixed here:
+- **Undo ordering (report K1 #6)** is handed to 094. The step-5 undo deletes the Stored File before the invoice, so a partial undo leaves a visible invoice with no source. 094 reorders the undo (invoice before its Stored File) or hides invoices of Failed submissions. With F1 in place, the submission's `sprk_document` still names the source while the submission row exists.
+- **AI retrieval surfaces (report K2).** `SemanticSearchService.cs:673,785` returns `InvoiceName` for documents filed to an invoice, and `IRetrievalAccessTrim` checks Read on the invoice only, with no (a′) check. Both tables are outside model 9.1's closed taint list. Raised with uac-r2 and the owner.
+- **Timing (report K3).** A hidden invoice costs more reads than a missing or out-of-scope one: the thread gate runs the predicate after the scope check, and the invoice-documents path runs it before the rights check. Response bodies are identical and nothing is written. 130's guard entry depends on the type names `FirmOutcomeEndpoints` and `FirmFindingsProjection`, which 130's POML calls directional.
+- **The `read_query` row-cap oracle (report F2), on documents and invoices alike.** The "reached the row cap" warning is measured on the raw page, before hidden rows are removed (task 188 F1-5). For an external caller, a hidden match under TOP can therefore be told apart from no match.
+  - Round 1 first fixed the invoice side by counting only visible rows (`81071dd45c`). That fix was reverted (`git revert`) at uac-r2's direction, because uac-r2 owns `read_query`'s posture.
+  - uac-r2's reasoning: when the raw page hits TOP but fewer visible rows come back, more visible rows can exist beyond the page, so a visible-only count makes a truncated answer look complete. That is a correctness regression, traded for an oracle that is no escalation, because flagged users can read `sprk_invoice` directly in Dataverse until 191 closes it.
+  - The invoice and document paths keep one identical posture: the raw-page cap.
+  - Owner: uac-r2 issue, tied to 191, covering both documents and invoices. The fix is to page until TOP visible rows, within a budget.
+
+Seeding proofs for this round: skipping the submission read failed 8 tests (the `ConfirmRoute_*` must-fire, fault and truncation tests and the batched-reads test); ignoring the unknowable columns failed the 4 K1 cases; dropping the interface match failed the guard's negative-control test.
 
 ## Escalation
 
