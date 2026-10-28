@@ -106,10 +106,6 @@ const useStyles = makeStyles({
     gridTemplateColumns: '1fr 1fr',
     gap: tokens.spacingHorizontalM,
   },
-  assignedToHint: {
-    color: tokens.colorNeutralForeground3,
-    marginTop: tokens.spacingVerticalXXS,
-  },
 });
 
 // ---------------------------------------------------------------------------
@@ -366,18 +362,15 @@ export const EnterInfoStep: React.FC<IEnterInfoStepProps> = ({
         </Field>
       </div>
 
-      <div>
-        <LookupField
-          label="Assigned To"
-          value={assignedToValue}
-          onChange={handleAssignedToChange}
-          onSearch={handleSearchAssignees}
-          placeholder="Search contacts..."
-        />
-        <Text as="p" size={200} className={styles.assignedToHint}>
-          Leave blank to use the Assigned To Internal value
-        </Text>
-      </div>
+      <LookupField
+        label="Assigned To"
+        value={assignedToValue}
+        onChange={handleAssignedToChange}
+        onSearch={handleSearchAssignees}
+        placeholder="Search contacts..."
+        minSearchLength={2}
+        hint="Leave blank to use the Assigned To Internal value"
+      />
     </div>
   );
 };

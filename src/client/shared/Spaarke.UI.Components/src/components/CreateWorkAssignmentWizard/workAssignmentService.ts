@@ -71,6 +71,9 @@ function _getCurrentUserId(): string {
   return getXrmUserId() ?? '';
 }
 
+/** Shown when a chosen Assigned To contact could not be sent (task 038 fix round 1). */
+const ASSIGNED_TO_NOT_SET_WARNING = 'Assigned To could not be set; the record uses its Assigned To Internal value.';
+
 // ---------------------------------------------------------------------------
 // WorkAssignmentService class
 // ---------------------------------------------------------------------------
@@ -485,6 +488,9 @@ export class WorkAssignmentService {
         console.warn(
           '[WorkAssignmentService] sprk_workassignment.sprk_assignedto nav-prop not found; Assigned To not set'
         );
+        // The person chose a contact that cannot be sent: say so (the dialog shows result.warnings) instead of
+        // silently giving the record its server default.
+        warnings.push(ASSIGNED_TO_NOT_SET_WARNING);
       }
     }
 

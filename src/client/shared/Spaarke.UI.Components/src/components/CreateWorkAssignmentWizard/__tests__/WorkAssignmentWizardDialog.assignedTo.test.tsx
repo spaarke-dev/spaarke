@@ -1,6 +1,8 @@
 /**
  * WorkAssignmentWizardDialog — the "Assigned To: {name}" line of the Send Email summary (field-mapping-server-write-path-r1
- * task 038, FR-37). The line appears only when a contact was chosen on Enter Info; a blank picker adds nothing.
+ * task 038, FR-37). The line appears only when a contact was chosen on Enter Info; a blank picker adds nothing. While the
+ * person has not edited the pre-filled email, a later change on Enter Info refreshes it (fix round 1: Back to Enter Info,
+ * change Assigned To, and the summary must not name the old one); an edited email is left alone.
  *
  * `WizardShell`, `EnterInfoStep` and the shared Next-Steps grid are replaced by recorders so the test drives the real
  * dialog state (form values from Enter Info, a selected Send Email follow-on) and reads the body the dialog pre-fills.
@@ -62,8 +64,10 @@ const ENTER_INFO = {
   responseDueDate: '2026-12-01',
 };
 
-/** Open the dialog, report Enter Info values, select the Send Email follow-on, and return the pre-filled email body. */
-async function emailBodyFor(assignedTo: { assignedToId: string; assignedToName: string }): Promise<string> {
+type Assignee = { assignedToId: string; assignedToName: string };
+
+/** Open the dialog, report Enter Info values, select the Send Email follow-on; return handles to read/drive it. */
+async function openWithSendEmail(assignedTo: Assignee) {
   mockShell.props = null;
   mockEnterInfo.props = null;
   mockGrid.props = null;
@@ -84,34 +88,68 @@ async function emailBodyFor(assignedTo: { assignedToId: string; assignedToName: 
     )!;
     render(<>{step.renderContent()}</>);
   };
+  const reportEnterInfo = (over: Partial<typeof ENTER_INFO> & Partial<Assignee>) =>
+    act(() => mockEnterInfo.props.onFormValues({ ...ENTER_INFO, ...assignedTo, ...over }));
 
   stepContent('enter-info');
-  act(() => mockEnterInfo.props.onFormValues({ ...ENTER_INFO, ...assignedTo }));
+  reportEnterInfo({});
 
   stepContent('next-steps');
   act(() => mockGrid.props.onSelectionChange(['send-email']));
 
-  // The pre-fill effect writes the body; the follow-on card reads it fresh when its step renders.
-  const sendEmailCard = (mockGrid.props.cards as Array<{ id: string; renderStep: () => React.ReactNode }>).find(
-    c => c.id === 'send-email'
-  )!;
-  await waitFor(() => {
+  // The Send Email step reads the dialog's pre-filled email fresh each time it renders.
+  // One tree, re-rendered per read: a fresh `render` inside `waitFor` mutates the DOM, which re-triggers `waitFor`
+  // endlessly when the awaited condition never holds. The mocked step renders nothing, so a re-render mutates nothing.
+  const emailTree = render(<></>);
+  const readEmail = () => {
+    const card = (mockGrid.props.cards as Array<{ id: string; renderStep: () => React.ReactNode }>).find(
+      c => c.id === 'send-email'
+    )!;
     mockEmail.props = null;
-    render(<>{sendEmailCard.renderStep()}</>);
-    expect(mockEmail.props.emailBody).toContain('Priority:');
-  });
-  return mockEmail.props.emailBody as string;
+    emailTree.rerender(<>{card.renderStep()}</>);
+    return mockEmail.props as { emailBody: string; emailSubject: string; onEmailBodyChange: (v: string) => void };
+  };
+  await waitFor(() => expect(readEmail().emailBody).toContain('Priority:'));
+  return { readEmail, reportEnterInfo };
 }
 
 describe('WorkAssignmentWizardDialog — Assigned To in the summary (task 038, FR-37)', () => {
   it('names the chosen contact in the summary', async () => {
-    const body = await emailBodyFor({ assignedToId: 'c-1', assignedToName: 'Chosen Contact' });
-    expect(body).toContain('Assigned To: Chosen Contact');
+    const { readEmail } = await openWithSendEmail({ assignedToId: 'c-1', assignedToName: 'Chosen Contact' });
+    expect(readEmail().emailBody).toContain('Assigned To: Chosen Contact');
   });
 
   it('adds no Assigned To line when the picker is blank', async () => {
-    const body = await emailBodyFor({ assignedToId: '', assignedToName: '' });
-    expect(body).toContain('Name: WA-1');
-    expect(body).not.toContain('Assigned To');
+    const { readEmail } = await openWithSendEmail({ assignedToId: '', assignedToName: '' });
+    expect(readEmail().emailBody).toContain('Name: WA-1');
+    expect(readEmail().emailBody).not.toContain('Assigned To');
+  });
+
+  it('refreshes the unedited summary when Assigned To changes on Enter Info (Back, change, Next)', async () => {
+    const { readEmail, reportEnterInfo } = await openWithSendEmail({
+      assignedToId: 'c-1',
+      assignedToName: 'Contact Y',
+    });
+    expect(readEmail().emailBody).toContain('Assigned To: Contact Y');
+
+    reportEnterInfo({ assignedToId: '', assignedToName: '' });
+
+    await waitFor(() => expect(readEmail().emailBody).not.toContain('Assigned To'));
+    reportEnterInfo({ name: 'WA-2', assignedToId: 'c-2', assignedToName: 'Contact Z' });
+    await waitFor(() => expect(readEmail().emailBody).toContain('Assigned To: Contact Z'));
+    expect(readEmail().emailSubject).toBe('Work Assignment: WA-2');
+  });
+
+  it('leaves an email the person edited alone', async () => {
+    const { readEmail, reportEnterInfo } = await openWithSendEmail({
+      assignedToId: 'c-1',
+      assignedToName: 'Contact Y',
+    });
+
+    const email = readEmail();
+    act(() => email.onEmailBodyChange('My own words'));
+    reportEnterInfo({ assignedToId: 'c-2', assignedToName: 'Contact Z' });
+
+    expect(readEmail().emailBody).toBe('My own words');
   });
 });

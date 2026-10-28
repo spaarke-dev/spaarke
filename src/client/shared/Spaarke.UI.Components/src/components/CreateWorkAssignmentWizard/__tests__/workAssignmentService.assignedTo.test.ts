@@ -154,6 +154,8 @@ describe('WorkAssignmentService.createWorkAssignment — Assigned To (task 038, 
     expect(payload).not.toHaveProperty('sprk_assignedto');
     expect(Object.values(payload).some(v => typeof v === 'string' && v.startsWith('/contacts('))).toBe(false);
     expect(Object.values(payload).includes(null)).toBe(false);
+    // A blank picker is not a failure: no warning.
+    expect(result.warnings).toEqual([]);
   });
 
   it('no sprk_assignedto nav-prop on the entity: no bind, a console warning, and the create still proceeds', async () => {
@@ -165,6 +167,8 @@ describe('WorkAssignmentService.createWorkAssignment — Assigned To (task 038, 
 
     expect(result.status).not.toBe('error');
     expect(result.workAssignmentId).toBe(WA_ID);
+    // The person chose a contact: they are told it was not sent (not only a console warning).
+    expect(result.warnings).toContain('Assigned To could not be set; the record uses its Assigned To Internal value.');
     expect(Object.keys(payload).filter(k => /assignedto/i.test(k))).toEqual([]);
     expect(Object.values(payload).some(v => v === `/contacts(${CONTACT_ID})`)).toBe(false);
     expect(

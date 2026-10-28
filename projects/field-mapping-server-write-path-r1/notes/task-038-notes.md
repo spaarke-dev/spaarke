@@ -6,7 +6,7 @@ FULL, from the POML. Executed on Sonnet 5.5 at high effort, branch `task/fm-038`
 with task 037 merged as `eaa500c656`). Gate met: 037 is merged, so the server fills `sprk_assignedto` from
 `sprk_assignedtointernal` only when the create leaves it UNSET.
 
-rework: none
+rework: fix-round-1
 
 ## Escalation check (POML trigger)
 
@@ -61,7 +61,7 @@ summary only when set"), which is `testable="true"` and not reachable from the s
    `ICreateWorkAssignmentFormState` literal for their Assign Work follow-on and have no picker; required fields broke their
    typecheck (TS2739). Optional keeps those files untouched and means the same thing (absent = blank = no key). The empty state
    still sets `''`.
-2. Hint rendered as a `Text` under the picker: `LookupField` has no hint prop.
+2. (Superseded by fix round 1) The hint is now `LookupField`'s new optional `hint` prop, passed to Fluent `Field`.
 
 ## Review (Step 9.5, own diff, not the adversarial agent) and classification
 
@@ -69,10 +69,36 @@ summary only when set"), which is `testable="true"` and not reachable from the s
 |---|---|---|---|
 | 1 | The 4 other wizards fail typecheck with required new fields | F | Fixed in-scope: made optional (Deviation 1); tsc clean. |
 | 2 | Blank must send no key even when a parent record is set: checked the field-mapping path (`FieldMappingService` writes `${navProp}@odata.bind` with the same discovered nav-prop), so a picked contact overwrites a mapped one on the SAME key (one bind, not two) | none | Pinned by reading; no code needed. |
-| 3 | A field-mapping profile that maps a parent's field onto `sprk_assignedto` still carries its bind when the picker is blank | K | Not the wizard's default and not new; the mapping is explicit configuration. Noted for the field-mapping owners. |
-| 4 | Hint is visual text, not programmatically tied to the lookup input (no `aria-describedby`) | K | `LookupField` exposes no hint/describedby prop; extending the shared component is out of scope. |
-| 5 | Enter Info remounts when leaving and returning (WizardShell renders only the current step) and seeds its state from the record pre-fill only, so a chosen contact (like every other field) resets on Back; the payload follows what the form then shows | K | Pre-existing for every field; display and payload agree, so no wrong contact is ever sent. |
-| 6 | The Send Email body is pre-filled once (`emailSubject === ''` guard), so changing Assigned To after opening Send Email does not refresh it | K | Same behaviour as every other summary line. |
+| 3 | A field-mapping profile that maps a parent's field onto `sprk_assignedto` still carries its bind when the picker is blank | K4 | Correct supplied-value behaviour (FR-36: a supplied value wins), but the hint "Leave blank to use the Assigned To Internal value" is not true in that configuration. A scalar mapping rule writing null onto it would be a configuration error. |
+| 4 | Typed-but-unpicked text in the picker sends nothing | K4 | By design (only a picked contact is bound); pinned by `typed-but-unpicked text reports no contact`. |
+
+## Fix round 1 (independent review of `8b13873034`)
+
+rework: fix-round-1
+
+Core contract confirmed by the reviewer (blank never sends a key, bind or null). Fixed:
+
+| # | Finding | Class | Resolution |
+|---|---|---|---|
+| 1 | Back to Enter Info wiped every edit (Enter Info remounts; seeded from the record pre-fill only), so the picker showed blank while the Send Email summary still named the old contact; with no record, everything typed was lost | F1 | `WorkAssignmentWizardDialog.tsx`: `enterInfoSeenRef` (set when Enter Info reports values; cleared when the selected record changes and on reopen). A remount gets `initialValues = formStateRef.current` and `hasInitialValues = true` (AI pre-fill does not re-run). Test `WorkAssignmentWizardDialog.backNav.test.tsx` (real `EnterInfoStep` + `LookupField`: type a name, pick a contact, unmount, re-render; name and contact still shown; a cleared contact stays cleared). The former K #5 is removed (fixed). |
+| 1b | The Send Email pre-fill was one-shot, so a changed Assigned To (or name) did not reach it | F1 | `autoEmailRef` holds the subject/body last pre-filled; a later Enter Info report refreshes the body (and the subject if unedited) while the body still equals it. An edited body is left alone. Built by the new `buildEmailPrefill`. Tests in `WorkAssignmentWizardDialog.assignedTo.test.tsx` (`refreshes the unedited summary...`, `leaves an email the person edited alone`). The former K #6 is removed (fixed). |
+| 2 | Nav-prop not found: the chosen contact was dropped with only a console warning | F1 (low) | `warnings.push('Assigned To could not be set; the record uses its Assigned To Internal value.')` (the dialog shows `result.warnings`; status becomes `partial`). Asserted in the nav-prop-absent test; the blank test asserts no warning. |
+| 3 | Hint not linked to the input; the `Text` `marginTop` did nothing (inline) | F4 | `LookupField` gets an optional `hint?: string` -> `<Field hint={hint}>` (Fluent wires `aria-describedby`); `EnterInfoStep` uses it and the free-standing `Text` and its style are gone. Tests: `LookupField.test.tsx` (hint linked; no `aria-describedby` without one) and `EnterInfoStep.assignedTo.test.tsx`. |
+| 4 | The EnterInfoStep test's search double was not production-like (browse returned a contact with no query) | F2 | The double returns `[]` below 2 characters (as `searchContactsAsLookup` does); the test types `ch`; the picker sets `minSearchLength={2}`; asserts the search is never called with fewer than 2 characters. |
+| 5 | Stale comment in `services/userLookup.ts` said `sprk_workassignment.sprk_assignedto` targets systemuser | F2 | Corrected in the file header and both JSDoc blocks (a contact lookup, live schema 2026-10-27; points to `resolveCurrentUserAsContactAssignee`). Comment only. |
+
+Red/green for the round: with the round-1 production files reset to `8b13873034` and the new/changed tests kept, **5 red**
+(nav-prop-absent warning, LookupField hint, EnterInfoStep hint link, Back-to-Enter-Info keeps the edits, unedited summary
+refreshes); the negative controls (edited email left alone, cleared contact stays cleared, blank sends no warning) pass both
+ways. After: all green.
+
+Test-harness note: a test that renders inside `waitFor` mutates the DOM and re-triggers `waitFor` endlessly when the condition
+never holds (it ran out of memory against the old code). The dialog test re-renders one tree instead.
+
+Checks after the round: wizard folder + `LookupField` + the four sibling wizards (`CreateInvoiceWizard`, `CreateMatterWizard`,
+`CreateProjectWizard`, `CreateReportCardWizard`) + `userLookup` service tests: **33 suites, 331 tests passed**. `tsc --noEmit`:
+no errors in changed files (the two environmental `@spaarke/auth` errors remain). client-lint ratchet `ui-components`: ok.
+Code page `src/solutions/CreateWorkAssignmentWizard` `npm run build`: ok (`dist/index.html` 1,071.11 kB).
 
 No open F-class finding.
 
