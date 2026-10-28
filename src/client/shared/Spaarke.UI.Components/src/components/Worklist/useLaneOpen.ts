@@ -38,6 +38,7 @@ function writeLane(lane: WorklistLane, open: boolean): void {
   try {
     // Read the stored value fresh so the other lane's state is kept, not overwritten with this hook's stale copy.
     window.localStorage.setItem(LANE_OPEN_STORAGE_KEY, JSON.stringify({ ...readAll(), [lane]: open }));
+    // eslint-disable-next-line no-restricted-syntax -- D-195: persistence is best effort; a storage failure (private mode, quota, blocked site data) keeps the in-memory state and must not break the panel.
   } catch {
     // Best-effort persistence: silent no-op on a storage failure.
   }
