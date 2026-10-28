@@ -41,9 +41,13 @@ internal sealed class OwnershipDirectory
     /// <summary>The Secure Record BU's NAMED owner team (task 144).</summary>
     public static readonly Guid SecureNamedTeam = Guid.Parse("d9ec0b6f-0000-4000-8000-000000000003");
 
-    /// <summary>UAC task 194b R4b-2: the restricted-content owner team — named, non-default, in the ROOT business unit
-    /// (<see cref="GeneralBu"/>), no members.</summary>
+    /// <summary>UAC task 194b R4b-2c (owner round 136): the restricted-content owner team — named, non-default, in the
+    /// CUSTOMER's top business unit (<see cref="ChildBu"/>, the root's direct child), no members.</summary>
     public static readonly Guid RestrictedContentTeam = Guid.Parse("0e5c0e5c-0086-4086-8086-000000000086");
+
+    /// <summary>R4b-2c: a business unit BELOW the customer's top unit (<see cref="ChildBu"/>), and its default team.</summary>
+    public static readonly Guid CustomerChildBu = Guid.Parse("0e5c0e5c-0086-4086-8086-0000000000c1");
+    public static readonly Guid CustomerChildTeam = Guid.Parse("0e5c0e5c-0086-4086-8086-0000000000c2");
 
     public const string SecureBuName = "Secure Record";
     public const string SecureOwnerTeamName = "Secure Record Owners";
@@ -63,6 +67,9 @@ internal sealed class OwnershipDirectory
 
     public List<string> QueriedEntities { get; } = new();
 
+    /// <summary>R4b-2c: how many business-unit reads BY ID (the walk to the customer's top unit) this directory answered.</summary>
+    public int BusinessUnitIdReads { get; private set; }
+
     /// <summary>#2143 round 2: every query on a record table (not systemuser, team or businessunit), as sent — so a test can
     /// assert how the resolver reads a row (its <c>NoLock</c>, its column set).</summary>
     public List<QueryExpression> RecordQueries { get; } = new();
@@ -80,16 +87,18 @@ internal sealed class OwnershipDirectory
     public static OwnershipDirectory Standard(
         bool withDefaultTeams = true, bool withNamedSecureTeam = true, bool withRestrictedContentTeam = true)
     {
-        // R4b-2: the general unit is the ROOT business unit (no parent); the others sit under it.
+        // R4b-2: the general unit is the ROOT business unit (no parent); the child (the customer's top unit, as dev's
+        // "Spaarke Business Unit 1") and the Secure Record unit sit under it, and a customer unit sits under the child.
         var directory = new OwnershipDirectory()
             .WithUser(CallerUserId, CallerOid, GeneralBu)
             .WithBusinessUnit(GeneralBu, "Spaarke")
             .WithBusinessUnit(ChildBu, "Spaarke Business Unit 1", parent: GeneralBu)
-            .WithBusinessUnit(SecureBu, SecureBuName, parent: GeneralBu);
+            .WithBusinessUnit(SecureBu, SecureBuName, parent: GeneralBu)
+            .WithBusinessUnit(CustomerChildBu, "Litigation", parent: ChildBu);
 
         if (withRestrictedContentTeam)
         {
-            directory.WithTeam(RestrictedContentTeam, GeneralBu, isDefault: false, teamType: 0,
+            directory.WithTeam(RestrictedContentTeam, ChildBu, isDefault: false, teamType: 0,
                 Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeam.DefaultOwnerTeamName);
         }
 
@@ -98,7 +107,8 @@ internal sealed class OwnershipDirectory
             directory
                 .WithTeam(GeneralTeam, GeneralBu, isDefault: true, teamType: 0, "Spaarke")
                 .WithTeam(ChildTeam, ChildBu, isDefault: true, teamType: 0, "Spaarke Business Unit 1")
-                .WithTeam(SecureDefaultTeam, SecureBu, isDefault: true, teamType: 0, SecureBuName);
+                .WithTeam(SecureDefaultTeam, SecureBu, isDefault: true, teamType: 0, SecureBuName)
+                .WithTeam(CustomerChildTeam, CustomerChildBu, isDefault: true, teamType: 0, "Litigation");
         }
 
         directory
@@ -492,6 +502,9 @@ internal sealed class OwnershipDirectory
         var rootOnly = query.Criteria.Conditions.Any(c =>
             c.Operator == ConditionOperator.Null && string.Equals(c.AttributeName, "parentbusinessunitid", StringComparison.OrdinalIgnoreCase));
 
+        if (query.EntityName == "businessunit" && conditions.ContainsKey("businessunitid"))
+            BusinessUnitIdReads++;
+
         IEnumerable<Entity> rows = query.EntityName switch
         {
             "systemuser" => UsersMatching(conditions),
@@ -506,9 +519,13 @@ internal sealed class OwnershipDirectory
                     // Task 148 r2: a planned owner's business unit is read from its team row.
                     ["businessunitid"] = new EntityReference("businessunit", t.BusinessUnit),
                 }),
+            // R4b-2c: by id too (the walk to the customer's top unit), with its parent.
             "businessunit" => _businessUnits
-                .Where(b => MatchesName(conditions, b.Name) && (!rootOnly || b.Parent is null))
-                .Select(b => new Entity("businessunit", b.BusinessUnitId)),
+                .Where(b => MatchesName(conditions, b.Name) && Matches(conditions, "businessunitid", b.BusinessUnitId)
+                            && (!rootOnly || b.Parent is null))
+                .Select(b => b.Parent is { } parent
+                    ? new Entity("businessunit", b.BusinessUnitId) { ["parentbusinessunitid"] = new EntityReference("businessunit", parent) }
+                    : new Entity("businessunit", b.BusinessUnitId)),
             "teammembership" => _memberships
                 .Where(m => Matches(conditions, "teamid", m.TeamId))
                 .Select(m => new Entity("teammembership", Guid.NewGuid()) { ["systemuserid"] = m.SystemUserId }),

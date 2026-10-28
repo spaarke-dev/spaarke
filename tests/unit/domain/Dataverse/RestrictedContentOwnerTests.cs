@@ -1,10 +1,12 @@
-// unified-access-control-r2 task 194b R4b-2 (owner round 131, the 086 ruling) — the hard-deny tables (sprk_storedfile,
-// sprk_procedureassignment, sprk_ruleset, sprk_policy, sprk_policyversion): where a row's ordinary answer would be a business
-// unit's default team, it goes to the restricted-content owner team instead (root business unit, no members); a Secure answer
-// and an answer that keeps the creator are unchanged; a team that cannot be used refuses (fail closed). The REAL resolver over
-// the shared ownership directory.
+// unified-access-control-r2 task 194b R4b-2 (owner round 131, the 086 ruling) and R4b-2c (owner round 136) — the hard-deny tables
+// (sprk_storedfile, sprk_procedureassignment, sprk_ruleset, sprk_policy, sprk_policyversion): where a row's ordinary answer would
+// be a business unit's default team, it goes to the restricted-content owner team instead — the one in the CUSTOMER's top
+// business unit above the answer (the root's direct child), no members; a Secure answer and an answer that keeps the creator are
+// unchanged; an answer in the root itself, a top unit that is the Secure Record unit, a parent chain that cannot be read or
+// loops, and a team that cannot be used each refuse (fail closed). The REAL resolver over the shared ownership directory.
 
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse;
@@ -23,14 +25,45 @@ public class RestrictedContentOwnerTests
     private static readonly Guid ChildTeam = FakeDirectory.ChildTeam;
     private static readonly Guid SecureNamedTeam = FakeDirectory.SecureNamedTeam;
     private static readonly Guid ContentTeam = FakeDirectory.RestrictedContentTeam;
+    private static readonly Guid CustomerChildBu = FakeDirectory.CustomerChildBu;
+    private static readonly Guid CustomerChildTeam = FakeDirectory.CustomerChildTeam;
 
     private static readonly Guid OrdinaryMatter = Guid.Parse("194b0086-0000-4000-8000-0000000000a1");
     private static readonly Guid SecureMatter = Guid.Parse("194b0086-0000-4000-8000-0000000000c1");
     private static readonly Guid Policy = Guid.Parse("194b0086-0000-4000-8000-0000000000d1");
 
+    /// <summary>R4b-2c: a matter owned in a business unit of <see cref="CustomerChildBu"/> (below the customer's top unit).</summary>
+    private static readonly Guid CustomerChildMatter = Guid.Parse("194b0086-0000-4000-8000-0000000000a2");
+
+    /// <summary>R4b-2c: a matter owned in the ROOT business unit itself.</summary>
+    private static readonly Guid RootMatter = Guid.Parse("194b0086-0000-4000-8000-0000000000a3");
+
+    /// <summary>R4b-2c: a second customer's top business unit (a direct child of the root), its default team, its own
+    /// restricted-content owner team, and a matter owned there.</summary>
+    private static readonly Guid OtherCustomerBu = Guid.Parse("194b0086-0000-4000-8000-0000000000b1");
+    private static readonly Guid OtherCustomerTeam = Guid.Parse("194b0086-0000-4000-8000-0000000000b2");
+    private static readonly Guid OtherContentTeam = Guid.Parse("194b0086-0000-4000-8000-0000000000b3");
+    private static readonly Guid OtherCustomerMatter = Guid.Parse("194b0086-0000-4000-8000-0000000000b4");
+
+    /// <summary>R4b-2c: a user homed below the customer's top unit.</summary>
+    private static readonly Guid CustomerUser = Guid.Parse("194b0086-0000-4000-8000-0000000000e1");
+    private static readonly Guid CustomerUserOid = Guid.Parse("194b0086-0000-4000-8000-0000000000e2");
+
     private static FakeDirectory World(FakeDirectory? directory = null) => (directory ?? FakeDirectory.Standard())
         .WithRecord("sprk_matter", OrdinaryMatter, ChildBu, owningTeam: ChildTeam)
-        .WithRecord("sprk_matter", SecureMatter, SecureBu, isSecure: true, owningTeam: SecureNamedTeam);
+        .WithRecord("sprk_matter", SecureMatter, SecureBu, isSecure: true, owningTeam: SecureNamedTeam)
+        .WithRecord("sprk_matter", CustomerChildMatter, CustomerChildBu, owningTeam: CustomerChildTeam)
+        .WithRecord("sprk_matter", RootMatter, GeneralBu, owningTeam: GeneralTeam);
+
+    /// <summary>A business unit, its default team and a matter it owns, for the fail-closed shapes.</summary>
+    private static FakeDirectory WithMatterIn(FakeDirectory directory, Guid businessUnit, Guid? parent, Guid matter)
+    {
+        var team = Guid.NewGuid();
+        return directory
+            .WithBusinessUnit(businessUnit, "Unit " + businessUnit.ToString("N")[..6], parent)
+            .WithTeam(team, businessUnit, isDefault: true, teamType: 0, "Unit default")
+            .WithRecord("sprk_matter", matter, businessUnit, owningTeam: team);
+    }
 
     private static Entity Row(string table, params (string Column, string Target, Guid Id)[] lookups)
     {
@@ -39,6 +72,9 @@ public class RestrictedContentOwnerTests
             row[column] = new EntityReference(target, id);
         return row;
     }
+
+    private static RecordOwnershipContext PolicyUnder(Guid matter) =>
+        RecordOwnershipContext.ForChild(Row("sprk_policy", ("sprk_matter", "sprk_matter", matter)));
 
     private static Task<RecordOwnerResolution> AskAsync(FakeDirectory directory, RecordOwnershipContext context) =>
         directory.Resolver().ResolveOwnerAsync(context, CancellationToken.None);
@@ -87,22 +123,50 @@ public class RestrictedContentOwnerTests
         resolution.InPlaceOfDefaultTeamId.Should().Be(ChildTeam, "the default team it replaced is recorded");
     }
 
+    [Fact(DisplayName = "R4b-2c must fire: an answer BELOW the customer's top unit takes that customer's team (the walk up to the root's direct child)")]
+    public async Task AHardDenyRowUnderAMatterBelowTheCustomersTopUnit_IsOwnedByThatCustomersTeam()
+    {
+        var resolution = await AskAsync(World(), PolicyUnder(CustomerChildMatter));
+
+        resolution.OwningTeamId.Should().Be(ContentTeam, "the team of the root's direct child above the answer");
+        resolution.InPlaceOfDefaultTeamId.Should().Be(CustomerChildTeam, "the default team of the answer's own unit");
+    }
+
+    [Fact(DisplayName = "R4b-2c must fire: two customers' top units each own their own rows — never one customer's team for the other's")]
+    public async Task TwoCustomerBusinessUnits_EachHaveTheirOwnTeam()
+    {
+        var directory = World()
+            .WithBusinessUnit(OtherCustomerBu, "Customer Two", parent: GeneralBu)
+            .WithTeam(OtherCustomerTeam, OtherCustomerBu, isDefault: true, teamType: 0, "Customer Two")
+            .WithTeam(OtherContentTeam, OtherCustomerBu, isDefault: false, teamType: 0, RestrictedContentOwnerTeam.DefaultOwnerTeamName)
+            .WithRecord("sprk_matter", OtherCustomerMatter, OtherCustomerBu, owningTeam: OtherCustomerTeam);
+        var cache = new RecordOwnerLookupCache();
+
+        var first = await AskAsync(directory, PolicyUnder(OrdinaryMatter) with { LookupCache = cache });
+        var second = await AskAsync(directory, PolicyUnder(OtherCustomerMatter) with { LookupCache = cache });
+
+        first.OwningTeamId.Should().Be(ContentTeam);
+        second.OwningTeamId.Should().Be(OtherContentTeam, "the other customer's own team (the name matches in both units)");
+        cache.RestrictedContentOwnerTeams.Select(t => (t.CustomerBusinessUnitId, t.OwnerTeamId)).Should().BeEquivalentTo(
+            new (Guid?, Guid?)[] { (ChildBu, ContentTeam), (OtherCustomerBu, OtherContentTeam) }, "the pass reports each customer's team");
+    }
+
     [Fact]
     public async Task APolicyVersionOfARestrictedPolicy_IsOwnedByTheRestrictedContentTeam()
     {
-        var directory = World().WithRecord("sprk_policy", Policy, GeneralBu, owningTeam: ContentTeam,
+        var directory = World().WithRecord("sprk_policy", Policy, ChildBu, owningTeam: ContentTeam,
             extra: new() { ["sprk_matter"] = new EntityReference("sprk_matter", OrdinaryMatter) });
 
         var resolution = await AskAsync(directory, RecordOwnershipContext.ForChild(Row("sprk_policyversion", ("sprk_policy", "sprk_policy", Policy))));
 
         resolution.OwningTeamId.Should().Be(ContentTeam);
-        resolution.InPlaceOfDefaultTeamId.Should().Be(GeneralTeam, "its parent's business unit (the root) default team");
+        resolution.InPlaceOfDefaultTeamId.Should().Be(ChildTeam, "its parent's business unit (the customer's) default team");
     }
 
     [Fact]
     public async Task AHardDenyRowUnderASecureMatter_IsOwnedByTheSecureTeam()
     {
-        var resolution = await AskAsync(World(), RecordOwnershipContext.ForChild(Row("sprk_policy", ("sprk_matter", "sprk_matter", SecureMatter))));
+        var resolution = await AskAsync(World(), PolicyUnder(SecureMatter));
 
         resolution.OwningTeamId.Should().Be(SecureNamedTeam);
         resolution.IsSecureOwner.Should().BeTrue();
@@ -119,46 +183,86 @@ public class RestrictedContentOwnerTests
     }
 
     [Fact]
-    public async Task AnUnfiledHardDenyRow_ThatKeepsItsCreator_IsUnchanged_AndOneWithACaller_TakesTheRestrictedContentTeam()
+    public async Task AnUnfiledHardDenyRow_ThatKeepsItsCreator_IsUnchanged_AndOneWithACustomerCaller_TakesTheRestrictedContentTeam()
     {
-        var kept = await AskAsync(World(), RecordOwnershipContext.ForChild(Row("sprk_policy")) with { WhenUnfiled = UnfiledOwnership.KeepCreator });
-        var acting = await AskAsync(World(),
-            RecordOwnershipContext.ForChild(Row("sprk_policy")) with { CallerObjectId = FakeDirectory.CallerOid });
+        var directory = World().WithUser(CustomerUser, CustomerUserOid, CustomerChildBu);
+
+        var kept = await AskAsync(directory, RecordOwnershipContext.ForChild(Row("sprk_policy")) with { WhenUnfiled = UnfiledOwnership.KeepCreator });
+        var acting = await AskAsync(directory,
+            RecordOwnershipContext.ForChild(Row("sprk_policy")) with { CallerObjectId = CustomerUserOid });
 
         kept.Outcome.Should().Be(RecordOwnerOutcome.Unchanged, "a kept creator is never replaced (rule 1)");
         acting.OwningTeamId.Should().Be(ContentTeam, "the acting user's business-unit default team is the ordinary answer it replaces");
-        acting.InPlaceOfDefaultTeamId.Should().Be(GeneralTeam);
+        acting.InPlaceOfDefaultTeamId.Should().Be(CustomerChildTeam);
+    }
+
+    [Fact(DisplayName = "R4b-2c must fire: an unfiled hard-deny row created by a user homed in the ROOT is refused — customer records never go to the root")]
+    public async Task AnUnfiledHardDenyRow_ByAUserHomedInTheRoot_Refuses()
+    {
+        var acting = await AskAsync(World(),
+            RecordOwnershipContext.ForChild(Row("sprk_policy")) with { CallerObjectId = FakeDirectory.CallerOid });
+
+        acting.Outcome.Should().Be(RecordOwnerOutcome.Refused);
+        acting.RefusalCode.Should().Be(RecordOwnerRefusal.RestrictedContentOwnerTeamUnresolved);
+        acting.Reason.Should().Contain(nameof(RestrictedContentOwnerTeamStatus.AnswerIsRootBusinessUnit));
     }
 
     // ── Fail closed ──────────────────────────────────────────────────────────────────────────────────────────────────
 
-    public static TheoryData<string> UnusableTeams => new() { "missing", "member", "outside-root", "two-roots" };
+    public static TheoryData<string> UnusableTeams => new()
+    {
+        "missing", "member", "only-in-root", "two", "answer-in-root", "under-secure", "loop", "unreadable",
+    };
 
     [Theory]
     [MemberData(nameof(UnusableTeams))]
     public async Task AnUnusableRestrictedContentTeam_Refuses_NeverTheDefaultTeam(string why)
     {
+        var matter = OrdinaryMatter;
+        var (loopA, loopB, orphan, underSecure) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
         var directory = why switch
         {
             "missing" => World(FakeDirectory.Standard(withRestrictedContentTeam: false)),
             "member" => World().WithTeamMember(ContentTeam, FakeDirectory.CallerUserId),
-            "outside-root" => World(FakeDirectory.Standard(withRestrictedContentTeam: false)
-                .WithTeam(ContentTeam, ChildBu, isDefault: false, teamType: 0, RestrictedContentOwnerTeam.DefaultOwnerTeamName)),
-            "two-roots" => World().WithBusinessUnit(Guid.NewGuid(), "A second root"),
+            "only-in-root" => World(FakeDirectory.Standard(withRestrictedContentTeam: false)
+                .WithTeam(ContentTeam, GeneralBu, isDefault: false, teamType: 0, RestrictedContentOwnerTeam.DefaultOwnerTeamName)),
+            "two" => World().WithTeam(Guid.NewGuid(), ChildBu, isDefault: false, teamType: 0, RestrictedContentOwnerTeam.DefaultOwnerTeamName),
+            "answer-in-root" => World(),
+            "under-secure" => WithMatterIn(World(), underSecure, SecureBu, matter = Guid.NewGuid()),
+            "loop" => WithMatterIn(World(), loopA, loopB, matter = Guid.NewGuid()).WithBusinessUnit(loopB, "Loop B", parent: loopA),
+            "unreadable" => WithMatterIn(World(), Guid.NewGuid(), orphan, matter = Guid.NewGuid()),
             _ => throw new ArgumentOutOfRangeException(nameof(why)),
         };
+        if (why == "answer-in-root")
+            matter = RootMatter;
 
-        var resolution = await AskAsync(directory, RecordOwnershipContext.ForChild(Row("sprk_policy", ("sprk_matter", "sprk_matter", OrdinaryMatter))));
+        var resolution = await AskAsync(directory, PolicyUnder(matter));
 
         resolution.Outcome.Should().Be(RecordOwnerOutcome.Refused, why);
         resolution.RefusalCode.Should().Be(RecordOwnerRefusal.RestrictedContentOwnerTeamUnresolved);
         resolution.Reason.Should().Contain(why switch
         {
-            "missing" => nameof(RestrictedContentOwnerTeamStatus.OwnerTeamNotFound),
+            "missing" or "only-in-root" => nameof(RestrictedContentOwnerTeamStatus.OwnerTeamNotFound),
             "member" => nameof(RestrictedContentOwnerTeamStatus.OwnerTeamHasMembers),
-            "outside-root" => nameof(RestrictedContentOwnerTeamStatus.OwnerTeamNotInRootBusinessUnit),
-            _ => nameof(RestrictedContentOwnerTeamStatus.RootBusinessUnitAmbiguous),
+            "two" => nameof(RestrictedContentOwnerTeamStatus.OwnerTeamAmbiguous),
+            "answer-in-root" => nameof(RestrictedContentOwnerTeamStatus.AnswerIsRootBusinessUnit),
+            "under-secure" => nameof(RestrictedContentOwnerTeamStatus.CustomerBusinessUnitIsSecureRecord),
+            "loop" => nameof(RestrictedContentOwnerTeamStatus.ParentChainLoops),
+            _ => nameof(RestrictedContentOwnerTeamStatus.ParentChainUnreadable),
         });
+    }
+
+    [Fact(DisplayName = "R4b-2c: a refusal logs at Error with the status and the business units — and names nobody")]
+    public async Task ARefusal_LogsAnError_ThatNamesNobody()
+    {
+        var log = new RecordingLog();
+        var directory = World().WithTeamMember(ContentTeam, FakeDirectory.CallerUserId);
+
+        await directory.Resolver(logger: log).ResolveOwnerAsync(PolicyUnder(OrdinaryMatter), CancellationToken.None);
+
+        var error = log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error).Which.Message;
+        error.Should().Contain(nameof(RestrictedContentOwnerTeamStatus.OwnerTeamHasMembers)).And.Contain(ChildBu.ToString());
+        error.Should().NotContain(FakeDirectory.CallerUserId.ToString()).And.NotContain(FakeDirectory.CallerOid.ToString());
     }
 
     [Fact]
@@ -190,18 +294,25 @@ public class RestrictedContentOwnerTests
     }
 
     [Fact]
-    public async Task TheTeamIsIdentifiedOncePerPass_WhenTheQuestionCarriesThePassCache()
+    public async Task TheWalkAndTheTeamAreReadOncePerPass_WhenTheQuestionCarriesThePassCache()
     {
         var directory = World();
         var cache = new RecordOwnerLookupCache();
-        var question = RecordOwnershipContext.ForChild(Row("sprk_policy", ("sprk_matter", "sprk_matter", OrdinaryMatter))) with { LookupCache = cache };
+        var question = PolicyUnder(OrdinaryMatter) with { LookupCache = cache };
 
         (await AskAsync(directory, question)).OwningTeamId.Should().Be(ContentTeam);
-        cache.RestrictedContentOwnerTeam.Should().NotBeNull();
-        cache.RestrictedContentOwnerTeam!.MembersFound.Should().Be(0, "the member check the pass reports");
+        cache.RestrictedContentOwnerTeams.Should().ContainSingle().Which.MembersFound.Should().Be(0, "the member check the pass reports");
+        directory.BusinessUnitIdReads.Should().Be(2, "the walk: the matter's unit, then its parent (the root)");
+        var memberReads = directory.QueriedEntities.Count(e => e == "teammembership");
 
         directory.WithTeamMember(ContentTeam, FakeDirectory.CallerUserId);
         (await AskAsync(directory, question)).OwningTeamId.Should().Be(ContentTeam, "the pass's answer, not read again");
+        (await AskAsync(directory, PolicyUnder(CustomerChildMatter) with { LookupCache = cache })).OwningTeamId
+            .Should().Be(ContentTeam, "another answer unit under the same customer: its walk is read, the team is the pass's");
+        directory.QueriedEntities.Count(e => e == "teammembership").Should().Be(memberReads, "the team is identified once per customer unit");
+        directory.BusinessUnitIdReads.Should().Be(2 + 3, "the first walk is the pass's; the new answer unit is walked (three units)");
+        cache.RestrictedContentOwnerTeams.Should().ContainSingle("one customer unit, one team");
+
         (await AskAsync(directory, question with { LookupCache = new RecordOwnerLookupCache() })).IsRefused
             .Should().BeTrue("the next pass reads the team again and sees its member");
     }
@@ -211,29 +322,27 @@ public class RestrictedContentOwnerTests
     [Fact]
     public async Task ReFilingAPolicyToAnotherOrdinaryMatter_KeepsItWithTheRestrictedContentTeam()
     {
-        var otherMatter = Guid.NewGuid();
         var directory = World()
-            .WithRecord("sprk_matter", otherMatter, GeneralBu, owningTeam: GeneralTeam)
-            .WithRecord("sprk_policy", Policy, GeneralBu, owningTeam: ContentTeam,
+            .WithRecord("sprk_policy", Policy, ChildBu, owningTeam: ContentTeam,
                 extra: new() { ["sprk_matter"] = new EntityReference("sprk_matter", OrdinaryMatter) });
         var request = new RecordReparent
         {
             EntityLogicalName = "sprk_policy",
             RecordId = Policy,
-            ParentChanges = new Dictionary<string, EntityReference?> { ["sprk_matter"] = new EntityReference("sprk_matter", otherMatter) },
+            ParentChanges = new Dictionary<string, EntityReference?> { ["sprk_matter"] = new EntityReference("sprk_matter", CustomerChildMatter) },
         };
 
         var resolution = await directory.Resolver().ReparentAsync(
             request,
             _ =>
             {
-                directory.Write("sprk_policy", Policy, new Dictionary<string, object?> { ["sprk_matter"] = new EntityReference("sprk_matter", otherMatter) });
+                directory.Write("sprk_policy", Policy, new Dictionary<string, object?> { ["sprk_matter"] = new EntityReference("sprk_matter", CustomerChildMatter) });
                 return Task.CompletedTask;
             },
             CancellationToken.None);
 
         resolution.OwningTeamId.Should().Be(ContentTeam);
-        directory.Assignments.Should().NotContain(a => a.TeamId == GeneralTeam || a.TeamId == ChildTeam);
+        directory.Assignments.Should().NotContain(a => a.TeamId == GeneralTeam || a.TeamId == ChildTeam || a.TeamId == CustomerChildTeam);
     }
 
     /// <summary>R4b-2b (rule 1): a row of <paramref name="table"/> owned by its author (the caller), filed under the ordinary
@@ -268,9 +377,7 @@ public class RestrictedContentOwnerTests
     [Fact]
     public async Task ReFilingAnAuthorOwnedPolicyToAnotherOrdinaryMatter_KeepsItsAuthor()
     {
-        var otherMatter = Guid.NewGuid();
-        var (directory, resolution) = await ReFileAuthorOwnedAsync(
-            "sprk_policy", "sprk_matter", otherMatter, World().WithRecord("sprk_matter", otherMatter, GeneralBu, owningTeam: GeneralTeam));
+        var (directory, resolution) = await ReFileAuthorOwnedAsync("sprk_policy", "sprk_matter", CustomerChildMatter);
 
         resolution.IsOwned.Should().BeFalse("rule 1: the content team never replaces a kept creator");
         resolution.Reason.Should().Be(RecordOwnershipContext.AuthorKeptRestrictedContentReason);
@@ -289,12 +396,22 @@ public class RestrictedContentOwnerTests
     [Fact]
     public async Task ReFilingAnAuthorOwnedRowOfAnotherTable_IsStillReOwnedToTheDefaultTeam()
     {
-        var otherMatter = Guid.NewGuid();
-        var (directory, resolution) = await ReFileAuthorOwnedAsync(
-            "sprk_event", "sprk_regardingmatter", otherMatter,
-            World().WithRecord("sprk_matter", otherMatter, GeneralBu, owningTeam: GeneralTeam));
+        var (directory, resolution) = await ReFileAuthorOwnedAsync("sprk_event", "sprk_regardingmatter", RootMatter);
 
         resolution.OwningTeamId.Should().Be(GeneralTeam, "the kept-author rule is the hard-deny tables' only");
         directory.Assignments.Should().ContainSingle().Which.TeamId.Should().Be(GeneralTeam);
+    }
+
+    private sealed class RecordingLog : ILogger<RecordOwnershipResolver>
+    {
+        public List<(LogLevel Level, string Message)> Entries { get; } = new();
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            Entries.Add((logLevel, formatter(state, exception)));
     }
 }

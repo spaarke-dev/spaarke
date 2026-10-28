@@ -215,11 +215,13 @@ public sealed record SecureChildReconcileReport(
     public IReadOnlyList<Guid> OrdinaryHandOffDocumentIds { get; init; } = Array.Empty<Guid>();
 
     /// <summary>
-    /// UAC task 194b R4b-2: the restricted-content owner team as this pass identified it — its status and the member check
-    /// (<see cref="Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeamIdentity.MembersFound"/>) — when a hard-deny
-    /// row of the pass asked for it; <c>null</c> when none did.
+    /// UAC task 194b R4b-2/R4b-2c: the restricted-content owner teams as this pass identified them — one per customer top
+    /// business unit a hard-deny row's answer sat under, and one per refusal of the walk to it, each with its status and the
+    /// member check (<see cref="Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeamIdentity.MembersFound"/>).
+    /// Empty when no hard-deny row asked.
     /// </summary>
-    public Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeamIdentity? RestrictedContentOwnerTeam { get; init; }
+    public IReadOnlyList<Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeamIdentity> RestrictedContentOwnerTeams { get; init; } =
+        Array.Empty<Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeamIdentity>();
 
     /// <summary>Rows re-owned by this pass.</summary>
     public int ChildrenReowned => Tables.Sum(t => t.Changed);
@@ -2145,7 +2147,7 @@ public sealed class SecureChildReconciler
                         h.Row.LogicalName, h.Row.Id, h.Result.Previous, h.Result.Target, h.Result.Outcome, h.Result.Detail))
                     .ToList(),
                 OrdinaryWritesAttempted = _ordinaryWritesAttempted,
-                RestrictedContentOwnerTeam = _lookupCache.RestrictedContentOwnerTeam,
+                RestrictedContentOwnerTeams = _lookupCache.RestrictedContentOwnerTeams,
                 OrdinaryHandOffDocumentIds = _documentHandOff.Where(d => d.Value).Select(d => d.Key).OrderBy(id => id).ToList(),
                 IsolatedDocumentIds = ordered
                     .Where(r => string.Equals(r.LogicalName, DocumentTable, StringComparison.OrdinalIgnoreCase)
@@ -2533,6 +2535,22 @@ public sealed class SecureChildReconciler
                 }
 
                 resolution = await _owner._ownership.ResolveOwnerAsync(ContextFor(row), _ct).ConfigureAwait(false);
+
+                // R4b-2c (F2): the restricted-content owner team replaces a default team only. A row this pass never moves —
+                // user-owned, or owned by a team that is not a default team — is left as it is whether or not that team can
+                // be used, so its refusal is reported on the row and does not leave the pass Incomplete on every run.
+                if (resolution.IsRefused
+                    && resolution.RefusalCode == RecordOwnerRefusal.RestrictedContentOwnerTeamUnresolved
+                    && (current.Value.Kind != DataversePrincipalKind.Team || owningTeam is { IsDefault: false }))
+                {
+                    return new(RowMove.Stay, SecureChildRowOutcome.Untouched, null, current.Value.Kind != DataversePrincipalKind.Team
+                        ? "owned by a user, and the restricted-content owner team its answer needs cannot be used " +
+                          $"({resolution.Reason}): reported, not moved (I-6 interim — a row created outside the product keeps " +
+                          "its creator)"
+                        : "owned by a team that is not a business unit's default team, and the restricted-content owner team " +
+                          $"its answer needs cannot be used ({resolution.Reason}): reported, not moved");
+                }
+
                 if (resolution.IsRefused)
                 {
                     Log.LogWarning("[SECURE-CHILD-RECONCILE] ordinary move {Table} {Id}: the ownership rule refused ({Code}: " +
@@ -2578,7 +2596,7 @@ public sealed class SecureChildReconciler
                     $"the team the rule gives it ({target:D}) does not exist or has no business unit");
             }
 
-            // R4b-2: a hard-deny row's answer is the restricted-content owner team (root business unit). A row this pass never
+            // R4b-2: a hard-deny row's answer is the restricted-content owner team (the customer's top business unit). A row this pass never
             // moves (user-owned, or owned by a non-default team) is still compared with the business unit its ordinary answer
             // names — the default team that team replaced — so its report is the one it had before (rule 1: keep the creator).
             var ordinaryBu = resolution.InPlaceOfDefaultTeamId is { } replaced

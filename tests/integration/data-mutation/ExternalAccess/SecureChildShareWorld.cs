@@ -38,9 +38,14 @@ internal sealed class SecureChildShareWorld
 
     public static readonly Guid SomeUser = Guid.Parse("8d7bad7a-e39e-f011-bbd3-7c1e5217cd7c");
 
-    /// <summary>UAC task 194b R4b-2: the restricted-content owner team — named, non-default, in the ROOT business unit
-    /// (<see cref="GeneralBu"/>), no members.</summary>
+    /// <summary>UAC task 194b R4b-2c (owner round 136): the restricted-content owner team — named, non-default, in the
+    /// CUSTOMER's top business unit (<see cref="CustomerBu"/>, the root's direct child), no members.</summary>
     public static readonly Guid RestrictedContentTeam = Guid.Parse("0e5c0e5c-0086-4086-8086-000000000086");
+
+    /// <summary>R4b-2c: the customer's top business unit (a direct child of the root, as dev's "Spaarke Business Unit 1")
+    /// and its default team.</summary>
+    public static readonly Guid CustomerBu = Guid.Parse("0e5c0e5c-0086-4086-8086-0000000000c3");
+    public static readonly Guid CustomerTeam = Guid.Parse("0e5c0e5c-0086-4086-8086-0000000000c4");
 
     public const string SecureBuName = "Secure Record";
     public const string SecureOwnerTeamName = "Secure Record Owners";
@@ -99,7 +104,10 @@ internal sealed class SecureChildShareWorld
         world.Team(Guid.NewGuid(), secureBu, SecureOwnerTeamName, isDefault: false, teamType: 1); // access team, right name
         world.Team(Guid.NewGuid(), secureBu, SecureOwnerTeamName + " Extra", isDefault: false, teamType: 0);
         world.Team(secureTeam, secureBu, SecureOwnerTeamName, isDefault: false, teamType: 0);
-        world.Team(RestrictedContentTeam, GeneralBu,
+        // R4b-2c: the customer's top unit, beside the Secure Record unit, holds the restricted-content owner team.
+        world.Add("businessunit", CustomerBu, ("name", "Spaarke Business Unit 1"), ("parentbusinessunitid", new EntityReference("businessunit", GeneralBu)));
+        world.Team(CustomerTeam, CustomerBu, "Spaarke Business Unit 1", isDefault: true, teamType: 0);
+        world.Team(RestrictedContentTeam, CustomerBu,
             Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeam.DefaultOwnerTeamName, isDefault: false, teamType: 0);
         world.User(SomeUser, GeneralBu);
         return world;
@@ -179,8 +187,23 @@ internal sealed class SecureChildShareWorld
     {
         _failingTables.Clear();
         _failingIdListReads.Clear();
+        _failingLikeReads.Clear();
         return this;
     }
+
+    private readonly HashSet<string> _failingLikeReads = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>UAC task 194b R4b-2c (F3c): makes every query of one table with a text match (<c>LIKE</c>, in any filter) throw —
+    /// the Decision Record steps read — while its other queries still answer.</summary>
+    public SecureChildShareWorld FailingLikeReadsOf(string table)
+    {
+        _failingLikeReads.Add(table);
+        return this;
+    }
+
+    /// <summary>True when <paramref name="filter"/> or a filter below it holds a <c>LIKE</c> condition.</summary>
+    internal static bool HasLike(FilterExpression filter) =>
+        filter.Conditions.Any(c => c.Operator == ConditionOperator.Like) || filter.Filters.Any(HasLike);
 
     /// <summary>
     /// Makes every read of ONE row by its id throw (task 149 r1: a lineage fault on one record — the walk's single-row
@@ -802,6 +825,8 @@ internal sealed class SecureChildShareWorld
         }
         if (_failingTables.Contains(query.EntityName))
             throw QueryFault?.Invoke() ?? new InvalidOperationException($"Test: {query.EntityName} cannot be read.");
+        if (_failingLikeReads.Contains(query.EntityName) && HasLike(query.Criteria))
+            throw new InvalidOperationException($"Test: a text match on {query.EntityName} cannot be read.");
         if (query.Criteria.Conditions.Any(c =>
                 c.AttributeName == query.EntityName + "id" && c.Operator == ConditionOperator.Equal
                 && c.Values.Single() is Guid id && _failingRowReads.Contains((query.EntityName, id))))

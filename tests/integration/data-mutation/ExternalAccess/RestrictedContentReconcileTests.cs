@@ -4,7 +4,9 @@
 //   - Justification: UAC task 194b R4b-2 (owner round 131, the 086 ruling) — the reconciler's side of the hard-deny tables. An
 //     Unsecure moves a team-owned hard-deny row to the restricted-content owner team (read back, counted moved); the ordinary
 //     pass expects that team for team-owned rows (no I-6 report) and keeps its report on a user-owned (author-owned) row as it
-//     was; Make Secure is unchanged; an unusable team refuses, and the pass reports the member check.
+//     was; Make Secure is unchanged; an unusable team refuses, and the pass reports the member check. R4b-2c (owner round 136):
+//     the team is the customer top unit's (the root's direct child above the answer); an answer in the root refuses; a row the
+//     pass never moves (user-owned, a non-default team) is reported, not refused, when the team cannot be used (F2).
 //
 // Doubles are module boundaries only (ADR-038 §4): the REAL reconciler and resolver over task 148's world (SecureChildShareWorld).
 
@@ -26,8 +28,16 @@ public class RestrictedContentReconcileTests
     private static readonly Guid GeneralBu = SecureChildShareWorld.GeneralBu;
     private static readonly Guid GeneralTeam = SecureChildShareWorld.GeneralTeam;
     private static readonly Guid ContentTeam = SecureChildShareWorld.RestrictedContentTeam;
+    private static readonly Guid CustomerBu = SecureChildShareWorld.CustomerBu;
+    private static readonly Guid CustomerTeam = SecureChildShareWorld.CustomerTeam;
 
-    /// <summary>Business unit B (under the root), where the matter was reassigned, and its default team.</summary>
+    /// <summary>R4b-2c: a second customer top unit (a direct child of the root) with NO restricted-content owner team, and its
+    /// default team and a non-default owner team.</summary>
+    private static readonly Guid BareCustomerBu = Guid.Parse("0c000000-0000-4000-8000-000000194c01");
+    private static readonly Guid BareCustomerTeam = Guid.Parse("0c000000-0000-4000-8000-000000194c02");
+    private static readonly Guid BareNonDefaultTeam = Guid.Parse("0c000000-0000-4000-8000-000000194c03");
+
+    /// <summary>Business unit B (under the customer's top unit), where the matter was reassigned, and its default team.</summary>
     private static readonly Guid BuB = Guid.Parse("0b000000-0000-4000-8000-000000194b01");
     private static readonly Guid TeamB = Guid.Parse("0b000000-0000-4000-8000-000000194b02");
 
@@ -37,8 +47,11 @@ public class RestrictedContentReconcileTests
     private static readonly Guid Author = Guid.Parse("5e000000-0000-4000-8000-000000194b20");
 
     private readonly SecureChildShareWorld _world = SecureChildShareWorld.Standard()
-        .Add("businessunit", BuB, ("name", "Litigation"), ("parentbusinessunitid", new EntityReference("businessunit", GeneralBu)))
-        .Team(TeamB, BuB, "Litigation", isDefault: true, teamType: 0);
+        .Add("businessunit", BuB, ("name", "Litigation"), ("parentbusinessunitid", new EntityReference("businessunit", CustomerBu)))
+        .Team(TeamB, BuB, "Litigation", isDefault: true, teamType: 0)
+        .Add("businessunit", BareCustomerBu, ("name", "Customer Two"), ("parentbusinessunitid", new EntityReference("businessunit", GeneralBu)))
+        .Team(BareCustomerTeam, BareCustomerBu, "Customer Two", isDefault: true, teamType: 0)
+        .Team(BareNonDefaultTeam, BareCustomerBu, "Customer Two Paralegals", isDefault: false, teamType: 0);
 
     private readonly FakeRecordShareTable _shares = new();
     private readonly SecureChildOrdinaryParentMoveTests.ConditionalOwnerWebApi _webApi;
@@ -58,12 +71,20 @@ public class RestrictedContentReconcileTests
     private void MatterMovedToB() =>
         _world.Add(Matter, MatterId, ("owningteam", TeamRef(TeamB)), ("sprk_issecure", false));
 
+    /// <summary>The matter, ordinary, reassigned to <paramref name="team"/>'s business unit.</summary>
+    private void MatterMovedTo(Guid team) =>
+        _world.Add(Matter, MatterId, ("owningteam", TeamRef(team)), ("sprk_issecure", false));
+
+    /// <summary>Mid-unsecure: the matter is owned by the customer's default team again, its flag cleared last.</summary>
+    private void MatterBeingUnsecured() =>
+        _world.Add(Matter, MatterId, ("owningteam", TeamRef(CustomerTeam)), ("sprk_issecure", true));
+
     // ── Unsecure ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
     [Fact(DisplayName = "R4b-2 must fire: an Unsecure moves an isolated policy and its version to the restricted-content team, read back and counted")]
     public async Task AnUnsecure_MovesIsolatedHardDenyRows_ToTheRestrictedContentTeam()
     {
-        _world.FlaggedNotIsolatedRoot(Matter, MatterId);
+        MatterBeingUnsecured();
         _world.SecureChild("sprk_policy", PolicyId, ("sprk_matter", Matter, MatterId));
         _world.SecureChild("sprk_policyversion", VersionId, ("sprk_policy", "sprk_policy", PolicyId));
 
@@ -76,15 +97,15 @@ public class RestrictedContentReconcileTests
         report.Changes.Where(c => c.Id == PolicyId || c.Id == VersionId).Should().OnlyContain(c =>
             c.Outcome == SecureChildRowOutcome.Changed && c.TargetTeamId == ContentTeam);
         report.ChildrenReowned.Should().Be(2);
-        report.RestrictedContentOwnerTeam.Should().NotBeNull();
-        report.RestrictedContentOwnerTeam!.Status.Should().Be(RestrictedContentOwnerTeamStatus.Resolved);
-        report.RestrictedContentOwnerTeam.MembersFound.Should().Be(0, "the pass reports the member check");
+        report.RestrictedContentOwnerTeams.Should().ContainSingle().Which.Should().Match<RestrictedContentOwnerTeamIdentity>(t =>
+            t.Status == RestrictedContentOwnerTeamStatus.Resolved && t.CustomerBusinessUnitId == CustomerBu && t.MembersFound == 0,
+            "the pass reports the customer unit's team and its member check");
     }
 
     [Fact(DisplayName = "R4b-2 must not fire: an Unsecure leaves an isolated policy isolated when the restricted-content team has a member — refused, and the report names the member check")]
     public async Task AnUnsecure_WhenTheRestrictedContentTeamHasAMember_RefusesAndLeavesTheRowIsolated()
     {
-        _world.FlaggedNotIsolatedRoot(Matter, MatterId);
+        MatterBeingUnsecured();
         _world.SecureChild("sprk_policy", PolicyId, ("sprk_matter", Matter, MatterId));
         _world.Add("teammembership", Guid.NewGuid(), ("teamid", ContentTeam), ("systemuserid", SecureChildShareWorld.SomeUser));
 
@@ -95,8 +116,8 @@ public class RestrictedContentReconcileTests
         report.Changes.Should().ContainSingle(c => c.Id == PolicyId).Which.Should().Match<SecureChildRowChange>(c =>
             c.Outcome == SecureChildRowOutcome.Refused
             && c.Detail!.Contains(Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.RestrictedContentOwnerTeamUnresolved));
-        report.RestrictedContentOwnerTeam!.Status.Should().Be(RestrictedContentOwnerTeamStatus.OwnerTeamHasMembers);
-        report.RestrictedContentOwnerTeam.MembersFound.Should().Be(1);
+        report.RestrictedContentOwnerTeams.Should().ContainSingle().Which.Should().Match<RestrictedContentOwnerTeamIdentity>(t =>
+            t.Status == RestrictedContentOwnerTeamStatus.OwnerTeamHasMembers && t.MembersFound == 1);
     }
 
     // ── Make Secure ──────────────────────────────────────────────────────────────────────────────────────────────────
@@ -164,5 +185,64 @@ public class RestrictedContentReconcileTests
             "its author is in the matter's unit, the unit of the ordinary answer it had before (B): not reported, as before");
         report.Changes.Should().ContainSingle(c => c.Id == inOtherUnit).Which.Detail.Should().Contain("owned by a user",
             "an author in another unit is reported, as before");
+    }
+
+    // ── R4b-2c: the customer's top unit ──────────────────────────────────────────────────────────────────────────────
+
+    [Fact(DisplayName = "R4b-2c F2 must not fire: with no usable team in the customer's unit, the ordinary pass leaves an author-owned and a non-default-team policy, reports them, and COMPLETES")]
+    public async Task TheOrdinaryPass_WithNoUsableTeam_LeavesRowsItNeverMoves_AndCompletes()
+    {
+        var nonDefault = Guid.NewGuid();
+        MatterMovedTo(BareCustomerTeam);
+        _world.User(Author, BareCustomerBu);
+        Row("sprk_policy", PolicyId, new EntityReference("systemuser", Author), ("sprk_matter", Matter, MatterId));
+        Row("sprk_policy", nonDefault, TeamRef(BareNonDefaultTeam), ("sprk_matter", Matter, MatterId));
+
+        var report = await Reconciler().ReconcileOrdinaryParentMoveAsync(
+            Matter, MatterId, SecureChildReconcileMode.Apply, maxWrites: 200, CancellationToken.None);
+
+        report.Status.Should().Be(SecureChildReconcileStatus.Completed, "a row this pass never moves is not work left undone");
+        _world.OwnerOf("sprk_policy", PolicyId).Should().Be(DataversePrincipalRef.User(Author));
+        _world.OwnerOf("sprk_policy", nonDefault).Should().Be(DataversePrincipalRef.Team(BareNonDefaultTeam));
+        _world.OwnerWrites.Should().BeEmpty();
+        report.Changes.Where(c => c.Id == PolicyId || c.Id == nonDefault).Should().HaveCount(2).And.OnlyContain(c =>
+            c.Outcome == SecureChildRowOutcome.Untouched && c.Detail!.Contains("cannot be used")
+            && c.Detail.Contains(nameof(RestrictedContentOwnerTeamStatus.OwnerTeamNotFound)));
+        report.Changes.Single(c => c.Id == PolicyId).Detail.Should().Contain("owned by a user").And.Contain("I-6");
+        report.RestrictedContentOwnerTeams.Should().ContainSingle().Which.Should().Match<RestrictedContentOwnerTeamIdentity>(t =>
+            t.Status == RestrictedContentOwnerTeamStatus.OwnerTeamNotFound && t.CustomerBusinessUnitId == BareCustomerBu);
+    }
+
+    [Fact(DisplayName = "R4b-2c F2 must fire: with no usable team in the customer's unit, a DEFAULT-team policy is refused — nothing written, the pass incomplete")]
+    public async Task TheOrdinaryPass_WithNoUsableTeam_RefusesADefaultTeamPolicy()
+    {
+        MatterMovedTo(BareCustomerTeam);
+        Row("sprk_policy", PolicyId, TeamRef(CustomerTeam), ("sprk_matter", Matter, MatterId));
+
+        var report = await Reconciler().ReconcileOrdinaryParentMoveAsync(
+            Matter, MatterId, SecureChildReconcileMode.Apply, maxWrites: 200, CancellationToken.None);
+
+        report.Status.Should().Be(SecureChildReconcileStatus.Incomplete);
+        _world.OwnerOf("sprk_policy", PolicyId).Should().Be(DataversePrincipalRef.Team(CustomerTeam), "never the default team");
+        _world.OwnerWrites.Should().BeEmpty();
+        report.Changes.Should().ContainSingle(c => c.Id == PolicyId).Which.Outcome.Should().Be(SecureChildRowOutcome.Refused);
+    }
+
+    [Fact(DisplayName = "R4b-2c must fire: a policy whose answer is the ROOT business unit is refused — customer records never go to the root")]
+    public async Task TheOrdinaryPass_RefusesAPolicyWhoseAnswerIsTheRoot()
+    {
+        MatterMovedTo(GeneralTeam);
+        Row("sprk_policy", PolicyId, TeamRef(TeamB), ("sprk_matter", Matter, MatterId));
+
+        var report = await Reconciler().ReconcileOrdinaryParentMoveAsync(
+            Matter, MatterId, SecureChildReconcileMode.Apply, maxWrites: 200, CancellationToken.None);
+
+        report.Status.Should().Be(SecureChildReconcileStatus.Incomplete);
+        _world.OwnerOf("sprk_policy", PolicyId).Should().Be(DataversePrincipalRef.Team(TeamB));
+        _world.OwnerWrites.Should().BeEmpty();
+        report.Changes.Should().ContainSingle(c => c.Id == PolicyId).Which.Should().Match<SecureChildRowChange>(c =>
+            c.Outcome == SecureChildRowOutcome.Refused
+            && c.Detail!.Contains(nameof(RestrictedContentOwnerTeamStatus.AnswerIsRootBusinessUnit)));
+        report.RestrictedContentOwnerTeams.Should().ContainSingle().Which.CustomerBusinessUnitId.Should().BeNull();
     }
 }

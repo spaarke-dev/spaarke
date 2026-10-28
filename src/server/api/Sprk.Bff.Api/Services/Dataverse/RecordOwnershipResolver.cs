@@ -254,8 +254,17 @@ public sealed class RecordOwnerLookupCache
     /// <summary>Each business unit's default owner team answer, once read.</summary>
     internal Dictionary<Guid, RecordOwnerResolution> DefaultOwnerTeams { get; } = new();
 
-    /// <summary>R4b-2: the restricted-content owner team's identification and member check, once read (the pass reports it).</summary>
-    public Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeamIdentity? RestrictedContentOwnerTeam { get; internal set; }
+    /// <summary>R4b-2c: each answer business unit's restricted-content owner team outcome (the walk to the customer's top unit
+    /// and the team there), once read.</summary>
+    internal Dictionary<Guid, Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeamIdentity> RestrictedContentByAnswerBusinessUnit { get; } = new();
+
+    /// <summary>R4b-2c: each customer top business unit's restricted-content owner team identification, once read.</summary>
+    internal Dictionary<Guid, Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeamIdentity> RestrictedContentByCustomerBusinessUnit { get; } = new();
+
+    /// <summary>R4b-2c: every restricted-content owner team outcome this pass met — one per customer top business unit, and
+    /// one per refusal of the walk (the pass reports them); empty when no hard-deny row asked.</summary>
+    public IReadOnlyList<Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeamIdentity> RestrictedContentOwnerTeams =>
+        RestrictedContentByAnswerBusinessUnit.Values.Distinct().ToList();
 }
 
 public sealed record RecordOwnershipContext
@@ -1413,8 +1422,10 @@ public static class RecordOwnerRefusal
     /// </summary>
     public const string ParentUndetermined = "record_owner_parent_undetermined";
 
-    /// <summary>UAC task 194b R4b-2: a hard-deny row's restricted-content owner team is missing, ambiguous, outside the root
-    /// business unit or has a member (<see cref="Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeamStatus"/>).</summary>
+    /// <summary>UAC task 194b R4b-2/R4b-2c: a hard-deny row's restricted-content owner team cannot be used — the answer is in
+    /// the root itself or under the Secure Record unit, the parent chain cannot be read or loops, or the team in the customer's
+    /// top business unit is missing, ambiguous or has a member
+    /// (<see cref="Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeamStatus"/>).</summary>
     public const string RestrictedContentOwnerTeamUnresolved = "record_owner_restricted_content_team_unresolved";
 }
 
@@ -1752,8 +1763,9 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// <summary>
     /// UAC task 194b R4b-2 (owner round 131, the 086 ruling): the HARD-DENY tables. A row of one of these whose ordinary answer
     /// would be a business unit's default team goes instead to the restricted-content owner team
-    /// (<see cref="Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeam"/>: the root business unit, no members, Read
-    /// only at Basic on exactly these tables), so no business-unit depth reaches it. A Secure answer is unchanged, and so is
+    /// (<see cref="Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeam"/>: in the customer's top business unit above
+    /// the answer — the root's direct child, owner round 136 — no members, Read only at Basic on exactly these tables), so no
+    /// business-unit depth reaches it. A Secure answer is unchanged, and so is
     /// every answer that keeps the creator (the reconciler's unfiled rows, a writer's KeepCreator). Read through
     /// <see cref="IsRestrictedContentTable"/> at the resolver's ordinary exits, for the table
     /// <see cref="RecordOwnershipContext.ChildEntityLogicalName"/> names.
@@ -3644,7 +3656,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
 
         return await OrdinaryExitAsync(
             await ResolveDefaultOwnerTeamAsync(facts[0].BusinessUnitId, ct, context.LookupCache).ConfigureAwait(false),
-            context, ct).ConfigureAwait(false);
+            facts[0].BusinessUnitId, context, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -3994,43 +4006,81 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         return secureBu.Id == businessUnitId
             ? await ResolveNamedSecureOwnerTeamAsync(businessUnitId.Value, ct).ConfigureAwait(false)
             : await OrdinaryExitAsync(
-                await ResolveDefaultOwnerTeamAsync(businessUnitId.Value, ct).ConfigureAwait(false), context, ct).ConfigureAwait(false);
+                await ResolveDefaultOwnerTeamAsync(businessUnitId.Value, ct).ConfigureAwait(false), businessUnitId.Value, context, ct)
+                .ConfigureAwait(false);
     }
 
     /// <summary>
-    /// UAC task 194b R4b-2 (owner round 131): the ordinary exit. A business unit's default team answer for a row of a hard-deny
-    /// table (<see cref="IsRestrictedContentTable"/>, the table <see cref="RecordOwnershipContext.ChildEntityLogicalName"/>
-    /// names) becomes the restricted-content owner team's — identified once per pass when the question carries the pass's
-    /// cache — recording the default team it replaced (<see cref="RecordOwnerResolution.InPlaceOfDefaultTeamId"/>). Every
-    /// other answer passes through unchanged: a Secure answer, a refusal, and an answer that keeps the creator never reach a
-    /// default team. FAIL CLOSED: a team that cannot be used refuses (<see cref="RecordOwnerRefusal.RestrictedContentOwnerTeamUnresolved"/>),
-    /// never the default team.
+    /// UAC task 194b R4b-2 (owner round 131) and R4b-2c (owner round 136): the ordinary exit. A business unit's default team
+    /// answer for a row of a hard-deny table (<see cref="IsRestrictedContentTable"/>, the table
+    /// <see cref="RecordOwnershipContext.ChildEntityLogicalName"/> names) becomes the restricted-content owner team of the
+    /// CUSTOMER's top business unit above <paramref name="answerBusinessUnitId"/> (the root's direct child it sits under) —
+    /// the walk and the team kept for the pass when the question carries the pass's cache — recording the default team it
+    /// replaced (<see cref="RecordOwnerResolution.InPlaceOfDefaultTeamId"/>). Every other answer passes through unchanged: a
+    /// Secure answer, a refusal, and an answer that keeps the creator never reach a default team. FAIL CLOSED: an answer in the
+    /// root itself, a top unit that is the Secure Record unit, a parent chain that cannot be read or loops, and a team that
+    /// cannot be used each refuse (<see cref="RecordOwnerRefusal.RestrictedContentOwnerTeamUnresolved"/>), never the default team.
     /// </summary>
     private async Task<RecordOwnerResolution> OrdinaryExitAsync(
-        RecordOwnerResolution defaultTeam, RecordOwnershipContext context, CancellationToken ct)
+        RecordOwnerResolution defaultTeam, Guid answerBusinessUnitId, RecordOwnershipContext context, CancellationToken ct)
     {
         if (!defaultTeam.IsOwned || defaultTeam.IsSecureOwner || !IsRestrictedContentTable(context.ChildEntityLogicalName))
             return defaultTeam;
 
-        var identity = context.LookupCache?.RestrictedContentOwnerTeam
-                       ?? await Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeam
-                           .IdentifyAsync(_dataverse, _configuration, ct).ConfigureAwait(false);
-        if (context.LookupCache is not null)
-            context.LookupCache.RestrictedContentOwnerTeam = identity;
-
+        var identity = await RestrictedContentOwnerTeamForAsync(answerBusinessUnitId, context.LookupCache, ct).ConfigureAwait(false);
         if (!identity.IsResolved)
         {
             _logger.LogError(
                 "Refusing to resolve an owning team for a {Table} row: the restricted-content owner team cannot be used "
-                + "({Status}; {MembersFound} member(s) read). A hard-deny row is never owned by a business unit's default team "
-                + "(UAC task 194b R4b-2).",
-                context.ChildEntityLogicalName, identity.Status, identity.MembersFound);
+                + "({Status}; answer business unit {AnswerBusinessUnitId}, customer business unit {CustomerBusinessUnitId}; "
+                + "{MembersFound} member(s) read). A hard-deny row is never owned by a business unit's default team "
+                + "(UAC task 194b R4b-2c).",
+                context.ChildEntityLogicalName, identity.Status, answerBusinessUnitId, identity.CustomerBusinessUnitId,
+                identity.MembersFound);
             return RecordOwnerResolution.Refused(
                 RecordOwnerRefusal.RestrictedContentOwnerTeamUnresolved,
                 $"the restricted-content owner team cannot be used ({identity.Status})");
         }
 
         return RecordOwnerResolution.Owned(identity.OwnerTeamId!.Value) with { InPlaceOfDefaultTeamId = defaultTeam.OwningTeamId };
+    }
+
+    /// <summary>
+    /// R4b-2c: the restricted-content owner team for an answer in <paramref name="answerBusinessUnitId"/>: the walk to the
+    /// customer's top business unit, then the team there — each kept in the pass's cache when there is one. Only answers are
+    /// kept; a read that faults propagates and is asked again.
+    /// </summary>
+    private async Task<Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeamIdentity> RestrictedContentOwnerTeamForAsync(
+        Guid answerBusinessUnitId, RecordOwnerLookupCache? cache, CancellationToken ct)
+    {
+        if (cache is not null && cache.RestrictedContentByAnswerBusinessUnit.TryGetValue(answerBusinessUnitId, out var known))
+            return known;
+
+        Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeamIdentity identity;
+        var (top, walk) = await Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeam
+            .CustomerTopBusinessUnitAsync(_dataverse, answerBusinessUnitId, ct).ConfigureAwait(false);
+        if (top is not { } customerBu)
+        {
+            identity = new(walk, null, null, 0);
+        }
+        else if (cache is not null && cache.RestrictedContentByCustomerBusinessUnit.TryGetValue(customerBu, out var team))
+        {
+            identity = team;
+        }
+        else
+        {
+            var secureBu = await SecureBusinessUnitAsync(cache, ct).ConfigureAwait(false);
+            identity = secureBu.Ambiguous
+                ? new(Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeamStatus.SecureBusinessUnitAmbiguous, null, customerBu, 0)
+                : await Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeam
+                    .IdentifyAsync(_dataverse, _configuration, customerBu, secureBu.Id, ct).ConfigureAwait(false);
+            if (cache is not null)
+                cache.RestrictedContentByCustomerBusinessUnit[customerBu] = identity;
+        }
+
+        if (cache is not null)
+            cache.RestrictedContentByAnswerBusinessUnit[answerBusinessUnitId] = identity;
+        return identity;
     }
 
     /// <summary>
