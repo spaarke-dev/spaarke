@@ -161,9 +161,27 @@ Recorded, not fixed here:
   - Round 1 first fixed the invoice side by counting only visible rows (`81071dd45c`). That fix was reverted (`git revert`) at uac-r2's direction, because uac-r2 owns `read_query`'s posture.
   - uac-r2's reasoning: when the raw page hits TOP but fewer visible rows come back, more visible rows can exist beyond the page, so a visible-only count makes a truncated answer look complete. That is a correctness regression, traded for an oracle that is no escalation, because flagged users can read `sprk_invoice` directly in Dataverse until 191 closes it.
   - The invoice and document paths keep one identical posture: the raw-page cap.
-  - Owner: uac-r2 issue, tied to 191, covering both documents and invoices. The fix is to page until TOP visible rows, within a budget.
+  - Owner: uac-r2, #2369, covering both documents and invoices. The fix is to page until TOP visible rows, within a budget.
 
 Seeding proofs for this round: skipping the submission read failed 8 tests (the `ConfirmRoute_*` must-fire, fault and truncation tests and the batched-reads test); ignoring the unknowable columns failed the 4 K1 cases; dropping the interface match failed the guard's negative-control test.
+
+## Review round 2, 2026-10-28
+
+uac-r2 re-checked `41a0ec7a6d`.
+
+Fixed: a submission whose document link is empty hides the invoice (`source_link_unreadable`). This is safe for real data: the submission evaluation refuses a submission with no document before any invoice exists (`SubmissionEvaluationOutcome.cs:128-131`, `DocumentMissing`), and the persister is the only writer of a submission's invoice.
+- Tests: `ConfirmRoute_ASubmissionWhoseDocumentLinkIsEmpty_HidesTheInvoice` and `ConfirmRoute_ADocumentLinkEmptiedAfterTheInvoiceWasCreated_HidesTheInvoice`, for both callers. `ConfirmRoute_ASubmissionsReadableDocument_LeavesTheInvoiceVisible` now covers only the readable document. The taint-closure fixture gives each submission row a document, as a real submission has.
+- Seeding proof: with the old submission filter restored, the two new tests failed for both callers (4 failures); the file was restored.
+
+Known limits, recorded:
+- **K1.** `sprk_invoicesubmission.sprk_document` is not write-protected. Tracked in #2372 (field-secured, BFF-only write), which waits for 191.
+- **K2. Guard blind spots.** The guard does not see a family read through:
+  - an adapter or extension-method class outside the external-plane namespaces;
+  - a DI-bound `Func<>`;
+  - an abstract base of a reader type.
+
+  The interface branch added in round 1 is proven only by its fixture today; no real external-plane caller uses it yet.
+- **K3. Cost.** The submission read adds ⌈N/50⌉ reads per call. The `[EXT-INVOICE-VISIBILITY]` cost line logs it as `submissionReads`.
 
 ## Escalation
 
