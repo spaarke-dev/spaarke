@@ -223,7 +223,7 @@ public sealed class DataverseUserClient : IDataverseUserClient
         // Ontology task 170 (D-196): the caller's WhoAmI under this exact credential was already answered in this request —
         // the same answer, not another round trip (CallerWhoAmIMemo: per request, per credential, successes only).
         var isWhoAmI = CallerWhoAmIMemo.IsWhoAmI(method, apiPath);
-        if (isWhoAmI && CallerWhoAmIMemo.TryGetBody(httpContext, dataverseToken, out var knownCaller))
+        if (isWhoAmI && CallerWhoAmIMemo.TryGetBody(_httpContextAccessor.HttpContext, _environmentUrl, dataverseToken, out var knownCaller))
         {
             _logger.LogDebug("[dataverse.*] WhoAmI answered from this request's memo (userObo=true)");
             return DataverseUserResponse.Ok(200, knownCaller);
@@ -298,7 +298,7 @@ public sealed class DataverseUserClient : IDataverseUserClient
                     using var doc = JsonDocument.Parse(text);
                     var body = doc.RootElement.Clone();
                     if (isWhoAmI)
-                        CallerWhoAmIMemo.Remember(httpContext, dataverseToken, body);
+                        CallerWhoAmIMemo.Remember(_httpContextAccessor.HttpContext, _environmentUrl, dataverseToken, body); // re-read: the request may have ended during the await
                     return DataverseUserResponse.Ok((int)response.StatusCode, body);
                 }
                 catch (JsonException)

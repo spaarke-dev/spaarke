@@ -1,8 +1,10 @@
 using System.Collections.Concurrent;
 using System.Net;
+using System.Security.Claims;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -157,21 +159,87 @@ public sealed class CallerWhoAmIMemoIsolationTests
     }
 
     [Fact]
-    public async Task TheUserClientsWhoAmI_IsAnsweredWithTheFullBody_TheProbeObtained()
+    public async Task TheMemo_StoresTheFullWhoAmIBody_NotJustTheUserId_SoABusinessUnitReaderIsAnsweredFromIt()
     {
-        // The probe and DataverseUserClient exchange the same assertion through one MSAL cache, so they share the token and
-        // the answer. A reader of WhoAmI's business unit (the reporting routes) must get it from a remembered answer too.
+        // Memo level only: this proves what the memo stores, NOT that DataverseUserClient reads it (that class needs a live MSAL
+        // OBO exchange, which no stub reaches without a transport double; recorded as K3 in task-170-notes.md). A reader of
+        // WhoAmI's business unit (the reporting routes) is answered from this stored body.
         var probe = new WireProbe { WhoAmIBusinessUnit = AliceUnit };
         probe.Users["alice-dv"] = Alice;
         var request = NewRequest("alice");
 
         await InRequestAsync(request, async () => (await probe.GetCallerSystemUserIdAsync("alice")).Should().Be(Alice));
 
-        CallerWhoAmIMemo.TryGetBody(request, "alice-dv", out var body).Should().BeTrue();
+        CallerWhoAmIMemo.TryGetBody(request, TestEnvironment, "alice-dv", out var body).Should().BeTrue();
         body.GetProperty("UserId").GetString().Should().Be(Alice.ToString("D"));
         body.GetProperty("BusinessUnitId").GetString().Should().Be(AliceUnit.ToString("D"));
-        CallerWhoAmIMemo.TryGetBody(request, "bob-dv", out _).Should().BeFalse("another credential has no answer here");
-        CallerWhoAmIMemo.TryGetBody(NewRequest("alice"), "alice-dv", out _).Should().BeFalse("another request has no answer here");
+        CallerWhoAmIMemo.TryGetBody(request, TestEnvironment, "bob-dv", out _).Should().BeFalse("another credential has no answer here");
+        CallerWhoAmIMemo.TryGetBody(NewRequest("alice"), TestEnvironment, "alice-dv", out _).Should().BeFalse("another request has no answer here");
+    }
+
+    [Fact]
+    public async Task TheSameToken_UnderTwoEnvironments_IsTwoMisses_AndEachEnvironmentThenHitsItsOwnAnswer()
+    {
+        var orgA = new WireProbe("https://org-a.crm.dynamics.com");
+        var orgB = new WireProbe("https://org-b.crm.dynamics.com");
+        orgA.Users["alice-dv"] = Alice;
+        orgB.Users["alice-dv"] = Bob; // the same token string, a different organisation: a different answer
+
+        await InRequestAsync(NewRequest("alice"), async () =>
+        {
+            (await orgA.GetCallerSystemUserIdAsync("alice")).Should().Be(Alice);
+            (await orgB.GetCallerSystemUserIdAsync("alice")).Should().Be(Bob, "another environment is a miss, never org A's answer");
+            (await orgA.GetCallerSystemUserIdAsync("alice")).Should().Be(Alice);
+            (await orgB.GetCallerSystemUserIdAsync("alice")).Should().Be(Bob);
+        });
+
+        orgA.WhoAmIsFor("alice-dv").Should().Be(1);
+        orgB.WhoAmIsFor("alice-dv").Should().Be(1);
+    }
+
+    [Theory]
+    [InlineData("https://test.crm.dynamics.com/", "https://test.crm.dynamics.com")]
+    [InlineData("  https://TEST.CRM.Dynamics.com//  ", "https://test.crm.dynamics.com")]
+    [InlineData("HTTPS://test.crm.dynamics.com", "https://test.crm.dynamics.com/")]
+    public void TheSameEnvironment_WrittenWithAndWithoutATrailingSlash_OrInADifferentCase_SharesOneAnswer(string written, string asked)
+    {
+        var request = NewRequest("alice");
+        var body = JsonDocument.Parse($"{{\"UserId\":\"{Alice:D}\"}}").RootElement;
+
+        CallerWhoAmIMemo.Remember(request, written, "alice-dv", body);
+
+        CallerWhoAmIMemo.TryGetUserId(request, asked, "alice-dv", out var id).Should().BeTrue();
+        id.Should().Be(Alice);
+        CallerWhoAmIMemo.TryGetUserId(request, "https://other.crm.dynamics.com", "alice-dv", out _).Should().BeFalse();
+        CallerWhoAmIMemo.TryGetUserId(request, "", "alice-dv", out _).Should().BeFalse("no environment is no key: a miss");
+    }
+
+    [Fact]
+    public async Task ARequestThatHasEnded_IsAMiss_AndAWrite_IsANoOp_NeverAThrow_TheQuestionStillAsksDataverse()
+    {
+        var probe = new WireProbe();
+        probe.Users["alice-dv"] = Alice;
+        var body = JsonDocument.Parse($"{{\"UserId\":\"{Alice:D}\"}}").RootElement;
+
+        foreach (var ended in new HttpContext[]
+                 {
+                     new EndedRequest(new ObjectDisposedException("HttpContext")),
+                     new EndedRequest(new InvalidOperationException("context recycled")),
+                 })
+        {
+            CallerWhoAmIMemo.TryGetUserId(ended, TestEnvironment, "alice-dv", out _).Should().BeFalse();
+            CallerWhoAmIMemo.TryGetBody(ended, TestEnvironment, "alice-dv", out _).Should().BeFalse();
+            var write = () => CallerWhoAmIMemo.Remember(ended, TestEnvironment, "alice-dv", body);
+            write.Should().NotThrow();
+
+            await InRequestAsync(ended, async () =>
+            {
+                (await probe.GetCallerSystemUserIdAsync("alice")).Should().Be(Alice, "the ended request has no memo: Dataverse is asked");
+                (await probe.GetCallerSystemUserIdAsync("alice")).Should().Be(Alice);
+            });
+        }
+
+        probe.WhoAmIsFor("alice-dv").Should().Be(4, "two ended requests, two questions each, none remembered");
     }
 
     [Theory]
@@ -185,6 +253,28 @@ public sealed class CallerWhoAmIMemoIsolationTests
         CallerWhoAmIMemo.IsWhoAmI(new HttpMethod(method), apiPath).Should().Be(answered);
 
     // ── The rig ──────────────────────────────────────────────────────────────────────────────────────────────────
+
+    private const string TestEnvironment = "https://test.crm.dynamics.com";
+
+    /// <summary>A request whose <see cref="HttpContext.Items"/> throws, as a context that has ended or been recycled does.
+    /// Everything else is a live inner context.</summary>
+    private sealed class EndedRequest(Exception failure) : HttpContext
+    {
+        private readonly DefaultHttpContext _inner = NewRequest("alice");
+
+        public override IFeatureCollection Features => _inner.Features;
+        public override HttpRequest Request => _inner.Request;
+        public override HttpResponse Response => _inner.Response;
+        public override ConnectionInfo Connection => _inner.Connection;
+        public override WebSocketManager WebSockets => _inner.WebSockets;
+        public override ClaimsPrincipal User { get => _inner.User; set => _inner.User = value; }
+        public override IDictionary<object, object?> Items { get => throw failure; set => throw failure; }
+        public override IServiceProvider RequestServices { get => _inner.RequestServices; set => _inner.RequestServices = value; }
+        public override CancellationToken RequestAborted { get => _inner.RequestAborted; set => _inner.RequestAborted = value; }
+        public override string TraceIdentifier { get => _inner.TraceIdentifier; set => _inner.TraceIdentifier = value; }
+        public override ISession Session { get => _inner.Session; set => _inner.Session = value; }
+        public override void Abort() => _inner.Abort();
+    }
 
     private static DefaultHttpContext NewRequest(string bearer)
     {
@@ -210,14 +300,14 @@ public sealed class CallerWhoAmIMemoIsolationTests
         private int _inFlight;
         private int _rightsAsked;
 
-        public WireProbe()
+        public WireProbe(string serviceUrl = TestEnvironment)
             : base(
                 new HttpClient(),
                 new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
                 {
                     ["AzureAd:TenantId"] = "00000000-0000-0000-0000-0000000000aa",
                     ["AzureAd:ClientId"] = "00000000-0000-0000-0000-0000000000bb",
-                    ["Dataverse:ServiceUrl"] = "https://test.crm.dynamics.com",
+                    ["Dataverse:ServiceUrl"] = serviceUrl,
                 }).Build(),
                 NullLogger<CallerRecordAccessProbe>.Instance,
                 // Never asked for a client (the exchange is answered below); it only has to exist, or the probe refuses OBO.

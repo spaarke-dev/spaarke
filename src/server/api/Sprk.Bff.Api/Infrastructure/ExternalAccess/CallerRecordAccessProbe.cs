@@ -866,8 +866,7 @@ public class CallerRecordAccessProbe
     /// </remarks>
     protected virtual async Task<Guid?> ResolveCallerSystemUserIdAsync(string dataverseToken, CancellationToken ct)
     {
-        var currentRequest = CallerWhoAmIMemo.CurrentRequest;
-        if (CallerWhoAmIMemo.TryGetUserId(currentRequest, dataverseToken, out var knownCaller))
+        if (CallerWhoAmIMemo.TryGetUserId(CallerWhoAmIMemo.CurrentRequest, _environmentUrl, dataverseToken, out var knownCaller))
             return knownCaller;
 
         try
@@ -890,7 +889,8 @@ public class CallerRecordAccessProbe
                 Guid.TryParse(userId.GetString(), out var systemUserId) &&
                 systemUserId != Guid.Empty)
             {
-                CallerWhoAmIMemo.Remember(currentRequest, dataverseToken, document.RootElement);
+                // Re-read at the point of use: the request may have ended during the await (the memo then no-ops).
+                CallerWhoAmIMemo.Remember(CallerWhoAmIMemo.CurrentRequest, _environmentUrl, dataverseToken, document.RootElement);
                 return systemUserId;
             }
 
