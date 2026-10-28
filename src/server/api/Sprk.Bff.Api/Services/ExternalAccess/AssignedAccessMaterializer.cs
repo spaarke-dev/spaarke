@@ -212,6 +212,7 @@ public sealed class AssignedAccessMaterializer
     private readonly ExternalParticipationService _participations;
     private readonly IAccessibleRecordSetService _accessibleRecords;
     private readonly IContactIdentityStore _identities;
+    private readonly ContactUserRepresentation _representation;
     private readonly SecureShareNoAccessGuard _noAccessGuard;
     private readonly IDataverseRecordShareService _recordShare;
 
@@ -281,6 +282,8 @@ public sealed class AssignedAccessMaterializer
         _participations = participations;
         _accessibleRecords = accessibleRecords;
         _identities = identities;
+        // Task 193: the ONE contact -> user rule, over the stores this class already holds (no new dependency).
+        _representation = new ContactUserRepresentation(identities, store, participations);
         _noAccessGuard = noAccessGuard;
         _recordShare = recordShare;
         // Both Scoped and unconditionally registered (ExternalAccessModule); no cycle — the synchronizer never depends on
@@ -1671,38 +1674,31 @@ public sealed class AssignedAccessMaterializer
             };
         }
 
-        // The contact, status-first (task 141's store — never IIdentityNormalizationService, whose "never an exception"
-        // contract would turn a faulted read into "unlinked" and grant a contact row to an internal user).
-        var contact = await _identities.GetContactAsync(subject.Id, ct).ConfigureAwait(false);
-        if (contact.Status != LookupStatus.Read)
-            return Target.Skip(AssignedAccessReason.LinkUnreadable);
-
-        var row = contact.Rows.FirstOrDefault(r => r.ContactId == subject.Id);
-        if (row is null)
-            return Target.Skip(AssignedAccessReason.SubjectNotFound);
-        if (!row.IsActive)
-            return Target.Skip(AssignedAccessReason.SubjectInactive);
-
-        Guid? boundOid = Guid.TryParse(row.RawOid?.Trim(), out var oid) && oid != Guid.Empty ? oid : null;
-
-        IReadOnlyList<AssignedLinkCandidate> candidates;
-        try
+        // Task 193: the ONE contact -> user rule (ContactUserRepresentation), status-first — never
+        // IIdentityNormalizationService, whose "never an exception" contract would turn a faulted read into "unlinked" and
+        // grant a contact row to an internal user. A missing binding column is unreadable here (FailClosed), as before. The
+        // oid-only user is now confirmed through the binder's oid decision (the read path's answer), a deliberate correction.
+        var representation = await _representation.ResolveAsync(
+            subject.Id, flags.IsRestricted, BindingColumnMissingPolicy.FailClosed, ct).ConfigureAwait(false);
+        switch (representation.Status)
         {
-            candidates = await _store.ReadLinkCandidatesAsync(subject.Id, boundOid, ct).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (!ct.IsCancellationRequested)
-        {
-            _logger.LogWarning(ex, "[ASSIGNED-ACCESS] The systemusers contact {ContactId} represents could not be read.", subject.Id);
-            return Target.Skip(AssignedAccessReason.LinkUnreadable);
+            case ContactRepresentationStatus.Read:
+                break;
+            case ContactRepresentationStatus.NotFound:
+                return Target.Skip(AssignedAccessReason.SubjectNotFound);
+            case ContactRepresentationStatus.Inactive:
+                return Target.Skip(AssignedAccessReason.SubjectInactive);
+            default:
+                if (representation.Fault is not null)
+                {
+                    _logger.LogWarning(representation.Fault,
+                        "[ASSIGNED-ACCESS] The systemusers contact {ContactId} represents could not be read.", subject.Id);
+                }
+
+                return Target.Skip(AssignedAccessReason.LinkUnreadable);
         }
 
-        // Task 141 §2/§5: the link (sprk_primarycontact) is honoured as it is; a user with NO link is represented by the
-        // contact bound to its oid. A user linked to ANOTHER contact is not this contact's, whatever the oid says.
-        var represented = candidates
-            .Where(c => c.Represents(subject.Id, boundOid))
-            .GroupBy(c => c.SystemUserId)
-            .Select(g => g.First())
-            .ToList();
+        var represented = representation.Users;
 
         if (represented.Count == 0)
             return new Target(TargetKind.ContactGrant);
@@ -1719,11 +1715,10 @@ public sealed class AssignedAccessMaterializer
         // Verifier V4: the ONE "barred on Restricted" predicate is asked FIRST — a DISABLED or non-person user flagged external
         // on a Restricted record is Restricted (the remover's known cause), never Ineligible (which would turn the remover's
         // removal into a sticky Declined and keep the share away after Restricted is lifted and the user re-enabled).
-        if (InternalShareEndpoints.IsBarredOnRestricted(user.IsExternal, flags.IsRestricted))
+        if (user.BarredOnRestricted)
             return Target.Skip(AssignedAccessReason.Restricted, user.SystemUserId);
 
-        return InternalShareEndpoints.ClassifyEligibility(
-                user.IsDisabled, user.AccessMode, user.ApplicationId, user.IsExternal, flags.IsRestricted) switch
+        return user.Eligibility switch
         {
             InternalShareEndpoints.ShareEligibility.Eligible => new Target(TargetKind.Share, null, user.SystemUserId),
             InternalShareEndpoints.ShareEligibility.ExternalOnRestricted => Target.Skip(AssignedAccessReason.Restricted, user.SystemUserId),
