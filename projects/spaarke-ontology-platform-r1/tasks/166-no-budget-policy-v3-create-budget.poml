@@ -4,7 +4,7 @@
     <title>POL-MATTER-NOBUDGET v3: "Matter has no active budget" items offer Create budget (D-192, UAT round 1 re-check)</title>
     <phase>11 UAT</phase>
     <gate>startable (D-192, owner 2026-10-28; the dev apply is approved after a clean -WhatIf)</gate>
-    <status>not-started</status>
+    <status>pr-open-awaiting-review</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Policy definition (config JSON) plus the tests that pin it; no BFF code change expected. It modifies tests, so code-review and adr-check run regardless.</rigor-reason>
     <model-tier>sonnet</model-tier>
