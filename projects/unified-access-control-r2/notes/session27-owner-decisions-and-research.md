@@ -1987,3 +1987,19 @@ Reading (sent to ontology; recorded in ontology D-191 at 349ac7df2a, and in fiel
 **Recorded from peer sessions (the owner decided there):**
 - ebilling EB-D-162: Billing Administrator's Read on rule set, policy and policy version is Deep, not Global. The EB-D-150 accepted exception is removed from `SecureBuRoleDepthAssertion.AcceptedRoleExceptions` (UAC's condition). Live on dev 2026-10-27, -Verify PASS.
 - field-mapping #2354 (FR-36): a work assignment's `sprk_assignedto` defaults, fill-only at create, to its `sprk_assignedtointernal`. This is a UAC review gate; my conditions were sent.
+
+### Round 130 (2026-10-28): the structured family entity is deferred to the roadmap (#2362)
+
+Asked: should we build the structured family entity (`sprk_securefamily`, owner team per family, round 100b), and if not now, can it be built later? UAC recommended not now: nothing concrete fails without it. Isolation, membership (the primary-parent rule, round 129) and grouping (stamps plus field-mapping W7's computed family) already work. A later build is a one-time migration. The owner answered, verbatim: **"yes i agree with your 'don't build it now' decision. record it and we'll keep it on a future roadmap determination"**.
+
+Reading:
+- Not scheduled in this project. It is tracked as #2362 (triggers, rules, spikes, the §8 option).
+- **Triggers to revisit:**
+  - mirror-share growth near Dataverse limits;
+  - a feature that needs one deterministic family key across Secure records that the stamps and W7 cannot serve;
+  - a requirement for structural isolation between Secure families.
+- **Binding now, so that a later build stays cheap:**
+  1. Membership stays computable from stored data: the primary-parent rule and one filing root per project (task 195).
+  2. Every ownership write goes through `RecordOwnershipResolver`.
+  3. New code asks "is this row isolated" through one shared predicate keyed on the Secure Record BU (never a team id), and reads families through W7.
+- Ontology D-191's "Secure family qualifier, materialised by `sprk_securefamily`" stays a design target, not a scheduled build. Ontology, field-mapping and ebilling were told the same day.

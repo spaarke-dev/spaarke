@@ -156,6 +156,11 @@ The full log is in `notes/session27-owner-decisions-and-research.md` (numbered r
 
 **Reconciliation:** `ExternalAccessReconciliationJob` writes on dev since round 79 (2026-10-08, after a 0-change report); it was report-only until then (round 7). R4 deactivates grants whose record is gone (round 71). In any other environment, explain plainly and confirm before setting `ExternalAccess:Reconciliation:WritesEnabled` or `Communication__OwnershipHoldAlertUserIds__0`.
 
+**Record family (round 130, #2362):** the structured family entity (`sprk_securefamily`) is deferred to the roadmap, not built in this project. Binding meanwhile:
+- family membership stays computable from stored data (the primary-parent rule, round 129; one filing root per project, task 195);
+- every ownership write goes through `RecordOwnershipResolver`;
+- new code tests isolation through one shared predicate keyed on the Secure Record BU, never a hard-coded team id, and reads families through field-mapping W7, never raw lookups.
+
 ## 4. Coordination
 
 - **customer-provisioning-orchestration-r1 (cpo-r1):**
