@@ -184,8 +184,8 @@ No Access "either way": the enforcer ends no contact grant itself (contacts are 
 ### Known limits
 
 - No Access adds one pairing read per (covered record, covered user) per enforcement, beside the share read it already makes per pair. With the column missing, each such read logs the revoke's Warning, which on dev (schema not applied) is a Warning per walled pair every 5 minutes until the script runs.
-- The secure-root inheritance's net path for a parent that now passes nothing on (unsecured or deleted, `PassesNothingOn`) still ends the pairing when it removes a leftover inherited share; only the unsecure cascade itself is skipped. It goes with the separately tracked unsecure change.
-- Pre-existing, filed for the coordinator: "Add person" at the same level as an existing Assigned-To auto share writes nothing, so the share stays attributed to the rule and clearing Assigned-To removes the person's explicitly added access. G2b only makes the paired grant follow.
+- The secure-root inheritance's net path for a parent that now passes nothing on (unsecured or deleted, `PassesNothingOn`) still ends the pairing when it removes a leftover inherited share; only the unsecure cascade itself is skipped. Coordinator: this goes to **task 196** (Unsecure keeps all access), which maps every removal on unsecure; left as it is here.
+- ~~Pre-existing: "Add person" at the same level as an existing Assigned-To auto share leaves the share the rule's.~~ **Corrected in G3a: not a defect.** The G2b claim was read from the materializer alone; the share core adopts on its no-write path (see G3a below).
 
 ### Guard
 
@@ -220,3 +220,54 @@ Each batch: a fresh write, a `--no-incremental` build, over the filter `PairedGr
 - The touched filter (the `AccessControl`, `DataMutation` and `ExternalAccess` test namespaces): 10636/10636.
 - Full ArchTests: 1604/1604. `Sprk.Bff.Api.IntegrationTests`: 186 passed, 8 skipped. `Spe.Integration.Tests`: 353 passed, 23 skipped.
 - One host fixture changed: `NoAccessEnforceEndpointTests`' host substitutes the grant revoke with the production one over an empty grant table. Its Web API client double answers no grant read, so the enforcer correctly failed closed (`paired-grant-not-ended`) until the boundary was substituted like the others.
+
+## G3a: Add person and Assigned-To in either order; one pairing-column check per pass
+
+### Item 4: not a defect (three tests pin it)
+
+The share core, which Add person reaches through `ContactInternalUserShare`, records the operator's provenance in the Assigned-To ledger in both orders. No second store is involved.
+
+| Order | What the ledger records | On unassign | Pinned by |
+|---|---|---|---|
+| Added first, then assigned | The rule finds the share already covering its target: `CoveredByExisting` (`AssignedAccessMaterializer.FreshShareAsync`) | The `default` case: nothing of the rule's to remove. The share and its paired grant stay | `G3a_AddedFirst_ThenAssigned_ThenUnassigned_…` |
+| Assigned first, then Add person at the same level | Nothing is written, but `InternalUserShareCore` calls `MarkShareAdoptedAsync` on its no-write path, so the row becomes `Adopted` | `KeptAdopted`. The share and its paired grant stay | `G3a_AssignedFirst_ThenAddedAtTheSameLevel_…` |
+| `/unshare-user` while still assigned | `MarkShareRemovedAsync` sets the row `Declined` (and puts it back if the revoke is not confirmed) | The materializer's contract: a `Declined` row is never re-created while the assignment persists, and a later re-assignment is new. The removal stands and the paired grant follows the share (G2) | `G3a_AssignedAndAdded_ThenUnsharedWhileAssigned_…` |
+
+All three passed on the code as it was, with no production change.
+
+### Item 2: one check and one Warning per pass
+
+- `ExternalGrantRevocationService` remembers a missing pairing column in its instance. After the first 400 it reads no more pairings and logs nothing more. An unreadable read is transient, so it is not remembered.
+- The per-user pairing read runs only while the column exists.
+- **Scope per pass, confirmed:**
+  - `/unshare-user`: the request scope.
+  - `NoAccessShareReconciliationJob`, `AssignedAccessReconciliationJob` (the Restricted remover and the materializer) and `SecureRootInheritanceJob`: one `CreateScope()` per run.
+  - The enforce, sync and record routes: the request scope.
+- **Fixed:** the materializer resolved the revoke from a NEW scope for every removed share, which meant a new instance and a Warning per removal. It now resolves it from its own scope's `IServiceProvider` (an optional constructor parameter; DI gives a scoped service its scope's provider). The materializer and the Restricted remover in the same job pass, and the share routes in a request, now share one revoke. This is not a constructor dependency: the revoke depends on the materializer.
+
+### Tests (G3a)
+
+- `ContactGrantSharesInternalUserTests.G3a_*` (3): the order cases above.
+- `PairedGrantFollowsShareRemovalTests`:
+  - `NoAccess_ManyUsersOnManyRecords_WithoutTheColumn_…`: an organization entry, 3 users × 3 secure records, exactly one Warning and one pairing read.
+  - Its positive twin: nine pairing reads, no Warning.
+  - `Materializer_TwoSharesRemovedInOnePass_WithoutTheColumn_…`: one Warning and one read.
+
+### Perturbations (G3a)
+
+Over `PairedGrantFollowsShareRemovalTests | ContactGrantSharesInternalUserTests | SecureRootInheritanceRound31Tests` (136 tests). The restored tree passed 136/136, and the guard 6/6.
+
+| Batch | Perturbation | Red |
+|---|---|---|
+| G1 | The share core's no-write path stops adopting | 2: `G3a_AssignedFirst_…`, and an existing round-31 raise test |
+| G2 | The materializer records its own share over an existing one (no `CoveredByExisting`) | 1: `G3a_AddedFirst_…` |
+| G3 | `/unshare-user` marks no `Declined` row | 2 existing round-31 tests. `G3a_…UnsharedWhileAssigned` stays green, because the materializer's out-of-band rule records the removal as `Declined` (`RemovedOutOfBand`) on its next pass, which is defence in depth |
+| G3b | The materializer's `Declined` stops being sticky | 1: `G3a_…UnsharedWhileAssigned` |
+| G4 | The missing-column cache disabled | 2: both one-Warning tests |
+| G5 | The materializer resolves the revoke from a new scope per removal | 1: the materializer one-Warning test |
+
+### Gates (G3a)
+
+- 0 warnings: the BFF, the unit project, ArchTests and both integration projects.
+- The touched filter (the `AccessControl`, `DataMutation` and `ExternalAccess` test namespaces): 10642/10642.
+- Full ArchTests: 1604/1604. `Sprk.Bff.Api.IntegrationTests`: 186 passed, 8 skipped. `Spe.Integration.Tests`: 353 passed, 23 skipped.
