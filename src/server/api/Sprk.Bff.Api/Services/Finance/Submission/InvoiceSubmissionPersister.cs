@@ -391,12 +391,14 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
                     return emlRefusal;
                 }
 
-                // Review round 5 (pass-2 K5): the .eml must still belong to the communication its parts were staged from.
+                // Review round 5 (pass-2 K5): the .eml must still belong to the communication its parts were staged from. Unlike a new
+                // version (SourceChanged, which a later delivery can commit), another delivery reads the same link, so it is Refused with
+                // source_changed: the job ends the submission Failed at once instead of retrying it until its attempts run out.
                 if (emlRow!.GetAttributeValue<EntityReference>(DocumentRelatedCommunication)?.Id != staged.SourceCommunicationId)
                 {
                     _logger.LogInformation("Invoice submission {SubmissionId}: its .eml no longer names the communication its parts were staged from; nothing persisted",
                         submissionId);
-                    return Result(SubmissionPersistStatus.SourceChanged, submissionId, SubmissionReasonCodes.SourceChanged);
+                    return Result(SubmissionPersistStatus.Refused, submissionId, SubmissionReasonCodes.SourceChanged);
                 }
 
                 checkedDocument = emlRow;

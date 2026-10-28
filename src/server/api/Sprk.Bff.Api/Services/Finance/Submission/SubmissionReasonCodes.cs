@@ -122,7 +122,8 @@ public static class SubmissionReasonCodes
     /// <summary>
     /// ebilling-r1 task 094 (9.1 step 4): the Submit Invoice source changed since the job staged its copy, and it changed again after one
     /// re-stage, or its bytes differ from the bytes the job evaluated. Transient: nothing was committed; a redelivery evaluates the source
-    /// as it is then.
+    /// as it is then (the final delivery writes Failed with this code). Review round 5: also the permanent refusal of a from-email
+    /// submission whose <c>.eml</c> no longer names the communication its parts were staged from (Failed at once, no retry).
     /// </summary>
     public const string SourceChanged = "ebilling.submission.source_changed";
 

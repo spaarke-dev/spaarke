@@ -1902,10 +1902,10 @@ public class InvoiceSubmissionPersisterTests
         return store;
     }
 
-    [Theory(DisplayName = "094 round 5 (pass-2 K5, must fire): step 3 answers SourceChanged when the live .eml names another communication than the one its parts were staged from, or none; nothing is built")]
+    [Theory(DisplayName = "094 round 5 (pass-2 K5, must fire): step 3 refuses with source_changed when the live .eml names another communication than the one its parts were staged from, or none; nothing is built, and it is Refused (the job ends it Failed at once), not the retried SourceChanged")]
     [InlineData(true)]
     [InlineData(false)]
-    public async Task FromEmail_TheEmlNamesAnotherCommunication_IsSourceChanged_NoTransaction(bool another)
+    public async Task FromEmail_TheEmlNamesAnotherCommunication_IsRefusedSourceChanged_NoTransaction(bool another)
     {
         var outcome = await new ProcessorHarness { Channel = InvoiceSubmissionChannel.Internal }.RunAsync();
         var store = FromEmailStore();
@@ -1919,7 +1919,7 @@ public class InvoiceSubmissionPersisterTests
 
         var result = await store.Build().PersistAsync(outcome, null);
 
-        result.Status.Should().Be(SubmissionPersistStatus.SourceChanged);
+        result.Status.Should().Be(SubmissionPersistStatus.Refused, "another delivery reads the same link: retrying cannot commit it (review round 5)");
         result.ReasonCode.Should().Be(SubmissionReasonCodes.SourceChanged);
         store.Transactions.Should().BeEmpty();
         store.Files.Dataverse.Rows.Should().BeEmpty();
