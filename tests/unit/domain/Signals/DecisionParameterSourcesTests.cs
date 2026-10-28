@@ -1,13 +1,17 @@
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Signals.Actions;
 using Xunit;
 
@@ -24,6 +28,10 @@ public class DecisionParameterSourcesTests
     private static readonly Guid BusinessUnitId = Guid.Parse("bbbbbbbb-0000-0000-0000-000000000001");
     private static readonly Guid BuCurrencyId = Guid.Parse("cccccccc-0000-0000-0000-000000000001");
     private static readonly Guid BaseCurrencyId = Guid.Parse("cccccccc-0000-0000-0000-000000000002");
+    private static readonly Guid CustomerCurrencyId = Guid.Parse("cccccccc-0000-0000-0000-000000000003");
+    private static readonly Guid SecureBuId = Guid.Parse("bbbbbbbb-0000-0000-0000-000000000002");
+    private static readonly Guid CustomerBuId = Guid.Parse("bbbbbbbb-0000-0000-0000-000000000003");
+    private static readonly Guid RootBuId = Guid.Parse("bbbbbbbb-0000-0000-0000-000000000004");
     private const string CategoryPath =
         "EntityDefinitions(LogicalName='sprk_budget')/Attributes(LogicalName='sprk_budgetcategory')/Microsoft.Dynamics.CRM.PicklistAttributeMetadata";
 
@@ -100,10 +108,30 @@ public class DecisionParameterSourcesTests
             },
         }));
 
+    /// <summary>The deployment's <c>ExternalAccess:CustomerBusinessUnitId</c>. Records every read, so a test can prove it was never asked.</summary>
+    private static Mock<IOptionsMonitor<ExternalAccessOptions>> Options(Guid? customerBusinessUnitId)
+    {
+        var options = new Mock<IOptionsMonitor<ExternalAccessOptions>>();
+        options.SetupGet(o => o.CurrentValue).Returns(new ExternalAccessOptions { CustomerBusinessUnitId = customerBusinessUnitId });
+        return options;
+    }
+
+    /// <summary>Keeps what was logged, so the unconfigured-customer-unit Warning can be asserted.</summary>
+    private sealed class CapturingLogger : ILogger<DecisionParameterSources>
+    {
+        public List<(LogLevel Level, string Message)> Entries { get; } = new();
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            Entries.Add((logLevel, formatter(state, exception)));
+    }
+
     private static DecisionParameterSources Build(
-        FakeUser? user = null, Mock<IGenericEntityService>? entities = null, Mock<ITenantCache>? cache = null) =>
+        FakeUser? user = null, Mock<IGenericEntityService>? entities = null, Mock<ITenantCache>? cache = null,
+        Mock<IOptionsMonitor<ExternalAccessOptions>>? options = null, ILogger<DecisionParameterSources>? logger = null) =>
         new(user ?? new FakeUser(), (entities ?? new Mock<IGenericEntityService>()).Object, (cache ?? Cache().Cache).Object,
-            NullLogger<DecisionParameterSources>.Instance);
+            new ConfigurationBuilder().Build(), (options ?? Options(CustomerBuId)).Object,
+            logger ?? NullLogger<DecisionParameterSources>.Instance);
 
     // ---------------------------------------------------------------------------------------------------------------
     // Options: live option-set metadata
@@ -226,7 +254,33 @@ public class DecisionParameterSourcesTests
         public FakeUser User { get; } = new();
         public List<QueryExpression> Queries { get; } = new();
 
-        public DecisionParameterSources Build() => DecisionParameterSourcesTests.Build(User, Entities);
+        public Mock<IOptionsMonitor<ExternalAccessOptions>> CustomerOption { get; set; } = Options(CustomerBuId);
+        public CapturingLogger Log { get; } = new();
+
+        /// <summary>The business units carrying the Secure Record name (one: unambiguous; two: ambiguous; none: this environment has none).</summary>
+        public Guid[] SecureUnits { get; set; } = [SecureBuId];
+
+        /// <summary>The configured customer business unit's row (null: no such row).</summary>
+        public Entity? CustomerUnit { get; set; }
+
+        public DecisionParameterSources Build() => DecisionParameterSourcesTests.Build(User, Entities, options: CustomerOption, logger: Log);
+
+        /// <summary>Gives the customer business unit a row: its Default Currency and its parent (null parent: it is the root).</summary>
+        public CurrencyWorld WithCustomerUnit(Guid? currency, Guid? parent = null, Guid? id = null)
+        {
+            var unit = new Entity("businessunit", id ?? CustomerBuId);
+            if (currency is { } c) unit["transactioncurrencyid"] = new EntityReference("transactioncurrency", c);
+            if (parent is { } p) unit["parentbusinessunitid"] = new EntityReference("businessunit", p);
+            CustomerUnit = unit;
+            return this;
+        }
+
+        /// <summary>The matter is owned by the Secure Record business unit.</summary>
+        public CurrencyWorld OwnedBySecure()
+        {
+            User.MatterResponse = MatterOwnedBy(SecureBuId);
+            return this;
+        }
 
         /// <param name="buCurrency">The business unit's Default Currency (null: none).</param>
         /// <param name="baseCurrency">The organization's base currency (null: none).</param>
@@ -239,6 +293,9 @@ public class DecisionParameterSourcesTests
             var bu = new Entity("businessunit", BusinessUnitId);
             if (buCurrency is { } c) bu["transactioncurrencyid"] = new EntityReference("transactioncurrency", c);
             Entities.Setup(e => e.RetrieveAsync("businessunit", BusinessUnitId, It.IsAny<string[]>(), It.IsAny<CancellationToken>())).ReturnsAsync(bu);
+            // The Secure Record unit has no Default Currency (dev fact 2026-10-28).
+            Entities.Setup(e => e.RetrieveAsync("businessunit", SecureBuId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new Entity("businessunit", SecureBuId));
 
             Entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
                 .Returns((QueryExpression q, CancellationToken _) =>
@@ -249,6 +306,14 @@ public class DecisionParameterSourcesTests
                         var org = new Entity("organization", Guid.NewGuid());
                         if (baseCurrency is { } b) org["basecurrencyid"] = new EntityReference("transactioncurrency", b);
                         return Task.FromResult(new EntityCollection(new List<Entity> { org }));
+                    }
+
+                    if (q.EntityName == "businessunit")
+                    {
+                        if (q.Criteria.Conditions.Any(x => x.AttributeName == "name"))
+                            return Task.FromResult(new EntityCollection(SecureUnits.Select(id => new Entity("businessunit", id)).ToList()));
+                        var asked = q.Criteria.Conditions.Single(x => x.AttributeName == "businessunitid").Values.Single();
+                        return Task.FromResult(new EntityCollection(CustomerUnit is { } unit && Equals(unit.Id, asked) ? new List<Entity> { unit } : new List<Entity>()));
                     }
 
                     var wanted = q.Criteria.Conditions.Single(x => x.AttributeName == "transactioncurrencyid").Values.Single();
@@ -390,6 +455,7 @@ public class DecisionParameterSourcesTests
         var entities = new Mock<IGenericEntityService>();
         entities.Setup(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new TimeoutException("no answer"));
+        entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>())).ReturnsAsync(new EntityCollection()); // the Secure Record unit lookup: none here
         var user = new FakeUser { MatterResponse = MatterOwnedBy(BusinessUnitId) };
 
         var act = () => Build(user, entities).ResolveBudgetCurrencyAsync(MatterId, null, CancellationToken.None);
@@ -483,6 +549,129 @@ public class DecisionParameterSourcesTests
 
         await act.Should().ThrowAsync<HttpRequestException>();
         world.Entities.Verify(e => e.RetrieveAsync("sprk_matter", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // D-198 (task 167c): a secure matter's budget currency is the customer business unit's
+    // ---------------------------------------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Currency_Omitted_ASecureMatter_GetsTheCustomerBusinessUnitsCurrency_NotTheBaseCurrency_D198()
+    {
+        var world = new CurrencyWorld(buCurrency: null, BaseCurrencyId, (CustomerCurrencyId, "EUR"), (BaseCurrencyId, "USD"))
+            .WithCustomerUnit(CustomerCurrencyId, RootBuId).OwnedBySecure();
+
+        var currency = await world.Build().ResolveBudgetCurrencyAsync(MatterId, null, CancellationToken.None);
+
+        (currency.Id, currency.IsoCode, currency.Refusal).Should().Be((CustomerCurrencyId, "EUR", null));
+        world.Queries.Should().NotContain(q => q.EntityName == "organization", "the base currency is read only when there is nothing better");
+        world.Entities.Verify(e => e.RetrieveAsync("businessunit", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never,
+            "the Secure Record unit's own currency is never taken as the customer's");
+        world.User.MatterGets.Should().ContainSingle("the owning unit is still read once, as the caller");
+        world.Entities.Verify(e => e.RetrieveAsync("sprk_matter", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Currency_Omitted_ASecureMatter_WhenTheCustomerUnitIsNotConfigured_FallsBackToTheBaseCurrency_AndWarns_D198()
+    {
+        var world = new CurrencyWorld(buCurrency: null, BaseCurrencyId, (BaseCurrencyId, "USD"))
+            .WithCustomerUnit(CustomerCurrencyId, RootBuId).OwnedBySecure();
+        world.CustomerOption = Options(null);
+
+        var currency = await world.Build().ResolveBudgetCurrencyAsync(MatterId, null, CancellationToken.None);
+
+        (currency.Id, currency.IsoCode, currency.Refusal).Should().Be((BaseCurrencyId, "USD", null));
+        world.Log.Entries.Should().Contain(e => e.Level == LogLevel.Warning && e.Message.Contains("CustomerBusinessUnitId"));
+        world.Queries.Should().NotContain(q => q.EntityName == "businessunit" && q.Criteria.Conditions.Any(c => c.AttributeName == "businessunitid"),
+            "an unset customer unit is not read");
+    }
+
+    [Theory]
+    [InlineData("secure")]  // the customer unit IS the Secure Record unit: its currency is never the customer's
+    [InlineData("root")]    // the customer unit is the root (no parent): the root's currency is not the customer's
+    public async Task Currency_Omitted_ASecureMatter_WhenTheCustomerUnitIsTheSecureUnitOrTheRoot_FallsBackToTheBaseCurrency_AndWarns_D198(string which)
+    {
+        var world = new CurrencyWorld(buCurrency: null, BaseCurrencyId, (CustomerCurrencyId, "EUR"), (BaseCurrencyId, "USD")).OwnedBySecure();
+        if (which == "secure")
+        {
+            world.CustomerOption = Options(SecureBuId);
+            world.WithCustomerUnit(CustomerCurrencyId, RootBuId, id: SecureBuId);
+        }
+        else
+        {
+            world.WithCustomerUnit(CustomerCurrencyId, parent: null); // has a currency, but no parent: the root
+        }
+
+        var currency = await world.Build().ResolveBudgetCurrencyAsync(MatterId, null, CancellationToken.None);
+
+        (currency.Id, currency.IsoCode, currency.Refusal).Should().Be((BaseCurrencyId, "USD", null));
+        world.Log.Entries.Should().Contain(e => e.Level == LogLevel.Warning && e.Message.Contains("CustomerBusinessUnitId"));
+    }
+
+    [Fact]
+    public async Task Currency_Omitted_ANonSecureMatter_NeverReadsTheCustomerBusinessUnit_AndKeepsItsOwnUnitsCurrency_D198()
+    {
+        // must not fire: the customer unit is configured and has a currency, but this matter is not secure.
+        var own = new CurrencyWorld(BuCurrencyId, BaseCurrencyId, (BuCurrencyId, "GBP"), (CustomerCurrencyId, "EUR"), (BaseCurrencyId, "USD"))
+            .WithCustomerUnit(CustomerCurrencyId, RootBuId);
+        var ownResult = await own.Build().ResolveBudgetCurrencyAsync(MatterId, null, CancellationToken.None);
+
+        // and an ordinary unit with no currency still ends at the base currency, not the customer's.
+        var none = new CurrencyWorld(buCurrency: null, BaseCurrencyId, (CustomerCurrencyId, "EUR"), (BaseCurrencyId, "USD"))
+            .WithCustomerUnit(CustomerCurrencyId, RootBuId);
+        var noneResult = await none.Build().ResolveBudgetCurrencyAsync(MatterId, null, CancellationToken.None);
+
+        (ownResult.Id, ownResult.IsoCode).Should().Be((BuCurrencyId, "GBP"));
+        (noneResult.Id, noneResult.IsoCode).Should().Be((BaseCurrencyId, "USD"));
+        foreach (var world in new[] { own, none })
+        {
+            world.CustomerOption.VerifyGet(o => o.CurrentValue, Times.Never);
+            world.Queries.Should().NotContain(q => q.EntityName == "businessunit" && q.Criteria.Conditions.Any(c => c.AttributeName == "businessunitid"));
+        }
+    }
+
+    [Theory]
+    [InlineData(2)]  // two business units carry the Secure Record name: ambiguous, so undeterminable
+    [InlineData(0)]  // none does: this environment has no Secure Record unit, so no unit is it
+    public async Task Currency_Omitted_WhenTheSecureUnitIsAmbiguousOrUnresolved_TheMatterIsNotSecure_D198(int named)
+    {
+        var world = new CurrencyWorld(buCurrency: null, BaseCurrencyId, (CustomerCurrencyId, "EUR"), (BaseCurrencyId, "USD"))
+            .WithCustomerUnit(CustomerCurrencyId, RootBuId).OwnedBySecure();
+        world.SecureUnits = named == 0 ? [] : [SecureBuId, Guid.Parse("bbbbbbbb-0000-0000-0000-0000000000ff")];
+
+        var currency = await world.Build().ResolveBudgetCurrencyAsync(MatterId, null, CancellationToken.None);
+
+        (currency.Id, currency.IsoCode).Should().Be((BaseCurrencyId, "USD"), "treated as not secure: its own unit's currency (none), then the base currency");
+        world.CustomerOption.VerifyGet(o => o.CurrentValue, Times.Never);
+    }
+
+    [Theory]
+    [InlineData("no-currency")]  // the customer unit exists but has no Default Currency
+    [InlineData("no-row")]       // the configured id names no business unit: invalid
+    public async Task Currency_Omitted_ASecureMatter_WhenTheCustomerUnitHasNoCurrencyOrDoesNotExist_FallsBackToTheBaseCurrency_D198(string which)
+    {
+        var world = new CurrencyWorld(buCurrency: null, BaseCurrencyId, (BaseCurrencyId, "USD")).OwnedBySecure();
+        if (which == "no-currency")
+            world.WithCustomerUnit(currency: null, RootBuId);
+
+        var currency = await world.Build().ResolveBudgetCurrencyAsync(MatterId, null, CancellationToken.None);
+
+        (currency.Id, currency.IsoCode, currency.Refusal).Should().Be((BaseCurrencyId, "USD", null));
+    }
+
+    [Fact]
+    public async Task Currency_Omitted_ASecureMatter_WhenTheCustomerUnitCannotBeRead_Throws_NeverAFallbackCurrency_D198()
+    {
+        // The new reads keep the rule that every Dataverse fault here throws, so the commit answers 503 (a fault is not a refusal).
+        var world = new CurrencyWorld(buCurrency: null, BaseCurrencyId, (BaseCurrencyId, "USD")).OwnedBySecure();
+        world.Entities.Setup(e => e.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == "businessunit" && q.Criteria.Conditions.Any(c => c.AttributeName == "businessunitid")),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("no answer"));
+
+        var act = () => world.Build().ResolveBudgetCurrencyAsync(MatterId, null, CancellationToken.None);
+
+        await act.Should().ThrowAsync<TimeoutException>();
     }
 
     // ---------------------------------------------------------------------------------------------------------------
