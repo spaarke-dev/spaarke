@@ -52,6 +52,7 @@ public class ComposeDocumentSessionRoutingTests
             Source: ActiveDocumentIdentity.SourceComposeDirect,
             SessionFileId: "file-1",
             DocumentSessionId: documentSessionId));
+        await SeedSessionAsync(documentSessionId, activeDocument: null, ownerOid: TestSessionOwner.Oid);
 
         var dispatcher = new RecordingDispatchOrchestrator();
         var tool = CreateTool(chatSessionId, dispatcher, BindingDisposition.Compose);
@@ -66,6 +67,54 @@ public class ComposeDocumentSessionRoutingTests
         dispatcher.LastRequest.SessionId.Should().NotBe(chatSessionId,
             "the document session and the chat session are deliberately kept separate (DEF-09) — " +
             "the compose dispatch must NOT land in the chat session when a document session is registered");
+    }
+
+    public static TheoryData<string?> DocumentSessionOwnersOtherThanTheChatOwner => new()
+    {
+        "00000000-0000-0000-0000-0000000000ff", // another user in the same tenant
+        null,                                   // an unowned session
+        "",                                     // a blank owner
+    };
+
+    [Theory]
+    [MemberData(nameof(DocumentSessionOwnersOtherThanTheChatOwner))]
+    public async Task InvokeAsync_DocumentSessionNotOwnedByTheChatOwner_StaysInTheChatSession(string? documentSessionOwner)
+    {
+        var chatSessionId = Guid.NewGuid().ToString("N");
+        var documentSessionId = Guid.NewGuid().ToString("N");
+        await SeedSessionAsync(chatSessionId, new ActiveDocumentIdentity(
+            Source: ActiveDocumentIdentity.SourceComposeDirect,
+            SessionFileId: "file-1",
+            DocumentSessionId: documentSessionId));
+        await SeedSessionAsync(documentSessionId, activeDocument: null, ownerOid: documentSessionOwner);
+
+        var dispatcher = new RecordingDispatchOrchestrator();
+        var tool = CreateTool(chatSessionId, dispatcher, BindingDisposition.Compose);
+
+        await tool.InvokeAsync(new AIFunctionArguments { ["revisionIntent"] = "improve-clarity" });
+
+        dispatcher.DispatchCount.Should().Be(1);
+        dispatcher.LastRequest!.SessionId.Should().Be(chatSessionId,
+            "an active document's session must belong to the chat session's owner before dispatch moves into it");
+    }
+
+    [Fact]
+    public async Task InvokeAsync_DocumentSessionThatDoesNotResolve_StaysInTheChatSession()
+    {
+        var chatSessionId = Guid.NewGuid().ToString("N");
+        var documentSessionId = Guid.NewGuid().ToString("N");
+        await SeedSessionAsync(chatSessionId, new ActiveDocumentIdentity(
+            Source: ActiveDocumentIdentity.SourceComposeDirect,
+            SessionFileId: "file-1",
+            DocumentSessionId: documentSessionId));
+
+        var dispatcher = new RecordingDispatchOrchestrator();
+        var tool = CreateTool(chatSessionId, dispatcher, BindingDisposition.Compose);
+
+        await tool.InvokeAsync(new AIFunctionArguments { ["revisionIntent"] = "improve-clarity" });
+
+        dispatcher.LastRequest!.SessionId.Should().Be(chatSessionId,
+            "a document session with no resolvable owner is never a dispatch target");
     }
 
     [Fact]
@@ -162,7 +211,8 @@ public class ComposeDocumentSessionRoutingTests
     // Helpers
     // =========================================================================
 
-    private async Task SeedSessionAsync(string sessionId, ActiveDocumentIdentity? activeDocument)
+    private async Task SeedSessionAsync(
+        string sessionId, ActiveDocumentIdentity? activeDocument, string? ownerOid = TestSessionOwner.Oid)
     {
         var now = DateTimeOffset.UtcNow;
         var session = new ChatSession(
@@ -173,7 +223,7 @@ public class ComposeDocumentSessionRoutingTests
             CreatedAt: now,
             LastActivity: now,
             Messages: new List<Sprk.Bff.Api.Models.Ai.Chat.ChatMessage>())
-        { OwnerOid = TestSessionOwner.Oid,
+        { OwnerOid = ownerOid,
             ActiveDocument = activeDocument,
         };
         await _sessionManager.UpdateSessionCacheAsync(session);

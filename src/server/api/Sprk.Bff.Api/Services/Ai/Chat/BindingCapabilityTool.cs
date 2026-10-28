@@ -288,6 +288,22 @@ public sealed class BindingCapabilityTool : AIFunction
             {
                 var currentSession = await ResolveCurrentSessionAsync(sessionManager, cancellationToken).ConfigureAwait(false);
                 var documentSessionId = currentSession?.ActiveDocument?.DocumentSessionId;
+                // The document session is a second session id read from stored state, not from the
+                // route the chat turn was authorized on. Dispatch moves into it only when it resolves
+                // AND its owner is the chat session's owner (both non-empty, ordinal); otherwise the
+                // dispatch stays in the chat session.
+                if (!string.IsNullOrWhiteSpace(documentSessionId)
+                    && !await IsDocumentSessionOwnedByChatOwnerAsync(
+                        sessionManager, documentSessionId!, currentSession!.OwnerOid, cancellationToken).ConfigureAwait(false))
+                {
+                    _logger.LogWarning(
+                        "[agent-turn.capability] document session not owned by the chat session's owner — " +
+                        "dispatch stays in the chat session. binding={BindingId} chatSession={ChatSessionId} " +
+                        "documentSession={DocumentSessionId}",
+                        _binding.BindingId, _sessionId, documentSessionId);
+                    documentSessionId = null;
+                }
+
                 if (!string.IsNullOrWhiteSpace(documentSessionId))
                 {
                     dispatchSessionId = documentSessionId!;
@@ -593,6 +609,25 @@ public sealed class BindingCapabilityTool : AIFunction
     }
 
     /// <summary>Yields <paramref name="sessionId"/> then its GUID "N"/"D" normalizations (when parseable).</summary>
+    /// <summary>
+    /// True only when a session resolves under exactly <paramref name="documentSessionId"/> — the id the
+    /// dispatch will load — and its <see cref="ChatSession.OwnerOid"/> is non-empty and equals
+    /// <paramref name="chatOwnerOid"/> (ordinal).
+    /// </summary>
+    private async Task<bool> IsDocumentSessionOwnedByChatOwnerAsync(
+        ChatSessionManager sessionManager, string documentSessionId, string? chatOwnerOid, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(chatOwnerOid))
+        {
+            return false;
+        }
+
+        var session = await sessionManager.GetSessionAsync(_tenantId, documentSessionId, cancellationToken).ConfigureAwait(false);
+        return session is not null
+            && !string.IsNullOrWhiteSpace(session.OwnerOid)
+            && string.Equals(session.OwnerOid, chatOwnerOid, StringComparison.Ordinal);
+    }
+
     private static IEnumerable<string> EnumerateSessionIdForms(string sessionId)
     {
         yield return sessionId;

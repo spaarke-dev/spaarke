@@ -412,6 +412,74 @@ public sealed class ComposeActiveDocumentContractTests : IClassFixture<ComposeAc
             "compose edit into the DOCUMENT session (redline in the open doc), not the chat session");
     }
 
+    // ── The active document's session belongs to the caller ─────────────────────────────────────────────────
+    // When documentSessionId names a session that already exists, it must be the caller's; otherwise the route
+    // answers the same 404 as for an unowned parent session and stores nothing.
+
+    private async Task SeedDocumentSessionAsync(string documentSessionId, string? ownerOid)
+        => await _fixture.Sessions.UpdateSessionCacheAsync(new ChatSession(
+            SessionId: documentSessionId,
+            TenantId: ComposeActiveDocumentFixture.TenantId,
+            DocumentId: null,
+            PlaybookId: null,
+            CreatedAt: DateTimeOffset.UtcNow,
+            LastActivity: DateTimeOffset.UtcNow,
+            Messages: Array.Empty<ChatMessage>(),
+            HostContext: null)
+        { OwnerOid = ownerOid });
+
+    public static TheoryData<string?> DocumentSessionOwnersOtherThanTheCaller => new()
+    {
+        TestSessionOwner.OtherOid,
+        null,
+    };
+
+    [Theory]
+    [MemberData(nameof(DocumentSessionOwnersOtherThanTheCaller))]
+    public async Task PostActiveDocument_ADocumentSessionNotOwnedByTheCaller_Returns404AndStoresNothing(string? documentSessionOwner)
+    {
+        var sessionId = await SeedOwnedSessionAsync();
+        var documentSessionId = Guid.NewGuid().ToString("D");
+        await SeedDocumentSessionAsync(documentSessionId, documentSessionOwner);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync("/api/compose/active-document", new
+        {
+            sessionId,
+            sessionFileId = "file-the-caller-uploaded",
+            source = ActiveDocumentIdentity.SourceComposeDirect,
+            documentSessionId,
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound,
+            "an existing document session must be owned by the caller — the same answer as an unowned parent session");
+        var parentAfter = await _fixture.Sessions.GetSessionAsync(ComposeActiveDocumentFixture.TenantId, sessionId);
+        parentAfter!.ActiveDocument.Should().BeNull("a refused registration stores nothing on the parent session");
+        var documentSessionAfter = await _fixture.Sessions.GetSessionAsync(ComposeActiveDocumentFixture.TenantId, documentSessionId);
+        documentSessionAfter!.OwnerOid.Should().Be(documentSessionOwner, "the named session is left untouched");
+    }
+
+    [Fact]
+    public async Task PostActiveDocument_ADocumentSessionOwnedByTheCaller_IsRecorded()
+    {
+        var sessionId = await SeedOwnedSessionAsync();
+        var documentSessionId = Guid.NewGuid().ToString("D");
+        await SeedDocumentSessionAsync(documentSessionId, TestSessionOwner.Oid);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync("/api/compose/active-document", new
+        {
+            sessionId,
+            sessionFileId = "file-the-caller-uploaded",
+            source = ActiveDocumentIdentity.SourceComposeDirect,
+            documentSessionId,
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var parentAfter = await _fixture.Sessions.GetSessionAsync(ComposeActiveDocumentFixture.TenantId, sessionId);
+        parentAfter!.ActiveDocument!.DocumentSessionId.Should().Be(documentSessionId);
+    }
+
     /// <summary>
     /// DEF-11 draft-alternative-404 fix (spaarkeai-compose-r2): registering the active document with a
     /// <c>documentSessionId</c> idempotently CREATES a resolvable <see cref="ChatSession"/> keyed by

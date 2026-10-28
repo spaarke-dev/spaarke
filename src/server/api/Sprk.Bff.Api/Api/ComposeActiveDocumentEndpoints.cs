@@ -126,6 +126,25 @@ internal static class ComposeActiveDocumentEndpoints
                     type: "https://tools.ietf.org/html/rfc7231#section-6.5.4");
             }
 
+            // The document session named in the body is a SECOND session id, and the agent turn later
+            // dispatches into it (BindingCapabilityTool). When it already exists it must be the caller's;
+            // a not-yet-existing id is minted below under the parent's (checked) owner. Someone else's,
+            // an unowned one and a missing parent are the same 404, and nothing is stored.
+            if (!await IsDocumentSessionAssignableAsync(
+                    sessionManager, tenantId, body.DocumentSessionId,
+                    CallerResolution.ResolveObjectId(httpContext.User), ct).ConfigureAwait(false))
+            {
+                logger.LogWarning(
+                    "Compose active-document DENIED: the document session is not owned by the caller. "
+                    + "Answered 404, session unchanged. tenant={TenantId} TraceId={TraceId}",
+                    tenantId, httpContext.TraceIdentifier);
+                return Results.Problem(
+                    statusCode: StatusCodes.Status404NotFound,
+                    title: "Session Not Found",
+                    detail: "The chat session was not found or has expired. Register the active document on an existing session.",
+                    type: "https://tools.ietf.org/html/rfc7231#section-6.5.4");
+            }
+
             ActiveDocumentIdentity identity;
             if (hasSessionFile)
             {
@@ -414,6 +433,32 @@ internal static class ComposeActiveDocumentEndpoints
             && string.Equals(session.OwnerOid, callerOid, StringComparison.Ordinal)
                 ? (session, key)
                 : (null, null);
+    }
+
+    /// <summary>
+    /// Whether <paramref name="documentSessionId"/> may be recorded as the active document's session for
+    /// <paramref name="callerOid"/>: true when it is absent (nothing to record), when no session resolves under
+    /// it (it is minted later under the parent's owner), or when the session that resolves is owned by the
+    /// caller (<see cref="ResolveOwnedSessionAsync"/>). An existing session that is someone else's or unowned
+    /// is false.
+    /// </summary>
+    internal static async Task<bool> IsDocumentSessionAssignableAsync(
+        ChatSessionManager sessionManager, string tenantId, string? documentSessionId, string? callerOid, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(documentSessionId))
+        {
+            return true;
+        }
+
+        var (existing, _) = await ResolveSessionAsync(sessionManager, tenantId, documentSessionId, ct).ConfigureAwait(false);
+        if (existing is null)
+        {
+            return true;
+        }
+
+        var (owned, _) = await ResolveOwnedSessionAsync(sessionManager, tenantId, documentSessionId, callerOid, ct)
+            .ConfigureAwait(false);
+        return owned is not null;
     }
 
     internal static IEnumerable<string> EnumerateSessionIdForms(string sessionId)
