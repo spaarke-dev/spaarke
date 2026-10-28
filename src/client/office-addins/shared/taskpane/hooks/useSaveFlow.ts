@@ -1104,16 +1104,19 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
                   .filter((name): name is string => !!name)
               : undefined;
 
+          const typedEmailName = context.documentName?.trim();
           serverRequest.email = {
             // #2416: always the email's own subject — it is the saved .eml's Subject header, sprk_emailsubject and the
             // communication's subject. Before #2416 the typed Document Name travelled here and replaced all three.
             subject: context.itemName || 'Untitled Email',
-            // #2416: the Document Name the user typed names the .eml file only.
-            ...(context.documentName ? { documentName: context.documentName } : {}),
+            // #2416: the Document Name the user typed names the .eml file only. Whitespace alone is no name.
+            ...(typedEmailName ? { documentName: typedEmailName } : {}),
             // Task 046 (b): says whether the .eml name is the email's own subject (system-derived) or the Document
             // Name the user TYPED. The server stores a system-derived name with a short unique suffix, so two
             // same-subject, same-date emails never share a file. A typed name is stored exactly as typed.
-            isNameSystemDerived: !context.documentName,
+            // #2416: "Keep both" after a typed-name collision asks for the suffix too. The server stores the file
+            // under a unique name and sprk_documentname keeps the typed name: the email's form of a rename.
+            isNameSystemDerived: !typedEmailName || context.allowRename === true,
             senderEmail: context.senderEmail || 'unknown@placeholder.com',
             senderName: context.senderDisplayName,
             recipients,

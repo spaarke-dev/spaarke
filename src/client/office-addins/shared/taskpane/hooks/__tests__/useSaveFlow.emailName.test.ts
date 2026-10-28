@@ -111,4 +111,25 @@ describe('useSaveFlow — the .eml name signal (task 046)', () => {
     expect(email.subject).toBe('Untitled Email');
     expect(email.documentName).toBe('Typed');
   });
+
+  it('a whitespace-only Document Name is no name: nothing is sent and the name is system-derived (#2416)', async () => {
+    const email = await sentEmail(outlookContext({ documentName: '   ' }));
+
+    expect(email).not.toHaveProperty('documentName');
+    expect(email.isNameSystemDerived).toBe(true);
+  });
+
+  it('a typed name is sent trimmed (#2416)', async () => {
+    const email = await sentEmail(outlookContext({ documentName: '  Smith letter  ' }));
+
+    expect(email.documentName).toBe('Smith letter');
+    expect(email.isNameSystemDerived).toBe(false);
+  });
+
+  it('"Keep both" after a typed-name collision keeps the typed name and asks for the unique stored suffix (#2416)', async () => {
+    const email = await sentEmail(outlookContext({ documentName: 'Smith letter', allowRename: true }));
+
+    expect(email.documentName).toBe('Smith letter');
+    expect(email.isNameSystemDerived).toBe(true);
+  });
 });
