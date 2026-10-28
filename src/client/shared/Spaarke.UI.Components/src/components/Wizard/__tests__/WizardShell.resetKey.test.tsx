@@ -106,6 +106,23 @@ describe('WizardShell resetKey', () => {
     expect(button('Next')).toHaveFocus();
   });
 
+  it('after a reset, focus held OUTSIDE the dialog (a confirm or side pane opened above it) is left where it is', () => {
+    // The decision wizard's discard confirm is a separate dialog: an item that finishes loading while it is open resets the shell.
+    const Host = ({ resetKey }: { resetKey: string }) => (
+      <>
+        <WizardShell {...props({ resetKey })} />
+        <div role="alertdialog" aria-label="Discard unrecorded choices?">
+          <button data-testid="confirm-keep">Keep editing</button>
+        </div>
+      </>
+    );
+    const { rerender } = renderWithProviders(<Host resetKey="one" />);
+    const keep = screen.getByTestId('confirm-keep');
+    keep.focus();
+    rerender(<Host resetKey="two" />);
+    expect(keep).toHaveFocus();
+  });
+
   it('must-not-fire: without resetKey the content area has no tabIndex, and nothing takes focus on a re-render', () => {
     const { rerender } = renderWithProviders(<WizardShell {...props()} />);
     const content = screen.getByTestId('content-a').parentElement as HTMLElement;

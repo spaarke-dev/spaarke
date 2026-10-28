@@ -261,8 +261,10 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
   }
 
   // After a reset the content has been remounted, so the control that held keyboard focus (Try again, Next open item) is gone and
-  // focus would fall to <body>, outside the dialog. Put it on the content area unless it is still inside the dialog. Skips the
-  // first mount; a shell without `resetKey` never changes `appliedResetKey`, so it never runs there after mount either.
+  // focus would fall to <body>, outside the dialog. Put it on the content area only when focus was LOST (on <body> or nowhere):
+  // focus held anywhere else (a control still in the dialog, a confirm or side pane opened above it) is left alone. Skips the
+  // first mount (under StrictMode in development the ref survives the simulated remount, so it may focus the content area once
+  // at open, which is harmless); a shell without `resetKey` never changes `appliedResetKey`, so it never runs there after mount.
   const contentRef = React.useRef<HTMLDivElement>(null);
   const resetMountedRef = React.useRef(false);
   React.useEffect(() => {
@@ -272,10 +274,8 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
     }
     const content = contentRef.current;
     if (!content) return;
-    const root = content.closest('[role="dialog"]');
     const active = document.activeElement;
-    const lost = !active || active === document.body;
-    if (root ? !root.contains(active) : lost) content.focus();
+    if (!active || active === document.body) content.focus();
   }, [appliedResetKey]);
 
   // ── Reset on open (false -> true) ──────────────────────────────────────

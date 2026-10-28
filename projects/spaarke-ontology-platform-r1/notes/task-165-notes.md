@@ -51,3 +51,9 @@ keyed on `resetKey`).
 - **K4.** `WizardShell` compares `!Object.is(resetKey, appliedResetKey)`; a NaN key no longer loops. One-line test added; it failed
   (render loop) before.
 - Render-phase reset mechanism and behaviour without `resetKey` untouched.
+
+## Re-check of fix round 1 (scoped Sonnet, 2026-10-28) and fix round 2 (main session)
+- F1-a, F3 and K4: confirmed fixed by trace.
+- **F2, fixed:** the post-reset focus effect also moved focus that was held OUTSIDE the wizard's dialog. Scenario: the discard confirm is open, and an item that was loading finishes. The effect now moves focus only when it was lost (`<body>` or none). New test: focus in a separate dialog survives a reset. It fails on the fix-round-1 code (mutant run: 1 failed) and passes now.
+- **K4, accepted:** under StrictMode in development, the skip-first-mount guard may focus the content area once at open. This is harmless; the comment now says so.
+- Wizard and DecisionWizard: 17 suites, 295 tests pass. `tsc --noEmit` is clean.
