@@ -603,7 +603,7 @@ public class TodoAssigneeOwnerReconciliationJobTests
 
         var services = new ServiceCollection();
         services.AddSingleton(entities.Object);
-        services.AddScoped<AssignedAccessStore>(_ => _links);
+        services.AddScoped(_ => AssignedAccessTestDoubles.Representation(_links));
         services.AddScoped(_ => reconciler);
         services.AddSingleton<IIdempotencyService>(new IdempotencyService(
             new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions())), NullLogger<IdempotencyService>.Instance));

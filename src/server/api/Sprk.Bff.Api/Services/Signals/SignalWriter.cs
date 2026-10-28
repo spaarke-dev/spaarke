@@ -447,9 +447,9 @@ public sealed partial class SignalWriter
     /// <param name="recordTypes">The <c>sprk_recordtype_ref</c> lookup the shared regarding builder types the pair from
     /// (<c>QueryRecordTypeRefAsync</c>; the same source <c>TaskActionCore</c> and the To Do writers hand it). Task 141.</param>
     /// <param name="scopes">Task 143: the scope this singleton resolves two SCOPED, already-registered services from, per call
-    /// (the <see cref="SignalSuppressionService"/> pattern): <see cref="AssignedAccessStore"/> for the D-134 assignee read
+    /// (the <see cref="SignalSuppressionService"/> pattern): <see cref="ContactUserRepresentation"/> for the D-134 assignee read
     /// (<see cref="PersonalToDoAssignee"/>) and <see cref="SecureChildReconciler"/> for the no-core re-own
-    /// (<see cref="ReassignNoCoreOwnerAsync"/>). No new registration.</param>
+    /// (<see cref="ReassignNoCoreOwnerAsync"/>).</param>
     public SignalWriter(
         OntologyWriterDataverseClient writerClient,
         IGenericEntityService sysadminClient,
@@ -1005,13 +1005,13 @@ public sealed partial class SignalWriter
 
     /// <summary>
     /// Task 153 (D-134): the one enabled user a personal To Do's Assigned To names (<see cref="PersonalToDoAssignee"/>, through the scoped
-    /// <see cref="AssignedAccessStore"/>), or null for no single user. A read fault propagates (the caller must not fall back).
+    /// <see cref="ContactUserRepresentation"/>), or null for no single user. A read fault propagates (the caller must not fall back).
     /// </summary>
     internal async Task<Guid?> PersonalToDoAssigneeAsync(Guid todoId, CancellationToken ct = default)
     {
         await using var scope = _scopes.CreateAsyncScope();
         return await PersonalToDoAssignee.ResolveAsync(
-            _sysadminClient, scope.ServiceProvider.GetRequiredService<AssignedAccessStore>(), todoId, ct).ConfigureAwait(false);
+            _sysadminClient, scope.ServiceProvider.GetRequiredService<ContactUserRepresentation>(), todoId, ct).ConfigureAwait(false);
     }
 
     /// <summary>

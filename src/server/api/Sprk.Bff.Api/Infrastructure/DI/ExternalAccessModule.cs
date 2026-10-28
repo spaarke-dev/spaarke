@@ -329,6 +329,10 @@ public static class ExternalAccessModule
         // store, the guard, the share seam, the tenant cache), so no Null-Object is needed.
         services.AddScoped<AssignedAccessStore>();
         services.AddScoped<AssignedAccessMaterializer>();
+        // Task 193 (#2338): the ONE contact -> user rule (who a contact represents), over the identity store, the store above
+        // and the participation service — all unconditional, so this is too (ADR-032). The personal To Do assignee's callers
+        // and Manage Access's /grant resolve it; the materializer and the grant notifier build it from the same stores.
+        services.AddScoped<ContactUserRepresentation>();
 
         // Principal-agnostic caller resolution (teams-app-r1 task 025 · R2 FR-22 · Option A). The
         // reusable abstraction that lets the /api/v1/external collaboration endpoints serve BOTH the

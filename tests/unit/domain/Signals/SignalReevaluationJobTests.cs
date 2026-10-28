@@ -2575,7 +2575,7 @@ public partial class SignalReevaluationJobTests
             var services = new ServiceCollection();
             services.AddScoped(_ => new Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer(
                 Sysadmin, null!, null!, configuration, NullLogger<Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer>.Instance));
-            services.AddScoped<Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessStore>(_ => Links);
+            services.AddScoped(_ => AccessControl.AssignedAccessTestDoubles.Representation(Links));
             services.AddScoped(sp => new Sprk.Bff.Api.Services.Access.SecureChildReconciler(
                 Sysadmin, Ownership, sp.GetRequiredService<Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer>(), ReownApi,
                 configuration, NullLogger<Sprk.Bff.Api.Services.Access.SecureChildReconciler>.Instance, new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing));

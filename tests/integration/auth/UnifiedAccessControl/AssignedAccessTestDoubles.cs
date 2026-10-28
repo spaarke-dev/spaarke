@@ -28,6 +28,26 @@ internal static class AssignedAccessTestDoubles
     internal const string TestTenant = "00000000-0000-0000-0000-0000000000aa";
     internal static readonly DateOnly Today = new(2026, 10, 3);
 
+    /// <summary>
+    /// Task 193: who a contact represents, through the ONE production rule (<see cref="ContactUserRepresentation"/>) over
+    /// <paramref name="links"/>. The personal To Do assignee's rigs seed only the link, so by default every contact reads as
+    /// ACTIVE with no oid binding (a contact never onboarded) — the world those rigs describe. A test about the contact
+    /// itself (inactive, oid-bound) passes its own <paramref name="identities"/>.
+    /// </summary>
+    internal static ContactUserRepresentation Representation(AssignedAccessStore links, IContactIdentityStore? identities = null)
+        => new(identities ?? ActiveContactsWithoutBinding(), links,
+            new GrantPolicyTestDoubles.FlagStubParticipationService(RootRecordFlags.None));
+
+    /// <summary>An identity store whose every contact is active and carries no oid binding.</summary>
+    internal static IContactIdentityStore ActiveContactsWithoutBinding()
+    {
+        var identities = new Moq.Mock<IContactIdentityStore>();
+        identities
+            .Setup(i => i.GetContactAsync(Moq.It.IsAny<Guid>(), Moq.It.IsAny<CancellationToken>()))
+            .Returns((Guid id, CancellationToken _) => Task.FromResult(ContactLookup.Of(new ContactBindingRow(id, 0, null, null))));
+        return identities.Object;
+    }
+
     /// <summary>A fixed clock (UTC noon on <see cref="Today"/>).</summary>
     internal sealed class FixedTimeProvider : TimeProvider
     {

@@ -190,7 +190,7 @@ public sealed class TodoAssigneeOwnerReconciliationJob : IScheduledJob
             using var scope = _scopeFactory.CreateScope();
             var run = new Run(
                 scope.ServiceProvider.GetRequiredService<IGenericEntityService>(),
-                scope.ServiceProvider.GetRequiredService<AssignedAccessStore>(),
+                scope.ServiceProvider.GetRequiredService<ContactUserRepresentation>(),
                 scope.ServiceProvider.GetRequiredService<SecureChildReconciler>(),
                 counts, problems, context);
             var idempotency = scope.ServiceProvider.GetRequiredService<IIdempotencyService>();
@@ -616,7 +616,7 @@ public sealed class TodoAssigneeOwnerReconciliationJob : IScheduledJob
         ToDoAnswer answer;
         try
         {
-            var assignee = await PersonalToDoAssignee.ClassifyAsync(run.Entities, run.Links, todoId, ct).ConfigureAwait(false);
+            var assignee = await PersonalToDoAssignee.ClassifyAsync(run.Entities, run.People, todoId, ct).ConfigureAwait(false);
             answer = assignee.Outcome switch
             {
                 PersonalToDoAssignee.Outcome.ToDoNotFound => new ToDoAnswer(todoId, ToDoKind.Gone),
@@ -1179,11 +1179,11 @@ public sealed class TodoAssigneeOwnerReconciliationJob : IScheduledJob
 
     /// <summary>One run's reads, memo and counts.</summary>
     private sealed class Run(
-        IGenericEntityService entities, AssignedAccessStore links, SecureChildReconciler reconciler,
+        IGenericEntityService entities, ContactUserRepresentation people, SecureChildReconciler reconciler,
         RunCounts counts, List<string> problems, JobRunContext context)
     {
         public IGenericEntityService Entities { get; } = entities;
-        public AssignedAccessStore Links { get; } = links;
+        public ContactUserRepresentation People { get; } = people;
         public SecureChildReconciler Reconciler { get; } = reconciler;
         public RunCounts Counts { get; } = counts;
         public List<string> Problems { get; } = problems;
