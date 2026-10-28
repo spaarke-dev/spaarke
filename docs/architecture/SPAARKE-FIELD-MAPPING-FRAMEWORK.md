@@ -55,7 +55,7 @@ This is the complete build surface. Every row is a distinct, live component; pat
 | Component | Path | Responsibility |
 |-----------|------|-----------------|
 | `UpdateRelatedButton` PCF (unchanged) | `src/client/pcf/` | Pre-existing **manual push** trigger for already-existing child records → `POST /push`; untouched by this project |
-| `sprk_fieldmapping_push.js` (web resource) | `src/client/webresources/js/` | MDA ribbon script that calls `POST /push` from a parent form |
+| `sprk_fieldmapping_push.js` (web resource) | `src/client/webresources/js/` | MDA ribbon script. `hasSourceProfile` is the enable rule; `pushUpdates` (v1.2.0, `field-mapping-server-write-path-r1` task 075) opens the `sprk_recordfamily` code page (`src/solutions/RecordFamily/`, hosting `RecordFamilyModal`) as a `navigateTo` dialog and pushes nothing itself. The old direct `POST /push` helpers remain in the file, uncalled, until task 040 |
 | ~~`FieldMappingAdmin` PCF~~ | — | **Retired 2026-10-15** (`pcf-orphan-cleanup-r1`): deleted from spaarkedev1 and removed from `FieldMappingAdminSolution`. Profiles/rules are authored on the **native MDA forms** (see Design Decisions "Native Dataverse forms for admin authoring") |
 
 ## PCF Hosts & the Set-Regarding Resolver (related controls — NOT part of the engine)
