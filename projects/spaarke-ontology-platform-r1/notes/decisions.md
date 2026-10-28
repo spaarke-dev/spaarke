@@ -382,3 +382,15 @@ Sources: **design** = [`design.md`](../design.md) §8 (D-1..D-12, §8.0c) and §
   - The operator must hold Assign on `sprk_policy` and `sprk_policyversion`, or create the rows with `ownerid`.
 - **Admin-tab authoring: the author wins.** A policy written in the admin tab stays owned by its author, wherever the author is homed, including the root business unit. `SavePolicyAsync` is unchanged.
 - **Release wiring:** running the script in the customer release or provisioning path is DI-124 (#2300), which stays separate.
+
+## D-198 — A secure matter's budget currency comes from the customer business unit (owner, 2026-10-28)
+
+- **Context:** review of task 167 (#2403, K1). D-193 prefills the budget currency from the matter's owning business unit. A secure matter is owned by the Secure Record unit, whose `transactioncurrencyid` is null, so its budget fell back to the organization base currency. In a multi-currency organization, a secure EUR matter would default to USD.
+- **Owner ruling: fix it now** (option B over accepting the fallback).
+- **Proposed rule** (sent to uac-r2 for confirmation, 2026-10-28):
+  - When the matter's owning business unit is the Secure Record unit (uac-r2's shared predicate, D-191), use the currency of the configured customer business unit, `ExternalAccess:CustomerBusinessUnitId`.
+  - If that unit is not configured or has no currency, use the organization base currency.
+  - Never apply this to a non-secure matter.
+- **Implementation:** in `DecisionParameterSources` on PR #2414 (the uac-r2 follow-up that reads the owning business unit as the caller).
+- **Dev fact (2026-10-28):** Secure Record, Spaarke Demo, Spaarke Dev 1 and Spaarke Test 1 have no currency; root (Spaarke) and Spaarke Business Unit 1 are USD. An ordinary unit with no currency still falls back to the base currency (D-193 unchanged).
+

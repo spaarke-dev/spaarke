@@ -454,7 +454,7 @@ Criterion 89 (blank the writer client id, expect the writer-failure alert to fir
   - `GET /api/v1/signals/47dfaafa-…/decision-plan` returned 200 for a v3 item (`policyVersionId …6313`). Actions: `create-budget` (recommended, first), then `assign-task`. Next steps: `add-todo`, then `assign-work`. This is D-192, and it is check 4 on the server.
   - **fm-037:** `POST /api/v1/child-records/sprk_workassignment` with `{sprk_name: "zz-fm037-ontology-smoke", sprk_assignedtointernal: contact 8e9918a9…}` returned 201 (id `57e37569-a2c2-4d50-a7a1-b889cf73b168`). Read back: `sprk_assignedto` = `sprk_assignedtointernal` = 8e9918a9…, and the row is team-owned (owneridtype 9). Assign Work rows created before the deploy (for example `10686fa6…`, 00:05Z) have `sprk_assignedto` empty.
   - **Not exercised:** a real decision commit through Assign Work. Committing one would act on the owner's open UAT items, so the owner's re-check covers it.
-- **Test data:** `zz-fm037-ontology-smoke` (`57e37569-…`) is NOT yet deleted. The owner's OK is needed to delete it.
+- **Test data:** `zz-fm037-ontology-smoke` (`57e37569-…`) was deleted on 2026-10-28 with the owner's OK. A query by name returns no rows.
 
 ## 2026-10-28 — `sprk_budgetnumber` autonumber `BUD-{SEQNUM:6}` on spaarkedev1 (task 167, D-193, owner-approved schema change)
 - **Before:** `AutoNumberFormat` was empty and MaxLength was 20. Existing budget numbers (`B001`, `B002`, `B003-01`, and some blank) are not renumbered.
