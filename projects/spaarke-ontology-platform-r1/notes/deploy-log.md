@@ -466,3 +466,20 @@ Criterion 89 (blank the writer client id, expect the writer-failure alert to fir
 - **Proof of numbering:** comes with the next budget created (the owner's UAT). No test budget was created, because deleting one needs the owner's OK.
 - **Code:** PR #2403 merged to docs as `4f52d3641f`. It reaches dev with the next docs→master merge and R3's BFF deploy (currency default, budget fields, year rule). The autonumber works now for any create path.
 
+## 2026-10-28 21:14Z — Console `a8314c2e0e` on dev (tasks 167, 169, 170; docs→master #2409)
+- **Merge:** PR #2409 (head `58daec8c2b`) merged to master as `a8314c2e0e`.
+  - Origin/master was merged into docs first, with no conflicts. R3 077 is an ancestor.
+  - The BFF build was clean, and the full ArchTests passed 1609/1609.
+  - CI had nothing pending. The only failure was the advisory Tier 2 "Last Reviewed Stamp". It passed on the previous head (`082f9cf51a`), and the newer head only added project notes.
+- **Deploy:** the push triggered `deploy-spaarke-ai.yml` run 40768831264, which succeeded at 21:14:15Z.
+- **Console contents:**
+  - 169: worklist lane subtitles, collapsed by default and remembered per device.
+  - 167: the budget fields in the DecisionWizard.
+- **BFF contents on master, NOT deployed:**
+  - 167: budget parameters and the currency default.
+  - 170: the WhoAmI memo and the entity-set-name cache.
+  - The dev BFF deploy is R3's operator step. It needs the owner's approval in R3's session.
+- **Notices:** before and after notices went to R3 and uac-r2. word-add-in replied with no hold.
+- **Owner:** hard-reload (Ctrl+F5) to see the worklist lanes. The budget fields need the BFF deploy before they can be committed.
+- **Not on master yet (docs only):** #2414 (`f634761a63`, the owning business unit read as the caller) and 167c / D-198 (in progress).
+
