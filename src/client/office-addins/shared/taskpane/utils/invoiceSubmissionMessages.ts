@@ -114,7 +114,7 @@ export const SUBMISSION_ERROR_MESSAGES: Readonly<Record<string, Entry>> = {
   'ebilling.submission.submission_already_ended':
     'This email was already submitted with these same details, and the invoice was rejected. You can follow it in ' +
     `Spaarke. ${NOTHING}`,
-  'ebilling.submission.document_already_submitted': `This invoice was already submitted from this email with different details. ${NOTHING}`,
+  'ebilling.submission.document_already_submitted': `This email was already submitted as an invoice for this record. You can follow it in Spaarke. ${NOTHING}`,
   OFFICE_IDEMPOTENCY_CONFLICT: f => `This submission is still being sent. ${tryAgain(f)}`,
   // §6 access and filters
   OFFICE_AUTH_001: `Your sign-in has expired. Sign in again, then submit. ${NOTHING}`,
@@ -175,6 +175,8 @@ export const INVOICE_OUTCOME_MESSAGES: Readonly<Record<string, Entry>> = {
   'ebilling.submission.source_check_failed':
     "The email's filing couldn't be confirmed, so the invoice was not processed.",
   'ebilling.submission.processing_failed': "The invoice couldn't be processed.",
+  'ebilling.submission.file_scan_timeout':
+    "The malware scan of a marked file didn't finish in time, so the invoice was not processed. Submit it again.",
   'ebilling.submission.blocked': 'The invoice was rejected by a billing rule.',
   'ebilling.submission.returned': 'The invoice was returned to the firm.',
 };
