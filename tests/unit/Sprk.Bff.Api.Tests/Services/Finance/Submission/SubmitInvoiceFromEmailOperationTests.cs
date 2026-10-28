@@ -6,7 +6,10 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Moq;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Api.Finance;
+using Sprk.Bff.Api.Infrastructure.Errors;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance.Files;
 using Sprk.Bff.Api.Services.Finance.Submission;
@@ -262,17 +265,53 @@ public sealed class SubmitInvoiceFromEmailOperationTests
     }
 
     [Fact]
-    public async Task Submit_StepARefusesTheFiling_IsTheRefileRoutesAnswer_AndWritesNothing()
+    public async Task Submit_StepARefusesTheFiling_403_IsTheRefileRoutesOwn403_AndWritesNothing()
     {
         var operation = Build();
         var refile = TypedResults.Problem(detail: "Not allowed", statusCode: StatusCodes.Status403Forbidden,
-            extensions: new Dictionary<string, object?> { ["code"] = "COMMUNICATION_REFILE_FORBIDDEN" });
+            extensions: new Dictionary<string, object?> { ["reasonCode"] = "child_record.denied" });
         operation.StepA = _ => throw new InvoiceSubmissionEndpoints.SourceFilingRefusedException(refile);
 
         var act = () => operation.SubmitAsync(Input(), CancellationToken.None);
 
-        (await act.Should().ThrowAsync<FromEmailRouteAnswerException>()).Which.Answer.Should().BeSameAs(refile);
+        var thrown = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+        (thrown.StatusCode, thrown.Code).Should().Be((StatusCodes.Status403Forbidden, CommunicationRecordAuthorizationFilter.RefileDenyCode),
+            "contract section 6 lists only the re-file route's own 403 (review round 5)");
+        thrown.Detail.Should().Be(InvoiceSubmissionEndpoints.RefileForbidden().Detail, "the same words as a caller without Write gets (no existence oracle)");
         H.Writes.Should().Be(0);
+        H.Allocations.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Review round 5: every other answer of the communication re-file core carries a code contract section 6 does not list, so it is mapped
+    /// onto section 6: a transient one is 503 <c>record_unavailable</c>, anything else 503 <c>failed</c>. Nothing was filed or written.
+    /// </summary>
+    [Theory]
+    [InlineData(StatusCodes.Status400BadRequest, "child_record.invalid_payload", 503, "ebilling.submission.failed")]
+    [InlineData(StatusCodes.Status404NotFound, "child_record.not_found", 503, "ebilling.submission.failed")]
+    [InlineData(StatusCodes.Status409Conflict, "record_owner.no_owner_source", 503, "ebilling.submission.failed")]
+    [InlineData(StatusCodes.Status500InternalServerError, "child_record.no_decision", 503, "ebilling.submission.failed")]
+    [InlineData(StatusCodes.Status429TooManyRequests, "child_record.dataverse", 503, "ebilling.submission.record_unavailable")]
+    [InlineData(StatusCodes.Status502BadGateway, "child_record.dataverse", 503, "ebilling.submission.record_unavailable")]
+    [InlineData(StatusCodes.Status503ServiceUnavailable, "child_record.dataverse", 503, "ebilling.submission.record_unavailable")]
+    [InlineData(StatusCodes.Status409Conflict, "record_owner_unsettled", 503, "ebilling.submission.record_unavailable")]
+    public async Task Submit_StepARefileAnswersACodeOutsideSectionSix_IsMappedOntoSectionSix_NothingWritten(
+        int refileStatus, string refileCode, int status, string code)
+    {
+        var operation = Build();
+        var refile = refileCode == "record_owner_unsettled"
+            ? ProblemDetailsHelper.RecordOwnerUnsettled("communication", "trace")
+            : TypedResults.Problem(detail: "refused", statusCode: refileStatus, extensions: new Dictionary<string, object?> { ["reasonCode"] = refileCode });
+        operation.StepA = _ => throw new InvoiceSubmissionEndpoints.SourceFilingRefusedException(refile);
+
+        var result = await operation.SubmitAsync(Input(), CancellationToken.None);
+
+        result.Outcome.Should().Be(FromEmailSubmitOutcome.Refused);
+        (result.Status, result.ErrorCode).Should().Be((status, code));
+        result.Detail.Should().NotContain(InvoiceSubmissionService.FilingKeptSentence, "the re-file did not answer 204: nothing was filed");
+        H.Writes.Should().Be(0);
+        H.Stages.Should().BeEmpty();
+        H.Allocations.Should().BeEmpty();
     }
 
     [Fact]

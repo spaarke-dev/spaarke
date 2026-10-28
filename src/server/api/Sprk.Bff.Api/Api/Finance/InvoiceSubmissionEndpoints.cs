@@ -417,12 +417,7 @@ public static class InvoiceSubmissionEndpoints
 
             if (!_rights.HasFlag(AccessRights.Write))
             {
-                // The communication re-file route's own refusal, with its words (no existence oracle).
-                throw new SdapProblemException(
-                    code: CommunicationRecordAuthorizationFilter.RefileDenyCode,
-                    title: "Forbidden",
-                    detail: "The communication does not exist or is not visible to the caller, or the caller may not change it.",
-                    statusCode: StatusCodes.Status403Forbidden);
+                throw RefileForbidden();
             }
 
             // The re-file core's own dependencies come from the request scope only when A runs (most submissions never file anything).
@@ -443,6 +438,16 @@ public static class InvoiceSubmissionEndpoints
             return true;
         }
     }
+
+    /// <summary>
+    /// Step A's 403: the communication re-file route's own refusal, with its words (no existence oracle). Also the from-email operation's
+    /// answer to a 403 of the re-file core (review round 5), so that route sends only contract section 6's code.
+    /// </summary>
+    internal static SdapProblemException RefileForbidden() => new(
+        code: CommunicationRecordAuthorizationFilter.RefileDenyCode,
+        title: "Forbidden",
+        detail: "The communication does not exist or is not visible to the caller, or the caller may not change it.",
+        statusCode: StatusCodes.Status403Forbidden);
 
     /// <summary>Step A's refusal, carrying the route's answer (the intake writes nothing after it; the route returns <see cref="Answer"/>).</summary>
     internal sealed class SourceFilingRefusedException(IResult answer) : Exception("Submit Invoice step A refused the filing of the source communication.")
