@@ -35,6 +35,16 @@ export interface ICreateWorkAssignmentFormState {
   priority: number;
   /** Step 3: Response Due Date — ISO date string. Maps to sprk_responseduedate. */
   responseDueDate: string;
+  /**
+   * Step 3: Assigned To contact GUID (optional; FR-37). Maps to sprk_assignedto (contact lookup).
+   * Blank means the create payload carries NO key for the column, so the server's FR-36 default
+   * (Assigned To Internal) applies; never pre-fill or compute that default on the client.
+   * Optional so the other wizards that build this state for their Assign Work follow-on (no picker there)
+   * need no change; absent means blank.
+   */
+  assignedToId?: string;
+  /** Step 3: Assigned To contact display name (summary only; never sent). Absent means blank. */
+  assignedToName?: string;
 }
 
 export const EMPTY_WORK_ASSIGNMENT_FORM: ICreateWorkAssignmentFormState = {
@@ -50,6 +60,8 @@ export const EMPTY_WORK_ASSIGNMENT_FORM: ICreateWorkAssignmentFormState = {
   practiceAreaName: '',
   priority: 100000001, // Normal
   responseDueDate: '',
+  assignedToId: '',
+  assignedToName: '',
 };
 
 // ---------------------------------------------------------------------------

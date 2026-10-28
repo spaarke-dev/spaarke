@@ -471,6 +471,23 @@ export class WorkAssignmentService {
     if (form.practiceAreaId)
       bindLookup('sprk_practicearea_ref', 'sprk_practicearea_refs', form.practiceAreaId, 'practicearea');
 
+    // Assigned To (contact) -- task 038 / FR-37. `sprk_workassignment.sprk_assignedto` targets CONTACT in the live
+    // schema (nav prop `sprk_AssignedTo`); the entity also has look-alike contact lookups (assigned attorney /
+    // paralegal, `sprk_assignedto1`, `sprk_assignedtointernal`), so it is resolved by exact column, never by
+    // substring or by referenced entity. A BLANK picker writes NOTHING -- no bind and no null: the server (task 037,
+    // FR-36) fills the column from Assigned To Internal only when the create leaves it UNSET, and an explicit null
+    // would block that default. The default is never computed here.
+    if (form.assignedToId) {
+      const assignedToNavProp = toNavPropMap(navProps)['sprk_assignedto'];
+      if (assignedToNavProp) {
+        entity[`${assignedToNavProp}@odata.bind`] = `/contacts(${cleanGuid(form.assignedToId)})`;
+      } else {
+        console.warn(
+          '[WorkAssignmentService] sprk_workassignment.sprk_assignedto nav-prop not found; Assigned To not set'
+        );
+      }
+    }
+
     // Assign Work lookups (if provided)
     if (assignWork) {
       if (assignWork.assignedAttorneyId) bindLookup('contact', 'contacts', assignWork.assignedAttorneyId, 'attorney');

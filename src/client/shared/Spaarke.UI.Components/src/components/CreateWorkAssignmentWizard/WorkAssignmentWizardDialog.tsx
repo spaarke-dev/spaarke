@@ -347,6 +347,8 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
         | 'practiceAreaName'
         | 'priority'
         | 'responseDueDate'
+        | 'assignedToId'
+        | 'assignedToName'
       >
     ) => {
       setFormState(prev => ({ ...prev, ...values }));
@@ -444,6 +446,7 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
       if (f.practiceAreaName) lines.push(`Practice Area: ${f.practiceAreaName}`);
       if (f.responseDueDate) lines.push(`Response Due Date: ${f.responseDueDate}`);
       lines.push(`Priority: ${getPriorityLabel(f.priority)}`);
+      if (f.assignedToName) lines.push(`Assigned To: ${f.assignedToName}`);
       setEmailBody(lines.join('\n'));
 
       // Auto-CC the current user
