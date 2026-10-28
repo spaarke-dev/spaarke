@@ -22,10 +22,9 @@
 | 094 | task/ebill-094-submit-invoice | Agent running. |
 
 ## Owner decisions 2026-10-27
-EB-D-153..161 (see notes/decisions-log.md); **162** Billing Admin Read Global → Deep (DONE: merged e03283c381, EB-D-150 exception removed per uac-r2, live on dev, -Verify PASS); **163** retire Procedure Library SPE container → new task 124 (after 116, 092); customer-provisioning told (they built nothing; #2232 is their only eBilling item, waits for #1911 on master; they have the Finance__FileStore__* settings).
+**164** malware scanning required on production stamps, may be off on dev/test (sent to customer-provisioning for #2232). EB-D-153..161 (see notes/decisions-log.md); **162** Billing Admin Read Global → Deep (DONE: merged e03283c381, EB-D-150 exception removed per uac-r2, live on dev, -Verify PASS); **163** retire Procedure Library SPE container → new task 124 (after 116, 092); customer-provisioning told (they built nothing; #2232 is their only eBilling item, waits for #1911 on master; they have the Finance__FileStore__* settings).
 
 ## Open owner questions
-- **Malware scanning off on a customer stamp** (refuse / allow with sign-off / allow): owner asked for a fuller explanation — answer pending. Provisioning (#2232) derives `Finance__FileStore__MalwareScanningEnabled` from `enableMalwareScanning`; H13 fails both mismatch directions; no refusal until the owner rules.
 - **OP-5** (095): may a user re-attempt after ANOTHER user's Failed attempt? Today 409 document_already_submitted; word-add-in-r1 fine either way.
 - Explicit re-check button (R2) into R1?
 
