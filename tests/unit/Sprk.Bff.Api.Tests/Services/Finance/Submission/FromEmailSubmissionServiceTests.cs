@@ -297,18 +297,169 @@ public class FromEmailSubmissionServiceTests
         RefusedBeforeAnyWrite(world);
     }
 
+    private const string SomeoneElseText = "This email was already submitted as an invoice for this record by someone else. Nothing was saved.";
+
+    /// <summary>EB-D-165 must-not-fire and 095 review F1-2: another person's LIVE attempt is 409 with its own text, naming no one.</summary>
     [Theory]
     [InlineData(InvoiceSubmissionStatus.Received)]
-    [InlineData(InvoiceSubmissionStatus.Failed)]
-    public async Task Replay_AnotherPersonsAttemptOfK_Is409DocumentAlreadySubmitted_OP5(InvoiceSubmissionStatus status)
+    [InlineData(InvoiceSubmissionStatus.Processing)]
+    [InlineData(InvoiceSubmissionStatus.Accepted)]
+    [InlineData(InvoiceSubmissionStatus.Rejected)]
+    public async Task Replay_AnotherPersonsLiveAttemptOfK_Is409DocumentAlreadySubmitted_WithTheSomeoneElseText(InvoiceSubmissionStatus status)
     {
         var world = new W();
         world.AddAttempt(W.K(), 1, status, creator: W.OtherCallerId);
 
         var outcome = await Run(world);
 
-        (outcome.Status, outcome.ErrorCode).Should().Be((409, "ebilling.submission.document_already_submitted"));
+        (outcome.Status, outcome.ErrorCode, outcome.Detail).Should().Be((409, "ebilling.submission.document_already_submitted", SomeoneElseText));
+        outcome.Detail.Should().NotContain(W.OtherCallerId.ToString("D"));
         RefusedBeforeAnyWrite(world);
+    }
+
+    /// <summary>
+    /// EB-D-165 must-fire: another person's attempt that ended Failed lets this caller re-attempt. The new generation is created by THIS
+    /// caller through the whole fresh path: this caller's own save (the narrowed create, OfficeSubmissionEmailSaveContractTests) and its
+    /// fresh .eml, never the failed attempt's .eml.
+    /// </summary>
+    [Fact]
+    public async Task ReAttempt_AfterAnotherPersonsFailedAttempt_IsANewGeneration_CreatedByThisCaller_OnTheFreshPath_EBD165()
+    {
+        var world = new W();
+        var k = W.K();
+        var theirEml = Guid.NewGuid();
+        world.AddAttempt(k, 1, InvoiceSubmissionStatus.Failed, creator: W.OtherCallerId, eml: theirEml);
+
+        var outcome = await Run(world);
+
+        outcome.Receipt.Should().Be(new FromEmailReceipt(
+            FromEmailSubmissionKey.SubmissionIdFor(k, 2), FromEmailSubmissionKey.JobIdFor(k, 2), "1001.2", W.EmlId));
+        var submit = world.Operation.Submits.Should().ContainSingle().Subject;
+        submit.CallerSystemUserId.Should().Be(W.CallerId, "the new attempt is this caller's");
+        submit.Generation.Should().Be(2);
+        submit.SourceEmlDocumentId.Should().Be(W.EmlId).And.NotBe(theirEml, "nothing of the failed attempt's rows is reused");
+        world.Save.Requests.Should().ContainSingle("this caller's own save runs, with its narrowing in the one create");
+        world.Save.Users.Should().Equal("office-user");
+        world.Attempts[FromEmailSubmissionKey.SubmissionIdFor(k, 2)].GetAttributeValue<EntityReference>(Sprk.Bff.Api.Services.Dataverse.RecordCreatorPerson.Column).Id
+            .Should().Be(W.CallerId);
+    }
+
+    /// <summary>EB-D-165: the new generation re-runs the firm link check (D-106); it is never granted on the failed attempt's say-so.</summary>
+    [Fact]
+    public async Task ReAttempt_AfterAnotherPersonsFailedAttempt_StillChecksTheFirmLink()
+    {
+        var world = new W();
+        world.AddAttempt(W.K(), 1, InvoiceSubmissionStatus.Failed, creator: W.OtherCallerId);
+        world.Intake.Links[("sprk_matter", W.MatterId)] = new[] { Guid.NewGuid() };
+
+        (await Run(world)).ErrorCode.Should().Be("ebilling.submission.firm_not_linked");
+        RefusedBeforeAnyWrite(world);
+    }
+
+    /// <summary>
+    /// EB-D-165 race: two callers re-attempt one Failed attempt at once. The deterministic id and the allocator's AlreadyCreated are the
+    /// guard of K; the loser re-checks the winner's row, finds another person's live attempt and gets the 409. Exactly one new generation.
+    /// </summary>
+    [Fact]
+    public async Task ReAttempt_TwoCallersRaceOnOneFailedAttempt_ExactlyOneNewGeneration_TheOtherGets409()
+    {
+        var world = new W();
+        var k = W.K();
+        world.AddAttempt(k, 1, InvoiceSubmissionStatus.Failed, creator: W.OtherCallerId);
+        world.Operation.Answer = input =>
+        {
+            // The other person's retry created generation 2 first (the allocator's alternate key refused this create).
+            world.AddAttempt(k, input.Generation, InvoiceSubmissionStatus.Received, creator: W.OtherCallerId, tracking: "1001.2", eml: Guid.NewGuid());
+            return FromEmailSubmitResult.AlreadyCreated();
+        };
+
+        var outcome = await Run(world);
+
+        (outcome.Status, outcome.ErrorCode, outcome.Detail).Should().Be((409, "ebilling.submission.document_already_submitted", SomeoneElseText));
+        world.Operation.Submits.Should().ContainSingle().Which.Generation.Should().Be(2);
+        world.Attempts.Should().HaveCount(2, "generation 1 and the one new generation the winner created");
+        world.Operation.Requeues.Should().BeEmpty();
+    }
+
+    // ── contract section 5: the same email and Invoice part with other details (095 review F2) ─────────────────
+
+    /// <summary>F2 must-fire: another firm invoice number, or another firm, on a live attempt is 409, and nothing is written.</summary>
+    [Theory]
+    [InlineData(InvoiceSubmissionStatus.Received, "1002", false)]
+    [InlineData(InvoiceSubmissionStatus.Processing, "1002", false)]
+    [InlineData(InvoiceSubmissionStatus.Accepted, "1002", false)]
+    [InlineData(InvoiceSubmissionStatus.Accepted, "1001", true)]
+    public async Task Replay_TheSameEmailAndInvoice_WithAnotherNumberOrFirm_LatestLive_Is409DocumentAlreadySubmitted(
+        InvoiceSubmissionStatus status, string number, bool otherFirm)
+    {
+        var world = new W();
+        var otherFirmId = Guid.NewGuid();
+        if (otherFirm)
+        {
+            world.Intake.Links[("sprk_matter", W.MatterId)] = new[] { W.FirmId, otherFirmId };
+        }
+
+        world.AddAttempt(W.K(), 1, status);
+
+        var outcome = await Run(world, W.Input(number: number, firm: otherFirm ? otherFirmId : null));
+
+        (outcome.Status, outcome.ErrorCode).Should().Be((409, "ebilling.submission.document_already_submitted"));
+        outcome.Detail.Should().Be("This email was already submitted as an invoice with other details. Nothing was saved.");
+        RefusedBeforeAnyWrite(world);
+        world.Attempts.Should().ContainSingle("no second invoice for one email");
+    }
+
+    /// <summary>F2 must-not-fire: after Failed, the same email with another number is a new attempt carrying the new details.</summary>
+    [Fact]
+    public async Task ReAttempt_AfterFailed_WithAnotherNumber_IsANewAttempt_WithTheNewDetails()
+    {
+        var world = new W();
+        var k = W.K();
+        world.AddAttempt(k, 1, InvoiceSubmissionStatus.Failed);
+
+        var outcome = await Run(world, W.Input(number: "1002"));
+
+        outcome.Receipt!.SubmissionId.Should().Be(FromEmailSubmissionKey.SubmissionIdFor(k, 2));
+        outcome.Receipt.TrackingNumber.Should().Be("1002.2");
+        world.Operation.Submits.Should().ContainSingle().Which.FirmInvoiceNumber.Should().Be("1002");
+    }
+
+    /// <summary>F2 must-not-fire: a second invoice in the same email (another file marked Invoice) is its own submission.</summary>
+    [Fact]
+    public async Task Fresh_ADifferentInvoicePartOfTheSameEmail_IsANewSubmission()
+    {
+        var world = new W();
+        var second = W.Attachment("Invoice 1002.pdf", System.Text.Encoding.ASCII.GetBytes("%PDF-1.7 invoice 1002"), "application/pdf");
+        var email = W.Email(W.Invoice, second);
+        var first = W.Input(new[] { W.Mark(W.Invoice, "Invoice"), W.Mark(second, "DontSave") }, email);
+        world.AddAttempt(W.K(first), 1, InvoiceSubmissionStatus.Accepted);
+
+        var outcome = await Run(world, W.Input(new[] { W.Mark(W.Invoice, "DontSave"), W.Mark(second, "Invoice") }, email, number: "1002"));
+
+        var input = W.Input(new[] { W.Mark(W.Invoice, "DontSave"), W.Mark(second, "Invoice") }, email, number: "1002");
+        outcome.Receipt!.SubmissionId.Should().Be(FromEmailSubmissionKey.SubmissionIdFor(W.K(input), 1));
+        world.Operation.Submits.Should().ContainSingle().Which.MarkedParts.Single().Sha256
+            .Should().Be(EmlMimeParts.Sha256Hex(System.Text.Encoding.ASCII.GetBytes("%PDF-1.7 invoice 1002")));
+    }
+
+    // ── 095 review F1: a marked part the built .eml does not carry ─────────────────────────────────────────────
+
+    [Fact]
+    public async Task Save_AMarkedPartNotPreserved_Is422AttachmentNotPreserved_AndNothingIsSubmitted()
+    {
+        var world = new W();
+        world.Save.Answer = new SubmissionEmailSaveOutcome
+        {
+            Response = new SaveResponse { Success = false, Error = new SaveError { Code = "OFFICE_INTERNAL", Message = "x" } },
+            Refusal = SubmissionEmailSaveRefusal.AttachmentNotPreserved,
+        };
+
+        var outcome = await Run(world);
+
+        (outcome.Status, outcome.ErrorCode).Should().Be((422, "ebilling.submission.attachment_not_preserved"));
+        world.Operation.Submits.Should().BeEmpty();
+        world.Save.MarkedSha256.Should().ContainSingle().Which.Should().Equal(
+            EmlMimeParts.Sha256Hex(W.PdfBytes), EmlMimeParts.Sha256Hex(W.XlsxBytes));
     }
 
     [Fact]

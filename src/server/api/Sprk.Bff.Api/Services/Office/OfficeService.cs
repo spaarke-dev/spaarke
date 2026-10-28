@@ -390,9 +390,10 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
 
     /// <inheritdoc />
     async Task<SubmissionEmailSaveOutcome> IOfficeSubmissionEmailSave.SaveEmailForSubmissionAsync(
-        SaveRequest request, string userId, HttpContext httpContext, CancellationToken cancellationToken)
+        SaveRequest request, IReadOnlyList<string> markedSha256, string userId, HttpContext httpContext, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(markedSha256);
         if (request.ContentType != SaveContentType.Email || request.Email is null
             || request.Email.SelectedAttachmentFileNames is not { Count: 0 } || request.IdempotencyKey is not null)
         {
@@ -403,7 +404,7 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
                 nameof(request));
         }
 
-        var state = new SubmissionSaveState();
+        var state = new SubmissionSaveState { MarkedSha256 = markedSha256 };
         var response = await SaveCoreAsync(request, userId, httpContext, state, cancellationToken);
         return new SubmissionEmailSaveOutcome
         {
@@ -846,6 +847,34 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
                             // marked attachment by the ordinal, name and SHA-256 the job will find when it reads the .eml back.
                             submission.EmlParts = EmlMimeParts.Read(contentStream, cancellationToken);
                             contentStream.Position = 0;
+
+                            // 095 review F1: every marked part must be in the .eml byte-for-byte (MIME may rewrite a part, or carry
+                            // it as something the reader does not see as an attachment). Checked here, after the build and BEFORE
+                            // the upload and the document create; the job row is recorded Failed so a retry is not its duplicate.
+                            if (!submission.PreservesEveryMarkedPart())
+                            {
+                                submission.Refusal = SubmissionEmailSaveRefusal.AttachmentNotPreserved;
+                                _logger.LogWarning(
+                                    "Submission save refused before the upload: the built .eml does not carry every marked part (job {JobId})", jobId);
+                                jobRecord = jobRecord with
+                                {
+                                    Status = JobStatus.Failed,
+                                    CurrentPhase = "AttachmentNotPreserved",
+                                    CompletedAt = DateTimeOffset.UtcNow
+                                };
+                                await _jobs.RecordAsync(jobRecord, "A marked attachment was not preserved in the built .eml", cancellationToken);
+                                await contentStream.DisposeAsync();
+                                return new SaveResponse
+                                {
+                                    Success = false,
+                                    Error = new SaveError
+                                    {
+                                        Code = OfficeErrorCodes.InternalError,
+                                        Message = "A marked attachment could not be kept unchanged in the saved email, so nothing was saved.",
+                                        Retryable = false
+                                    }
+                                };
+                            }
                         }
 
                         // Task 046 (b): a SYSTEM-DERIVED name is stored with a short unique suffix, because the

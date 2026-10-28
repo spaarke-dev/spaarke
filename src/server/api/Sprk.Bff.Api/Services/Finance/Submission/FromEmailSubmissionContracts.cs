@@ -34,6 +34,12 @@ public static class FromEmailSubmissionErrors
 
     /// <summary>Outcome code (contract section 9): the <c>.eml</c> save did not finish, so the submission ended Failed.</summary>
     public const string EmailSaveFailed = "ebilling.submission.email_save_failed";
+
+    /// <summary>
+    /// 422, permanent (095 review F1, added 2026-10-28): the <c>.eml</c> as built does not carry every marked file byte-for-byte, so the
+    /// save was refused after the build and before the upload; nothing was saved and nothing was submitted.
+    /// </summary>
+    public const string AttachmentNotPreserved = "ebilling.submission.attachment_not_preserved";
 }
 
 /// <summary>The <c>reason</c> values of 400 <see cref="FromEmailSubmissionErrors.MarksInvalid"/> (contract section 6).</summary>
@@ -244,9 +250,13 @@ internal static class FromEmailSubmissionKey
     internal const int MaxGeneration = 50;
 
     /// <summary>
-    /// K: a canonical JSON array, version 1: the RFC Message-ID; the core record (kind, id); the mode; the invoice id (empty for New); the
-    /// firm id; the trimmed firm invoice number; and every mark as [fileName, size, contentType, mark], sorted ordinal by fileName, then
-    /// size, contentType, mark (OP-1, OP-3). The content type is compared ignoring case (contract section 2), so it is upper-cased in K.
+    /// K: a canonical JSON array, version 2: the RFC Message-ID; the core record (kind, id); the mode; the invoice id (empty for New); and
+    /// every mark as [fileName, size, contentType, mark], sorted ordinal by fileName, then size, contentType, mark (OP-3). The content type
+    /// is compared ignoring case (contract section 2), so it is upper-cased in K.
+    /// <para>The firm and the firm invoice number are NOT in K (095 review F2, contract section 5 "other details differ"): the same email,
+    /// record and marking with another firm or number is the SAME submission, answered 409 document_already_submitted while its latest
+    /// attempt is not Failed, and a new attempt with the new details after Failed. Version 1 carried them, which made a second invoice
+    /// for one email. They stay in the response-cache binding (<see cref="CacheBinding"/>).</para>
     /// </summary>
     public static string Of(FromEmailSubmissionInput input)
     {
@@ -263,14 +273,12 @@ internal static class FromEmailSubmissionKey
         using (var json = new Utf8JsonWriter(buffer))
         {
             json.WriteStartArray();
-            json.WriteStringValue("v1");
+            json.WriteStringValue("v2");
             json.WriteStringValue(input.MessageId);
             json.WriteStringValue(input.CoreRecord.Kind.ToString());
             json.WriteStringValue(input.CoreRecord.RecordId.ToString("D"));
             json.WriteStringValue(input.Mode);
             json.WriteStringValue(input.InvoiceId is { } invoiceId ? invoiceId.ToString("D") : string.Empty);
-            json.WriteStringValue(input.FirmId.ToString("D"));
-            json.WriteStringValue(input.FirmInvoiceNumber?.Trim() ?? string.Empty);
             json.WriteStartArray();
             foreach (var mark in marks)
             {
@@ -297,8 +305,18 @@ internal static class FromEmailSubmissionKey
     public static Guid JobIdFor(string k, int generation) =>
         InvoiceSubmissionPersister.IdOf("ebilling-from-email-job-" + k + GenerationSuffix(generation));
 
-    /// <summary>The value the <c>X-Idempotency-Key</c> response cache is bound to: K itself (the filter hashes it).</summary>
-    public static string CacheBinding(string k) => k;
+    /// <summary>
+    /// The value the <c>X-Idempotency-Key</c> response cache is bound to (the filter hashes it): K plus the firm and the trimmed firm invoice
+    /// number, so a header reused on a request with another firm or number is never answered with the first request's cached 202; it
+    /// reaches the handler, which answers it from K (contract section 5).
+    /// </summary>
+    public static string CacheBinding(FromEmailSubmissionInput input) =>
+        Of(input) + "|" + input.FirmId.ToString("D") + "|" + (input.FirmInvoiceNumber?.Trim() ?? string.Empty);
+
+    /// <summary>Whether an attempt row recorded exactly this firm and trimmed firm invoice number (the details K does not carry).</summary>
+    public static bool SameFirmDetails(Guid? rowFirm, string? rowNumber, FromEmailSubmissionInput input) =>
+        rowFirm == input.FirmId
+        && string.Equals(rowNumber?.Trim(), input.FirmInvoiceNumber?.Trim(), StringComparison.Ordinal);
 
     /// <summary>
     /// The Stored File a marked part of attempt <paramref name="submissionId"/> is staged under (092's file-store intake), so a retried

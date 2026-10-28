@@ -20,8 +20,11 @@ internal interface IOfficeSubmissionEmailSave
     /// <c>IdempotencyKey = null</c>) for a from-email submission. Never throws for a refusal: <see cref="SubmissionEmailSaveOutcome.Response"/>
     /// carries the Office refusal, or <see cref="SubmissionEmailSaveOutcome.Refusal"/> the submission-specific one.
     /// </summary>
+    /// <param name="markedSha256">The SHA-256 (hex) of every Invoice and Supporting part, one entry per marked part. The built
+    /// <c>.eml</c> must carry each one byte-for-byte; otherwise the save is refused before the upload
+    /// (<see cref="SubmissionEmailSaveRefusal.AttachmentNotPreserved"/>, 095 review F1).</param>
     Task<SubmissionEmailSaveOutcome> SaveEmailForSubmissionAsync(
-        SaveRequest request, string userId, HttpContext httpContext, CancellationToken cancellationToken);
+        SaveRequest request, IReadOnlyList<string> markedSha256, string userId, HttpContext httpContext, CancellationToken cancellationToken);
 }
 
 /// <summary>Why the submission's save refused the email before writing anything (model §9.1 F1-c).</summary>
@@ -32,6 +35,12 @@ internal enum SubmissionEmailSaveRefusal
 
     /// <summary>The Message-ID lookup faulted: a transient Dataverse error, retryable.</summary>
     CommunicationUnavailable,
+
+    /// <summary>
+    /// The <c>.eml</c> as built does not carry every marked part byte-for-byte (095 review F1: a part MIME rewrites, or one the reader
+    /// does not see as an attachment). Refused after the build and before the upload and the document create: permanent.
+    /// </summary>
+    AttachmentNotPreserved,
 }
 
 /// <summary>One attachment part of a built or saved <c>.eml</c>: its 0-based ordinal among the message's attachments, its file name and
@@ -76,4 +85,25 @@ internal sealed class SubmissionSaveState
     public bool ContentDuplicate { get; set; }
 
     public IReadOnlyList<EmlPart>? EmlParts { get; set; }
+
+    /// <summary>The marked parts' SHA-256, one per marked part, that the built <c>.eml</c> must carry (095 review F1).</summary>
+    public IReadOnlyList<string> MarkedSha256 { get; init; } = Array.Empty<string>();
+
+    /// <summary>Whether <see cref="EmlParts"/> carries every one of <see cref="MarkedSha256"/>, counted (two identical marked files need
+    /// two parts).</summary>
+    public bool PreservesEveryMarkedPart()
+    {
+        var available = (EmlParts ?? Array.Empty<EmlPart>())
+            .GroupBy(p => p.Sha256, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.Count(), StringComparer.OrdinalIgnoreCase);
+        foreach (var required in MarkedSha256.GroupBy(s => s, StringComparer.OrdinalIgnoreCase))
+        {
+            if (!available.TryGetValue(required.Key, out var count) || count < required.Count())
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
 }

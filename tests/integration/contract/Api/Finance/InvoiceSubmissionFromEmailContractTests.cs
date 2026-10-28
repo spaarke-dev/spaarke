@@ -338,7 +338,29 @@ public sealed class InvoiceSubmissionFromEmailContractTests : IAsyncLifetime
         { Mutate(r => r with { Mode = "new" }), "mode" },
         { Mutate(r => r with { InvoiceId = Guid.NewGuid() }), "invoiceId" },
         { Mutate(r => r with { Mode = "Correction" }), "invoiceId" },
+        // 095 review F4: a null attachment entry is the body-shape 400, never a 500.
+        { Mutate(r => r with { Email = r.Email! with { Attachments = new List<AttachmentReference> { W.Invoice, null!, W.Timesheet } } }), "email.attachments[1]" },
+        // 095 review F1: an attached email (message/*) marked to be saved cannot be kept byte-for-byte in the .eml.
+        { Mutate(r => r with
+            {
+                Email = r.Email! with { Attachments = new List<AttachmentReference> { W.Invoice, W.Timesheet, ForwardedEmail } },
+                Marks = new List<FromEmailMark> { W.Mark(W.Invoice, "Invoice"), W.Mark(W.Timesheet, "Supporting"), W.Mark(ForwardedEmail, "Supporting") },
+            }), "marks[2].contentType" },
     };
+
+    private static readonly AttachmentReference ForwardedEmail =
+        W.Attachment("Fwd original.eml", Encoding.ASCII.GetBytes("From: a@b.c\r\nSubject: original\r\n\r\nbody\r\n"), "message/rfc822");
+
+    /// <summary>095 review F1, the control: an attached email marked DontSave is accepted (it is not a marked part).</summary>
+    [Fact]
+    public async Task Marks_AnAttachedEmailMarkedDontSave_IsAccepted()
+    {
+        var request = Request(
+            email: W.Email(W.Invoice, W.Timesheet, ForwardedEmail),
+            marks: new() { W.Mark(W.Invoice, "Invoice"), W.Mark(W.Timesheet, "Supporting"), W.Mark(ForwardedEmail, "DontSave") });
+
+        await Accepted(await PostAsync(request));
+    }
 
     private static string Mutate(Func<FromEmailSubmissionRequest, FromEmailSubmissionRequest> change) =>
         JsonSerializer.Serialize(change(Request()), Json);
@@ -736,17 +758,69 @@ public sealed class InvoiceSubmissionFromEmailContractTests : IAsyncLifetime
         NothingWritten();
     }
 
-    [Fact]
-    public async Task Replay_SameK_FromAnotherUser_Is409DocumentAlreadySubmitted()
+    [Theory]
+    [InlineData(InvoiceSubmissionStatus.Received)]
+    [InlineData(InvoiceSubmissionStatus.Processing)]
+    [InlineData(InvoiceSubmissionStatus.Accepted)]
+    [InlineData(InvoiceSubmissionStatus.Rejected)]
+    public async Task Replay_SameK_FromAnotherUser_LatestLive_Is409DocumentAlreadySubmitted_WithTheSomeoneElseText(InvoiceSubmissionStatus status)
     {
-        // OP-5: K has no caller; the same email, record, firm, number and marks from a second user is the same submission.
-        _world.AddAttempt(K(), 1, InvoiceSubmissionStatus.Received, creator: W.OtherCallerId);
+        // OP-5: K has no caller; the same email, record and marks from a second user is the same submission (EB-D-165: while it is live).
+        _world.AddAttempt(K(), 1, status, creator: W.OtherCallerId);
 
         var response = await PostAsync();
 
         response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        var body = await BodyAsync(response);
+        body.GetProperty("errorCode").GetString().Should().Be("ebilling.submission.document_already_submitted");
+        body.GetProperty("detail").GetString().Should().Be(
+            "This email was already submitted as an invoice for this record by someone else. Nothing was saved.");
+        NothingWritten();
+    }
+
+    [Fact]
+    public async Task Replay_SameK_AnotherUsersFailedAttempt_IsANewAttemptCreatedByThisCaller_EBD165()
+    {
+        var k = K();
+        _world.AddAttempt(k, 1, InvoiceSubmissionStatus.Failed, creator: W.OtherCallerId);
+
+        var body = await Accepted(await PostAsync(idempotencyKey: "my-action"));
+
+        body.GetProperty("submissionId").GetGuid().Should().Be(FromEmailSubmissionKey.SubmissionIdFor(k, 2));
+        body.GetProperty("trackingNumber").GetString().Should().Be("1001.2");
+        _world.Operation.Submits.Should().ContainSingle().Which.CallerSystemUserId.Should().Be(W.CallerId);
+        _world.Save.Requests.Should().ContainSingle("this caller's own save, through the whole fresh path");
+    }
+
+    [Theory]
+    [InlineData(InvoiceSubmissionStatus.Received)]
+    [InlineData(InvoiceSubmissionStatus.Accepted)]
+    public async Task Replay_SameEmailAndInvoice_AnotherFirmInvoiceNumber_LatestLive_Is409DocumentAlreadySubmitted(InvoiceSubmissionStatus status)
+    {
+        // Contract section 5 (095 review F2): the same email and Invoice part with other details is never a second invoice.
+        _world.AddAttempt(K(), 1, status);
+
+        var response = await PostAsync(Request(number: "1002"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
         (await CodeAsync(response)).Should().Be("ebilling.submission.document_already_submitted");
         NothingWritten();
+        _world.Attempts.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task Replay_TheSameHeaderOnAnotherNumber_IsNotTheCachedAnswer_ItIsTheHandlers409()
+    {
+        // The response cache is bound to K plus the firm details: a reused header on another number reaches the handler.
+        await Accepted(await PostAsync(idempotencyKey: "reused"));
+
+        var second = await PostAsync(Request(number: "1002"), idempotencyKey: "reused");
+
+        second.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        second.Headers.Contains("X-Idempotency-Status").Should().BeTrue();
+        second.Headers.GetValues("X-Idempotency-Status").Should().NotContain("cached");
+        (await CodeAsync(second)).Should().Be("ebilling.submission.document_already_submitted");
+        _world.Operation.Submits.Should().ContainSingle();
     }
 
     [Fact]
@@ -754,10 +828,10 @@ public sealed class InvoiceSubmissionFromEmailContractTests : IAsyncLifetime
     {
         var first = await Accepted(await PostAsync(idempotencyKey: "reused"));
 
-        var second = await Accepted(await PostAsync(Request(number: "1002"), idempotencyKey: "reused"));
+        var second = await Accepted(await PostAsync(
+            Request(marks: new() { W.Mark(W.Invoice, "Invoice"), W.Mark(W.Timesheet, "DontSave") }), idempotencyKey: "reused"));
 
         second.GetProperty("submissionId").GetGuid().Should().NotBe(first.GetProperty("submissionId").GetGuid());
-        second.GetProperty("trackingNumber").GetString().Should().Be("1002.1");
         _world.Operation.Submits.Should().HaveCount(2);
     }
 

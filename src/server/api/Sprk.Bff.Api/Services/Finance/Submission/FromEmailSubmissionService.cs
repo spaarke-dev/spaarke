@@ -162,7 +162,8 @@ internal sealed class FromEmailSubmissionService
         var invoiceSha = saved[0].Sha256;
         var k = FromEmailSubmissionKey.Of(input);
 
-        // ── 6. The replay of K (contract section 5, EB-D-160) ──
+        // ── 6. The replay of K (contract section 5, EB-D-160, EB-D-165). K has no firm, number or caller: whoever submits this email,
+        //       record and marking meets the same attempts, so one email never becomes a second invoice while one is live ──
         var latest = await FindLatestAttemptAsync(k, ct);
         if (latest.Refusal is { } readRefusal)
         {
@@ -171,7 +172,7 @@ internal sealed class FromEmailSubmissionService
 
         if (latest.Row is { } earlier)
         {
-            if (await AnswerExistingAsync(earlier, latest.Generation, k, callerId, invoiceSha, http, ct) is { } answered)
+            if (await AnswerExistingAsync(earlier, latest.Generation, k, callerId, invoiceSha, input, http, ct) is { } answered)
             {
                 return answered;
             }
@@ -211,7 +212,7 @@ internal sealed class FromEmailSubmissionService
             IdempotencyKey = null,
         };
 
-        var saveOutcome = await _save.SaveEmailForSubmissionAsync(saveRequest, officeUserId, http, ct);
+        var saveOutcome = await _save.SaveEmailForSubmissionAsync(saveRequest, saved.Select(m => m.Sha256).ToList(), officeUserId, http, ct);
         var resolved = await ResolveEmlAsync(saveOutcome, input, callerId, saved, ct);
         if (resolved.Refusal is { } emlRefusal)
         {
@@ -259,8 +260,11 @@ internal sealed class FromEmailSubmissionService
                     return concurrentFault;
                 }
 
+                // The concurrency guard of K (the deterministic id and the allocator's AlreadyCreated): the creator, the status and the
+                // details are re-checked on the row that won, so of two callers racing on one Failed attempt exactly one creates the new
+                // generation and the other gets 409 (EB-D-165), and a same-caller retry with other details gets its 409 too.
                 return concurrent.Row is { } row
-                    && await AnswerExistingAsync(row, generation, k, callerId, invoiceSha, http, ct) is { } replayed
+                    && await AnswerExistingAsync(row, generation, k, callerId, invoiceSha, input, http, ct) is { } replayed
                         ? replayed
                         : NotQueued();
 
@@ -363,31 +367,45 @@ internal sealed class FromEmailSubmissionService
     }
 
     /// <summary>
-    /// The answer to an existing attempt of K, or null when a NEW attempt follows (the latest one ended Failed, EB-D-160). Another caller's
-    /// attempt is 409 document_already_submitted (OP-5); Rejected is 409 submission_already_ended (D-139); Received, Processing and
-    /// Accepted are the 202 replay unless the Invoice part differs (409 document_already_submitted). A Received one is re-queued.
+    /// The answer to an existing attempt of K, or null when a NEW attempt follows: the latest one ended Failed, whoever made it (EB-D-160;
+    /// EB-D-165 for another caller's). The new attempt is this caller's and runs the whole fresh path (the firm and its link above, the
+    /// filing, this caller's own save with its narrowing in the one create); nothing of the failed attempt's rows is reused (the earlier
+    /// <c>.eml</c> candidates are this caller's own only). Otherwise: another caller's live attempt is 409 document_already_submitted with
+    /// its own text (OP-5, 095 review F1-2); Rejected is 409 submission_already_ended (D-139); another firm or number, or another Invoice
+    /// part, is 409 document_already_submitted (contract section 5); else the 202 replay, re-queueing a Received one.
     /// </summary>
     private async Task<FromEmailSubmissionOutcome?> AnswerExistingAsync(
-        Entity row, int generation, string k, Guid callerId, string invoiceSha, HttpContext http, CancellationToken ct)
+        Entity row, int generation, string k, Guid callerId, string invoiceSha, FromEmailSubmissionInput input, HttpContext http, CancellationToken ct)
     {
+        var status = StatusOf(row);
+        if (status == InvoiceSubmissionStatus.Failed)
+        {
+            return null; // EB-D-160 / EB-D-165: a new attempt (generation + 1), created by this caller
+        }
+
         var creator = row.GetAttributeValue<EntityReference>(RecordCreatorPerson.Column)?.Id;
         if (creator != callerId)
         {
             // OP-5: K has no caller, so this is the same submission from someone else; it never becomes a second invoice for one email.
             _logger.LogInformation("From-email submission {SubmissionId}: K was already submitted by another person; refused (409)", row.Id);
-            return DocumentAlreadySubmitted();
-        }
-
-        var status = StatusOf(row);
-        if (status == InvoiceSubmissionStatus.Failed)
-        {
-            return null; // EB-D-160: a new attempt (generation + 1)
+            return FromEmailSubmissionOutcome.Refused(StatusCodes.Status409Conflict, InvoiceSubmissionErrors.DocumentAlreadySubmitted,
+                "This email was already submitted as an invoice for this record by someone else. Nothing was saved.");
         }
 
         if (status == InvoiceSubmissionStatus.Rejected)
         {
             return FromEmailSubmissionOutcome.Refused(StatusCodes.Status409Conflict, InvoiceSubmissionErrors.SubmissionAlreadyEnded,
                 "This email was already submitted as an invoice and that submission was rejected. Nothing was saved.");
+        }
+
+        // Contract section 5 (095 review F2): the same email, record and marking with another firm or firm invoice number is the same
+        // submission with other details, never a second invoice.
+        if (!FromEmailSubmissionKey.SameFirmDetails(
+                row.GetAttributeValue<EntityReference>(TrackingNumberAllocator.FirmColumn)?.Id,
+                row.GetAttributeValue<string>(TrackingNumberAllocator.FirmInvoiceNumberColumn), input))
+        {
+            _logger.LogInformation("From-email submission {SubmissionId}: the firm or firm invoice number differs from the live attempt; refused (409)", row.Id);
+            return DocumentAlreadySubmitted();
         }
 
         // Task 092: the submission row names no document; the attempt's source (.eml and Invoice part) is what the operation recorded.
@@ -475,6 +493,10 @@ internal sealed class FromEmailSubmissionService
         {
             case SubmissionEmailSaveRefusal.NoCommunication:
                 return ResolvedEml.Refused(Unidentifiable(FromEmailUnidentifiableReasons.NoCommunication));
+            case SubmissionEmailSaveRefusal.AttachmentNotPreserved:
+                return ResolvedEml.Refused(FromEmailSubmissionOutcome.Refused(StatusCodes.Status422UnprocessableEntity,
+                    FromEmailSubmissionErrors.AttachmentNotPreserved,
+                    "A marked file could not be kept unchanged in the saved email, so nothing was saved. Save the invoice PDF and submit it through the invoice upload instead."));
             case SubmissionEmailSaveRefusal.CommunicationUnavailable:
                 return ResolvedEml.Refused(Unavailable("The email's record could not be read right now. Nothing was saved; try again shortly."));
         }

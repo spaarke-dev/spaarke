@@ -202,17 +202,16 @@ public class FromEmailSubmissionRulesTests
     };
 
     [Fact]
-    public void Key_IsTheCanonicalV1Array_InTheContractsFieldOrder()
+    public void Key_IsTheCanonicalV2Array_InTheContractsFieldOrder_WithNoFirmDetails()
     {
         var k = FromEmailSubmissionKey.Of(Input());
 
         using var doc = JsonDocument.Parse(k);
         var a = doc.RootElement.EnumerateArray().ToList();
         a.Select(e => e.ValueKind == JsonValueKind.Array ? "[marks]" : e.GetString())
-            .Should().Equal("v1", "<inv-1001@firm.example>", "Matter", MatterId.ToString("D"), "New", string.Empty,
-                FirmId.ToString("D"), "1001", "[marks]");
-        a[8].EnumerateArray().Select(m => m[0].GetString()).Should().Equal("Invoice 1001.pdf", "Timesheet.xlsx");
-        a[8][0][2].GetString().Should().Be("APPLICATION/PDF", "the content type is compared ignoring case, so K upper-cases it");
+            .Should().Equal("v2", "<inv-1001@firm.example>", "Matter", MatterId.ToString("D"), "New", string.Empty, "[marks]");
+        a[6].EnumerateArray().Select(m => m[0].GetString()).Should().Equal("Invoice 1001.pdf", "Timesheet.xlsx");
+        a[6][0][2].GetString().Should().Be("APPLICATION/PDF", "the content type is compared ignoring case, so K upper-cases it");
     }
 
     [Fact]
@@ -226,7 +225,7 @@ public class FromEmailSubmissionRulesTests
     }
 
     [Fact]
-    public void Key_ChangesWithTheMarking_TheMode_TheFirm_TheNumber_AndTheMessage()
+    public void Key_ChangesWithTheMarking_TheMode_AndTheMessage()
     {
         var k = FromEmailSubmissionKey.Of(Input());
 
@@ -234,10 +233,28 @@ public class FromEmailSubmissionRulesTests
         {
             FromEmailSubmissionKey.Of(Input(new[] { Mark(Invoice, "Invoice"), Mark(Timesheet, "DontSave") })),
             FromEmailSubmissionKey.Of(Input(mode: "Correction")),
-            FromEmailSubmissionKey.Of(Input(firm: Guid.NewGuid())),
-            FromEmailSubmissionKey.Of(Input(number: "1002")),
             FromEmailSubmissionKey.Of(Input(messageId: "<other@firm.example>")),
         }.Should().NotContain(k).And.OnlyHaveUniqueItems();
+    }
+
+    /// <summary>095 review F2 (contract section 5): another firm or number is the same K (the same submission, other details); the
+    /// response-cache binding still tells them apart, so a reused header never replays the other request's 202.</summary>
+    [Fact]
+    public void Key_DoesNotChangeWithTheFirmOrTheNumber_ButTheCacheBindingDoes()
+    {
+        var k = FromEmailSubmissionKey.Of(Input());
+
+        FromEmailSubmissionKey.Of(Input(firm: Guid.NewGuid())).Should().Be(k);
+        FromEmailSubmissionKey.Of(Input(number: "1002")).Should().Be(k);
+
+        var binding = FromEmailSubmissionKey.CacheBinding(Input());
+        new[]
+        {
+            FromEmailSubmissionKey.CacheBinding(Input(firm: Guid.NewGuid())),
+            FromEmailSubmissionKey.CacheBinding(Input(number: "1002")),
+            FromEmailSubmissionKey.CacheBinding(Input(mode: "Correction")),
+        }.Should().NotContain(binding).And.OnlyHaveUniqueItems();
+        FromEmailSubmissionKey.CacheBinding(Input(number: " 1001 ")).Should().Be(binding);
     }
 
     [Fact]
@@ -256,7 +273,7 @@ public class FromEmailSubmissionRulesTests
 
         var act = () => FromEmailSubmissionKey.SubmissionIdFor(k, 0);
         act.Should().Throw<ArgumentOutOfRangeException>();
-        FromEmailSubmissionKey.CacheBinding(k).Should().Be(k);
+        FromEmailSubmissionKey.CacheBinding(Input()).Should().StartWith(k);
     }
 
     // ── .eml parts ──────────────────────────────────────────────────────────────────────────────────────────────

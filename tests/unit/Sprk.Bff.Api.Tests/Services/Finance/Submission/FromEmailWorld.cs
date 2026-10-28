@@ -171,14 +171,19 @@ internal sealed class FromEmailWorld
     public static string K(FromEmailSubmissionInput? input = null) => FromEmailSubmissionKey.Of(input ?? Input());
 
     /// <summary>Stores attempt <paramref name="generation"/> of <paramref name="k"/> as 094 would have created it.</summary>
-    public Entity AddAttempt(string k, int generation, InvoiceSubmissionStatus status, Guid? creator = null, string? tracking = null, Guid? eml = null)
+    public Entity AddAttempt(
+        string k, int generation, InvoiceSubmissionStatus status, Guid? creator = null, string? tracking = null, Guid? eml = null,
+        Guid? firm = null, string number = "1001")
     {
         var id = FromEmailSubmissionKey.SubmissionIdFor(k, generation);
-        // Task 092: the row names no document; its source is what the operation recorded (Operation.Sources).
+        // Task 092: the row names no document; its source is what the operation recorded (Operation.Sources). The allocator records the
+        // firm and the firm invoice number on the row.
         var row = new Entity(InvoiceSubmissionService.SubmissionEntity, id)
         {
             ["sprk_processingstatus"] = new OptionSetValue((int)status),
-            [TrackingNumberAllocator.TrackingNumberColumn] = tracking ?? "1001." + generation,
+            [TrackingNumberAllocator.TrackingNumberColumn] = tracking ?? number + "." + generation,
+            [TrackingNumberAllocator.FirmColumn] = new EntityReference("sprk_organization", firm ?? FirmId),
+            [TrackingNumberAllocator.FirmInvoiceNumberColumn] = number,
             [RecordCreatorPerson.Column] = new EntityReference("systemuser", creator ?? CallerId),
         };
         Attempts[id] = row;
@@ -213,14 +218,23 @@ internal sealed class FromEmailWorld
     {
         public readonly List<SaveRequest> Requests = new();
 
+        /// <summary>The marked parts' SHA-256 each save was asked to preserve.</summary>
+        public readonly List<IReadOnlyList<string>> MarkedSha256 = new();
+
+        /// <summary>The save's caller (the Office user id) per request.</summary>
+        public readonly List<string> Users = new();
+
         /// <summary>Null (default): a fresh save that builds the real <c>.eml</c> from the request. Otherwise this answer.</summary>
         public SubmissionEmailSaveOutcome? Answer;
 
-        public Task<SubmissionEmailSaveOutcome> SaveEmailForSubmissionAsync(SaveRequest request, string userId, HttpContext http, CancellationToken ct)
+        public Task<SubmissionEmailSaveOutcome> SaveEmailForSubmissionAsync(
+            SaveRequest request, IReadOnlyList<string> markedSha256, string userId, HttpContext http, CancellationToken ct)
         {
             lock (Requests)
             {
                 Requests.Add(request);
+                MarkedSha256.Add(markedSha256);
+                Users.Add(userId);
             }
 
             if (Answer is { } answer)
@@ -280,6 +294,8 @@ internal sealed class FromEmailWorld
             {
                 ["sprk_processingstatus"] = new OptionSetValue((int)InvoiceSubmissionStatus.Received),
                 [TrackingNumberAllocator.TrackingNumberColumn] = tracking,
+                [TrackingNumberAllocator.FirmColumn] = new EntityReference("sprk_organization", input.FirmId),
+                [TrackingNumberAllocator.FirmInvoiceNumberColumn] = input.FirmInvoiceNumber,
                 [RecordCreatorPerson.Column] = new EntityReference("systemuser", input.CallerSystemUserId),
             };
             Sources[input.SubmissionId] = new FromEmailAttemptSource(

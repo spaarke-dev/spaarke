@@ -169,6 +169,17 @@ internal static class InvoiceSubmissionFromEmailHttp
             {
                 errors["email.attachments"] = new[] { "attachments is required." };
             }
+            else
+            {
+                for (var i = 0; i < request.Email.Attachments.Count; i++)
+                {
+                    if (request.Email.Attachments[i] is null)
+                    {
+                        // 095 review F4: a null entry is the body-shape 400, never a fault in the marks rules.
+                        errors[$"email.attachments[{i}]"] = new[] { "An attachment entry is required." };
+                    }
+                }
+            }
         }
 
         if (request.Marks is null)
@@ -204,6 +215,14 @@ internal static class InvoiceSubmissionFromEmailHttp
                 if (mark.Mark is null)
                 {
                     errors[$"marks[{i}].mark"] = new[] { "mark is required." };
+                }
+
+                // 095 review F1: an attached message (message/*) is not a file part of the .eml (MIME nests it, and its bytes are
+                // re-serialized), so it cannot be kept byte-for-byte. Refused when it is to be saved; a DontSave mark may name one.
+                if (mark.Mark is FromEmailMarks.Invoice or FromEmailMarks.Supporting
+                    && mark.ContentType?.TrimStart().StartsWith("message/", StringComparison.OrdinalIgnoreCase) == true)
+                {
+                    errors[$"marks[{i}].contentType"] = new[] { "An attached email (message/*) cannot be marked Invoice or Supporting." };
                 }
             }
         }
@@ -332,10 +351,11 @@ internal static class InvoiceSubmissionFromEmailHttp
         });
     }
 
-    /// <summary>The idempotency filter's binding: the response cache of an <c>X-Idempotency-Key</c> is bound to K (contract section 4).</summary>
+    /// <summary>The idempotency filter's binding: the response cache of an <c>X-Idempotency-Key</c> is bound to K plus the firm details
+    /// (contract section 4).</summary>
     internal static string? IdempotencyBinding(EndpointFilterInvocationContext context) =>
         context.Arguments.OfType<FromEmailSubmissionBody>().FirstOrDefault()?.Input is { } input
-            ? FromEmailSubmissionKey.CacheBinding(FromEmailSubmissionKey.Of(input))
+            ? FromEmailSubmissionKey.CacheBinding(input)
             : null;
 
     /// <summary>
