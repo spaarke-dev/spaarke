@@ -849,6 +849,70 @@ No BFF resolver change: seeders own customer configuration rows to this team (fi
 supersedes items 3a and 3a′ as built on this branch: a child the Unsecure pass touches loses its mirror (A2's held row,
 the F4 table's Unsecure row). They stay as they are here until 196b lands.
 
+### R4b-4: two security reviews of cfa7bbe421..12aeb8742a (as built)
+
+Server (pass A):
+- **A-F1, a crash path.** `DecideOrdinaryRowCoreAsync` read the default team a hard-deny answer replaced
+  (`InPlaceOfDefaultTeamId`, for the row's report) outside the row's try/catch. A Dataverse fault there escaped
+  `Pass.RunAsync`, `ReconcileOrdinaryParentMoveAsync` and the job's ordinary-moves run (documented "never throws"),
+  skipping the rest of the run, the settle and the cursor saves, in report-only too. Fix: the read has its own try; a
+  fault fails that row ("its owner could not be decided") and the pass goes on. A default-team-owned row now moves before
+  that read, so it never makes it. Every other await R4b added to the decision code was checked: the resolver call and the
+  answer's team read sit in the row's try; `ReportHeldDecisionRecordAsync` has its own; the Decision Record discovery
+  (`AddDecisionRecordsResolvingAsync`) is part of the walk, whose reads throw by design and are handled as a walk fault.
+  Tests: `RestrictedContentReconcileTests` (a user-owned policy fails alone, the default-team policy beside it still
+  moves); `SecureChildOrdinaryParentMoveTests` job theory, report-only and write (the run finishes, `failed` = 1, the
+  other row decided, the sweep cursor saved, the settle section present, the root carried when writing). All red before.
+- **A-F2, an unpinned condition.** `RestrictedContentOwnerTeam`'s `teamtype = 0`. Both test worlds (`OwnershipDirectory`,
+  `SecureChildShareWorld`) now seed an access team (1) and a group team (2) with the restricted-content name in the
+  customer unit, before the real team. Mutation (condition dropped): 23 tests red (OwnerTeamAmbiguous), restored.
+- **A-K1, a silent row.** A hard-deny row owned by a non-default team other than the restricted-content team, in the
+  answer's own unit, was Untouched with no detail and never reached the report. Still never moved (only default teams
+  move); it now carries "a hard-deny row owned by team {id}, which is not the restricted-content owner team ({id}) and not
+  a business unit's default team: reported, not moved" (ids only), whatever the team's unit. The member check was not
+  added (every such team is reported, with or without members). A user owner is its author (K3), so a user-owned row
+  keeps the report it had (rule 1). Tests: must-fire (same unit with a member, and another unit; no team name in the
+  detail) and a must-not-fire control (an ordinary table's non-default-team row in the answer's unit stays unreported).
+
+Setup, guard and docs (pass B):
+- **B-F1, fail open.** `Set-CustomerOwnerTeams.ps1` carried on when no unit matched `-SecureBusinessUnitName`, so with a
+  non-default `SecureRecord:BusinessUnitName` Secure Record was accepted as a customer unit. It now refuses no match and
+  more than one, and refuses if the Secure unit is ever counted among the customer top units. Pester
+  `tests/scripts/Set-CustomerOwnerTeams.Tests.ps1` (mocked Dataverse; any write fails the test): red on the old script.
+  Not in a CI workflow yet (CI runs named Pester files only); run with Pester 5.
+- **B-F3, one-way guard.** The guard matched each file name as a substring of the script. It now reads
+  `$DeclaredRoleFiles` as the script runs it (block and line comments dropped, one assignment) and asserts it EQUALS the
+  declared file set. Mutations of the live script: (A) an extra file and (E) the configuration entry commented out are red
+  on the new guard and green on the old one. The script's comment now states the equality.
+- **B-K1.** Both role names are pinned (`Restricted Content Owner`, `Customer Configuration Owner`); neither may equal the
+  Secure Record owner role's name. Mutation `roleName` = "System Administrator": red on the new guard, green on the old.
+- **B-K4.** A dry run whose drift -Apply refuses now exits 1 with the OWNER DECISION NEEDED summary (Pester must-fire red on
+  the old script; the plain-plan control exits 0 on both).
+- **B-K3.** `RestrictedContent:OwnerTeamName` is documented (UAC guide quick reference and hard-deny paragraph; the Secure
+  Record setup guide's configuration rows): it must equal the script's `teamName`, or every ordinary hard-deny write is
+  refused (`OwnerTeamNotFound`).
+- **Docs.** The deployment guide's step is now §12.2 "Phase 7a", after Phase 7 (H10 creates the unit) and before Phase 8.
+  It says the BFF deployed in Phase 6 refuses ordinary hard-deny writes until this step's `-Verify` exits 0; §7.11 agrees.
+  The seeder claim is future tense everywhere (both guides, the script, the configuration file): field-mapping's seeder
+  (task 004) and provisioning's H12b seeder (FR-39) will own new configuration rows to the team; until they ship the rows
+  stay with the seeding identity and an operator re-owns them after setup. The "Phase 5d" and "seeders own" wording above
+  is history.
+- **Dev (read-only, spaarkedev1, 2026-10-28, no -Apply).** BU1 dry run: the same 12-step plan, exit 0 (no owner-decision
+  drift). `-CustomerBusinessUnitName 'Secure Record' -SecureBusinessUnitName 'Nonexistent'`: refused, exit 1 (the old
+  script accepted Secure Record as the customer unit and printed a plan, exit 0). The root and Secure Record are still
+  refused (exit 1).
+- **Publish size** (Release, BFF only, against 12aeb8742a): +620 bytes total, +512 bytes `Sprk.Bff.Api.dll`.
+
+Known limits, accepted:
+- **K2.** The restricted-content team's member check is read once per pass and cached; a member added mid-pass is seen
+  by the next pass.
+- **K3.** "Author" means the current owning user; the reconciler does not compare it with the creator.
+- **K4.** An Unsecure does not return a hard-deny row to its pre-secure author; it goes to the restricted-content team.
+  This belongs to task 196b.
+- **K5.** The live proof of the `sprk_steps` LIKE read (the Decision Record discovery) is pending.
+- **K6.** The ontology publish question names no table.
+- **K7.** One Error log per refused row (no aggregation).
+
 ### Issues to file (issue-ready text; the coordinator files them)
 
 **K-a: Undetermined rows from bad data block their own root's Unsecure.**

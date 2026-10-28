@@ -45,6 +45,7 @@ and the code disagree, the code is right and this guide must be fixed.
 | Standing grant (contact / organization) | `sprk_standinggrant` + baseline level `sprk_accesspermissiongrant` |
 | No Access list | `sprk_noaccessentry` (subject: contact, organization or systemuser; object: a record) |
 | Secure business unit / owner team | `Secure Record` / `Secure Record Owners` (config `SecureRecord:BusinessUnitName`, `SecureRecord:OwnerTeamName`) |
+| Restricted-content owner team | `Spaarke Restricted Content Owners`, one per customer top business unit (config `RestrictedContent:OwnerTeamName`; must equal `teamName` in `config/restricted-content-owner-role.json`, which `scripts/Set-CustomerOwnerTeams.ps1` creates — a different name finds no team and every ordinary hard-deny write is refused, `OwnerTeamNotFound`) |
 | Who may manage access | Write **and** Share on the record, checked as the caller (`DelegationRuleFilter`) |
 | Default grant expiry | Today + 90 days (Date Only, UTC) |
 | Make Secure / Remove Secure | `POST /api/v1/external-access/provision-project` / `POST /api/v1/external-access/unsecure-project` |
@@ -431,9 +432,12 @@ least as strict as the matter.
   binds no owner, an author-owned row that is re-filed) keeps its author. The write is refused
   (`record_owner_restricted_content_team_unresolved`) when the answer is in the root itself (an unfiled row created by a
   user homed in the root, or one filed under a record owned there), when the top unit is Secure Record, when the parent
-  chain cannot be read or loops, and when the team in that unit is missing, there are two, or it has a member. The
-  reconciler's ordinary pass leaves an author-owned row, or one owned by a non-default team, where it is and reports it,
-  without refusing it.
+  chain cannot be read or loops, and when the team in that unit is missing, there are two, or it has a member. The BFF
+  finds the team by name: `RestrictedContent:OwnerTeamName` (default `Spaarke Restricted Content Owners`) must equal the
+  `teamName` the setup script creates from `config/restricted-content-owner-role.json`. Set one without the other and no
+  team is found: every ordinary hard-deny write is refused (`OwnerTeamNotFound`, fail closed). The reconciler's ordinary
+  pass leaves an author-owned row, or one owned by a non-default team, where it is and reports it, without refusing it; a
+  hard-deny row owned by a non-default team other than the restricted-content team is always reported, by id.
 - **A Decision Record** is also filed under the subject of every Signal it resolved (the ids its `sprk_steps` lists). A
   Secure pass reaches it through those Signals even when it lies outside the record's own family, so it moves into
   isolation, or out, with them.
@@ -722,13 +726,14 @@ teams.)
 | **Secure Record Owners** (named, non-default, in the Secure Record business unit) | Every Secure record, its family, and the grant rows on it | **None, ever** — that is what makes the record reachable only by shares. Spaarke refuses to add anyone to a team in that business unit. |
 | A business unit's **default owner team** | Ordinary records, children created through Spaarke, grant rows on ordinary records, contacts created by registration (the customer business unit's team) | Everyone in the business unit (managed by the platform) |
 | **Spaarke Restricted Content Owners** (named, non-default, one in EACH customer's top business unit; never the root) | Ordinary rows of the five hard-deny tables (stored files, procedure assignments, rule sets, rules, rule versions) under that customer unit | **None, ever.** Its copy of the role holds Read at Basic on those five tables only. |
-| **Spaarke Customer Configuration Owners** (named, non-default, one in EACH customer's top business unit; never the root) | The customer's configuration rows of the declared tables (AI Search indexes, field-mapping profiles and rules), which seeders own to this team | **None, ever.** Its copy of the role holds Read at Basic on those tables only. |
+| **Spaarke Customer Configuration Owners** (named, non-default, one in EACH customer's top business unit; never the root) | The customer's configuration rows of the declared tables (AI Search indexes, field-mapping profiles and rules). Seeders will own new rows to this team; until then an operator re-owns them | **None, ever.** Its copy of the role holds Read at Basic on those tables only. |
 
 **Customer configuration rows** (R4b-3b, field-mapping #2399) are owned in the customer's top business unit, never the
 root, which holds only Spaarke product data. Dataverse refuses to assign a row to a principal whose roles lack Read on
 the table (`0x80040299`), and the unit's default team is not an acceptable owner (a role on it reaches every member of
-the unit), so the owner is this second memberless team. The BFF does not resolve it: seeders own customer configuration
-rows to this team. Users keep reading the rows through their own roles: Spaarke Core User holds Read on these tables at
+the unit), so the owner is this second memberless team. The BFF does not resolve it. Field-mapping's seeder (its task
+004) and provisioning's H12b seeder (FR-39) will own new configuration rows to this team; until they ship, no seeder does,
+so the rows stay with the seeding identity and an operator re-owns them to this team after setup. Users keep reading the rows through their own roles: Spaarke Core User holds Read on these tables at
 Deep, which reaches the rows for a user homed in the customer's top unit or above it (the root); a user homed in a unit
 below it does not reach them.
 
