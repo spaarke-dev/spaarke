@@ -682,6 +682,60 @@ public sealed class InvoiceSubmissionExistingDocumentTests
             new EntityReference("systemuser", Guid.Parse("0000c0de-0000-4000-8000-000000000167")), "sprk_createdbyperson is this caller's person");
     }
 
+    // ── Review round 5 (pass-2 F1-1): no new attempt while the failed one's undo is unfinished ──
+
+    /// <summary>A Failed attempt the commit gate failed with <paramref name="reasonCode"/>; <paramref name="linked"/>: its undo is unfinished
+    /// (the invoice link stays until the undo completes).</summary>
+    private static Entity FailedByTheGate(string reasonCode, bool linked)
+    {
+        var row = Attempt(SubmissionId, "Failed");
+        row[InvoiceSubmissionPersister.SubmissionReasonCode] = reasonCode;
+        if (linked)
+        {
+            row[InvoiceSubmissionService.InvoiceColumn] = new EntityReference("sprk_invoice", InvoiceSubmissionPersister.InvoiceIdFor(SubmissionId));
+        }
+        else
+        {
+            row.Attributes.Remove(TrackingNumberAllocator.FirmInvoiceNumberColumn);
+        }
+
+        return row;
+    }
+
+    [Theory(DisplayName = "Round 5 (pass-2 F1-1, must fire): a retry while the failed attempt's undo is unfinished (undo reason, invoice still linked) is 503 earlier_attempt_being_removed - no new attempt, nothing written or queued")]
+    [InlineData(SubmissionReasonCodes.SourceCheckFailed)]
+    [InlineData(SubmissionReasonCodes.FileUnservable)]
+    public async Task Retry_WhileTheFailedAttemptsUndoIsUnfinished_Is503_NothingWritten(string reasonCode)
+    {
+        var h = NewHarness();
+        h.Submissions[SubmissionId] = FailedByTheGate(reasonCode, linked: true);
+
+        var outcome = await h.Build().SubmitExistingDocumentAsync(Confirm(), CancellationToken.None);
+
+        outcome.Kind.Should().Be(InvoiceSubmissionOutcomeKind.Refused);
+        outcome.StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable);
+        outcome.ErrorCode.Should().Be(InvoiceSubmissionErrors.EarlierAttemptBeingRemoved).And.Be("ebilling.submission.earlier_attempt_being_removed");
+        outcome.Receipt.Should().BeNull();
+        ShouldHaveWrittenNothing(h);
+        h.Writes.Should().Be(0);
+        h.SubmissionReads.Should().Equal([SubmissionId, SecondAttempt], "refused at the walk, before the document or anything else is read");
+    }
+
+    [Theory(DisplayName = "Round 5 (pass-2 F1-1, must not fire): once the failed attempt's undo completed (the invoice link cleared) the retry is a NEW attempt")]
+    [InlineData(SubmissionReasonCodes.SourceCheckFailed)]
+    [InlineData(SubmissionReasonCodes.FileUnservable)]
+    public async Task Retry_OnceTheFailedAttemptsUndoCompleted_IsANewAttempt(string reasonCode)
+    {
+        var h = NewHarness();
+        h.Submissions[SubmissionId] = FailedByTheGate(reasonCode, linked: false);
+
+        var outcome = await h.Build().SubmitExistingDocumentAsync(Confirm(), CancellationToken.None);
+
+        outcome.Kind.Should().Be(InvoiceSubmissionOutcomeKind.Received);
+        outcome.Receipt!.SubmissionId.Should().Be(SecondAttempt);
+        h.JobsSent.Should().ContainSingle().Which.JobId.Should().Be(SecondJob);
+    }
+
     [Fact(DisplayName = "EB-D-167: the walk passes every Failed attempt - after attempts 1 and 2 failed, the retry is attempt 3")]
     public async Task Retry_AfterTwoFailedAttempts_IsAttemptThree()
     {

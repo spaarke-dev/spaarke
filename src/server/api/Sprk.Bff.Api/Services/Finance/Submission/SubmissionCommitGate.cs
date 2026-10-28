@@ -106,6 +106,16 @@ public class SubmissionCommitGate
     internal static readonly IReadOnlySet<string> UndoReasonCodes =
         new HashSet<string>(StringComparer.Ordinal) { SubmissionReasonCodes.SourceCheckFailed, SubmissionReasonCodes.FileUnservable };
 
+    /// <summary>
+    /// Review round 5 (pass-2 F1-1): a Failed attempt whose undo has not finished - its reason is one of <see cref="UndoReasonCodes"/> and it
+    /// still links its invoice (<see cref="CompensateAsync"/> clears the link only once nothing of the commit is left). No new attempt is
+    /// made after it until the undo completes (<see cref="InvoiceSubmissionErrors.EarlierAttemptBeingRemoved"/>).
+    /// </summary>
+    internal static bool UndoUnfinished(InvoiceSubmissionStatus? status, string? reasonCode, Guid? invoiceId) =>
+        status == InvoiceSubmissionStatus.Failed
+        && reasonCode is not null && UndoReasonCodes.Contains(reasonCode)
+        && invoiceId is { } linked && linked != Guid.Empty;
+
     private readonly IGenericEntityService _entities;
     private readonly StoredFileService _files;
     private readonly ExistingDocumentIsolationCheck _isolation;

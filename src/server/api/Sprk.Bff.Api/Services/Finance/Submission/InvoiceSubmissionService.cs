@@ -79,6 +79,10 @@ public class InvoiceSubmissionService
 
     private static readonly byte[] PdfSignature = "%PDF-"u8.ToArray();
 
+    /// <summary>Review round 5 (pass-2 F1-1): the detail of <see cref="InvoiceSubmissionErrors.EarlierAttemptBeingRemoved"/> on both routes.</summary>
+    internal const string EarlierAttemptBeingRemovedDetail =
+        "An earlier attempt to submit this invoice failed and is still being removed. Nothing was saved; try again shortly.";
+
     private static readonly string[] ViewColumns =
     {
         TrackingNumberAllocator.TrackingNumberColumn, TrackingNumberAllocator.FirmInvoiceNumberColumn, TrackingNumberAllocator.FirmColumn,
@@ -384,6 +388,16 @@ public class InvoiceSubmissionService
         {
             return await AnswerWithEarlierAsync(
                 request, number, earlier, documentId, ExistingDocumentJobIdFor(documentId, earlierGeneration), request.FileSourceBeforeWrite, ct);
+        }
+
+        // Review round 5 (pass-2 F1-1): no new attempt while the latest Failed one's undo is unfinished (its invoice still linked).
+        if (earlier is not null
+            && SubmissionCommitGate.UndoUnfinished(InvoiceSubmissionStatus.Failed, earlier.OutcomeReasonCode, earlier.InvoiceId))
+        {
+            _logger.LogInformation("Invoice submission {EarlierId} of document {DocumentId} ended Failed and its undo is unfinished; refused (503)",
+                earlier.SubmissionId, documentId);
+            return InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.EarlierAttemptBeingRemoved,
+                EarlierAttemptBeingRemovedDetail);
         }
 
         var generation = earlierGeneration + 1;

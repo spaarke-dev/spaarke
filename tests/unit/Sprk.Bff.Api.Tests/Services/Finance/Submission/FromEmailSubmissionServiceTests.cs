@@ -478,6 +478,52 @@ public class FromEmailSubmissionServiceTests
         world.Operation.Submits.Single().Generation.Should().Be(2);
     }
 
+    // ── Review round 5 (pass-2 F1-1): no new attempt while the failed one's undo is unfinished ──
+
+    /// <summary>Generation 1 Failed by the commit gate with <paramref name="reasonCode"/>; <paramref name="linked"/>: its undo is unfinished
+    /// (the invoice link stays until the undo completes).</summary>
+    private static void AddAttemptFailedByTheGate(W world, string k, string reasonCode, bool linked, Guid? creator = null)
+    {
+        var row = world.AddAttempt(k, 1, InvoiceSubmissionStatus.Failed, creator: creator);
+        row[InvoiceSubmissionPersister.SubmissionReasonCode] = reasonCode;
+        if (linked)
+        {
+            row[InvoiceSubmissionPersister.SubmissionInvoice] = new EntityReference("sprk_invoice", InvoiceSubmissionPersister.InvoiceIdFor(row.Id));
+        }
+    }
+
+    [Theory(DisplayName = "Round 5 (pass-2 F1-1, must fire): a re-attempt while the failed attempt's undo is unfinished (undo reason, invoice still linked) is 503 earlier_attempt_being_removed - no save, no submit, nothing written; whoever made the failed attempt")]
+    [InlineData(SubmissionReasonCodes.SourceCheckFailed, false)]
+    [InlineData(SubmissionReasonCodes.FileUnservable, false)]
+    [InlineData(SubmissionReasonCodes.SourceCheckFailed, true)]
+    public async Task ReAttempt_WhileTheFailedAttemptsUndoIsUnfinished_Is503_NothingWritten(string reasonCode, bool anotherPersons)
+    {
+        var world = new W();
+        AddAttemptFailedByTheGate(world, W.K(), reasonCode, linked: true, creator: anotherPersons ? W.OtherCallerId : null);
+
+        var outcome = await Run(world);
+
+        outcome.Receipt.Should().BeNull();
+        outcome.Status.Should().Be(StatusCodes.Status503ServiceUnavailable);
+        outcome.ErrorCode.Should().Be(InvoiceSubmissionErrors.EarlierAttemptBeingRemoved).And.Be("ebilling.submission.earlier_attempt_being_removed");
+        RefusedBeforeAnyWrite(world);
+    }
+
+    [Theory(DisplayName = "Round 5 (pass-2 F1-1, must not fire): once the failed attempt's undo completed (the invoice link cleared) the re-attempt is generation 2")]
+    [InlineData(SubmissionReasonCodes.SourceCheckFailed)]
+    [InlineData(SubmissionReasonCodes.FileUnservable)]
+    public async Task ReAttempt_OnceTheFailedAttemptsUndoCompleted_IsGenerationTwo(string reasonCode)
+    {
+        var world = new W();
+        var k = W.K();
+        AddAttemptFailedByTheGate(world, k, reasonCode, linked: false);
+
+        var outcome = await Run(world);
+
+        outcome.Receipt!.SubmissionId.Should().Be(FromEmailSubmissionKey.SubmissionIdFor(k, 2));
+        world.Operation.Submits.Single().Generation.Should().Be(2);
+    }
+
     [Fact]
     public async Task ReAttempt_WalksEveryFailedGeneration_ToTheFirstUnused()
     {

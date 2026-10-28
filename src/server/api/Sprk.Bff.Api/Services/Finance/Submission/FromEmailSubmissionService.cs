@@ -56,6 +56,8 @@ internal sealed class FromEmailSubmissionService
         "sprk_processingstatus", TrackingNumberAllocator.TrackingNumberColumn, TrackingNumberAllocator.FirmColumn,
         TrackingNumberAllocator.FirmInvoiceNumberColumn, "sprk_regardingmatter", "sprk_regardingproject", "sprk_regardingworkassignment",
         RecordCreatorPerson.Column,
+        // Review round 5 (pass-2 F1-1): whether a Failed attempt's undo is unfinished.
+        InvoiceSubmissionPersister.SubmissionReasonCode, InvoiceSubmissionPersister.SubmissionInvoice,
     ];
 
     private const string DocumentEntity = "sprk_document";
@@ -381,6 +383,17 @@ internal sealed class FromEmailSubmissionService
         var status = StatusOf(row);
         if (status == InvoiceSubmissionStatus.Failed)
         {
+            // Review round 5 (pass-2 F1-1): no new attempt while the failed one's undo is unfinished (its invoice still linked).
+            if (SubmissionCommitGate.UndoUnfinished(
+                    status, row.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionReasonCode),
+                    row.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.SubmissionInvoice)?.Id))
+            {
+                _logger.LogInformation("From-email submission {SubmissionId} (attempt {Generation}) ended Failed and its undo is unfinished; refused (503)",
+                    row.Id, generation);
+                return FromEmailSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.EarlierAttemptBeingRemoved,
+                    InvoiceSubmissionService.EarlierAttemptBeingRemovedDetail);
+            }
+
             return null; // EB-D-160 / EB-D-165: a new attempt (generation + 1), created by this caller
         }
 

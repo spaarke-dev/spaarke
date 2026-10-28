@@ -346,6 +346,12 @@ public static class InvoiceSubmissionErrors
     /// </summary>
     public const string DocumentRejected = "ebilling.submission.document_rejected";
 
+    /// <summary>
+    /// ebilling-r1 task 094 (review round 5, pass-2 F1-1): the latest attempt ended Failed and the removal of what it committed has not
+    /// finished yet (<see cref="SubmissionCommitGate.UndoUnfinished"/>), so no new attempt is made. 503, retryable; nothing was written.
+    /// </summary>
+    public const string EarlierAttemptBeingRemoved = "ebilling.submission.earlier_attempt_being_removed";
+
     public const string StorageNotConfigured = "ebilling.submission.storage_not_configured";
     public const string CoreRecordUnavailable = "ebilling.submission.record_unavailable";
     public const string Failed = "ebilling.submission.failed";
