@@ -416,6 +416,10 @@ public sealed class SecureChildReconciler
     /// (<see cref="RecordOwnershipContext.ForExistingRowAsync"/>), the same derivation their writers use.</summary>
     private readonly CoreAncestorResolver? _coreAncestors;
 
+    /// <summary>UAC task 194b fix round (F1-c): the To Do assignee links, so a no-core Signal's or Decision Record's question
+    /// asks the To Do job's own predicate (<c>TodoAssigneeOwnerReconciliationJob.SelectsAsync</c>).</summary>
+    private readonly Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessStore? _links;
+
     /// <param name="accessCacheInvalidator">Batch-4 integration, 148 × 132. Every child OWNER change this pass makes
     /// (provisioning's child pass, the unsecure's Step 3.5 and completion branch, a re-file, <c>SecureChildReconciliationJob</c>)
     /// is evicted through task 132's ONE owner-change hook. It is optional so this service's test compositions keep
@@ -435,6 +439,9 @@ public sealed class SecureChildReconciler
     /// question names the same stamps its writer did (<see cref="RecordOwnershipContext.ForExistingRowAsync"/>). Optional so the
     /// test compositions keep compiling; the host registers it unconditionally (<c>AddCoreAncestorResolver</c>). Without it such
     /// a row with a core record is not decided (fail closed).</param>
+    /// <param name="links">UAC task 194b fix round (F1-c): the To Do assignee links, so whether the To Do job keeps a no-core
+    /// row is asked with that job's own predicate. Optional so the test compositions keep compiling; the host registers it
+    /// (<c>AddScoped&lt;AssignedAccessStore&gt;</c>). Without it a no-core row about a To Do is not decided (fail closed).</param>
     public SecureChildReconciler(
         IGenericEntityService dataverse,
         IRecordOwnershipResolver ownership,
@@ -447,10 +454,12 @@ public sealed class SecureChildReconciler
         Sprk.Bff.Api.Services.Communication.IThreadResolver? threads = null,
         Sprk.Bff.Api.Services.Dataverse.Privileges.IDataversePrivilegeChecker? ownerPrivileges = null,
         DocumentContainerRelocator? relocator = null,
-        CoreAncestorResolver? coreAncestors = null)
+        CoreAncestorResolver? coreAncestors = null,
+        Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessStore? links = null)
     {
         _relocator = relocator;
         _coreAncestors = coreAncestors;
+        _links = links;
         _threads = threads;
         _ownerPrivileges = ownerPrivileges;
         _gateDecisionRecords = gateDecisionRecords ?? throw new ArgumentNullException(nameof(gateDecisionRecords));
@@ -1390,7 +1399,7 @@ public sealed class SecureChildReconciler
                 anchor.RecordId, "the Secure Record owner team could not be read");
         }
 
-        var pass = new Pass(this, mode, anchor, anchorIsolated, unsecuring: false, mayRelease, secureTeamId, ct);
+        var pass = new Pass(this, mode, anchor, anchorIsolated, unsecuring: false, mayRelease, secureTeamId, ct, refileChildPass: true);
         try
         {
             await pass.LoadDescendantsAsync().ConfigureAwait(false);
@@ -1456,11 +1465,24 @@ public sealed class SecureChildReconciler
         // row as the pass read it: its parents, primary first, and whether its owner comes from another rule or cannot be asked.
         private readonly Dictionary<(string Table, Guid Id), ExistingRowOwnership> _questions = new();
 
+        // UAC task 194b fix round (K5): what those questions read — the catalog by record type, the stamps by subject — once
+        // per pass.
+        private ExistingRowReads? _reads;
+
+        private ExistingRowReads Reads => _reads ??= new ExistingRowReads(_owner._dataverse, _owner._coreAncestors, _owner._links);
+
+        // UAC task 194b fix round (F1-d): the pass after a re-file (AfterRefileAsync's child pass), as opposed to a root's
+        // provisioning, sweep or Unsecure pass. The never-out rule for a Decision Record holds in the root passes (Unsecure OUT);
+        // a re-file's own release (ontology task 144, C2 §5 item 6) is not one of its named callers.
+        private readonly bool _refileChildPass;
+
         public Pass(
             SecureChildReconciler owner, SecureChildReconcileMode mode, RecordOwnershipParent root, bool rootIsolated,
-            bool unsecuring, bool mayRelease, Guid secureTeamId, CancellationToken ct, OrdinaryMove? ordinary = null)
+            bool unsecuring, bool mayRelease, Guid secureTeamId, CancellationToken ct, OrdinaryMove? ordinary = null,
+            bool refileChildPass = false)
         {
             _ordinary = ordinary;
+            _refileChildPass = refileChildPass;
             _owner = owner;
             _mode = mode;
             _root = root;
@@ -2108,8 +2130,19 @@ public sealed class SecureChildReconciler
             if (_ordinary is { } ordinary)
                 return await DecideOrdinaryRowAsync(row, current, ordinary).ConfigureAwait(false);
 
-            if (QuestionFor(row).Undetermined is { } undetermined)
+            var question = QuestionFor(row);
+            if (question.Undetermined is { } undetermined)
             {
+                // 194b fix round (F1-b): the whole question cannot be asked, but the parents the row STORES can. Secure-if-any
+                // over parents that are already secure is secure over every parent the row has, so a secure answer still takes
+                // it INTO isolation (or keeps it there). Any other answer — out, ordinary, a refusal, a fault — decides nothing.
+                if (await SecureOnStoredParentsAsync(row, undetermined).ConfigureAwait(false) is { } secure)
+                {
+                    return IsIsolated(current)
+                        ? new(RowMove.Stay, SecureChildRowOutcome.AlreadyCorrect, secure, null)
+                        : new(RowMove.In, SecureChildRowOutcome.Untouched, secure, null);
+                }
+
                 Log.LogWarning("[SECURE-CHILD-RECONCILE] {Table} {Id}: its owner cannot be decided ({Why}); it is left as it is.",
                     table, row.Id, undetermined);
                 return new(RowMove.None, SecureChildRowOutcome.Failed, null, undetermined);
@@ -2153,10 +2186,82 @@ public sealed class SecureChildReconciler
                 return new(RowMove.Stay, SecureChildRowOutcome.NeedsF3, resolution, NeedsF3Detail);
             }
 
+            // 194b fix round: a row isolated when the pass began that no rule here may take out — even Unsecure (a row this pass
+            // moved in may still go back to its own start owner: that undoes the pass's own move). K3: the To Do job keeps a
+            // no-core row's owner (its own predicate); F1-d: a Decision Record's commit-time parents are not all stored. Held
+            // isolated (an under-share, never an over-share) and reported.
+            if (move == RowMove.Out && IsIsolated(start)
+                && (question.NoCoreOwnerRule
+                    ?? (_refileChildPass ? null : RecordOwnershipContext.DecisionRecordHeldInIsolation(table, ownedInIsolation: true, resolution)))
+                is { } held)
+            {
+                Log.LogWarning("[SECURE-CHILD-RECONCILE] {Table} {Id}: the rule gives it team {Target}, out of isolation, but it " +
+                    "is held isolated ({Why}).", table, row.Id, target, held);
+                return new(RowMove.Stay, SecureChildRowOutcome.Untouched, resolution, held);
+            }
+
             var kind = current == DataversePrincipalRef.Team(target)
                 ? SecureChildRowOutcome.AlreadyCorrect
                 : SecureChildRowOutcome.Untouched;
             return new(move, kind, resolution, null);
+        }
+
+        /// <summary>
+        /// UAC task 194b fix round (F1-b): the rule's answer over the parents an undetermined row STORES
+        /// (<see cref="ContextFor"/>, from its question's context), when that answer is the Secure Record owner team; otherwise
+        /// <c>null</c> (an ordinary answer, a refusal or a fault decides nothing for such a row).
+        /// </summary>
+        private async Task<RecordOwnerResolution?> SecureOnStoredParentsAsync(Entity row, string undetermined)
+        {
+            try
+            {
+                var stored = await _owner._ownership.ResolveOwnerAsync(ContextFor(row), _ct).ConfigureAwait(false);
+                if (stored.IsOwned && stored.OwningTeamId == _secureTeamId)
+                {
+                    Log.LogWarning("[SECURE-CHILD-RECONCILE] {Table} {Id}: its whole owner question cannot be asked ({Why}), but " +
+                        "the parents it stores are secure: it belongs in isolation (secure wins).", row.LogicalName, row.Id, undetermined);
+                    return stored;
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !_ct.IsCancellationRequested)
+            {
+                Log.LogWarning(ex, "[SECURE-CHILD-RECONCILE] {Table} {Id}: the parents it stores could not be asked about either.",
+                    row.LogicalName, row.Id);
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// UAC task 194b fix round (F1-d): the ordinary pass never decides a row held in isolation, but a Decision Record held
+        /// there whose stored parents now give an ordinary team is REPORTED (the one never-out rule,
+        /// <see cref="RecordOwnershipContext.DecisionRecordHeldInIsolation"/>); <c>null</c> for every other row, and when its
+        /// question cannot be asked or the rule cannot answer (logged).
+        /// </summary>
+        private async Task<RowDecision?> ReportHeldDecisionRecordAsync(Entity row)
+        {
+            if (!string.Equals(row.LogicalName, RecordOwnershipContext.DecisionRecordTable, StringComparison.OrdinalIgnoreCase)
+                || QuestionFor(row).Undetermined is not null)
+            {
+                return null;
+            }
+
+            try
+            {
+                var answer = await _owner._ownership.ResolveOwnerAsync(ContextFor(row), _ct).ConfigureAwait(false);
+                if (RecordOwnershipContext.DecisionRecordHeldInIsolation(row.LogicalName, ownedInIsolation: true, answer) is { } held)
+                {
+                    Log.LogWarning("[SECURE-CHILD-RECONCILE] ordinary move {Table} {Id}: {Why}.", row.LogicalName, row.Id, held);
+                    return new(RowMove.Stay, SecureChildRowOutcome.Untouched, answer, held);
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !_ct.IsCancellationRequested)
+            {
+                Log.LogWarning(ex, "[SECURE-CHILD-RECONCILE] ordinary move {Table} {Id}: held in isolation; its owner could not be " +
+                    "asked about (a read failed).", row.LogicalName, row.Id);
+            }
+
+            return null;
         }
 
         /// <summary>
@@ -2250,12 +2355,13 @@ public sealed class SecureChildReconciler
             var secureBu = ordinary.SecureBusinessUnit;
             var rowBu = row.GetAttributeValue<EntityReference>(OwningBusinessUnitColumn)?.Id;
             if (IsIsolated(current) || secureBu is { } securedRow && rowBu == securedRow)
-                return new(RowMove.Stay, SecureChildRowOutcome.Untouched, null, null);
+                return await ReportHeldDecisionRecordAsync(row).ConfigureAwait(false) ?? new(RowMove.Stay, SecureChildRowOutcome.Untouched, null, null);
             if (current is null)
                 return new(RowMove.None, SecureChildRowOutcome.Failed, null, "its owner could not be read");
 
-            // 194b: a row whose question cannot be asked is not decided; a Signal or Decision Record with no core record is
-            // owned by its assignee's team, which TodoAssigneeOwnerReconciliationJob keeps: reported, never moved here.
+            // 194b: a row whose question cannot be asked is not decided; a Signal or Decision Record with no core record that
+            // TodoAssigneeOwnerReconciliationJob keeps (its own predicate, fix round F1-c) is owned by its assignee's team:
+            // reported, never moved here. Every other no-core row is decided over its parents, as its writer decided it.
             var question = QuestionFor(row);
             if (question.Undetermined is { } undetermined)
             {
@@ -2279,7 +2385,7 @@ public sealed class SecureChildReconciler
                         return new(RowMove.None, SecureChildRowOutcome.Failed, null,
                             $"its owning team {team.Id:D} does not exist or has no business unit");
                     if (secureBu is { } securedTeam && owningTeam.Value.BusinessUnit == securedTeam)
-                        return new(RowMove.Stay, SecureChildRowOutcome.Untouched, null, null);
+                        return await ReportHeldDecisionRecordAsync(row).ConfigureAwait(false) ?? new(RowMove.Stay, SecureChildRowOutcome.Untouched, null, null);
                 }
 
                 resolution = await _owner._ownership.ResolveOwnerAsync(ContextFor(row), _ct).ConfigureAwait(false);
@@ -2511,8 +2617,7 @@ public sealed class SecureChildReconciler
                     continue;
                 try
                 {
-                    _questions[key] = await RecordOwnershipContext.ForExistingRowAsync(
-                        row, _owner._dataverse, _owner._coreAncestors, _ct).ConfigureAwait(false);
+                    _questions[key] = await RecordOwnershipContext.ForExistingRowAsync(row, Reads, _ct).ConfigureAwait(false);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException || !_ct.IsCancellationRequested)
                 {

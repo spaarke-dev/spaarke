@@ -1245,6 +1245,84 @@ public class RecordOwnershipResolverTests
         directory.Assignments.Should().ContainSingle().Which.Item3.Should().Be(ChildTeam);
     }
 
+    [Fact(DisplayName = "194b F1-d must fire: a Decision Record held in isolation is NEVER re-filed out on its stored parents — refused before any write, even with F3")]
+    public async Task Reparent_WhenADecisionRecordHeldInIsolationWouldLeaveIt_RefusesBeforeAnyWrite()
+    {
+        var recordId = Guid.NewGuid();
+        var directory = Directory()
+            .WithRecord("sprk_project", SecureProjectId, SecureBu)
+            .WithRecord("sprk_matter", MatterId, ChildBu)
+            .WithRecord("sprk_decisionrecord", recordId, SecureBu, owningTeam: SecureNamedTeam,
+                extra: new() { ["sprk_project"] = new EntityReference("sprk_project", SecureProjectId) });
+        var applied = false;
+        var request = new RecordReparent
+        {
+            EntityLogicalName = "sprk_decisionrecord",
+            RecordId = recordId,
+            ParentChanges = new Dictionary<string, EntityReference?>
+            {
+                ["sprk_project"] = null,
+                ["sprk_matter"] = new EntityReference("sprk_matter", MatterId),
+            },
+            SecureExitCaller = CallerHolding(FullAccess), // F3 would permit a document; a Decision Record is still held
+        };
+
+        var resolution = await Build(directory).ReparentAsync(
+            request, Applies(directory, request, () => applied = true), CancellationToken.None);
+
+        resolution.IsRefused.Should().BeTrue();
+        resolution.RefusalCode.Should().Be(RecordOwnerRefusal.ParentUndetermined);
+        resolution.Reason.Should().Contain("F1-d");
+        applied.Should().BeFalse("the guard decides before anything is written");
+        directory.Assignments.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "194b F1-d must not fire: a Decision Record re-filed INTO isolation still moves (only a move out is held)")]
+    public async Task Reparent_WhenADecisionRecordMovesIntoIsolation_AssignsTheNamedTeam()
+    {
+        var recordId = Guid.NewGuid();
+        var directory = Directory()
+            .WithRecord("sprk_project", SecureProjectId, SecureBu)
+            .WithRecord("sprk_matter", MatterId, ChildBu)
+            .WithRecord("sprk_decisionrecord", recordId, ChildBu, owningTeam: ChildTeam,
+                extra: new() { ["sprk_matter"] = new EntityReference("sprk_matter", MatterId) });
+        var request = new RecordReparent
+        {
+            EntityLogicalName = "sprk_decisionrecord",
+            RecordId = recordId,
+            ParentChanges = new Dictionary<string, EntityReference?>
+            {
+                ["sprk_project"] = new EntityReference("sprk_project", SecureProjectId),
+            },
+        };
+
+        var resolution = await Build(directory).ReparentAsync(request, Applies(directory, request), CancellationToken.None);
+
+        resolution.OwningTeamId.Should().Be(SecureNamedTeam);
+        directory.Assignments.Should().ContainSingle().Which.Should().Be(("sprk_decisionrecord", recordId, SecureNamedTeam));
+    }
+
+    [Fact(DisplayName = "194b F1-d must not fire: an ORDINARY Decision Record re-filed between ordinary records still moves")]
+    public async Task Reparent_WhenAnOrdinaryDecisionRecordMovesBetweenOrdinaryRecords_AssignsTheNewTeam()
+    {
+        var (recordId, otherMatter) = (Guid.NewGuid(), Guid.NewGuid());
+        var directory = Directory()
+            .WithRecord("sprk_matter", MatterId, ChildBu)
+            .WithRecord("sprk_matter", otherMatter, GeneralBu)
+            .WithRecord("sprk_decisionrecord", recordId, GeneralBu, owningTeam: GeneralTeam,
+                extra: new() { ["sprk_matter"] = new EntityReference("sprk_matter", otherMatter) });
+        var request = new RecordReparent
+        {
+            EntityLogicalName = "sprk_decisionrecord",
+            RecordId = recordId,
+            ParentChanges = new Dictionary<string, EntityReference?> { ["sprk_matter"] = new EntityReference("sprk_matter", MatterId) },
+        };
+
+        var resolution = await Build(directory).ReparentAsync(request, Applies(directory, request), CancellationToken.None);
+
+        resolution.OwningTeamId.Should().Be(ChildTeam);
+    }
+
     [Fact]
     public async Task Reparent_WhenTheNewParentIsFlaggedButNotIsolated_RefusesAndDoesNotApplyTheChange()
     {

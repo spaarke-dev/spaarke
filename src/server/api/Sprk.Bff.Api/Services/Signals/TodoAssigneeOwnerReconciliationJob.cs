@@ -616,17 +616,16 @@ public sealed class TodoAssigneeOwnerReconciliationJob : IScheduledJob
         ToDoAnswer answer;
         try
         {
-            var assignee = await PersonalToDoAssignee.ClassifyAsync(run.Entities, run.Links, todoId, ct).ConfigureAwait(false);
-            answer = assignee.Outcome switch
+            var todo = await ClassifyToDoAsync(run.Entities, run.Links, _coreAncestors, todoId, ct).ConfigureAwait(false);
+            if (todo.Kind == ToDoKind.CoreRefused)
             {
-                PersonalToDoAssignee.Outcome.ToDoNotFound => new ToDoAnswer(todoId, ToDoKind.Gone),
-                PersonalToDoAssignee.Outcome.Filed => await FiledAnswerAsync(run, todoId, ct).ConfigureAwait(false),
-                PersonalToDoAssignee.Outcome.NoAssignedTo or PersonalToDoAssignee.Outcome.NoLinkedUser =>
-                    new ToDoAnswer(todoId, ToDoKind.Fallback, Fallback: FallbackReason.NoAssignee),
-                PersonalToDoAssignee.Outcome.SeveralUsers => new ToDoAnswer(todoId, ToDoKind.Fallback, Fallback: FallbackReason.Ambiguous),
-                PersonalToDoAssignee.Outcome.OnlyIneligibleUsers => new ToDoAnswer(todoId, ToDoKind.Fallback, Fallback: FallbackReason.Disabled),
-                _ => await AssigneeAnswerAsync(run, todoId, assignee.UserId!.Value, ct).ConfigureAwait(false),
-            };
+                _logger.LogWarning("{Prefix} To Do {TodoId}: its core record cannot be derived ({Error}); its rows are refused, not "
+                    + "written. correlationId={CorrelationId}", LogPrefix, todoId, todo.Detail, run.Context.CorrelationId);
+            }
+
+            answer = todo.Kind == ToDoKind.Assignee
+                ? await AssigneeAnswerAsync(run, todoId, todo.AssigneeUserId!.Value, ct).ConfigureAwait(false)
+                : new ToDoAnswer(todoId, todo.Kind, Fallback: todo.Fallback, Detail: todo.Detail);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -647,26 +646,81 @@ public sealed class TodoAssigneeOwnerReconciliationJob : IScheduledJob
         return answer;
     }
 
-    /// <summary>A To Do filed under something: under a core record it is the re-file rule's (cored); otherwise it keeps its own
-    /// team (owner K2), so its rows take the To Do's own team, as the writers give them. Which one is the To Do's CURRENT core
-    /// (<see cref="CoreAncestorResolver"/>), never a row's decision context. A fault throws (Unverified, carried); a data
-    /// condition a retry does not change (<see cref="CoreAncestorResult.IsPermanent"/>) is refused and not carried.</summary>
-    private async Task<ToDoAnswer> FiledAnswerAsync(Run run, Guid todoId, CancellationToken ct)
+    /// <summary>
+    /// What this job makes of one To Do (D-134, owner K2), with no write and no owner question: <see cref="ToDoKind.Gone"/>; a
+    /// To Do filed under a core record is the re-file rule's (<see cref="ToDoKind.Cored"/>), one whose core cannot be derived for a
+    /// data reason a retry does not change (<see cref="CoreAncestorResult.IsPermanent"/>) is <see cref="ToDoKind.CoreRefused"/>, one
+    /// filed under a non-core record keeps its own team (<see cref="FallbackReason.FiledNonCore"/>); a PERSONAL To Do (filed under
+    /// nothing) is its one eligible assignee's (<see cref="ToDoKind.Assignee"/>, <see cref="ToDoClass.AssigneeUserId"/> set) or
+    /// falls back to its own team. Which core is the To Do's CURRENT one (<see cref="CoreAncestorResolver"/>), never a row's
+    /// decision context. UAC task 194b fix round (F1-c): static and shared, so the ownership reconciler asks exactly this job's
+    /// question (<see cref="SelectsAsync"/>).
+    /// </summary>
+    /// <exception cref="Exception">A Dataverse fault reading the To Do, its links or its core propagates (Unverified).</exception>
+    internal static async Task<ToDoClass> ClassifyToDoAsync(
+        IGenericEntityService entities, AssignedAccessStore links, CoreAncestorResolver coreAncestors, Guid todoId, CancellationToken ct)
     {
-        // Read-only (GitHub #2002): the answer only classifies the To Do; nothing is written against it, so an unfiled one is not a Warning.
-        var core = await _coreAncestors.ResolveStampsAsync(TodoTable, todoId, ct, CoreAncestorIntent.ReadOnly).ConfigureAwait(false);
-        if (!core.Succeeded && core.IsPermanent)
+        ArgumentNullException.ThrowIfNull(coreAncestors);
+        var assignee = await PersonalToDoAssignee.ClassifyAsync(entities, links, todoId, ct).ConfigureAwait(false);
+        switch (assignee.Outcome)
         {
-            _logger.LogWarning("{Prefix} To Do {TodoId}: its core record cannot be derived ({Error}); its rows are refused, not "
-                + "written. correlationId={CorrelationId}", LogPrefix, todoId, core.Error, run.Context.CorrelationId);
-            return new ToDoAnswer(todoId, ToDoKind.CoreRefused, Detail: core.Error);
-        }
+            case PersonalToDoAssignee.Outcome.ToDoNotFound:
+                return new ToDoClass(ToDoKind.Gone);
+            case PersonalToDoAssignee.Outcome.Filed:
+            {
+                // Read-only (GitHub #2002): the answer only classifies the To Do; nothing is written against it, so an unfiled one is not a Warning.
+                var core = await coreAncestors.ResolveStampsAsync(TodoTable, todoId, ct, CoreAncestorIntent.ReadOnly).ConfigureAwait(false);
+                if (!core.Succeeded && core.IsPermanent)
+                    return new ToDoClass(ToDoKind.CoreRefused, Detail: core.Error);
+                if (!core.Succeeded)
+                    throw new InvalidOperationException($"the core record of the To Do could not be derived ({core.Error})");
+                return core.Stamps.Count > 0
+                    ? new ToDoClass(ToDoKind.Cored)
+                    : new ToDoClass(ToDoKind.Fallback, FallbackReason.FiledNonCore);
+            }
 
-        if (!core.Succeeded)
-            throw new InvalidOperationException($"the core record of the To Do could not be derived ({core.Error})");
-        return core.Stamps.Count > 0
-            ? new ToDoAnswer(todoId, ToDoKind.Cored)
-            : new ToDoAnswer(todoId, ToDoKind.Fallback, Fallback: FallbackReason.FiledNonCore);
+            case PersonalToDoAssignee.Outcome.NoAssignedTo or PersonalToDoAssignee.Outcome.NoLinkedUser:
+                return new ToDoClass(ToDoKind.Fallback, FallbackReason.NoAssignee);
+            case PersonalToDoAssignee.Outcome.SeveralUsers:
+                return new ToDoClass(ToDoKind.Fallback, FallbackReason.Ambiguous);
+            case PersonalToDoAssignee.Outcome.OnlyIneligibleUsers:
+                return new ToDoClass(ToDoKind.Fallback, FallbackReason.Disabled);
+            default:
+                return new ToDoClass(ToDoKind.Assignee, AssigneeUserId: assignee.UserId!.Value);
+        }
+    }
+
+    /// <summary>Whether this job keeps the rows of a To Do it classified so (<see cref="ClassifyToDoAsync"/>): a personal To Do's
+    /// and a non-core-filed To Do's, never a cored, refused, gone or unverified one's.</summary>
+    internal static bool KeepsRowsOf(ToDoKind kind) => kind is ToDoKind.Assignee or ToDoKind.Fallback;
+
+    /// <summary>Uac-r2 F1: a row whose own live core stamp (<paramref name="stampColumns"/>, the
+    /// <c>sprk_regarding{matter,project,workassignment,servicerequest}</c> lookups) is set is filed: the re-file rule owns it.</summary>
+    internal static bool HasLiveCoreStamp(Entity row, IEnumerable<string> stampColumns) =>
+        stampColumns.Any(c => row.GetAttributeValue<EntityReference>(c) is { } r && r.Id != Guid.Empty);
+
+    /// <summary>A user-owned row is skipped: this job never re-owns one (it keeps its creator).</summary>
+    internal static bool IsOwnedByUser(Entity row) =>
+        row.GetAttributeValue<EntityReference>(OwningUserColumn) is { } user && user.Id != Guid.Empty;
+
+    /// <summary>
+    /// UAC task 194b fix round (F1-c): THE predicate — whether this job keeps <paramref name="row"/> (a Signal or Decision Record,
+    /// read with every column): it names a To Do (<see cref="RegardingTodoColumn"/>), carries no live core stamp
+    /// (<see cref="HasLiveCoreStamp"/>), is not owned by a user (<see cref="IsOwnedByUser"/>), and its To Do is one whose rows
+    /// this job keeps (<see cref="ClassifyToDoAsync"/>, <see cref="KeepsRowsOf"/>) — the steps <see cref="DecideRowAsync"/>
+    /// takes for each row before it asks the row's parents, with no memo. The
+    /// ownership reconciler (<c>RecordOwnershipContext.ForExistingRowAsync</c>) reports such a row and never moves it.
+    /// </summary>
+    /// <exception cref="Exception">A Dataverse fault propagates (the row is not decided: the job's Unverified).</exception>
+    internal static async Task<bool> SelectsAsync(
+        Entity row, IGenericEntityService entities, AssignedAccessStore links, CoreAncestorResolver coreAncestors, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        if (row.GetAttributeValue<EntityReference>(RegardingTodoColumn) is not { } todo || todo.Id == Guid.Empty)
+            return false;
+        if (HasLiveCoreStamp(row, CoreAncestorResolver.CoreAncestorLookups.Select(l => l.LookupAttribute)) || IsOwnedByUser(row))
+            return false;
+        return KeepsRowsOf((await ClassifyToDoAsync(entities, links, coreAncestors, todo.Id, ct).ConfigureAwait(false)).Kind);
     }
 
     /// <summary>The assignee's business-unit team (D-134 via <see cref="RecordOwnershipContext.ForUserTeam"/>), once per user per run.</summary>
@@ -698,13 +752,13 @@ public sealed class TodoAssigneeOwnerReconciliationJob : IScheduledJob
         }
 
         // F1: the row's own live core stamp means it is filed; the re-file rule owns it.
-        if (run.Hosts(table).Stamps.Any(c => row.GetAttributeValue<EntityReference>(c) is { } r && r.Id != Guid.Empty))
+        if (!KeepsRowsOf(todo.Kind) || HasLiveCoreStamp(row, run.Hosts(table).Stamps))
         {
             counts.SkippedCored++;
             return null;
         }
 
-        if (row.GetAttributeValue<EntityReference>(OwningUserColumn) is { } user && user.Id != Guid.Empty)
+        if (IsOwnedByUser(row))
         {
             counts.SkippedUserOwned++;
             return null;
@@ -900,11 +954,28 @@ public sealed class TodoAssigneeOwnerReconciliationJob : IScheduledJob
         // not decided (Unverified), never written past an unchecked secure subject.
         if (!run.HostMap.ContainsKey(SignalTable))
             throw new InvalidOperationException("the Signal columns were not probed, so the record's resolved subjects cannot be read");
+        return await ResolvedSignalSubjectsAsync(run.Entities, run.Hosts(SignalTable).Parents, recordId, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>The Signal table's ownership-parent lookups (its lineage, <see cref="SecureChildLineage"/>), unprobed.</summary>
+    internal static IReadOnlyList<string> SignalParentColumns { get; } = SecureChildLineage.Children[SignalTable].Lookups
+        .Where(l => RecordOwnershipResolver.IsOwnershipParent(l.Value))
+        .Select(l => l.Key)
+        .ToArray();
+
+    /// <summary>
+    /// The subjects of every Signal whose <c>sprk_decisionrecord</c> is <paramref name="recordId"/> (each Signal's ownership-parent
+    /// lookups among <paramref name="signalParentColumns"/>). UAC task 194b fix round (F1-d): shared with the ownership reconciler's
+    /// existing-row question for a Decision Record. A fault propagates.
+    /// </summary>
+    internal static async Task<List<RecordOwnershipParent>> ResolvedSignalSubjectsAsync(
+        IGenericEntityService entities, IReadOnlyList<string> signalParentColumns, Guid recordId, CancellationToken ct)
+    {
         var lineage = SecureChildLineage.Children[SignalTable].Lookups;
-        var columns = run.Hosts(SignalTable).Parents;
+        var columns = signalParentColumns;
         var query = new QueryExpression(SignalTable) { ColumnSet = new ColumnSet(columns.ToArray()), NoLock = true };
         query.Criteria.AddCondition(SignalDecisionRecordColumn, ConditionOperator.Equal, recordId);
-        var signals = await run.Entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+        var signals = await entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
         return signals.Entities
             .SelectMany(s => columns
                 .Select(c => s.GetAttributeValue<EntityReference>(c) is { } r && r.Id != Guid.Empty
@@ -1220,7 +1291,7 @@ public sealed class TodoAssigneeOwnerReconciliationJob : IScheduledJob
 
     private sealed record RecentWindow(List<Guid> ToDos, bool Listed, DateTime NextWatermark, Guid? NextAfter);
 
-    private enum ToDoKind
+    internal enum ToDoKind
     {
         /// <summary>Personal, with one eligible assignee: their team.</summary>
         Assignee,
@@ -1242,7 +1313,7 @@ public sealed class TodoAssigneeOwnerReconciliationJob : IScheduledJob
         Unverified,
     }
 
-    private enum FallbackReason
+    internal enum FallbackReason
     {
         NoAssignee,
         Ambiguous,
@@ -1251,6 +1322,9 @@ public sealed class TodoAssigneeOwnerReconciliationJob : IScheduledJob
         /// <summary>Not personal: filed under a non-core record, so it keeps its own team (D-135 K2).</summary>
         FiledNonCore,
     }
+
+    /// <summary>A To Do as <see cref="ClassifyToDoAsync"/> classified it (no owner question asked).</summary>
+    internal sealed record ToDoClass(ToDoKind Kind, FallbackReason? Fallback = null, Guid? AssigneeUserId = null, string? Detail = null);
 
     private sealed record ToDoAnswer(
         Guid TodoId,

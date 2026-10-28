@@ -1252,6 +1252,20 @@ public sealed partial class SignalWriter
         }
     }
 
+    /// <summary>
+    /// UAC task 194b fix round (F3): the ownership question this writer asks for a Signal about the subject — its core record
+    /// derived as a write derives it (<see cref="ResolveCoreAsync"/>, <see cref="PickStampAsync"/> included), the list
+    /// <see cref="OwnershipContextOf"/> builds — and the owner it resolves (<see cref="ResolveOwnerAsync"/>), with no write. The
+    /// parity seam: tests compare it with the reconciler's question for the existing row.
+    /// </summary>
+    internal async Task<(RecordOwnershipContext Question, RecordOwnerResolution Owner)> OwnershipOfAsync(
+        string subjectEntity, Guid subjectId, int lane, CancellationToken ct)
+    {
+        var core = await ResolveCoreAsync(subjectEntity, subjectId, lane, ct).ConfigureAwait(false);
+        var question = OwnershipContextOf(core.Entity, core.Id, core.Stamps, subjectEntity, subjectId, requestedBy: null);
+        return (question, await ResolveOwnerAsync(core, subjectEntity, subjectId, requestedBy: null, ct).ConfigureAwait(false));
+    }
+
     /// <summary>True when the existing Signal's core record (or, for a no-core Signal, its owner team) is not the one planned
     /// now (<paramref name="owner"/>: the resolver's answer for the item, task 143).</summary>
     private static bool CoreRecordChanged(Entity existing, CorePlan core, RecordOwnerResolution owner)

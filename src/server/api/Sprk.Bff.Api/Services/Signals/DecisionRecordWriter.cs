@@ -1520,6 +1520,18 @@ public sealed class DecisionRecordWriter
         return stamp.Stamps;
     }
 
+    /// <summary>
+    /// UAC task 194b fix round (F3): the parents this writer asks the owner question over for <paramref name="request"/> — through
+    /// the write's own filing and owner step (<see cref="FiledAndOwnedAsync"/>: the shared regarding builder, the derived cores,
+    /// <see cref="DecisionRecordRequest.SignalSubjects"/>, then the resolver) — with no write. The parity seam: tests compare it
+    /// with the reconciler's question for the existing row.
+    /// </summary>
+    internal async Task<IReadOnlyList<RecordOwnershipParent>> OwnershipParentsForAsync(DecisionRecordRequest request, CancellationToken ct)
+    {
+        var (_, owner) = await FiledAndOwnedAsync(request, handed: null, ct, noRequester: true).ConfigureAwait(false);
+        return owner.Parents;
+    }
+
     /// <summary>Fix round 2 (K1): a handed filing that does not answer the request. Logged at Error (a caller bug, not a data
     /// condition); the refusal names no record and nothing has been read or written for it.</summary>
     private DecisionRecordRefusedException HandedFilingDoesNotAnswer(DecisionRecordRequest request, string why)

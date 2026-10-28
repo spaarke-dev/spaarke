@@ -494,15 +494,17 @@ public class SecureChildOrdinaryParentMoveTests
         _world.OwnerWrites.Should().NotContain(w => w.Id == analysis);
     }
 
-    [Theory(DisplayName = "194b must not fire: a Signal or Decision Record with NO core record is reported, never moved — TodoAssigneeOwnerReconciliationJob owns it")]
+    [Theory(DisplayName = "194b must not fire: a Signal or Decision Record with NO core record about a PERSONAL To Do (the To Do job keeps it) is reported, never moved")]
     [InlineData("sprk_signal")]
     [InlineData("sprk_decisionrecord")]
     public async Task ANoCoreRow_IsReported_NotMoved(string table)
     {
         MatterMovedToB();
-        Row("sprk_todo", TodoId, TeamRef(GeneralTeam), ("sprk_regardingmatter", Matter, MatterId));
+        Row("sprk_todo", TodoId, TeamRef(GeneralTeam)); // personal: filed under nothing, no assignee — the job's Fallback
         var row = Guid.NewGuid();
-        OntologyRow(table, row, TeamRef(GeneralTeam), core: null, subject: TodoId, ("sprk_regardingtodo", "sprk_todo", TodoId));
+        // Reached from the matter through its typed core lookup only (no stamp: a live stamp would make it the re-file rule's).
+        OntologyRow(table, row, TeamRef(GeneralTeam), core: null, subject: TodoId,
+            ("sprk_regardingtodo", "sprk_todo", TodoId), ("sprk_matter", Matter, MatterId));
 
         var report = await Reconciler().ReconcileOrdinaryParentMoveAsync(
             Matter, MatterId, SecureChildReconcileMode.Apply, maxWrites: 200, CancellationToken.None);
@@ -512,6 +514,129 @@ public class SecureChildOrdinaryParentMoveTests
         report.Changes.Should().ContainSingle(c => c.Id == row)
             .Which.Should().Match<SecureChildRowChange>(c => c.Outcome == SecureChildRowOutcome.Untouched
                                                              && c.Detail!.Contains("TodoAssigneeOwnerReconciliationJob"));
+    }
+
+    [Fact(DisplayName = "194b F1-c must fire: a no-core Signal about an EVENT whose filing moved (now under the B matter) follows its event to B — its writer decided it over its subject")]
+    public async Task ANoCoreSignalAboutAnEvent_FollowsTheEventsFiling()
+    {
+        MatterMovedToB();
+        Row("sprk_event", EventId, TeamRef(GeneralTeam), ("sprk_regardingmatter", Matter, MatterId));
+        var signal = Guid.NewGuid();
+        OntologyRow("sprk_signal", signal, TeamRef(GeneralTeam), core: null, subject: EventId, ("sprk_regardingevent", "sprk_event", EventId));
+
+        var report = await Reconciler().ReconcileOrdinaryParentMoveAsync(
+            Matter, MatterId, SecureChildReconcileMode.Apply, maxWrites: 200, CancellationToken.None);
+
+        _world.OwnerOf("sprk_event", EventId).Should().Be(DataversePrincipalRef.Team(TeamB));
+        _world.OwnerOf("sprk_signal", signal).Should().Be(DataversePrincipalRef.Team(TeamB));
+        report.Changes.Should().ContainSingle(c => c.Id == signal).Which.Outcome.Should().Be(SecureChildRowOutcome.Changed);
+    }
+
+    [Fact(DisplayName = "194b F1-c must fire: a no-core Signal whose To Do is now FILED under the B matter (cored: the job leaves it) follows its To Do to B")]
+    public async Task ANoCoreSignalWhoseToDoIsCored_FollowsItsToDo()
+    {
+        MatterMovedToB();
+        Row("sprk_todo", TodoId, TeamRef(GeneralTeam), ("sprk_regardingmatter", Matter, MatterId));
+        var signal = Guid.NewGuid();
+        OntologyRow("sprk_signal", signal, TeamRef(GeneralTeam), core: null, subject: TodoId, ("sprk_regardingtodo", "sprk_todo", TodoId));
+
+        await Reconciler().ReconcileOrdinaryParentMoveAsync(Matter, MatterId, SecureChildReconcileMode.Apply, 200, CancellationToken.None);
+
+        _world.OwnerOf("sprk_todo", TodoId).Should().Be(DataversePrincipalRef.Team(TeamB));
+        _world.OwnerOf("sprk_signal", signal).Should().Be(DataversePrincipalRef.Team(TeamB));
+    }
+
+    [Fact(DisplayName = "194b F1-d must fire: the ordinary pass REPORTS a Decision Record held by the Secure team whose stored lookups are all ordinary — never moved")]
+    public async Task AnIsolatedDecisionRecordWithOrdinaryLookups_IsReported_ByTheOrdinaryPass()
+    {
+        MatterMovedToB();
+        var record = Guid.NewGuid();
+        OntologyRow("sprk_decisionrecord", record, TeamRef(SecureChildShareWorld.SecureTeam), core: MatterId, subject: MatterId,
+            ("sprk_matter", Matter, MatterId), ("sprk_regardingmatter", Matter, MatterId));
+
+        var report = await Reconciler().ReconcileOrdinaryParentMoveAsync(
+            Matter, MatterId, SecureChildReconcileMode.Apply, maxWrites: 200, CancellationToken.None);
+
+        _world.OwnerOf("sprk_decisionrecord", record).Should().Be(DataversePrincipalRef.Team(SecureChildShareWorld.SecureTeam));
+        _world.OwnerWrites.Should().NotContain(w => w.Id == record);
+        report.Changes.Should().ContainSingle(c => c.Id == record)
+            .Which.Should().Match<SecureChildRowChange>(c => c.Outcome == SecureChildRowOutcome.Untouched && c.Detail!.Contains("F1-d"));
+    }
+
+    [Fact(DisplayName = "194b F1-d must fire: an Unsecure HOLDS a Decision Record in isolation and reports it, while the Signal beside it is released")]
+    public async Task AnUnsecure_HoldsADecisionRecord_AndReleasesTheSignal()
+    {
+        var unsecured = Guid.NewGuid();
+        _world.FlaggedNotIsolatedRoot(Matter, unsecured);
+        MatterMovedToB();
+        var (record, signal) = (Guid.NewGuid(), Guid.NewGuid());
+        OntologyRow("sprk_decisionrecord", record, TeamRef(SecureChildShareWorld.SecureTeam), core: unsecured, subject: unsecured,
+            ("sprk_matter", Matter, unsecured), ("sprk_regardingmatter", Matter, unsecured));
+        OntologyRow("sprk_signal", signal, TeamRef(SecureChildShareWorld.SecureTeam), core: unsecured, subject: unsecured,
+            ("sprk_matter", Matter, unsecured), ("sprk_regardingmatter", Matter, unsecured));
+
+        var report = await Reconciler().ReconcileAsync(
+            Matter, unsecured, SecureChildReconcileMode.Apply, SecureChildPassTrigger.Unsecure, CancellationToken.None);
+
+        _world.OwnerOf("sprk_decisionrecord", record).Should().Be(DataversePrincipalRef.Team(SecureChildShareWorld.SecureTeam));
+        _world.OwnerWrites.Should().NotContain(w => w.Id == record);
+        report.Changes.Should().ContainSingle(c => c.Id == record)
+            .Which.Should().Match<SecureChildRowChange>(c => c.Outcome == SecureChildRowOutcome.Untouched && c.Detail!.Contains("F1-d"));
+        _world.OwnerOf("sprk_signal", signal).Should().Be(DataversePrincipalRef.Team(GeneralTeam), "only a Decision Record is held");
+    }
+
+    [Fact(DisplayName = "194b K3 must fire: an Unsecure never takes a no-core row the To Do job keeps OUT of isolation — held and reported with the job's rule")]
+    public async Task AnUnsecure_HoldsANoCoreRowTheToDoJobKeeps()
+    {
+        var unsecured = Guid.NewGuid();
+        _world.FlaggedNotIsolatedRoot(Matter, unsecured);
+        Row("sprk_todo", TodoId, TeamRef(GeneralTeam)); // personal: the job keeps its rows
+        var signal = Guid.NewGuid();
+        OntologyRow("sprk_signal", signal, TeamRef(SecureChildShareWorld.SecureTeam), core: null, subject: TodoId,
+            ("sprk_regardingtodo", "sprk_todo", TodoId), ("sprk_matter", Matter, unsecured));
+
+        var report = await Reconciler().ReconcileAsync(
+            Matter, unsecured, SecureChildReconcileMode.Apply, SecureChildPassTrigger.Unsecure, CancellationToken.None);
+
+        _world.OwnerOf("sprk_signal", signal).Should().Be(DataversePrincipalRef.Team(SecureChildShareWorld.SecureTeam));
+        _world.OwnerWrites.Should().NotContain(w => w.Id == signal);
+        report.Changes.Should().ContainSingle(c => c.Id == signal)
+            .Which.Should().Match<SecureChildRowChange>(c => c.Outcome == SecureChildRowOutcome.Untouched
+                                                             && c.Detail!.Contains("TodoAssigneeOwnerReconciliationJob"));
+    }
+
+    [Fact(DisplayName = "194b F1-b must fire: Make Secure on R moves a Signal filed under R INTO isolation even when its core's catalog read faults (a 429) — its stored parents are secure")]
+    public async Task MakeSecure_MovesASignalIn_WhenItsQuestionCannotBeAsked()
+    {
+        var secured = Guid.NewGuid();
+        _world.SecureRoot(Matter, secured);
+        var signal = Guid.NewGuid();
+        OntologyRow("sprk_signal", signal, TeamRef(GeneralTeam), core: secured, subject: secured,
+            ("sprk_matter", Matter, secured), ("sprk_regardingmatter", Matter, secured));
+        _world.FailingRowReadsOf("sprk_recordtype_ref", CatalogMatter);
+
+        var report = await Reconciler().ReconcileAsync(
+            Matter, secured, SecureChildReconcileMode.Apply, SecureChildPassTrigger.Provisioning, CancellationToken.None);
+
+        _world.OwnerOf("sprk_signal", signal).Should().Be(DataversePrincipalRef.Team(SecureChildShareWorld.SecureTeam));
+        report.Changes.Should().ContainSingle(c => c.Id == signal).Which.Outcome.Should().Be(SecureChildRowOutcome.Changed);
+    }
+
+    [Fact(DisplayName = "194b F1-b must not fire: an undetermined Signal whose stored parents are ordinary is NOT moved out by an Unsecure — it fails, left as it is")]
+    public async Task AnUnsecure_DoesNotMoveAnUndeterminedSignalOut()
+    {
+        var unsecured = Guid.NewGuid();
+        _world.FlaggedNotIsolatedRoot(Matter, unsecured);
+        var signal = Guid.NewGuid();
+        OntologyRow("sprk_signal", signal, TeamRef(SecureChildShareWorld.SecureTeam), core: unsecured, subject: unsecured,
+            ("sprk_matter", Matter, unsecured), ("sprk_regardingmatter", Matter, unsecured));
+        _world.FailingRowReadsOf("sprk_recordtype_ref", CatalogMatter);
+
+        var report = await Reconciler().ReconcileAsync(
+            Matter, unsecured, SecureChildReconcileMode.Apply, SecureChildPassTrigger.Unsecure, CancellationToken.None);
+
+        _world.OwnerOf("sprk_signal", signal).Should().Be(DataversePrincipalRef.Team(SecureChildShareWorld.SecureTeam));
+        report.Changes.Should().ContainSingle(c => c.Id == signal).Which.Outcome.Should().Be(SecureChildRowOutcome.Failed);
     }
 
     [Theory(DisplayName = "194b must fire: an Unsecure takes a Signal OUT to its core's business-unit team, whatever order its lookups were read in")]

@@ -518,26 +518,28 @@ public sealed record RecordOwnershipContext
     /// <item><c>sprk_signal</c> and <c>sprk_decisionrecord</c>: the core record (<c>sprk_corerecordtype</c>, read through the
     /// record-type catalog, + <c>sprk_corerecordid</c>), then the subject (the regarding lookup that carries
     /// <c>sprk_regardingrecordid</c>), then every core ancestor stamp <see cref="CoreAncestorResolver"/> derives from that subject
-    /// (the list <c>SignalWriter.OwnershipContextOf</c> and <c>DecisionRecordWriter.OwnershipContextOf</c> build), then the
-    /// row's other lookups (<see cref="OrderedParentsOf"/>). A row with NO core is owned by its personal To Do assignee's team
-    /// (D-134), which <c>TodoAssigneeOwnerReconciliationJob</c> keeps: <see cref="ExistingRowOwnership.NoCoreOwnerRule"/> says so,
-    /// and its parents start with the subject.</item>
+    /// (the list <c>SignalWriter.OwnershipContextOf</c> and <c>DecisionRecordWriter.OwnershipContextOf</c> build), then — for a
+    /// Decision Record — the subject of every Signal it resolved (the writer's <c>SignalSubjects</c>), then the row's other
+    /// lookups (<see cref="OrderedParentsOf"/>). A row with NO core is decided over the same list without the core, as its
+    /// writer decides it, EXCEPT one whose subject is a To Do that <c>TodoAssigneeOwnerReconciliationJob</c> keeps
+    /// (<c>TodoAssigneeOwnerReconciliationJob.SelectsAsync</c>, the job's own predicate): its owner is its personal To Do
+    /// assignee's team (D-134), and <see cref="ExistingRowOwnership.NoCoreOwnerRule"/> says so (fix round F1-c).</item>
     /// <item>Every other table: <see cref="OrderedParentsOf"/>.</item>
     /// </list>
     /// </summary>
     /// <param name="row">The row, with every column (the reconciler reads the whole row).</param>
-    /// <param name="catalog">Reads the record-type catalog (<see cref="CoreAncestorResolver.CoreTableOfRecordTypeAsync"/>).</param>
-    /// <param name="coreAncestors">Derives a subject's core ancestor stamps; <c>null</c> where none is given, which leaves a
-    /// Signal or Decision Record with a core <see cref="ExistingRowOwnership.Undetermined"/> (fail closed: a stamp could be the
-    /// secure parent).</param>
+    /// <param name="reads">What the question reads, once per pass (<see cref="ExistingRowReads"/>): the record-type catalog,
+    /// the core-ancestor derivation (absent: a Signal or Decision Record with a core is
+    /// <see cref="ExistingRowOwnership.Undetermined"/> — fail closed, a stamp could be the secure parent) and the To Do
+    /// assignee links (absent: a no-core row about a To Do is undetermined).</param>
     /// <param name="ct">Cancellation.</param>
     /// <returns>A data condition (a malformed pair, an unknown core type, a stamp derivation that failed) is
-    /// <see cref="ExistingRowOwnership.Undetermined"/>, never a throw. A Dataverse fault propagates.</returns>
-    public static async Task<ExistingRowOwnership> ForExistingRowAsync(
-        Entity row, IGenericEntityService catalog, CoreAncestorResolver? coreAncestors, CancellationToken ct)
+    /// <see cref="ExistingRowOwnership.Undetermined"/>, never a throw. A Dataverse fault reading the core record propagates; one
+    /// reading what decides a no-core row's rule or a Decision Record's Signal subjects is undetermined.</returns>
+    public static async Task<ExistingRowOwnership> ForExistingRowAsync(Entity row, ExistingRowReads reads, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(row);
-        ArgumentNullException.ThrowIfNull(catalog);
+        ArgumentNullException.ThrowIfNull(reads);
         var rest = OrderedParentsOf(row);
         if (!CorePairTables.Contains(row.LogicalName))
             return new ExistingRowOwnership(ForParents(rest));
@@ -555,34 +557,105 @@ public sealed record RecordOwnershipContext
             ? new RecordOwnershipParent(subjectTable, pairId)
             : null;
 
-        if (coreId is null)
+        // Fix round F1-d: a Decision Record's writer also asks about the subject of every Signal it resolved (SignalSubjects), so
+        // its question does too — read with the To Do job's own query. A read that faults leaves the row undetermined.
+        IReadOnlyList<RecordOwnershipParent> signalSubjects = Array.Empty<RecordOwnershipParent>();
+        if (string.Equals(row.LogicalName, DecisionRecordTable, StringComparison.OrdinalIgnoreCase))
         {
-            return new ExistingRowOwnership(ForParents(new[] { subject }.Concat(rest)))
+            try
             {
-                NoCoreOwnerRule = "it has no core record: its owner is its To Do assignee's business-unit team (D-134), kept by "
-                                  + "TodoAssigneeOwnerReconciliationJob; reported, not moved",
-            };
+                signalSubjects = await Sprk.Bff.Api.Services.Signals.TodoAssigneeOwnerReconciliationJob.ResolvedSignalSubjectsAsync(
+                    reads.Entities, Sprk.Bff.Api.Services.Signals.TodoAssigneeOwnerReconciliationJob.SignalParentColumns, row.Id, ct)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                return undetermined with { Undetermined = $"the subjects of the Signals it resolved could not be read ({ex.Message})" };
+            }
         }
 
-        var coreTable = await CoreAncestorResolver.CoreTableOfRecordTypeAsync(catalog, typeRef!.Value, ct).ConfigureAwait(false);
+        if (coreId is null)
+        {
+            // Fix round F1-c: the assignee rule is the To Do job's, and only for the rows that job keeps (its own predicate);
+            // every other no-core row is decided over its parents, as its writer decided it ([subject, ..SignalSubjects]).
+            var noCore = ForParents(new[] { subject }.Concat(signalSubjects).Concat(rest));
+            if (subject is null || !string.Equals(subject.EntityLogicalName, TodoTable, StringComparison.OrdinalIgnoreCase))
+                return new ExistingRowOwnership(noCore);
+            if (reads.Links is null || reads.CoreAncestors is null)
+            {
+                return new ExistingRowOwnership(noCore)
+                {
+                    Undetermined = "it has no core record and is about a To Do, whose assignee rule cannot be checked here",
+                };
+            }
+
+            bool keptByToDoJob;
+            try
+            {
+                keptByToDoJob = await Sprk.Bff.Api.Services.Signals.TodoAssigneeOwnerReconciliationJob.SelectsAsync(
+                    row, reads.Entities, reads.Links, reads.CoreAncestors, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                return new ExistingRowOwnership(noCore)
+                {
+                    Undetermined = $"it has no core record, and whether its To Do's assignee rule keeps it could not be read ({ex.Message})",
+                };
+            }
+
+            return keptByToDoJob
+                ? new ExistingRowOwnership(noCore)
+                {
+                    NoCoreOwnerRule = "it has no core record: its owner is its To Do assignee's business-unit team (D-134), kept by "
+                                      + "TodoAssigneeOwnerReconciliationJob; reported, not moved",
+                }
+                : new ExistingRowOwnership(noCore);
+        }
+
+        var coreTable = await reads.CoreTableOfRecordTypeAsync(typeRef!.Value, ct).ConfigureAwait(false);
         if (coreTable is null)
             return undetermined with { Undetermined = "its core record type is not a core record table in the record-type catalog" };
 
         var parents = new List<RecordOwnershipParent?> { new(coreTable, coreId.Value), subject };
         if (subject is not null)
         {
-            if (coreAncestors is null)
+            if (reads.CoreAncestors is null)
                 return undetermined with { Undetermined = "its subject's core ancestors cannot be derived here" };
 
-            var stamps = await coreAncestors.ResolveStampsAsync(
-                subject.EntityLogicalName, subject.RecordId, ct, CoreAncestorIntent.ReadOnly).ConfigureAwait(false);
+            var stamps = await reads.StampsOfAsync(subject, ct).ConfigureAwait(false);
             if (stamps.Status is not (CoreAncestorStatus.CoreTarget or CoreAncestorStatus.Derived or CoreAncestorStatus.NoAncestor))
                 return undetermined with { Undetermined = $"its subject's core ancestors could not be derived ({stamps.Status})" };
 
             parents.AddRange(stamps.Stamps.Select(stamp => new RecordOwnershipParent(stamp.EntityType, stamp.RecordId)));
         }
 
-        return new ExistingRowOwnership(ForParents(parents.Concat(rest)));
+        return new ExistingRowOwnership(ForParents(parents.Concat(signalSubjects).Concat(rest)));
+    }
+
+    internal const string DecisionRecordTable = "sprk_decisionrecord";
+    private const string TodoTable = "sprk_todo";
+
+    /// <summary>
+    /// UAC task 194b fix round (F1-d): THE never-out rule for a Decision Record — the ONE predicate the reconciler's secure pass
+    /// (a move OUT, Unsecure included), its ordinary pass and <see cref="IRecordOwnershipResolver.ReparentAsync"/> ask. A
+    /// Decision Record owned in isolation (the Secure Record owner team, or any team in the Secure Record business unit) whose
+    /// answer now is an ordinary team is held where it is and reported: the parents its writer asked at commit time are not
+    /// all stored on the row (the Signals it resolved can be re-filed or deleted since), so an ordinary answer read from what
+    /// is stored cannot prove it may leave. A move INTO isolation is never held.
+    /// </summary>
+    /// <param name="table">The row's table.</param>
+    /// <param name="ownedInIsolation">Whether the row is owned now by the Secure Record owner team or in the Secure Record
+    /// business unit (an ambiguous Secure Record business unit counts as owned there: fail closed).</param>
+    /// <param name="answer">The rule's answer for the row now.</param>
+    /// <returns>Why it is held (a sentence), or <c>null</c> when the rule does not hold it.</returns>
+    public static string? DecisionRecordHeldInIsolation(string? table, bool ownedInIsolation, RecordOwnerResolution answer)
+    {
+        ArgumentNullException.ThrowIfNull(answer);
+        return string.Equals(table, DecisionRecordTable, StringComparison.OrdinalIgnoreCase)
+               && ownedInIsolation && answer.IsOwned && !answer.IsSecureOwner
+            ? "a Decision Record owned in isolation whose stored parents now give an ordinary team: its commit-time parents are "
+              + "not all stored (the Signals it resolved), so it is held in isolation and reported, never moved out (194b F1-d)"
+            : null;
     }
 
     /// <summary>
@@ -670,6 +743,70 @@ public sealed record RecordOwnershipContext
 }
 
 /// <summary>
+/// UAC task 194b fix round (K5): what one pass reads to ask its rows' ownership questions
+/// (<see cref="RecordOwnershipContext.ForExistingRowAsync"/>) — the record-type catalog by type, and the core-ancestor stamps by
+/// subject, each read once per pass and kept in a plain dictionary (no expiry, no sharing across passes: a new pass reads
+/// again). A fault is not kept, so the next row asks again.
+/// </summary>
+public sealed class ExistingRowReads
+{
+    private readonly Dictionary<Guid, string?> _coreTables = new();
+    private readonly Dictionary<RecordOwnershipParent, CoreAncestorResult> _stamps = new();
+
+    /// <param name="entities">Reads the catalog, the To Do and the Signals a Decision Record resolved.</param>
+    /// <param name="coreAncestors">The ONE core-ancestor derivation; <c>null</c> leaves a cored Signal or Decision Record
+    /// undetermined.</param>
+    /// <param name="links">The To Do assignee links (the To Do job's); <c>null</c> leaves a no-core row about a To Do
+    /// undetermined.</param>
+    public ExistingRowReads(
+        IGenericEntityService entities, CoreAncestorResolver? coreAncestors,
+        Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessStore? links)
+    {
+        Entities = entities ?? throw new ArgumentNullException(nameof(entities));
+        CoreAncestors = coreAncestors;
+        Links = links;
+    }
+
+    /// <summary>Reads the catalog, the To Do and the Signals a Decision Record resolved.</summary>
+    public IGenericEntityService Entities { get; }
+
+    /// <summary>The core-ancestor derivation, when given.</summary>
+    public CoreAncestorResolver? CoreAncestors { get; }
+
+    /// <summary>The To Do assignee links, when given.</summary>
+    public Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessStore? Links { get; }
+
+    /// <summary>How many catalog reads this pass made (one per record type).</summary>
+    public int CatalogReads { get; private set; }
+
+    /// <summary>How many stamp derivations this pass made (one per subject).</summary>
+    public int StampDerivations { get; private set; }
+
+    /// <summary>The core table of a record type (<see cref="CoreAncestorResolver.CoreTableOfRecordTypeAsync"/>), once per type.</summary>
+    internal async Task<string?> CoreTableOfRecordTypeAsync(Guid typeRef, CancellationToken ct)
+    {
+        if (_coreTables.TryGetValue(typeRef, out var known))
+            return known;
+        CatalogReads++;
+        var table = await CoreAncestorResolver.CoreTableOfRecordTypeAsync(Entities, typeRef, ct).ConfigureAwait(false);
+        _coreTables[typeRef] = table;
+        return table;
+    }
+
+    /// <summary>A subject's core ancestor stamps (read-only intent), once per subject. Requires <see cref="CoreAncestors"/>.</summary>
+    internal async Task<CoreAncestorResult> StampsOfAsync(RecordOwnershipParent subject, CancellationToken ct)
+    {
+        if (_stamps.TryGetValue(subject, out var known))
+            return known;
+        StampDerivations++;
+        var stamps = await CoreAncestors!.ResolveStampsAsync(
+            subject.EntityLogicalName, subject.RecordId, ct, CoreAncestorIntent.ReadOnly).ConfigureAwait(false);
+        _stamps[subject] = stamps;
+        return stamps;
+    }
+}
+
+/// <summary>
 /// UAC task 194b: the ownership question for an existing row (<see cref="RecordOwnershipContext.ForExistingRowAsync"/>).
 /// <see cref="Context"/> names its parents, primary first, and is always set (a caller that needs only the set of parents reads
 /// it even when the answer is undetermined).
@@ -677,8 +814,10 @@ public sealed record RecordOwnershipContext
 /// <param name="Context">The row's parents in its writer's order (<see cref="RecordOwnershipContext.ForParents"/>).</param>
 public sealed record ExistingRowOwnership(RecordOwnershipContext Context)
 {
-    /// <summary>Set for a Signal or Decision Record with no core record: its owner comes from another rule (its assignee's team),
-    /// not from its parents, so a reconciler reports it and never moves it. Why, as a sentence.</summary>
+    /// <summary>Set for a Signal or Decision Record with no core record that <c>TodoAssigneeOwnerReconciliationJob</c> keeps (its
+    /// own predicate, fix round F1-c): its owner comes from another rule (its To Do assignee's team), not from its parents, so a
+    /// reconciler never moves it out of isolation nor between ordinary teams (a move INTO isolation still holds: secure wins).
+    /// Why, as a sentence.</summary>
     public string? NoCoreOwnerRule { get; init; }
 
     /// <summary>Set when the question cannot be asked from what the row holds (a malformed core pair, an unknown core type, a
@@ -1746,6 +1885,24 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                 "Refusing to re-file {Entity} {RecordId}: {Reason} ({Code}). The change was NOT written.",
                 request.EntityLogicalName, request.RecordId, resolution.Reason, resolution.RefusalCode);
             return resolution;
+        }
+
+        // UAC task 194b fix round (F1-d): a Decision Record owned in isolation is never moved out on its stored parents (the
+        // ONE never-out rule the reconciler's passes ask too) — decided before anything is written.
+        if (string.Equals(request.EntityLogicalName, RecordOwnershipContext.DecisionRecordTable, StringComparison.OrdinalIgnoreCase)
+            && resolution.IsOwned && !resolution.IsSecureOwner)
+        {
+            var secureBu = await ResolveSecureBusinessUnitAsync(ct).ConfigureAwait(false);
+            var owningBu = current.GetAttributeValue<EntityReference>(OwningBusinessUnitColumn)?.Id;
+            var ownedInIsolation = secureBu.Ambiguous || secureBu.Id is { } secureBuId && (owningBu is null || owningBu == secureBuId);
+            if (RecordOwnershipContext.DecisionRecordHeldInIsolation(request.EntityLogicalName, ownedInIsolation, resolution)
+                is { } held)
+            {
+                _logger.LogWarning(
+                    "Refusing to re-file {Entity} {RecordId}: {Reason}. The change was NOT written.",
+                    request.EntityLogicalName, request.RecordId, held);
+                return RecordOwnerResolution.Refused(RecordOwnerRefusal.ParentUndetermined, held);
+            }
         }
 
         // Owner round 10 item 7 (2026-10-03, BINDING): "moving a CHILD out of a secure root is an un-secure, so F3's

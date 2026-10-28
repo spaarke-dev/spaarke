@@ -44,6 +44,7 @@ public class AccessTableReaderScanTests
             ["sprk_todo"] = "A child record; its access follows its parents, its owner and creator are refused.",
             ["sprk_invoice"] = "A child record; its access follows its parents, its owner and creator are refused.",
             ["sprk_servicerequest"] = "A child record; its requester is refused (CreatorColumns), its access follows its parents.",
+            ["sprk_decisionrecord"] = "A child record; its access follows its parents. UAC task 194b names it for its owner question (RecordOwnershipResolver: the resolved Signals' subjects, the never-out rule); no access decision reads its other columns.",
             ["account"] = "A customer account; no access decision reads its columns.",
 
             // #2253 fix round 3 (K): found by the wider scan. Refused per column (AccessColumns):

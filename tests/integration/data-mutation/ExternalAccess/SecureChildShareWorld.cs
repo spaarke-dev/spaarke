@@ -683,7 +683,8 @@ internal sealed class SecureChildShareWorld
         Sprk.Bff.Api.Services.Signals.GateDecisionRecordSharing? gateDecisionRecords = null,
         Sprk.Bff.Api.Services.Documents.DocumentContainerRelocator? relocator = null,
         Microsoft.Extensions.Logging.ILogger<SecureChildReconciler>? logger = null,
-        Microsoft.Extensions.Logging.ILogger<SecureChildShareSynchronizer>? sharesLogger = null)
+        Microsoft.Extensions.Logging.ILogger<SecureChildShareSynchronizer>? sharesLogger = null,
+        Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessStore? links = null)
     {
         var entities = EntitiesOver(current).Object;
         var configuration = Configuration();
@@ -696,7 +697,8 @@ internal sealed class SecureChildShareWorld
             entities, resolver, synchronizer, webApi, configuration, logger ?? NullLogger<SecureChildReconciler>.Instance,
             gateDecisionRecords ?? new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing, // ontology 042b: a gate-record double over an empty world
             accessCacheInvalidator, threads, ownerPrivileges, relocator,
-            coreAncestors: CoreAncestorsOver(current)); // 194b: a Signal's or Decision Record's subject stamps
+            coreAncestors: CoreAncestorsOver(current), // 194b: a Signal's or Decision Record's subject stamps
+            links: links ?? new AssignedAccessTestDoubles.FakeAssignedAccessStore()); // 194b F1-c: the To Do job's predicate (nobody linked)
     }
 
     /// <summary>
