@@ -225,6 +225,7 @@ public sealed class CallerWhoAmIMemoIsolationTests
                  {
                      new EndedRequest(new ObjectDisposedException("HttpContext")),
                      new EndedRequest(new InvalidOperationException("context recycled")),
+                     new EndedRequest(new NullReferenceException("recycled DefaultHttpContext")),
                  })
         {
             CallerWhoAmIMemo.TryGetUserId(ended, TestEnvironment, "alice-dv", out _).Should().BeFalse();
@@ -239,7 +240,7 @@ public sealed class CallerWhoAmIMemoIsolationTests
             });
         }
 
-        probe.WhoAmIsFor("alice-dv").Should().Be(4, "two ended requests, two questions each, none remembered");
+        probe.WhoAmIsFor("alice-dv").Should().Be(6, "three ended requests, two questions each, none remembered");
     }
 
     [Theory]

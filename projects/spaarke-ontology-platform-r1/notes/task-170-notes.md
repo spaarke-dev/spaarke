@@ -18,7 +18,7 @@ Branch `task/170-commit-latency` from `origin/docs/ontology-platform-design`. Ri
 
 1. **`CallerWhoAmIMemo`** (new, `Infrastructure/Dataverse/CallerWhoAmIMemo.cs`): the caller's successful `WhoAmI()` body, stored in the request's
    `HttpContext.Items`, keyed by SHA-256 of `normalised environment URL + "
-" + exact Dataverse token` `WhoAmI` ran under (fix round: uac-r2 condition; the same token string under two orgs is two misses; trim, trailing slash, case-insensitive scheme/host). Per request, per environment and credential, successes only; an ended or recycled request (`ObjectDisposedException`, `InvalidOperationException`) is a miss on read and a no-op on write, and both callers re-read the current request at the point of use; static class with
+" + exact Dataverse token` `WhoAmI` ran under (fix round: uac-r2 condition; the same token string under two orgs is two misses; trim, trailing slash, case-insensitive scheme/host). Per request, per environment and credential, successes only; an ended or recycled request (`ObjectDisposedException`, `InvalidOperationException`, or the `NullReferenceException` a recycled `DefaultHttpContext` can raise) is a miss on read and a no-op on write, and both callers re-read the current request at the point of use; static class with
    no data of its own; no DI registration. Outside a request nothing is remembered. Each answer is held as the parsed id plus the body
    as text; every body read gets its own freshly parsed copy (a shared `JsonDocument` is not safe for parallel readers, and one request
    asks in parallel), and reads of `Items` take the same lock as the write.
