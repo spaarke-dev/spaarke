@@ -234,8 +234,25 @@ own builders, in `WriterBuilderOwnershipParityTests`: `AppOnlyAnalysisService.Ow
 with its lookups and owner) and `IncomingAssociationResolver.OwnershipContextOf` (the static tail of
 `OwnershipContextForNewRecordAsync`: the communication's question, which the archive's owner comes from). No answer changes.
 
+**Fix round R, run R1 (A1, A2; ontology answer (c)).**
+- A1: a Decision Record's existing-row question takes its Signal subjects from `sprk_steps.resolvedSignalIds` (written once
+  at create, never truncated), not from the Signals' `sprk_decisionrecord` link: `DecisionCommitService.ResolvedSignalSubjectsOfRecordAsync`
+  reads the listed Signals by id, in any state, in pages of `ResolvedSignalReadPage` (100; no 5,000 cap, verifier K1), and
+  applies `KnownSignalSubjectsOf`, the rule `SignalSubjectsOf` now delegates to (each Signal's subject only, stored order,
+  de-duplicated). The question is `ExistingRowOwnership.Incomplete` (decided over what is known) when `sprk_steps` is missing
+  or unparseable or has no `resolvedSignalIds`, a listed Signal is unreadable or gone, or a subject table cannot be derived.
+- `DecisionRecordHeldInIsolation` takes the question's incompleteness and holds only then. It is one predicate with the same
+  callers, in every pass: `refileChildPass` is removed. `ReparentAsync` passes `ReparentQuestionIncomplete`, because a
+  re-file asks about its own lookups, so its behaviour is unchanged until R2 (A5). The FK reader is the To Do job's own again.
+- A2: a row held in isolation by a pass that may release (F1-d or K3) loses its mirror through
+  `SecureChildShareSynchronizer.RemoveHeldMirrorAsync` and stays on the Secure team. A removal that does not complete marks
+  the row failed for the next pass. The report lists `HeldInIsolation`; `SecureChildPassSummary` carries `held` and
+  `heldRecords` (at most 50, with why) on the Unsecure and provisioning responses. Holding does not make a pass incomplete.
+- Ontology criterion 3's seed now writes the Decision Record's `sprk_steps` as `DecisionRecordWriter` does; its assertions and
+  wording are unchanged.
+- Dev count (read-only, 2026-10-27): 28 Decision Records, all 28 list `resolvedSignalIds`: 0 lack the key, and 0 of those are
+  Secure-owned (2 records are Secure-owned overall).
+
 **Known gaps (not 194b).**
-- A Decision Record's existing-row question names every ownership lookup of each resolved Signal (the job's read), a superset
-  of the writer's `SignalSubjects` when a Signal carries more than its subject (secure-if-any only reads more).
 - A gate Decision Record on an unfiled communication is owned by the communication's user (D-144); the reconciler asks it as
   a plain row (keep-creator), so it is never moved.
