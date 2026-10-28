@@ -36,10 +36,11 @@ const BFF_CHILD_RECORD_DENIED = 'child_record.denied';
 
 /**
  * The privilege a refusal names, as Dataverse writes it: `prvAppendToContact`, `prvCreatesprk_Project`, or the filled
- * "does not have AppendToAccess right(s)" form. AppendTo is listed before Append (it starts with it).
+ * "does not have AppendToAccess right(s)" form, or the SecLib "AccessRights: AppendToAccess" form. AppendTo is listed
+ * before Append (it starts with it).
  */
 const PRIVILEGE_TOKEN =
-  /\bprv(AppendTo|Append|Create)[A-Za-z_]|\bdoes not have (AppendTo|Append|Create)(?:Access)? right\(s\)/i;
+  /\bprv(AppendTo|Append|Create)[A-Za-z_]|\bdoes not have (AppendTo|Append|Create)(?:Access)? right\(s\)|\bAccessRights:\s*(AppendTo|Append|Create)Access\b/i;
 
 /** An unfilled .NET format placeholder ("{0}", "{6}") — the message is a template, not a sentence. */
 const UNFILLED_PLACEHOLDER = /\{\d+\}/;
@@ -82,7 +83,7 @@ function neutralSentence(recordNoun: string): string {
 /** The sentence for a Dataverse privilege refusal, chosen from the privilege its raw message names. */
 function privilegeSentence(raw: string, recordNoun: string): string {
   const m = PRIVILEGE_TOKEN.exec(raw);
-  const kind = (m?.[1] ?? m?.[2] ?? '').toLowerCase();
+  const kind = (m?.[1] ?? m?.[2] ?? m?.[3] ?? '').toLowerCase();
   if (kind === 'create') return `You don't have permission to create this ${recordNoun}. Ask your administrator.`;
   if (kind === 'appendto' || kind === 'append') {
     return `You don't have permission to link one of the selected values to this ${recordNoun}. Ask your administrator.`;

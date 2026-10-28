@@ -108,6 +108,22 @@ describe('describeWebApiCreateError', () => {
     });
   });
 
+  // SecLib's own form: "... SecLib::AccessCheckEx failed. Returned hr = -2147220960 ... AccessRights: AppendToAccess".
+  const secLib = (rights: string) => ({
+    message:
+      'SecLib::AccessCheckEx failed. Returned hr = -2147220960 on UserId: 11111111-1111-1111-1111-111111111111 and ' +
+      `PrivilegeId: 22222222-2222-2222-2222-222222222222. OwnerId: 33333333-3333-3333-3333-333333333333, AccessRights: ${rights}`,
+  });
+
+  it.each([
+    ['AppendToAccess', LINK_SENTENCE('matter')],
+    ['AppendAccess', LINK_SENTENCE('matter')],
+    ['CreateAccess', CREATE_SENTENCE('matter')],
+    ['ReadAccess', NEUTRAL_SENTENCE('matter')],
+  ])('the SecLib "AccessRights: %s" form gets its sentence', (rights, sentence) => {
+    expect(describeWebApiCreateError(secLib(rights), 'matter')).toEqual({ message: sentence, isAccessDenied: true });
+  });
+
   it('a BFF child-record refusal (ChildRecordWriteError, child_record.denied) gets the neutral sentence, not its detail', () => {
     const err = new ChildRecordWriteError(
       "You do not have permission to create records in 'sprk_todo' (prvCreatesprk_Todo).",
