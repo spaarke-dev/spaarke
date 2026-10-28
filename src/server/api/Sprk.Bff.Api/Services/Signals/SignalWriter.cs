@@ -1357,7 +1357,8 @@ public sealed partial class SignalWriter
 
         parents.Add(new RecordOwnershipParent(subjectEntity, subjectId));
         parents.AddRange(stamps.Select(stamp => new RecordOwnershipParent(stamp.EntityType, stamp.RecordId)));
-        return RecordOwnershipContext.ForParents(parents) with { RequestedBy = requestedBy };
+        // UAC task 194b fix round R (B3): the writer's own order IS sprk_signal's rule (core, subject, stamps) — the closed opt-out.
+        return RecordOwnershipContext.ForParentsInWriterOrder(parents) with { RequestedBy = requestedBy };
     }
 
     /// <summary>

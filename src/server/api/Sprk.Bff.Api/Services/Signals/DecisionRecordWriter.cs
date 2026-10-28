@@ -1344,7 +1344,8 @@ public sealed class DecisionRecordWriter
             parents.Add(new RecordOwnershipParent(signalSubject.Entity, signalSubject.Id));
         }
 
-        return RecordOwnershipContext.ForParents(parents) with
+        // UAC task 194b fix round R (B3): the writer's own order IS sprk_decisionrecord's rule — the closed opt-out.
+        return RecordOwnershipContext.ForParentsInWriterOrder(parents) with
         {
             RequestedBy = noRequester ? null : RecordRequester.Of(request.ConfirmedByUserId),
         };
