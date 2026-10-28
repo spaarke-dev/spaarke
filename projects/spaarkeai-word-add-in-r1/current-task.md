@@ -6,21 +6,30 @@
 
 ## 🔥 ACTIVE NOW (2026-10-28): owner-approved fixes #2412 + #2416
 
-- **#2412 (ISS-027)**: the save-pane choice must win over a conflicting 1.0 match.
-  - Branch `task/word-2412-caller-regarding`, worktree **C:\wt2412**, commit 1d349e240b, **PR #2417** (open, NO auto-merge yet).
-  - Change: `RungMatch.CallerSupplied`; `ExplicitReferenceRung` sets it; `AssociationStatusMapper` lets exactly one caller target settle its field.
-  - Publish size +1,029 bytes against bafe310ca4; master publish kept at scratchpad `pub2412-master(.zip)`; C:\wt2412m is a detached master worktree for size checks (remove later with Remove-WorktreeSafe).
-  - **Review round 1 findings to FIX NOW:**
-    - (F1) Quick Save sends the engine's guess as caller-supplied. In `communicationSuggestionsService.ts` `fetchEnginePreSelection`, return null when `model.state === 'requires-review'` (no `model.primary`; it currently falls back to `candidates[0]`). Add a must-not-fire jest test.
-    - (F1-low) Mapper: build `callerDecided` only from fields where the write is the caller's target.
-    - (K4) Docs: RungMatch.cs and ExplicitReferenceRung.cs say "outbound send" supplies caller regarding (only EmailUploadCaptureService does); fix `docs/architecture/communication-intelligence-architecture.md:120`.
-    - (K1) File an issue: the suggestions endpoint (CommunicationService.cs:432) ignores an existing filing.
-  - Then re-check the fix diff (scoped), merge with `--auto --merge`, and ask R3 for a dev BFF deploy (OK on content; owner go in R3).
-- **#2416 (ISS-028)**: a typed Document Name replaced the email subject.
-  - Server: `task/word-2416-docname-server`, **C:\wt2416**, 9939b19f6b, **PR #2419** (`EmailMetadata.DocumentName`; +94 bytes).
-  - Client: `task/word-2416-docname-client`, **C:\wt2416c**, 25ca6bf796, **PR #2420 DRAFT**. HOLD it until the server is live on dev.
-  - An adversarial review is running (opus agent); act on its findings.
-- After both are live: the owner re-tests one save with a typed name. Offer to correct the owner's 10-28 test record (comm 12f1f3f8…, doc 536204ff…) only if they ask.
+- **#2412 (ISS-027): MERGED.** PR #2417 merged to master at cae791a743 (2026-10-28 21:58Z); review round 1 fixes were in 9450b4a0fd and the scoped re-check was clean.
+  - The Quick Save part is client-side, so the master push auto-deploys it with the add-in. The mapper part needs a dev BFF deploy.
+  - Known limits: Quick Save saves unfiled when any field is Ambiguous (accepted, noted on the PR); #2421 (suggestions re-evaluation ignores an existing filing).
+- **#2416 (ISS-028): a typed Document Name replaced the email subject.**
+  - Server: `task/word-2416-docname-server`, **C:\wt2416**, **PR #2419**. Commits 9939b19f6b and round 1 0dbcf27c1e:
+    - a blank typed name gets the suffix;
+    - an id-less key includes the typed name;
+    - the Office suite passes 975 of 975 (7 skipped).
+    - NO auto-merge yet.
+  - Client: `task/word-2416-docname-client`, **C:\wt2416c**, **PR #2420 DRAFT**. Commits 25ca6bf796 and round 1 2c37d7f47e:
+    - trims the typed name;
+    - email "Keep both" sends `isNameSystemDerived: true`, so the file is stored suffixed and the typed name is kept;
+    - fixed the stale SaveFlow.documentName test;
+    - 223 jest tests pass.
+    - HOLD until the server is live on dev.
+  - A scoped re-check of both round-1 commits is running (sonnet). If it is clean: `gh pr merge 2419 --auto --merge`.
+- **Then:** ask R3 for a dev BFF deploy carrying #2417 + #2419 (OK on content; the owner's go is given in R3's session). After it is live, mark #2420 ready and auto-merge it (the master push deploys the add-in). Then the owner re-tests one save with a typed name.
+  - Offer to correct the owner's 10-28 test record (comm 12f1f3f8…, doc 536204ff…) only if they ask.
+- **ebilling 094 round 5** changed the from-email contract (e8ef9a89d4). When 094 merges to work, update `invoiceSubmissionMessages.ts`:
+  - `email_save_failed` and `document_unavailable` are permanent;
+  - `earlier_attempt_being_removed` is a retryable 503;
+  - the race-loser 409 says the filing is kept.
+  - I've acknowledged it to ebilling.
+- Cleanup later (Remove-WorktreeSafe): C:\wt2412, C:\wt2412m, C:\wt2416, C:\wt2416c.
 
 ## ⚡ Quick Recovery (READ THIS FIRST)
 
