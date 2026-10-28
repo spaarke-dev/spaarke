@@ -4,7 +4,7 @@
     <title>A secure matter's budget currency defaults to the customer business unit's currency (D-198)</title>
     <phase>11 UAT</phase>
     <gate>startable: #2414 (the owning business unit is read as the caller) is merged to docs as f634761a63</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Access-tagged: it uses uac-r2's Secure Record unit predicate and a deployment configuration value in Sprk.Bff.Api (.cs), and it modifies tests.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -85,4 +85,10 @@
       <file>docs/adr/ADR-038-testing-strategy.md</file>
     </files>
   </knowledge>
+  <completion date="2026-10-28">
+    `DefaultCurrencyAsync` now gives a secure matter the currency of `ExternalAccess:CustomerBusinessUnitId`. It uses uac-r2's `ResolveSecureBusinessUnitAsync` and `IsInSecureBusinessUnit`, called, not copied. Ambiguous or unresolved means not secure. If the customer unit is unset, missing, the Secure Record unit itself, the root (no parent) or has no currency, the default is the base currency and a Warning is logged. A non-secure matter never reads the option. The owning-unit read stays as the caller (#2414). The new reads are app-only business-unit configuration. Faults still throw.
+    Tests (1)-(6) plus a fault test. Before the change, 5 of 48 tests failed; after it, 0 of 48. Filtered BFF: 2245 passed. ArchTests: 1609/1609. Publish size: +1,270 B, 192 files on both sides.
+    Review: a Sonnet adversarial pass was clean, with K only. K2: the Secure Record lookup is not cached (1-2 extra configuration reads per request). K3: an inactive customer currency is refused with the business-unit message. K4: two optional test gaps. uac-r2 approved at `cd6dafc1d2`.
+    PR #2422 merged to docs (`e2456c89dc`). Also part of the D-193 follow-ups: #2414 (`f634761a63`) reads the owning business unit as the caller, and uac-r2 approved it.
+  </completion>
 </task>
