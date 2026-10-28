@@ -329,3 +329,46 @@ Sources: **design** = [`design.md`](../design.md) §8 (D-1..D-12, §8.0c) and §
 - `create-budget` stays non-authorable (D-180). The plan names `revise-budget`, and the server decides what is shown.
 - v1 and v2 rows stay, and Signals and Decision Records keep the version they cite (D-14).
 - **Approved:** the config change, and the dev apply through `Apply-DoLanePolicies.ps1 -DefinitionPath config/know-promotion.policies.json`, with a clean `-WhatIf` first. Task 166.
+
+## D-193 — Budgets get an autonumber, and Create budget fills currency and the budget fields (owner, 2026-10-28, UAT round 2 items 5–6)
+
+- **Budget number:** `sprk_budget.sprk_budgetnumber` becomes a Dataverse autonumber column, `BUD-{SEQNUM:6}`. This is the same process as matters (`MAT-{SEQNUM:6}`) and projects (`PRJ-{SEQNUM:6}`). `RecordTableRules` declares it as `AutonumberColumn` for `sprk_budget`, as it does for matter and project. **The schema change is approved** (owner: "yes use the same auto number process"). Apply it to spaarkedev1 through the Web API attribute update and record it in the SpaarkeMaster `sprk_Budget/Entity.xml`.
+- **Currency:** Create budget sets `transactioncurrencyid` from the matter's owning business unit's Default Currency (`businessunit.transactioncurrencyid`). It writes `sprk_currency` as that currency's ISO code (`transactioncurrency.isocurrencycode`). The user can change the currency in the step. There is **no** schema change to `sprk_currency`: it stays, required on the form, and is filled. Retiring it is outside ontology scope; finance and e-billing would review it later.
+- **Budget step fields:**
+  - Category (`sprk_budgetcategory`, a Choice): options come from live metadata, so the owner's later relabel needs no code change. The owner will update the placeholder labels.
+  - Year (`sprk_budgetyear`): text.
+  - Start date and end date (`sprk_budgetstartdate`, `sprk_budgetenddate`): DateOnly.
+  - Period (`sprk_budgetperiod`): Choice.
+  - Currency: as above.
+  - All of these are optional, except Currency, which is always filled from its default.
+- Task 167.
+
+## D-194 — Assign Task can notify the assignee by email and with a bell notification (owner, 2026-10-28, UAT round 2 item 2)
+
+- **Checkbox:** Assign Task gets a "Send email notification" checkbox, **ticked by default**.
+- **Email:** to the Assigned To contact (`emailaddress1`). The body has the matter name and link, What to do, and Due.
+  - Sent from the **assigner's own mailbox when available** (delegated send, as the budget inquiry does). The fallback is the system mailbox (`Communication:DefaultMailbox`, the access-granted email path).
+  - The template is embedded HTML with placeholders, following the `RegistrationEmailService` precedent.
+- **Bell:** a model-driven app notification (`NotificationService.CreateNotificationAsync`, the `GrantAccessNotifier` precedent) goes to the assignee's linked user. The link comes from the D-129 linked-contact path. With no linked user, the email alone is sent.
+- **Failure handling:** a failed send or notification is logged and never fails the decision. The Decision Record stays the last write of the commit (D-17), and notifying runs after it. No new tracked communication is required, but if the delegated-send path records one by design, that is acceptable and must be stated.
+- Task 168.
+
+## D-195 — Worklist lanes: subtitles and a collapsible card list (owner, 2026-10-28, UAT round 2 item 4)
+
+- **Titles:** keep the short titles and add subtitles. "Decide": "Items that need your decision". "Do": "Your work that is due soon or overdue".
+- **Collapsible list:** each lane's card list starts collapsed. The open or collapsed state is then **remembered on the device**, per lane, following the localStorage pattern of `usePaneCollapse`.
+- **Always shown:** the title, the subtitle, the count, the Start review / Work through these button and the metric cards stay visible when the list is collapsed.
+- Clicking a metric card opens the lane's list. Start review works whether the list is collapsed or open.
+- Task 169.
+
+## D-196 — Make recording a decision faster without changing its rules (UAT round 2 item 3)
+
+- **Measured:** one commit took 24.0 s, with 261 serial dependencies and no throttling. The time went to:
+  - 35 `WhoAmI` and 29 `RetrievePrincipalAccess` calls, about 5.6 s;
+  - about 30 uncached `EntityDefinitions` lookups through `DataverseServiceClientImpl.GetEntitySetNameAsync`, about 2.7 s plus WCF;
+  - repeated reads of the same rows.
+- **First step (task 170):**
+  - Per-request memoisation of the caller's systemuserid. It is never shared across callers or requests.
+  - A process-wide cache of entity-set names and `sprk_recordtype_ref` reads, since that metadata is immutable.
+  - Neither changes D-17 (the Decision Record written last by the single route), fail-closed access or append-only.
+- **Later:** memoising access probes, parallel reads, and moving work after the response touch correctness and uac-r2's code. They are proposed separately and need uac-r2's review.
