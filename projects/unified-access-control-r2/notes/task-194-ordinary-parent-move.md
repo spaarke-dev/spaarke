@@ -227,6 +227,13 @@ never relaxed: the look-through keeps the original parents in the secure-if-any 
   un-team-owned parent's filing (`ReadUnownedChildLineageAsync`) regardless of order; the order only picks the ordinary team,
   and a primary look-through past its bound refuses.
 
+**Fix round, slice 3 (analysis, attachment and .eml parity of F3).** The three remaining parity tests call the writers'
+own builders, in `WriterBuilderOwnershipParityTests`: `AppOnlyAnalysisService.OwnershipOfNewAnalysis` (now also used by the
+`AnalysisEndpoints` create route and `AnalysisResultPersistence`), `AnalysisEndpoints.OwnershipOfPromotedAnalysis`,
+`EmailAttachmentProcessor.OwnershipOfAttachmentDocument`, `IncomingCommunicationProcessor.ArchivedEmlDocument` (the archive row
+with its lookups and owner) and `IncomingAssociationResolver.OwnershipContextOf` (the static tail of
+`OwnershipContextForNewRecordAsync`: the communication's question, which the archive's owner comes from). No answer changes.
+
 **Known gaps (not 194b).**
 - A Decision Record's existing-row question names every ownership lookup of each resolved Signal (the job's read), a superset
   of the writer's `SignalSubjects` when a Signal carries more than its subject (secure-if-any only reads more).
