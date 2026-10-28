@@ -1456,7 +1456,30 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
     // Metadata Operations (Phase 7)
     // ========================================
 
+    /// <summary>
+    /// Entity set names already resolved by this instance — one per process, as the BFF registers this class as a
+    /// singleton (ontology task 170, D-196). A table's entity set name is fixed for the life of the environment, so it is
+    /// asked once per table, not on every call (one decision commit asked for <c>sprk_matter</c>'s six times, 0.08–0.8 s each).
+    /// The same cache <c>DataverseWebApiService</c> keeps for the same answer. Only a resolved name is kept: a failure, or an
+    /// empty name, is asked again next time.
+    /// </summary>
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _entitySetNameCache = new(StringComparer.Ordinal);
+
     public async Task<string> GetEntitySetNameAsync(string entityLogicalName, CancellationToken ct = default)
+    {
+        if (entityLogicalName is not null && _entitySetNameCache.TryGetValue(entityLogicalName, out var cached))
+            return cached;
+
+        var entitySetName = await RetrieveEntitySetNameAsync(entityLogicalName!, ct).ConfigureAwait(false);
+        if (entityLogicalName is not null && !string.IsNullOrEmpty(entitySetName))
+            _entitySetNameCache.TryAdd(entityLogicalName, entitySetName);
+
+        return entitySetName;
+    }
+
+    /// <summary>The metadata read behind <see cref="GetEntitySetNameAsync"/> (<c>RetrieveEntityRequest</c>), uncached; the seam a
+    /// test answers from memory and counts.</summary>
+    protected virtual async Task<string> RetrieveEntitySetNameAsync(string entityLogicalName, CancellationToken ct)
     {
         _logger.LogDebug("Querying entity set name for {EntityLogicalName}", entityLogicalName);
 
