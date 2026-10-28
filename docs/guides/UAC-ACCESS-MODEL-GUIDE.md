@@ -448,19 +448,21 @@ the family; a service request is a core record of its own.
 ## 7. What happens to the family when a parent is reassigned to a new business unit or owner?
 
 **Short answer.** For an ordinary (non-Secure) record, **the children follow it**, within about two minutes plus the
-run, once the owner has turned the switch on (task 194, #2339). Dataverse itself is configured not to cascade Assign,
+run, once the owner has turned the switch on (`SecureChild:Reconciliation:OrdinaryMovesWritesEnabled`; task 194, #2339). Dataverse itself is configured not to cascade Assign,
 Reparent or Share from matter, project or work assignment to any Spaarke child, so the BFF does it: the two-minute
 `secure-child-reconciliation` job lists every ordinary matter, project, work assignment and service request changed since
 its last run (an MDA Assign changes the record's `modifiedon`), walks its children and re-owns each child that a business unit's default
-team owns to the owner `RecordOwnershipResolver` answers now (rule I-6). Until the switch is on, the job only reports
-the moves it would make.
+team owns to the owner `RecordOwnershipResolver` answers now (rule I-6), asking each child the same question its writer
+asked when it was created (task 194b). Until the switch is on, the job only reports the moves it would make.
 
 What moves, and what does not:
 
 - **Moved:** every child (and grandchild — a To Do under an event under the matter) owned by a business unit's default
   owner team, to the default team of its primary parent's business unit. A child filed under several records in
-  different business units takes the resolver's answer for its first (primary) parent, the same answer a new child would
-  get. Each move is a conditional write (it is refused if the row changed since it was read), logged with the previous
+  different business units takes the resolver's answer for its primary parent, the same answer a new child would get.
+  The primary is fixed per table, never the order the columns come back in: a document's parent document, then its
+  matter, project or work assignment, then the rest; a To Do's record regarding; a budget revision's budget, then its
+  matter. A contact is never a parent, so a document filed only to a contact is unfiled. Each move is a conditional write (it is refused if the row changed since it was read), logged with the previous
   owner, and read back.
 - **Never moved by this job:** a Secure child (owned by the Secure Record Owners team or any team in the Secure Record
   business unit), and nothing is moved into or out of isolation — that is the Secure pass's (§10). A child the rule would
@@ -499,8 +501,12 @@ Spaarke does not use plugins (ADR-002), so the re-own is the scheduled job's.
 **Switches** (app settings): `SecureChild:Reconciliation:OrdinaryMovesWritesEnabled` (default `false`, report-only;
 turned on only after UAC reads a report-only run and the owner gives the go), `SecureChild:Reconciliation:MaxOrdinaryMovesPerRun`
 (default 200 owner writes a run) and the shared `SecureChild:Reconciliation:MaxRootsPerRun` (50 records a run). The
-recent-changes emergency stop (`RecentChangesWritesEnabled = false`) stops it too. A record not finished in one run is
-carried to the next. Each run's report is `ResultJson.ordinaryMoves`. **Older moves:** besides its one-hour window, each
+recent-changes emergency stop (`RecentChangesWritesEnabled = false`) stops it too. Each run spends at most about 60
+seconds on this pass, checked between records (one large record's own walk is not cut short). A record not finished in
+one run is carried to the next; carried records run least-recently-tried first, and every run advances at least one
+record, so one large record cannot hold the others back. A report-only run carries nothing, so it resumes after the last
+record the previous report-only run reached (`ResultJson.ordinaryMoves.reportCursor`) and wraps around; that cursor is
+kept in memory, so after a restart the report starts again from the first record. Each run's report is `ResultJson.ordinaryMoves`. **Older moves:** besides its one-hour window, each
 App Service instance sweeps every ordinary record once (50 a run, then it stops), and sweeps again when the switch is
 turned on, so a reassignment made before this job existed, or before a restart, is corrected too
 (`ResultJson.ordinaryMoves.sweep`).

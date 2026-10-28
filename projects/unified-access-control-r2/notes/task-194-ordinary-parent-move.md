@@ -256,3 +256,199 @@ with its lookups and owner) and `IncomingAssociationResolver.OwnershipContextOf`
 **Known gaps (not 194b).**
 - A gate Decision Record on an unfiled communication is owned by the communication's user (D-144); the reconciler asks it as
   a plain row (keep-creator), so it is never moved.
+
+## Fix round R, runs R2–R5 (history and decisions)
+
+**R2 (09db6130b3 … 72a15de9ed).**
+- A3: a user-owned primary child that loops (an event and its communication filed under each other, two documents) no
+  longer runs to `MaxLineageDepth` and refuses. The look-through carries the primaries it has seen; on a revisit or at the
+  bound it decides secure-if-any over the parents it holds. Only an answer that would be ordinary refuses.
+- A4: a second never-out check in the re-file settle. Dropped in R3 (coordinator: A5 makes it unreachable).
+- A5: `ReparentAsync` refuses a generic re-file of a Signal or a Decision Record before anything is read or written
+  (`WriterOwnedFilingRefusal`). Only their writers file them. Dev: 0 field-mapping profiles, playbook nodes or configs
+  name either table.
+- A6: `TodoAssigneeOwnerReconciliationJob` reads a Decision Record's resolved Signals from `sprk_steps.resolvedSignalIds`
+  (the resolver's one source), not from the Signals' link. It never writes an ordinary owner on part of the question.
+
+**R3 (1c69bd74cb … 454e0f848d).**
+- A4 and `ReparentAsync`'s unreachable Decision Record never-out branch removed.
+- B1: `IncomingAssociationResolver.OwnershipContextOf` orders the writes and the stamps together, keyed by the lookup each
+  is written to, in `sprk_communication`'s order. **Deviation, accepted:** the brief asked for the writes ordered "before
+  the stamps"; ordering both together is what the reconciler reads. Dev: 6 communications hold a matter and a project, 0
+  in different business units.
+- B2: the Compose copy asks its inherited links in `sprk_document`'s order.
+
+**R3b (e25cb27461 … 87a185061f): one builder.**
+- `RecordOwnershipContext.ForRow(table, column → parent, pairId)` is the one builder of a child row's question. It orders
+  through `InPrimaryOrder`, the order the reconciler reads the written row in. `ForChild` routes through it.
+- **Decision 2 (coordinator): the table's order wins.** An explicit caller-named primary ("regarding first") gives way to
+  the table's order: `TaskActionCore`, Office, `TodoGenerationService`, `InquiryReplyTodoCreator`. The CommunicationService
+  secure-links copy loses its "first secure link" override too.
+- Two behaviour changes follow decision 2:
+  - an event asks its stamped matter before its regarding project (the owner was asked over the regarding lookup alone);
+  - a budget revision asks its budget before its matter. The theory
+    `ReviseBudget_TheRevisionIsOwnedByTheTeamTheOwnershipRuleNames` was updated from matter-first to budget-first.
+- Decision 1: contexts that are not about a child row's owner are out of scope: `ContentOf`, `GateDecisionRecordSharing`,
+  the secure-root cascade, the To Do job's own parent list. They are the guard's permanent exemptions.
+- The closed opt-out: `ForParentsInWriterOrder`, used only by `SignalWriter` and `DecisionRecordWriter`, whose order is their
+  table's rule. `WriterOrderOptOutAllowListTests` fails on any other caller and on a stale entry.
+- `SecureChildLineage`: the comment now says a service request IS an ordinary ownership and filing parent
+  (`FilingParentOf`); only the Secure lineage map leaves it out.
+
+**R4 (bb09c42cda): real-column keying.** Every extra parent is keyed under the real column that files it, so `ForRow`
+ranks it as the reconciler does:
+- a message's thread filing is keyed under `sprk_communicationthread`, which `sprk_communication`'s order ranks after the
+  message's own lookups (`RecordThreadFiling.FilingLookupsOf`);
+- a project's ADR-024 pair parent is keyed under `sprk_regardingrecordid`.
+- **`RootLookupOrder` deviation, approved by the coordinator.** The pair needs a rank on `sprk_project`, which is a root.
+  Adding `sprk_project` to `SecureChildLineage.Children` would have made projects reconciled children. A separate
+  `SecureChildLineage.RootLookupOrder` ranks it instead. After the master merge (R5), `RecordFamilyEdgesGuardTests` (which
+  reads `Children`) passes unchanged.
+- **Repair attribute-order defect, found and fixed.** `RecordCreationService` Repair asked a row's parents in the order
+  Dataverse returned its attributes: the #2339 class. It now asks through `ForRow` (`OwnerQuestionOf`), the same question
+  Create and the reconciler ask. Dev: 0 rows affected (Repair has no live caller; K-c).
+
+**R4-2 (defdadbb8e … e75511f6ec).**
+- Spend signals: `SignalEvaluationService` asks once per firing snapshot over the matter and the snapshot
+  (`ForRow("sprk_spendsignal", …)`, matter before snapshot). A refused snapshot writes no signal for that snapshot.
+- **Office communication defect, fixed.** An email-derived document is written with its association AND
+  `sprk_relatedcommunication`, but the save and the upload worker asked about the association alone. A secure
+  communication beside an ordinary association was seen only by the reconciler's next pass. The save now resolves the
+  communication first (the capture's id, or a read by Message-ID) and asks over both
+  (`OfficeDocumentPersistence.DocumentOwnershipOf`). A failed read refuses the save (OFFICE_022, retryable). The worker
+  asks the same question over the payload's communication.
+- **Contact ruling (coordinator): the reconciler is right.** A contact is never an ownership parent; people lookups are
+  never family. A document filed to a contact is filed only by its communication, and is unfiled when that is empty.
+  `AssociationTargetOwnershipOf` was removed. Dev: 0 documents hold `sprk_relatedcontact`.
+
+**R4-3 (d92dec5a0e): B4.**
+- Carried roots run least-recently-attempted first.
+- The time slice never stops a group (listed, swept) before its first root, so every run advances at least one root of
+  each group.
+- A report-only run resumes after the last root the previous report-only run reached (`ordinaryMoves.reportCursor`),
+  wrapping around. The cursor is cleared when a run reaches every root, and by a writing run.
+
+**R5.**
+- Merged `origin/master` (9280a282d3): field-mapping 070 `RecordFamilyEdges`, and 037's copied Assigned To default. The
+  default is still applied in `OwnedChildWrite.CreateAsync` before the caller check, the secure-root plan, the
+  `OwnershipOf` / `ForRow` question and the create.
+- One Secure Record business-unit lookup (6666ab5d5e, round-130 rule 3):
+  `SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync`, beside `IsInSecureBusinessUnit`. The private copy in
+  `RecordOwnershipResolver` and the copy in `SecureChildShareSynchronizer` are gone. No behaviour change: the resolver
+  passes its logger, so its ambiguity error log stays.
+
+### Known limits accepted in R (recorded, not filed separately unless listed under "Issues to file")
+
+- **Capture before refusal (R4-2).** The Office save runs the email capture before the owner question, so a save refused
+  for an unreadable communication has already captured the email. The capture is best-effort and idempotent on the
+  Message-ID, as mailbox intake would make it.
+- **CommunicationService case 2 (R3b-2).** The outbound secure-links copy, when all its links are ordinary and in
+  different business units, is now owned by `sprk_document`'s primary (for example the project) rather than the first
+  link named. With any secure link it is the Secure team in either order (proven through the real resolver). Dev: 0
+  rows (25 email-attachment documents carry `sprk_relatedcommunication`, none carries a record link).
+- **In-memory report-only cursor (coordinator ruling, R4).** `ordinaryMoves.reportCursor` lives in the job singleton,
+  like every window the job keeps. The job has no durable state store, and none is added. A restart starts the report-only
+  window from its first root.
+- **5 dev documents (data only).** Email-derived documents whose communication sits under a different ordinary matter
+  than the document's own association: `dc70ebdf`, `fe41f0c5`, `0342f0c5`, `0742f0c5`, `73910392`. None of the matters
+  is secure. Under the ordinary rule the document's own lookups decide, in the table's order.
+
+### The guard baseline (`ChildRowOwnershipBuilderGuardTests`)
+
+Permanent exemptions (not a child row's owner in a table's order):
+- `RecordOwnershipContext.ContentOf`
+- `GateDecisionRecordSharing.AskOwnerAsync`
+- `SecureRootInheritance.UnsecureFollowingParentsAsync`
+- `TodoAssigneeOwnerReconciliationJob.ParentsAnswerAsync`
+- `SecureChildReconciler.Pass.ContextFor` (the reference question)
+- `SecureChildReconciler.PlaceCascadeRowsAsync`
+- `TodoGenerationService.CreateTodoAsync` (no column holds a standalone to-do's content source)
+- `GrantExternalAccessEndpoint.ResolveGrantOwnerAsync`
+- `ExternalIntakeEndpoints.SubmitServiceRequestAsync`
+- `RecordOwnershipResolver.ResolveReparentOwnerAsync`
+- `OntologyAdminAuthoringService.CheckVersionOwnerAsync` (a secure-if-any gate that binds no owner)
+
+Ratchet (single-parent sites, so order decides nothing; move to `ForRow` when touched):
+
+| Site | Reason |
+|---|---|
+| `ExternalProjectDataEndpoints.ResolveChildOwnerAsync` | Single parent: the route's root |
+| `AnalysisResultPersistence.PersistReviewMemoAsync` | Single parent: the analysis |
+| `AnalysisResultPersistence.StoreDocumentProfileOutputsAsync` | Single parent: the analysis |
+| `AppOnlyAnalysisService.ExecutePlaybookAnalysisAsync` | Single parent: the analysis |
+| `InvoiceReviewService.CreateInvoiceRecordAsync` | Single parent: the matter (the vendor organisation is not an ownership parent) |
+| `SpendSnapshotService.ResolveSnapshotOwnerAsync` | Single parent: the matter OR the project, one per path |
+
+### Dev finding: budget revision `e4e5dbe6-8fbf-f111-aaaf-0022482913fc` (read-only, 2026-10-28)
+
+**Facts:**
+- The revision is owned by a USER (the developer account), in the root business unit.
+- Its budget `0f7f39b7` and its matter `b68299c6` (REAL-2026-123456.02, not secure) are owned by the default team of
+  Spaarke Business Unit 1.
+- The audit shows how it got there:
+  - the matter has been owned in BU 1 since 2026-09-09;
+  - the revision was created on 2026-10-03 by the ontology R1 task-005 seed script, a direct Dataverse create under the
+    developer's own identity, outside the BFF, so Dataverse made the creator its owner;
+  - the budget, also user-owned, was assigned to BU 1's default team by hand on 2026-10-21 under the same identity. The
+    revision was not.
+
+**What this branch's ordinary pass plans for it (report-only):**
+- When it walks the matter (recent window or sweep), the rule answers BU 1's default team: the budget first, then the
+  matter, both in BU 1.
+- The row is user-owned and that team is in another business unit, so the pass reports it ("owned by a user, and the rule
+  gives it a team in another business unit: reported, not moved", the I-6 interim) and does not move it. Writing runs
+  behave the same.
+
+**Verdict: bad seed data, not a defect.** No product path created or re-owned the row. A product-created revision
+(`DecisionActionExecutors` revise-budget) is asked through `ForRow` and owned by the team the rule names. To clean it up,
+assign the row to BU 1's default team by hand. It is the same class as the 69 user-owned analyses above.
+
+### Issues to file (issue-ready text; the coordinator files them)
+
+**K-a: Undetermined rows from bad data block their own root's Unsecure.**
+- *Context.* The secure pass cannot ask some rows their writer's question (`ExistingRowOwnership.Undetermined`). Examples
+  are a Signal or Decision Record whose subject's core-ancestor stamps are ambiguous (conflicting matter columns), or whose
+  core record type is not a core table in the record-type catalog. Such a row moves INTO isolation when the parents it
+  stores are secure (F1-b). Any other answer leaves it as it is and marks it Failed.
+- *Impact.* On Unsecure, a Failed row makes the child pass incomplete, so `POST …/unsecure` answers 500
+  `sdap.unsecure.children_incomplete` on every retry until the data is corrected. The row stays isolated (fail closed).
+  Since B4 it no longer starves other roots of the reconciliation job.
+- *Proposed fix.* Report these rows with a stable reason code on the Unsecure response (a new
+  `failedRecords` list beside `heldRecords`; today only the per-table `failed` count shows them). Add an admin repair path, or a report-only list in the census job, so an operator can correct the
+  stamps or catalog row. Decide with the owner whether Unsecure may complete with such rows held in isolation (as A2 does
+  for held Decision Records).
+- *Acceptance.* A root with one undetermined child: Unsecure reports the row and its reason. After the data is fixed, the
+  next Unsecure completes.
+
+**K-b: The ordinary-moves time slice does not bound a single root's walk.**
+- *Context.* `SecureChildReconciliationJob.OrdinaryTimeSlice` (60 s) is checked between roots. One root's walk (one query
+  per lineage table per level, plus resolver reads per row) runs to the end, bounded only by `MaxOrdinaryMovesPerRun`
+  (writes) and the root's size.
+- *Impact.* A very large ordinary root can make one run long. Other roots are not starved (B4: least-recently-attempted
+  order, at least one root per group per run), but that run's report and the next tick are delayed.
+- *Proposed fix.* Check the slice between lineage levels or between pages of a root's walk, and carry the root
+  (Incomplete) when the slice is spent mid-walk. The carry and the least-recently-attempted order already resume it.
+- *Acceptance.* A root whose walk exceeds the slice stops at the next level boundary, is carried, and completes over later
+  runs. The slice holds within one level's cost.
+
+**K-c: `RecordCreationService` Repair has no live caller.**
+- *Context.* `RecordCreationService.RepairAsync` and its owner step `RepairOwnerAsync` (field-mapping-server-write-path-r1
+  task 016; `RecordCreationService.cs` ~:878–897) are not reached by any endpoint or job. R4 fixed its owner question (the
+  table's order through `ForRow`, the attribute-order defect above), but nothing exercises it in production.
+- *Impact.* Code and tests to maintain with no behaviour behind them. A later caller would inherit rules (task 016's
+  fail-closed cross-BU escalation, the mapping gate) that were never run live.
+- *Proposed fix.* field-mapping decides: wire Repair to its intended route (FR-09), or delete it and its tests.
+- *Acceptance.* Either a live caller with an integration test, or the code removed and the census and guard entries
+  updated.
+
+**K4: An undetermined Signal or Decision Record blocks its root's Unsecure.**
+- *Context.* A Signal or Decision Record whose question cannot be asked because a READ faulted (a catalog or stamp read,
+  the To Do assignee check), as opposed to bad data (K-a), is Failed in the secure pass unless its stored parents are
+  secure. This is narrower since A1/A2: a Decision Record with an incomplete `resolvedSignalIds` question is held in
+  isolation and reported, not failed.
+- *Impact.* The root's Unsecure answers `sdap.unsecure.children_incomplete` until a retry finds the read healthy. The row
+  stays isolated (fail closed).
+- *Proposed fix.* Retry the faulted reads once inside the pass. If they still fail, report the row as held with a
+  retryable reason, so the caller sees "retry" rather than a generic incomplete.
+- *Acceptance.* An injected one-off read fault on a root's Signal: Unsecure completes on the in-pass retry. A persistent
+  fault: Unsecure reports the row as retryable, and nothing leaves isolation.
