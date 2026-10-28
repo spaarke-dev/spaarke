@@ -213,6 +213,14 @@ internal static class SecureChildLineage
             ("sprk_matter", Matter), ("sprk_project", Project), ("sprk_snapshot", "sprk_spendsnapshot")),
         T("sprk_spendsnapshot", "sprk_spendsnapshots",
             ("sprk_matter", Matter), ("sprk_project", Project)),
+        // ebilling-r1 task 086 (procedure model 5.2, EB-D-148; lookups and entity set read live, spaarkedev1 2026-10-27): an INVOICE Stored
+        // File is its invoice's child and a leaf (no table names a Stored File as a parent; it is not an ownership parent). ONE lineage
+        // column, sprk_invoice, declared first (uac-r2 194b: declaration order is the order the primary parent is chosen in). Left out on
+        // purpose: sprk_procedureversion and sprk_billingexport (a Procedure-source or export file is not a secure child, model 5.2 / F4-c,
+        // so a row with no sprk_invoice is never reached), and sprk_sourcedocument / sprk_sourcecommunication (the copy rule's citations,
+        // RecordOwnershipResolver.CitationLookups; answer B).
+        T("sprk_storedfile", "sprk_storedfiles",
+            ("sprk_invoice", "sprk_invoice")),
         T("sprk_todo", "sprk_todos",
             Regarding("sprk_agreement", "sprk_analysis", "sprk_budget", "sprk_communication", "sprk_document", "sprk_event",
                 "sprk_invoice", Matter, Project, "sprk_reportcard", WorkAssignment)),

@@ -60,6 +60,9 @@ public class RecordOwnerAssignmentCensusTests
         // ebilling-r1 task 089 (EB-D-148, uac-r2 F1-a): an assignment / override row and a record-scoped rule set are their core record's
         // children (a record rule is filed under its set: SecureChildLineage).
         "sprk_procedureassignment", "sprk_ruleset",
+        // ebilling-r1 task 086 (procedure model 5.2): an invoice's Stored File is its invoice's child (a leaf; SecureChildLineage). The
+        // table also holds Procedure-source and export files, which name no invoice; every create of the table is censused.
+        "sprk_storedfile",
     };
 
     private enum Disposition
@@ -294,6 +297,12 @@ public class RecordOwnerAssignmentCensusTests
         new CensusEntry("ProcedureAssignmentService.cs", "sprk_policyversion", 1, Disposition.Routed,
             "ebilling-r1 task 089: a record rule's one Published version (PlanChange) is created with its policy in one transaction, so it "
             + "takes the policy's resolution (ResolveOwnerAsync) through ApplyTo; nothing else creates versions of a record rule."),
+        // ebilling-r1 task 086 (procedure model 5.2/9.1): the invoice Stored File joins the secure family as a leaf child of sprk_invoice.
+        new CensusEntry("StoredFileService.cs", "sprk_storedfile", 1, Disposition.Routed,
+            "ebilling-r1 task 086: BuildRow is the one sprk_storedfile create. Its owner is a resolution handed in and written with ApplyTo "
+            + "(a refused owner throws, nothing is written): StageCreateFlipAsync resolves ContentOf(parent) with the caller as RequestedBy "
+            + "and refuses OwnerUnresolved before any stage or write; the Submit Invoice persister (task 092) passes its one ForParents "
+            + "resolution over the invoice's core record, so the file is owned with its invoice."),
         // WorkAssignmentEndpoints.cs's sprk_workassignment create is gone: task 166 deleted the caller-less route (S-76,
         // owner round 10 item 1), so its Pending waiver went with it (batch-4 integration).
 
@@ -1838,6 +1847,37 @@ public class RecordOwnerAssignmentCensusTests
         @"const\s+string\s+(?<name>\w+)\s*=\s*""(?<value>[a-z_]+)""\s*;",
         RegexOptions.Compiled);
 
+    private static readonly Regex TypeDeclaration = new(
+        @"\b(?:class|record|struct|interface)\s+(?<type>[A-Za-z_]\w*)",
+        RegexOptions.Compiled);
+
+    /// <summary>
+    /// type name → its string consts (ebilling-r1 task 086): each const belongs to the nearest type declared before it in its file.
+    /// Crude like every <see cref="SourceScan"/> rule (a const after a nested type's end is given to the nested type); a type name
+    /// declared in two files keeps the first. Used only to resolve a qualified <c>Type.Name</c>, so a miss falls back as before.
+    /// </summary>
+    private static Dictionary<string, Dictionary<string, string>> TypeScopedConsts(IEnumerable<string> sources)
+    {
+        var byType = new Dictionary<string, Dictionary<string, string>>(StringComparer.Ordinal);
+        foreach (var code in sources)
+        {
+            var types = TypeDeclaration.Matches(code).Select(t => (t.Index, Name: t.Groups["type"].Value)).ToList();
+            var seenHere = new HashSet<string>(StringComparer.Ordinal);
+            foreach (Match m in StringConst.Matches(code))
+            {
+                var owner = types.LastOrDefault(t => t.Index < m.Index).Name;
+                if (owner is null || (byType.ContainsKey(owner) && !seenHere.Contains(owner)))
+                    continue; // no type before it, or the type name was already claimed by another file
+                seenHere.Add(owner);
+                if (!byType.TryGetValue(owner, out var consts))
+                    byType[owner] = consts = new Dictionary<string, string>(StringComparer.Ordinal);
+                consts.TryAdd(m.Groups["name"].Value, m.Groups["value"].Value);
+            }
+        }
+
+        return byType;
+    }
+
     // =============================================================================================
 
     [Fact(DisplayName = "Task 146: every server create of a child-record table is in the census, with the expected count")]
@@ -2128,6 +2168,39 @@ public class RecordOwnerAssignmentCensusTests
         Assert.True(sites.ContainsKey(("Seeded.cs", "sprk_memo")));
         Assert.True(sites.ContainsKey(("Seeded.cs", "sprk_event")));
         Assert.Single(sites[("Seeded.cs", "sprk_todo")]); // the two-argument update is not a create
+    }
+
+    [Fact(DisplayName = "ebilling-r1 086: negative control — a qualified const is resolved in the type it names, not by its last segment")]
+    public void Detector_NegativeControl_QualifiedConstsResolveInTheirType()
+    {
+        // The shape that hid StoredFileService's create: three files declare a const `Entity`; the create names the one of
+        // StoredFileSchema, and the creating file has its own `Entity` const as well.
+        var files = new Dictionary<string, string>
+        {
+            ["A.cs"] = SourceScan.CodeText(new[] { "public sealed class Search", "{", "    public const string Entity = \"entity\";", "}" }),
+            ["Contracts.cs"] = SourceScan.CodeText(new[]
+            {
+                "public static class OtherSchema", "{", "    public const string Entity = \"sprk_document\";", "}",
+                "public static class StoredFileSchema", "{", "    public const string Entity = \"sprk_storedfile\";", "}",
+            }),
+            ["Writer.cs"] = SourceScan.CodeText(new[]
+            {
+                "public sealed class Writer",
+                "{",
+                "    public const string Entity = \"sprk_todo\";",
+                "    public CreateRequest A(Guid id) { var row = new Entity(StoredFileSchema.Entity, id); return new CreateRequest { Target = row }; }",
+                "    public CreateRequest B(Guid id) { var row = new Entity(Unknown.Entity, id); return new CreateRequest { Target = row }; }",
+                "}",
+            }),
+        };
+
+        var sites = ScanSites(files);
+
+        // Every table here is a census child table, so each assertion can fire.
+        Assert.Single(sites[("Writer.cs", "sprk_storedfile")]);           // must fire: A resolved in StoredFileSchema
+        Assert.False(sites.ContainsKey(("Writer.cs", "sprk_document")));   // never OtherSchema.Entity (same name, another type)
+        // A did not take the local const; B (a type no file declares) falls back to it, as before this fix.
+        Assert.Single(sites[("Writer.cs", "sprk_todo")]);
     }
 
     [Fact(DisplayName = "Task 146 b2: negative control — a create-by-upsert or a fresh-id construction is a create; an update is not")]
@@ -2481,6 +2554,9 @@ public class RecordOwnerAssignmentCensusTests
         new PersonBearingWriter("ProcedureService.cs", "OwnerContext", "the calling admin (oid) of a Procedure, version or copy-forward create"),
         // ebilling-r1 task 089: every assignment, Exclude row, record-scoped set, record rule and version names the calling admin.
         new PersonBearingWriter("ProcedureAssignmentService.cs", "OwnerContext", "the calling admin (oid) of an assignment or override"),
+        // ebilling-r1 task 086: every Stored File records the person who asked (none for a job or a contact uploader, model 5.2 K6).
+        new PersonBearingWriter("StoredFileService.cs", "StageCreateFlipAsync", "the caller (or the app create's requestedBy) as RequestedBy of the file's owner"),
+        new PersonBearingWriter("StoredFileService.cs", "BuildRow", "the person handed in (creatorPersonId), stamped with RecordCreatorPerson"),
     };
 
     /// <summary>
@@ -2930,6 +3006,11 @@ public class RecordOwnerAssignmentCensusTests
                 globalConsts.TryAdd(m.Groups["name"].Value, m.Groups["value"].Value);
         }
 
+        // ebilling-r1 task 086: a QUALIFIED const (StoredFileSchema.Entity) is resolved in the type it names first. By its last
+        // segment alone it took the first `Entity` const of any file (SemanticSearchRequest's "entity"), so StoredFileService's
+        // sprk_storedfile create was invisible; a same-named local const of the using file must not win either.
+        var typeConsts = TypeScopedConsts(files.Values);
+
         var sites = new Dictionary<(string, string), List<int>>();
         foreach (var (fileName, code) in files)
         {
@@ -2941,7 +3022,10 @@ public class RecordOwnerAssignmentCensusTests
             {
                 if (m.Groups["lit"].Success)
                     return m.Groups["lit"].Value;
-                var name = m.Groups["id"].Value.Split('.').Last();
+                var parts = m.Groups["id"].Value.Split('.');
+                var name = parts[^1];
+                if (parts.Length > 1 && typeConsts.TryGetValue(parts[^2], out var scoped) && scoped.TryGetValue(name, out var qualified))
+                    return qualified;
                 return localConsts.TryGetValue(name, out var v) ? v : globalConsts.GetValueOrDefault(name);
             }
 

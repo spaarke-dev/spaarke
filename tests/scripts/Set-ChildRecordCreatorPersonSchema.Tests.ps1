@@ -82,12 +82,12 @@ Describe 'the script''s table and solution wiring' {
         $homes = [regex]::Match($text, '(?ms)^\$SolutionHomes = @\{(.*?)^\}').Groups[1].Value
         $homes | Should -Match '(?m)^\s+sprk_signal\s+= @\(''SpaarkeMaster'', ''OntologyPlatformSolution''\)'
         # exactly the three ontology tables, the four eBilling tables (ebilling-r1 task 013), the two Procedure tables and the two
-        # policy tables (task 081), and the rule set and Procedure assignment (task 090) have solution homes; every other child's
+        # policy tables (task 081), the rule set and Procedure assignment (task 090) and the Stored File (task 086) have solution homes; every other child's
         # column stays in SpaarkeCore
         @([regex]::Matches($homes, '(?m)^\s+(sprk_\w+)\s+=') | ForEach-Object { $_.Groups[1].Value } | Sort-Object) |
             Should -Be @('sprk_budgetrevision', 'sprk_decisionrecord', 'sprk_externalidentifier', 'sprk_invoiceapproval',
                 'sprk_invoicecorrection', 'sprk_invoicesubmission', 'sprk_policy', 'sprk_policyversion', 'sprk_procedure',
-                'sprk_procedureassignment', 'sprk_procedureversion', 'sprk_ruleset', 'sprk_signal')
+                'sprk_procedureassignment', 'sprk_procedureversion', 'sprk_ruleset', 'sprk_signal', 'sprk_storedfile')
     }
 
     It 'ebilling-r1 081: lists the Procedure and policy tables in $Tables with SpaarkeMaster as their only home; the empty-before-securing gate covers every table (UAC #2276)' {
@@ -112,6 +112,15 @@ Describe 'the script''s table and solution wiring' {
             $text | Should -Match "(?m)^\`$Tables = @\([^)]*'$t'[^)]*\)"
             $homes | Should -Match "(?m)^\s+$t\s+= @\('SpaarkeMaster'\)"
         }
+    }
+
+    It 'ebilling-r1 086: lists sprk_storedfile in $Tables with SpaarkeMaster as its only home, outside the narrow profile' {
+        $text = Get-Content -Raw $script:ScriptPath
+        $homes = [regex]::Match($text, '(?ms)^\$SolutionHomes = @\{(.*?)^\}').Groups[1].Value
+        $text | Should -Match "(?m)^\`$Tables = @\([^)]*'sprk_storedfile'[^)]*\)"
+        $homes | Should -Match "(?m)^\s+sprk_storedfile\s+= @\('SpaarkeMaster'\)"
+        # 088 created the column (canonical relationship name); a home means no mode of this script creates it (F3).
+        $text | Should -Not -Match "(?m)^\`$OntologyWriterTables = @\([^)]*'sprk_storedfile'"
     }
 
     It 'D-136: the narrow profile covers exactly sprk_budgetrevision, sprk_decisionrecord and sprk_signal' {
@@ -154,7 +163,8 @@ Describe 'a simulated run' {
         # ebilling-r1 task 013: tables whose column travels in SpaarkeMaster only (the eBilling schema scripts create it with
         # the canonical relationship name).
         $global:SimCpMasterOnlyTables = @('sprk_invoicesubmission', 'sprk_invoiceapproval', 'sprk_externalidentifier', 'sprk_invoicecorrection',
-            'sprk_procedure', 'sprk_procedureversion', 'sprk_policy', 'sprk_policyversion', 'sprk_ruleset', 'sprk_procedureassignment')
+            'sprk_procedure', 'sprk_procedureversion', 'sprk_policy', 'sprk_policyversion', 'sprk_ruleset', 'sprk_procedureassignment',
+            'sprk_storedfile')
         # Task 081: the tables a field-permission POST was sent for (the write list records only "POST fieldpermissions"), and no
         # real waiting: Ensure-FieldPermission's retry sleeps are shadowed so a refused grant fails fast instead of after two minutes.
         $global:SimCpPermissionPosts = [System.Collections.Generic.List[string]]::new()

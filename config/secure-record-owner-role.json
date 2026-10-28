@@ -318,6 +318,14 @@
       "addedBy": "ebilling-r1 task 089"
     },
     {
+      "logicalName": "sprk_storedfile",
+      "privilegeName": "prvReadsprk_StoredFile",
+      "kind": "child",
+      "reason": "ebilling-r1 task 086 (procedure model 5.2 and 9.1, EB-D-148): an invoice's Stored File (the Invoice PDF or a supporting file) is its invoice's child and a leaf. The Submit Invoice transaction creates it owned by the invoice's own owner, resolved once through RecordOwnershipResolver with parents [the core record], so under a Secure core record it is owned by the Secure Record Owners team; SecureChildLineage lists it under sprk_invoice, so SecureChildReconciler re-owns existing rows on Make Secure and moves them back on Unsecure. A Procedure-source or export Stored File names no invoice and is never reached.",
+      "evidence": "PENDING-LIVE-PROBE: before this privilege is added, POST sprk_storedfiles owned by team Secure Record Owners 6eabc7f9-13be-f111-a05b-0022482913fc must be refused with HTTP 403 0x80040299 'Read Privilege Check For Owner failed ... is missing prvReadsprk_StoredFile privilege (Id=ef068f7b-6a82-4c37-bf25-95c0129e0b47) on OTC=11029 ...', no row created; quote it here verbatim (main session, owner EB-D-158). Record: projects/ebilling-r1/notes/086-storedfile-secure-child.md.",
+      "addedBy": "ebilling-r1 task 086"
+    },
+    {
       "logicalName": "sprk_externalrecordaccess",
       "privilegeName": "prvReadsprk_ExternalRecordAccess",
       "kind": "grant",

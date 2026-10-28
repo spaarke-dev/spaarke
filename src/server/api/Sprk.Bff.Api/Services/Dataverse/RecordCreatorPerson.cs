@@ -122,6 +122,10 @@ public static class RecordCreatorPerson
         // Procedure assignment will be (no BFF writer creates one yet). 080 created both columns UNSECURED; the script empty-checks,
         // secures and publishes them like 081's four (SpaarkeMaster).
         "sprk_ruleset", "sprk_procedureassignment",
+        // ebilling-r1 task 086 (procedure model 5.2, K6): StoredFileService creates every Stored File app-only and records the person who
+        // asked (none for a contact uploader or a job). 088 created the column UNSECURED in SpaarkeMaster; the script empty-checks,
+        // secures and verifies it, never creates it.
+        "sprk_storedfile",
     };
 
     /// <summary>Whether <paramref name="entityLogicalName"/> carries the column: a secure root or a stamped child table.</summary>

@@ -15,6 +15,11 @@ namespace Spaarke.ArchTests;
 /// <c>sprk_procedureversion</c> or <c>sprk_procedureassignment</c>. Flagged-external systemusers hold the same roles as internal users
 /// through their business unit's default team, so any grant would reach them; Procedures are internal-only. Task 191 replaces this rule
 /// (delete <see cref="UntilTask191"/> and its control then, with uac-r2's agreement).</item>
+/// <item><b>Until uac-r2 task 191, the Stored File too</b> (ebilling-r1 task 086; ontology-r1 088 gate K-d): no role holds ANY privilege on
+/// <c>sprk_storedfile</c>. Its rows are written and served only by the BFF (StoredFileService); the one grant is the Secure Record Owner
+/// role's Read at Basic (config/secure-record-owner-role.json, applied by script, held only by the Secure Record Owners team), which is
+/// not a source role file. A flagged-external user in a reader business unit already has COLUMN read on its secured columns, so a table
+/// privilege through any Spaarke role would give them the rows.</item>
 /// </list>
 /// </summary>
 /// <remarks>
@@ -31,8 +36,9 @@ public class ProcedureRolePrivilegeGuardTests
     private static readonly Regex CreateOrWriteOnVersionOrAssignment = new(
         "^prv(Create|Write)(sprk_procedureversion|sprk_procedureassignment)$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
+    // ebilling-r1 task 086: sprk_storedfile joins the until-191 tables (class summary).
     private static readonly Regex AnyOnProcedureTables = new(
-        "^prv(Create|Read|Write|Delete|Append|AppendTo|Assign|Share)(sprk_procedure|sprk_procedureversion|sprk_procedureassignment)$",
+        "^prv(Create|Read|Write|Delete|Append|AppendTo|Assign|Share)(sprk_procedure|sprk_procedureversion|sprk_procedureassignment|sprk_storedfile)$",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     [Fact(DisplayName = "081: no Spaarke role grants a privilege on the Procedure tables (Create/Write on versions and assignments never; any, until uac-r2 191)")]
@@ -54,7 +60,8 @@ public class ProcedureRolePrivilegeGuardTests
         Assert.True(violations.Count == 0,
             "A Spaarke role grants a privilege on a Procedure table. Procedures are written only by the BFF (ebilling-r1 081; ontology-r1 080 "
             + "review: sprk_procedureversion.sprk_procedure cannot be field-secured), and until uac-r2 task 191 no role may hold any privilege "
-            + "on them (flagged-external users hold the same roles). Remove the grant or agree it with uac-r2:\n  " + string.Join("\n  ", violations));
+            + "on them or on sprk_storedfile (ebilling-r1 086; flagged-external users hold the same roles). Remove the grant or agree it "
+            + "with uac-r2:\n  " + string.Join("\n  ", violations));
     }
 
     [Fact(DisplayName = "081 must-fire: Create/Write on a version or an assignment, and (until 191) any privilege on the three tables, are reported")]
@@ -67,13 +74,16 @@ public class ProcedureRolePrivilegeGuardTests
                 <RolePrivilege name="prvWritesprk_procedureassignment" level="Basic" />
                 <RolePrivilege name="prvReadsprk_procedure" level="Global" />
                 <RolePrivilege name="prvAppendTosprk_procedureversion" level="Deep" />
+                <RolePrivilege name="prvReadsprk_StoredFile" level="Basic" />
               </RolePrivileges>
             </Role>
             """;
 
         var found = Violations(role);
 
-        Assert.Equal(4, found.Count);
+        Assert.Equal(5, found.Count);
+        // ebilling-r1 task 086: a Read on the Stored File through a source role (one a flagged-external user can hold) is reported.
+        Assert.Contains(found, f => f.Contains("prvReadsprk_StoredFile", StringComparison.Ordinal) && f.Contains("191", StringComparison.Ordinal));
         Assert.Contains(found, f => f.Contains("prvCreatesprk_ProcedureVersion", StringComparison.Ordinal) && f.Contains("never", StringComparison.Ordinal));
         Assert.Contains(found, f => f.Contains("prvWritesprk_procedureassignment", StringComparison.Ordinal) && f.Contains("never", StringComparison.Ordinal));
         Assert.Contains(found, f => f.Contains("prvReadsprk_procedure", StringComparison.Ordinal) && f.Contains("191", StringComparison.Ordinal));
@@ -92,6 +102,7 @@ public class ProcedureRolePrivilegeGuardTests
                 <RolePrivilege name="xprvWritesprk_procedure" level="Deep" />
                 <RolePrivilege name="prvWritesprk_policyversion" level="Deep" />
                 <RolePrivilege name="prvReadsprk_proceduresource" level="Deep" />
+                <RolePrivilege name="prvReadsprk_storedfileversion" level="Deep" />
               </RolePrivileges>
             </Role>
             """;

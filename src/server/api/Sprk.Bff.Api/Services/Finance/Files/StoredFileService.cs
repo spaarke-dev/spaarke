@@ -146,8 +146,10 @@ public sealed class StoredFileService
         owner.ApplyTo(row);
         if (creatorPersonId is { } person && person != Guid.Empty)
         {
-            // sprk_storedfile carries sprk_createdbyperson (088) but is not yet in RecordCreatorPerson.StampedChildTables (086 adds
-            // it), so ApplyTo does not stamp it; stamp it here. Once 086 lists the table both write the same column.
+            // sprk_storedfile is in RecordCreatorPerson.StampedChildTables (task 086), so ApplyTo stamps the resolution's
+            // CreatedByPerson when the owner was resolved with a RequestedBy. A transaction writer that resolves its owner once for
+            // every row and names the person here instead (the submission persister) still records them: the same column, the
+            // same person, written last.
             RecordCreatorPerson.Stamp(row, person);
         }
 

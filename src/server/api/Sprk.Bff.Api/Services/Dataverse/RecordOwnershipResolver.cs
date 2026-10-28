@@ -1217,6 +1217,11 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             ("sprk_procedureassignment", "sprk_procedure"),
             ("sprk_procedureassignment", "sprk_pinnedversion"),
             ("sprk_procedureassignment", "sprk_excludedpolicy"),
+            // ebilling-r1 task 086 (procedure model 5.2: the source lookups are "not access-conferring"): an invoice Stored File names the
+            // document and the communication it was copied from; it is filed under its invoice only. Read as parents, a source document
+            // in another business unit (or held by a Secure matter) would decide the file's team when its invoice is made Secure or Unsecure.
+            ("sprk_storedfile", "sprk_sourcedocument"),
+            ("sprk_storedfile", "sprk_sourcecommunication"),
         ], CitationComparer.Instance);
 
     /// <summary>True when <paramref name="column"/> of <paramref name="table"/> cites a record rather than files the row under it.</summary>
