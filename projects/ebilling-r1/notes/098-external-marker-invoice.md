@@ -210,6 +210,7 @@ Seeding proofs (each restored afterwards):
 Known limits, recorded:
 - **A write-time source-kind marker** on the submission would remove the remaining data-fault class. Filed under #2372 (schema, owner OK, tied to 191).
 - **The writer guard** (an `InvoicePdf` is created only in the same commit as its invoice) is built on the 094 branch, not here: this base does not include 092's persister.
+- **Legacy SPA submissions** (before 092) still carry `sprk_document`; rule 1 ignores it, so such an invoice is shown whatever that document is. Accepted by the main session and uac-r2 (2026-10-28): it is the firm's own upload, never an isolated internal source; dev data is recreated, not migrated (O-13); after 092 an SPA submission cannot carry a document.
 
 ## Escalation
 
