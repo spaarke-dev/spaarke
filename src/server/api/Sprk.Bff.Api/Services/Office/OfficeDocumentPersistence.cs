@@ -966,14 +966,15 @@ public class OfficeDocumentPersistence
     /// <see cref="Sprk.Bff.Api.Services.Dataverse.RecordReparent.ParentChangesOf"/> names it) and its
     /// <c>sprk_relatedcommunication</c>, through the one builder in <c>sprk_document</c>'s order. It is the question the
     /// reconciler asks the written row, so a secure communication next to an ordinary association is seen at create, not at
-    /// the next sweep. An association no ownership column holds (a contact) keeps its pre-146 target question
-    /// (<see cref="AssociationTargetOwnershipOf"/>).
+    /// the next sweep. Coordinator ruling (R4-2): a contact is never an ownership parent (people lookups are never family),
+    /// so a contact association contributes no filing column — the document is filed only by its communication, and is
+    /// unfiled (the resolver's unfiled answer, as the reconciler gives it) when it has none.
     /// </summary>
     internal static Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext DocumentOwnershipOf(
         string? associationType, Guid? associationId, Guid? relatedCommunicationId, Guid? callerObjectId)
     {
         var association = new UpdateDocumentRequest();
-        var associated = DocumentAssociationMap.TryApply(association, associationType, associationId);
+        DocumentAssociationMap.TryApply(association, associationType, associationId);
         var lookups = Sprk.Bff.Api.Services.Dataverse.RecordReparent.ParentChangesOf(association)
             .Select(c => KeyValuePair.Create(
                 c.Key,
@@ -985,33 +986,12 @@ public class OfficeDocumentPersistence
             ? new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent("sprk_communication", communicationId)
             : null;
 
-        if (associationId is { } named && named != Guid.Empty && !string.IsNullOrWhiteSpace(associationType)
-            && (!associated || lookups.Count == 0))
-        {
-            return AssociationTargetOwnershipOf(associationType, named, communication, callerObjectId);
-        }
-
         if (communication is not null)
             lookups.Add(KeyValuePair.Create(RelatedCommunicationColumn, (Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent?)communication));
 
         return Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForRow(
             DocumentLogicalName, lookups, callerObjectId: callerObjectId);
     }
-
-    /// <summary>
-    /// The pre-146 target question for an association no <c>sprk_document</c> ownership column holds (a contact: its
-    /// <c>sprk_relatedcontact</c> is a relationship, not a filing), with the communication as a further parent. Kept so a
-    /// contact-filed save's owner does not change in this fix (UAC task 194b R4-2; on the guard's ratchet).
-    /// </summary>
-    private static Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext AssociationTargetOwnershipOf(
-        string associationType, Guid associationId, Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent? communication,
-        Guid? callerObjectId) => new()
-    {
-        TargetEntityLogicalName = associationType,
-        TargetRecordId = associationId,
-        Parents = communication is null ? [] : [communication],
-        CallerObjectId = callerObjectId,
-    };
 
     /// <summary>
     /// FR-C2 (task 022) office-upload half + task 130 resolve: the communication of the email an email-derived save

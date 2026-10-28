@@ -114,9 +114,41 @@ public class UploadFinalizationOwnerTeamTests
         team.Should().Be(RecordOwnershipResolverDouble.DefaultTeamId, "a Document save is never linked to a communication");
     }
 
+    // Coordinator ruling (R4-2): a contact is never an ownership parent, so a contact-filed document is filed only by its
+    // communication — the reconciler's question (SecureChildReconciler.Pass.ContextFor: the row's ordered parents).
+
+    private static Microsoft.Xrm.Sdk.Entity ContactFiledDocument(Guid contactId, Guid? communicationId)
+    {
+        var row = new Microsoft.Xrm.Sdk.Entity("sprk_document", Guid.NewGuid())
+        {
+            ["sprk_relatedcontact"] = new Microsoft.Xrm.Sdk.EntityReference("contact", contactId),
+        };
+        if (communicationId is { } id)
+            row["sprk_relatedcommunication"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_communication", id);
+        return row;
+    }
+
     [Fact]
     [Trait("status", "task-194b-uac-r2")]
-    public async Task ResolveDocumentOwnerTeam_AContactAssociation_KeepsItsTargetQuestion_WithTheCommunication()
+    public async Task ResolveDocumentOwnerTeam_AContactOnly_IsUnfiled_AsTheReconcilerAsksIt()
+    {
+        var contactId = Guid.NewGuid();
+        var resolver = SecureCommunicationResolver();
+
+        var team = await UploadFinalizationWorker.ResolveDocumentOwnerTeamAsync(
+            resolver, Payload(owningTeamId: null) with { AssociationType = "contact", AssociationId = contactId },
+            CallerOid.ToString(), CancellationToken.None);
+
+        team.Should().Be(RecordOwnershipResolverDouble.DefaultTeamId, "the resolver's unfiled answer: the caller's business unit");
+        var asked = resolver.Requests.Should().ContainSingle().Subject;
+        asked.HasParent.Should().BeFalse("a contact is never an ownership parent; the contact's business unit is not asked");
+        asked.Parents.Should().Equal(RecordOwnershipContext.OrderedParentsOf(ContactFiledDocument(contactId, null)));
+        asked.CallerObjectId.Should().Be(CallerOid);
+    }
+
+    [Fact]
+    [Trait("status", "task-194b-uac-r2")]
+    public async Task ResolveDocumentOwnerTeam_AContactAndASecureCommunication_GivesTheSecureTeam()
     {
         var contactId = Guid.NewGuid();
         var resolver = SecureCommunicationResolver();
@@ -126,10 +158,29 @@ public class UploadFinalizationOwnerTeamTests
             Payload(owningTeamId: null) with { AssociationType = "contact", AssociationId = contactId, RelatedCommunicationId = SecureCommunicationId },
             CallerOid.ToString(), CancellationToken.None);
 
-        team.Should().Be(SecureTeam);
+        team.Should().Be(SecureTeam, "secure-if-any applies through the communication");
+        resolver.Requests.Should().ContainSingle().Which.Parents
+            .Should().Equal(RecordOwnershipContext.OrderedParentsOf(ContactFiledDocument(contactId, SecureCommunicationId)));
+    }
+
+    [Fact]
+    [Trait("status", "task-194b-uac-r2")]
+    public async Task ResolveDocumentOwnerTeam_AContactAndAnOrdinaryCommunication_AsksTheCommunicationAsItsPrimary()
+    {
+        var contactId = Guid.NewGuid();
+        var ordinaryCommunication = Guid.NewGuid();
+        var resolver = SecureCommunicationResolver();
+
+        var team = await UploadFinalizationWorker.ResolveDocumentOwnerTeamAsync(
+            resolver,
+            Payload(owningTeamId: null) with { AssociationType = "contact", AssociationId = contactId, RelatedCommunicationId = ordinaryCommunication },
+            CallerOid.ToString(), CancellationToken.None);
+
+        team.Should().Be(RecordOwnershipResolverDouble.DefaultTeamId);
         var asked = resolver.Requests.Should().ContainSingle().Subject;
-        asked.TargetEntityLogicalName.Should().Be("contact", "a contact is no ownership column; its pre-146 question is unchanged");
-        asked.TargetRecordId.Should().Be(contactId);
+        asked.Parents.Should().Equal(new RecordOwnershipParent("sprk_communication", ordinaryCommunication));
+        asked.TargetEntityLogicalName.Should().Be("sprk_communication", "the communication is the document's primary");
+        asked.TargetRecordId.Should().Be(ordinaryCommunication);
     }
 
     [Fact]
