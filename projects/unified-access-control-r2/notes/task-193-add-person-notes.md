@@ -31,7 +31,8 @@ Branch `fix/uac-193-add-person` (worktree C:/wt193), based on 078f62bcad (R3 #23
 | Share requested with an expiry | (n/a) | Shared with no end date; `expiryNotApplied: true`; the modal says so (same as picking the user directly) |
 | /invite-and-grant for an email resolving to one active contact that represents a user | CIAM invite + grant | Share; `onboardStatus: SharedWithInternalUser`; no CIAM account, email or grant row |
 | Modal | "+ Contact" / "+ User" | One "Add person" lookup; on a Restricted record, users only |
-| A No Access entry naming the contact or its firm, on a NON-secure record, contact representing a user | 422 `grantee_denied` | Unchanged: still 422, nothing written (V-fix; an explicit deny is honoured on the contact route; a direct /share-user pick keeps the owner's Q4 rule) |
+| No Access on a contact answered with a share | 422 `grantee_denied` (grant path) | `/grant` and `/invite-and-grant`, before any share, on every record (not only secure ones): an entry naming the contact, its organizations or the firm on the request → 422 `grantee_denied`; a list that cannot be read → 503; nothing written. A user picked directly through `/share-user` keeps Q4 (the wall applies on secure records only). |
+| A request to an unknown record vs a denied one, at the delegation filter | Different timing | Same timing (`GetCallerRightsForAuthorizationGateAsync`, #2334) |
 | Visibility in the workforce SPA/Teams of a colleague added through their contact | Visible (contact grant) | **OWNER RULING PENDING:** share only = MDA access, not visible in the SPA while ImpersonatedRootSets is off (same as a direct user pick) |
 
 ## Security verifiers (a7d0f8186d)
