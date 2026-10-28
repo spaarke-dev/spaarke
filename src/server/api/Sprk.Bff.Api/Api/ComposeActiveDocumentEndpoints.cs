@@ -101,11 +101,9 @@ internal static class ComposeActiveDocumentEndpoints
             // session minted below INHERITS this one's owner — so an unchecked parent would hand a
             // caller a child session owned by someone else.
             // Not-yours and not-found are deliberately the same answer (see the filter's remarks).
+            // An empty owner or an empty caller oid never matches: both must be non-empty, then equal.
             if (session is not null
-                && !string.Equals(
-                    session.OwnerOid,
-                    CallerResolution.ResolveObjectId(httpContext.User),
-                    StringComparison.Ordinal))
+                && !IsOwnedBy(session, CallerResolution.ResolveObjectId(httpContext.User)))
             {
                 logger.LogWarning(
                     "Compose active-document DENIED: session={SessionId} tenant={TenantId} is not " +
@@ -428,12 +426,20 @@ internal static class ComposeActiveDocumentEndpoints
 
         var (session, key) = await ResolveSessionAsync(sessionManager, tenantId, sessionId, ct).ConfigureAwait(false);
 
-        return session is not null
-            && !string.IsNullOrWhiteSpace(session.OwnerOid)
-            && string.Equals(session.OwnerOid, callerOid, StringComparison.Ordinal)
+        return session is not null && IsOwnedBy(session, callerOid)
                 ? (session, key)
                 : (null, null);
     }
+
+    /// <summary>
+    /// The one ownership rule for body-scoped Compose sessions: the session's <c>OwnerOid</c> and
+    /// <paramref name="callerOid"/> are both non-empty and equal (ordinal). An unowned session or a caller with no
+    /// oid never matches.
+    /// </summary>
+    internal static bool IsOwnedBy(ChatSession session, string? callerOid)
+        => !string.IsNullOrWhiteSpace(session.OwnerOid)
+           && !string.IsNullOrWhiteSpace(callerOid)
+           && string.Equals(session.OwnerOid, callerOid, StringComparison.Ordinal);
 
     /// <summary>
     /// Whether <paramref name="documentSessionId"/> may be recorded as the active document's session for

@@ -412,6 +412,60 @@ public sealed class ComposeActiveDocumentContractTests : IClassFixture<ComposeAc
             "compose edit into the DOCUMENT session (redline in the open doc), not the chat session");
     }
 
+    // ── The parent session's ownership rule: an empty owner or an empty caller oid never matches ─────────────
+
+    private async Task<string> SeedSessionOwnedByAsync(string? ownerOid)
+    {
+        var sessionId = Guid.NewGuid().ToString("N");
+        await _fixture.Sessions.UpdateSessionCacheAsync(new ChatSession(
+            SessionId: sessionId,
+            TenantId: ComposeActiveDocumentFixture.TenantId,
+            DocumentId: null,
+            PlaybookId: null,
+            CreatedAt: DateTimeOffset.UtcNow,
+            LastActivity: DateTimeOffset.UtcNow,
+            Messages: Array.Empty<ChatMessage>(),
+            HostContext: null)
+        { OwnerOid = ownerOid });
+        return sessionId;
+    }
+
+    [Fact]
+    public async Task PostActiveDocument_AParentSessionWithNoOwner_AndACallerWithNoOid_Returns404AndStoresNothing()
+    {
+        var sessionId = await SeedSessionOwnedByAsync(ownerOid: null);
+
+        using var client = _fixture.CreateAuthenticatedClientWithoutOid();
+        var response = await client.PostAsJsonAsync("/api/compose/active-document", new
+        {
+            sessionId,
+            sessionFileId = "file-the-caller-uploaded",
+            source = ActiveDocumentIdentity.SourceComposeDirect,
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound, "an empty owner never matches an empty caller oid");
+        var after = await _fixture.Sessions.GetSessionAsync(ComposeActiveDocumentFixture.TenantId, sessionId);
+        after!.ActiveDocument.Should().BeNull("a refused registration stores nothing");
+    }
+
+    [Fact]
+    public async Task PostActiveDocument_AParentSessionOwnedByTheCaller_IsRecorded()
+    {
+        var sessionId = await SeedSessionOwnedByAsync(TestSessionOwner.Oid);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync("/api/compose/active-document", new
+        {
+            sessionId,
+            sessionFileId = "file-the-caller-uploaded",
+            source = ActiveDocumentIdentity.SourceComposeDirect,
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var after = await _fixture.Sessions.GetSessionAsync(ComposeActiveDocumentFixture.TenantId, sessionId);
+        after!.ActiveDocument!.SessionFileId.Should().Be("file-the-caller-uploaded");
+    }
+
     // ── The active document's session belongs to the caller ─────────────────────────────────────────────────
     // When documentSessionId names a session that already exists, it must be the caller's; otherwise the route
     // answers the same 404 as for an unowned parent session and stores nothing.
@@ -765,6 +819,14 @@ public sealed class ComposeActiveDocumentFixture : WebApplicationFactory<Program
     public HttpClient CreateUnauthenticatedClient() =>
         CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
 
+    /// <summary>An authenticated caller whose token carries no object id.</summary>
+    public HttpClient CreateAuthenticatedClientWithoutOid()
+    {
+        var client = CreateAuthenticatedClient();
+        client.DefaultRequestHeaders.Add("X-Test-No-Oid", "1");
+        return client;
+    }
+
     public HttpClient CreateAuthenticatedClient()
     {
         var client = CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
@@ -803,13 +865,17 @@ internal sealed class ComposeActiveDocFakeAuthHandler : AuthenticationHandler<Au
 
         var claims = new List<Claim>
         {
-            new("oid", oid),
-            new(ClaimTypes.NameIdentifier, oid),
             new(ClaimTypes.Name, $"Compose Test User {oid}"),
             // Task 059 — a real Entra token always carries `tid`. Without it this fixture forced the
             // register endpoint down the X-Tenant-Id fallback, which is the path that task retired.
             new("tid", ComposeActiveDocumentFixture.TenantId),
         };
+        // X-Test-No-Oid: a principal with no object id, for the ownership rule's empty-caller case.
+        if (!Request.Headers.ContainsKey("X-Test-No-Oid"))
+        {
+            claims.Add(new("oid", oid));
+            claims.Add(new(ClaimTypes.NameIdentifier, oid));
+        }
 
         var identity = new ClaimsIdentity(claims, SchemeName);
         var principal = new ClaimsPrincipal(identity);
