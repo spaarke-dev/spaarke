@@ -91,6 +91,17 @@ Raw findings as the owner reported them. Each becomes a refinement below once tr
 | 114 | Uploaded document bound to `sprk_relatedworkassignment`, not `sprk_workassignment`. | [162](../tasks/162-wizard-document-lookup-exact-column.poml) |
 | Q | Action steps as configuration, and an AI agent that configures the wizard. | New project spaarke-ontology-platform-r2 (D-183) |
 
+## Round 1 re-check — 2026-10-28 (owner, dev BFF `de38296499`, as testuser1 / Spaarke Core User)
+
+| Check | Result | Follow-up |
+|---|---|---|
+| 1 Worklist loads (163, D-185) | ✅ Power Apps' own "Some components of this app require you to sign in" bar shows. It is the browser's sign-in cookie (the silent sign-in got AADSTS50058 on first load), not the worklist. | — |
+| 2 Decision wizard (158) | ✅ Loads with the matter link. ❌ **Double load:** a "Loading" dialog opens, closes, and a second dialog opens with the steps. | [165](../tasks/165-decision-wizard-one-dialog.poml) |
+| 3 Assign Task (159) | ✅ Two Task events (`sprk_eventtype_ref` `124f5fc9…`) created on dev by the BFF for the owner's no-budget matters. | — |
+| 4 Create budget (161) | ✅ as built: the fee/scope item on a no-budget matter offers Create budget. Gap: "Matter has no active budget" items offer only Assign Task, because the v2 plan has no budget action. | D-192, [166](../tasks/166-no-budget-policy-v3-create-budget.poml) |
+| 5 Uploads (162) | ✅ Documents save to the new record. ❌ Creating a **project** as Core User fails: there is no AppendTo on `sprk_organization`, AppendTo on `contact` is user-level only, and the message shows `{0}..{6}`. Not ontology code. | uac-r2, [#2382](https://github.com/spaarke-dev/spaarke/issues/2382) (DI-130) |
+| 6 Budget inquiry composer (160) | ✅ | — |
+
 ## Owner completion statement
 
 (not yet given)

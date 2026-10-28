@@ -318,3 +318,14 @@ Sources: **design** = [`design.md`](../design.md) §8 (D-1..D-12, §8.0c) and §
     - mirror-share growth near Dataverse limits;
     - a feature that needs one deterministic family key across Secure records that the stamps and W7 cannot serve;
     - structural isolation required between Secure families.
+
+## D-192 — "Matter has no active budget" items offer Create budget (owner, 2026-10-28)
+
+- **Decision (owner, this session, UAT round 1 re-check, check 4):** publish **POL-MATTER-NOBUDGET v3**.
+  - Plan actions: `revise-budget` first, then `assign-task`.
+  - Next steps: `add-todo` and `assign-work`.
+  - On a matter with no active budget, task 161's substitution (D-180) shows `revise-budget` as **Create budget**. The person who owns the item can set the budget or hand it off.
+- **Why:** v2's plan was `assign-task` only. 161 substitutes Create budget only where a plan offers Revise budget, so the rule that says "this matter has no budget" never offered a way to create one. The fee or scope change items did (verified by the owner).
+- `create-budget` stays non-authorable (D-180). The plan names `revise-budget`, and the server decides what is shown.
+- v1 and v2 rows stay, and Signals and Decision Records keep the version they cite (D-14).
+- **Approved:** the config change, and the dev apply through `Apply-DoLanePolicies.ps1 -DefinitionPath config/know-promotion.policies.json`, with a clean `-WhatIf` first. Task 166.

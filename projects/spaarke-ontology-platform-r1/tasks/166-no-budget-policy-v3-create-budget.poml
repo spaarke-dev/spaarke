@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="166" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>POL-MATTER-NOBUDGET v3: "Matter has no active budget" items offer Create budget (D-192, UAT round 1 re-check)</title>
+    <phase>11 UAT</phase>
+    <gate>startable (D-192, owner 2026-10-28; the dev apply is approved after a clean -WhatIf)</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Policy definition (config JSON) plus the tests that pin it; no BFF code change expected. It modifies tests, so code-review and adr-check run regardless.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Adds one version to an existing definition, copying v2's shape; the tests to update are known.</model-tier-reason>
+    <effort>high</effort>
+    <deps>159 (assign-task), 161 (create-budget substitution); both are on dev BFF de38296499</deps>
+    <tags>config,policy,testing</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+    <parallel-group>L</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Owner UAT re-check 2026-10-28, check 4 (notes/uat-v4-log.md): the many Work Items "This matter was created more than 5 days ago and has no active budget record." offer only Assign Task, never Create budget. Cause: POL-MATTER-NOBUDGET v2 (`config/know-promotion.policies.json`, versionId `…6312`) has the plan `actions: ["assign-task"]` and `nextSteps: ["add-todo", "assign-work"]`. Task 161 (D-180) substitutes `create-budget` for `revise-budget` only when a plan offers `revise-budget`. Owner decision D-192: publish v3 with plan actions `["revise-budget", "assign-task"]` (revise-budget first) and nextSteps `["add-todo", "assign-work"]`.</prompt>
+  <role>SPAARKE Signals engineer (policy definitions).</role>
+  <goal>`config/know-promotion.policies.json` has POL-MATTER-NOBUDGET v3 with the D-192 plan, `currentVersion` 3, and every definition test and script test passing. After review and merge, the main session applies v3 to dev, and a no-budget Work Item then offers Create budget and Assign Task.</goal>
+
+  <context>
+    <background>v2's shape is the precedent: copy it and change only `versionId` (`00000000-0000-4000-8000-000000006313`), `versionNumber` (3), `inForceFrom` (the apply day, `2026-10-28T00:00:00Z` unless the script or tests require otherwise), `proposedAction` and `decisionPlan`. The rule body, headline and message template are unchanged (same predicate; spec §0.3: the template asserts only what the predicate reads). `scripts/Apply-DoLanePolicies.ps1:78` lists the codes allowed for `know-promotion-policies` (it already includes revise-budget and assign-task). The pinning tests:
+      <ul>
+        <li>`tests/unit/domain/Signals/KnowPromotionPolicyDefinitionTests.cs` (:172 v1 id, :180 v2 id);</li>
+        <li>`tests/scripts/Apply-DoLanePolicies.Tests.ps1` (:51, :73, :114-160);</li>
+        <li>`tests/unit/domain/Signals/DecisionActionCatalogTests.cs:842` (the 159 x 161 test asserting the v2 plan never substitutes);</li>
+        <li>`tests/unit/domain/Signals/AuthorableColumnsTests.cs:74-78`;</li>
+        <li>`tests/unit/domain/Signals/DecisionActionCatalogScriptListsTests.cs:52`;</li>
+        <li>`tests/integration/seam/Signals/KnowPromotionPolicySeamTests.cs`.</li>
+      </ul>
+      Exclusions: `revise-budget` mutually excludes `approve-variance` only (DecisionActionCatalog.cs:127-131, 167), so a plan with revise-budget and assign-task is valid; confirm with the catalog's `FirstConflict` and the authoring validator.</background>
+    <relevant-files>
+      <file>config/know-promotion.policies.json</file>
+      <file>scripts/Apply-DoLanePolicies.ps1</file>
+      <file>tests/unit/domain/Signals/KnowPromotionPolicyDefinitionTests.cs</file>
+      <file>tests/scripts/Apply-DoLanePolicies.Tests.ps1</file>
+      <file>tests/unit/domain/Signals/DecisionActionCatalogTests.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Signals/Actions/DecisionActionCatalog.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Signals/Actions/DecisionPlanService.cs</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>POL-MATTER-NOBUDGET v1/v2 and task 161's substitution.</existing>
+    <extension>A new policy VERSION (D-14), not a new policy, code path or action: published versions stay untouched.</extension>
+    <cost-of-doing-nothing>The rule that reports a missing budget offers no way to create one (owner, UAT check 4).</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="D-192">v3 plan: actions `["revise-budget", "assign-task"]` in that order; nextSteps `["add-todo", "assign-work"]`. Do not name `create-budget` in the plan: D-180 forbids authoring it, and the server substitutes it.</constraint>
+    <constraint source="D-14">v1 and v2 stay in the file exactly as they are. `currentVersion` becomes 3. The apply script supersedes v2 by stamping `sprk_inforceto` as it did for v1 → v2. Confirm in the Pester tests and with `-WhatIf`.</constraint>
+    <constraint source="spec §0.3">The rule body, `shortHeadline` and `messageTemplate` are unchanged. `proposedAction` names only codes in the plan.</constraint>
+    <constraint source="CLAUDE.md">Use `python`, never `python3`. Pester 5.7.1 for local runs is at `C:\Users\RALPHS~1\AppData\Local\Temp\p571\Pester\5.7.1`. Never run the unfiltered Sprk.Bff.Api.Tests: filter to the Signals definition and catalog tests named above. Do NOT run the apply script against Dataverse (the main session does, after merge).</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare STANDARD rigor and the reason, then load the knowledge files.</step>
+    <step order="1">Update the tests first.
+      <ul>
+        <li>The definition tests: v3 id, number and plan; currentVersion 3; v1 and v2 unchanged.</li>
+        <li>The Pester tests: v3 validates; v2 is superseded.</li>
+        <li>`DecisionActionCatalogTests.cs:842`: assert that the v3 plan, on a matter with 0 active budgets, substitutes Create budget in first position, and keeps revise-budget with ≥1. Keep a v2 assertion if v2 is still loadable.</li>
+      </ul>
+      Show the new tests failing.</step>
+    <step order="2">Add v3 to `config/know-promotion.policies.json`. Run the filtered unit tests, the seam test if it runs offline, and the Pester file.</step>
+    <step order="3">Open the PR into `docs/ontology-platform-design`. In the PR body, give the exact apply command for the main session: `pwsh scripts/Apply-DoLanePolicies.ps1 -DataverseUrl https://spaarkedev1.crm.dynamics.com -DefinitionPath config/know-promotion.policies.json -WhatIf`, then without `-WhatIf`.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">POL-MATTER-NOBUDGET v3 exists with versionId `…6313`, the D-192 plan and unchanged rule text. currentVersion is 3. v1 and v2 are byte-identical to before.</criterion>
+    <criterion testable="true">On a matter with 0 active budgets, the v3 plan resolves to Create budget (first) and Assign Task. With ≥1 active budget it resolves to Revise budget and Assign Task (must-not-fire).</criterion>
+    <criterion testable="true">The definition passes the authoring and evaluation gates (`KnowPromotionPolicyDefinitionTests`), and the Pester `Test-Definition` returns no errors.</criterion>
+    <criterion testable="true">No plan names `create-budget` (D-180 guard still passes).</criterion>
+    <criterion testable="true">Test scope: the stated contract plus the cases above. Anything beyond needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If the validator or the catalog refuses revise-budget together with assign-task, or the apply script cannot supersede v2, STOP and report. Do not change the catalog or the script's rules.</trigger>
+  </escalation>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ontology-platform-r1/notes/decisions.md (D-14, D-180, D-186, D-192)</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/uat-v4-log.md</file>
+    </files>
+  </knowledge>
+</task>
