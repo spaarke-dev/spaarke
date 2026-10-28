@@ -51,14 +51,19 @@ Describe 'Get-ExpectedInForceTo (the shipped know-promotion definition)' {
         $script:Policy = (Read-Definition 'know-promotion.policies.json').policies | Where-Object code -eq 'POL-MATTER-NOBUDGET'
         $script:V1 = $script:Policy.versions | Where-Object versionNumber -eq 1
         $script:V2 = $script:Policy.versions | Where-Object versionNumber -eq 2
+        $script:V3 = $script:Policy.versions | Where-Object versionNumber -eq 3
     }
 
     It 'the superseded v1 ends at v2''s inForceFrom' {
         Get-ExpectedInForceTo $script:Policy $script:V1 | Should -Be '2026-10-22T00:00:00Z'
     }
 
-    It 'the current v2 has no end' {
-        Get-ExpectedInForceTo $script:Policy $script:V2 | Should -BeNullOrEmpty
+    It 'the superseded v2 ends at v3''s inForceFrom (D-192)' {
+        Get-ExpectedInForceTo $script:Policy $script:V2 | Should -Be '2026-10-28T00:00:00Z'
+    }
+
+    It 'the current v3 has no end' {
+        Get-ExpectedInForceTo $script:Policy $script:V3 | Should -BeNullOrEmpty
     }
 
     It 'must not fire: a single-version policy (the Do-lane definitions) never ends a version' {
@@ -73,11 +78,17 @@ Describe 'Get-VersionEndAction / Get-InForceToDiff (what -Verify and the apply e
         $script:Policy = (Read-Definition 'know-promotion.policies.json').policies | Where-Object code -eq 'POL-MATTER-NOBUDGET'
         $script:V1 = $script:Policy.versions | Where-Object versionNumber -eq 1
         $script:V2 = $script:Policy.versions | Where-Object versionNumber -eq 2
+        $script:V3 = $script:Policy.versions | Where-Object versionNumber -eq 3
     }
 
     It 'must fire: v1 still open after v2 exists is the one allowed write (Stamp), and -Verify names it' {
         Get-VersionEndAction $script:Policy $script:V1 (New-LiveRow $null) | Should -Be 'Stamp'
         Get-InForceToDiff $script:Policy $script:V1 (New-LiveRow $null) | Should -Be "sprk_inforceto live='' expected='2026-10-22T00:00:00Z'"
+    }
+
+    It 'must fire: v2 still open after v3 exists is stamped with v3''s inForceFrom (D-192, the same supersede as v1 -> v2)' {
+        Get-VersionEndAction $script:Policy $script:V2 (New-LiveRow $null) | Should -Be 'Stamp'
+        Get-InForceToDiff $script:Policy $script:V2 (New-LiveRow $null) | Should -Be "sprk_inforceto live='' expected='2026-10-28T00:00:00Z'"
     }
 
     It 'must not fire: v1 already ended at the expected instant is in sync (a re-run changes nothing), as text or as a parsed date' {
@@ -86,20 +97,28 @@ Describe 'Get-VersionEndAction / Get-InForceToDiff (what -Verify and the apply e
         Get-InForceToDiff $script:Policy $script:V1 (New-LiveRow '2026-10-22T00:00:00Z') | Should -BeNullOrEmpty
     }
 
+    It 'must not fire: v2 already ended at v3''s inForceFrom is in sync, as text or as a parsed date' {
+        Get-VersionEndAction $script:Policy $script:V2 (New-LiveRow '2026-10-28T00:00:00Z') | Should -Be 'None'
+        Get-VersionEndAction $script:Policy $script:V2 (New-LiveRow ([datetime]::SpecifyKind([datetime]'2026-10-28', 'Utc'))) | Should -Be 'None'
+        Get-InForceToDiff $script:Policy $script:V2 (New-LiveRow '2026-10-28T00:00:00Z') | Should -BeNullOrEmpty
+    }
+
     It 'a different end on a superseded version is DRIFT, never rewritten' {
         Get-VersionEndAction $script:Policy $script:V1 (New-LiveRow '2026-10-23T00:00:00Z') | Should -Be 'Drift'
         Get-InForceToDiff $script:Policy $script:V1 (New-LiveRow '2026-10-23T00:00:00Z') | Should -Match "live='2026-10-23T00:00:00Z' expected='2026-10-22T00:00:00Z'"
+        Get-VersionEndAction $script:Policy $script:V2 (New-LiveRow '2026-10-22T00:00:00Z') | Should -Be 'Drift'
     }
 
     It 'the current version with no end is in sync; with any end it is DRIFT (an ended current version is refused by the nightly job)' {
-        Get-VersionEndAction $script:Policy $script:V2 (New-LiveRow $null) | Should -Be 'None'
-        Get-VersionEndAction $script:Policy $script:V2 (New-LiveRow '2026-10-22T00:00:00Z') | Should -Be 'Drift'
-        Get-InForceToDiff $script:Policy $script:V2 (New-LiveRow '2026-10-22T00:00:00Z') | Should -Match "expected=''"
+        Get-VersionEndAction $script:Policy $script:V3 (New-LiveRow $null) | Should -Be 'None'
+        Get-VersionEndAction $script:Policy $script:V3 (New-LiveRow '2026-10-28T00:00:00Z') | Should -Be 'Drift'
+        Get-InForceToDiff $script:Policy $script:V3 (New-LiveRow '2026-10-28T00:00:00Z') | Should -Match "expected=''"
     }
 
-    It 'idempotent: the applied state (v1 ended, v2 open) needs no action on either version' {
+    It 'idempotent: the applied state (v1 and v2 ended, v3 open) needs no action on any version' {
         Get-VersionEndAction $script:Policy $script:V1 (New-LiveRow '2026-10-22T00:00:00Z') | Should -Be 'None'
-        Get-VersionEndAction $script:Policy $script:V2 (New-LiveRow $null) | Should -Be 'None'
+        Get-VersionEndAction $script:Policy $script:V2 (New-LiveRow '2026-10-28T00:00:00Z') | Should -Be 'None'
+        Get-VersionEndAction $script:Policy $script:V3 (New-LiveRow $null) | Should -Be 'None'
     }
 
     It 'a Do-lane policy (one version) is in sync open and DRIFT ended' {
@@ -135,7 +154,14 @@ Describe 'Test-Definition (lint)' {
         (@(Test-Definition $def) -join '|') | Should -Match 'v2 inForceFrom must be after v1 inForceFrom'
     }
 
-    It 'must not fire: a later inForceFrom is accepted (the shipped v1 < v2)' {
+    It 'must fire: v3 starting at or before v2 is refused (D-192; strictly increasing across all three versions)' {
+        $def = Read-Definition 'know-promotion.policies.json'
+        $v2 = $def.policies[0].versions | Where-Object versionNumber -eq 2
+        ($def.policies[0].versions | Where-Object versionNumber -eq 3).inForceFrom = $v2.inForceFrom
+        (@(Test-Definition $def) -join '|') | Should -Match 'v3 inForceFrom must be after v2 inForceFrom'
+    }
+
+    It 'must not fire: a later inForceFrom is accepted (the shipped v1 < v2 < v3)' {
         @(Test-Definition (Read-Definition 'know-promotion.policies.json')) | Should -BeNullOrEmpty
     }
 
@@ -161,6 +187,24 @@ Describe 'Test-Definition (lint)' {
         @(Test-Definition $def) | Should -BeNullOrEmpty
         ($def.policies[0].versions | Where-Object versionNumber -eq 2).decisionPlan.actions = @('mark-complete')
         (@(Test-Definition $def) -join '|') | Should -Match "names 'mark-complete', not a Decide-lane catalog code"
+    }
+
+    It 'the shipped v3 plan is revise-budget then assign-task with add-todo and assign-work as Next steps, lints clean, and never names create-budget (D-192, D-180)' {
+        $def = Read-Definition 'know-promotion.policies.json'
+        $p = $def.policies[0]
+        $p.currentVersion | Should -Be 3
+        $v3 = $p.versions | Where-Object versionNumber -eq 3
+        $v3.versionId | Should -Be '00000000-0000-4000-8000-000000006313'
+        ($v3.decisionPlan.actions -join ',') | Should -Be 'revise-budget,assign-task'
+        ($v3.decisionPlan.nextSteps -join ',') | Should -Be 'add-todo,assign-work'
+        ($v3.decisionPlan | ConvertTo-Json -Compress) | Should -Not -Match 'create-budget'
+        @(Test-Definition $def) | Should -BeNullOrEmpty
+    }
+
+    It 'must fire: a v3 plan that authors create-budget is refused (D-180, the lint does not list it as a Decide-lane code)' {
+        $def = Read-Definition 'know-promotion.policies.json'
+        ($def.policies[0].versions | Where-Object versionNumber -eq 3).decisionPlan.actions = @('create-budget', 'assign-task')
+        (@(Test-Definition $def) -join '|') | Should -Match "names 'create-budget', not a Decide-lane catalog code"
     }
 }
 

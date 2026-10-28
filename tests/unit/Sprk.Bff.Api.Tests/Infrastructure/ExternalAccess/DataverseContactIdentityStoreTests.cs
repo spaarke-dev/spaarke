@@ -1524,8 +1524,11 @@ public class DataverseContactIdentityStoreTests
         var path = Uri.UnescapeDataString(DataverseContactIdentityStore.BuildFieldPermissionReadPath(
             user, DataverseContactIdentityStore.ContactTable, DataverseContactIdentityStore.IdentityColumns, throughTeam));
 
-        path.Should().StartWith("fieldpermissions?fetchXml=<fetch><entity name=\"fieldpermission\"><attribute name=\"attributelogicalname\" />");
-        path.Should().Contain("<condition attribute=\"entityname\" operator=\"eq\" value=\"contact\" />");
+        // No condition on the table (Dataverse refuses a FetchXML condition on fieldpermission.entityname given a logical
+        // name); entityname is selected and checked in code (ParseGrantedColumns).
+        path.Should().StartWith("fieldpermissions?fetchXml=<fetch count=\"5000\"><entity name=\"fieldpermission\">"
+            + "<attribute name=\"attributelogicalname\" /><attribute name=\"entityname\" /><filter>");
+        path.Should().NotContain("<condition attribute=\"entityname\"");
         path.Should().Contain("<condition attribute=\"canread\" operator=\"eq\" value=\"4\" />");
         foreach (var column in DataverseContactIdentityStore.IdentityColumns)
         {
@@ -1533,6 +1536,82 @@ public class DataverseContactIdentityStoreTests
         }
 
         path.Should().Contain(link + $"<condition attribute=\"systemuserid\" operator=\"eq\" value=\"{user:D}\" /></filter>");
+    }
+
+    // ── The profile read's answer: the table is checked in code (ParseGrantedColumns) ─────────────────────────────
+
+    private const string SharedColumn = "sprk_accesspermissiongrant";
+
+    private static IReadOnlyCollection<string> Granted(string json, string table)
+    {
+        using var doc = JsonDocument.Parse(json);
+        return DataverseContactIdentityStore.ParseGrantedColumns(doc.RootElement, table);
+    }
+
+    [Theory]
+    [InlineData("contact", "sprk_organization")]  // a grant on the organization's column never proves the contact's
+    [InlineData("sprk_organization", "contact")]  // a grant on the contact's column never proves the organization's
+    public void TheProfileReadsAnswer_ARowOfAnotherTable_ForTheSameColumnName_IsNotCounted(string asked, string rowTable)
+        => Granted($$"""{"value":[{"attributelogicalname":"{{SharedColumn}}","entityname":"{{rowTable}}"}]}""", asked)
+            .Should().BeEmpty();
+
+    [Theory]
+    [InlineData("""{"attributelogicalname":"sprk_accesspermissiongrant"}""")]                   // missing
+    [InlineData("""{"attributelogicalname":"sprk_accesspermissiongrant","entityname":null}""")]  // null
+    [InlineData("""{"attributelogicalname":"sprk_accesspermissiongrant","entityname":""}""")]    // empty
+    [InlineData("""{"attributelogicalname":"sprk_accesspermissiongrant","entityname":2}""")]     // not a string
+    [InlineData("""{"attributelogicalname":"sprk_accesspermissiongrant","entityname":{"name":"contact"}}""")]
+    public void TheProfileReadsAnswer_ARowWhoseTableIsUnknown_IsNotCounted(string row)
+        => Granted($$"""{"value":[{{row}}]}""", "contact").Should().BeEmpty("a row whose table is unknown never counts");
+
+    [Theory]
+    [InlineData("contact")]
+    [InlineData("Contact")]
+    public void TheProfileReadsAnswer_ARowOfTheTable_IsCounted(string rowTable)
+        => Granted($$"""
+            {"value":[
+              {"attributelogicalname":"{{SharedColumn}}","entityname":"{{rowTable}}"},
+              {"attributelogicalname":"sprk_other","entityname":"sprk_organization"},
+              {"attributelogicalname":"sprk_third"}
+            ]}
+            """, "contact").Should().Equal(SharedColumn);
+
+    [Theory]
+    [InlineData("""{"value":[],"@odata.nextLink":"https://org.test.invalid/api/data/v9.2/fieldpermissions?next"}""")]
+    [InlineData("""{"value":[],"@Microsoft.Dynamics.CRM.morerecords":true}""")]
+    [InlineData("""{"error":{"message":"no rows"}}""")]
+    [InlineData("""{"value":{}}""")]
+    public void TheProfileReadsAnswer_WhenIncompleteOrNotAList_Throws(string json)
+        => FluentActions.Invoking(() => Granted(json, "contact"))
+            .Should().Throw<InvalidOperationException>("a partial or malformed answer is a fault, never \"no grant\"");
+
+    [Fact]
+    public void TheProfileReadsAnswer_WhenItFillsThePage_Throws()
+    {
+        var rows = string.Join(",", Enumerable.Range(0, SdkColumnReadPermissionSource.FieldPermissionPageSize)
+            .Select(_ => $$"""{"attributelogicalname":"{{SharedColumn}}","entityname":"contact"}"""));
+
+        FluentActions.Invoking(() => Granted($$"""{"value":[{{rows}}]}""", "contact"))
+            .Should().Throw<InvalidOperationException>();
+    }
+
+    [Fact]
+    public void TheProfileReadsAnswer_WithMoreRecordsFalse_IsAnAnswer()
+        => Granted($$"""{"value":[{"attributelogicalname":"{{SharedColumn}}","entityname":"contact"}],"@Microsoft.Dynamics.CRM.morerecords":false}""",
+            "contact").Should().Equal(SharedColumn);
+
+    [Fact]
+    public async Task TheRealStore_AGrantOnlyOnAnotherTablesColumns_ProvesNothing()
+    {
+        // MUST FIRE: every identity column is granted, but each row names sprk_organization: the empty plane is Unreadable.
+        var http = new ReadProofHttp { ContactBody = ContactJson(), GrantsTable = "sprk_organization" };
+        http.DirectGrants.UnionWith(DataverseContactIdentityStore.IdentityColumns);
+        http.TeamGrants.UnionWith(DataverseContactIdentityStore.IdentityColumns);
+        var store = StoreOver(http);
+
+        (await store.ProbeBindingReadabilityAsync(CancellationToken.None)).Should().Be(BindingReadability.Masked);
+        (await store.GetContactAsync(ProofContact, CancellationToken.None)).Rows.Should().ContainSingle()
+            .Which.Binding.Kind.Should().Be(BindingKind.Unreadable);
     }
 
     [Fact]

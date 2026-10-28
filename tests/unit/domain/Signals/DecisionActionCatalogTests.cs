@@ -847,6 +847,22 @@ public class DecisionActionCatalogTests
         v2.NextSteps.Select(a => a.Code).Should().Equal("add-todo", "assign-work");
     }
 
+    private const string PolMatterNobudgetV3Plan = """{"actions":["revise-budget","assign-task"],"nextSteps":["add-todo","assign-work"]}""";
+
+    [Fact]
+    public void WithCreateBudgetInsteadOfRevise_TurnsThePolMatterNobudgetV3Plan_IntoCreateBudgetThenAssignTask_KeepingTheNextSteps_D192()
+    {
+        // 166 (D-192) x 161 (D-180): the v3 plan names revise-budget first, so a matter with no active budget is offered Create budget first.
+        var v3 = DecisionPlanService.Resolve(PolMatterNobudgetV3Plan, DecisionLane.Decide).Plan!;
+        v3.Actions.Select(a => a.Code).Should().Equal("revise-budget", "assign-task");
+
+        var substituted = v3.WithCreateBudgetInsteadOfRevise();
+
+        substituted.Actions.Select(a => a.Code).Should().Equal("create-budget", "assign-task");
+        substituted.NextSteps.Select(a => a.Code).Should().Equal("add-todo", "assign-work");
+        v3.Actions.Select(a => a.Code).Should().Equal("revise-budget", "assign-task"); // the original is not changed
+    }
+
     private const string ReviseThenVariance = """{"actions":["send-budget-inquiry","revise-budget","approve-variance"],"nextSteps":[]}""";
 
     /// <summary>The caller's reads: the Signal, the matter (readable or not), and the caller's OWN read of <c>sprk_budgets</c>
@@ -929,6 +945,31 @@ public class DecisionActionCatalogTests
         var body = await PlanRouteAsync(Access(users, budgets: new AppBudgets(budgets)));
 
         body.Actions.Select(a => a.Code).Should().Equal("send-budget-inquiry", "revise-budget", "approve-variance");
+    }
+
+    [Fact]
+    public async Task ThePlanRoute_PolMatterNobudgetV3_OffersCreateBudgetThenAssignTask_WhenTheMatterHasNoActiveBudget_D192()
+    {
+        var (users, _) = UsersWithBudgets();
+
+        var body = await PlanRouteAsync(Access(users, budgets: new AppBudgets(0)), PolMatterNobudgetV3Plan);
+
+        body.Actions.Select(a => a.Code).Should().Equal("create-budget", "assign-task");
+        body.Actions.Single(a => a.Code == "create-budget").Label.Should().Be("Create budget");
+        body.NextSteps.Select(a => a.Code).Should().Equal("add-todo", "assign-work");
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(3)]
+    public async Task ThePlanRoute_PolMatterNobudgetV3_StillOffersReviseBudgetThenAssignTask_WhenTheMatterHasAnActiveBudget_MustNotFire_D192(int budgets)
+    {
+        var (users, _) = UsersWithBudgets();
+
+        var body = await PlanRouteAsync(Access(users, budgets: new AppBudgets(budgets)), PolMatterNobudgetV3Plan);
+
+        body.Actions.Select(a => a.Code).Should().Equal("revise-budget", "assign-task");
+        body.Actions.Should().NotContain(a => a.Code == "create-budget");
     }
 
     [Fact]
