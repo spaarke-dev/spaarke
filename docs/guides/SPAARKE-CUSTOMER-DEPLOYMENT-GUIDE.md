@@ -1955,9 +1955,17 @@ The package has no `permissions`, `webApplicationInfo`, bot or knowledge capabil
    - scope `api://{bffAppRegId}/user_impersonation offline_access`;
    - PKCE **on**.
 
-   Save, then copy the **OAuth client registration ID**. With the Agents Toolkit the same values go through
-   `oauth/register` (`isPKCEEnabled: true`, `targetAudience: AnyTenant`, `applicableToApps: AnyApp`, no
-   `clientSecret`).
+   **The portal form cannot save these values (T186 ACME, 2026-10-28):** it marks the client secret required, and the
+   Spaarke Copilot Agent client has no secret (SPA redirect + PKCE), so a dummy value would make every sign-in fail.
+   Use the Agents Toolkit `oauth/register` instead, which takes no secret when `isPKCEEnabled: true`. Copy
+   `provisioning-runs/acme-b6941254-ac1b-42a6-8b12-dec7587090fc/copilot-auth-config/m365agents.yml` into the
+   customer's run record, change the name, base URL and scope, then run (operator's own Microsoft 365 sign-in):
+   `npm install -g @microsoft/m365agentstoolkit-cli`, `atk auth login m365 --tenant {SpaarkeTenantId}`,
+   `atk provision --env {customerId} --folder {that folder}`. The id lands in `env/.env.{customerId}` as
+   `SPAARKE_COPILOT_AUTH_CONFIG_ID` — commit that file: the toolkit skips creation only while that variable has a
+   value, so a run from a fresh folder creates a second auth config. Scope is comma-separated there; `appId` is
+   required by the driver and unused with `AnyApp`. The portal's **Client password authentication method** does not
+   apply (no secret). The portal still shows, edits and deletes the auth config.
 7. **Record the id** on the customer's registry row. PATCH `sprk_copilotauthconfigid` on `sprk_dataverseenvironment`
    with your own identity (`pac data update` or the Web API). The id is not a secret; re-renders and decommission read
    it from the row.
