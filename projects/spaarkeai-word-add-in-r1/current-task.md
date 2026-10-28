@@ -21,8 +21,8 @@
     - fixed the stale SaveFlow.documentName test;
     - 223 jest tests pass.
     - HOLD until the server is live on dev.
-  - A scoped re-check of both round-1 commits is running (sonnet). If it is clean: `gh pr merge 2419 --auto --merge`.
-- **Then:** ask R3 for a dev BFF deploy carrying #2417 + #2419 (OK on content; the owner's go is given in R3's session). After it is live, mark #2420 ready and auto-merge it (the master push deploys the add-in). Then the owner re-tests one save with a typed name.
+  - The scoped re-check was clean; the F4 doc fix is 39a8b88ce8. **#2419 MERGED at 136568cf70** (2026-10-28).
+- **Waiting on R3:** I asked R3 for a dev BFF deploy of origin/master at or after 136568cf70, carrying #2417 + #2419 (OK on content; the owner's go is given in R3's session). After it is live, mark #2420 ready and auto-merge it (the master push deploys the add-in). Then the owner re-tests one save with a typed name.
   - Offer to correct the owner's 10-28 test record (comm 12f1f3f8…, doc 536204ff…) only if they ask.
 - **ebilling 094 round 5** changed the from-email contract (e8ef9a89d4). When 094 merges to work, update `invoiceSubmissionMessages.ts`:
   - `email_save_failed` and `document_unavailable` are permanent;
