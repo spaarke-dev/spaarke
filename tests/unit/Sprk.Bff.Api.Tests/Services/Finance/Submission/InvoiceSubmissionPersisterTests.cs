@@ -1537,7 +1537,7 @@ public class InvoiceSubmissionPersisterTests
         result.Status.Should().Be(SubmissionPersistStatus.Undone);
         result.UndoHeld.Should().BeTrue();
         store.Submission.GetAttributeValue<OptionSetValue>(InvoiceSubmissionPersister.SubmissionStatus).Value.Should().Be((int)InvoiceSubmissionStatus.Failed);
-        store.FileStatus.Should().Be(StoredFileStatus.NotYetServable, "held: the file is never served");
+        store.FileStatus.Should().Be(StoredFileStatus.Removed, "held after the withdraw (uac-r2 (b)): the file is never served");
         store.Submission.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.SubmissionInvoice).Should().NotBeNull("held: the columns stay until the rows are gone");
 
         store.Files.Gateway.FailOp.Clear();
@@ -1567,7 +1567,7 @@ public class InvoiceSubmissionPersisterTests
         result.UndoHeld.Should().BeTrue();
         store.UndoTransactions.Should().ContainSingle("the transaction was sent and rolled back");
         store.InvoiceExists.Should().BeTrue("the transaction rolled back: the invoice stays");
-        store.CopyStatus.Should().Be(StoredFileStatus.NotYetServable, "and so does its file row, never served");
+        store.CopyStatus.Should().Be(StoredFileStatus.Removed, "and so does its file row, withdrawn before its blob went (uac-r2 (b)): never served");
         store.Deletes.Select(d => d.Table).Should().NotContain(["sprk_invoice", StoredFileSchema.Entity]);
         var note = store.Submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionAdminAttention);
         note.Should().Contain(AdminAttentionText.UndoPendingNote(SubmissionReasonCodes.SourceCheckFailed));
@@ -1609,6 +1609,107 @@ public class InvoiceSubmissionPersisterTests
         store.CopyBlobExists.Should().BeTrue("the file step never ran");
         store.Submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionAdminAttention)
             .Should().Contain(AdminAttentionText.UndoPendingNote(SubmissionReasonCodes.SourceCheckFailed));
+    }
+
+    // ── uac-r2 re-check of d7ec16cb97: (b) rows withdrawn before their blobs go; K2 more rows than one transaction holds with nothing deleted ──
+
+    [Fact(DisplayName = "094 undo (uac-r2 (b), must fire): an undo of a COMMITTED, Servable copy held after its blob was deleted leaves the row Removed - the download route answers the uniform 404, never a broken download; a later compensation completes it")]
+    public async Task Undo_HeldAfterTheBlobDelete_LeavesTheServableRowWithdrawn_NeverServed()
+    {
+        var store = new Store();
+        var outcome = AsSource(await new ProcessorHarness().RunAsync(), store);
+        (await store.Build().PersistAsync(outcome, "corr-094")).Status.Should().Be(SubmissionPersistStatus.Committed);
+        var copy = store.SourceCopy!;
+        store.CopyStatus.Should().Be(StoredFileStatus.Servable);
+        store.UndoTransactionFault = new DataverseTransactionException("ServiceUnavailable", failedRequestIndex: 1, outcomeUnknown: false, null);
+
+        var result = await store.Gate!.UndoAsync(SourceSubmission, SubmissionReasonCodes.SourceCheckFailed, CancellationToken.None);
+
+        result.Status.Should().Be(SubmissionCommitGateStatus.UndoHeld);
+        store.CopyBlobExists.Should().BeFalse("the blob went before the transaction faulted");
+        store.InvoiceExists.Should().BeTrue("the transaction rolled back");
+        store.CopyStatus.Should().Be(StoredFileStatus.Removed, "withdrawn before its blob was deleted");
+        await using (var host = await Sprk.Bff.Api.Tests.Api.Finance.StoredFileEndpointsTests.Host.StartAsync(rig: store.Files))
+        {
+            store.Files.Probe.Grant("sprk_invoices", SourceInvoice, AccessRights.Read);
+            store.Files.Probe.Grant("sprk_documents", Document, AccessRights.Read);
+            var storageCalls = store.Files.Gateway.StorageCalls;
+
+            var served = await host.SendAsync($"/api/finance/files/{copy.Spec.FileId}/content");
+
+            served.StatusCode.Should().Be(System.Net.HttpStatusCode.NotFound, "a withdrawn row is never served");
+            store.Files.Gateway.StorageCalls.Should().Be(storageCalls, "refused on the row, before any storage read");
+        }
+
+        (await store.Gate!.CompensateAsync(SourceSubmission, CancellationToken.None)).Should().BeTrue();
+
+        store.Files.Dataverse.Rows.Should().NotContainKey(copy.Spec.FileId);
+        store.InvoiceExists.Should().BeFalse();
+    }
+
+    [Fact(DisplayName = "094 undo (uac-r2 (b), must not fire): an undo held before the file step withdraws nothing - the Servable copy and its blob stay")]
+    public async Task Undo_HeldBeforeTheFileStep_WithdrawsNothing()
+    {
+        var store = new Store();
+        var outcome = AsSource(await new ProcessorHarness().RunAsync(), store);
+        (await store.Build().PersistAsync(outcome, null)).Status.Should().Be(SubmissionPersistStatus.Committed);
+        store.DeleteFault = "sprk_invoiceapproval";
+
+        var result = await store.Gate!.UndoAsync(SourceSubmission, SubmissionReasonCodes.SourceCheckFailed, CancellationToken.None);
+
+        result.Status.Should().Be(SubmissionCommitGateStatus.UndoHeld);
+        store.CopyStatus.Should().Be(StoredFileStatus.Servable);
+        store.CopyBlobExists.Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "094 undo (uac-r2 K2, must fire): more file rows under the invoice than one transaction takes holds the undo with NOTHING deleted or withdrawn - no approval, line, row or blob")]
+    public async Task Undo_MoreRowsThanOneTransaction_HoldsWithNothingDeleted()
+    {
+        var store = new Store();
+        var outcome = AsSource(await new ProcessorHarness().RunAsync(), store);
+        (await store.Build().PersistAsync(outcome, null)).Status.Should().Be(SubmissionPersistStatus.Committed);
+        var parent = new StoredFileParent(StoredFileParentKind.Invoice, SourceInvoice);
+        while (store.Files.Dataverse.Rows.Count <= SubmissionCommitGate.MaxFiles)
+        {
+            // Rows with no source: the shape the old surplus loop could keep as the only survivor.
+            store.Files.SeedFile(Guid.NewGuid(), parent, "%PDF-1.7 extra"u8.ToArray(), StoredFileStatus.NotYetServable,
+                StoredFilePurpose.InvoiceSupportingFile);
+        }
+
+        var rows = store.Files.Dataverse.Rows.Count;
+        var statuses = store.Files.Dataverse.Rows.Values.Select(r => r.GetAttributeValue<OptionSetValue>(StoredFileSchema.Status).Value).ToList();
+
+        var result = await store.Gate!.UndoAsync(SourceSubmission, SubmissionReasonCodes.SourceCheckFailed, CancellationToken.None);
+
+        result.Status.Should().Be(SubmissionCommitGateStatus.UndoHeld);
+        store.Deletes.Should().BeEmpty("held before the approval");
+        store.UndoTransactions.Should().BeEmpty();
+        store.Files.Dataverse.Rows.Should().HaveCount(rows);
+        store.Files.Dataverse.Rows.Values.Select(r => r.GetAttributeValue<OptionSetValue>(StoredFileSchema.Status).Value).Should().Equal(statuses);
+        store.CopyStatus.Should().Be(StoredFileStatus.Servable, "the sourced row is kept, never traded for a sourceless one");
+        store.CopyBlobExists.Should().BeTrue();
+        store.InvoiceExists.Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "094 undo (uac-r2 K2, must not fire): exactly MaxFiles rows under the invoice fit one transaction - the undo completes, every row and the invoice deleted together")]
+    public async Task Undo_ExactlyMaxFilesRows_Completes()
+    {
+        var store = new Store();
+        var outcome = AsSource(await new ProcessorHarness().RunAsync(), store);
+        (await store.Build().PersistAsync(outcome, null)).Status.Should().Be(SubmissionPersistStatus.Committed);
+        var parent = new StoredFileParent(StoredFileParentKind.Invoice, SourceInvoice);
+        while (store.Files.Dataverse.Rows.Count < SubmissionCommitGate.MaxFiles)
+        {
+            store.Files.SeedFile(Guid.NewGuid(), parent, "%PDF-1.7 extra"u8.ToArray(), StoredFileStatus.NotYetServable,
+                StoredFilePurpose.InvoiceSupportingFile);
+        }
+
+        var result = await store.Gate!.UndoAsync(SourceSubmission, SubmissionReasonCodes.SourceCheckFailed, CancellationToken.None);
+
+        result.Status.Should().Be(SubmissionCommitGateStatus.Undone);
+        store.Files.Dataverse.Rows.Should().BeEmpty();
+        store.InvoiceExists.Should().BeFalse();
+        store.UndoTransactions.Should().ContainSingle().Which.Should().HaveCount(SubmissionCommitGate.MaxFiles + 1);
     }
 
     [Fact(DisplayName = "092: a flip fault after the commit throws (the job retries) before the totals; the retry is a resume with nothing created again")]

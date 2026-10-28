@@ -88,9 +88,6 @@ public class SubmissionCommitGate
     /// <summary>The most lines the compensation deletes per query (it queries again until none is left).</summary>
     private const int LinePage = 500;
 
-    /// <summary>The most rounds the compensation removes surplus file rows (beyond <see cref="MaxFiles"/>) before it holds the undo.</summary>
-    private const int MaxSurplusRounds = 20;
-
     private const string SubmissionFirmInvoiceNumber = TrackingNumberAllocator.FirmInvoiceNumberColumn;
     private const string SubmissionPoNumber = "sprk_ponumber";
     private const string OwningTeamColumn = "owningteam";
@@ -312,12 +309,13 @@ public class SubmissionCommitGate
 
     /// <summary>
     /// The compensation of an undone commit, idempotent (fix round: undo ordering and F2-a). In order: the approval (its invoice lookup is
-    /// required), the lines, the blobs of the invoice's files, then ONE transaction that deletes the file rows AND the invoice together, and
+    /// required), the lines, the invoice's file rows withdrawn (Removed; uac-r2 (b)), their blobs, then ONE transaction that deletes the file rows AND the invoice together, and
     /// last the submission's commit columns with the "removed" administrator note. The invoice is never left without its file rows: the
     /// rows are the source gate the external invoice predicate (task 098) reads, and <c>sprk_storedfile.sprk_invoice</c> is RemoveLink, so
     /// an invoice deleted first would orphan them, and rows deleted first would leave an invoice that reads as having no source. The columns
     /// are cleared only when something of the commit was left (the link or the findings set, or a row found), so a submission Failed BEFORE
-    /// any commit with the same code keeps its number. True when nothing is left; false when a step faulted (the undo is held; logged with
+    /// any commit with the same code keeps its number. More than <see cref="MaxFiles"/> file rows hold the undo with nothing deleted (uac-r2 K2).
+    /// True when nothing is left; false when a step faulted (the undo is held; logged with
     /// the fault type only, and the note still says the removal is pending). Only the caller's cancellation propagates.
     /// </summary>
     public virtual async Task<bool> CompensateAsync(Guid submissionId, CancellationToken ct)
@@ -329,6 +327,16 @@ public class SubmissionCommitGate
             var submission = await _entities.RetrieveAsync(FinanceBaseValues.SubmissionEntity, submissionId, SubmissionColumns, ct).ConfigureAwait(false);
             var left = submission.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.SubmissionInvoice) is { Id: var linked } && linked != Guid.Empty
                 || !string.IsNullOrEmpty(submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionFindingsJson));
+
+            // uac-r2 K2: the file rows are read FIRST. More than one transaction takes (only a data fault gets here) holds the undo
+            // before anything is deleted: the read is unordered, so removing a "surplus" could keep a row with no source and drop
+            // the rows that carry one.
+            step = "files_read";
+            var files = await _files.ReadRowsForInvoiceAsync(invoiceId, MaxFiles + 1, ct).ConfigureAwait(false);
+            if (files.Count > MaxFiles)
+            {
+                throw new InvalidOperationException($"Invoice {invoiceId} has more than {MaxFiles} file rows; the undo is held.");
+            }
 
             step = "approval";
             left |= await DeleteIfPresentAsync(InvoiceSubmissionPersister.ApprovalEntity, InvoiceSubmissionPersister.ApprovalIdFor(submissionId), ct).ConfigureAwait(false);
@@ -352,27 +360,16 @@ public class SubmissionCommitGate
             }
 
             step = "files";
-            var files = await _files.ReadRowsForInvoiceAsync(invoiceId, MaxFiles + 1, ct).ConfigureAwait(false);
-            for (var round = 0; files.Count > MaxFiles; round++)
-            {
-                // More rows than one transaction takes (only a data fault gets here): remove the surplus one by one (blob, then row), always
-                // keeping at least one row under the invoice, until the rest fit the transaction.
-                if (round >= MaxSurplusRounds)
-                {
-                    throw new InvalidOperationException($"Invoice {invoiceId} still has more than {MaxFiles} file rows; the undo is held.");
-                }
-
-                foreach (var surplus in files.Skip(1))
-                {
-                    await _files.DeleteForUndoAsync(surplus.FileId, ct).ConfigureAwait(false);
-                }
-
-                files = await _files.ReadRowsForInvoiceAsync(invoiceId, MaxFiles + 1, ct).ConfigureAwait(false);
-            }
-
             if (files.Count > 0)
             {
                 left = true;
+
+                // uac-r2 (b): every row is withdrawn (Removed, never served) BEFORE any blob goes, so an undo held after a blob delete
+                // never leaves a Servable row whose blob is gone. Each write is conditioned on the row version read above.
+                step = "withdraw";
+                await _files.WithdrawForUndoAsync(files, ct).ConfigureAwait(false);
+
+                step = "blobs";
                 foreach (var file in files)
                 {
                     await _files.DeleteBlobForUndoAsync(file, ct).ConfigureAwait(false);

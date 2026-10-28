@@ -513,49 +513,35 @@ public sealed class StoredFileService
     }
 
     /// <summary>
-    /// ebilling-r1 task 094 (procedure-and-file-model 9.1 step 5, undo): the compensation delete of a file the submission's commit wrote.
-    /// Its blob first (only when the row's path is its own; a path that is not cannot name this file's blob, so no blob is touched), then
-    /// the row, so a row that is still there always means "compensation not finished" and a row that is gone means its blob is gone too.
-    /// A row that is already gone is <see cref="StoredFileCompensation.AlreadyGone"/>. A storage or Dataverse fault throws (the undo is
-    /// then held and retried). Only <see cref="Submission.SubmissionCommitGate"/> calls it, for the files of an invoice it is undoing; a
-    /// row of that invoice that is already Servable (an invoice with several files, one flipped before another failed) is deleted too,
-    /// with a warning: no after-step ran on it, and an invoice that is undone keeps no file.
+    /// ebilling-r1 task 094 (uac-r2 re-check (b); procedure-and-file-model 9.1 undo): withdraws every row of <paramref name="rows"/> that is
+    /// not already <see cref="StoredFileStatus.Removed"/> (one write of <c>sprk_filestatus</c> = Removed per row, conditioned on the row
+    /// version that was read), so no row of an invoice being undone is served once its blob is deleted. Only
+    /// <see cref="Submission.SubmissionCommitGate.CompensateAsync"/> calls it, before <see cref="DeleteBlobForUndoAsync"/>. A row changed
+    /// since the read or any fault throws (the undo is held and a later delivery re-reads and retries); a row already gone is skipped.
     /// </summary>
-    /// <exception cref="RequestFailedException">A storage fault.</exception>
-    public async Task<StoredFileCompensation> DeleteForUndoAsync(Guid fileId, CancellationToken ct)
+    internal async Task WithdrawForUndoAsync(IReadOnlyList<StoredFileRow> rows, CancellationToken ct)
     {
-        var row = await ReadRowAsync(fileId, ct).ConfigureAwait(false);
-        if (row is null)
+        ArgumentNullException.ThrowIfNull(rows);
+        foreach (var row in rows.Where(r => r.Status != StoredFileStatus.Removed))
         {
-            return StoredFileCompensation.AlreadyGone;
-        }
-
-        if (row.Status == StoredFileStatus.Servable)
-        {
-            _logger.LogWarning("Stored file {FileId}: Servable, deleted by the undo of its invoice's commit", fileId);
-        }
-
-        if (PathIsOwn(row))
-        {
-            if (!_blobs.IsConfigured)
+            var rowVersion = row.RowVersion ?? throw new InvalidOperationException($"Stored file {row.FileId} was read without a row version.");
+            if (row.Status == StoredFileStatus.Servable)
             {
-                throw new InvalidOperationException("The Finance file store is not configured; a committed file's blob cannot be deleted.");
+                _logger.LogWarning("Stored file {FileId}: Servable, withdrawn by the undo of its invoice's commit", row.FileId);
             }
 
-            await _blobs.DeleteAsync(row.Container!, row.BlobPath!, ct).ConfigureAwait(false);
+            try
+            {
+                await _entities.UpdateIfRowVersionMatchesAsync(
+                    StoredFileSchema.Entity, row.FileId, rowVersion,
+                    new Dictionary<string, object> { [StoredFileSchema.Status] = new OptionSetValue((int)StoredFileStatus.Removed) },
+                    ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (StoredFileNotFound.Is(ex))
+            {
+                // Already gone: nothing to serve.
+            }
         }
-
-        try
-        {
-            await _entities.DeleteAsync(StoredFileSchema.Entity, fileId, ct).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (StoredFileNotFound.Is(ex))
-        {
-            return StoredFileCompensation.AlreadyGone;
-        }
-
-        _logger.LogInformation("Stored file {FileId}: removed by the submission undo (row and blob)", fileId);
-        return StoredFileCompensation.Deleted;
     }
 
     /// <summary>
