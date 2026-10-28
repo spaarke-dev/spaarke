@@ -1804,6 +1804,17 @@ Run intake no longer takes `communicationGraphResource` / `emailGraphResource`. 
 
 ### 7.11 Phase 11 — Secure-record environment setup (H7b; the operator verifies it before telling the customer the environment is ready)
 
+> **Restricted-content owner team: a manual step, not part of H7b yet (unified-access-control-r2 task 194b R4b-3).**
+> A BFF that carries the hard-deny rule (owner round 131) owns every ORDINARY row of `sprk_storedfile`,
+> `sprk_procedureassignment`, `sprk_ruleset`, `sprk_policy` and `sprk_policyversion` by the memberless team
+> `Spaarke Restricted Content Owners` in the ROOT business unit, through the role `Restricted Content Owner` (Read at Basic
+> on exactly those five tables, `config/restricted-content-owner-role.json`). Every customer environment needs the team and
+> the role **before** that BFF runs. Without them every such write is refused (`record_owner_restricted_content_team_unresolved`,
+> also when the team has a member or is outside the root unit), and Dataverse refuses the team as an owner while the
+> role lacks Read. H7b does not create them, so run `scripts/Set-RestrictedContentOwnerTeam.ps1`: dry run, then `-Apply`,
+> then `-Verify`, which must exit 0. The full sequence is §12.2, "Phase 5d". Secure rows of these tables still go to
+> `Secure Record Owners`.
+
 Secure projects, matters and work assignments (unified-access-control-r2) need Dataverse security configuration that
 no solution import can create. Since T256, **H7b creates it on every run**, after H6 and before H9:
 - the `Secure Record` business unit, which holds no users and **no container**;
@@ -2266,6 +2277,15 @@ pac admin assign-user --environment "https://spaarke-acme.crm.dynamics.com/" `
     -SecretName "spe-owning-app-<name>" -KeyVaultName "<bff-kv>","<operator-kv>"
 .\scripts\Repair-SpeConfigSecretName.ps1 ... -MintClientSecret -Apply
 .\scripts\Repair-SpeConfigSecretName.ps1 ... -Verify
+# Phase 5d — Restricted-content owner team (unified-access-control-r2 task 194b R4b-3; BEFORE Phase 6 deploys a BFF that carries
+# the hard-deny rule). The memberless 'Spaarke Restricted Content Owners' team in the ROOT business unit, with the role
+# 'Restricted Content Owner' (Read at Basic on exactly the five tables in config/restricted-content-owner-role.json) and
+# no other role. Without it every ordinary write to those tables is refused (record_owner_restricted_content_team_unresolved).
+# -Apply never removes a member, moves a team or takes a role off another principal: it refuses that drift (owner decision).
+.\scripts\Set-RestrictedContentOwnerTeam.ps1 -EnvironmentUrl "<dv-org-url>"            # dry run: the plan, no writes
+.\scripts\Set-RestrictedContentOwnerTeam.ps1 -EnvironmentUrl "<dv-org-url>" -Apply     # create the team and role, add the five, strip the rest, assign
+.\scripts\Set-RestrictedContentOwnerTeam.ps1 -EnvironmentUrl "<dv-org-url>" -Verify    # MUST exit 0 (no drift)
+
 # Phase 6 — BFF deploy
 # Phase 7b (Set-ExternalFlagForB2BGuests.ps1) takes -CustomerTenantIds on a Model 1 stamp — see Phase 7b below.
 # EXISTING environment receiving the BFF that carries unified-access-control-r2 task 114: run Phase 7b (all

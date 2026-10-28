@@ -614,6 +614,87 @@ entry, and loses its mirror.
    Decision Records, neither in the hard-deny set.
 3. The Secure safeguard in the ordinary exit is unchanged (coordinator: fine as it is).
 
+### R4b-3: the restricted-content owner team and role (definitions and docs; no live writes)
+
+> **HELD (coordinator, 2026-10-28).** The owner ruled that the Spaarke root business unit holds only Spaarke product data:
+> customer records belong in the CUSTOMER's top business unit (H10's `customerBusinessUnitId`, a sibling of Secure Record).
+> So this team moves there. Everything below is the root-unit version as built. The R4b-2 root-unit check, the config,
+> the script and the docs change with the revised brief, which also carries the ontology re-check items F2 (an
+> author-owned policy row goes Incomplete when the team cannot be resolved) and F3 (five missing tests).
+
+**Built.**
+- `config/restricted-content-owner-role.json` is the ONE definition, in the same structure as
+  `secure-record-owner-role.json`:
+  - team `Spaarke Restricted Content Owners`, which equals `RestrictedContentOwnerTeam.DefaultOwnerTeamName`;
+  - role `Restricted Content Owner`;
+  - `businessUnit: root`;
+  - Read at Basic on the five hard-deny tables. Each entry gives its reason and its evidence: metadata privilege names
+    and ids read on spaarkedev1 on 2026-10-28. No probe refusal is recorded, because a probe is a write and waits for
+    the owner's go.
+- `scripts/Set-RestrictedContentOwnerTeam.ps1`, modelled on `Set-SecureRecordOwnerRolePrivileges.ps1`:
+  - Dry run by default. `-Verify` exits 1 on drift. `-Apply` with `-Verify` is refused. Every read pages to the end and
+    fails closed: exit 1, nothing decided. It uses the operator's az CLI identity, with no secrets.
+  - **Drift:**
+    - team or role missing;
+    - the team not teamtype 0, a default team, or outside the root unit;
+    - any member;
+    - any other role on the team;
+    - the role, or any of its business-unit copies, assigned to another team or a user;
+    - a declared privilege missing or at another depth;
+    - any privilege outside the file.
+  - **`-Apply`** creates the team (root unit, teamtype 0, the operator as administrator) and the role (root unit) if
+    either is missing. It adds the five at Basic, narrows a wrong depth (removes it, then adds it at Basic), strips every
+    other privilege of this role (the platform injects some, setup guide 5.4), assigns the role, and reads everything
+    back against the same drift check. It removes a member only from a team it created in the same run (the create's
+    own side effect).
+  - It refuses, before writing anything, drift an owner decides: members, wrong type or unit, default team, other roles,
+    other assignees.
+- `tests/Spaarke.ArchTests/RestrictedContentOwnerRoleGuardTests`:
+  - the live file gives no finding: Read, Basic, root; the tables are exactly `RecordOwnershipResolver.RestrictedContentTables`;
+    each privilege name is its own table's Read; names unique; a reason and evidence on every entry; no per-entry
+    depth or access field; the team name equals the code default.
+  - must-fire controls: an extra privilege (Write), an extra table, a raised depth (the file's, one entry's), a duplicate
+    privilege name, another team name, another business unit, a missing table, another access type.
+  - Perturbations: live file at Local → 1 red; no duplicate check → 1 red; no hard-deny check → 2 red.
+
+**Dev dry run (spaarkedev1, read-only, 2026-10-28).** Root BU `Spaarke` (06fbf21c-1872-f011-b4cb-7c1e52671ad0). No team
+named `Spaarke Restricted Content Owners`; no role `Restricted Content Owner` in the root unit. Plan:
+1. create the team in the root unit (teamtype 0, no members);
+2. create the role in the root unit;
+3. add Read at Basic: `prvReadsprk_Policy`, `prvReadsprk_PolicyVersion`, `prvReadsprk_StoredFile`, `prvReadsprk_ruleset`,
+   `prvReadsprk_procedureassignment`;
+4. strip everything else on the role;
+5. assign the role to the team;
+6. read back.
+
+`-Verify` today exits 1 (TEAM MISSING, ROLE MISSING). The drift checks were also exercised read-only with a scratch
+config naming the root unit's default team and `Basic User`. They report the default team, its 176 members, its 3
+other roles, the role's other assignee, and missing and outside privileges, and `-Apply` would refuse. Nothing was
+applied: `-Apply` waits for the owner's go.
+
+**Provisioning.** `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`:
+- §7.11 has a callout: H7b does not create the team yet; it is a manual step;
+- §12.2 has "Phase 5d", the script's three modes, before Phase 6 deploys a BFF with the rule.
+
+Without it every ordinary write to these tables is refused (`record_owner_restricted_content_team_unresolved`). Moving
+it into H7b (customer-provisioning-orchestration-r1) is that project's call.
+
+**191.** These rows sit in the ROOT business unit. No user-facing (non-admin) role may hold Read on these tables at
+Local, Deep or Global depth: a root-unit user with Local or Deep Read, or anyone with Global, would read them all. Task
+191 must never grant such a depth on them. This is recorded in `UAC-ACCESS-MODEL-GUIDE.md` (owner teams) as well.
+
+**Ontology dependency (ontology condition, 2026-10-28).**
+- Spaarke Ontology Administrator holds its policy and policy-version privileges at Deep, not Global. So a rule owned by
+  the root-unit content team is readable and editable only by admins homed in the root unit.
+- Live today the only holder is in the root unit, so nothing breaks. An Ontology Administrator homed in a child unit
+  would lose those rules from their admin tab, and could not publish or retire them.
+- Recorded here and in `UAC-ACCESS-MODEL-GUIDE.md`; no ontology guide exists in `docs/guides`. No role was changed.
+
+**Docs.**
+- `docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md`, I-6: the hard-deny exception, the walk reaching a Decision
+  Record through its Signals, and the setup script.
+- `docs/guides/UAC-ACCESS-MODEL-GUIDE.md`: the role table, the ownership rules and the owner-team table.
+
 ### Issues to file (issue-ready text; the coordinator files them)
 
 **K-a: Undetermined rows from bad data block their own root's Unsecure.**
