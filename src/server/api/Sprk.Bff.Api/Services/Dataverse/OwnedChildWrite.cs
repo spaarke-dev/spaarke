@@ -1073,9 +1073,12 @@ internal static class OwnedChildWrite
 
         if (!isChild)
         {
+            // UAC task 194b R3b-2: through the one builder, keyed by the columns the update writes.
             var owner = await ownership.ResolveOwnerAsync(
-                RecordOwnershipContext.ForParents(
-                    newParents.Select(l => new RecordOwnershipParent(l.RelatedTable, l.RecordId)), callerObjectId, me.SystemUserId),
+                RecordOwnershipContext.ForRow(
+                    table,
+                    newParents.Select(l => KeyValuePair.Create(l.Column, (RecordOwnershipParent?)new RecordOwnershipParent(l.RelatedTable, l.RecordId))),
+                    PairIdOf(item.JsonBody), callerObjectId, me.SystemUserId),
                 ct).ConfigureAwait(false);
             return owner.IsRefused || owner.IsSecureOwner
                 ? new RefileOutcome { SecureFilingRefused = owner }

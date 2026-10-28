@@ -712,19 +712,6 @@ public static class EventEndpoints
 
         try
         {
-            // Task 146 (C10 part 2): the create is app-only, so the event is owned by the team the ONE resolver names —
-            // the regarding record's team (the named Secure team for a secure record), else the caller's own business
-            // unit team for an event regarding nothing. A refusal writes nothing and is a 409 with a stable reason
-            // code; a Dataverse fault during resolution falls to the catch below as a 500 (a fault is not a refusal).
-            var owner = await ownership.ResolveOwnerAsync(
-                OwnershipContextFor(request.RegardingRecordType, request.RegardingRecordId, httpContext), ct);
-            if (!owner.IsOwned)
-            {
-                logger.LogWarning(
-                    "Refused event create: no owner resolved ({Code}: {Reason})", owner.RefusalCode, owner.Reason);
-                return OwnerRefusalProblem(owner, "event");
-            }
-
             // The ADR-024 regarding write set, resolved here (Spaarke.Dataverse cannot reach the resolver or the
             // record-type catalog). FR-26: a stamp that cannot be derived refuses the write (nothing is created).
             RegardingWrite? regarding = null;
@@ -737,6 +724,21 @@ public static class EventEndpoints
                 {
                     return RegardingStampRefused(httpContext);
                 }
+            }
+
+            // Task 146 (C10 part 2): the create is app-only, so the event is owned by the team the ONE resolver names —
+            // the regarding record's team (the named Secure team for a secure record), else the caller's own business
+            // unit team for an event regarding nothing. A refusal writes nothing and is a 409 with a stable reason
+            // code; a Dataverse fault during resolution falls to the catch below as a 500 (a fault is not a refusal).
+            // UAC task 194b R3b-2: asked AFTER the regarding write set is known, over every parent the row will hold (the
+            // regarding and its FR-26 core stamps), in sprk_event's primary order — what the reconciler asks the written row.
+            var owner = await ownership.ResolveOwnerAsync(
+                OwnershipContextFor(request.RegardingRecordType, request.RegardingRecordId, regarding?.CoreStamps, httpContext), ct);
+            if (!owner.IsOwned)
+            {
+                logger.LogWarning(
+                    "Refused event create: no owner resolved ({Code}: {Reason})", owner.RefusalCode, owner.Reason);
+                return OwnerRefusalProblem(owner, "event");
             }
 
             // UAC-r2 task 152 / owner decision S1: the create is app-only, so Created By is the BFF application user
@@ -1207,22 +1209,37 @@ public static class EventEndpoints
     /// the parent when it is an ownership parent (a contact or an account is a relationship, not a parent); with no
     /// parent, the caller's own business unit (I-6).
     /// </summary>
+    /// <remarks>UAC task 194b fix round R (R3b-2): through the one builder (<c>ForRow</c>), keyed by the sprk_event columns the
+    /// create writes — the regarding's typed lookup and each FR-26 core stamp in <paramref name="coreStamps"/> — so the
+    /// primary is sprk_event's, as the reconciler asks the written row, never the regarding named first.</remarks>
     internal static Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext OwnershipContextFor(
-        int? regardingRecordType, Guid? regardingRecordId, HttpContext httpContext)
+        int? regardingRecordType, Guid? regardingRecordId,
+        IReadOnlyList<(string LookupAttribute, string EntitySetName, Guid RecordId)>? coreStamps, HttpContext httpContext)
     {
         var oid = CallerResolution.ResolveObjectId(httpContext.User);
-        var parents = new List<Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent>();
+        var lookups = new List<KeyValuePair<string, Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent?>>();
         if (regardingRecordType is { } type
             && Spaarke.Dataverse.RegardingRecordType.GetEntityLogicalName(type) is { } entity
+            && Spaarke.Dataverse.RegardingRecordType.GetLookupFieldName(type) is { } column
             && regardingRecordId is { } recordId && recordId != Guid.Empty)
         {
-            parents.Add(new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(entity, recordId));
+            lookups.Add(KeyValuePair.Create(column,
+                (Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent?)new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(entity, recordId)));
         }
 
-        return new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext
+        foreach (var stamp in coreStamps ?? [])
         {
-            Parents = parents,
-            CallerObjectId = Guid.TryParse(oid, out var callerOid) ? callerOid : null,
+            var root = CoreAncestorResolver.CoreAncestorLookups
+                .FirstOrDefault(l => string.Equals(l.LookupAttribute, stamp.LookupAttribute, StringComparison.OrdinalIgnoreCase))
+                .EntityType;
+            if (root is not null)
+                lookups.Add(KeyValuePair.Create(stamp.LookupAttribute,
+                    (Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent?)new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(root, stamp.RecordId)));
+        }
+
+        return Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForRow(
+            "sprk_event", lookups, callerObjectId: Guid.TryParse(oid, out var callerOid) ? callerOid : null) with
+        {
             // Task 146 c1-r1 (owner round 13 item 9): the caller asked for the event the application creates.
             RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfObjectId(oid),
         };

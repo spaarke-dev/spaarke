@@ -2664,7 +2664,8 @@ public sealed class SecureChildReconciler
                 {
                     Log.LogWarning(ex, "[SECURE-CHILD-RECONCILE] {Table} {Id}: its ownership question could not be built (a read " +
                         "failed).", row.LogicalName, row.Id);
-                    _questions[key] = new ExistingRowOwnership(RecordOwnershipContext.ForParents(RecordOwnershipContext.OrderedParentsOf(row)))
+                    // UAC task 194b R3b-2: the one builder over the row's own lookups (ForChild → ForRow: its table's order).
+                    _questions[key] = new ExistingRowOwnership(RecordOwnershipContext.ForChild(row))
                     {
                         Undetermined = "its core record could not be read",
                     };
