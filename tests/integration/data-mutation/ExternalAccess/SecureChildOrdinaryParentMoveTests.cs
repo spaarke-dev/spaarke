@@ -1285,6 +1285,40 @@ public class SecureChildOrdinaryParentMoveTests
         _world.OwnerWrites.Should().BeEmpty();
     }
 
+    [Theory(DisplayName = "R4b-4 A-F1 must fire: a fault reading a hard-deny row's replaced default team fails that row only — the job run finishes, the settle and the cursors run")]
+    [InlineData(null)]
+    [InlineData("true")]
+    public async Task TheJob_WhenAHardDenyRowsReplacedDefaultTeamCannotBeRead_FailsThatRowAndFinishesTheRun(string? ordinaryWrites)
+    {
+        // Unit C under the customer's top unit (which holds the restricted-content owner team); the matter moved there.
+        var buC = Guid.NewGuid();
+        var teamC = Guid.NewGuid();
+        var author = Guid.NewGuid();
+        var authorOwned = Guid.NewGuid();
+        var defaultOwned = Guid.NewGuid();
+        _world.Add("businessunit", buC, ("name", "Arbitration"),
+                ("parentbusinessunitid", new EntityReference("businessunit", SecureChildShareWorld.CustomerBu)))
+            .Team(teamC, buC, "Arbitration", isDefault: true, teamType: 0)
+            .User(author, GeneralBu);
+        _world.Add(Matter, MatterId, ("owningteam", new EntityReference("team", teamC)), ("sprk_issecure", false));
+        _world.Modified(Matter, MatterId, DateTime.UtcNow);
+        Row("sprk_policy", authorOwned, new EntityReference("systemuser", author), ("sprk_matter", Matter, MatterId));
+        Row("sprk_policy", defaultOwned, TeamRef(GeneralTeam), ("sprk_matter", Matter, MatterId));
+        _world.FailingRowReadsOf("team", teamC);
+        var harness = new JobHarness(_world, _webApi);
+
+        var (_, ordinary) = await harness.RunAsync(ordinaryWrites);
+
+        ordinary.GetProperty("failed").GetInt32().Should().Be(1, "the user-owned policy whose owner could not be decided");
+        ordinary.GetProperty(ordinaryWrites is null ? "wouldMove" : "moved").GetInt32().Should().Be(1,
+            "the default-team policy beside it is still decided");
+        ordinary.GetProperty("incompleteRoots").GetArrayLength().Should().Be(1);
+        ordinary.GetProperty("sweep").GetProperty("complete").GetBoolean().Should().BeTrue("the sweep cursor is saved");
+        if (ordinaryWrites is not null)
+            ordinary.GetProperty("carriedRoots").GetInt32().Should().Be(1, "a writing run carries the incomplete root");
+        harness.Last.TryGetProperty("makeSecureRelocations", out _).Should().BeTrue("the settle after the ordinary moves runs");
+    }
+
     [Fact(DisplayName = "194 must fire: a capped run carries the rest and the next run finishes them")]
     public async Task ACappedRun_CarriesTheRest()
     {

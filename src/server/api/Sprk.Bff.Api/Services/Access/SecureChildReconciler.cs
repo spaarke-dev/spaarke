@@ -2596,12 +2596,37 @@ public sealed class SecureChildReconciler
                     $"the team the rule gives it ({target:D}) does not exist or has no business unit");
             }
 
+            // A row owned by a business unit's default team moves; it needs no other read.
+            if (current.Value.Kind == DataversePrincipalKind.Team && owningTeam!.Value.IsDefault)
+                return new(RowMove.Ordinary, SecureChildRowOutcome.Untouched, resolution, null);
+
+            // R4b-4 (A-K1): a hard-deny row owned by a team that is neither a default team nor the restricted-content owner team
+            // (the target, AlreadyCorrect above) is never moved — this pass moves default teams only — but its owner is not the
+            // one its answer names, so it is reported whatever that team's business unit. Ids only, never names.
+            if (current.Value.Kind == DataversePrincipalKind.Team && resolution.InPlaceOfDefaultTeamId is not null)
+            {
+                return new(RowMove.Stay, SecureChildRowOutcome.Untouched, resolution,
+                    $"a hard-deny row owned by team {current.Value.Id:D}, which is not the restricted-content owner team " +
+                    $"({target:D}) and not a business unit's default team: reported, not moved");
+            }
+
             // R4b-2: a hard-deny row's answer is the restricted-content owner team (the customer's top business unit). A row this pass never
             // moves (user-owned, or owned by a non-default team) is still compared with the business unit its ordinary answer
             // names — the default team that team replaced — so its report is the one it had before (rule 1: keep the creator).
-            var ordinaryBu = resolution.InPlaceOfDefaultTeamId is { } replaced
-                ? (await TeamFactsAsync(replaced).ConfigureAwait(false)).BusinessUnit
-                : targetBu;
+            // R4b-4 (A-F1): that read is the row's own — a fault fails THIS row, never the pass (the job's "never throws").
+            Guid? ordinaryBu;
+            try
+            {
+                ordinaryBu = resolution.InPlaceOfDefaultTeamId is { } replaced
+                    ? (await TeamFactsAsync(replaced).ConfigureAwait(false)).BusinessUnit
+                    : targetBu;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !_ct.IsCancellationRequested)
+            {
+                Log.LogWarning(ex, "[SECURE-CHILD-RECONCILE] ordinary move {Table} {Id}: its owner could not be decided (a read " +
+                    "failed); it is left as it is.", table, row.Id);
+                return new(RowMove.None, SecureChildRowOutcome.Failed, null, "its owner could not be decided");
+            }
 
             if (current.Value.Kind != DataversePrincipalKind.Team)
             {
@@ -2611,15 +2636,10 @@ public sealed class SecureChildReconciler
                       "interim — a row created outside the product keeps its creator)");
             }
 
-            if (!owningTeam!.Value.IsDefault)
-            {
-                return new(RowMove.Stay, SecureChildRowOutcome.Untouched, resolution, owningTeam.Value.BusinessUnit == ordinaryBu
-                    ? null
-                    : "owned by a team that is not a business unit's default team, and the rule gives it a team in another " +
-                      "business unit: reported, not moved");
-            }
-
-            return new(RowMove.Ordinary, SecureChildRowOutcome.Untouched, resolution, null);
+            return new(RowMove.Stay, SecureChildRowOutcome.Untouched, resolution, owningTeam!.Value.BusinessUnit == ordinaryBu
+                ? null
+                : "owned by a team that is not a business unit's default team, and the rule gives it a team in another " +
+                  "business unit: reported, not moved");
         }
 
         /// <summary>A team's business unit (<c>null</c> when it does not exist or names none) and whether it is a default team.</summary>

@@ -187,6 +187,76 @@ public class RestrictedContentReconcileTests
             "an author in another unit is reported, as before");
     }
 
+    // ── R4b-4 ────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+    [Fact(DisplayName = "R4b-4 A-F1 must fire: a fault reading the replaced default team fails THAT user-owned policy only — the pass returns, the default-team policy beside it still moves")]
+    public async Task TheOrdinaryPass_WhenTheReplacedDefaultTeamCannotBeRead_FailsThatRowOnly()
+    {
+        var defaultOwned = Guid.NewGuid();
+        MatterMovedToB();
+        _world.User(Author, GeneralBu);
+        Row("sprk_policy", PolicyId, new EntityReference("systemuser", Author), ("sprk_matter", Matter, MatterId));
+        Row("sprk_policy", defaultOwned, TeamRef(GeneralTeam), ("sprk_matter", Matter, MatterId));
+        _world.FailingRowReadsOf("team", TeamB);
+
+        var report = await Reconciler().ReconcileOrdinaryParentMoveAsync(
+            Matter, MatterId, SecureChildReconcileMode.Apply, maxWrites: 200, CancellationToken.None);
+
+        report.Status.Should().Be(SecureChildReconcileStatus.Incomplete, "the failed row carries the root");
+        report.Changes.Should().ContainSingle(c => c.Id == PolicyId).Which.Should().Match<SecureChildRowChange>(c =>
+            c.Outcome == SecureChildRowOutcome.Failed && c.Detail == "its owner could not be decided");
+        _world.OwnerOf("sprk_policy", PolicyId).Should().Be(DataversePrincipalRef.User(Author), "a failed row is left as it is");
+        _world.OwnerOf("sprk_policy", defaultOwned).Should().Be(DataversePrincipalRef.Team(ContentTeam),
+            "the other rows of the pass are still decided");
+        report.Changes.Should().ContainSingle(c => c.Id == defaultOwned).Which.Outcome.Should().Be(SecureChildRowOutcome.Changed);
+    }
+
+    [Fact(DisplayName = "R4b-4 A-K1 must fire: a policy owned by a non-default team in the answer's own unit is reported by id as a hard-deny row whose owner is not the restricted-content team — never moved")]
+    public async Task TheOrdinaryPass_ReportsAPolicyOwnedByANonDefaultTeam_ByIdOnly()
+    {
+        const string TeamName = "Litigation Paralegals";
+        var nonDefault = Guid.NewGuid();
+        var elsewhere = Guid.NewGuid();
+        var elsewherePolicy = Guid.NewGuid();
+        MatterMovedToB();
+        _world.Team(nonDefault, BuB, TeamName, isDefault: false, teamType: 0)
+            .Team(elsewhere, GeneralBu, TeamName + " Two", isDefault: false, teamType: 0)
+            .Add("teammembership", Guid.NewGuid(), ("teamid", nonDefault), ("systemuserid", SecureChildShareWorld.SomeUser));
+        Row("sprk_policy", PolicyId, TeamRef(nonDefault), ("sprk_matter", Matter, MatterId));
+        Row("sprk_policy", elsewherePolicy, TeamRef(elsewhere), ("sprk_matter", Matter, MatterId));
+
+        var report = await Reconciler().ReconcileOrdinaryParentMoveAsync(
+            Matter, MatterId, SecureChildReconcileMode.Apply, maxWrites: 200, CancellationToken.None);
+
+        report.Status.Should().Be(SecureChildReconcileStatus.Completed, "a row this pass never moves is not work left undone");
+        _world.OwnerWrites.Should().BeEmpty("the pass moves default teams only");
+        foreach (var (policy, team) in new[] { (PolicyId, nonDefault), (elsewherePolicy, elsewhere) })
+        {
+            report.Changes.Should().ContainSingle(c => c.Id == policy).Which.Should().Match<SecureChildRowChange>(c =>
+                c.Outcome == SecureChildRowOutcome.Untouched
+                && c.Detail!.Contains($"owned by team {team:D}")
+                && c.Detail.Contains($"not the restricted-content owner team ({ContentTeam:D})")
+                && !c.Detail.Contains(TeamName));
+        }
+    }
+
+    [Fact(DisplayName = "R4b-4 A-K1 must not fire: a non-default-team row of an ORDINARY table in the answer's unit is still not reported")]
+    public async Task TheOrdinaryPass_LeavesANonDefaultTeamEventInTheAnswersUnit_Unreported()
+    {
+        var nonDefault = Guid.NewGuid();
+        var eventId = Guid.NewGuid();
+        MatterMovedToB();
+        _world.Team(nonDefault, BuB, "Litigation Paralegals", isDefault: false, teamType: 0);
+        Row("sprk_event", eventId, TeamRef(nonDefault), ("sprk_regardingmatter", Matter, MatterId));
+
+        var report = await Reconciler().ReconcileOrdinaryParentMoveAsync(
+            Matter, MatterId, SecureChildReconcileMode.Apply, maxWrites: 200, CancellationToken.None);
+
+        report.Status.Should().Be(SecureChildReconcileStatus.Completed, report.Detail);
+        _world.OwnerWrites.Should().BeEmpty();
+        report.Changes.Should().NotContain(c => c.Id == eventId);
+    }
+
     // ── R4b-2c: the customer's top unit ──────────────────────────────────────────────────────────────────────────────
 
     [Fact(DisplayName = "R4b-2c F2 must not fire: with no usable team in the customer's unit, the ordinary pass leaves an author-owned and a non-default-team policy, reports them, and COMPLETES")]
