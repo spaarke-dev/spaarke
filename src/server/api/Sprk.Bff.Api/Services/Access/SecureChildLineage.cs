@@ -72,7 +72,9 @@ internal static class SecureChildLineage
         _ => 2,
     };
 
-    /// <summary>Document link targets that are not a filing parent (identities, the email activity, a service request).</summary>
+    /// <summary>Document link targets this SECURE lineage map leaves out: identities and the email activity (relationships, not
+    /// parents), and a service request — which IS an ordinary ownership and filing parent (<c>RecordOwnershipResolver.FilingParentOf</c>;
+    /// the ordinary pass walks it), but a root of its own that the Secure lineage does not list (the class remarks).</summary>
     private static readonly HashSet<string> DocumentLinksThatAreNotFiling = new(StringComparer.OrdinalIgnoreCase)
     {
         "contact", "sprk_organization", "email", "sprk_servicerequest",

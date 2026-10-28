@@ -3168,6 +3168,25 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     /// container fault propagates to the caller's non-fatal catch; a per-attachment upload or row failure is logged
     /// and the next attachment continues. An upload that returns no item creates no row.</para>
     /// </remarks>
+    /// <summary>
+    /// The ownership question for the copy of a SECURE source (owner decision 2026-10-06): <paramref name="secureLinks"/> —
+    /// the source's record links that put it in its secure container — are written onto <paramref name="copy"/>, so its own
+    /// derived container, task 166's pointer check and task 146's secure-if-any owner all see the secure record, not just
+    /// the communication; then the copy is asked about in sprk_document's primary order (UAC task 194b fix round R, B3:
+    /// <c>ForChild</c> → <c>ForRow</c>, the order the reconciler asks the written copy in — never the first link named first).
+    /// </summary>
+    internal static Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext SecureCopyOwnershipOf(
+        DataverseEntity copy, IReadOnlyList<(string Column, EntityReference Record)> secureLinks,
+        Sprk.Bff.Api.Services.Dataverse.RecordRequester? requestedBy)
+    {
+        foreach (var (column, record) in secureLinks)
+        {
+            copy[column] = record;
+        }
+
+        return Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForChild(copy) with { RequestedBy = requestedBy };
+    }
+
     private async Task ArchiveOutboundAttachmentsAsync(
         Guid communicationId,
         IReadOnlyList<ChannelAttachment> attachments,
@@ -3236,19 +3255,8 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                     // A SECURE source: the copy goes to the source's secure container and carries the record links that
                     // put the source there, so its own derived container, task 166's pointer check and task 146's
                     // secure-if-any owner all see the secure record — not just the communication.
-                    foreach (var (column, record) in placement.SecureLinks)
-                    {
-                        attachmentDoc[column] = record;
-                    }
-
-                    // UAC task 194b fix round R (B3): in sprk_document's primary order (ForChild → ForRow), never the first
-                    // secure link named first — the order the reconciler asks the written copy in.
                     copyOwner = await _ownership.ResolveOwnerAsync(
-                        Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForChild(attachmentDoc) with
-                        {
-                            RequestedBy = requestedBy,
-                        },
-                        ct);
+                        SecureCopyOwnershipOf(attachmentDoc, placement.SecureLinks, requestedBy), ct);
                     if (copyOwner.IsRefused)
                     {
                         _logger.LogWarning(
