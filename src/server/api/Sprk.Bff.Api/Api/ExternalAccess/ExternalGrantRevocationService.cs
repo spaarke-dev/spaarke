@@ -39,6 +39,37 @@ internal sealed record GrantRevocation(
     internal static GrantRevocation Refused(GrantRevocationStatus status) => new(status);
 }
 
+/// <summary>What <see cref="ExternalGrantRevocationService.RevokePairedWithAsync"/> did (task 193 G2).</summary>
+internal enum PairedGrantRevocationStatus
+{
+    /// <summary>No active grant on the record is paired with the user. Nothing was changed.</summary>
+    NonePaired,
+
+    /// <summary>Every paired grant was ended.</summary>
+    Ended,
+
+    /// <summary>The pairing could not be read, or a paired grant was not fully ended. The share stays removed.</summary>
+    Failed,
+
+    /// <summary>The pairing column is not provisioned in this environment, so nothing is paired. Nothing was changed.</summary>
+    ColumnMissing,
+}
+
+/// <summary>The outcome of ending a user's paired grants on one record.</summary>
+internal sealed record PairedGrantRevocation(PairedGrantRevocationStatus Status, int Ended = 0, int Failed = 0)
+{
+    /// <summary>
+    /// What the share-revoke response reports: <c>true</c> every paired grant was ended, <c>false</c> one was not (or the
+    /// pairing could not be read), <c>null</c> none is paired here (or the column is not provisioned).
+    /// </summary>
+    public bool? PairedGrantEnded => Status switch
+    {
+        PairedGrantRevocationStatus.Ended => true,
+        PairedGrantRevocationStatus.Failed => false,
+        _ => null,
+    };
+}
+
 /// <summary>
 /// Slice C2c: what <see cref="ExternalGrantRevocationService.RemovePersonOrganizationGrantPermissionsAsync"/> did for one
 /// person. <see cref="Completed"/> only when every organization, every organization grant and every container was read and
@@ -220,6 +251,91 @@ internal sealed class ExternalGrantRevocationService
             organizationTooLarge,
             permissionsAmbiguous,
             residualAccessTerms);
+    }
+
+    /// <summary>The most paired grants one user's share revoke ends on one record (one more is read; a page above it fails).</summary>
+    internal const int MaxPairedGrantsPerShare = 10;
+
+    /// <summary>
+    /// Task 193 G2 (owner F1-b: the paired grant follows the share): ends every ACTIVE grant on the record PAIRED with
+    /// <paramref name="systemUserId"/> (<c>sprk_pairedsystemuser</c>), each through <see cref="RevokeAsync"/> — the one grant
+    /// revoke, so the SPE cleanup, the cache invalidation and the ledger marking run as for any revoke. Called only after the
+    /// user's share on the record is confirmed gone. Found by the pairing column and the record, never by name or email.
+    /// </summary>
+    /// <remarks>
+    /// Never throws (but for cancellation). A missing column (the schema script not applied) ends nothing and is
+    /// <see cref="PairedGrantRevocationStatus.ColumnMissing"/> (a Warning: no pairing exists there). An unreadable pairing,
+    /// or any grant whose revoke does not complete (its rows, or its container permission), is
+    /// <see cref="PairedGrantRevocationStatus.Failed"/>, logged at Error with ids only; the reconciliation job's R5 ends a
+    /// paired grant whose share is gone on its next run.
+    /// </remarks>
+    public async Task<PairedGrantRevocation> RevokePairedWithAsync(
+        ExternalGrantRootType rootType, Guid rootId, Guid systemUserId, CancellationToken ct)
+    {
+        var read = await ExternalGrantLifecycle.ReadPairingsOnRecordAsync(
+            _dataverse, rootType, rootId, systemUserId, MaxPairedGrantsPerShare + 1, ct).ConfigureAwait(false);
+
+        if (read.Status == GrantPairingReadStatus.ColumnMissing)
+        {
+            _logger.LogWarning(
+                "[EXT-REVOKE] {Table}.{Column} is not provisioned here, so no grant is paired with {SystemUserId} on {RootType} " +
+                "{RootId}; only the share was removed.",
+                ExternalGrantLifecycle.EntityLogicalName, ExternalGrantLifecycle.PairedSystemUserAttribute, systemUserId,
+                rootType, rootId);
+            return new PairedGrantRevocation(PairedGrantRevocationStatus.ColumnMissing);
+        }
+
+        if (read.Status != GrantPairingReadStatus.Read || read.ByRow.Count > MaxPairedGrantsPerShare)
+        {
+            _logger.LogError(read.Fault,
+                "[EXT-REVOKE] The grants paired with {SystemUserId} on {RootType} {RootId} could not be read in full; none was " +
+                "ended. The share stays removed; the reconciliation job ends them on its next run.",
+                systemUserId, rootType, rootId);
+            return new PairedGrantRevocation(PairedGrantRevocationStatus.Failed);
+        }
+
+        // The filter named the user; checked again here so a row paired with anyone else is never ended.
+        var paired = read.ByRow.Where(kv => kv.Value == systemUserId).Select(kv => kv.Key).OrderBy(id => id).ToList();
+        if (paired.Count == 0)
+            return new PairedGrantRevocation(PairedGrantRevocationStatus.NonePaired);
+
+        var ended = 0;
+        var failed = 0;
+        foreach (var accessRecordId in paired)
+        {
+            GrantRevocation revocation;
+            try
+            {
+                revocation = await RevokeAsync(accessRecordId, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "[EXT-REVOKE] Paired grant {AccessRecordId} ({SystemUserId} on {RootType} {RootId}) could not be ended.",
+                    accessRecordId, systemUserId, rootType, rootId);
+                failed++;
+                continue;
+            }
+
+            if (revocation.Status == GrantRevocationStatus.Revoked && revocation.SpeOutcome != SpeContainerRevokeOutcome.Failed)
+            {
+                ended++;
+                continue;
+            }
+
+            _logger.LogError(
+                "[EXT-REVOKE] Paired grant {AccessRecordId} ({SystemUserId} on {RootType} {RootId}) was not fully ended: " +
+                "status={Status} speOutcome={SpeOutcome}. The share stays removed.",
+                accessRecordId, systemUserId, rootType, rootId, revocation.Status, revocation.SpeOutcome);
+            failed++;
+        }
+
+        return new PairedGrantRevocation(
+            failed > 0 ? PairedGrantRevocationStatus.Failed : PairedGrantRevocationStatus.Ended, ended, failed);
     }
 
     /// <summary>

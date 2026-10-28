@@ -567,6 +567,9 @@ internal static class AssignedAccessTestDoubles
         /// <summary>Task 193 G1: a grant read selecting the pairing column fails for another reason (503).</summary>
         public bool FailPairingReads { get; set; }
 
+        /// <summary>Task 193 G2: every grant-row DEACTIVATION (an update to statecode 1) fails (503) and changes nothing.</summary>
+        public bool FailDeactivations { get; set; }
+
         /// <summary>System users the share routes can read (eligible internal people unless seeded otherwise).</summary>
         public ConcurrentDictionary<Guid, Sprk.Bff.Api.Api.ExternalAccess.InternalShareEndpoints.SystemUserRow> SystemUsers { get; } = new();
 
@@ -681,7 +684,12 @@ internal static class AssignedAccessTestDoubles
                         throw new HttpRequestException(
                             "Simulated Dataverse read failure.", null, System.Net.HttpStatusCode.ServiceUnavailable);
 
+                    // Task 193 G2: "… and _sprk_pairedsystemuser_value eq {user}" keeps the rows paired with that user.
+                    var pairedFilter = filter is null ? null : Regex.Match(filter,
+                        ExternalGrantLifecycle.PairedSystemUserValueProperty + @" eq ([0-9a-fA-F-]{36})");
                     var paired = MatchGrants(filter)
+                        .Where(r => pairedFilter is not { Success: true }
+                                    || (PairedUsers.TryGetValue(r.Id, out var pu) && pu == Guid.Parse(pairedFilter.Groups[1].Value)))
                         .Select(r => new Dictionary<string, object?>
                         {
                             ["sprk_externalrecordaccessid"] = r.Id,
@@ -824,6 +832,8 @@ internal static class AssignedAccessTestDoubles
         public override Task UpdateAsync(string entitySetName, Guid id, object entity, CancellationToken cancellationToken = default)
         {
             var json = JsonSerializer.Serialize(entity);
+            if (FailDeactivations && entitySetName == GrantSet && json.Contains("\"statecode\":1", StringComparison.Ordinal))
+                throw new HttpRequestException("Simulated Dataverse write failure.", null, System.Net.HttpStatusCode.ServiceUnavailable);
             lock (_gate)
             {
                 Updates.Add((entitySetName, id, json));

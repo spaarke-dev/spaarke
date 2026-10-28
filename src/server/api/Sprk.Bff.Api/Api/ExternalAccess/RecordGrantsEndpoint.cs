@@ -132,6 +132,9 @@ public static class RecordGrantsEndpoint
                 unaddressable, root.Type, root.Id);
         }
 
+        // Task 193 G2: which of these are PAIRED with an internal user's share (display only — never a refusal).
+        var pairings = await ReadDisplayPairingsAsync(dataverseClient, root.Type, root.Id, logger, ct);
+
         var today = ExternalGrantLifecycle.TodayUtc(timeProvider);
         var grants = rows
             .Where(r => r.Id != Guid.Empty)
@@ -147,10 +150,37 @@ public static class RecordGrantsEndpoint
                 GrantedByContactName: r.GrantedByContactName,
                 GrantedDate: r.GrantedDate,
                 ExpiresDate: r.ExpiresDate,
-                IsExpired: !ExternalParticipationService.ConfersAccessOn(r.ExpiresDate, today)))
+                IsExpired: !ExternalParticipationService.ConfersAccessOn(r.ExpiresDate, today),
+                PairedWith: pairings.TryGetValue(r.Id, out var pairedUser)
+                    ? new RecordAccessPairing(pairedUser, RecordAccessPairing.ShareKind)
+                    : null))
             .ToList();
 
         return TypedResults.Ok(new RecordGrantsResponse(root.Id, grants, truncated));
+    }
+
+    /// <summary>
+    /// Task 193 G2: the record's ACTIVE grant rows that are paired with an internal user (row id → systemuser id), for
+    /// Current Access's <c>pairedWith</c> on both lists (<c>/record-grants</c> and <c>/user-shares</c>). Display only, so it
+    /// fails QUIET: a missing or unreadable column pairs nothing (logged at Warning) and never fails the list — no access
+    /// decision reads it.
+    /// </summary>
+    internal static async Task<IReadOnlyDictionary<Guid, Guid>> ReadDisplayPairingsAsync(
+        DataverseWebApiClient dataverseClient, ExternalGrantRootType rootType, Guid rootId, ILogger logger, CancellationToken ct)
+    {
+        var read = await ExternalGrantLifecycle.ReadPairingsOnRecordAsync(
+            dataverseClient, rootType, rootId, pairedWith: null, top: MaxGrantsListed + 1, ct);
+        if (read.Status != GrantPairingReadStatus.Read)
+        {
+            logger.LogWarning(read.Fault,
+                "[RECORD-GRANTS] The pairing of the grants on {RootType} {RootId} was not read ({Status}); Current Access shows no " +
+                "pairing.", rootType, rootId, read.Status);
+            return new Dictionary<Guid, Guid>();
+        }
+
+        return read.ByRow
+            .Where(kv => kv.Value is { } user && user != Guid.Empty)
+            .ToDictionary(kv => kv.Key, kv => kv.Value!.Value);
     }
 
     private static IResult Refused(HttpContext httpContext, int statusCode, string title, string reasonCode, string detail)

@@ -239,7 +239,9 @@ public static class InternalShareEndpoints
             .WithSummary("Remove an internal user's share on a record")
             .WithDescription(
                 "Revokes a system user's POA share on the record and confirms it is gone. A user with no share is " +
-                "answered removed = false without a write, so repeating the call is safe. Requires Write and Share on the record.")
+                "answered removed = false without a write, so repeating the call is safe. Once the share is gone, the " +
+                "workforce-app grant paired with it is ended too (pairedGrantEnded; false = not ended, the share stays " +
+                "removed). Requires Write and Share on the record.")
             .Produces<UnshareRecordWithUserResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -348,7 +350,75 @@ public static class InternalShareEndpoints
         HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken ct,
-        [FromServices] IOptionsMonitor<WorkforceIdentityOptions>? workforceIdentity = null)
+        [FromServices] IOptionsMonitor<WorkforceIdentityOptions>? workforceIdentity = null,
+        [FromServices] SpeContainerMembershipService? speContainerMembership = null,
+        [FromServices] Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver? containerResolver = null,
+        [FromServices] TimeProvider? timeProvider = null,
+        [FromServices] IContactIdentityStore? identityStore = null)
+    {
+        var result = await UnshareRecordShareAsync(
+            request, recordShare, dataverseClient, participations, cache, assignedAccess, secureChildShares, relatedRoots,
+            recordLock, httpContext, logger, ct, workforceIdentity);
+
+        // Task 193 G2 (owner F1-b: the paired grant follows the share): once the user's share on the record is confirmed
+        // GONE — removed now, or held none (the 200), or the record's own share removed with its children still catching up
+        // (children_incomplete) — every grant on the record PAIRED with them is ended through the one grant revoke. The share
+        // first, then the grant: a share removal that failed or was refused changes nothing here. A grant that is not ended
+        // leaves the share removed and says so (pairedGrantEnded = false); the reconciliation job's R5 ends it next run. Both
+        // SPE services are registered in every host (the /revoke route requires them); the auth tests that drive this
+        // handler without them exercise the share alone.
+        if (speContainerMembership is null || containerResolver is null || !ShareConfirmedGone(result)
+            || GrantExternalAccessEndpoint.ResolveExplicitRoot(request.RecordType, request.RecordId) is not { Ok: true } root
+            || request.SystemUserId is not { } systemUserId)
+            return result;
+
+        var paired = await new ExternalGrantRevocationService(
+                dataverseClient, speContainerMembership, participations, assignedAccess, containerResolver,
+                timeProvider ?? TimeProvider.System, identityStore, logger)
+            .RevokePairedWithAsync(root.Type, root.Id, systemUserId, ct);
+
+        if (paired.PairedGrantEnded is not { } ended)
+            return result;
+
+        if (result is Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult { ProblemDetails: { } problem })
+        {
+            problem.Extensions["pairedGrantEnded"] = ended;
+            return result;
+        }
+
+        return result is Microsoft.AspNetCore.Http.HttpResults.Ok<UnshareRecordWithUserResponse> { Value: { } body }
+            ? TypedResults.Ok(body with { PairedGrantEnded = ended })
+            : result;
+    }
+
+    /// <summary>
+    /// Whether an <c>/unshare-user</c> answer means the user's share on the record itself is gone: the 200 (removed, or held
+    /// none), or the 500 <see cref="ChildrenIncompleteReasonCode"/>, which is sent only after the record's own share is
+    /// confirmed removed. Every other answer is a refusal or an unconfirmed removal.
+    /// </summary>
+    private static bool ShareConfirmedGone(IResult result) => result switch
+    {
+        Microsoft.AspNetCore.Http.HttpResults.Ok<UnshareRecordWithUserResponse> => true,
+        Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult { ProblemDetails: { } problem } =>
+            problem.Extensions.TryGetValue("reasonCode", out var code) && Equals(code, ChildrenIncompleteReasonCode),
+        _ => false,
+    };
+
+    /// <summary>The share half of <c>/unshare-user</c>: validation, the lease, the S5 check, the revoke and its read-back.</summary>
+    private static async Task<IResult> UnshareRecordShareAsync(
+        UnshareRecordWithUserRequest request,
+        IDataverseRecordShareService recordShare,
+        DataverseWebApiClient dataverseClient,
+        ExternalParticipationService participations,
+        ITenantCache cache,
+        Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer assignedAccess,
+        SecureChildShareSynchronizer secureChildShares,
+        SecureRootInheritance relatedRoots,
+        Spaarke.Scheduling.IScheduledJobLease recordLock,
+        HttpContext httpContext,
+        ILogger<Program> logger,
+        CancellationToken ct,
+        IOptionsMonitor<WorkforceIdentityOptions>? workforceIdentity)
     {
         var root = GrantExternalAccessEndpoint.ResolveExplicitRoot(request.RecordType, request.RecordId);
         if (!root.Ok)
@@ -830,6 +900,12 @@ public static class InternalShareEndpoints
         // still in force) — shown read-only. Display only: a ledger read that fails marks nothing (logged).
         var inherited = await InheritedSharesAsync(ledger, root.Type, root.Id, logger, ct);
 
+        // Task 193 G2: the workforce-app grant PAIRED with each share (display only; an unreadable pairing pairs nothing). One
+        // grant per user is shown — the lowest id when, rarely, two contacts' grants are paired with the same user.
+        var pairedGrants = (await RecordGrantsEndpoint.ReadDisplayPairingsAsync(dataverseClient, root.Type, root.Id, logger, ct))
+            .GroupBy(kv => kv.Value)
+            .ToDictionary(g => g.Key, g => g.Select(kv => kv.Key).Min());
+
         var listed = userShares
             .Select(s => new RecordUserShare(
                 s.SystemUserId,
@@ -838,7 +914,10 @@ public static class InternalShareEndpoints
                 RecordShareLevels.LevelForMask(s.Mask),
                 s.ModifiedOn,
                 ExternalNoAccess: IsBarredOnRestricted(people.GetValueOrDefault(s.SystemUserId)?.IsExternal, restricted),
-                InheritedFrom: inherited.GetValueOrDefault(s.SystemUserId)))
+                InheritedFrom: inherited.GetValueOrDefault(s.SystemUserId),
+                PairedWith: pairedGrants.TryGetValue(s.SystemUserId, out var grantId)
+                    ? new RecordAccessPairing(grantId, RecordAccessPairing.GrantKind)
+                    : null))
             .OrderBy(s => s.FullName is null)
             // Ordinal, not CurrentCulture (Step 9.5 review finding 11): a server-side order must not depend on the
             // host's culture configuration, or one record lists its users in different orders across hosts — or

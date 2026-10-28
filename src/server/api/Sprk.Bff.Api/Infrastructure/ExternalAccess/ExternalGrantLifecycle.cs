@@ -457,15 +457,36 @@ internal static class ExternalGrantLifecycle
     /// <see cref="GrantPairingReadStatus.ColumnMissing"/>; any other fault is <see cref="GrantPairingReadStatus.Unreadable"/>.
     /// Either way the caller writes no pairing.
     /// </summary>
-    internal static async Task<GrantPairingRead> ReadPairingsAsync(
+    internal static Task<GrantPairingRead> ReadPairingsAsync(
         DataverseWebApiClient dataverseClient, ExternalGrantKey key, CancellationToken ct)
+        => ReadPairingsByFilterAsync(dataverseClient, key.ToActiveRowsFilter(), top: null, ct);
+
+    /// <summary>
+    /// Task 193 G2: the ACTIVE rows on one record with their pairing — every row (Current Access's <c>pairedWith</c>), or only
+    /// those paired with <paramref name="pairedWith"/> (the share revoke ending that user's paired grant). The same one-column
+    /// read and the same never-throws contract as <see cref="ReadPairingsAsync"/>: a missing column is
+    /// <see cref="GrantPairingReadStatus.ColumnMissing"/>, any other fault <see cref="GrantPairingReadStatus.Unreadable"/>.
+    /// </summary>
+    internal static Task<GrantPairingRead> ReadPairingsOnRecordAsync(
+        DataverseWebApiClient dataverseClient, ExternalGrantRootType rootType, Guid rootId, Guid? pairedWith, int? top,
+        CancellationToken ct)
+    {
+        var filter = $"{ExternalGrantRoot.ValueColumnFor(rootType)} eq {rootId} and statecode eq 0";
+        if (pairedWith is { } systemUserId)
+            filter += $" and {PairedSystemUserValueProperty} eq {systemUserId}";
+        return ReadPairingsByFilterAsync(dataverseClient, filter, top, ct);
+    }
+
+    private static async Task<GrantPairingRead> ReadPairingsByFilterAsync(
+        DataverseWebApiClient dataverseClient, string filter, int? top, CancellationToken ct)
     {
         try
         {
             var rows = await dataverseClient.QueryAsync<PairingRow>(
                 EntitySet,
-                filter: key.ToActiveRowsFilter(),
+                filter: filter,
                 select: $"sprk_externalrecordaccessid,{PairedSystemUserValueProperty}",
+                top: top,
                 cancellationToken: ct).ConfigureAwait(false);
 
             var byRow = new Dictionary<Guid, Guid?>();

@@ -815,4 +815,246 @@ public class ContactGrantSharesInternalUserTests
         _h.Grants.Creates.Should().BeEmpty();
         body.WorkforceApp.Should().Be(WorkforceAppAccess.NotGiven(ExternalGrantLifecycle.RecordRestrictedReasonCode));
     }
+
+    // ── Task 193 G2: the paired grant follows the share (revoke), and Current Access shows the pairing ────────────────
+
+    private static SpeContainerMembershipService Spe() => new(
+        TestInfrastructure.TestSpeOwnership.AllowAll(Moq.Mock.Of<Sprk.Bff.Api.Infrastructure.Graph.IGraphClientFactory>()),
+        NullLogger<SpeContainerMembershipService>.Instance);
+
+    /// <summary><c>/unshare-user</c> through the production handler; <paramref name="pairing"/> false drives it without the SPE
+    /// services, as the share-only auth tests do.</summary>
+    private Task<IResult> Unshare(Guid user, bool pairing = true)
+    {
+        _h.Grants.RootOwners.TryAdd(_matter, Guid.NewGuid()); // #1620: the owner-aware revoke reads the record's owner
+        return InternalShareEndpoints.UnshareAsync(
+            new UnshareRecordWithUserRequest("matter", _matter, user),
+            _h.Shares, _h.Grants, _h.Participations, _h.Cache.Mock.Object, _h.Materializer, _h.Children,
+            TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(), new Spaarke.Scheduling.ProcessLocalScheduledJobLease(),
+            InternalUserShareCoreTests.Rig.Caller(), NullLogger<Program>.Instance, CancellationToken.None,
+            _h.WorkforceIdentity,
+            pairing ? Spe() : null,
+            pairing ? TestRecordContainerResolver.ForNonSecureRecord(MatterTable, _matter) : null,
+            _h.Time, null);
+    }
+
+    private Task<IResult> RevokeGrant(Guid accessRecordId) =>
+        RevokeExternalAccessEndpoint.RevokeAccessAsync(
+            new RevokeAccessRequest(accessRecordId, Guid.Empty, Guid.Empty),
+            _h.Grants, Spe(), _h.Participations, _h.Materializer,
+            TestRecordContainerResolver.ForNonSecureRecord(MatterTable, _matter),
+            InternalUserShareCoreTests.Rig.Caller(), NullLogger<Program>.Instance, CancellationToken.None);
+
+    /// <summary>A colleague added through their contact: the share AND the paired grant are in place.</summary>
+    private async Task<(Guid Contact, Guid User, Guid Grant)> AddedColleague()
+    {
+        var (contact, user) = Colleague();
+        (await Grant(contact)).Should().BeOfType<Ok<GrantAccessResponse>>();
+        var grant = _h.Grants.ActiveRowsOf(_matter, contact).Single();
+        _h.Grants.PairedUsers[grant.Id].Should().Be(user);
+        return (contact, user, grant.Id);
+    }
+
+    private int? ShareMask(Guid user) => _h.Shares.MaskOf(MatterTable, _matter, DataversePrincipalRef.User(user));
+
+    [Fact]
+    public async Task G2_Unshare_RemovesTheShare_ThenEndsTheGrantPairedWithIt()
+    {
+        var (contact, user, _) = await AddedColleague();
+
+        var result = await Unshare(user);
+
+        result.Should().BeOfType<Ok<UnshareRecordWithUserResponse>>().Subject.Value
+            .Should().Be(new UnshareRecordWithUserResponse(user, Removed: true, PairedGrantEnded: true));
+        ShareMask(user).GetValueOrDefault().Should().Be(0);
+        _h.Grants.ActiveRowsOf(_matter, contact).Should().BeEmpty("the paired grant follows the share");
+    }
+
+    [Fact]
+    public async Task G2_Unshare_WhenThePairedGrantCannotBeEnded_KeepsTheShareRemoved_AndSaysSo()
+    {
+        var (contact, user, grant) = await AddedColleague();
+        _h.Grants.FailDeactivations = true;
+
+        var result = await Unshare(user);
+
+        result.Should().BeOfType<Ok<UnshareRecordWithUserResponse>>().Subject.Value
+            .Should().Be(new UnshareRecordWithUserResponse(user, Removed: true, PairedGrantEnded: false));
+        ShareMask(user).GetValueOrDefault().Should().Be(0, "the share stays removed");
+        _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle().Which.Id.Should().Be(grant,
+            "left for the reconciliation job's R5");
+    }
+
+    [Fact]
+    public async Task G2_Unshare_WhenTheShareRemovalFails_ChangesNothing_TheGrantStays()
+    {
+        var (contact, user, grant) = await AddedColleague();
+        var updatesBefore = _h.Grants.Updates.Count;
+        _h.Shares.FailWritesOnRecord = ("sprk_matters", _matter);
+
+        var result = await Unshare(user);
+
+        result.Should().NotBeOfType<Ok<UnshareRecordWithUserResponse>>();
+        ShareMask(user).Should().Be(CollaborateMask);
+        _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle().Which.Id.Should().Be(grant);
+        _h.Grants.Updates.Should().HaveCount(updatesBefore, "no grant row was touched");
+    }
+
+    [Fact]
+    public async Task G2_Unshare_WhenThePairingColumnIsNotProvisioned_RemovesTheShareOnly()
+    {
+        var (contact, user, _) = await AddedColleague();
+        _h.Grants.PairingColumnMissing = true;
+
+        var result = await Unshare(user);
+
+        result.Should().BeOfType<Ok<UnshareRecordWithUserResponse>>().Subject.Value
+            .Should().Be(new UnshareRecordWithUserResponse(user, Removed: true), "nothing is paired where the column is missing");
+        ShareMask(user).GetValueOrDefault().Should().Be(0);
+        _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task G2_Unshare_WhenThePairingCannotBeRead_KeepsTheShareRemoved_AndSaysTheGrantWasNotEnded()
+    {
+        var (contact, user, _) = await AddedColleague();
+        _h.Grants.FailPairingReads = true;
+
+        var result = await Unshare(user);
+
+        result.Should().BeOfType<Ok<UnshareRecordWithUserResponse>>().Subject.Value!.PairedGrantEnded.Should().BeFalse();
+        ShareMask(user).GetValueOrDefault().Should().Be(0);
+        _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle();
+    }
+
+    /// <summary>Found by the pairing column and the record only: a deliberate grant, and a grant paired with someone else, stay.</summary>
+    [Fact]
+    public async Task G2_Unshare_EndsOnlyTheGrantPairedWithThatUser()
+    {
+        var (_, user, _) = await AddedColleague();
+        var deliberate = _h.Grants.Seed(ExternalGrantRootType.Matter, _matter, _h.Contact(), null,
+            (int)ExternalAccessLevel.Collaborate, Today.AddDays(30));
+        var someoneElses = _h.Grants.Seed(ExternalGrantRootType.Matter, _matter, _h.Contact(), null,
+            (int)ExternalAccessLevel.Collaborate, Today.AddDays(30));
+        _h.Grants.PairedUsers[someoneElses.Id] = Guid.NewGuid();
+
+        await Unshare(user);
+
+        _h.Grants.ActiveRowsOf(_matter, deliberate.ContactId!.Value).Should().ContainSingle();
+        _h.Grants.ActiveRowsOf(_matter, someoneElses.ContactId!.Value).Should().ContainSingle();
+    }
+
+    /// <summary>A repeat after a grant that was not ended (or a share removed elsewhere) completes it: no share, still ended.</summary>
+    [Fact]
+    public async Task G2_Unshare_WhenTheUserHoldsNoShare_StillEndsTheirPairedGrant()
+    {
+        var (contact, user, _) = await AddedColleague();
+        _h.Grants.FailDeactivations = true;
+        await Unshare(user);
+        _h.Grants.FailDeactivations = false;
+
+        var again = await Unshare(user);
+
+        again.Should().BeOfType<Ok<UnshareRecordWithUserResponse>>().Subject.Value
+            .Should().Be(new UnshareRecordWithUserResponse(user, Removed: false, PairedGrantEnded: true));
+        _h.Grants.ActiveRowsOf(_matter, contact).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task G2_Unshare_OfAShareWithNoPairedGrant_AnswersAsBefore()
+    {
+        var (_, user) = Colleague();
+        _h.Shares.Seed(MatterTable, _matter, DataversePrincipalRef.User(user), CollaborateMask); // a share with no paired grant
+
+        var result = await Unshare(user);
+
+        result.Should().BeOfType<Ok<UnshareRecordWithUserResponse>>().Subject.Value
+            .Should().Be(new UnshareRecordWithUserResponse(user, Removed: true));
+    }
+
+    /// <summary>children_incomplete is sent only after the record's own share is removed, so the paired grant is ended there too.</summary>
+    [Fact]
+    public async Task G2_Unshare_WhenRelatedRecordsAreIncomplete_StillEndsThePairedGrant_AndSaysSo()
+    {
+        var (contact, user, _) = await AddedColleague();
+        RelatedRecordsUnreadable();
+
+        var result = await Unshare(user);
+
+        ReasonCode(result).Should().Be(InternalShareEndpoints.ChildrenIncompleteReasonCode);
+        Extensions(result)["pairedGrantEnded"].Should().Be(true);
+        ShareMask(user).GetValueOrDefault().Should().Be(0);
+        _h.Grants.ActiveRowsOf(_matter, contact).Should().BeEmpty();
+    }
+
+    /// <summary>The owner's cleanup ruling: grant gone, share stays. Revoking only the paired grant never removes the share.</summary>
+    [Fact]
+    public async Task G2_RevokingOnlyThePairedGrant_LeavesTheShare()
+    {
+        var (contact, user, grant) = await AddedColleague();
+
+        var result = await RevokeGrant(grant);
+
+        result.Should().BeOfType<Ok<RevokeAccessResponse>>();
+        _h.Grants.ActiveRowsOf(_matter, contact).Should().BeEmpty();
+        ShareMask(user).Should().Be(CollaborateMask, "the share stands on its own");
+        _h.Shares.WriteLog.Should().NotContain(w => w.Action.StartsWith("Revoke", StringComparison.Ordinal));
+    }
+
+    // ── Current Access: pairedWith ──────────────────────────────────────────────────────────────────────────────────
+
+    private async Task<RecordUserSharesResponse> UserShares() =>
+        (await InternalShareEndpoints.ListAsync(new RecordUserSharesQuery("matter", _matter), _h.Shares, _h.Grants,
+            _h.Participations, _h.Store, InternalUserShareCoreTests.Rig.Caller(), NullLogger<Program>.Instance,
+            CancellationToken.None))
+        .Should().BeOfType<Ok<RecordUserSharesResponse>>().Subject.Value!;
+
+    private async Task<RecordGrantsResponse> RecordGrants() =>
+        (await RecordGrantsEndpoint.Handle(new RecordGrantsQuery("matter", _matter), _h.Grants, _h.Time,
+            NullLogger<Program>.Instance, InternalUserShareCoreTests.Rig.Caller(), CancellationToken.None))
+        .Should().BeOfType<Ok<RecordGrantsResponse>>().Subject.Value!;
+
+    [Fact]
+    public async Task G2_CurrentAccess_TheShareAndItsPairedGrant_EachNameTheOther_ByIdAndKindOnly()
+    {
+        var (_, user, grant) = await AddedColleague();
+
+        var share = (await UserShares()).Shares.Single(r => r.SystemUserId == user);
+        share.PairedWith.Should().Be(new RecordAccessPairing(grant, RecordAccessPairing.GrantKind));
+
+        var grantRow = (await RecordGrants()).Grants.Single(r => r.AccessRecordId == grant);
+        grantRow.PairedWith.Should().Be(new RecordAccessPairing(user, RecordAccessPairing.ShareKind));
+
+        var json = System.Text.Json.JsonSerializer.Serialize(grantRow);
+        json.Should().NotContain(Email, "the grant row never carries the user's email");
+        json.Should().NotContain("Ada Lovelace", "nor the user's name");
+    }
+
+    [Fact]
+    public async Task G2_CurrentAccess_ADeliberateGrantAndAPlainShare_CarryNoPairing()
+    {
+        var plain = _h.Grants.Seed(ExternalGrantRootType.Matter, _matter, _h.Contact(), null,
+            (int)ExternalAccessLevel.Collaborate, Today.AddDays(30));
+        var (_, user) = Colleague();
+        _h.Shares.Seed(MatterTable, _matter, DataversePrincipalRef.User(user), CollaborateMask); // a share with no paired grant
+
+        (await UserShares()).Shares.Single(r => r.SystemUserId == user).PairedWith.Should().BeNull();
+        (await RecordGrants()).Grants.Single(r => r.AccessRecordId == plain.Id).PairedWith.Should().BeNull();
+    }
+
+    /// <summary>Display only: a pairing that cannot be read pairs nothing and never fails either list (fails quiet).</summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task G2_CurrentAccess_WhenThePairingCannotBeRead_ListsEverythingUnpaired(bool columnMissing)
+    {
+        var (_, user, grant) = await AddedColleague();
+        if (columnMissing)
+            _h.Grants.PairingColumnMissing = true;
+        else
+            _h.Grants.FailPairingReads = true;
+
+        (await UserShares()).Shares.Single(r => r.SystemUserId == user).PairedWith.Should().BeNull();
+        (await RecordGrants()).Grants.Single(r => r.AccessRecordId == grant).PairedWith.Should().BeNull();
+    }
 }
