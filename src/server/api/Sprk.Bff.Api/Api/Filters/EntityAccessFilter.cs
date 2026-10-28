@@ -344,6 +344,11 @@ public class EntityAccessFilter : IEndpointFilter
     /// nothing. Extend this method in the same change, and add a guard that pins the pairing.
     /// </para>
     /// <para>
+    /// ebilling-r1 task 095: the from-email submission body (<c>FromEmailSubmissionBody</c>) is the second request shape: it files an
+    /// <c>.eml</c> to its core record. <c>InvoiceSubmissionFromEmailContractTests</c> pins the pairing (a caller without Append To on the
+    /// record is refused 403 before any read or write). A concrete type check, not an interface: ADR-010, one shape needs no seam.
+    /// </para>
+    /// <para>
     /// Today only <c>SaveRequest</c> reaches this filter (<c>POST /api/office/save</c>). For
     /// <c>POST /api/office/todo</c>, see <c>TodoSourceAccessFilter</c> (spaarkeai-word-add-in-r1 task
     /// 064), which gates all four caller-supplied ids; a <c>CreateTodoRequest</c> branch that once lived
@@ -358,6 +363,13 @@ public class EntityAccessFilter : IEndpointFilter
             if (argument is SaveRequest saveRequest && saveRequest.TargetEntity != null)
             {
                 return saveRequest.TargetEntity;
+            }
+
+            // ebilling-r1 task 095: POST /api/finance/invoice-submissions/from-email names its core record in its own body (not a
+            // SaveRequest); the bound body hands this filter the SAME target the in-process save files the .eml to.
+            if (argument is Sprk.Bff.Api.Api.Finance.FromEmailSubmissionBody fromEmail && fromEmail.EntityAccessTarget is { } target)
+            {
+                return target;
             }
         }
 

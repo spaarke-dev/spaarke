@@ -10,7 +10,7 @@ namespace Spaarke.ArchTests;
 /// <list type="bullet">
 /// <item>No Spaarke role other than "Spaarke Billing Administrator" holds any privilege on <c>sprk_ruleset</c> (Core and Basic User lost
 /// Read in task 120; Console, Ontology Administrator, Ontology Service and every other role hold none).</item>
-/// <item>"Spaarke Billing Administrator" holds exactly Read at Global and Create, Write, Append and AppendTo at Basic on
+/// <item>"Spaarke Billing Administrator" holds exactly Read at Deep (EB-D-162) and Create, Write, Append and AppendTo at Basic on
 /// <c>sprk_ruleset</c>, <c>sprk_Policy</c> and <c>sprk_PolicyVersion</c>, and nothing else beyond the platform defaults every Spaarke role
 /// export carries. No Delete, Assign or Share; nothing on the Procedure tables (task 121 adds those after uac-r2 task 191). Basic, not
 /// Global (uac-r2 review of task 120): the BFF asks for Create / Write only as markers at any depth (D-108) and writes these tables
@@ -30,13 +30,14 @@ public class RuleSetRolePrivilegeGuardTests
         "^prv(Create|Read|Write|Delete|Append|AppendTo|Assign|Share)sprk_ruleset$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     /// <summary>
-    /// D-76 / D-108 with uac-r2's depths: name (live privilege-name casing, as <c>BillingAdminAuthorization</c>) -> level. Read is Global;
-    /// the markers are Basic. Global Read on sprk_Policy / sprk_PolicyVersion reaches policies re-owned into the secure business unit; the
-    /// owner kept it (EB-D-150, 2026-10-26) and uac-r2's isolation census lists it as an accepted exception (#2322).
+    /// D-76 / D-108 with uac-r2's depths: name (live privilege-name casing, as <c>BillingAdminAuthorization</c>) -> level. Read is Deep;
+    /// the markers are Basic. Global Read (task 120, kept by EB-D-150) reached the Secure Record business unit under every layout, and with
+    /// task 089 a Secure record's rule set and record rules live there; the owner lowered it to Deep (EB-D-162, 2026-10-27), which stops at
+    /// the admin's business-unit subtree once UAC design section 5.2 makes Secure a sibling.
     /// </summary>
     private static readonly Dictionary<string, string> BillingAdminSet = new(StringComparer.Ordinal)
     {
-        ["prvReadsprk_ruleset"] = "Global", ["prvReadsprk_Policy"] = "Global", ["prvReadsprk_PolicyVersion"] = "Global",
+        ["prvReadsprk_ruleset"] = "Deep", ["prvReadsprk_Policy"] = "Deep", ["prvReadsprk_PolicyVersion"] = "Deep",
         ["prvCreatesprk_ruleset"] = "Basic", ["prvWritesprk_ruleset"] = "Basic", ["prvAppendsprk_ruleset"] = "Basic", ["prvAppendTosprk_ruleset"] = "Basic",
         ["prvCreatesprk_Policy"] = "Basic", ["prvWritesprk_Policy"] = "Basic", ["prvAppendsprk_Policy"] = "Basic", ["prvAppendTosprk_Policy"] = "Basic",
         ["prvCreatesprk_PolicyVersion"] = "Basic", ["prvWritesprk_PolicyVersion"] = "Basic", ["prvAppendsprk_PolicyVersion"] = "Basic",
@@ -68,14 +69,14 @@ public class RuleSetRolePrivilegeGuardTests
             + "to the owner:\n  " + string.Join("\n  ", violations));
     }
 
-    [Fact(DisplayName = "120 / D-76 / D-108: Spaarke Billing Administrator holds exactly the billing-admin set (Read Global, markers Basic)")]
+    [Fact(DisplayName = "120 / D-76 / D-108: Spaarke Billing Administrator holds exactly the billing-admin set (Read Deep, markers Basic)")]
     public void BillingAdministratorHoldsExactlyTheBillingAdminSetAtItsDepths()
     {
         var role = Assert.Single(SourceRoles(), r => r.Name == BillingAdministrator);
         var (missing, extra) = ExactSetFindings(role.Xml);
 
         Assert.True(missing.Count == 0 && extra.Count == 0,
-            $"{role.RelativePath} must hold exactly Read at Global and Create, Write, Append and AppendTo at Basic on sprk_ruleset, sprk_Policy "
+            $"{role.RelativePath} must hold exactly Read at Deep (EB-D-162) and Create, Write, Append and AppendTo at Basic on sprk_ruleset, sprk_Policy "
             + "and sprk_PolicyVersion (live name casing; uac-r2: Global markers would let a billing admin write past RuleSetService), plus only "
             + "the platform defaults; no Delete, Assign or Share, and nothing on the Procedure tables until task 121.\n  missing or at another "
             + "depth: " + string.Join(", ", missing)
@@ -111,8 +112,8 @@ public class RuleSetRolePrivilegeGuardTests
         Assert.Empty(clean.Missing);
         Assert.Empty(clean.Extra);
 
-        var wrongDepth = ExactSetFindings(BillingAdminRole(exact.Select(p => p.Item1 == "prvReadsprk_Policy" ? (p.Item1, "Deep") : p).ToList()));
-        Assert.Equal("prvReadsprk_Policy at Global (held at Deep)", Assert.Single(wrongDepth.Missing));
+        var wrongDepth = ExactSetFindings(BillingAdminRole(exact.Select(p => p.Item1 == "prvReadsprk_Policy" ? (p.Item1, "Global") : p).ToList()));
+        Assert.Equal("prvReadsprk_Policy at Deep (held at Global)", Assert.Single(wrongDepth.Missing));
         Assert.Empty(wrongDepth.Extra);
 
         var extraPrivilege = ExactSetFindings(BillingAdminRole(exact.Append(("prvDeletesprk_ruleset", "Basic")).ToList()));

@@ -109,6 +109,7 @@ Full rationale for each decision is in `notes/decisions-log.md`.
   - Guidelines, rate cards and procedures go in **Procedure Library** (internal only, indexed).
   - Export files go in **E-Billing Output Files** (not indexed).
   - Both use SPE, never Blob.
+  - **Superseded for files by EB-D-148 (2026-10-21, `notes/procedure-and-file-model.md` 3.4, 4):** invoice PDFs, supporting files, Procedure sources and export files are Stored Files in the Finance file store (090, provisioned with the stamp by 091). 092 retired `Finance:EbillingOutputContainerId`; task 124 retires `Finance:ProcedureLibraryContainerId` after 116 (EB-D-163). No new reader of either container.
 - 2026-10-14 — D-46 / D-49 / D-51 / D-53: extraction (Content Understanding custom analyzer `sprk_invoice_vN`, gpt-5.2) is separate from coding (`INVOICE-LINE-CODE@v1`, gpt-5.4-mini; gpt-5.6-luna is compared in 005).
 - 2026-10-14 — D-47: field confidence is combined from four signals: analyzer confidence, arithmetic consistency, reference-data match and model self-report.
 - 2026-10-14 — D-56: AP export default columns, with the mapping snapshotted per batch.
@@ -125,7 +126,7 @@ Full rationale for each decision is in `notes/decisions-log.md`.
 - 2026-10-15 — D-66 (confirmed): firms see guideline *content* — clause quotes on findings plus the SPA Billing Guidelines view — never the documents.
 - 2026-10-15 — Pipeline: WP1 schema tasks (010–028) each write their own idempotent Web API script under `scripts/ebilling/` and apply it to dev. **Only task 029** syncs SpaarkeMaster solution source, forms and views. After 029, `src/dataverse/solutions/SpaarkeMaster/**` is edited only by serial tasks: 015 and 026 (their entities), 070 (billing values on the `sprk_policyversion.sprk_ruletype` option set) and the deploy tasks 053, 079, 112, 136 and 153 (sitemap / navigation entries for the pages they deploy, plus any columns or tables their phase added after 029, using 029's export-to-temp procedure). No parallel task edits it.
 
-- 2026-10-15 — D-67: Procedure Library and Output Files container keys join `GraphModule.StampContainerSettingKeys` (app-only SPE writes allowed).
+- 2026-10-15 — D-67: Procedure Library and Output Files container keys join `GraphModule.StampContainerSettingKeys` (app-only SPE writes allowed). Being retired with the keys (092, 124; EB-D-163).
 - 2026-10-15 — D-68: external-identifier key = (firm, type, normalized value, core record).
 - 2026-10-15 — D-69: confidence weights seeded provisionally; validated in 161 / 162 and checked at UAT (163).
 - 2026-10-15 — D-70: CIAM users see only their own firm's invoices (`sprk_vendororg`), in addition to core-record and secure-root scoping (task 130; uac-r2 reviews).
@@ -163,7 +164,7 @@ None open from the prototype (F-2, F-7, F-8, F-9 decided as D-72 to D-75). Remai
   - Notify ontology-r1 when the `sprk_invoicestatus` retirement PR and the schema PRs open.
 - **unified-access-control-r2** reviews FR-05 (core-ancestor derivation) and FR-15. It last touched `InvoiceReviewService.cs`. It shares `Infrastructure/ExternalAccess/**`: `parallel-safe=false` on tasks that edit it, and run `/conflict-check` before every BFF PR.
 - **spaarke-SPA-external-access-platform-r3** shares the external SPA (`src/client/external-spa/**`) and `deploy-external-spa.yml`. Coordinate on the Invoices widget and the SPA notification feed.
-- **customer-provisioning-orchestration-r1** receives the hand-off for container provisioning in customer environments (task 028 files it). This is the spec's only unresolved question.
+- **customer-provisioning-orchestration-r1** received the hand-off for SPE container provisioning in customer environments (task 028, DEF-013 / #1967). EB-D-163 withdraws it: eBilling needs no SPE container on a stamp, only 091's file store; task 124 closes #1967 and tells them.
 - **notification-spine-r1 / ADR-047** — notifications (132) go through the spine.
 - **spaarkeai-tuning-and-feedback-r1** consumes our correction records later. Do not build anything for it in R1 beyond the D-64 record.
 - **Prototype** (`spaarke-prototype/projects/ebilling.r1`) is the reference UI for 108–111. Its components are mocks: map them to real shared components (WizardShell, FormModal, ConsoleKit, StatusBadge, AiFieldTag, PanelSplitter / useTwoPanelLayout, DataGrid). Never import from the prototype repo.

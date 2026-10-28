@@ -1294,6 +1294,12 @@ public sealed class OfficeVersionSaveWorld
     public List<CreateDocumentRequest> CreatedDocumentRequests { get; } = new();
 
     /// <summary>
+    /// The communications the Message-ID lookup (<c>GetCommunicationByInternetMessageIdAsync</c>) finds, by RFC Message-ID (ebilling-r1
+    /// task 095). Empty by default, so the lookup answers null as the loose mock always did.
+    /// </summary>
+    public Dictionary<string, Guid> CommunicationsByMessageId { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>
     /// SECURE records by LOGICAL name + id → the record's own SPE container (task 080 review, F1). Empty by default,
     /// which keeps every other test's registry answer "nothing is securable", exactly as before. When populated, the
     /// factory's <see cref="ISecurableEntityRegistry"/> double reports those LOGICAL names securable — and only the
@@ -2111,6 +2117,12 @@ public sealed class OfficeVersionSaveTestWebAppFactory : OfficeTestWebAppFactory
                     "sprk_document", It.IsAny<Microsoft.Xrm.Sdk.KeyAttributeCollection>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string _, Microsoft.Xrm.Sdk.KeyAttributeCollection keys, string[] _, CancellationToken _) =>
                     world.RetrieveDocumentByItemId((string)keys["sprk_graphitemid"]));
+            // ebilling-r1 task 095: the communication found by Message-ID (none unless a test registers one, as before).
+            dataverse
+                .Setup(d => d.GetCommunicationByInternetMessageIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string messageId, CancellationToken _) => world.CommunicationsByMessageId.TryGetValue(messageId, out var id)
+                    ? new Microsoft.Xrm.Sdk.Entity("sprk_communication", id)
+                    : null);
             dataverse
                 .Setup(d => d.UpdateAsync("sprk_document", It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
                 .Callback((string _, Guid id, Dictionary<string, object> fields, CancellationToken _) => world.ApplyGenericUpdate(id, fields))

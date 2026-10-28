@@ -27,7 +27,7 @@ namespace Sprk.Bff.Api.Api.Finance;
 /// <para><b>Depth (D-108, owner 2026-10-17).</b> Write at ANY depth counts: there is no Org-depth requirement. The check asks whether the
 /// caller holds the privilege, not at what depth. The "Spaarke Billing Administrator" role (task 120) holds the Create / Write markers
 /// at Basic on purpose (uac-r2): the writes run app-only through <see cref="RuleSetService"/>, so a deeper native Write would only let
-/// a billing admin edit rule sets and policies past its invariants. Read stays Global.</para>
+/// a billing admin edit rule sets and policies past its invariants. Read is Deep (owner EB-D-162, 2026-10-27; it was Global): the BFF reads these tables app-only, so no route depends on it.</para>
 /// <para>Privilege names are the live ones (spaarkedev1 <c>privilege</c> table, 2026-10-17): <c>sprk_ruleset</c> is lower case;
 /// <c>sprk_Policy</c> and <c>sprk_PolicyVersion</c> are not (as <c>OntologyAdminAuthoringService.AuthoringPrivilegeName</c>).</para>
 /// </remarks>

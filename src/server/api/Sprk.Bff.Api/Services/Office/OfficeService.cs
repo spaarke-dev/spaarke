@@ -38,7 +38,7 @@ namespace Sprk.Bff.Api.Services.Office;
 /// <para>Internal (task 018b): its constructor takes the internal <c>RecordCreationService</c>; the DI container builds it
 /// through <see cref="IOfficeService"/>, and every test reaches it through InternalsVisibleTo.</para>
 /// </remarks>
-internal class OfficeService : IOfficeService
+internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
 {
     // Task 060 (#1084): the save's job record (create, transitions, the idempotency lookup, the status read and the SSE
     // stream), stored on the Dataverse row instead of a static in-memory dictionary.
@@ -381,11 +381,55 @@ internal class OfficeService : IOfficeService
     }
 
     /// <inheritdoc />
-    public async Task<SaveResponse> SaveAsync(
+    public Task<SaveResponse> SaveAsync(
         SaveRequest request,
         string userId,
         HttpContext httpContext,
         CancellationToken cancellationToken = default)
+        => SaveCoreAsync(request, userId, httpContext, submission: null, cancellationToken);
+
+    /// <inheritdoc />
+    async Task<SubmissionEmailSaveOutcome> IOfficeSubmissionEmailSave.SaveEmailForSubmissionAsync(
+        SaveRequest request, IReadOnlyList<string> markedSha256, string userId, HttpContext httpContext, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(markedSha256);
+        if (request.ContentType != SaveContentType.Email || request.Email is null
+            || request.Email.SelectedAttachmentFileNames is not { Count: 0 } || request.IdempotencyKey is not null)
+        {
+            // Model §9.1 step 1 (uac-r2 F2-a): the submission's save never makes attachment Documents, and its duplicate key is the
+            // server's own. The caller sets both; anything else is a defect, refused before any write.
+            throw new ArgumentException(
+                "A submission save is an Email save with SelectedAttachmentFileNames = [] and no body idempotency key (task 095).",
+                nameof(request));
+        }
+
+        var state = new SubmissionSaveState { MarkedSha256 = markedSha256 };
+        var response = await SaveCoreAsync(request, userId, httpContext, state, cancellationToken);
+        return new SubmissionEmailSaveOutcome
+        {
+            Response = response,
+            Refusal = state.Refusal,
+            EmlDocumentId = state.EmlDocumentId,
+            CommunicationId = state.CommunicationId,
+            ContentDuplicate = state.ContentDuplicate,
+            EmlParts = state.EmlParts,
+        };
+    }
+
+    /// <summary>
+    /// The save. <paramref name="submission"/> is null for every <c>/office/save</c> request; the from-email submission
+    /// (ebilling-r1 task 095, <see cref="IOfficeSubmissionEmailSave"/>) passes its state, which changes exactly: the attachment list
+    /// the <c>.eml</c> is built from stays the one the submission validated; an email whose communication cannot be identified is
+    /// refused before the job row; the <c>.eml</c> is created own-Restricted with the submission marker; and the state records the
+    /// <c>.eml</c>, its communication and its parts.
+    /// </summary>
+    private async Task<SaveResponse> SaveCoreAsync(
+        SaveRequest request,
+        string userId,
+        HttpContext httpContext,
+        SubmissionSaveState? submission,
+        CancellationToken cancellationToken)
     {
         _logger.LogInformation(
             "Save requested for {ContentType} by user {UserId}",
@@ -405,7 +449,18 @@ internal class OfficeService : IOfficeService
         // Fetch email body and attachments from Graph API if missing
         if (request.ContentType == SaveContentType.Email && request.Email != null)
         {
+            var sentEmail = request.Email;
             request = await _emailEnricher.EnrichEmailFromGraphAsync(request, httpContext, cancellationToken);
+
+            if (submission is not null && request.Email is { } enriched)
+            {
+                // Task 095: the submission validated the marks and their bytes against the attachments it was SENT. A Graph read
+                // (an empty body) may replace that list, so the .eml is built from the sent list, and no attachment Document is made.
+                request = request with
+                {
+                    Email = enriched with { Attachments = sentEmail.Attachments, SelectedAttachmentFileNames = new List<string>() },
+                };
+            }
         }
 
         // Fetch attachment content from Graph API if missing (single attachment save). Task 130: the same read also yields
@@ -543,6 +598,39 @@ internal class OfficeService : IOfficeService
                 // Best-effort: it never fails the save; a refusal or failure is reported in SaveResponse.EmailFiling (task 131).
                 emailFiling = ToEmailFilingOutcome(await _reconciledEmailFiling.FileIfUnfiledAsync(
                     request, capture, TokenHelper.ExtractBearerTokenOrNull(httpContext), cancellationToken));
+
+                if (submission is not null)
+                {
+                    // Task 095 (model §9.1 F1-c): the submission's .eml is created linked to its communication or not at all. The
+                    // capture is best-effort and returns none on a fault, so the Message-ID lookup decides; still none is refused
+                    // here, BEFORE the job row and the upload (never task 130's save-Restricted fallback).
+                    if (emailCommunicationId is not { } captured || captured == Guid.Empty)
+                    {
+                        var (found, unavailable) = await _documentPersistence.FindCommunicationForSubmissionAsync(
+                            OfficeEmailEnricher.ResolveRfcMessageId(request.Email!), cancellationToken);
+                        emailCommunicationId = found;
+                        if (found is null)
+                        {
+                            submission.Refusal = unavailable
+                                ? SubmissionEmailSaveRefusal.CommunicationUnavailable
+                                : SubmissionEmailSaveRefusal.NoCommunication;
+                            _logger.LogWarning(
+                                "Submission save refused before any write: no communication for the email ({Refusal})", submission.Refusal);
+                            return new SaveResponse
+                            {
+                                Success = false,
+                                Error = new SaveError
+                                {
+                                    Code = OfficeErrorCodes.DataverseError,
+                                    Message = "The email could not be identified, so nothing was saved.",
+                                    Retryable = unavailable,
+                                },
+                            };
+                        }
+                    }
+
+                    submission.CommunicationId = emailCommunicationId;
+                }
             }
             else if (request.ContentType == SaveContentType.Attachment
                      && attachmentParentEmail is { } parentEmail
@@ -753,6 +841,42 @@ internal class OfficeService : IOfficeService
                     case SaveContentType.Email when request.Email != null:
                         // Build .eml file from email metadata using MimeKit
                         contentStream = OfficeEmailEnricher.BuildEmlFromMetadata(request.Email);
+                        if (submission is not null)
+                        {
+                            // Task 095 (model §9.1 step 2): the parts of the .eml exactly as uploaded, so the submission names each
+                            // marked attachment by the ordinal, name and SHA-256 the job will find when it reads the .eml back.
+                            submission.EmlParts = EmlMimeParts.Read(contentStream, cancellationToken);
+                            contentStream.Position = 0;
+
+                            // 095 review F1: every marked part must be in the .eml byte-for-byte (MIME may rewrite a part, or carry
+                            // it as something the reader does not see as an attachment). Checked here, after the build and BEFORE
+                            // the upload and the document create; the job row is recorded Failed so a retry is not its duplicate.
+                            if (!submission.PreservesEveryMarkedPart())
+                            {
+                                submission.Refusal = SubmissionEmailSaveRefusal.AttachmentNotPreserved;
+                                _logger.LogWarning(
+                                    "Submission save refused before the upload: the built .eml does not carry every marked part (job {JobId})", jobId);
+                                jobRecord = jobRecord with
+                                {
+                                    Status = JobStatus.Failed,
+                                    CurrentPhase = "AttachmentNotPreserved",
+                                    CompletedAt = DateTimeOffset.UtcNow
+                                };
+                                await _jobs.RecordAsync(jobRecord, "A marked attachment was not preserved in the built .eml", cancellationToken);
+                                await contentStream.DisposeAsync();
+                                return new SaveResponse
+                                {
+                                    Success = false,
+                                    Error = new SaveError
+                                    {
+                                        Code = OfficeErrorCodes.InternalError,
+                                        Message = "A marked attachment could not be kept unchanged in the saved email, so nothing was saved.",
+                                        Retryable = false
+                                    }
+                                };
+                            }
+                        }
+
                         // Task 046 (b): a SYSTEM-DERIVED name is stored with a short unique suffix, because the
                         // path-keyed Replace upload below would otherwise let a second same-subject, same-date
                         // email overwrite the first. A name the user typed is stored exactly as today.
@@ -1041,7 +1165,15 @@ internal class OfficeService : IOfficeService
                     // when the capture produced nothing (ParentEmailId is an Exchange item id whenever Graph read it).
                     emailMessageIdFallback: attachmentParentEmail is { } parentForLookup
                         ? OfficeEmailEnricher.ResolveRfcMessageId(parentForLookup)
-                        : null);
+                        : null,
+                    // Task 095: the from-email submission's .eml is own-Restricted and marked in this create.
+                    submissionNarrowing: submission is not null);
+
+                if (submission is not null)
+                {
+                    submission.ContentDuplicate = wasContentDuplicate;
+                    submission.EmlDocumentId = wasContentDuplicate ? null : documentId;
+                }
 
                 // FR-C3 (email-communication-intelligence-r2, R-3): the content is byte-identical to an existing
                 // canonical document (returned as `documentId`). No second document was created — and there is

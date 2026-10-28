@@ -162,6 +162,14 @@ public static class FinanceModule
         // and again at commit (the persister below), over uac-r2's SecureChildShareSynchronizer.SecureRootsAboveAsync. Concrete (ADR-010: one
         // implementation). Scoped like the synchronizer it composes (ExternalAccessModule); every dependency is registered unconditionally.
         services.AddScoped<ExistingDocumentIsolationCheck>();
+        // Submit Invoice from an email (ebilling-r1 task 095, model §9.1): the from-email route's orchestration (marks, firm, replay, the
+        // in-process Office save, the .eml's resolution), scoped like its scoped dependencies (the Office save, InvoiceSubmissionService).
+        // The seam onto task 094's Submit Invoice operation is the not-yet-available stand-in until 094 merges (the route answers 503
+        // ebilling.submission.failed before any write); 094 replaces this one registration. The job's byte read of the .eml (094 calls it
+        // at staging) is scoped like IGenericEntityService and SpeFileStore. All unconditional (flag rule above).
+        services.AddScoped<FromEmailSubmissionService>();
+        services.AddSingleton<ISubmitInvoiceFromEmail, SubmitInvoiceFromEmailNotYetAvailable>();
+        services.AddScoped<EmlMarkedPartReader>();
         // Billing Decision Records (ebilling-r1 task 074, FR-30, D-75, D-100, D-101): the one Finance-side owner of a billing decision's record,
         // over the writer's additive WriteBillingDecisionAsync. Concrete (ADR-010: no interface, one implementation). Singleton: it holds no
         // state and its dependencies are singletons (DecisionRecordWriter, SignalsModule; IIdentityNormalizationService, MembershipModule, for

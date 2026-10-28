@@ -21,9 +21,9 @@
     <RolePrivilege name="prvReadSdkMessageProcessingStepImage" level="Global" />
     <RolePrivilege name="prvReadSharePointData" level="Global" />
     <RolePrivilege name="prvReadSharePointDocument" level="Global" />
-    <RolePrivilege name="prvReadsprk_Policy" level="Global" />
-    <RolePrivilege name="prvReadsprk_PolicyVersion" level="Global" />
-    <RolePrivilege name="prvReadsprk_ruleset" level="Global" />
+    <RolePrivilege name="prvReadsprk_Policy" level="Deep" />
+    <RolePrivilege name="prvReadsprk_PolicyVersion" level="Deep" />
+    <RolePrivilege name="prvReadsprk_ruleset" level="Deep" />
     <RolePrivilege name="prvWriteSharePointData" level="Global" />
     <RolePrivilege name="prvWritesprk_Policy" level="Basic" />
     <RolePrivilege name="prvWritesprk_PolicyVersion" level="Basic" />

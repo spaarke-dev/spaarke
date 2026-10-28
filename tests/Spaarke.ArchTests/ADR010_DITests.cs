@@ -399,7 +399,17 @@ public class ADR010_DITests
         // steps (Completed / Retry / Refused / SubmissionMissing branches and the preflight refusal) as they fake the processor and the
         // persister; the real component needs the concrete SignalWriter, recorder and job queue. Falsifiable: if part E's handler tests
         // drive the real after-steps, register the concrete and lower to 168.
-        const int knownOneToOneCeiling = 169;
+        // ───────── Ceiling RAISED 169 → 171, 2026-10-27 (ebilling-r1 task 095; +2 interfaces) ─────────
+        // ISubmitInvoiceFromEmail -> SubmitInvoiceFromEmailNotYetAvailable. Seam justification: the brief requires ONE internal seam for "submit
+        // this source to the Submit Invoice operation" so 095 ships before 094; 094 registers its adapter in place of the stand-in, and 095's
+        // service and contract tests fake it. Falsifiable: once 094's adapter is the only implementation AND the tests drive it, register the
+        // concrete and lower by 1.
+        // IOfficeSubmissionEmailSave -> OfficeService. Seam justification: the Finance service saves the email through the Office save without
+        // depending on the whole OfficeService (its tests fake the save outcome); the real save is proven once, in
+        // OfficeSubmissionEmailSaveContractTests. Falsifiable: if the from-email tests drive the real OfficeService, lower by 1.
+        // A third 095 interface (IEntityAccessTarget, for EntityAccessFilter) was replaced by a concrete type check (ADR-010 Path C).
+        // Measured: the printed list at 172 before that removal, 171 after.
+        const int knownOneToOneCeiling = 171;
 
         Assert.True(
             oneToOneInterfaces.Count <= knownOneToOneCeiling,
