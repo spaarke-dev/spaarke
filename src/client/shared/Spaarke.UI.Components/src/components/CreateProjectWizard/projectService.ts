@@ -15,6 +15,7 @@
  * @see IDataService — high-level data access abstraction (no IWebApi dependency)
  */
 
+import { describeWebApiCreateError } from '../../utils/webApiCreateError';
 import type { ICreateProjectFormState } from './projectFormTypes';
 import type { ILookupItem } from '../../types/LookupTypes';
 import type { IDataService } from '../../types/serviceInterfaces';
@@ -382,12 +383,12 @@ export class ProjectService {
       };
     } catch (err) {
       console.error('[ProjectService] createRecord error:', err);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const errObj = err as any;
-      const message = errObj?.message || (err instanceof Error ? err.message : 'Unknown error');
+      // #2382: a privilege refusal becomes one plain sentence; the full error is logged above.
+      const described = describeWebApiCreateError(err, 'project');
+      const message = described.message;
       return {
         success: false,
-        errorMessage: `Failed to create project record: ${message}`,
+        errorMessage: described.isAccessDenied ? message : `Failed to create project record: ${message}`,
         warnings,
       };
     }

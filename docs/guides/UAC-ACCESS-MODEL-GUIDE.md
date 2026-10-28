@@ -375,9 +375,9 @@ Assigned-To automatic grants are not limited by anyone's role.
 
 | Role | What it holds (UAC-relevant) | Purpose |
 |---|---|---|
-| **Spaarke Core User** | Create, Read, Write, Delete, Assign, Append, AppendTo at Deep on matter, project, work assignment and document; **Share** at Deep on matter, project and work assignment (not document); Read on the grant table; no privilege on `sprk_noaccessentry` | The ordinary internal user; can manage access |
-| **Spaarke Basic User** | Read and AppendTo at Deep on matter, project, work assignment and document; Read on the grant table; no Write or Share | Default role for B2B guest users; cannot manage access |
-| **Spaarke Access Administrator** | Create, Read, Write, Append, AppendTo on `sprk_noaccessentry` at Global | Authors No Access entries; assigned together with a role that holds Share |
+| **Spaarke Core User** | Create, Read, Write, Delete, Assign, Append, AppendTo at Deep on matter, project, work assignment and document; **Share** at Deep on matter, project and work assignment (not document); Read on the grant table; no privilege on `sprk_noaccessentry`; Read and Share only on `sprk_contactorganization`; AppendTo at its Read depth on every table the create wizards link (`config/core-user-wizard-linking-role.json`) | The ordinary internal user; can manage access |
+| **Spaarke Basic User** | Read and AppendTo at Deep on matter, project, work assignment and document; Read on the grant table; Read and Share only on `sprk_contactorganization`; no Write or Share | Default role for B2B guest users; cannot manage access |
+| **Spaarke Access Administrator** | Create, Read, Write, Append, AppendTo on `sprk_noaccessentry` at Global; Create, Read, Write, Append on `sprk_contactorganization` at Global | Authors No Access entries; adds and ends contact-organization memberships (no other Spaarke role writes them); assigned together with a role that holds Share |
 | **Secure Record Owner** | User (Basic) depth on the secure table set | Held only by the Secure Record Owners team; created by provisioning, not in the solution |
 
 Partners are contacts, not systemusers, and hold no Dataverse role.
