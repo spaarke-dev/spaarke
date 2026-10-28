@@ -321,6 +321,71 @@ public class SecureChildOrdinaryParentMoveTests
         _world.OwnerWrites.Should().BeEmpty();
     }
 
+    // ── UAC task 194b V-fix 3: a copy's canonical (sprk_document.sprk_canonicaldocument) is a Secure-only parent ──────────
+    // The reconciler asks the writers' question (RecordOwnershipContext.SecureOnlyParents): the canonical joins secure-if-any
+    // only and is never the copy's primary, so an ordinary canonical's move never takes the copy with it (task 146's case).
+
+    [Fact(DisplayName = "194b V-fix 3 must not fire: an UNFILED copy of a document under the moved matter takes the unfiled answer — it is never moved to B with its canonical")]
+    public async Task AnUnfiledCopyOfACanonicalUnderTheMovedMatter_IsNotMoved()
+    {
+        var copy = Guid.NewGuid();
+        MatterMovedToB();
+        Row("sprk_document", DocumentId, TeamRef(GeneralTeam), ("sprk_matter", Matter, MatterId));
+        Row("sprk_document", copy, TeamRef(GeneralTeam), ("sprk_canonicaldocument", "sprk_document", DocumentId));
+
+        var report = await Reconciler().ReconcileOrdinaryParentMoveAsync(
+            Matter, MatterId, SecureChildReconcileMode.Apply, maxWrites: 200, CancellationToken.None);
+
+        _world.OwnerOf("sprk_document", DocumentId).Should().Be(DataversePrincipalRef.Team(TeamB), "the canonical follows its matter");
+        _world.OwnerOf("sprk_document", copy).Should().Be(DataversePrincipalRef.Team(GeneralTeam),
+            "the canonical is not the copy's primary: an unfiled copy keeps the unfiled answer, never B's business unit");
+        _world.OwnerWrites.Select(w => w.Id).Should().Equal(DocumentId);
+        report.Changes.Should().NotContain(c => c.Id == copy && c.TargetTeamId == TeamB);
+        report.Status.Should().Be(SecureChildReconcileStatus.Completed, report.Detail);
+    }
+
+    [Fact(DisplayName = "194b V-fix 3 must not fire: a copy filed under matter A, whose canonical is under the moved matter, stays with A")]
+    public async Task ACopyFiledUnderAnotherMatter_OfACanonicalUnderTheMovedMatter_StaysWithItsOwnMatter()
+    {
+        var matterA = Guid.NewGuid();
+        var copy = Guid.NewGuid();
+        MatterMovedToB();
+        _world.Add(Matter, matterA, ("owningteam", TeamRef(GeneralTeam)), ("sprk_issecure", false));
+        Row("sprk_document", DocumentId, TeamRef(GeneralTeam), ("sprk_matter", Matter, MatterId));
+        Row("sprk_document", copy, TeamRef(GeneralTeam),
+            ("sprk_canonicaldocument", "sprk_document", DocumentId), ("sprk_matter", Matter, matterA));
+
+        var report = await Reconciler().ReconcileOrdinaryParentMoveAsync(
+            Matter, MatterId, SecureChildReconcileMode.Apply, maxWrites: 200, CancellationToken.None);
+
+        _world.OwnerOf("sprk_document", copy).Should().Be(DataversePrincipalRef.Team(GeneralTeam), "its primary is matter A");
+        _world.OwnerWrites.Select(w => w.Id).Should().Equal(DocumentId);
+        report.Changes.Should().NotContain(c => c.Id == copy && c.TargetTeamId == TeamB);
+    }
+
+    [Fact(DisplayName = "194b V-fix 3 must not fire: a copy filed under the moved matter whose canonical is under a SECURE matter is reported for the secure pass, never given B")]
+    public async Task ACopyUnderTheMovedMatter_OfASecureCanonical_IsLeftToTheSecurePass()
+    {
+        var secureMatter = Guid.NewGuid();
+        var secureCanonical = Guid.NewGuid();
+        var copy = Guid.NewGuid();
+        MatterMovedToB();
+        _world.SecureRoot(Matter, secureMatter)
+            .SecureChild("sprk_document", secureCanonical, ("sprk_matter", Matter, secureMatter));
+        Row("sprk_document", copy, TeamRef(GeneralTeam),
+            ("sprk_matter", Matter, MatterId), ("sprk_canonicaldocument", "sprk_document", secureCanonical));
+
+        var report = await Reconciler().ReconcileOrdinaryParentMoveAsync(
+            Matter, MatterId, SecureChildReconcileMode.Apply, maxWrites: 200, CancellationToken.None);
+
+        _world.OwnerOf("sprk_document", copy).Should().Be(DataversePrincipalRef.Team(GeneralTeam),
+            "only the secure pass moves a row INTO isolation");
+        report.Changes.Should().ContainSingle(c => c.Id == copy).Which.Should().Match<SecureChildRowChange>(c =>
+            c.Outcome == SecureChildRowOutcome.Untouched && c.TargetTeamId == _world.OwnerTeam
+            && c.Detail!.Contains("Secure Record owner team"));
+        _world.OwnerWrites.Should().BeEmpty();
+    }
+
     [Fact(DisplayName = "194 must not fire: a user-owned child is reported (its rule answer is in another business unit), never written")]
     public async Task AUserOwnedChild_IsReported_NotMoved()
     {

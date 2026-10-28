@@ -143,6 +143,9 @@ public class ChildRowOwnershipBuilderGuardTests
         "set_" + nameof(RecordOwnershipContext.Parents),
         "set_" + nameof(RecordOwnershipContext.TargetEntityLogicalName),
         "set_" + nameof(RecordOwnershipContext.TargetRecordId),
+        // UAC task 194b V-fix 3: the Secure-only parents (a copy's canonical) are part of the question, read from the row by
+        // the same builders (RecordOwnershipResolver.IsSecureOnlyParent) — never set by hand outside them.
+        "set_" + nameof(RecordOwnershipContext.SecureOnlyParents),
     ];
 
     /// <summary>

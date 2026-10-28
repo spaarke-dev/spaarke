@@ -2130,7 +2130,8 @@ public sealed class SecureChildReconciler
             var inPass = ordered.Select(r => (r.LogicalName, r.Id)).ToHashSet();
             var parentsOf = ordered.ToDictionary(
                 r => (r.LogicalName, r.Id),
-                r => ContextFor(r).Parents
+                // V-fix 3: a Secure-only parent (a copy's canonical) is one its answer rests on too.
+                r => ContextFor(r).Parents.Concat(ContextFor(r).SecureOnlyParents)
                     .Select(p => (p.EntityLogicalName.ToLowerInvariant(), p.RecordId))
                     .Where(inPass.Contains)
                     .ToArray());
@@ -2664,6 +2665,11 @@ public sealed class SecureChildReconciler
             return new RecordOwnershipContext
             {
                 Parents = parents.Distinct().ToArray(),
+                // UAC task 194b V-fix 3: the row's Secure-only parents (a copy's canonical) join secure-if-any only, as the writer's
+                // question holds them (RecordOwnershipContext.ForRow) — never the primary, so an unfiled copy keeps its creator.
+                SecureOnlyParents = IsGrant(row.LogicalName)
+                    ? Array.Empty<RecordOwnershipParent>()
+                    : QuestionFor(row).Context.SecureOnlyParents,
                 WhenUnfiled = UnfiledOwnership.KeepCreator,
                 UnsecuringRoot = _unsecuring ? _root : null,
                 PlannedOwningTeams = _planned.Count > 0 ? new Dictionary<RecordOwnershipParent, Guid>(_planned) : null,

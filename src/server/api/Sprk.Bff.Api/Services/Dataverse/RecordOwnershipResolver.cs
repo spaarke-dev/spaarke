@@ -271,6 +271,15 @@ public sealed record RecordOwnershipContext
     /// </summary>
     public IReadOnlyList<RecordOwnershipParent> Parents { get; init; } = Array.Empty<RecordOwnershipParent>();
 
+    /// <summary>
+    /// UAC task 194b V-fix 3 (coordinator ruling): the parents that count for SECURE-IF-ANY only
+    /// (<see cref="RecordOwnershipResolver.IsSecureOnlyParent"/>: an editable copy's <c>sprk_canonicaldocument</c>). Any one of
+    /// them under a Secure record makes the row Secure, and one that cannot be read refuses, as any parent does. They are never
+    /// the primary and never decide an ordinary row's business unit: a row with no other parent takes the unfiled answer.
+    /// Filled by <see cref="ForRow"/> (and so <see cref="ForChild"/>) and <see cref="ForExistingRowAsync"/>, never by hand.
+    /// </summary>
+    public IReadOnlyList<RecordOwnershipParent> SecureOnlyParents { get; init; } = Array.Empty<RecordOwnershipParent>();
+
     /// <summary>The acting user's Dataverse systemuserid, when known (HTTP paths that already resolved it).</summary>
     public Guid? CallerSystemUserId { get; init; }
 
@@ -406,6 +415,27 @@ public sealed record RecordOwnershipContext
         return PrimaryOrdered(row.LogicalName, LookupsOf(row), PairIdOf(row));
     }
 
+    /// <summary>
+    /// UAC task 194b V-fix 3: the row's Secure-only parents (<see cref="SecureOnlyParents"/>), which
+    /// <see cref="OrderedParentsOf"/> leaves out — the other half of the question the reconciler asks about the written row.
+    /// </summary>
+    public static IReadOnlyList<RecordOwnershipParent> SecureOnlyParentsOf(Entity row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        return SecureOnlyOf(row.LogicalName, LookupsOf(row));
+    }
+
+    /// <summary>The ownership parents held by <paramref name="table"/>'s Secure-only columns, distinct.</summary>
+    private static IReadOnlyList<RecordOwnershipParent> SecureOnlyOf(
+        string table, IEnumerable<KeyValuePair<string, RecordOwnershipParent?>> lookups) =>
+        lookups
+            .Where(l => l.Value is { IsSpecified: true } parent
+                        && RecordOwnershipResolver.IsOwnershipParent(parent.EntityLogicalName)
+                        && RecordOwnershipResolver.IsSecureOnlyParent(table, l.Key))
+            .Select(l => l.Value! with { EntityLogicalName = l.Value!.EntityLogicalName.Trim().ToLowerInvariant() })
+            .Distinct()
+            .ToArray();
+
     /// <summary>Every lookup <paramref name="row"/> holds, column → the record it names (any table; the core filters).</summary>
     internal static IEnumerable<KeyValuePair<string, RecordOwnershipParent?>> LookupsOf(Entity row) =>
         row.Attributes
@@ -430,7 +460,9 @@ public sealed record RecordOwnershipContext
         var filed = lookups
             .Where(l => l.Value is { IsSpecified: true } parent
                         && RecordOwnershipResolver.IsOwnershipParent(parent.EntityLogicalName)
-                        && !RecordOwnershipResolver.IsCitation(table, l.Key))
+                        && !RecordOwnershipResolver.IsCitation(table, l.Key)
+                        // V-fix 3: a Secure-only parent is never in the primary order (SecureOnlyParents carries it).
+                        && !RecordOwnershipResolver.IsSecureOnlyParent(table, l.Key))
             .Select(l => new KeyValuePair<string, RecordOwnershipParent>(l.Key, l.Value!))
             .ToArray();
         var subject = SubjectColumnOf(
@@ -600,10 +632,12 @@ public sealed record RecordOwnershipContext
         ArgumentNullException.ThrowIfNull(row);
         ArgumentNullException.ThrowIfNull(reads);
         var rest = OrderedParentsOf(row);
+        // V-fix 3: the Secure-only parents ride with every question built here (only sprk_document holds one today).
+        var secureOnly = SecureOnlyParentsOf(row);
         if (!CorePairTables.Contains(row.LogicalName))
-            return new ExistingRowOwnership(ForParents(rest));
+            return new ExistingRowOwnership(ForParents(rest) with { SecureOnlyParents = secureOnly });
 
-        var undetermined = new ExistingRowOwnership(ForParents(rest));
+        var undetermined = new ExistingRowOwnership(ForParents(rest) with { SecureOnlyParents = secureOnly });
         var typeRef = row.GetAttributeValue<EntityReference>(CoreRecordTypeColumn)?.Id is { } t && t != Guid.Empty ? t : (Guid?)null;
         var coreText = row.GetAttributeValue<string>(CoreRecordIdColumn)?.Trim();
         Guid? coreId = Guid.TryParse(coreText, out var parsed) && parsed != Guid.Empty ? parsed : null;
@@ -636,7 +670,7 @@ public sealed record RecordOwnershipContext
         {
             // Fix round F1-c: the assignee rule is the To Do job's, and only for the rows that job keeps (its own predicate);
             // every other no-core row is decided over its parents, as its writer decided it ([subject, ..SignalSubjects]).
-            var noCore = ForParents(new[] { subject }.Concat(signalSubjects).Concat(rest));
+            var noCore = ForParents(new[] { subject }.Concat(signalSubjects).Concat(rest)) with { SecureOnlyParents = secureOnly };
             if (subject is null || !string.Equals(subject.EntityLogicalName, TodoTable, StringComparison.OrdinalIgnoreCase))
                 return Asked(new ExistingRowOwnership(noCore));
             if (reads.Links is null || reads.CoreAncestors is null)
@@ -687,7 +721,8 @@ public sealed record RecordOwnershipContext
             parents.AddRange(stamps.Stamps.Select(stamp => new RecordOwnershipParent(stamp.EntityType, stamp.RecordId)));
         }
 
-        return Asked(new ExistingRowOwnership(ForParents(parents.Concat(signalSubjects).Concat(rest))));
+        return Asked(new ExistingRowOwnership(
+            ForParents(parents.Concat(signalSubjects).Concat(rest)) with { SecureOnlyParents = secureOnly }));
     }
 
     internal const string DecisionRecordTable = "sprk_decisionrecord";
@@ -763,7 +798,13 @@ public sealed record RecordOwnershipContext
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(table);
         ArgumentNullException.ThrowIfNull(lookups);
-        return ForParents(PrimaryOrdered(table.Trim().ToLowerInvariant(), lookups, pairId), callerObjectId, callerSystemUserId);
+        var name = table.Trim().ToLowerInvariant();
+        var held = lookups.ToArray();
+        // V-fix 3: a Secure-only lookup (an editable copy's canonical) joins secure-if-any only, never the primary order.
+        return ForParents(PrimaryOrdered(name, held, pairId), callerObjectId, callerSystemUserId) with
+        {
+            SecureOnlyParents = SecureOnlyOf(name, held),
+        };
     }
 
     /// <summary>
@@ -1659,6 +1700,25 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     public static bool IsCitation(string? table, string? column) =>
         table is not null && column is not null && CitationLookups.Contains((table, column));
 
+    /// <summary>
+    /// UAC task 194b V-fix 3 (coordinator ruling, 2026-10-28): lookups to an ownership-parent table that count for
+    /// SECURE-IF-ANY only — (table, column). The opposite rule to <see cref="CitationLookups"/>: a citation is left out of
+    /// secure-if-any; one of these is IN secure-if-any and OUT of the primary order. An editable copy's link to the
+    /// byte-identical canonical it was saved as (<c>sprk_document.sprk_canonicaldocument</c>, Compose and Office): a copy of
+    /// Secure content is Secure, but an ordinary canonical never decides the copy's business unit — following it would hand
+    /// the saver's own document to another record's team (task 146). The one definition the writers' question
+    /// (<see cref="RecordOwnershipContext.ForRow"/>), the reconciler's (<see cref="RecordOwnershipContext.ForExistingRowAsync"/>),
+    /// the re-file's (<see cref="ReparentAsync"/>) and the resolver's look-through read. The link is cut when the copy diverges
+    /// (graduate); a graduated copy keeps its owner until a re-file asks again (a known limit, task-194 notes).
+    /// </summary>
+    private static readonly HashSet<(string Table, string Column)> SecureOnlyLookups = new(
+        [("sprk_document", "sprk_canonicaldocument")], CitationComparer.Instance);
+
+    /// <summary>True when <paramref name="column"/> of <paramref name="table"/> is a Secure-only parent
+    /// (<see cref="SecureOnlyLookups"/>): in secure-if-any, never the primary.</summary>
+    public static bool IsSecureOnlyParent(string? table, string? column) =>
+        table is not null && column is not null && SecureOnlyLookups.Contains((table, column));
+
     private sealed class CitationComparer : IEqualityComparer<(string Table, string Column)>
     {
         public static readonly CitationComparer Instance = new();
@@ -1776,6 +1836,15 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         }
 
         // ── 2. Nothing named ──────────────────────────────────────────────────────────────────────────────
+        // V-fix 3: a row filed under nothing but a Secure-only parent (an unfiled copy of a canonical) is Secure when that
+        // parent is, and otherwise takes the unfiled answer below — never the Secure-only parent's business unit.
+        if (context.SecureOnlyParents.Count > 0
+            && await SecureDecisionAsync(Array.Empty<ParentFacts>(), context, committedParentReads, ct).ConfigureAwait(false)
+                is { } secureOnlyDecided)
+        {
+            return secureOnlyDecided;
+        }
+
         if (context.WhenUnfiled == UnfiledOwnership.KeepCreator)
         {
             return RecordOwnerResolution.Unchanged(
@@ -1967,16 +2036,18 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         }
 
         // UAC task 194b: in the table's primary order (RecordOwnershipContext.OrderedParentsOf), never the attribute order.
+        // V-fix 3: a Secure-only column (a copy's canonical) is asked for secure-if-any only, never in the primary order.
         var parents = WithInheritedParents(
             RecordOwnershipContext.InPrimaryOrder(
-                    request.EntityLogicalName, byColumn,
+                    request.EntityLogicalName, FilingColumns(request.EntityLogicalName, byColumn),
                     RecordOwnershipContext.SubjectColumnOf(
                         request.EntityLogicalName,
                         current.Attributes.TryGetValue(CoreAncestorResolver.RegardingRecordIdColumn, out var pairText) ? pairText as string : null,
                         column => byColumn.TryGetValue(column, out var heldParent) ? heldParent.RecordId : null))
                 .Select(c => c.Value).Concat(threadAfter),
             request);
-        var resolution = await ResolveReparentOwnerAsync(request, parents, ct).ConfigureAwait(false);
+        var secureOnlyAfter = SecureOnlyColumns(request.EntityLogicalName, byColumn);
+        var resolution = await ResolveReparentOwnerAsync(request, parents, secureOnlyAfter, ct).ConfigureAwait(false);
 
         if (resolution.IsRefused)
         {
@@ -1999,7 +2070,10 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             ? threadBefore
             : Array.Empty<RecordOwnershipParent>();
         var (exitRefusal, permittedToLeaveSecure, exitPermit) = await RefuseUnlessPermittedToLeaveSecureRootsAsync(
-            request, current, filedUnderBefore, parents, ownBefore, ownAfter, threadTheReconcileMayLeave, resolution, ct)
+            // V-fix 3: filed under, after the change, includes the Secure-only parents it still holds (as filedUnderBefore does),
+            // so keeping a copy's canonical is never read as leaving the canonical's secure root.
+            request, current, filedUnderBefore, parents.Concat(secureOnlyAfter).Distinct().ToArray(), ownBefore, ownAfter,
+            threadTheReconcileMayLeave, resolution, ct)
             .ConfigureAwait(false);
         if (exitRefusal is not null)
         {
@@ -2166,7 +2240,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// </remarks>
     private sealed record RowOwnership(
         string? Version, Guid? OwningTeam, Guid? OwningBusinessUnit, IReadOnlyCollection<RecordOwnershipParent> Parents,
-        IReadOnlyDictionary<string, Guid> LineageLookups);
+        IReadOnlyDictionary<string, Guid> LineageLookups, IReadOnlyList<RecordOwnershipParent> SecureOnlyParents);
 
     /// <summary>Every lineage-only lookup (<see cref="RecordReparent.LineageOnlyTargetOf"/>) <paramref name="row"/> holds,
     /// column → row id (#2143 round 3). An empty lookup is absent, as the every-column read returns it.</summary>
@@ -2231,6 +2305,16 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         return byColumn;
     }
 
+    /// <summary>V-fix 3: the columns of <paramref name="byColumn"/> that file the row (every one but a Secure-only parent).</summary>
+    private static IEnumerable<KeyValuePair<string, RecordOwnershipParent>> FilingColumns(
+        string table, IReadOnlyDictionary<string, RecordOwnershipParent> byColumn) =>
+        byColumn.Where(c => !IsSecureOnlyParent(table, c.Key));
+
+    /// <summary>V-fix 3: the Secure-only parents of <paramref name="byColumn"/> (<see cref="IsSecureOnlyParent"/>), distinct.</summary>
+    private static RecordOwnershipParent[] SecureOnlyColumns(
+        string table, IReadOnlyDictionary<string, RecordOwnershipParent> byColumn) =>
+        byColumn.Where(c => IsSecureOnlyParent(table, c.Key)).Select(c => c.Value).Distinct().ToArray();
+
     /// <summary><paramref name="ownParents"/> plus the request's <see cref="RecordReparent.InheritedParents"/>, distinct.</summary>
     private static RecordOwnershipParent[] WithInheritedParents(
         IEnumerable<RecordOwnershipParent> ownParents, RecordReparent request) =>
@@ -2242,11 +2326,13 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// <summary>The owner a re-filed row takes from <paramref name="parents"/>, for the request's caller — from parent facts
     /// read committed (#2143 round 3, K1: the settle and put-back decisions are taken from them).</summary>
     private Task<RecordOwnerResolution> ResolveReparentOwnerAsync(
-        RecordReparent request, IReadOnlyList<RecordOwnershipParent> parents, CancellationToken ct) =>
+        RecordReparent request, IReadOnlyList<RecordOwnershipParent> parents, IReadOnlyList<RecordOwnershipParent> secureOnly,
+        CancellationToken ct) =>
         ResolveOwnerOnlyAsync(
             new RecordOwnershipContext
             {
                 Parents = parents,
+                SecureOnlyParents = secureOnly, // V-fix 3: secure-if-any only
                 CallerSystemUserId = request.CallerSystemUserId,
                 CallerObjectId = request.CallerObjectId,
                 WhenUnfiled = request.WhenUnfiled,
@@ -2280,10 +2366,12 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             row.GetAttributeValue<EntityReference>(OwningBusinessUnitColumn)?.Id,
             WithInheritedParents(
                 RecordOwnershipContext.InPrimaryOrder(
-                        request.EntityLogicalName, OwnershipParentColumnsOf(row), RecordOwnershipContext.SubjectColumnOf(row))
+                        request.EntityLogicalName, FilingColumns(request.EntityLogicalName, OwnershipParentColumnsOf(row)),
+                        RecordOwnershipContext.SubjectColumnOf(row))
                     .Select(c => c.Value).Concat(threadParents),
                 request),
-            LineageOnlyLookupsOf(request.EntityLogicalName, row));
+            LineageOnlyLookupsOf(request.EntityLogicalName, row),
+            SecureOnlyColumns(request.EntityLogicalName, OwnershipParentColumnsOf(row)));
     }
 
     /// <summary>
@@ -2345,7 +2433,8 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
 
             // F1-a: re-derived on EVERY attempt, from the parents read now — never the answer from before the change, which a
             // parent made Secure since (SecureChildReconciler re-owning the row first) would turn into a stale ordinary owner.
-            var target = await ResolveReparentOwnerAsync(request, state.Parents.ToArray(), ct).ConfigureAwait(false);
+            var target = await ResolveReparentOwnerAsync(request, state.Parents.ToArray(), state.SecureOnlyParents, ct)
+                .ConfigureAwait(false);
             if (!parentsAsResolved)
             {
                 _logger.LogWarning(
@@ -2501,7 +2590,8 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                 $"The {request.EntityLogicalName} {request.RecordId:D} being re-filed no longer exists, so its owner could "
                 + "not be settled (#2143).");
 
-        var freshTarget = await ResolveReparentOwnerAsync(request, fresh.Parents.ToArray(), ct).ConfigureAwait(false);
+        var freshTarget = await ResolveReparentOwnerAsync(request, fresh.Parents.ToArray(), fresh.SecureOnlyParents, ct)
+            .ConfigureAwait(false);
         var filingIsOwn = FiledAsResolved(fresh, resolvedFrom) && SameLineage(before.LineageLookups, fresh.LineageLookups);
         if (freshTarget.IsSecureOwner)
         {
@@ -3436,7 +3526,8 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             {
                 facts[0].Parent,
             };
-            var parentFiling = await ReadOwnershipParentsOfAsync(facts[0].Parent, committedReads, ct).ConfigureAwait(false);
+            var parentFiling = await ReadOwnershipParentsOfAsync(facts[0].Parent, committedReads, ct, withSecureOnly: false)
+                .ConfigureAwait(false);
             if (parentFiling is null)
             {
                 return RecordOwnerResolution.Refused(
@@ -3472,6 +3563,57 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             }
         }
 
+        // V-fix 3: the secure-if-any decision (with the Secure-only parents) is the one helper the no-parent path shares.
+        if (await SecureDecisionAsync(facts, context, committedReads, ct).ConfigureAwait(false) is { } decided)
+            return decided;
+
+        if (primaryUndecided is not null)
+        {
+            _logger.LogWarning(
+                "Refusing to resolve an owning team: no parent is secure, and the primary parent {Entity} {RecordId} could not be "
+                + "looked through (a loop or the depth bound), so the ordinary business unit cannot be decided (194b A3).",
+                facts[0].Parent.EntityLogicalName, facts[0].Parent.RecordId);
+            return RecordOwnerResolution.Refused(RecordOwnerRefusal.ParentUnresolved, primaryUndecided);
+        }
+
+        return await ResolveDefaultOwnerTeamAsync(facts[0].BusinessUnitId, ct, context.LookupCache).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Secure-if-any over <paramref name="facts"/> and <paramref name="context"/>'s Secure-only parents
+    /// (<see cref="RecordOwnershipContext.SecureOnlyParents"/>, V-fix 3), with the lineage above every parent that is a child
+    /// and not team-owned: a REFUSAL (an unreadable parent or ancestor, an ambiguous Secure Record business unit, a parent
+    /// flagged secure but not isolated) or the Secure team's answer; <c>null</c> when nothing is secure, so the ordinary rule
+    /// (the primary's business unit, never a Secure-only parent's) or the unfiled answer decides.
+    /// </summary>
+    private async Task<RecordOwnerResolution?> SecureDecisionAsync(
+        IReadOnlyList<ParentFacts> facts, RecordOwnershipContext context, bool committedReads, CancellationToken ct)
+    {
+        var all = new List<ParentFacts>(facts);
+        foreach (var secureOnly in context.SecureOnlyParents)
+        {
+            if (!secureOnly.IsSpecified || !IsOwnershipParent(secureOnly.EntityLogicalName))
+                continue;
+            var parent = secureOnly with { EntityLogicalName = secureOnly.EntityLogicalName.Trim().ToLowerInvariant() };
+            if (all.Any(f => f.Parent == parent))
+                continue;
+
+            var fact = await ReadParentAsync(parent, context.PlannedOwningTeams, committedReads, ct).ConfigureAwait(false);
+            if (fact is null)
+            {
+                // ⛔ REFUSE, as for any named parent: the one that cannot be read might be the secure one.
+                _logger.LogWarning(
+                    "Refusing to resolve an owning team: the Secure-only parent {ParentEntity} {ParentId} was named but its "
+                    + "business unit could not be read (V-fix 3).",
+                    parent.EntityLogicalName, parent.RecordId);
+                return RecordOwnerResolution.Refused(
+                    RecordOwnerRefusal.ParentUnresolved,
+                    $"the parent {parent.EntityLogicalName} {parent.RecordId:D} does not exist or has no owning business unit");
+            }
+
+            all.Add(fact);
+        }
+
         // A parent that is itself a CHILD and is NOT team-owned (a run-as-user, client-created or pre-146 row) says nothing
         // about secrecy through its own business unit — a user-owned document filed to a secure matter sits in its
         // creator's ordinary unit. Its filing is read, transitively, so a secure ancestor makes THIS row secure and a
@@ -3479,7 +3621,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         // now for every context: an analysis of such a document, a Compose promote, a grandchild of any writer). The
         // ancestors only take part in the secure decision; an ordinary row still takes the PRIMARY parent's unit, so
         // nothing changes for a child of ordinary records.
-        var lineage = await ReadUnownedChildLineageAsync(facts, context.PlannedOwningTeams, committedReads, ct)
+        var lineage = await ReadUnownedChildLineageAsync(all, context.PlannedOwningTeams, committedReads, ct)
             .ConfigureAwait(false);
         if (lineage.Unresolved is { } unresolved)
         {
@@ -3495,7 +3637,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                     + "exist or has no owning business unit");
         }
 
-        var decisive = facts.Concat(lineage.Facts).ToList();
+        var decisive = all.Concat(lineage.Facts).ToList();
 
         var secureBu = await SecureBusinessUnitAsync(context.LookupCache, ct).ConfigureAwait(false);
         if (secureBu.Ambiguous)
@@ -3532,16 +3674,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             return await ResolveNamedSecureOwnerTeamAsync(secureBuId, ct).ConfigureAwait(false);
         }
 
-        if (primaryUndecided is not null)
-        {
-            _logger.LogWarning(
-                "Refusing to resolve an owning team: no parent is secure, and the primary parent {Entity} {RecordId} could not be "
-                + "looked through (a loop or the depth bound), so the ordinary business unit cannot be decided (194b A3).",
-                facts[0].Parent.EntityLogicalName, facts[0].Parent.RecordId);
-            return RecordOwnerResolution.Refused(RecordOwnerRefusal.ParentUnresolved, primaryUndecided);
-        }
-
-        return await ResolveDefaultOwnerTeamAsync(facts[0].BusinessUnitId, ct, context.LookupCache).ConfigureAwait(false);
+        return null;
     }
 
     /// <summary>How many filing levels <see cref="ReadUnownedChildLineageAsync"/> follows above a parent.</summary>
@@ -3626,7 +3759,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// <remarks>#2143 round 3 (K1): <paramref name="committedReads"/> is <c>true</c> on the re-file path only (a committed
     /// read); the create paths read with <c>NoLock</c>.</remarks>
     private async Task<IReadOnlyList<RecordOwnershipParent>?> ReadOwnershipParentsOfAsync(
-        RecordOwnershipParent row, bool committedReads, CancellationToken ct)
+        RecordOwnershipParent row, bool committedReads, CancellationToken ct, bool withSecureOnly = true)
     {
         var query = new QueryExpression(row.EntityLogicalName)
         {
@@ -3640,7 +3773,14 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         // lineage walk, or a ContentOf / DecisionRecordWriter target (ForParents keeps ownership parents only) — and no citing
         // table (RecordOwnershipResolver.IsCitation: sprk_signal) is one, so the exclusion could never fire.
         // UAC task 194b: in the table's primary order; the first is the parent's own primary, which a look-through follows.
-        return entity is null ? null : RecordOwnershipContext.OrderedParentsOf(entity);
+        // V-fix 3: then its Secure-only parents (its canonical), for the walks that decide whether it sits under a secure record
+        // (the lineage, the secure roots above) — never for the look-through, which follows the primary order alone.
+        if (entity is null)
+            return null;
+        var ordered = RecordOwnershipContext.OrderedParentsOf(entity);
+        return withSecureOnly
+            ? ordered.Concat(RecordOwnershipContext.SecureOnlyParentsOf(entity)).Distinct().ToArray()
+            : ordered;
     }
 
     /// <summary>
