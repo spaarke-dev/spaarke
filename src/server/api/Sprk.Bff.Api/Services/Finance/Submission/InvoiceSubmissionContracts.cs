@@ -144,6 +144,15 @@ public sealed record InvoiceSubmissionRequest
 
     /// <summary>The request's correlation id, carried to the job.</summary>
     public string? CorrelationId { get; init; }
+
+    /// <summary>
+    /// ebilling-r1 task 094 fix round (F1-b; procedure-and-file-model 9.1 step A): the route's filing of an unfiled source communication
+    /// under <see cref="CoreRecord"/>, as the caller. <see cref="InvoiceSubmissionService.SubmitExistingDocumentAsync"/> runs it only AFTER
+    /// every read-only refusal (the earlier submission, the document, D-140, isolation, the firm, the link, the owner) and before the
+    /// submission is created, so a refused submission never leaves a filing behind. True when it filed something; false when there was
+    /// nothing to file. It throws to refuse (the route renders its own answer). Null: nothing to file (the job's own channels).
+    /// </summary>
+    public Func<CancellationToken, Task<bool>>? FileSourceBeforeWrite { get; init; }
 }
 
 /// <summary>A submission that was received: the row exists with its tracking number and the processing job is enqueued.</summary>

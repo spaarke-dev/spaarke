@@ -32,9 +32,10 @@ namespace Sprk.Bff.Api.Api.Finance;
 /// <para><b>Submit Invoice from a source document (ebilling-r1 task 094; procedure-and-file-model 9.1 step 1).</b>
 /// <c>POST /api/finance/invoice-submissions/from-document</c>, keyed on (communication, document): the filter checks Read and AppendTo on
 /// the body's core record and AppendTo on its firm, as the upload routes do; then <see cref="PrepareSourceAsync"/> (shared with the
-/// confirm route) checks the caller's own Read on the document and its communication (gate variant), files an unfiled communication to
-/// the core record AS THE CALLER (step A, the communication re-file core), and the intake's existing-document entry decides the rest
-/// (D-140, isolation, dedupe by document). The document is never moved: its bytes are copied by the job.</para>
+/// confirm route) checks the caller's own Read on the document and its communication (gate variant), read-only; the intake's
+/// existing-document entry decides the rest (dedupe by document, D-140, isolation, the firm, the link, the owner) and only then runs
+/// step A (<see cref="SourceFiling"/>), which files a communication the D-140 chain leaves unfiled to the core record AS THE CALLER
+/// (the communication re-file core). The document is never moved: its bytes are copied by the job.</para>
 /// </remarks>
 public static class InvoiceSubmissionEndpoints
 {
@@ -81,14 +82,16 @@ public static class InvoiceSubmissionEndpoints
             .AddFinanceAuthorizationFilter(ResolveFromDocumentTargets)
             .RequireEbillingEnabled()
             .WithName("SubmitInvoiceFromDocument")
-            .WithSummary("Submit a document (an email attachment or a filed document) as an invoice")
+            .WithSummary("Submit an email attachment (a document of a communication) as an invoice")
             .WithDescription(
-                "Submits the source document as an internal invoice submission; the processing job copies its bytes into the invoice's " +
-                "file (the document is never moved). Body: {communicationId, documentId, coreRecord: {kind: matter|project|workassignment, " +
-                "id}, firmId, firmInvoiceNumber, poNumber?}. The caller needs Read on the document and its communication, Read and AppendTo " +
-                "on the core record and AppendTo on the firm; an unfiled communication is filed to the core record first, as the caller " +
-                "(Write on it). 202 {submissionId, jobId, trackingNumber, statusUrl}; a retry for the same document returns the same " +
-                "submission. Refusals are ProblemDetails with errorCode: 400 validation; 403 source_forbidden, COMMUNICATION_REFILE_FORBIDDEN, " +
+                "Submits the source document, a document of the communication named (communicationId is required), as an internal invoice " +
+                "submission; the processing job copies its bytes into the invoice's file (the document is never moved). Body: " +
+                "{communicationId, documentId, coreRecord: {kind: matter|project|workassignment, id}, firmId, firmInvoiceNumber, poNumber?}. " +
+                "The caller needs Read on the document and its communication, Read and AppendTo on the core record and AppendTo on the firm; " +
+                "after every read-only check passes, a communication the D-140 chain reads as unfiled is filed " +
+                "to the core record first, as the caller (Write on it). 202 {submissionId, jobId, trackingNumber, statusUrl}; a retry for " +
+                "the same document returns the same submission. Refusals are ProblemDetails with errorCode: 400 validation; 403 " +
+                "source_forbidden, COMMUNICATION_REFILE_FORBIDDEN, " +
                 "the core record and firm checks; 404 document_not_found; 409 document_core_record_mismatch, document_already_invoiced, " +
                 "document_rejected, document_already_submitted, submission_already_ended; 422 source_communication_mismatch, " +
                 "document_has_no_file; 503 record_unavailable.")
@@ -233,18 +236,17 @@ public static class InvoiceSubmissionEndpoints
     }
 
     /// <summary>
-    /// Procedure-and-file-model 9.1 step 1, before any submission write: (1) the caller's own Read on the source document, gate variant (skipped when <paramref name="documentReadChecked"/>: the confirm route's filter already required it)
-    /// (an unknown document and one the caller cannot see get the same 403 <see cref="InvoiceSubmissionErrors.SourceForbidden"/> on the same
-    /// schedule); (2) the document's communication, read app-only: the one <paramref name="communicationId"/> names must be it (422
-    /// <see cref="InvoiceSubmissionErrors.SourceCommunicationMismatch"/>; the confirm route names none and takes the document's own, if
-    /// any); (3) the caller's own Read on that communication (403 <see cref="InvoiceSubmissionErrors.SourceForbidden"/>); (4) step A: a
-    /// communication filed under nothing is filed to <paramref name="core"/> through the communication re-file core
-    /// (<see cref="CommunicationEndpoints.RefileCommunicationAsync"/>) AS THE CALLER: Write on it first (else that route's own 403
-    /// <c>COMMUNICATION_REFILE_FORBIDDEN</c>), then its own checks (AppendTo on the record, the owner, the thread following the filing);
-    /// any answer but 204 is returned as it is and nothing else is written. Null when the submission may proceed. A read fault is 503.
-    /// The filing made by A is NOT undone by a later refusal or by the job's undo (recorded in the administrator note).
+    /// Procedure-and-file-model 9.1 step 1, before any submission write. READ-ONLY (fix round F1-b): (1) the caller's own Read on the source
+    /// document, gate variant (skipped only when <paramref name="documentReadChecked"/>: a route whose filter already required Read on the
+    /// document) (an unknown document and one the caller cannot see get the same 403 <see cref="InvoiceSubmissionErrors.SourceForbidden"/>
+    /// on the same schedule); (2) the document's communication, read app-only: the one <paramref name="communicationId"/> names must be it
+    /// (422 <see cref="InvoiceSubmissionErrors.SourceCommunicationMismatch"/>; the confirm route names none and takes the document's own, if
+    /// any); (3) the caller's own Read on that communication (403 <see cref="InvoiceSubmissionErrors.SourceForbidden"/>). A read fault is
+    /// 503. The answer's <see cref="SourcePreparation.Filing"/> is step A (<see cref="SourceFiling"/>), which the route hands to the intake
+    /// (<see cref="InvoiceSubmissionRequest.FileSourceBeforeWrite"/>): the intake runs it only after its own read-only refusals, so a refused
+    /// submission never leaves a filing behind.
     /// </summary>
-    internal static async Task<IResult?> PrepareSourceAsync(
+    internal static async Task<SourcePreparation> PrepareSourceAsync(
         Guid documentId, Guid? communicationId, InvoiceCoreRecord core, HttpContext http, bool documentReadChecked, CancellationToken ct)
     {
         // Resolved here, after the route's filters, not bound as parameters: a route that refuses never needs them.
@@ -255,7 +257,7 @@ public static class InvoiceSubmissionEndpoints
             var documentRights = await services.Probe.GetCallerRightsForAuthorizationGateAsync(token, FinanceAuthorizationFilter.DocumentEntitySet, documentId, ct);
             if (!documentRights.HasFlag(AccessRights.Read))
             {
-                return SourceForbidden();
+                return SourcePreparation.Refused(SourceForbidden());
             }
         }
 
@@ -266,13 +268,13 @@ public static class InvoiceSubmissionEndpoints
         }
         catch (Exception ex) when (IsNotFound(ex))
         {
-            return InvoiceSubmissionHttp.Refused(StatusCodes.Status404NotFound, InvoiceSubmissionErrors.DocumentNotFound,
-                "The document no longer exists. Nothing was saved.");
+            return SourcePreparation.Refused(InvoiceSubmissionHttp.Refused(StatusCodes.Status404NotFound, InvoiceSubmissionErrors.DocumentNotFound,
+                "The document no longer exists. Nothing was saved."));
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             services.Logger.LogWarning("Submit Invoice: document {DocumentId} could not be read ({Fault})", documentId, ex.GetType().Name);
-            return Unavailable();
+            return SourcePreparation.Refused(Unavailable());
         }
 
         var linked = document.GetAttributeValue<EntityReference>(DocumentRelatedCommunication)?.Id is { } related && related != Guid.Empty
@@ -280,72 +282,132 @@ public static class InvoiceSubmissionEndpoints
             : (Guid?)null;
         if (communicationId is { } named && named != linked)
         {
-            return InvoiceSubmissionHttp.Refused(StatusCodes.Status422UnprocessableEntity, InvoiceSubmissionErrors.SourceCommunicationMismatch,
-                "The document does not belong to the communication named, so it cannot be submitted from it. Nothing was saved.");
+            return SourcePreparation.Refused(InvoiceSubmissionHttp.Refused(StatusCodes.Status422UnprocessableEntity, InvoiceSubmissionErrors.SourceCommunicationMismatch,
+                "The document does not belong to the communication named, so it cannot be submitted from it. Nothing was saved."));
         }
 
         if (linked is not { } communication)
         {
-            return null; // a document with no communication (the confirm route): nothing to file
+            return SourcePreparation.Proceed(null); // a document with no communication (the confirm route): nothing to file
         }
 
         var communicationRights = await services.Probe.GetCallerRightsForAuthorizationGateAsync(token, CommunicationEntitySet, communication, ct);
         if (!communicationRights.HasFlag(AccessRights.Read))
         {
-            return SourceForbidden();
+            return SourcePreparation.Refused(SourceForbidden());
         }
 
-        // ── A: file an unfiled communication to the core record first, as the caller ──
-        bool filed;
-        try
+        return SourcePreparation.Proceed(new SourceFiling(communication, communicationRights, core, http, services));
+    }
+
+    /// <summary>What step 1 decided: a refusal (the route's answer, nothing written), or proceed with step A (null: nothing to file).</summary>
+    internal sealed record SourcePreparation(IResult? Refusal, SourceFiling? Filing)
+    {
+        internal static SourcePreparation Refused(IResult refusal) => new(refusal, null);
+
+        internal static SourcePreparation Proceed(SourceFiling? filing) => new(null, filing);
+
+        /// <summary>The intake's hook (<see cref="InvoiceSubmissionRequest.FileSourceBeforeWrite"/>), or null when there is nothing to file.</summary>
+        internal Func<CancellationToken, Task<bool>>? Hook => Filing is { } filing ? filing.RunAsync : null;
+    }
+
+    /// <summary>
+    /// Step A of Submit Invoice (procedure-and-file-model 9.1), run by the intake after its read-only refusals (fix round F1-b). It decides
+    /// "unfiled" from the D-140 chain (<see cref="InvoiceSubmissionService.IsCommunicationFiledAsync"/>: the communication's own filing
+    /// columns and every parent its record thread files it under) and files only a communication the chain leaves empty: a filed one is left
+    /// as it is (the intake has already judged the filing the chain gives). Before it files, the communication must be under no secure root
+    /// and not owned by the Secure Record owner team (<see cref="ExistingDocumentIsolationCheck.CheckCommunicationForFilingAsync"/>: else 409
+    /// <see cref="InvoiceSubmissionErrors.DocumentCoreRecordMismatch"/>, a fault 503), and the caller must have Write on it (else the
+    /// communication re-file route's own 403 <c>COMMUNICATION_REFILE_FORBIDDEN</c>). Then the communication re-file core
+    /// (<see cref="CommunicationEndpoints.RefileCommunicationAsync"/>) files it under the core record AS THE CALLER, with its own checks
+    /// (AppendTo on the record, the owner, the thread following the filing); any answer but 204 is the route's answer. Every refusal throws
+    /// <see cref="SourceFilingRefusedException"/> (or the 403's <see cref="SdapProblemException"/>), so the intake writes nothing after it.
+    /// The filing it makes is NOT undone by a later refusal or by the job's undo (the answer and the administrator note say so).
+    /// </summary>
+    internal sealed class SourceFiling
+    {
+        private readonly Guid _communication;
+        private readonly AccessRights _rights;
+        private readonly InvoiceCoreRecord _core;
+        private readonly HttpContext _http;
+        private readonly SourceServices _services;
+
+        internal SourceFiling(Guid communication, AccessRights rights, InvoiceCoreRecord core, HttpContext http, SourceServices services)
         {
-            var row = await services.Entities.RetrieveAsync(CommunicationEntity, communication, [.. Services.Office.ReconciledEmailFiling.FilingColumns], ct);
-            filed = Services.Office.ReconciledEmailFiling.FilingColumns.Any(column => row.Attributes.TryGetValue(column, out var value) && value switch
+            _communication = communication;
+            _rights = rights;
+            _core = core;
+            _http = http;
+            _services = services;
+        }
+
+        /// <summary>True when it filed the communication; false when it was already filed (nothing written). Throws to refuse.</summary>
+        internal async Task<bool> RunAsync(CancellationToken ct)
+        {
+            bool filed;
+            try
             {
-                null => false,
-                string text => !string.IsNullOrWhiteSpace(text),
-                EntityReference reference => reference.Id != Guid.Empty,
-                _ => true,
-            });
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-        {
-            services.Logger.LogWarning("Submit Invoice: communication {CommunicationId} could not be read ({Fault})", communication, ex.GetType().Name);
-            return Unavailable();
-        }
+                filed = await InvoiceSubmissionService.IsCommunicationFiledAsync(_services.Entities, _communication, ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _services.Logger.LogWarning("Submit Invoice: the filing of communication {CommunicationId} could not be read ({Fault})", _communication, ex.GetType().Name);
+                throw new SourceFilingRefusedException(Unavailable());
+            }
 
-        if (filed)
-        {
-            return null;
-        }
+            if (filed)
+            {
+                return false;
+            }
 
-        if (!communicationRights.HasFlag(AccessRights.Write))
-        {
-            // The communication re-file route's own refusal, with its words (no existence oracle).
-            throw new SdapProblemException(
-                code: CommunicationRecordAuthorizationFilter.RefileDenyCode,
-                title: "Forbidden",
-                detail: "The communication does not exist or is not visible to the caller, or the caller may not change it.",
-                statusCode: StatusCodes.Status403Forbidden);
-        }
+            var scope = _http.RequestServices;
+            var isolation = await scope.GetRequiredService<ExistingDocumentIsolationCheck>().CheckCommunicationForFilingAsync(_communication, ct);
+            switch (isolation.Verdict)
+            {
+                case ExistingDocumentIsolationVerdict.Allowed:
+                    break;
+                case ExistingDocumentIsolationVerdict.Unavailable:
+                    throw new SourceFilingRefusedException(Unavailable());
+                default:
+                    _services.Logger.LogInformation("Submit Invoice: communication {CommunicationId} is isolated ({Verdict}); it is not filed and nothing is submitted",
+                        _communication, isolation.Verdict);
+                    throw new SourceFilingRefusedException(InvoiceSubmissionHttp.Refused(StatusCodes.Status409Conflict, InvoiceSubmissionErrors.DocumentCoreRecordMismatch,
+                        "The document's communication belongs to a restricted record, so it cannot be filed or submitted for this record. Nothing was saved."));
+            }
 
-        // The re-file core's own dependencies come from the request scope only when A runs (most submissions never file anything).
-        var scope = http.RequestServices;
-        var body = await RefileBodyAsync(core, services, scope.GetRequiredService<ICommunicationDataverseService>(), ct);
-        var refiled = await CommunicationEndpoints.RefileCommunicationAsync(
-            communication, body, scope.GetRequiredService<IDataverseUserClient>(), scope.GetRequiredService<IRecordOwnershipResolver>(),
-            scope.GetRequiredService<CoreAncestorRestamper>(), scope.GetRequiredService<Services.Access.SecureChildReconciler>(), services.Entities,
-            scope.GetService<Services.Signals.SignalEvaluationTrigger>(), http, services.Logger, ct);
-        if (refiled is not Microsoft.AspNetCore.Http.HttpResults.NoContent)
-        {
-            services.Logger.LogInformation("Submit Invoice: filing communication {CommunicationId} under {Entity} {RecordId} was refused; nothing submitted",
-                communication, core.EntityLogicalName, core.RecordId);
-            return refiled;
-        }
+            if (!_rights.HasFlag(AccessRights.Write))
+            {
+                // The communication re-file route's own refusal, with its words (no existence oracle).
+                throw new SdapProblemException(
+                    code: CommunicationRecordAuthorizationFilter.RefileDenyCode,
+                    title: "Forbidden",
+                    detail: "The communication does not exist or is not visible to the caller, or the caller may not change it.",
+                    statusCode: StatusCodes.Status403Forbidden);
+            }
 
-        services.Logger.LogInformation("Submit Invoice: communication {CommunicationId} filed under {Entity} {RecordId} before the submission (step A)",
-            communication, core.EntityLogicalName, core.RecordId);
-        return null;
+            // The re-file core's own dependencies come from the request scope only when A runs (most submissions never file anything).
+            var body = await RefileBodyAsync(_core, _services, scope.GetRequiredService<ICommunicationDataverseService>(), ct);
+            var refiled = await CommunicationEndpoints.RefileCommunicationAsync(
+                _communication, body, scope.GetRequiredService<IDataverseUserClient>(), scope.GetRequiredService<IRecordOwnershipResolver>(),
+                scope.GetRequiredService<CoreAncestorRestamper>(), scope.GetRequiredService<Services.Access.SecureChildReconciler>(), _services.Entities,
+                scope.GetService<Services.Signals.SignalEvaluationTrigger>(), _http, _services.Logger, ct);
+            if (refiled is not Microsoft.AspNetCore.Http.HttpResults.NoContent)
+            {
+                _services.Logger.LogInformation("Submit Invoice: filing communication {CommunicationId} under {Entity} {RecordId} was refused; nothing submitted",
+                    _communication, _core.EntityLogicalName, _core.RecordId);
+                throw new SourceFilingRefusedException(refiled);
+            }
+
+            _services.Logger.LogInformation("Submit Invoice: communication {CommunicationId} filed under {Entity} {RecordId} before the submission (step A)",
+                _communication, _core.EntityLogicalName, _core.RecordId);
+            return true;
+        }
+    }
+
+    /// <summary>Step A's refusal, carrying the route's answer (the intake writes nothing after it; the route returns <see cref="Answer"/>).</summary>
+    internal sealed class SourceFilingRefusedException(IResult answer) : Exception("Submit Invoice step A refused the filing of the source communication.")
+    {
+        internal IResult Answer { get; } = answer;
     }
 
     /// <summary>
@@ -429,24 +491,34 @@ public static class InvoiceSubmissionEndpoints
         }
 
         var core = request.ToCoreRecord()!;
-        if (await PrepareSourceAsync(request.DocumentId, request.CommunicationId, core, http, documentReadChecked: false, ct) is { } refused)
+        var prepared = await PrepareSourceAsync(request.DocumentId, request.CommunicationId, core, http, documentReadChecked: false, ct);
+        if (prepared.Refusal is { } refused)
         {
             return refused;
         }
 
         Guid? callerOid = Guid.TryParse(CallerResolution.ResolveObjectId(http.User), out var oid) ? oid : null;
-        var outcome = await service.SubmitExistingDocumentAsync(new InvoiceSubmissionRequest
+        InvoiceSubmissionOutcome outcome;
+        try
         {
-            FirmId = request.FirmId,
-            CoreRecord = core,
-            Channel = InvoiceSubmissionChannel.Internal,
-            FirmInvoiceNumber = request.FirmInvoiceNumber,
-            PoNumber = request.PoNumber,
-            ExistingDocumentId = request.DocumentId,
-            SourceCommunicationId = request.CommunicationId,
-            CallerObjectId = callerOid,
-            CorrelationId = http.TraceIdentifier,
-        }, ct);
+            outcome = await service.SubmitExistingDocumentAsync(new InvoiceSubmissionRequest
+            {
+                FirmId = request.FirmId,
+                CoreRecord = core,
+                Channel = InvoiceSubmissionChannel.Internal,
+                FirmInvoiceNumber = request.FirmInvoiceNumber,
+                PoNumber = request.PoNumber,
+                ExistingDocumentId = request.DocumentId,
+                SourceCommunicationId = request.CommunicationId,
+                CallerObjectId = callerOid,
+                CorrelationId = http.TraceIdentifier,
+                FileSourceBeforeWrite = prepared.Hook, // step A: the intake runs it after its read-only refusals (fix round F1-b)
+            }, ct);
+        }
+        catch (SourceFilingRefusedException ex)
+        {
+            return ex.Answer;
+        }
 
         return InvoiceSubmissionHttp.ToResult(outcome, StatusUrl, http.TraceIdentifier);
     }
@@ -549,6 +621,13 @@ public sealed record SubmitInvoiceFromDocumentRequest
         if (FirmId == Guid.Empty)
         {
             errors["firmId"] = ["firmId is required."];
+        }
+
+        // Fix round (validation order): D-91's required number is a 400 here, before the filter's rights queries and step 1's reads. The
+        // intake checks it again (length, content) and stays the rule's owner.
+        if (string.IsNullOrWhiteSpace(FirmInvoiceNumber))
+        {
+            errors["firmInvoiceNumber"] = ["firmInvoiceNumber is required (D-91)."];
         }
 
         return errors;

@@ -331,7 +331,7 @@ public class InvoiceSubmissionService
 
         if (earlier is not null)
         {
-            return await AnswerWithEarlierAsync(request, number, earlier, documentId, jobId, ct);
+            return await AnswerWithEarlierAsync(request, number, earlier, documentId, jobId, request.FileSourceBeforeWrite, ct);
         }
 
         // ── 3. The document: present, holding a file, not already an invoice's, not rejected, linking the route's communication, not filed
@@ -347,6 +347,10 @@ public class InvoiceSubmissionService
         {
             return refused;
         }
+
+        // ── 4b. Step A (fix round F1-b): the route's filing of an unfiled source communication, as the caller - only now, after every
+        //        read-only refusal above, so a refused submission never leaves a filing behind. Its refusal throws (the route answers). ──
+        var filed = request.FileSourceBeforeWrite is { } fileSource && await fileSource(ct);
 
         // ── 5. The submission, then its job ──
         var row = decision.Row!;
@@ -390,19 +394,19 @@ public class InvoiceSubmissionService
             // ours, so not touched.
             _logger.LogWarning(ex, "Invoice submission {SubmissionId}: the confirm of document {DocumentId} met a concurrent confirm with other details",
                 submissionId, documentId);
-            return DocumentAlreadySubmitted();
+            return AfterFiling(DocumentAlreadySubmitted(), filed);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Invoice submission {SubmissionId}: the confirm of document {DocumentId} could not be created", submissionId, documentId);
-            return NotQueued();
+            return AfterFiling(NotQueued(), filed);
         }
 
         if (!allocation.Succeeded)
         {
             _logger.LogWarning("Invoice submission {SubmissionId}: no tracking number could be allocated ({Reason})", submissionId, allocation.Reason);
-            return InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, TrackingNumberReasons.Unavailable,
-                "A tracking number could not be assigned right now, so nothing was saved. Try again shortly.");
+            return AfterFiling(InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, TrackingNumberReasons.Unavailable,
+                "A tracking number could not be assigned right now, so nothing was saved. Try again shortly."), filed);
         }
 
         if (allocation.Outcome == TrackingNumberOutcome.AlreadyCreated)
@@ -416,22 +420,23 @@ public class InvoiceSubmissionService
             }
             catch (SdapProblemException ex)
             {
-                return InvoiceSubmissionOutcome.Refused(ex.StatusCode, ex.Code, ex.Detail ?? ex.Title);
+                return AfterFiling(InvoiceSubmissionOutcome.Refused(ex.StatusCode, ex.Code, ex.Detail ?? ex.Title), filed);
             }
 
             if (concurrent is null)
             {
                 // Created, then gone before it could be read (a delete outside this path): nothing to answer with; a retry decides again.
                 _logger.LogWarning("Invoice submission {SubmissionId}: already created for document {DocumentId} but no longer readable", submissionId, documentId);
-                return NotQueued();
+                return AfterFiling(NotQueued(), filed);
             }
 
-            return await AnswerWithEarlierAsync(request, number, concurrent, documentId, jobId, write);
+            // Step A already ran above for this request: the concurrent row's answer never runs it again.
+            return AfterFiling(await AnswerWithEarlierAsync(request, number, concurrent, documentId, jobId, fileSource: null, write), filed);
         }
 
         if (!await TrySubmitJobAsync(jobId, submissionId, request.CorrelationId))
         {
-            return NotQueued();
+            return AfterFiling(NotQueued(), filed);
         }
 
         _logger.LogInformation(
@@ -446,8 +451,11 @@ public class InvoiceSubmissionService
     /// Rejected is 409 <see cref="InvoiceSubmissionErrors.SubmissionAlreadyEnded"/> naming that status, and the caller does not re-mark the
     /// document (review #4; owner 2026-10-20, D-139: a new attempt after a terminal status is a later feature).
     /// </summary>
+    /// <remarks>Fix round F1-b: <paramref name="fileSource"/> (step A, the retry's own request) runs only once the answer is known to be the
+    /// earlier submission itself (the same details, not ended), never before a refusal.</remarks>
     private async Task<InvoiceSubmissionOutcome> AnswerWithEarlierAsync(
-        InvoiceSubmissionRequest request, string number, InvoiceSubmissionView earlier, Guid documentId, Guid jobId, CancellationToken ct)
+        InvoiceSubmissionRequest request, string number, InvoiceSubmissionView earlier, Guid documentId, Guid jobId,
+        Func<CancellationToken, Task<bool>>? fileSource, CancellationToken ct)
     {
         // Task 094: an undone submission (9.1 step 5) has its firm invoice number cleared, so for a terminal one an empty number matches.
         var ended = earlier.Status is nameof(InvoiceSubmissionStatus.Failed) or nameof(InvoiceSubmissionStatus.Rejected);
@@ -473,12 +481,13 @@ public class InvoiceSubmissionService
                 "a new attempt for the same document is not available yet.");
         }
 
+        var filed = fileSource is not null && await fileSource(ct);
         if (earlier.Status == nameof(InvoiceSubmissionStatus.Received))
         {
             ct.ThrowIfCancellationRequested();
             if (!await TrySubmitJobAsync(jobId, earlier.SubmissionId, request.CorrelationId))
             {
-                return NotQueued();
+                return AfterFiling(NotQueued(), filed);
             }
         }
 
@@ -689,6 +698,50 @@ public class InvoiceSubmissionService
             .Where(c => c.Id != Guid.Empty)
             .ToList();
 
+    /// <summary>
+    /// ebilling-r1 task 094 fix round: step A decides "unfiled" from the D-140 chain. True when the communication <paramref name="communicationId"/>
+    /// is filed anywhere: any of its own filing columns (every regarding lookup and the resolver pair, <c>ReconciledEmailFiling.FilingColumns</c>,
+    /// which include the D-140 core columns) or ANY parent its thread files its messages under (<see cref="RecordThreadFiling.ParentsOf"/>,
+    /// the D-140 thread hop, every kind). Step A files only a communication for which this is false. A communication that is gone files
+    /// nothing (the re-file core then answers it); a thread that cannot be found counts as filed. A read fault propagates.
+    /// </summary>
+    internal static async Task<bool> IsCommunicationFiledAsync(IGenericEntityService entities, Guid communicationId, CancellationToken ct)
+    {
+        string[] columns = [.. Services.Office.ReconciledEmailFiling.FilingColumns.Union(CommunicationHopColumns, StringComparer.Ordinal)];
+        if (await ReadChainRowAsync(entities, CommunicationEntity, communicationId, columns, ct) is not { } communication)
+        {
+            return false;
+        }
+
+        if (Services.Office.ReconciledEmailFiling.FilingColumns.Any(column => communication.Attributes.TryGetValue(column, out var value) && value switch
+            {
+                null => false,
+                string text => !string.IsNullOrWhiteSpace(text),
+                EntityReference reference => reference.Id != Guid.Empty,
+                _ => true,
+            })
+            || CoreRecordsOf(communication, CommunicationCoreColumns, CommunicationEntity).Count > 0)
+        {
+            return true;
+        }
+
+        if (communication.GetAttributeValue<EntityReference>(CommunicationThread) is not { Id: var threadId } || threadId == Guid.Empty)
+        {
+            return false;
+        }
+
+        // The thread with every column (its ownership parents are whatever lookups it carries, not only the core ones D-140 compares).
+        // A thread that cannot be found counts as filed: step A never files a message whose thread's filing it cannot see (fail closed).
+        try
+        {
+            return RecordThreadFiling.ParentsOf(await RecordThreadFiling.ReadThreadAsync(entities, threadId, ct).ConfigureAwait(false)).Count > 0;
+        }
+        catch (InvalidOperationException)
+        {
+            return true;
+        }
+    }
+
     /// <summary>A row of the filing chain, or null when it no longer exists. A read fault propagates.</summary>
     private static async Task<Entity?> ReadChainRowAsync(IGenericEntityService entities, string table, Guid id, string[] columns, CancellationToken ct)
     {
@@ -784,6 +837,27 @@ public class InvoiceSubmissionService
             return false;
         }
     }
+
+    /// <summary>
+    /// Fix round F1-b: a refusal answered AFTER step A filed the source communication must not say "nothing was saved": the filing is kept
+    /// (it is the caller's own, made with their rights, and is not undone). Unchanged when nothing was filed or the outcome is Received.
+    /// </summary>
+    internal static InvoiceSubmissionOutcome AfterFiling(InvoiceSubmissionOutcome outcome, bool filed)
+    {
+        if (!filed || outcome.Kind == InvoiceSubmissionOutcomeKind.Received)
+        {
+            return outcome;
+        }
+
+        var detail = (outcome.Detail ?? string.Empty)
+            .Replace("Nothing was saved", "No submission was saved", StringComparison.Ordinal)
+            .Replace("nothing was saved", "no submission was saved", StringComparison.Ordinal)
+            .TrimEnd();
+        return outcome with { Detail = (detail.Length == 0 ? string.Empty : detail + " ") + FilingKeptSentence };
+    }
+
+    /// <summary>Fix round F1-b: what a refusal after step A adds.</summary>
+    internal const string FilingKeptSentence = "The communication was filed under the record first; that filing is kept.";
 
     private static InvoiceSubmissionOutcome DocumentAlreadySubmitted() =>
         InvoiceSubmissionOutcome.Refused(StatusCodes.Status409Conflict, InvoiceSubmissionErrors.DocumentAlreadySubmitted,

@@ -125,8 +125,24 @@ internal static class AdminAttentionText
     /// (<see cref="SubmissionCommitGate"/>). Names the reason code only (ADR-015) and says what was kept: a filing of the source
     /// communication made by the from-document route is not undone.
     /// </summary>
+    /// <remarks>Fix round (F2-a): written only once the compensation returned complete. Until then the slot says
+    /// <see cref="UndoPendingNote"/>, and a held undo on the final delivery says <see cref="UndoHeldNote"/>; the three share one slot.</remarks>
     internal static string UndoneNote(string? code) =>
         $"{UndonePrefix}{CodeOnly(code)}; the invoice, its lines, approval and file were removed and the submission is Failed; a filing of its source communication made at submission is kept";
+
+    /// <summary>
+    /// ebilling-r1 task 094 fix round (F2-a): the undone slot while the compensation has not finished. Written with Failed, before any
+    /// delete, so a held undo never claims a removal that did not happen.
+    /// </summary>
+    internal static string UndoPendingNote(string? code) =>
+        $"{UndonePrefix}{CodeOnly(code)}; the submission is Failed and the removal of its invoice, lines, approval and file is pending (a later delivery finishes it); a filing of its source communication made at submission is kept";
+
+    /// <summary>
+    /// ebilling-r1 task 094 fix round (F2-a): the undone slot when the undo is still held on the job's final delivery: nothing retries it
+    /// on its own, so an operator must act.
+    /// </summary>
+    internal static string UndoHeldNote(string? code) =>
+        $"{UndonePrefix}{CodeOnly(code)}; undo held — operator action: the submission is Failed but its invoice, lines, approval or file could not all be removed; replay the dead-lettered job to finish the undo; a filing of its source communication made at submission is kept";
 
     /// <summary>
     /// R5: the segment for a system billing policy that is not usable. <paramref name="state"/> is
@@ -270,6 +286,12 @@ internal static class AdminAttentionText
             return false;
         }
     }
+
+    /// <summary>Whether <paramref name="current"/> holds an undone slot that is not the final "removed" statement (pending or held).</summary>
+    internal static bool HasUnfinishedUndo(string? current) =>
+        !string.IsNullOrEmpty(current)
+        && current.Split(Separator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Any(p => p.StartsWith(UndonePrefix, StringComparison.Ordinal) && !p.Contains("were removed", StringComparison.Ordinal));
 
     /// <summary>The current <c>sprk_adminattention</c> of a submission (null when empty); a fault propagates.</summary>
     internal static async Task<string?> ReadCurrentAsync(IGenericEntityService entities, Guid submissionId, CancellationToken ct)

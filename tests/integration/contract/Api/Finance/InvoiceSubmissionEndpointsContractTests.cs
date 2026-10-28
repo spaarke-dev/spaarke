@@ -1644,7 +1644,7 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         NothingWritten();
     }
 
-    [Theory(DisplayName = "094: a body without a document, a core record of a known kind or an invoice number is 400; nothing written")]
+    [Theory(DisplayName = "094: a body without a document, a core record of a known kind or an invoice number is 400 before anything is read (fix round: the number is validated with the body); nothing written")]
     [InlineData("document")]
     [InlineData("kind")]
     [InlineData("number")]
@@ -1661,6 +1661,13 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         });
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        _sourceRights.Calls.Should().BeEmpty("the body is validated before step 1 reads the source");
+        if (missing == "number")
+        {
+            using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            problem.RootElement.GetProperty("errors").TryGetProperty("firmInvoiceNumber", out _).Should().BeTrue();
+        }
+
         NothingWritten();
     }
 

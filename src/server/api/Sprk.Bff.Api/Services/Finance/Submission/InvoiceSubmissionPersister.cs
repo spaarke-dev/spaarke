@@ -319,6 +319,14 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             throw new ArgumentException("A source-document submission names its document, and only it does.", nameof(outcome));
         }
 
+        if (sourceDocument && submissionId != InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(documentId!.Value))
+        {
+            // Fix round F1-1 (defence in depth; SubmissionSnapshot.Read refuses it first): a document is a source only for the submission
+            // derived from it. Nothing is read or written.
+            _logger.LogWarning("Invoice submission {SubmissionId}: it names a document it was not created for; refused", submissionId);
+            return Result(SubmissionPersistStatus.Refused, submissionId, SubmissionReasonCodes.DocumentUnavailable);
+        }
+
         Entity? checkedDocument = null;
         if (sourceDocument)
         {

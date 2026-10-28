@@ -100,6 +100,14 @@ public record InvoiceReviewConfirmRequest
     /// </summary>
     [System.Text.Json.Serialization.JsonIgnore]
     public RecordRequester? RequestedBy { get; init; }
+
+    /// <summary>
+    /// ebilling-r1 task 094 fix round (F1-b): the route's step A (file an unfiled source communication under the matter, as the caller),
+    /// handed to the intake, which runs it only after every read-only refusal (<see cref="InvoiceSubmissionRequest.FileSourceBeforeWrite"/>).
+    /// Never bound from the request body.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public Func<CancellationToken, Task<bool>>? FileSourceBeforeWrite { get; init; }
 }
 
 /// <summary>
@@ -345,6 +353,7 @@ public class InvoiceReviewService : IInvoiceReviewService
             ExistingDocumentId = request.DocumentId,
             CallerObjectId = request.RequestedBy?.ObjectId,
             CorrelationId = correlationId,
+            FileSourceBeforeWrite = request.FileSourceBeforeWrite,
         }, ct);
 
         if (outcome.Kind != InvoiceSubmissionOutcomeKind.Received)

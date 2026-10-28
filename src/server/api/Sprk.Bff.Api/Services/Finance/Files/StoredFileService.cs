@@ -559,6 +559,33 @@ public sealed class StoredFileService
     }
 
     /// <summary>
+    /// ebilling-r1 task 094 fix round (undo ordering): the blob of <paramref name="row"/> only, when the row's path is its own (a path that
+    /// is not cannot name this file's blob, so nothing is touched). The row stays: the undo deletes it in ONE transaction with its invoice
+    /// (<see cref="Submission.SubmissionCommitGate.CompensateAsync"/>), so the invoice is never left without its file rows. A blob that is
+    /// already gone is not a fault; a storage fault throws (the undo is then held and retried).
+    /// </summary>
+    internal async Task DeleteBlobForUndoAsync(StoredFileRow row, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        if (!PathIsOwn(row))
+        {
+            return;
+        }
+
+        if (!_blobs.IsConfigured)
+        {
+            throw new InvalidOperationException("The Finance file store is not configured; a committed file's blob cannot be deleted.");
+        }
+
+        if (row.Status == StoredFileStatus.Servable)
+        {
+            _logger.LogWarning("Stored file {FileId}: Servable, its blob deleted by the undo of its invoice's commit", row.FileId);
+        }
+
+        await _blobs.DeleteAsync(row.Container!, row.BlobPath!, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// ebilling-r1 task 094: every Stored File row whose parent is the invoice <paramref name="invoiceId"/>, as the store's rules read them
     /// (whatever their channel: an upload, a Submit Invoice copy or a from-email part). At most <paramref name="max"/>; a fault throws.
     /// </summary>

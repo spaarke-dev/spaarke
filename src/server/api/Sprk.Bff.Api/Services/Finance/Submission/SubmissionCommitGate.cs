@@ -19,6 +19,7 @@
 // endpoint, no package, no AI call. DI: FinanceModule (scoped, like the isolation check and the share synchronizer it composes).
 
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Access;
@@ -67,13 +68,16 @@ public sealed record SubmissionCommitGateResult(SubmissionCommitGateStatus Statu
 /// <see cref="SubmissionReasonCodes.SourceCheckFailed"/> (uac-r2 condition 1: a check that cannot be made is a failure). Then every file is
 /// flipped; a definitive flip failure is <see cref="SubmissionReasonCodes.FileUnservable"/>. A flip that meets a concurrent change is tried
 /// once more; a second change, or a fault of the flip or of the file read, throws (the job retries, and the resume runs this gate first).</para>
-/// <para><b>The undo (uac-r2 condition 3: complete or held).</b> Failed, the reason code and an administrator note are written FIRST, in one
-/// update (a fault throws: nothing was undone and the job retries). Then the compensation (<see cref="CompensateAsync"/>): each file's blob
-/// then row, the approval (before the invoice: its invoice lookup is required), the lines, the invoice, and last the submission's commit
-/// columns (<c>sprk_invoice</c>, <c>sprk_findingsjson</c>, <c>sprk_firminvoicenumber</c>, <c>sprk_ponumber</c>). The status, the reason
-/// code, the administrator note and the correlation id are kept. A filing of the source communication made by the from-document route
-/// (step A) is not undone, and the note says so. A delete that faults leaves the undo held: the submission is Failed with its reason, and
-/// the handler runs the compensation again on a later delivery instead of its terminal no-op.</para>
+/// <para><b>The undo (uac-r2 condition 3: complete or held).</b> Failed, the reason code and an "undo pending" administrator note are
+/// written FIRST, in one update (a fault throws: nothing was undone and the job retries). Then the compensation
+/// (<see cref="CompensateAsync"/>): the approval (its invoice lookup is required), the lines, the files' blobs, then the file rows and the
+/// invoice in ONE transaction (the invoice is never left without its file rows, which the external invoice predicate reads as its source
+/// gate), and last the submission's commit columns (<c>sprk_invoice</c>, <c>sprk_findingsjson</c>, <c>sprk_firminvoicenumber</c>,
+/// <c>sprk_ponumber</c>) with the note switched to "removed". The status, the reason code and the correlation id are kept. A filing of the
+/// source communication made by the from-document route (step A) is not undone, and the note says so. A delete that faults leaves the undo
+/// held: the submission is Failed with its reason, the note still says the removal is pending, and the handler runs the compensation again
+/// on a later delivery instead of its terminal no-op; on the final delivery the handler switches the note to "undo held — operator action"
+/// (<see cref="NoteUndoHeldAsync"/>).</para>
 /// <para><b>Logs (ADR-015)</b> carry ids, counts and codes only.</para>
 /// </remarks>
 public class SubmissionCommitGate
@@ -83,6 +87,9 @@ public class SubmissionCommitGate
 
     /// <summary>The most lines the compensation deletes per query (it queries again until none is left).</summary>
     private const int LinePage = 500;
+
+    /// <summary>The most rounds the compensation removes surplus file rows (beyond <see cref="MaxFiles"/>) before it holds the undo.</summary>
+    private const int MaxSurplusRounds = 20;
 
     private const string SubmissionFirmInvoiceNumber = TrackingNumberAllocator.FirmInvoiceNumberColumn;
     private const string SubmissionPoNumber = "sprk_ponumber";
@@ -278,13 +285,13 @@ public class SubmissionCommitGate
     }
 
     /// <summary>
-    /// The undo: Failed, <paramref name="reasonCode"/> and the administrator note first (a fault throws: nothing was undone), then
-    /// <see cref="CompensateAsync"/>.
+    /// The undo: Failed, <paramref name="reasonCode"/> and the "undo pending" administrator note first (a fault throws: nothing was undone),
+    /// then <see cref="CompensateAsync"/>, which replaces the note with "removed" only once nothing of the commit is left (fix round F2-a).
     /// </summary>
     internal async Task<SubmissionCommitGateResult> UndoAsync(Guid submissionId, string reasonCode, CancellationToken ct)
     {
         var current = await AdminAttentionText.ReadCurrentAsync(_entities, submissionId, ct).ConfigureAwait(false);
-        var note = AdminAttentionText.Merge(current, undoneNote: AdminAttentionText.UndoneNote(reasonCode));
+        var note = AdminAttentionText.Merge(current, undoneNote: AdminAttentionText.UndoPendingNote(reasonCode));
         var failed = new Dictionary<string, object>
         {
             [InvoiceSubmissionPersister.SubmissionStatus] = new OptionSetValue((int)InvoiceSubmissionStatus.Failed),
@@ -304,10 +311,14 @@ public class SubmissionCommitGate
     }
 
     /// <summary>
-    /// The compensation of an undone commit, idempotent: each file of the invoice (blob, then row), the approval, the lines, the invoice,
-    /// then the submission's commit columns. The columns are cleared only when something of the commit was left (the link or the findings
-    /// set, or a row found), so a submission Failed BEFORE any commit with the same code keeps its number. True when nothing is left;
-    /// false when a step faulted (the undo is held; logged with the fault type only). Only the caller's cancellation propagates.
+    /// The compensation of an undone commit, idempotent (fix round: undo ordering and F2-a). In order: the approval (its invoice lookup is
+    /// required), the lines, the blobs of the invoice's files, then ONE transaction that deletes the file rows AND the invoice together, and
+    /// last the submission's commit columns with the "removed" administrator note. The invoice is never left without its file rows: the
+    /// rows are the source gate the external invoice predicate (task 098) reads, and <c>sprk_storedfile.sprk_invoice</c> is RemoveLink, so
+    /// an invoice deleted first would orphan them, and rows deleted first would leave an invoice that reads as having no source. The columns
+    /// are cleared only when something of the commit was left (the link or the findings set, or a row found), so a submission Failed BEFORE
+    /// any commit with the same code keeps its number. True when nothing is left; false when a step faulted (the undo is held; logged with
+    /// the fault type only, and the note still says the removal is pending). Only the caller's cancellation propagates.
     /// </summary>
     public virtual async Task<bool> CompensateAsync(Guid submissionId, CancellationToken ct)
     {
@@ -318,22 +329,6 @@ public class SubmissionCommitGate
             var submission = await _entities.RetrieveAsync(FinanceBaseValues.SubmissionEntity, submissionId, SubmissionColumns, ct).ConfigureAwait(false);
             var left = submission.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.SubmissionInvoice) is { Id: var linked } && linked != Guid.Empty
                 || !string.IsNullOrEmpty(submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionFindingsJson));
-
-            step = "files";
-            for (var round = 0; round < 2; round++)
-            {
-                var files = await _files.ReadRowsForInvoiceAsync(invoiceId, MaxFiles, ct).ConfigureAwait(false);
-                if (files.Count == 0)
-                {
-                    break;
-                }
-
-                left = true;
-                foreach (var file in files)
-                {
-                    await _files.DeleteForUndoAsync(file.FileId, ct).ConfigureAwait(false);
-                }
-            }
 
             step = "approval";
             left |= await DeleteIfPresentAsync(InvoiceSubmissionPersister.ApprovalEntity, InvoiceSubmissionPersister.ApprovalIdFor(submissionId), ct).ConfigureAwait(false);
@@ -356,19 +351,72 @@ public class SubmissionCommitGate
                 }
             }
 
-            step = "invoice";
-            left |= await DeleteIfPresentAsync(InvoiceReviewService.InvoiceEntity, invoiceId, ct).ConfigureAwait(false);
+            step = "files";
+            var files = await _files.ReadRowsForInvoiceAsync(invoiceId, MaxFiles + 1, ct).ConfigureAwait(false);
+            for (var round = 0; files.Count > MaxFiles; round++)
+            {
+                // More rows than one transaction takes (only a data fault gets here): remove the surplus one by one (blob, then row), always
+                // keeping at least one row under the invoice, until the rest fit the transaction.
+                if (round >= MaxSurplusRounds)
+                {
+                    throw new InvalidOperationException($"Invoice {invoiceId} still has more than {MaxFiles} file rows; the undo is held.");
+                }
 
-            if (left)
+                foreach (var surplus in files.Skip(1))
+                {
+                    await _files.DeleteForUndoAsync(surplus.FileId, ct).ConfigureAwait(false);
+                }
+
+                files = await _files.ReadRowsForInvoiceAsync(invoiceId, MaxFiles + 1, ct).ConfigureAwait(false);
+            }
+
+            if (files.Count > 0)
+            {
+                left = true;
+                foreach (var file in files)
+                {
+                    await _files.DeleteBlobForUndoAsync(file, ct).ConfigureAwait(false);
+                }
+
+                // The rows reference the invoice, so it exists: the rows and the invoice go in one transaction (all or nothing).
+                step = "files_and_invoice";
+                var deletes = files.Select(f => (OrganizationRequest)new DeleteRequest { Target = new EntityReference(StoredFileSchema.Entity, f.FileId) })
+                    .Append(new DeleteRequest { Target = new EntityReference(InvoiceReviewService.InvoiceEntity, invoiceId) })
+                    .ToList();
+                await _entities.ExecuteTransactionAsync(deletes, ct).ConfigureAwait(false);
+            }
+            else
+            {
+                step = "invoice";
+                left |= await DeleteIfPresentAsync(InvoiceReviewService.InvoiceEntity, invoiceId, ct).ConfigureAwait(false);
+            }
+
+            var current = submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionAdminAttention);
+            if (left || AdminAttentionText.HasUnfinishedUndo(current))
             {
                 step = "columns";
-                await _entities.UpdateAsync(FinanceBaseValues.SubmissionEntity, submissionId, new Dictionary<string, object>
+                var fields = new Dictionary<string, object>();
+                if (left)
                 {
-                    [InvoiceSubmissionPersister.SubmissionInvoice] = DBNull.Value,
-                    [InvoiceSubmissionPersister.SubmissionFindingsJson] = DBNull.Value,
-                    [SubmissionFirmInvoiceNumber] = DBNull.Value,
-                    [SubmissionPoNumber] = DBNull.Value,
-                }, ct).ConfigureAwait(false);
+                    fields[InvoiceSubmissionPersister.SubmissionInvoice] = DBNull.Value;
+                    fields[InvoiceSubmissionPersister.SubmissionFindingsJson] = DBNull.Value;
+                    fields[SubmissionFirmInvoiceNumber] = DBNull.Value;
+                    fields[SubmissionPoNumber] = DBNull.Value;
+                }
+
+                // F2-a: "removed" only now, when every delete above returned.
+                var code = submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionReasonCode);
+                var note = AdminAttentionText.Merge(current, undoneNote: AdminAttentionText.UndoneNote(code));
+                if (note is not null && !string.Equals(note, current, StringComparison.Ordinal))
+                {
+                    fields[InvoiceSubmissionPersister.SubmissionAdminAttention] = note;
+                }
+
+                if (fields.Count > 0)
+                {
+                    await _entities.UpdateAsync(FinanceBaseValues.SubmissionEntity, submissionId, fields, ct).ConfigureAwait(false);
+                }
+
                 _logger.LogInformation("Invoice submission {SubmissionId}: its commit was undone (invoice {InvoiceId}, its lines, approval and files removed)",
                     submissionId, invoiceId);
             }
@@ -379,6 +427,36 @@ public class SubmissionCommitGate
         {
             _logger.LogError("Invoice submission {SubmissionId}: the undo of its commit is held at step {Step} ({Fault}); a later delivery finishes it",
                 submissionId, step, ex.GetType().Name);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Fix round (F2-a): the undone slot of the administrator note becomes "undo held — operator action" (<see cref="AdminAttentionText.UndoHeldNote"/>).
+    /// The job handler calls it when the undo is still held on the job's final delivery, so nothing retries it on its own. Not a status
+    /// write; a fault is logged (type only) and swallowed, so the handler's outcome never changes. True when it wrote.
+    /// </summary>
+    public virtual async Task<bool> NoteUndoHeldAsync(Guid submissionId, string? reasonCode, CancellationToken ct)
+    {
+        try
+        {
+            var current = await AdminAttentionText.ReadCurrentAsync(_entities, submissionId, ct).ConfigureAwait(false);
+            var note = AdminAttentionText.Merge(current, undoneNote: AdminAttentionText.UndoHeldNote(reasonCode));
+            if (note is null || string.Equals(note, current, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            await _entities.UpdateAsync(FinanceBaseValues.SubmissionEntity, submissionId, new Dictionary<string, object>
+            {
+                [InvoiceSubmissionPersister.SubmissionAdminAttention] = note,
+            }, ct).ConfigureAwait(false);
+            return true;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("Invoice submission {SubmissionId}: the held-undo note could not be written ({Fault}); the outcome is unchanged",
+                submissionId, ex.GetType().Name);
             return false;
         }
     }

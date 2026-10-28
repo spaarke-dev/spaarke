@@ -282,6 +282,15 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
             CompensateCalls.Add(submissionId);
             return (Compensate ?? throw new InvalidOperationException("CompensateAsync was not scripted"))();
         }
+
+        /// <summary>Fix round F2-a: every "undo held — operator action" note the handler asked for (submission, reason code).</summary>
+        public List<(Guid Submission, string? Code)> HeldNotes { get; } = [];
+
+        public override Task<bool> NoteUndoHeldAsync(Guid submissionId, string? reasonCode, CancellationToken ct)
+        {
+            HeldNotes.Add((submissionId, reasonCode));
+            return Task.FromResult(true);
+        }
     }
 
     internal sealed class Rig
@@ -397,7 +406,7 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
                     {
                         ["sprk_graphdriveid"] = PointerContainer,
                         ["sprk_graphitemid"] = "item-1",
-                        ["sprk_filename"] = "invoice.pdf",
+                        ["sprk_filename"] = "Acme v Roe - settlement draft.pdf", // never the copy's name (uac K1)
                         ["versionnumber"] = DocumentVersion,
                         ["sprk_isemailarchive"] = IsEmailArchive,
                     };
@@ -1130,6 +1139,8 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
         copy.Spec.Purpose.Should().Be(StoredFilePurpose.InvoicePdf);
         copy.Spec.Parent.Should().Be(new StoredFileParent(StoredFileParentKind.Invoice, InvoiceId));
         copy.Spec.FirmVisible.Should().BeFalse("a Submit Invoice copy is internal until someone marks it visible");
+        copy.Spec.Name.Should().Be("INV-100.2.pdf",
+            "fix round (uac K1): the copy is named by the submission's tracking number, never the source's file name (the invoice's readers see the row)");
         copy.Spec.SourceDocumentId.Should().Be(DocumentId);
         copy.Spec.SourceVersion.Should().Be(41);
         copy.Spec.SubmissionId.Should().Be(SubmissionId);
@@ -1207,6 +1218,77 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
         rig.Persister.Calls.Should().ContainSingle();
         StagedCopy(rig, 8).Should().BeNull("a copy of bytes nobody evaluated is never kept");
         rig.StatusWrites.Should().NotContain(w => w.Status == Failed);
+    }
+
+    // ── Fix round F2-b: a staged copy is discarded on every path that cannot leave a row naming it ──
+
+    [Fact(DisplayName = "094 F2-b (must fire): an evaluation that throws after the copy was staged discards it - no blob is left without a row")]
+    public async Task Source_EvaluationThrowsAfterTheStage_DiscardsTheStagedCopy()
+    {
+        var rig = new Rig().HappyPath();
+        rig.Processor.Script = async (row, load) =>
+        {
+            await load(DocumentSnapshot(row), CancellationToken.None);
+            StagedCopy(rig, rig.DocumentVersion).Should().NotBeNull("the copy was staged before the fault");
+            throw new InvalidOperationException("the reader faulted");
+        };
+
+        try
+        {
+            await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+        }
+        catch (InvalidOperationException)
+        {
+            // Whether the handler maps or rethrows the fault is not this test's subject.
+        }
+
+        StagedCopy(rig, rig.DocumentVersion).Should().BeNull();
+        rig.Persister.Calls.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "094 F2-b (must fire): a persister that throws discards the staged copy (no row was written for it)")]
+    public async Task Source_PersisterThrows_DiscardsTheStagedCopy()
+    {
+        var rig = new Rig().HappyPath();
+        LoadsTheSource(rig);
+        rig.Persister.Script.Clear();
+        rig.Persister.Script.Add(_ => Task.FromException<SubmissionPersistResult>(new TimeoutException("dataverse")));
+
+        try
+        {
+            await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+        }
+        catch (TimeoutException)
+        {
+            // As above.
+        }
+
+        StagedCopy(rig, rig.DocumentVersion).Should().BeNull();
+    }
+
+    [Fact(DisplayName = "094 F2-b (K4, must fire): a Resumed persist (another run committed) discards this run's copy - no row names it")]
+    public async Task Source_Resumed_DiscardsThisRunsCopy()
+    {
+        var rig = new Rig().HappyPath();
+        LoadsTheSource(rig);
+        rig.Persister.Script.Clear();
+        rig.Persister.Script.Add(_ => Task.FromResult(Persist(SubmissionPersistStatus.Resumed, InvoiceId)));
+
+        (await rig.Build().ProcessAsync(Job(), CancellationToken.None)).Status.Should().Be(JobStatus.Completed);
+
+        rig.After.ResumeCalls.Should().ContainSingle();
+        StagedCopy(rig, rig.DocumentVersion).Should().BeNull();
+    }
+
+    [Fact(DisplayName = "094 F2-b (must not fire): a Committed persist keeps the staged copy (its row names it)")]
+    public async Task Source_Committed_KeepsTheStagedCopy()
+    {
+        var rig = new Rig().HappyPath();
+        LoadsTheSource(rig);
+
+        (await rig.Build().ProcessAsync(Job(), CancellationToken.None)).Status.Should().Be(JobStatus.Completed);
+
+        StagedCopy(rig, rig.DocumentVersion).Should().NotBeNull();
     }
 
     [Fact(DisplayName = "094: a second SourceChanged under one run does not loop - transient (Failure)")]
@@ -1326,6 +1408,8 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
         rig.StatusWrites.Should().Equal([(Processing, (string?)null)], "the gate wrote Failed with its code; the handler adds nothing");
         rig.After.RunCalls.Should().BeEmpty("no after-step runs after an undo");
         rig.After.ResumeCalls.Should().BeEmpty();
+        // Fix round F2-a: only a held undo on the final delivery (nothing retries it on its own) asks for the operator note.
+        rig.Gate.HeldNotes.Should().Equal(held && finalDelivery ? [(SubmissionId, code)] : Array.Empty<(Guid, string?)>());
     }
 
     [Theory(DisplayName = "094: a resume whose gate undid the commit (Undone, complete or held) maps the same way; no status or attention write")]
@@ -1363,6 +1447,8 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
             : finalDelivery ? (JobStatus.Poisoned, SubmissionReasonCodes.UndoHeld) : (JobStatus.Failed, SubmissionReasonCodes.UndoHeld));
         rig.NothingRan.Should().BeTrue("a Failed submission is never evaluated, persisted or resumed again");
         rig.Writes.Should().BeEmpty();
+        rig.Gate.HeldNotes.Should().Equal(!complete && finalDelivery ? [(SubmissionId, code)] : Array.Empty<(Guid, string?)>(),
+            "F2-a: the operator note is written when the compensation is still held on the final delivery");
     }
 
     [Theory(DisplayName = "094 must-not-fire (step 0): a Failed submission with any other code is the terminal no-op - no compensation")]

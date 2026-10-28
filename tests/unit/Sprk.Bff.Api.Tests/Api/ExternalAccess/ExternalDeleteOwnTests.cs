@@ -635,12 +635,13 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
 
     // =====================================================================
     // ebilling-r1 task 094 (ontology-r1 088 gate F1; procedure-and-file-model 5.2): a Stored File copied from a document
-    // names it as sprk_sourcedocument (Delete = Restrict). The document is refused with the same 409 BEFORE its file is
-    // touched, never a Restrict refusal after the file is gone.
+    // names it as sprk_sourcedocument (Delete = Restrict). The document is refused with a 409 BEFORE its file is touched, never
+    // a Restrict refusal after the file is gone. Fix round F1-c (owner EB-D-166: blocking is correct): its own code, not
+    // "has child documents" - deleting other documents first would not help. The external plane is generic: "in use", no count.
     // =====================================================================
 
-    [Fact(DisplayName = "094 (must fire): a document a Stored File was copied from is 409 has-children on the external route; no file or row is deleted")]
-    public async Task Document_WithAStoredFileCopy_Is409_AndNothingIsDeleted()
+    [Fact(DisplayName = "094 F1-c (must fire): a document a Stored File was copied from is a generic 409 document_in_use on the external route - no count, no invoice; no file or row is deleted")]
+    public async Task Document_WithAStoredFileCopy_Is409_InUse_AndNothingIsDeleted()
     {
         var id = _fixture.Seed(DeletableKind.Document, contact: CallerContact, parents: Project(RecordA));
         _fixture.Dataverse.StoredFileCopies[id] = 1;
@@ -650,14 +651,30 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
 
         var body = await response.Content.ReadAsStringAsync();
         response.StatusCode.Should().Be(HttpStatusCode.Conflict, body);
-        ProblemCode(body).Should().Be(DocumentCheckoutService.HasChildDocumentsCode);
+        ProblemCode(body).Should().Be(DocumentCheckoutService.DocumentInUseCode);
         body.Should().NotContain("childCount", "the external plane never counts what refuses the delete");
+        body.Should().NotContainEquivalentOf("invoice", "the external plane does not say what the document is in use by");
+        body.Should().NotContainEquivalentOf("child", "it is not a parent of child documents");
         _fixture.Steps.Should().BeEmpty("the SPE file is untouched");
         _fixture.Exists(DeletableKind.Document, id).Should().BeTrue();
     }
 
-    [Fact(DisplayName = "094 (must fire): the internal delete counts Stored File copies with child documents, before the file")]
-    public async Task InternalDelete_WithStoredFileCopies_IsRefused_WithTheCount_BeforeTheFile()
+    [Fact(DisplayName = "094 F1-c (must fire): the internal delete of a document a Stored File was copied from is refused as an invoice source (its own code), before the file")]
+    public async Task InternalDelete_WithStoredFileCopies_IsRefused_AsAnInvoiceSource_BeforeTheFile()
+    {
+        var id = _fixture.Seed(DeletableKind.Document, contact: CallerContact, parents: Project(RecordA));
+        _fixture.Dataverse.StoredFileCopies[id] = 2;
+        var service = _fixture.Services.GetRequiredService<DocumentCheckoutService>();
+
+        var result = await service.DeleteAsync(id, "corr-094");
+
+        result.Should().BeOfType<InvoiceSourceDeleteResult>();
+        _fixture.Steps.Should().BeEmpty();
+        _fixture.Exists(DeletableKind.Document, id).Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "094 F1-c: a document with child documents AND Stored File copies is refused for its children first, with their count only")]
+    public async Task InternalDelete_WithChildrenAndStoredFileCopies_IsRefusedForTheChildren_WithTheirCount()
     {
         var id = _fixture.Seed(DeletableKind.Document, contact: CallerContact, parents: Project(RecordA));
         _fixture.Dataverse.AddChild(id);
@@ -667,7 +684,7 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
         var result = await service.DeleteAsync(id, "corr-094");
 
         var refused = result.Should().BeOfType<HasChildDocumentsDeleteResult>().Subject;
-        refused.ChildCount.Should().Be(3, "one child document and two Stored File copies");
+        refused.ChildCount.Should().Be(1, "the Stored File copies are not child documents");
         refused.FileGone.Should().BeFalse();
         _fixture.Steps.Should().BeEmpty();
         _fixture.Exists(DeletableKind.Document, id).Should().BeTrue();

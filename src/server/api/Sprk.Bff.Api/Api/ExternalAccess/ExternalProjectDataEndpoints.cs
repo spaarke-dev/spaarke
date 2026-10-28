@@ -2702,6 +2702,12 @@ public static class ExternalProjectDataEndpoints
                 return Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.DocumentHasChildDocuments(
                     childCount: null, fileGone: hasChildren.FileGone);
 
+            case InvoiceSourceDeleteResult:
+                // ebilling-r1 task 094 fix round (F1-c; EB-D-166): an invoice was submitted from the document. Generic on this plane: no
+                // count, no invoice, no reason beyond "in use". Nothing was deleted.
+                logger.LogInformation("[EXT-DELETE] Document {DocumentId}: refused, it is in use", id);
+                return Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.DocumentInUse();
+
             case FileNotDeletedDeleteResult notDeleted:
                 return Results.Problem(statusCode: notDeleted.FailureStatusCode, title: "Document not deleted",
                     detail: "The document's file could not be deleted, so the document was kept. Nothing was deleted.",

@@ -357,17 +357,26 @@ public static class DataverseDocumentsEndpoints
                 // Task 188 slice D (owner round 111 item 3): sprk_document_ParentDocument is Delete = Restrict, so a
                 // document other documents name as their parent is refused here with the one 409 shape, never a raw
                 // Dataverse refusal as a 500. A failed read throws before the delete (the 500 below; nothing deleted).
-                // ebilling-r1 task 094 (ontology-r1 088 gate F1): a Stored File copied from the document (sprk_sourcedocument,
-                // Delete = Restrict) refuses the row the same way, so it counts too: the same 409.
-                var childCount = (await dataverseService.GetDocumentsByParentAsync(Guid.Parse(id), context.RequestAborted)).Count()
-                    + await Sprk.Bff.Api.Services.Finance.Files.StoredFileService.CountCopiesOfDocumentAsync(
-                        entities, Guid.Parse(id), context.RequestAborted);
+                var childCount = (await dataverseService.GetDocumentsByParentAsync(Guid.Parse(id), context.RequestAborted)).Count();
                 if (childCount > 0)
                 {
                     logger.LogInformation(
                         "Delete refused for document {DocumentId}: {ChildCount} child document(s) still name it as parent",
                         id, childCount);
                     return ProblemDetailsHelper.DocumentHasChildDocuments(childCount, traceId);
+                }
+
+                // ebilling-r1 task 094 (ontology-r1 088 gate F1; owner EB-D-166): a Stored File copied from the document
+                // (sprk_sourcedocument, Delete = Restrict) refuses the row the same way, so it is checked too - with its own code
+                // (fix round F1-c): the document is an invoice's source, not a parent of child documents.
+                var copyCount = await Sprk.Bff.Api.Services.Finance.Files.StoredFileService.CountCopiesOfDocumentAsync(
+                    entities, Guid.Parse(id), context.RequestAborted);
+                if (copyCount > 0)
+                {
+                    logger.LogInformation(
+                        "Delete refused for document {DocumentId}: {CopyCount} Stored File copies name it as their source",
+                        id, copyCount);
+                    return ProblemDetailsHelper.DocumentIsInvoiceSource(traceId);
                 }
 
                 try

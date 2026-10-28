@@ -827,16 +827,27 @@ public class DocumentCheckoutService
         // 1b. A document that still has child documents is refused BEFORE anything is deleted (unified-access-control-r2
         // task 188 slice D, owner round 111 item 3). sprk_document_ParentDocument is Delete = Restrict, so Dataverse would
         // refuse the row anyway, but only AFTER step 2 had deleted the file. A failed read throws here, before any delete
-        // (fail closed), exactly as the document read above does. ebilling-r1 task 094 (ontology-r1 088 gate F1; procedure-and-file-
-        // model 5.2): a Stored File copied from this document (sprk_storedfile.sprk_sourcedocument, Delete = Restrict) refuses the
-        // row the same way, so it counts here too and gets the same 409 before the file is touched.
-        var childCount = await CountChildDocumentsAsync(documentId, ct) + await CountStoredFileCopiesAsync(documentId, ct);
+        // (fail closed), exactly as the document read above does.
+        var childCount = await CountChildDocumentsAsync(documentId, ct);
         if (childCount > 0)
         {
             _logger.LogInformation(
                 "Delete refused for document {DocumentId}: {ChildCount} child document(s) still name it as parent [{CorrelationId}]",
                 documentId, childCount, correlationId);
             return new HasChildDocumentsDeleteResult(childCount, correlationId);
+        }
+
+        // 1c. ebilling-r1 task 094 (ontology-r1 088 gate F1; procedure-and-file-model 5.2; owner EB-D-166: blocking is correct): a
+        // Stored File copied from this document (sprk_storedfile.sprk_sourcedocument, Delete = Restrict) refuses the row the same
+        // way, so it is checked here too, before the file is touched - with its own code (fix round F1-c): it is an invoice's
+        // source, not a parent of child documents, and deleting other documents first would not help.
+        var copyCount = await CountStoredFileCopiesAsync(documentId, ct);
+        if (copyCount > 0)
+        {
+            _logger.LogInformation(
+                "Delete refused for document {DocumentId}: {CopyCount} Stored File copies name it as their source [{CorrelationId}]",
+                documentId, copyCount, correlationId);
+            return new InvoiceSourceDeleteResult(correlationId);
         }
 
         // 2. Delete file from SPE first. fileGone records whether the row's file is gone after this step (deleted now or
@@ -1039,6 +1050,19 @@ public class DocumentCheckoutService
     /// other documents (an .eml and its attachments), so it is not deleted (task 188 slice D).
     /// </summary>
     public const string HasChildDocumentsCode = "document_has_child_documents";
+
+    /// <summary>
+    /// ebilling-r1 task 094 fix round (F1-c; owner EB-D-166): the code of an <see cref="InvoiceSourceDeleteResult"/> - an invoice was
+    /// submitted from the document (a Stored File names it as <c>sprk_sourcedocument</c>, Delete = Restrict), so it is not deleted.
+    /// Internal planes only; the external plane answers <see cref="DocumentInUseCode"/>.
+    /// </summary>
+    public const string InvoiceSourceCode = "document_is_invoice_source";
+
+    /// <summary>
+    /// ebilling-r1 task 094 fix round (F1-c): the external plane's generic code for a delete refused because the document is in use
+    /// (an invoice's source). It names no count and no invoice.
+    /// </summary>
+    public const string DocumentInUseCode = "document_in_use";
 
     /// <summary>
     /// Dataverse's <c>CannotDeleteDueToAssociation</c> error code ("The object you tried to delete is associated with
@@ -1780,6 +1804,17 @@ public record FileNotDeletedDeleteResult(string Code, int FailureStatusCode, str
 /// on both routes). A row whose pointer is unbound or mismatched, or whose container is not this stamp's, is still
 /// refused (409), and a fault in the check is a retryable 503.</param>
 public record HasChildDocumentsDeleteResult(int? ChildCount, string CorrelationId, bool FileGone = false)
+    : DeleteResult(false, CorrelationId)
+{
+    public new int StatusCode => 409;
+}
+
+/// <summary>
+/// ebilling-r1 task 094 fix round (F1-c; owner EB-D-166): an invoice was submitted from the document - a Stored File names it as its
+/// <c>sprk_sourcedocument</c> (Delete = Restrict) - so nothing was deleted. Code <see cref="DocumentCheckoutService.InvoiceSourceCode"/>, 409.
+/// </summary>
+/// <param name="CorrelationId">The request's correlation id.</param>
+public record InvoiceSourceDeleteResult(string CorrelationId)
     : DeleteResult(false, CorrelationId)
 {
     public new int StatusCode => 409;

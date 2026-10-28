@@ -147,8 +147,8 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         Func<Guid, Guid, DateTime, string, CancellationToken, Task<SignalAutomatedCloseOutcome>> closeActed,
         Func<BillingDecision, CancellationToken, Task<BillingDecisionRecordResult>> record,
         Action<BillingDecision> preflight,
-        TimeProvider? time = null,
-        Func<Guid, CancellationToken, Task<SubmissionCommitGateResult>>? commitGate = null)
+        Func<Guid, CancellationToken, Task<SubmissionCommitGateResult>> commitGate,
+        TimeProvider? time = null)
     {
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _idempotency = idempotency ?? throw new ArgumentNullException(nameof(idempotency));
@@ -162,8 +162,8 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         _record = record ?? throw new ArgumentNullException(nameof(record));
         _preflight = preflight ?? throw new ArgumentNullException(nameof(preflight));
 
-        // Tasks 092 / 094: the resume's commit gate (SubmissionCommitGate.RunAsync). The unit-test seam defaults to "passed".
-        _commitGate = commitGate ?? ((_, _) => Task.FromResult(SubmissionCommitGateResult.Passed));
+        // Tasks 092 / 094: the resume's commit gate (SubmissionCommitGate.RunAsync). Required (fix round K6): no seam defaults it to "passed".
+        _commitGate = commitGate ?? throw new ArgumentNullException(nameof(commitGate));
     }
 
     /// <summary>The automatic rejection's decision id: deterministic from the submission id, so a retry or a resume reuses it (notes section 7).</summary>

@@ -170,6 +170,48 @@ Owner choice: (1) separate batches for secure invoices, owned by the Secure Reco
 **Related**: tasks 023, 028, 150; task 013 notes
 
 ---
+### ISS-012 — A transient fault in submission step 5 permanently blocks the document on internal routes (owner decision)
+
+| Field | Value |
+|---|---|
+| **Status** | Open: owner decision (task 094 review, addendum K2) |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-28 |
+| **Source** | ebilling-r1 task 094 adversarial review |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2374 |
+
+*(ID is provisional: other worktrees may allocate ISS-012 in parallel; renumber on merge.)*
+
+**Description**: model 9.1 step 5 treats any fault of its re-run as a failure (uac-r2 condition 1), so a transient Dataverse fault undoes the commit and ends the submission Failed `source_check_failed`. Since D-139 a document whose existing-document submission ended Failed is refused on the internal routes (`submission_already_ended`), so the document can never be submitted again.
+
+**Entry-points**: `Services/Finance/Submission/SubmissionCommitGate.cs` (`RunAsync`, the re-run fault path); `Services/Finance/Submission/InvoiceSubmissionService.cs` (`AnswerWithEarlierAsync`).
+
+**Suggested fix**: owner choice: extend EB-D-160's re-attempt to a fault-caused `source_check_failed` (its own code), or make a re-run fault a retry while the file is still Not yet servable. Not built.
+
+**Fails without it**: one transient fault blocks a valid invoice document for good; only an operator edit frees it.
+
+---
+### ISS-013 — ContentConflict re-stage can replace a concurrent delivery's staged copy
+
+| Field | Value |
+|---|---|
+| **Status** | Open: known limit of task 094 (addendum K4) |
+| **Urgency** | someday |
+| **Filed** | 2026-10-28 |
+| **Source** | ebilling-r1 task 094 adversarial review |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2375 |
+
+*(ID is provisional; renumber on merge.)*
+
+**Description**: on `StoredFileRefusal.ContentConflict` the job deletes the staged blob under the same `ForSourceVersion` id and stages its own. The delete is row-guarded, but a concurrent delivery (expired lock) that staged other bytes and has not committed yet loses its blob; its commit then names a blob whose hash differs from its SHA. The flip refuses it (`HashMismatch`), so it fails closed, but the submission is undone instead of evaluated once more.
+
+**Entry-points**: `Services/Jobs/Handlers/InvoiceSubmissionProcessingJobHandler.cs` (`LoadDocumentAsync`, the ContentConflict branch); `Services/Finance/Files/StoredFileService.cs` (`DeleteStagedAsync`).
+
+**Suggested fix**: answer ContentConflict as transient instead of replacing, or include the content hash in the staged id.
+
+**Fails without it**: a rare double delivery over a source changed without a new row version is undone instead of retried.
+
+---
 ### ISS-001 — InvoiceLiveFactResolver reads non-existent sprk_invoice columns (sprk_total, sprk_status)
 
 | Field | Value |
@@ -1224,5 +1266,45 @@ K1 (ontology): a D-96 re-file across core records withholds line Duplicates perm
 **Description**: since 092 an upload (SPA or internal) is a Stored File, not a `sprk_document`. The `InvoiceIndexing` job is keyed by a document (`InvoiceIndexingJobHandler`), so `InvoiceSubmissionAfterSteps` skips it for uploads (logged). Since task 094 (owner K) no submission is indexed: a confirm or a Submit Invoice copies its source into a Stored File too, and the after-steps no longer take the job submitter. Per D-44 (second half) indexing takes no bytes from a Stored File. Fix: key the job on the invoice id and index the structured record for every invoice In Review.
 
 **Fails without it**: invoice search and AI retrieval over invoices miss every uploaded invoice.
+
+---
+
+### DEF-048 — Field-secure sprk_invoicesubmission.sprk_document (owner OK)
+
+| Field | Value |
+|---|---|
+| **Status** | Open: follow-up of task 094 fix round F1-1 |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-28 |
+| **Source** | ebilling-r1 task 094 adversarial review |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2372 |
+
+*(ID is provisional; renumber on merge.)*
+
+**Description**: the BFF binds a source-document submission to the id derived from its document (`ExistingDocumentSubmissionIdFor`) at the job's snapshot read and in the persister, so a row whose `sprk_document` was changed after the intake fails closed (`document_unavailable`). The column is still writable by anyone with Write on the submission; field security (users may not update it) would refuse the change at write time.
+
+**Entry-points**: `Services/Finance/Submission/SubmissionEvaluationOutcome.cs` (`SubmissionSnapshot.Read`); `Services/Finance/Submission/InvoiceSubmissionPersister.cs`; Dataverse column security on `sprk_invoicesubmission.sprk_document`.
+
+**Fails without it**: a user with Write on a submission can strand it Failed by re-pointing its document.
+
+---
+
+### DEF-049 — Commit gate step 6 and the undo must key to the submission's own file ids before O-14 / 150
+
+| Field | Value |
+|---|---|
+| **Status** | Open: precondition for O-14 and task 150 (task 094 uac K2 / addendum K3) |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-28 |
+| **Source** | ebilling-r1 task 094 review |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2373 |
+
+*(ID is provisional; renumber on merge.)*
+
+**Description**: `SubmissionCommitGate` reads "the invoice's files" by the invoice: step 6 skips the re-run when any file of the invoice is Servable, and the undo deletes every file row of the invoice. Today those are the submission's own files. Once O-14 (files added to an invoice) or 150 (export files) put other Stored Files under an invoice, both must filter to the submission's file ids.
+
+**Entry-points**: `Services/Finance/Submission/SubmissionCommitGate.cs` (`RunAsync` step 6, `CompensateAsync`); `Services/Finance/Files/StoredFileService.cs` (`ReadRowsForInvoiceAsync`).
+
+**Fails without it**: after O-14 / 150 a Servable export file makes step 6 skip a new copy's re-run (a re-filed copy is served), and an undo deletes files that are not the submission's.
 
 ---

@@ -86,10 +86,10 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
 
     private static readonly string[] StatusColumns = ["sprk_processingstatus", InvoiceSubmissionPersister.SubmissionInvoice];
 
-    /// <summary>The source document as step 2 reads it: the file pointer, the version and the names, in ONE retrieve.</summary>
+    /// <summary>The source document as step 2 reads it: the file pointer, the version and the type, in ONE retrieve.</summary>
     private static readonly string[] SourceDocumentColumns =
     [
-        "sprk_graphdriveid", "sprk_graphitemid", "sprk_mimetype", "sprk_filename", InvoiceReviewService.VersionNumber,
+        "sprk_graphdriveid", "sprk_graphitemid", "sprk_mimetype", InvoiceReviewService.VersionNumber,
         "sprk_relatedcommunication", "sprk_isemailarchive",
     ];
 
@@ -240,7 +240,8 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
             && row.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionReasonCode) is { } failedCode
             && SubmissionCommitGate.UndoReasonCodes.Contains(failedCode))
         {
-            return Compensated(job, submissionId, await _gate.CompensateAsync(submissionId, ct).ConfigureAwait(false), stopwatch);
+            return await CompensatedAsync(job, submissionId, failedCode, await _gate.CompensateAsync(submissionId, ct).ConfigureAwait(false), stopwatch, ct)
+                .ConfigureAwait(false);
         }
 
         // Terminal comes FIRST. The after-steps write Accepted / Rejected LAST, so a terminal status means complete; Failed is terminal too.
@@ -292,99 +293,119 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
         var current = row;
         for (var pass = 0; pass <= MaxReEvaluations; pass++)
         {
-            // Task 094 (9.1 step 2): the copy a source-document read staged, carried to the persister with the outcome.
+            // Task 094 (9.1 step 2): the copy a source-document read staged, carried to the persister with the outcome. Fix round F2-b: the
+            // copy is discarded in the finally below on EVERY path (a fault of the evaluation, the reader or the persister included) unless the
+            // persister's answer means a row of this run's commit may name it: Committed, Undone (the undo removed it), a Retry that links
+            // the invoice, or the outcome-unknown Retry (the commit may yet be proved). The discard is row-guarded
+            // (StoredFileService.DeleteStagedAsync keeps a blob a row names, and keeps it when the row read faults), so a Resumed run's copy
+            // at another version is removed too and a committed copy never is.
             StagedSourceCopy? staged = null;
-            var outcome = await _processor.EvaluateAsync(current, async (snapshot, token) =>
-            {
-                var (read, copy) = await LoadDocumentAsync(snapshot, token).ConfigureAwait(false);
-                staged = copy;
-                return read;
-            }, ct).ConfigureAwait(false);
-            switch (outcome.Kind)
-            {
-                case SubmissionEvaluationKind.Failed:
-                    await DiscardStagedAsync(submissionId, staged, ct).ConfigureAwait(false);
-                    return await FailAsync(job, submissionId, outcome.ReasonCode ?? SubmissionReasonCodes.ProcessingFailed, linked, stopwatch, ct).ConfigureAwait(false);
-
-                case SubmissionEvaluationKind.RejectedUnreadable:
-                    await DiscardStagedAsync(submissionId, staged, ct).ConfigureAwait(false);
-                    return await RejectUnreadableAsync(job, submissionId, outcome, stopwatch, ct).ConfigureAwait(false);
-            }
-
-            // 3. Record-before-mutate (074 K-3): refuse an automatic rejection the recorder would refuse BEFORE the invoice is created.
+            var keepStaged = false;
             try
             {
-                _afterSteps.PreflightRejection(outcome);
-            }
-            catch (DecisionRecordRefusedException ex)
-            {
-                await DiscardStagedAsync(submissionId, staged, ct).ConfigureAwait(false);
-                return await FailAsync(job, submissionId, ex.Reason, linked, stopwatch, ct).ConfigureAwait(false);
-            }
-
-            if (staged is not null)
-            {
-                outcome = outcome with { StagedFiles = [staged] };
-            }
-
-            var persisted = await _persister.PersistAsync(outcome, correlation, ct).ConfigureAwait(false);
-            if (persisted.Status == SubmissionPersistStatus.SourceChanged && staged is not null)
-            {
-                // Task 094 (9.1 step 4): the source changed before the commit (the persister deleted the stale copy). Stage its new version;
-                // the evaluation stands only when the bytes are the bytes it read, and the commit is tried ONCE more.
-                var (_, again) = await LoadDocumentAsync(outcome.Submission!, ct).ConfigureAwait(false);
-                if (again is null || !string.Equals(again.Spec.SourceSha256, staged.Spec.SourceSha256, StringComparison.Ordinal))
+                var outcome = await _processor.EvaluateAsync(current, async (snapshot, token) =>
                 {
-                    _logger.LogInformation("Invoice submission {SubmissionId}: its source's content changed since it was read; retry evaluates it again", submissionId);
-                    await DiscardStagedAsync(submissionId, again, ct).ConfigureAwait(false);
-                    return await TransientAsync(job, submissionId, SubmissionReasonCodes.SourceChanged, stopwatch, ct).ConfigureAwait(false);
+                    var (read, copy) = await LoadDocumentAsync(snapshot, token).ConfigureAwait(false);
+                    staged = copy;
+                    return read;
+                }, ct).ConfigureAwait(false);
+                switch (outcome.Kind)
+                {
+                    case SubmissionEvaluationKind.Failed:
+                        return await FailAsync(job, submissionId, outcome.ReasonCode ?? SubmissionReasonCodes.ProcessingFailed, linked, stopwatch, ct).ConfigureAwait(false);
+
+                    case SubmissionEvaluationKind.RejectedUnreadable:
+                        return await RejectUnreadableAsync(job, submissionId, outcome, stopwatch, ct).ConfigureAwait(false);
                 }
 
-                persisted = await _persister.PersistAsync(outcome with { StagedFiles = [again] }, correlation, ct).ConfigureAwait(false);
+                // 3. Record-before-mutate (074 K-3): refuse an automatic rejection the recorder would refuse BEFORE the invoice is created.
+                try
+                {
+                    _afterSteps.PreflightRejection(outcome);
+                }
+                catch (DecisionRecordRefusedException ex)
+                {
+                    return await FailAsync(job, submissionId, ex.Reason, linked, stopwatch, ct).ConfigureAwait(false);
+                }
+
+                if (staged is not null)
+                {
+                    outcome = outcome with { StagedFiles = [staged] };
+                }
+
+                var persisted = await _persister.PersistAsync(outcome, correlation, ct).ConfigureAwait(false);
+                if (persisted.Status == SubmissionPersistStatus.SourceChanged && staged is not null)
+                {
+                    // Task 094 (9.1 step 4): the source changed before the commit (the persister deleted the stale copy). Stage its new version;
+                    // the evaluation stands only when the bytes are the bytes it read, and the commit is tried ONCE more.
+                    var readSha = staged.Spec.SourceSha256;
+                    staged = null;
+                    var (_, again) = await LoadDocumentAsync(outcome.Submission!, ct).ConfigureAwait(false);
+                    staged = again;
+                    if (again is null || !string.Equals(again.Spec.SourceSha256, readSha, StringComparison.Ordinal))
+                    {
+                        _logger.LogInformation("Invoice submission {SubmissionId}: its source's content changed since it was read; retry evaluates it again", submissionId);
+                        return await TransientAsync(job, submissionId, SubmissionReasonCodes.SourceChanged, stopwatch, ct).ConfigureAwait(false);
+                    }
+
+                    persisted = await _persister.PersistAsync(outcome with { StagedFiles = [again] }, correlation, ct).ConfigureAwait(false);
+                }
+
+                keepStaged = persisted.Status is SubmissionPersistStatus.Committed or SubmissionPersistStatus.Undone
+                    || (persisted.Status == SubmissionPersistStatus.Retry
+                        && (persisted.InvoiceId is not null || persisted.ReasonCode == InvoiceSubmissionPersister.TransactionOutcomeUnknownCode));
+
+                switch (persisted.Status)
+                {
+                    case SubmissionPersistStatus.Committed:
+                        return await MapAfterStepsAsync(job, submissionId, await _afterSteps.RunAsync(persisted, correlation, ct).ConfigureAwait(false), stopwatch, ct)
+                            .ConfigureAwait(false);
+
+                    case SubmissionPersistStatus.Retry when persisted.InvoiceId is not null:
+                    case SubmissionPersistStatus.Resumed:
+                        // R2: the submission links its invoice, so the after-steps run from the STORED state, never from this run's outcome. Resumed:
+                        // the link appeared while this run evaluated (a lock that expired under a slow run), and the terminal this run's outcome
+                        // implies could contradict the committed one. Retry with the invoice id: the transaction committed and only the totals
+                        // failed; the resume recalculates them again, then does the Signals, the record and the rest. RunAsync is for Committed
+                        // only - a run that committed in this delivery.
+                        return await MapAfterStepsAsync(job, submissionId, await _afterSteps.ResumeAsync(submissionId, correlation, ct).ConfigureAwait(false), stopwatch, ct)
+                            .ConfigureAwait(false);
+
+                    case SubmissionPersistStatus.Retry:
+                        return await TransientAsync(job, submissionId, persisted.ReasonCode ?? SubmissionReasonCodes.ProcessingFailed, stopwatch, ct).ConfigureAwait(false);
+
+                    case SubmissionPersistStatus.SourceChanged:
+                        // A second change under one run: do not loop. Another delivery evaluates the source as it is then.
+                        return await TransientAsync(job, submissionId, SubmissionReasonCodes.SourceChanged, stopwatch, ct).ConfigureAwait(false);
+
+                    case SubmissionPersistStatus.Undone:
+                        return await UndoneAsync(job, submissionId, persisted.ReasonCode, persisted.UndoHeld, stopwatch, ct).ConfigureAwait(false);
+
+                    case SubmissionPersistStatus.Refused:
+                        return await FailAsync(job, submissionId, persisted.ReasonCode ?? SubmissionReasonCodes.ProcessingFailed, linked, stopwatch, ct).ConfigureAwait(false);
+
+                    case SubmissionPersistStatus.SubmissionMissing:
+                        _logger.LogInformation("Invoice submission job {JobId}: submission {SubmissionId} vanished before it was persisted; nothing to do", job.JobId, submissionId);
+                        return Done(job, stopwatch);
+
+                    case SubmissionPersistStatus.ReEvaluate:
+                        current = persisted.CurrentSubmission
+                            ?? throw new InvalidOperationException("The persister asked to re-evaluate without the current submission.");
+                        _logger.LogInformation("Invoice submission job {JobId}: the core record of submission {SubmissionId} changed; re-evaluating (pass {Pass})",
+                            job.JobId, submissionId, pass + 1);
+                        break;
+
+                    default:
+                        throw new InvalidOperationException($"Unhandled persist status {persisted.Status}.");
+                }
             }
-
-            switch (persisted.Status)
+            finally
             {
-                case SubmissionPersistStatus.Committed:
-                    return await MapAfterStepsAsync(job, submissionId, await _afterSteps.RunAsync(persisted, correlation, ct).ConfigureAwait(false), stopwatch, ct)
-                        .ConfigureAwait(false);
-
-                case SubmissionPersistStatus.Retry when persisted.InvoiceId is not null:
-                case SubmissionPersistStatus.Resumed:
-                    // R2: the submission links its invoice, so the after-steps run from the STORED state, never from this run's outcome. Resumed:
-                    // the link appeared while this run evaluated (a lock that expired under a slow run), and the terminal this run's outcome
-                    // implies could contradict the committed one. Retry with the invoice id: the transaction committed and only the totals
-                    // failed; the resume recalculates them again, then does the Signals, the record and the rest. RunAsync is for Committed
-                    // only - a run that committed in this delivery.
-                    return await MapAfterStepsAsync(job, submissionId, await _afterSteps.ResumeAsync(submissionId, correlation, ct).ConfigureAwait(false), stopwatch, ct)
-                        .ConfigureAwait(false);
-
-                case SubmissionPersistStatus.Retry:
-                    return await TransientAsync(job, submissionId, persisted.ReasonCode ?? SubmissionReasonCodes.ProcessingFailed, stopwatch, ct).ConfigureAwait(false);
-
-                case SubmissionPersistStatus.SourceChanged:
-                    // A second change under one run: do not loop. Another delivery evaluates the source as it is then.
-                    return await TransientAsync(job, submissionId, SubmissionReasonCodes.SourceChanged, stopwatch, ct).ConfigureAwait(false);
-
-                case SubmissionPersistStatus.Undone:
-                    return Undone(job, submissionId, persisted.ReasonCode, persisted.UndoHeld, stopwatch);
-
-                case SubmissionPersistStatus.Refused:
-                    return await FailAsync(job, submissionId, persisted.ReasonCode ?? SubmissionReasonCodes.ProcessingFailed, linked, stopwatch, ct).ConfigureAwait(false);
-
-                case SubmissionPersistStatus.SubmissionMissing:
-                    _logger.LogInformation("Invoice submission job {JobId}: submission {SubmissionId} vanished before it was persisted; nothing to do", job.JobId, submissionId);
-                    return Done(job, stopwatch);
-
-                case SubmissionPersistStatus.ReEvaluate:
-                    current = persisted.CurrentSubmission
-                        ?? throw new InvalidOperationException("The persister asked to re-evaluate without the current submission.");
-                    _logger.LogInformation("Invoice submission job {JobId}: the core record of submission {SubmissionId} changed; re-evaluating (pass {Pass})",
-                        job.JobId, submissionId, pass + 1);
-                    break;
-
-                default:
-                    throw new InvalidOperationException($"Unhandled persist status {persisted.Status}.");
+                if (!keepStaged)
+                {
+                    // Best effort, never cancelled half-way: a blob left here has no row, and nothing serves a blob without its row.
+                    await DiscardStagedAsync(submissionId, staged, CancellationToken.None).ConfigureAwait(false);
+                }
             }
         }
 
@@ -411,7 +432,7 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
 
             case SubmissionAfterStepsStatus.Undone:
                 // Tasks 092 / 094: the resume's commit gate failed; the gate wrote Failed and undid the commit (or holds the undo).
-                return Undone(job, submissionId, result.ReasonCode, result.UndoHeld, stopwatch);
+                return await UndoneAsync(job, submissionId, result.ReasonCode, result.UndoHeld, stopwatch, ct).ConfigureAwait(false);
 
             case SubmissionAfterStepsStatus.Refused:
                 // Both callers reach here only with the invoice linked (Committed / Retry-with-invoice / Resumed / a Processing+link resume).
@@ -479,9 +500,10 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
     /// ebilling-r1 task 094 (procedure-and-file-model 9.1 step 5): the commit gate undid the commit and wrote Failed with
     /// <paramref name="reasonCode"/> itself. Complete: Poisoned (permanent, nothing retries). Held (a delete of the undo faulted): Failure, so
     /// the broker redelivers and step 0 finishes the compensation; Poisoned on the final delivery (a replay of the dead-lettered message
-    /// finishes it).
+    /// finishes it). Fix round F2-a: on that final delivery the administrator note says "undo held — operator action"
+    /// (<see cref="SubmissionCommitGate.NoteUndoHeldAsync"/>; a fault writing it never changes the outcome).
     /// </summary>
-    private JobOutcome Undone(JobContract job, Guid submissionId, string? reasonCode, bool held, Stopwatch stopwatch)
+    private async Task<JobOutcome> UndoneAsync(JobContract job, Guid submissionId, string? reasonCode, bool held, Stopwatch stopwatch, CancellationToken ct)
     {
         var code = reasonCode ?? SubmissionReasonCodes.FileUnservable;
         if (!held)
@@ -492,13 +514,17 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
 
         _logger.LogError("Invoice submission job {JobId}: submission {SubmissionId} Failed ({ReasonCode}); the undo of its commit is held ({HeldCode})",
             job.JobId, submissionId, code, SubmissionReasonCodes.UndoHeld);
-        return job.IsFinalDelivery
-            ? JobOutcome.Poisoned(job.JobId, JobType, SubmissionReasonCodes.UndoHeld, job.Attempt, stopwatch.Elapsed)
-            : JobOutcome.Failure(job.JobId, JobType, SubmissionReasonCodes.UndoHeld, job.Attempt, stopwatch.Elapsed);
+        if (!job.IsFinalDelivery)
+        {
+            return JobOutcome.Failure(job.JobId, JobType, SubmissionReasonCodes.UndoHeld, job.Attempt, stopwatch.Elapsed);
+        }
+
+        await _gate.NoteUndoHeldAsync(submissionId, code, ct).ConfigureAwait(false);
+        return JobOutcome.Poisoned(job.JobId, JobType, SubmissionReasonCodes.UndoHeld, job.Attempt, stopwatch.Elapsed);
     }
 
     /// <summary>Step 0's compensation of a held undo (task 094): complete is Success; still held is a retry (Poisoned on the final delivery).</summary>
-    private JobOutcome Compensated(JobContract job, Guid submissionId, bool complete, Stopwatch stopwatch)
+    private async Task<JobOutcome> CompensatedAsync(JobContract job, Guid submissionId, string failedCode, bool complete, Stopwatch stopwatch, CancellationToken ct)
     {
         if (complete)
         {
@@ -506,7 +532,7 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
             return Done(job, stopwatch);
         }
 
-        return Undone(job, submissionId, null, held: true, stopwatch);
+        return await UndoneAsync(job, submissionId, failedCode, held: true, stopwatch, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -717,7 +743,7 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
             FileId = StoredFileIds.ForSourceVersion(snapshot.SubmissionId, version),
             Purpose = StoredFilePurpose.InvoicePdf,
             Parent = new StoredFileParent(StoredFileParentKind.Invoice, InvoiceSubmissionPersister.InvoiceIdFor(snapshot.SubmissionId)),
-            Name = SourceCopyName(document.GetAttributeValue<string>("sprk_filename"), snapshot.TrackingNumber),
+            Name = SourceCopyName(snapshot.TrackingNumber),
             ContentType = contentType,
             FirmVisible = false,
             SourceDocumentId = documentId,
@@ -750,10 +776,13 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
         return (read, new StagedSourceCopy(spec, blob, version));
     }
 
-    /// <summary>The copy's display name: the source's file name, else the tracking number, else <c>invoice</c>; cut to the column.</summary>
-    private static string SourceCopyName(string? fileName, string? trackingNumber)
+    /// <summary>
+    /// The copy's display name: the submission's tracking number, else <c>invoice</c>; cut to the column. Fix round (uac K1): never the source
+    /// document's file name - the copy row is read by the invoice's readers, who need not be able to read the source document.
+    /// </summary>
+    private static string SourceCopyName(string? trackingNumber)
     {
-        var name = !string.IsNullOrWhiteSpace(fileName) ? fileName.Trim() : !string.IsNullOrWhiteSpace(trackingNumber) ? trackingNumber.Trim() + ".pdf" : "invoice.pdf";
+        var name = !string.IsNullOrWhiteSpace(trackingNumber) ? trackingNumber.Trim() + ".pdf" : "invoice.pdf";
         return name.Length <= StoredFileSchema.NameMaxLength ? name : name[..StoredFileSchema.NameMaxLength];
     }
 

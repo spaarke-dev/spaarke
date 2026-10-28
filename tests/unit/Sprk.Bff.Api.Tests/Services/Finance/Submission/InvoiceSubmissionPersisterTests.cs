@@ -933,6 +933,26 @@ public class InvoiceSubmissionPersisterTests
         StagedFiles = [store.StageSourceCopy()],
     };
 
+    [Fact(DisplayName = "094 fix round F1-1 (must fire; restores 092's rule): an outcome naming a source document its submission was not created for is Refused document_unavailable - nothing read, owned or written")]
+    public async Task Source_DocumentItsSubmissionWasNotCreatedFor_IsRefused_NothingWritten()
+    {
+        var store = new Store();
+        var outcome = await new ProcessorHarness().RunAsync();
+        outcome = outcome with
+        {
+            Submission = outcome.Submission! with { DocumentId = Document, FileSource = SubmissionFileSource.SourceDocument },
+            StagedFiles = [store.StageSourceCopy()],
+        };
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Refused);
+        result.ReasonCode.Should().Be(SubmissionReasonCodes.DocumentUnavailable);
+        store.DocumentReads.Should().BeEmpty();
+        store.Transactions.Should().BeEmpty();
+        store.OwnerContexts.Should().BeEmpty();
+    }
+
     [Fact(DisplayName = "094 happy path: a source submission commits invoice, the copy's Stored File row, lines, approval, the guard and the submission in ONE transaction; the copy ends Servable; nothing links the source")]
     public async Task Source_CommitsTheCopy_ServableAfterTheGate_NothingLinksTheSource()
     {
@@ -1136,14 +1156,24 @@ public class InvoiceSubmissionPersisterTests
         store.CopyStatus.Should().Be(StoredFileStatus.Servable);
     }
 
-    /// <summary>Task 094: the undo's end state - every row of the commit gone in order, the four columns cleared, Failed with the code and note.</summary>
+    /// <summary>
+    /// Task 094: the undo's end state - every row of the commit gone in order, the four columns cleared, Failed with the code and note. Fix round
+    /// (undo order): the approval first, then the lines, then the file blobs, then the Stored File rows AND the invoice in one transaction - so no
+    /// state of the undo leaves the invoice without its file row (the external visibility rule reads an invoice with no source file as visible).
+    /// </summary>
     private static void ShouldBeUndone(Store store, string reasonCode, Guid fileId)
     {
         store.Files.Dataverse.Rows.Should().NotContainKey(fileId, "the Stored File row is deleted");
+        store.InvoiceExists.Should().BeFalse();
+        store.CopyBlobExists.Should().BeFalse("the file's blob is deleted before its row");
         store.Deletes.Select(d => d.Table).Should().StartWith(["sprk_invoiceapproval"]).And.EndWith("sprk_invoice",
-            "the approval first (its invoice lookup is required), then the lines, then the invoice");
+            "the approval first (its invoice lookup is required), then the lines, then the file rows and the invoice");
         store.Deletes.Where(d => d.Table == "sprk_billingevent").Should().NotBeEmpty();
-        store.Deletes.Should().OnlyContain(d => d.FilesLeft == 0, "the Stored File (blob and row) is deleted before the approval, lines and invoice");
+        store.Deletes.Where(d => d.Table is "sprk_invoiceapproval" or "sprk_billingevent").Should().OnlyContain(d => d.FilesLeft > 0,
+            "the file row stays until the transaction that deletes the invoice");
+        var undo = store.UndoTransactions.Should().ContainSingle("the file rows and the invoice go in one transaction").Subject;
+        undo.Select(d => d.Target.LogicalName).Should().Equal(StoredFileSchema.Entity, "sprk_invoice");
+        undo[0].Target.Id.Should().Be(fileId);
         store.Submission.GetAttributeValue<OptionSetValue>(InvoiceSubmissionPersister.SubmissionStatus).Value.Should().Be((int)InvoiceSubmissionStatus.Failed);
         store.Submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionReasonCode).Should().Be(reasonCode);
         store.Submission.Attributes.Should().NotContainKey(InvoiceSubmissionPersister.SubmissionInvoice);
@@ -1516,6 +1546,71 @@ public class InvoiceSubmissionPersisterTests
         ShouldBeUndone(store, SubmissionReasonCodes.FileUnservable, FileId);
     }
 
+    // ── Fix round (undo order, F2-a): no partial undo leaves an invoice without its file row; "removed" is written only when the undo completed ──
+
+    [Fact(DisplayName = "094 undo (must fire): a fault in the transaction that deletes the file rows and the invoice leaves both, the note says the removal is pending (never removed); a later compensation completes it")]
+    public async Task Undo_FaultInTheRowsAndInvoiceTransaction_LeavesTheInvoiceWithItsFileRow_ThenCompletes()
+    {
+        var store = new Store
+        {
+            AfterCommit = s =>
+            {
+                s.DocumentRow = new Entity("sprk_document", Document) { ["sprk_matter"] = new EntityReference("sprk_matter", OtherMatter) };
+                s.UndoTransactionFault = new DataverseTransactionException("ServiceUnavailable", failedRequestIndex: 1, outcomeUnknown: false, null);
+            },
+        };
+        var outcome = AsSource(await new ProcessorHarness().RunAsync(), store);
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Undone);
+        result.UndoHeld.Should().BeTrue();
+        store.UndoTransactions.Should().ContainSingle("the transaction was sent and rolled back");
+        store.InvoiceExists.Should().BeTrue("the transaction rolled back: the invoice stays");
+        store.CopyStatus.Should().Be(StoredFileStatus.NotYetServable, "and so does its file row, never served");
+        store.Deletes.Select(d => d.Table).Should().NotContain(["sprk_invoice", StoredFileSchema.Entity]);
+        var note = store.Submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionAdminAttention);
+        note.Should().Contain(AdminAttentionText.UndoPendingNote(SubmissionReasonCodes.SourceCheckFailed));
+        note.Should().NotContain("were removed", "nothing is reported removed before the undo completed");
+        store.Submission.GetAttributeValue<OptionSetValue>(InvoiceSubmissionPersister.SubmissionStatus).Value.Should().Be((int)InvoiceSubmissionStatus.Failed);
+
+        (await store.Gate!.CompensateAsync(SourceSubmission, CancellationToken.None)).Should().BeTrue();
+
+        store.UndoTransactions.Should().HaveCount(2);
+        store.Files.Dataverse.Rows.Should().NotContainKey(store.SourceCopy!.Spec.FileId);
+        store.InvoiceExists.Should().BeFalse();
+        var completed = store.Submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionAdminAttention);
+        completed.Should().Contain(AdminAttentionText.UndoneNote(SubmissionReasonCodes.SourceCheckFailed));
+        completed.Should().NotContain(AdminAttentionText.UndoPendingNote(SubmissionReasonCodes.SourceCheckFailed), "the one undone slot now says removed");
+    }
+
+    [Theory(DisplayName = "094 undo (must fire): a fault before the file step (approval or lines) leaves the invoice AND its file row; the note says pending")]
+    [InlineData("sprk_invoiceapproval")]
+    [InlineData("sprk_billingevent")]
+    public async Task Undo_FaultBeforeTheFileStep_LeavesTheInvoiceWithItsFileRow(string faultingTable)
+    {
+        var store = new Store
+        {
+            AfterCommit = s =>
+            {
+                s.DocumentRow = new Entity("sprk_document", Document) { ["sprk_matter"] = new EntityReference("sprk_matter", OtherMatter) };
+                s.DeleteFault = faultingTable;
+            },
+        };
+        var outcome = AsSource(await new ProcessorHarness().RunAsync(), store);
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Undone);
+        result.UndoHeld.Should().BeTrue();
+        store.UndoTransactions.Should().BeEmpty("the undo stopped before the file step");
+        store.InvoiceExists.Should().BeTrue();
+        store.CopyStatus.Should().Be(StoredFileStatus.NotYetServable);
+        store.CopyBlobExists.Should().BeTrue("the file step never ran");
+        store.Submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionAdminAttention)
+            .Should().Contain(AdminAttentionText.UndoPendingNote(SubmissionReasonCodes.SourceCheckFailed));
+    }
+
     [Fact(DisplayName = "092: a flip fault after the commit throws (the job retries) before the totals; the retry is a resume with nothing created again")]
     public async Task FlipFault_Throws_BeforeTheTotals_RetryResumes()
     {
@@ -1717,6 +1812,12 @@ public class InvoiceSubmissionPersisterTests
             entities.Setup(e => e.DeleteAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
                 .Returns((string table, Guid id, CancellationToken _) =>
                 {
+                    if (DeleteFault == table)
+                    {
+                        DeleteFault = null;
+                        return Task.FromException(new HttpRequestException("Dataverse unavailable"));
+                    }
+
                     var existed = table == InvoiceSubmissionPersister.LineEntity ? StoredLines.RemoveAll(l => l.Id == id) > 0 : CreatedRows.Remove((table, id));
                     if (!existed)
                     {
@@ -1729,6 +1830,11 @@ public class InvoiceSubmissionPersisterTests
             entities.Setup(e => e.ExecuteTransactionAsync(It.IsAny<IReadOnlyList<OrganizationRequest>>(), It.IsAny<CancellationToken>()))
                 .Returns((IReadOnlyList<OrganizationRequest> requests, CancellationToken _) =>
                 {
+                    if (requests.Count > 0 && requests.All(r => r is DeleteRequest))
+                    {
+                        return UndoTransaction(requests.Cast<DeleteRequest>().ToList());
+                    }
+
                     Transactions.Add(requests);
                     BeforeTransaction?.Invoke(this);
 
@@ -1849,6 +1955,54 @@ public class InvoiceSubmissionPersisterTests
                 }
             }
         }
+
+        /// <summary>
+        /// Fix round (undo order): the undo's one transaction - every Stored File row of the invoice and the invoice - applied all or nothing, as
+        /// Dataverse's ExecuteTransaction does. <see cref="UndoTransactionFault"/> (one shot) rolls it back. Each delete is recorded in
+        /// <see cref="Deletes"/> with the Stored File rows left after it.
+        /// </summary>
+        private Task UndoTransaction(IReadOnlyList<DeleteRequest> deletes)
+        {
+            UndoTransactions.Add(deletes);
+            if (UndoTransactionFault is { } fault)
+            {
+                UndoTransactionFault = null;
+                return Task.FromException(fault);
+            }
+
+            if (deletes.Any(d => d.Target.LogicalName == StoredFileSchema.Entity ? !Files.Dataverse.Rows.ContainsKey(d.Target.Id) : !CreatedRows.Contains((d.Target.LogicalName, d.Target.Id))))
+            {
+                return Task.FromException(new DataverseTransactionException("ObjectDoesNotExist", failedRequestIndex: 0, outcomeUnknown: false, null));
+            }
+
+            foreach (var delete in deletes)
+            {
+                if (delete.Target.LogicalName == StoredFileSchema.Entity)
+                {
+                    Files.Dataverse.Rows.TryRemove(delete.Target.Id, out _);
+                }
+                else
+                {
+                    CreatedRows.Remove((delete.Target.LogicalName, delete.Target.Id));
+                }
+
+                Deletes.Add((delete.Target.LogicalName, delete.Target.Id, Files.Dataverse.Rows.Count));
+            }
+
+            return Task.CompletedTask;
+        }
+
+        /// <summary>Fix round: every undo transaction sent (rows and invoice), rolled back or not.</summary>
+        public List<IReadOnlyList<DeleteRequest>> UndoTransactions { get; } = [];
+
+        /// <summary>Fix round: the next single-row delete of this table faults (one shot).</summary>
+        public string? DeleteFault { get; set; }
+
+        /// <summary>Fix round: the next undo transaction faults and rolls back (one shot).</summary>
+        public Exception? UndoTransactionFault { get; set; }
+
+        /// <summary>Fix round: whether the committed invoice row is still there.</summary>
+        public bool InvoiceExists => CreatedRows.Any(r => r.Table == "sprk_invoice");
 
         private Entity ReadDocument(Guid id, string[] columns)
         {

@@ -918,4 +918,142 @@ public sealed class InvoiceSubmissionExistingDocumentTests
         InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(other).Should().NotBe(SubmissionId);
         InvoiceSubmissionService.ExistingDocumentJobIdFor(DocumentId).Should().NotBe(SubmissionId);
     }
+
+    // ── ebilling-r1 task 094 fix round (F1-b): step A (the route's filing of an unfiled source communication) runs only after every read-only
+    //    refusal, once, before the create; a refusal after it says the filing is kept ──
+
+    /// <summary>A recording step A: when it ran (the creates made and the checks run by then); answers <paramref name="filed"/>.</summary>
+    private sealed class RecordedStepA(Harness h, bool filed = true)
+    {
+        public List<(int Creates, int LinkReads, int OwnerChecks)> Runs { get; } = [];
+
+        public Func<CancellationToken, Task<bool>> Hook => _ =>
+        {
+            Runs.Add((h.Allocations.Count, h.LinkReads.Count, h.OwnerContexts.Count));
+            return Task.FromResult(filed);
+        };
+    }
+
+    [Fact(DisplayName = "094 F1-b (must fire): step A runs once, after the read-only checks (firm link, owner) and before the create")]
+    public async Task StepA_RunsOnce_AfterTheChecks_BeforeTheCreate()
+    {
+        var h = NewHarness();
+        var stepA = new RecordedStepA(h);
+
+        var outcome = await h.Build().SubmitExistingDocumentAsync(Confirm() with { FileSourceBeforeWrite = stepA.Hook }, CancellationToken.None);
+
+        outcome.Kind.Should().Be(InvoiceSubmissionOutcomeKind.Received);
+        var run = stepA.Runs.Should().ContainSingle().Subject;
+        run.Creates.Should().Be(0, "before the create");
+        run.LinkReads.Should().BeGreaterThan(0, "after the firm-link check");
+        run.OwnerChecks.Should().BeGreaterThan(0, "after the owner check");
+        h.Allocations.Should().ContainSingle();
+    }
+
+    public static TheoryData<string> RefusalsBeforeStepA => new()
+    {
+        "earlier-ended", "earlier-other-details", "d140-chain-case-1", "isolation-case-1", "firm-not-linked", "owner-refused",
+        "document-missing", "document-invoiced", "isolation-unreadable",
+    };
+
+    [Theory(DisplayName = "094 F1-b (must fire): a read-only refusal is answered before step A runs, so a refused submission leaves no filing behind")]
+    [MemberData(nameof(RefusalsBeforeStepA))]
+    public async Task StepA_DoesNotRun_BeforeARefusal(string refusal)
+    {
+        var h = refusal switch
+        {
+            "d140-chain-case-1" => ThreadReply(communicationMatter: null, threadMatter: Guid.NewGuid()).Harness,
+            "isolation-case-1" => ThreadJoinedAttachment(SecureMatterS),
+            _ => NewHarness(),
+        };
+        switch (refusal)
+        {
+            case "earlier-ended":
+                h.Submission = Earlier(status: "Failed");
+                break;
+            case "earlier-other-details":
+                h.Submission = Earlier(number: "INV-8");
+                break;
+            case "isolation-case-1":
+                h.Isolation.OrdinaryRoot("sprk_matter", MatterId);
+                break;
+            case "firm-not-linked":
+                h.Links.Clear();
+                break;
+            case "owner-refused":
+                h.OwnerAnswer = RecordOwnerResolution.Refused(RecordOwnerRefusal.ParentUnresolved, "no team");
+                break;
+            case "document-missing":
+                h.ExistingDocument = null;
+                break;
+            case "document-invoiced":
+                h.ExistingDocument!["sprk_invoice"] = new EntityReference("sprk_invoice", Guid.NewGuid());
+                break;
+            case "isolation-unreadable":
+                h.Isolation.FailingQueriesOf("sprk_document");
+                break;
+        }
+
+        var stepA = new RecordedStepA(h);
+
+        var outcome = await h.Build().SubmitExistingDocumentAsync(Confirm() with { FileSourceBeforeWrite = stepA.Hook }, CancellationToken.None);
+
+        outcome.Kind.Should().NotBe(InvoiceSubmissionOutcomeKind.Received);
+        stepA.Runs.Should().BeEmpty("step A writes; it never runs before a read-only refusal");
+        outcome.Detail?.Should().NotContain(InvoiceSubmissionService.FilingKeptSentence);
+        ShouldHaveWrittenNothing(h);
+    }
+
+    [Fact(DisplayName = "094 F1-b (must fire): a retry that finds the earlier submission (same details, still Received) runs step A once and answers it")]
+    public async Task StepA_RunsOnTheEarlierSubmissionsRetry()
+    {
+        var h = NewHarness();
+        h.Submission = Earlier(status: "Received");
+        var stepA = new RecordedStepA(h, filed: false);
+
+        var outcome = await h.Build().SubmitExistingDocumentAsync(Confirm() with { FileSourceBeforeWrite = stepA.Hook }, CancellationToken.None);
+
+        outcome.Kind.Should().Be(InvoiceSubmissionOutcomeKind.Received);
+        stepA.Runs.Should().ContainSingle();
+        h.Allocations.Should().BeEmpty();
+    }
+
+    public static TheoryData<string> RefusalsAfterStepA => new() { "queue", "allocator" };
+
+    [Theory(DisplayName = "094 F1-b (must fire): a refusal after step A filed the communication says so truthfully: no submission was saved, the filing is kept")]
+    [MemberData(nameof(RefusalsAfterStepA))]
+    public async Task StepA_Filed_ThenARefusal_SaysTheFilingIsKept(string fault)
+    {
+        var h = NewHarness();
+        if (fault == "queue")
+        {
+            h.JobFailure = new InvalidOperationException("service bus down");
+        }
+        else
+        {
+            h.AllocatorFailure = new InvalidOperationException("exists for another firm or number");
+        }
+
+        var stepA = new RecordedStepA(h, filed: true);
+
+        var outcome = await h.Build().SubmitExistingDocumentAsync(Confirm() with { FileSourceBeforeWrite = stepA.Hook }, CancellationToken.None);
+
+        outcome.Kind.Should().Be(InvoiceSubmissionOutcomeKind.Refused);
+        stepA.Runs.Should().ContainSingle();
+        outcome.Detail.Should().Contain(InvoiceSubmissionService.FilingKeptSentence);
+        outcome.Detail.Should().NotContain("Nothing was saved", "the communication's filing was saved");
+    }
+
+    [Fact(DisplayName = "094 F1-b (must not fire): a refusal after a step A that filed nothing (already filed) says nothing about a filing")]
+    public async Task StepA_FiledNothing_ThenARefusal_SaysNothingOfAFiling()
+    {
+        var h = NewHarness();
+        h.AllocatorFailure = new InvalidOperationException("exists for another firm or number");
+        var stepA = new RecordedStepA(h, filed: false);
+
+        var outcome = await h.Build().SubmitExistingDocumentAsync(Confirm() with { FileSourceBeforeWrite = stepA.Hook }, CancellationToken.None);
+
+        stepA.Runs.Should().ContainSingle();
+        outcome.Detail.Should().NotContain(InvoiceSubmissionService.FilingKeptSentence);
+    }
 }

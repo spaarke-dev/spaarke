@@ -367,6 +367,7 @@ public class InvoiceSubmissionProcessorTests
         var h = new Harness { Channel = channel };
         if (withDocument)
         {
+            h.Row.Id = InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(Document);
             h.Row["sprk_document"] = new EntityReference("sprk_document", Document);
         }
 
@@ -383,6 +384,35 @@ public class InvoiceSubmissionProcessorTests
     public async Task SpaWithADocument_FailsClosed_DocumentUnavailable()
     {
         var h = new Harness { Channel = InvoiceSubmissionChannel.Spa };
+        h.Row["sprk_document"] = new EntityReference("sprk_document", Document);
+
+        var outcome = await h.RunAsync();
+
+        outcome.Kind.Should().Be(SubmissionEvaluationKind.Failed);
+        outcome.ReasonCode.Should().Be(SubmissionReasonCodes.DocumentUnavailable);
+        h.DocumentLoads.Should().Be(0);
+        h.Reads.Should().Be(0);
+    }
+
+    [Fact(DisplayName = "094 fix round F1-1 (must fire; restores 092's rule): an internal submission naming a document it was not created for (a sprk_document written onto an upload submission) fails closed DocumentUnavailable before any load or read")]
+    public async Task InternalUploadSubmission_PatchedToNameADocument_FailsClosed_DocumentUnavailable()
+    {
+        var h = new Harness { Channel = InvoiceSubmissionChannel.Internal };
+        h.Row["sprk_document"] = new EntityReference("sprk_document", Document);
+
+        var outcome = await h.RunAsync();
+
+        outcome.Kind.Should().Be(SubmissionEvaluationKind.Failed);
+        outcome.ReasonCode.Should().Be(SubmissionReasonCodes.DocumentUnavailable);
+        h.DocumentLoads.Should().Be(0);
+        h.Reads.Should().Be(0);
+    }
+
+    [Fact(DisplayName = "094 fix round F1-1 (must fire): a submission derived from one document but re-pointed at another fails closed DocumentUnavailable before any load or read")]
+    public async Task DerivedSubmission_RepointedAtAnotherDocument_FailsClosed_DocumentUnavailable()
+    {
+        var h = new Harness { Channel = InvoiceSubmissionChannel.Internal };
+        h.Row.Id = InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(Guid.Parse("09400000-0000-4000-8000-0000000000f1"));
         h.Row["sprk_document"] = new EntityReference("sprk_document", Document);
 
         var outcome = await h.RunAsync();

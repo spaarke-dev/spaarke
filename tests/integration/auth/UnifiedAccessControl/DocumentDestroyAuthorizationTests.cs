@@ -170,8 +170,27 @@ public class DocumentDestroyAuthorizationTests
             "the refusal comes before IDocumentDataverseService.DeleteDocumentAsync, so Dataverse's Restrict never fires");
     }
 
-    [Fact(DisplayName = "094 (must fire): the Dataverse document delete counts Stored Files copied from the document (sprk_sourcedocument, Restrict) with its children; 409, nothing destroyed")]
-    public async Task DeleteDataverseDocument_WithStoredFileCopies_Is409_WithTheCount_AndDestroysNothing()
+    [Fact(DisplayName = "094 F1-c (must fire): the Dataverse document delete of a document Stored Files were copied from (sprk_sourcedocument, Restrict) is 409 document_is_invoice_source, no count; nothing destroyed")]
+    public async Task DeleteDataverseDocument_WithStoredFileCopies_Is409_AsAnInvoiceSource_AndDestroysNothing()
+    {
+        _fixture.StoredFileCopyCounts[DocumentId] = 2;
+        using var client = _fixture.CreateClientWithRights("ReadAccess,DeleteAccess");
+
+        var response = await client.DeleteAsync($"/api/v1/documents/{DocumentId}");
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, body);
+        using var problem = System.Text.Json.JsonDocument.Parse(body);
+        problem.RootElement.GetProperty("reasonCode").GetString()
+            .Should().Be(Sprk.Bff.Api.Services.DocumentCheckoutService.InvoiceSourceCode);
+        problem.RootElement.GetProperty("detail").GetString()
+            .Should().Be("An invoice was submitted from this document, so it can't be deleted. Nothing was deleted.");
+        problem.RootElement.TryGetProperty("childCount", out _).Should().BeFalse("the copies are not child documents");
+        _fixture.DeletedDataverseDocumentIds.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "094 F1-c: the Dataverse document delete of a document with children AND copies is refused for its children first, with their count only")]
+    public async Task DeleteDataverseDocument_WithChildrenAndStoredFileCopies_Is409_ForTheChildren()
     {
         _fixture.ChildDocumentCounts[DocumentId] = 1;
         _fixture.StoredFileCopyCounts[DocumentId] = 2;
@@ -179,7 +198,7 @@ public class DocumentDestroyAuthorizationTests
 
         var response = await client.DeleteAsync($"/api/v1/documents/{DocumentId}");
 
-        await ShouldBeHasChildDocuments(response, expectedCount: 3);
+        await ShouldBeHasChildDocuments(response, expectedCount: 1);
         _fixture.DeletedDataverseDocumentIds.Should().BeEmpty();
     }
 

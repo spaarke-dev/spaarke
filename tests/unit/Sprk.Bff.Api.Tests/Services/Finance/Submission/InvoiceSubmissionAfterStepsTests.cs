@@ -356,12 +356,12 @@ public class InvoiceSubmissionAfterStepsTests
                     Preflighted.Add(decision);
                     Recorder.Preflight(decision);
                 },
-                Clock,
-                commitGate: CommitGate);
+                time: Clock,
+                commitGate: CommitGate!);
         }
 
-        /// <summary>Task 094: the resume's commit gate (model 9.1 steps 5-6; null: the test seam's default, Passed).</summary>
-        public Func<Guid, CancellationToken, Task<SubmissionCommitGateResult>>? CommitGate { get; set; }
+        /// <summary>Task 094: the resume's commit gate (model 9.1 steps 5-6). Passed unless a test sets it (the constructor requires one, fix round K6).</summary>
+        public Func<Guid, CancellationToken, Task<SubmissionCommitGateResult>>? CommitGate { get; set; } = (_, _) => Task.FromResult(SubmissionCommitGateResult.Passed);
 
         /// <summary>The writer's rule (SignalWriter.CloseActedByDecisionAsync), over the in-memory table.</summary>
         private Task<SignalAutomatedCloseOutcome> CloseActedAsync(Guid id, Guid recordId, DateTime setReadAt, string policyCode, CancellationToken _)
@@ -1371,6 +1371,16 @@ public class InvoiceSubmissionAfterStepsTests
         world.RecordCreates.Should().Be(0);
         world.Notified.Should().BeEmpty();
         world.TerminalWrites.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "094 fix round K6 (must fire): the after-steps cannot be built without a commit gate - no seam defaults the gate to passed")]
+    public async Task Constructor_WithoutACommitGate_Throws()
+    {
+        var world = new World(await Accepted()) { CommitGate = null };
+
+        var build = () => world.Build();
+
+        build.Should().Throw<ArgumentNullException>().WithParameterName("commitGate");
     }
 
     [Fact(DisplayName = "094: a gate fault on resume throws (the job retries) and nothing after it runs")]

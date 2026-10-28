@@ -155,6 +155,15 @@ public sealed record SubmissionSnapshot
             return (null, SubmissionReasonCodes.DocumentUnavailable);
         }
 
+        // Fix round F1-1 (security): the document is a source only for the submission the intake created FOR it - the id derived from that
+        // document (ExistingDocumentSubmissionIdFor; the confirm and the from-document route both use it, after checking the caller's Read on
+        // the document). Any other submission naming a document (a sprk_document written onto an upload submission afterwards, or a derived
+        // submission re-pointed at another document) would have the job copy and extract a document no one checked: it fails closed.
+        if (documentId is { } source && row.Id != InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(source))
+        {
+            return (null, SubmissionReasonCodes.DocumentUnavailable);
+        }
+
         return (new SubmissionSnapshot
         {
             SubmissionId = row.Id,
