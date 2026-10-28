@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Dataverse;
@@ -20,11 +21,12 @@ namespace Spaarke.ArchTests;
 /// (<see cref="RecordOwnershipResolver.RestrictedContentTables"/>), under the BFF's compiled team name
 /// (<see cref="RestrictedContentOwnerTeam.DefaultOwnerTeamName"/>, a fail-closed lookup key).</item>
 /// <item><c>config/customer-configuration-owner-role.json</c>: the customer configuration tables
-/// (<see cref="CustomerConfigurationTables"/>), which the BFF never resolves (seeders own the rows to the team). None may be
+/// (<see cref="CustomerConfigurationTables"/>), which the BFF never resolves (seeders will own new rows to the team). None may be
 /// a hard-deny table, an ownership parent or a secure-child table: those are customer records whose owner the resolver
 /// decides.</item>
 /// </list>
-/// The two files declare different teams and roles and no table in common, and the script declares both files.
+/// The two files declare different teams and roles (each pinned by name, neither the Secure Record owner role) and no table in
+/// common, and the script's <c>$DeclaredRoleFiles</c> equals the declared file set (R4b-4: none missing, none extra).
 /// Enforced by: this guard (the live files must give no finding; each seeded bad document must give its finding).
 /// </summary>
 public class RestrictedContentOwnerRoleGuardTests
@@ -43,10 +45,16 @@ public class RestrictedContentOwnerRoleGuardTests
 
     internal const string CustomerConfigurationTeamName = "Spaarke Customer Configuration Owners";
 
-    /// <summary>A declared owner role: its file, the team name it must carry, its exact tables, and why a table may never be in it.</summary>
+    /// <summary>R4b-4 (B-K1): the restricted-content owner role's name, pinned as the team name is.</summary>
+    internal const string RestrictedContentRoleName = "Restricted Content Owner";
+
+    /// <summary>R4b-4 (B-K1): the customer configuration owner role's name, pinned as the team name is.</summary>
+    internal const string CustomerConfigurationRoleName = "Customer Configuration Owner";
+
+    /// <summary>A declared owner role: its file, the team and role names it must carry, its exact tables, and why a table may never be in it.</summary>
     internal sealed record DeclaredRole(
         string FileName, string TeamName, string TeamNameSource, IReadOnlyCollection<string> Tables, string TablesSource,
-        Func<string, string?> NeverListed);
+        Func<string, string?> NeverListed, string RoleName);
 
     internal static readonly DeclaredRole RestrictedContent = new(
         "restricted-content-owner-role.json",
@@ -54,7 +62,8 @@ public class RestrictedContentOwnerRoleGuardTests
         "the BFF's default",
         RecordOwnershipResolver.RestrictedContentTables,
         "a hard-deny table (RecordOwnershipResolver.RestrictedContentTables)",
-        _ => null);
+        _ => null,
+        RestrictedContentRoleName);
 
     internal static readonly DeclaredRole CustomerConfiguration = new(
         "customer-configuration-owner-role.json",
@@ -68,7 +77,8 @@ public class RestrictedContentOwnerRoleGuardTests
                 : RecordOwnershipResolver.OwnershipParentEntities.Contains(table, StringComparer.OrdinalIgnoreCase)
                   || SecureChildLineage.Children.ContainsKey(table)
                     ? "a customer record table (the ownership resolver decides its owner)"
-                    : null);
+                    : null,
+        CustomerConfigurationRoleName);
 
     internal static readonly DeclaredRole[] Declared = [RestrictedContent, CustomerConfiguration];
 
@@ -76,6 +86,11 @@ public class RestrictedContentOwnerRoleGuardTests
         File.ReadAllText(Path.Combine(SourceScan.RepoRoot, "config", role.FileName));
 
     private static string LiveJson() => LiveJson(RestrictedContent);
+
+    /// <summary>The Secure Record owner role's name (<c>config/secure-record-owner-role.json</c>): never a declared role's.</summary>
+    private static string SecureRecordOwnerRoleName() =>
+        Text(JsonNode.Parse(File.ReadAllText(Path.Combine(SourceScan.RepoRoot, "config", "secure-record-owner-role.json")))!
+            .AsObject(), "roleName") ?? throw new InvalidOperationException("config/secure-record-owner-role.json names no roleName");
 
     /// <summary>Every way <paramref name="json"/> breaks the restricted-content role's definition; empty when it holds.</summary>
     internal static IReadOnlyList<string> Findings(string json) => Findings(json, RestrictedContent);
@@ -109,6 +124,8 @@ public class RestrictedContentOwnerRoleGuardTests
             findings.Add($"teamName is '{Text(file, "teamName")}', not {role.TeamNameSource} '{role.TeamName}'");
         if (string.IsNullOrWhiteSpace(Text(file, "roleName")))
             findings.Add("roleName is empty");
+        else if (Text(file, "roleName") != role.RoleName)
+            findings.Add($"roleName is '{Text(file, "roleName")}', not the declared '{role.RoleName}'");
 
         if (file["tables"] is not JsonArray tables || tables.Count == 0)
         {
@@ -189,10 +206,106 @@ public class RestrictedContentOwnerRoleGuardTests
     }
 
     [Fact]
-    public void TheSetupScript_DeclaresEveryRoleFile()
+    public void TheDeclaredRoleNames_AreNeverTheSecureRecordOwnerRole()
     {
-        var script = File.ReadAllText(Path.Combine(SourceScan.RepoRoot, "scripts", "Set-CustomerOwnerTeams.ps1"));
-        Assert.All(Declared, role => Assert.Contains($"'{role.FileName}'", script, StringComparison.Ordinal));
+        var secure = SecureRecordOwnerRoleName();
+        Assert.False(string.IsNullOrWhiteSpace(secure));
+        Assert.All(Declared, role => Assert.NotEqual(secure, role.RoleName, StringComparer.OrdinalIgnoreCase));
+        Assert.Equal(Declared.Length, Declared.Select(r => r.RoleName).Distinct(StringComparer.OrdinalIgnoreCase).Count());
+    }
+
+    private static string LiveScript() =>
+        File.ReadAllText(Path.Combine(SourceScan.RepoRoot, "scripts", "Set-CustomerOwnerTeams.ps1"));
+
+    private static readonly Regex DeclaredRoleFilesAssignment =
+        new(@"^[ \t]*\$DeclaredRoleFiles[ \t]*=[ \t]*@\(", RegexOptions.Multiline | RegexOptions.CultureInvariant);
+
+    private static string WithoutBlockComments(string script) => Regex.Replace(script, @"<#[\s\S]*?#>", "");
+
+    /// <summary>
+    /// R4b-4 (B-F3): the script's <c>$DeclaredRoleFiles</c> array as the script runs it — block comments and the comment part
+    /// of each line dropped, so a commented-out entry is not declared — up to the array's closing parenthesis.
+    /// </summary>
+    internal static IReadOnlyList<string> ScriptDeclaredRoleFiles(string script)
+    {
+        var code = WithoutBlockComments(script);
+        var start = DeclaredRoleFilesAssignment.Match(code);
+        if (!start.Success)
+            return [];
+        var files = new List<string>();
+        foreach (var raw in code[(start.Index + start.Length)..].Split('\n'))
+        {
+            var line = raw.Split('#')[0];
+            var close = line.IndexOf(')');
+            files.AddRange(Regex.Matches(close >= 0 ? line[..close] : line, "'([^']*)'").Select(m => m.Groups[1].Value));
+            if (close >= 0)
+                break;
+        }
+
+        return files;
+    }
+
+    /// <summary>Every way the script's declared files differ from <see cref="Declared"/>; empty when they are equal.</summary>
+    internal static IReadOnlyList<string> ScriptFindings(string script)
+    {
+        var assignments = DeclaredRoleFilesAssignment.Matches(WithoutBlockComments(script)).Count;
+        if (assignments != 1)
+            return [$"$DeclaredRoleFiles is assigned {assignments} time(s), not once"];
+
+        var findings = new List<string>();
+        var files = ScriptDeclaredRoleFiles(script);
+        var declared = Declared.Select(r => r.FileName).ToHashSet(StringComparer.Ordinal);
+        foreach (var dupe in files.GroupBy(f => f, StringComparer.Ordinal).Where(g => g.Count() > 1))
+            findings.Add($"'{dupe.Key}' is listed {dupe.Count()} times");
+        foreach (var extra in files.Where(f => !declared.Contains(f)).Distinct(StringComparer.Ordinal))
+            findings.Add($"'{extra}' is not a declared role file");
+        foreach (var missing in declared.Where(f => !files.Contains(f, StringComparer.Ordinal)).OrderBy(f => f, StringComparer.Ordinal))
+            findings.Add($"'{missing}' is declared but not in $DeclaredRoleFiles");
+        return findings;
+    }
+
+    [Fact]
+    public void TheSetupScript_DeclaresExactlyTheDeclaredRoleFiles()
+    {
+        Assert.Equal(
+            Declared.Select(r => r.FileName).OrderBy(f => f, StringComparer.Ordinal),
+            ScriptDeclaredRoleFiles(LiveScript()).OrderBy(f => f, StringComparer.Ordinal));
+        Assert.Empty(ScriptFindings(LiveScript()));
+    }
+
+    private const string ConfigurationEntry = "    'customer-configuration-owner-role.json'";
+    private const string RestrictedEntry = "    'restricted-content-owner-role.json',";
+
+    public static TheoryData<string, string> ScriptMustFire() => new()
+    {
+        {
+            "(A) an extra file in the array",
+            LiveScript().Replace(ConfigurationEntry, ConfigurationEntry + ", 'secure-record-owner-role.json'", StringComparison.Ordinal)
+        },
+        {
+            "(E) the configuration entry commented out",
+            LiveScript().Replace(ConfigurationEntry, "#" + ConfigurationEntry, StringComparison.Ordinal)
+        },
+        {
+            "the restricted-content entry commented out after its indent",
+            LiveScript().Replace(RestrictedEntry, "    # 'restricted-content-owner-role.json',", StringComparison.Ordinal)
+        },
+        {
+            "a file named twice",
+            LiveScript().Replace(RestrictedEntry, RestrictedEntry + " 'restricted-content-owner-role.json',", StringComparison.Ordinal)
+        },
+        {
+            "the assignment itself commented out",
+            LiveScript().Replace("$DeclaredRoleFiles = @(", "# $DeclaredRoleFiles = @(", StringComparison.Ordinal)
+        },
+    };
+
+    [Theory]
+    [MemberData(nameof(ScriptMustFire))]
+    public void ASeededBadScript_GivesAFinding(string what, string script)
+    {
+        Assert.NotEqual(LiveScript(), script); // the seeded change landed
+        Assert.True(ScriptFindings(script).Count > 0, $"must fire on {what}");
     }
 
     private static string Mutated(Action<JsonObject> change) => Mutated(RestrictedContent, change);
@@ -252,6 +365,10 @@ public class RestrictedContentOwnerRoleGuardTests
         {
             "another access type",
             Mutated(f => f["access"] = "Write")
+        },
+        {
+            "a role name other than the declared one (B-K1)",
+            Mutated(f => f["roleName"] = "System Administrator")
         },
         {
             "a configuration table in the restricted-content role",
@@ -323,6 +440,10 @@ public class RestrictedContentOwnerRoleGuardTests
         {
             "a business unit other than each customer's",
             Mutated(CustomerConfiguration, f => f["businessUnit"] = "root")
+        },
+        {
+            "a role name other than the declared one (B-K1)",
+            Mutated(CustomerConfiguration, f => f["roleName"] = "System Administrator")
         },
     };
 
