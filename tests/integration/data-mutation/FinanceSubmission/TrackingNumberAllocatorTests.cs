@@ -203,6 +203,63 @@ public sealed class TrackingNumberAllocatorTests
         }
     }
 
+    // ── Task 094 (EB-D-167): a number held by an UNDONE attempt (its firm invoice number cleared by the undo) is skipped ──────────
+
+    [Fact(DisplayName = "094 EB-D-167 (must fire): a number held by an undone attempt is skipped - the retry gets {number}.2, not an endless .1 collision")]
+    public async Task ANumberHeldByAnUndoneAttempt_IsSkipped()
+    {
+        _store.AddUndone(FirmA, "INV-002", 1);
+        var id = Guid.NewGuid();
+
+        var result = await CreateService().CreateSubmissionAsync(id, FirmA, "INV-002");
+
+        result.Outcome.Should().Be(TrackingNumberOutcome.Created);
+        result.TrackingNumber.Should().Be("INV-002.2");
+        _store.CreateCalls.Should().Be(2, "the .1 collision, then .2");
+    }
+
+    [Fact(DisplayName = "094 EB-D-167 (must fire): more undone attempts than MaxAttempts are all skipped - a skip is not a lost race")]
+    public async Task MoreUndoneAttemptsThanMaxAttempts_AreAllSkipped()
+    {
+        for (var n = 1; n <= TrackingNumberAllocator.MaxAttempts + 2; n++)
+        {
+            _store.AddUndone(FirmA, "INV-002", n);
+        }
+
+        var result = await CreateService().CreateSubmissionAsync(Guid.NewGuid(), FirmA, "INV-002");
+
+        result.Outcome.Should().Be(TrackingNumberOutcome.Created);
+        result.TrackingNumber.Should().Be($"INV-002.{TrackingNumberAllocator.MaxAttempts + 3}");
+    }
+
+    [Fact(DisplayName = "094 EB-D-167 (must not fire): undone attempts beyond MaxHiddenSkips refuse unavailable (bounded), writing nothing")]
+    public async Task UndoneAttemptsBeyondTheSkipBound_AreRefused()
+    {
+        for (var n = 1; n <= TrackingNumberAllocator.MaxHiddenSkips + 1; n++)
+        {
+            _store.AddUndone(FirmA, "INV-002", n);
+        }
+
+        var id = Guid.NewGuid();
+        var result = await CreateService().CreateSubmissionAsync(id, FirmA, "INV-002");
+
+        result.Outcome.Should().Be(TrackingNumberOutcome.Refused);
+        result.Reason.Should().Be("ebilling.tracking.unavailable");
+        _store.Has(id).Should().BeFalse();
+    }
+
+    [Fact(DisplayName = "094 EB-D-167 (must not fire): a number held by a row that KEEPS its firm invoice number is a lost race (counted), never a skip")]
+    public async Task ANumberHeldByANumberedRow_IsALostRace_NotASkip()
+    {
+        // Every create loses to a competitor that commits exactly the number being written AND keeps its firm invoice number.
+        _store.BeforeCreate = (_, row) => _store.AddNumbered(FirmA, "INV-002", row.GetAttributeValue<int>("sprk_submissionsequence"));
+
+        var result = await CreateService().CreateSubmissionAsync(Guid.NewGuid(), FirmA, "INV-002");
+
+        result.Outcome.Should().Be(TrackingNumberOutcome.Refused);
+        _store.CreateCalls.Should().Be(TrackingNumberAllocator.MaxAttempts);
+    }
+
     [Fact]
     public async Task AFaultThatIsNotAnAlternateKeyDuplicate_PropagatesOnTheFirstAttempt_WithoutARetry()
     {
@@ -512,8 +569,9 @@ public sealed class TrackingNumberAllocatorTests
                 .Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
                 .Returns(async (QueryExpression query, CancellationToken _) =>
                 {
-                    // A lookup by the submission id is the idempotency read; anything else is the highest-sequence read.
-                    var byId = query.Criteria.Conditions.Any(c => c.AttributeName == "sprk_invoicesubmissionid");
+                    // A lookup by the submission id is the idempotency read; one on the sequence is the highest-sequence read; one on
+                    // the tracking number is the held-number check (task 094).
+                    var byId = !query.Criteria.Conditions.Any(c => c.AttributeName == "sprk_submissionsequence");
                     if (!byId)
                     {
                         if (BeforeSequenceRead is { } gate)
@@ -630,6 +688,19 @@ public sealed class TrackingNumberAllocatorTests
                 _rows[row.Id] = row;
                 return row.Id;
             }
+        }
+
+        /// <summary>Task 094: a submission whose commit was UNDONE: it keeps <c>{number}.{sequence}</c> and its sequence, but the undo cleared
+        /// its firm invoice number (SubmissionCommitGate), so the highest-sequence read does not see it.</summary>
+        public Guid AddUndone(Guid firmId, string firmInvoiceNumber, int sequence)
+        {
+            var id = AddNumbered(firmId, firmInvoiceNumber, sequence);
+            lock (_gate)
+            {
+                _rows[id].Attributes.Remove("sprk_firminvoicenumber");
+            }
+
+            return id;
         }
 
         /// <summary>A submission that exists with a firm and a tracking number but was never numbered by the allocator (no sequence).</summary>
