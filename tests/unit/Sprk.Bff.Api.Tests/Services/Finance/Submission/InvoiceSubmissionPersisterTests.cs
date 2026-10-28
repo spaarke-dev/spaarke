@@ -2004,9 +2004,32 @@ public class InvoiceSubmissionPersisterTests
         store.Transactions.Should().BeEmpty();
     }
 
-    [Fact(DisplayName = "094 x 098 end to end: a from-email invoice the REAL persister commits (Channel Internal, no document link, every Stored File sourced from the .eml) is visible to its own firm",
-        Skip = "098 at f2446e638e hides it (source_link_unreadable): its rule 3 is being reworked in 098 round 4 for this shape; unskip when that head is merged (notes/094-submit-invoice.md)")]
+    [Fact(DisplayName = "094 x 098 end to end (must not fire): a from-email invoice the REAL persister commits (Channel Internal, no document link, every Stored File sourced from the .eml) is visible to its own firm when its .eml carries the submission marker")]
     public async Task FromEmailInvoice_CommittedByThePersister_IsVisibleToTheFirm()
+    {
+        var decision = await CommitFromEmailAndDecideAsync(emlMarked: true);
+
+        decision.IsVisible(InvoiceId).Should().BeTrue(decision.HiddenSummary());
+        decision.Faulted.Should().BeFalse();
+    }
+
+    [Fact(DisplayName = "094 x 098 end to end (control, must fire): the same from-email invoice whose .eml is Restricted WITHOUT the submission marker stays hidden from the firm (source_hidden)")]
+    public async Task FromEmailInvoice_CommittedByThePersister_UnmarkedRestrictedEml_IsHidden()
+    {
+        var decision = await CommitFromEmailAndDecideAsync(emlMarked: false);
+
+        decision.IsVisible(InvoiceId).Should().BeFalse();
+        decision.HiddenSummary().Should().Contain(
+            Sprk.Bff.Api.Infrastructure.ExternalAccess.InvoiceVisibilityResult.CodeOf(
+                Sprk.Bff.Api.Infrastructure.ExternalAccess.InvoiceHiddenReason.SourceHidden));
+    }
+
+    /// <summary>
+    /// Commits a from-email submission through the REAL persister, projects the committed rows for the firm, and seeds the
+    /// <c>.eml</c> as 095 writes it (its own Restricted narrowing, an email archive, linked to an open-thread communication,
+    /// filed on a clean matter) with or without the submission marker; then asks 098's predicate.
+    /// </summary>
+    private static async Task<Sprk.Bff.Api.Infrastructure.ExternalAccess.InvoiceVisibilityResult> CommitFromEmailAndDecideAsync(bool emlMarked)
     {
         var outcome = await new ProcessorHarness { Channel = InvoiceSubmissionChannel.Internal }.RunAsync();
         var store = FromEmailStore();
@@ -2014,12 +2037,14 @@ public class InvoiceSubmissionPersisterTests
         (await store.Build().PersistAsync(outcome, null)).Status.Should().Be(SubmissionPersistStatus.Committed);
         var world = new Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld();
         ProjectForTheFirm(store, world, withStoredFiles: true);
+        world.Flags[Matter] = Sprk.Bff.Api.Infrastructure.ExternalAccess.RootRecordFlags.None;
+        const int openThread = 100000000;
+        world.Document(
+            Document, permission: Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.RestrictedPermission, eml: true,
+            marker: emlMarked, communication: world.Communication(internalOnly: false, world.Thread(openThread)), matter: Matter);
 
-        var decision = await world.NewService(identity: null)
+        return await world.NewService(identity: null)
             .HideInvoicesForAsync(FirmContact(), [InvoiceId], world.RootFlags);
-
-        decision.IsVisible(InvoiceId).Should().BeTrue(decision.HiddenSummary());
-        decision.Faulted.Should().BeFalse();
     }
 
     private sealed class Store
