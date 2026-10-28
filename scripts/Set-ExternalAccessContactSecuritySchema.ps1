@@ -37,17 +37,21 @@
       (g) PROOF READS   -Verify only. The BFF trusts an EMPTY value of a secured column only once it has proven its own
                         read of the column (SecuredColumnReadProof: the System Administrator role by its template id, or a field security
                         profile granting Read, held directly or through a team). Each -BffApplicationIds application
-                        user must be able to READ every platform table that proof reads — systemuser (WhoAmI), role,
+                        user must be able to READ every platform table that proof reads — systemuser, role,
                         systemuserroles, fieldpermission, systemuserprofiles, teamprofiles, teammembership — or every
                         such empty read is refused (fail closed). The proof's own queries are run AS that user
                         (MSCRMCallerID); the operator running -Verify needs the act-on-behalf-of privilege for it. An
                         answer means the table is readable; the grant itself is checked in (d). The field-permission
                         reads select entityname and have no condition on it (Dataverse refuses a FetchXML condition on
                         fieldpermission.entityname given a table's logical name; the BFF checks the table in code).
-                        When WhoAmI as that user answers another id (act-as-user not honoured; the cause is not
-                        established), the reads are not run: the user is OK-ROLE, a passing state of its own, when a
-                        live role query (by the System Administrator role template id, through systemuserroles, read as
-                        the operator) shows it holds System Administrator, so the proof's role leg holds; otherwise FAIL.
+                        The first read, systemuser by systemuserid eq-userid, also names the effective caller: the Web
+                        API WhoAmI did not reflect MSCRMCallerID in a live check; an eq-userid query does, so WhoAmI is
+                        not used. When that read answers the app user's own id, the reads are made as it and each is OK
+                        or FAIL. When it answers another id or none (act-as-user not honoured; the cause is not
+                        established), the remaining reads are not run: the user is OK-ROLE, a passing state of its own,
+                        when a live role query (by the System Administrator role template id, through systemuserroles,
+                        read as the operator) shows it holds System Administrator, so the proof's role leg holds;
+                        otherwise FAIL.
       (h) STANDING GRANT -Verify only, read-only. Each -BffApplicationIds application user may update
                         contact.sprk_standinggrant ONLY through its DIRECT membership of Standing Grant Administrators
                         (the person removal clears the standing grant), and no other profile it holds, directly or through
@@ -433,8 +437,9 @@ foreach ($solutionName in $SolutionUniqueNames) {
 # (that is what (g) checks), not that a grant exists. The field-permission reads select entityname and have no condition on
 # it: Dataverse refuses a FetchXML condition on fieldpermission.entityname given a table's logical name, so the BFF checks
 # the table in code.
-# When WhoAmI as that user answers another id, the act-on-behalf header was not honoured (the cause is not established), and
-# the reads cannot be made as it. The user then passes only by the proof's role leg: a role of the System Administrator
+# The first read names the effective caller: systemuser by systemuserid eq-userid. The Web API WhoAmI did not reflect
+# MSCRMCallerID in a live check; an eq-userid query does, so WhoAmI is not used here. When that read answers another id
+# (or none), the act-on-behalf header was not honoured (the cause is not established), and the reads cannot be made as it. The user then passes only by the proof's role leg: a role of the System Administrator
 # template, joined through systemuserroles, read here as the operator. That pass is its own state (OK-ROLE), never a plain OK.
 $ProofTables = @('systemuser', 'role', 'systemuserroles', 'fieldpermission', 'systemuserprofiles', 'teamprofiles', 'teammembership')
 function Invoke-DvGetAs([string]$Path, [string]$SystemUserId) {
@@ -452,8 +457,10 @@ if ($Verify) {
             "<link-entity name=`"systemuserroles`" from=`"roleid`" to=`"roleid`" link-type=`"inner`">$member</link-entity></entity></fetch>")
         $fieldPermission = "<fetch top=`"1`"><entity name=`"fieldpermission`"><attribute name=`"attributelogicalname`" /><attribute name=`"entityname`" />" +
             "<filter><condition attribute=`"canread`" operator=`"eq`" value=`"4`" /><condition attribute=`"attributelogicalname`" operator=`"in`">$securedColumnValues</condition></filter>"
+        $callerPath = 'systemusers?fetchXml=' + [uri]::EscapeDataString(
+            "<fetch top=`"1`"><entity name=`"systemuser`"><attribute name=`"systemuserid`" /><filter><condition attribute=`"systemuserid`" operator=`"eq-userid`" /></filter></entity></fetch>")
         $proofReads = @(
-            @{ What = 'systemuser (WhoAmI)'; Path = 'WhoAmI' }
+            @{ What = 'systemuser (the effective caller, eq-userid)'; Path = $callerPath }
             @{ What = 'role + systemuserroles'; Path = $rolePath }
             @{ What = 'fieldpermission + systemuserprofiles'; Path = 'fieldpermissions?fetchXml=' + [uri]::EscapeDataString(
                 $fieldPermission + "<link-entity name=`"systemuserprofiles`" from=`"fieldsecurityprofileid`" to=`"fieldsecurityprofileid`" link-type=`"inner`">$member</link-entity></entity></fetch>") }
@@ -464,9 +471,10 @@ if ($Verify) {
         foreach ($r in $proofReads) {
             try {
                 $answer = Invoke-DvGetAs $r.Path $sid
-                if ($r.Path -eq 'WhoAmI' -and "$($answer.UserId)".ToLowerInvariant() -ne $sid) {
+                $effective = if ($r.Path -eq $callerPath) { "$(@($answer.value)[0].systemuserid)".ToLowerInvariant() } else { $sid }
+                if ($effective -ne $sid) {
                     # The reads cannot be made as this user; none of them is reported as read by it.
-                    $notHonoured = "WhoAmI as this user answered $($answer.UserId), not $sid (act-as-user not honoured; the cause is not established)"
+                    $notHonoured = "the effective-caller query (systemuserid eq-userid) as this user answered '$effective', not $sid (act-as-user not honoured; the cause is not established)"
                     try { $holdsAdmin = @((Invoke-DvGet $rolePath).value).Count -gt 0 }
                     catch {
                         Report 'FAIL' "$($u.fullname): $notHonoured, and its System Administrator role could not be read ($($_.Exception.Message)); it is not assumed to pass."

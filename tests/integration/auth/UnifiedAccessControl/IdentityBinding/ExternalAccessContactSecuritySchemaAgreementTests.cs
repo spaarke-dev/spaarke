@@ -153,7 +153,24 @@ public class ExternalAccessContactSecuritySchemaAgreementTests
         }
 
         text.Should().Contain("$h['MSCRMCallerID'] = $SystemUserId", "the reads are made as the BFF application user");
-        text.Should().Contain("Path = 'WhoAmI'", "the proof's first read is the user's own systemuser");
+        text.Should().Contain(
+            "<fetch top=`\"1`\"><entity name=`\"systemuser`\"><attribute name=`\"systemuserid`\" /><filter><condition attribute=`\"systemuserid`\" operator=`\"eq-userid`\" /></filter></entity></fetch>",
+            "the proof's first read is the user's own systemuser");
+    }
+
+    [Fact]
+    public void TheScriptsProofReads_DecideTheEffectiveCaller_ByAnEqUserIdQuery_NeverByWhoAmI()
+    {
+        // The Web API WhoAmI did not reflect MSCRMCallerID in a live check; an eq-userid query does. So the effective caller
+        // is the systemuserid the eq-userid read answers, run with the same header, and WhoAmI is not read in (g).
+        var text = File.ReadAllText(ScriptPath());
+
+        text.Should().Contain("@{ What = 'systemuser (the effective caller, eq-userid)'; Path = $callerPath }");
+        text.Should().Contain(
+            "$effective = if ($r.Path -eq $callerPath) { \"$(@($answer.value)[0].systemuserid)\".ToLowerInvariant() } else { $sid }");
+        text.Should().Contain("if ($effective -ne $sid) {");
+        text.Should().NotContain("Path = 'WhoAmI'");
+        text.Should().NotContain("$answer.UserId");
     }
 
     [Fact]
@@ -181,7 +198,8 @@ public class ExternalAccessContactSecuritySchemaAgreementTests
         text.Should().Contain(
             "Report 'OK-ROLE' \"$($u.fullname): OK (role leg: app user holds System Administrator; act-as-user not honoured, not verified).");
         text.Should().Contain("and it does not hold System Administrator, so its proof reads are not verified. Run -Verify as a user who may act on behalf of another user, or grant its security role Read on these tables.");
-        text.Should().Contain("the cause is not established");
+        text.Should().Contain(
+            "the effective-caller query (systemuserid eq-userid) as this user answered '$effective', not $sid (act-as-user not honoured; the cause is not established)");
         // OK-ROLE passes (it is not a gap) and is named in the summary.
         text.Should().Contain("if ($State -in 'MISSING', 'FAIL') { $gaps.Add($What) }");
         text.Should().Contain("if ($State -eq 'OK-ROLE') { $roleLegOnly.Add($What) }");
