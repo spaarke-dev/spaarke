@@ -349,8 +349,8 @@ ranks it as the reconciler does:
   - `InquiryReplyTodoCreator`: the matter is written through `ApplyResolverFieldsAsync`.
   - `TodoGenerationService`: the builder throws on an unmapped type; the content source is the permanent exemption above.
   - `CommunicationService` secure copy: its links are written as columns.
-- **2, isolation: the ordinary pass never writes on an incomplete question** (fed2e4ac08). A Decision Record whose
-  resolved Signals cannot all be read now gets `Failed` (with the reason) in `DecideOrdinaryRowCoreAsync` when the answer
+- **2, isolation: the ordinary pass never writes on an incomplete question** (fed2e4ac08). A Decision Record (not
+  isolated: an isolated one is reported held, R4b-2b F4) whose resolved Signals cannot all be read now gets `Failed` (with the reason) in `DecideOrdinaryRowCoreAsync` when the answer
   is ordinary, instead of an owner computed from part of its parents. A question that is secure on what it could read is
   still reported for the secure pass.
 - **3, parity: `sprk_canonicaldocument` in the writers' question: STOPPED, not changed.** Task 146's comment in
@@ -545,6 +545,74 @@ one of them, so task 191 must never grant BU-depth or Deep Read on them.
   row that is now the restricted-content team (before: the default team). No writer re-files these tables on this branch.
 - `TodoAssigneeOwnerReconciliationJob.IsConfigurationRefusal` does not list the new code. That job never asks about these
   tables.
+
+### R4b-2b: ontology re-check findings at cfa7bbe421 (as built)
+
+**F1: a Decision Record outside the root's lineage, reached through a Signal it resolved.** A Decision Record's question (c)
+asks about the subject of every Signal it resolved, which no lineage lookup names. So the walk missed it: E2 filed under
+Secure matter X left a Decision Record about E1 (core M1, ordinary) ordinary while its question was Secure (D-123), and an
+Unsecure of X never released one isolated only by E2 (criterion 3).
+- `SecureChildReconciler.LoadDescendantsAsync` now runs `AddDecisionRecordsResolvingAsync` after each level. Every Decision
+  Record that resolved a Signal the level reached joins that level, unless the pass already holds it, and its own lineage is
+  walked below it. It is decided like any row of the pass, with its full (c) question (`ForExistingRowAsync`). Its Signal
+  subjects are its parents in `AncestorsInPass`, so it is re-decided when E2 moves. Every pass does this: Make Secure, the
+  sweep, Unsecure, the pass after a re-file and the ordinary pass.
+- **Two reads, unioned.**
+  - The records whose `sprk_steps` lists the Signal id. This is a `LIKE '%{id:D}%'` match, OR'd and chunked at
+    `DescendantConditionsPerQuery` (200). It reads the same ids the question reads; `DecisionRecordWriter` writes them in
+    `D` form (:1996).
+  - The record the Signal's own `sprk_decisionrecord` link names. The link is already on the Signal row, so this is one
+    `id IN (…)` read per chunk. It covers a record whose steps the text match cannot see, such as an id stored in another
+    `Guid` form, which the parser accepts.
+- **Why not the link alone.** The link can miss. `DecisionCommitService` links a Signal only when the commit closes it
+  itself. A Signal someone else closed during the review returns Warn `closed_during_review`: it is listed in
+  `resolvedSignalIds` and never linked.
+- A false text match (the id appearing elsewhere in a record's steps) only adds a record to the pass. That record is decided
+  by its own question, so its answer is the same as it would be anywhere.
+- `RecordFamilyEdges` remarks: the comment now says the walk reaches such a record from the Signal, not through an edge.
+- **Tests.** In `SecureChildOrdinaryParentMoveTests`:
+  - the E1/E2 case in both directions: Make Secure moves it IN; Unsecure releases it to its core's team;
+  - the link branch: steps listing the id in `N` form, plus the link;
+  - a must-not-fire control: a record listing no Signal of the pass is not read into it.
+
+**F3.** `AnUnsecure_ReleasesACompleteAllOrdinaryDecisionRecord`: an Unsecure releases an isolated Decision Record whose
+question is complete and all ordinary. Its listed Signal is about an ordinary event. The record is Changed, has no held
+entry, and loses its mirror.
+
+**F4: what happens to a Decision Record (corrects the wording in the V-fix notes and the R4b-2 summary).**
+
+| Pass | Owned now | Question | Answer | Outcome |
+|---|---|---|---|---|
+| Ordinary pass | ordinary | incomplete | ordinary | `Failed` with the reason; nothing written; the root is carried |
+| Ordinary pass | in isolation | incomplete | ordinary | `Untouched`, reported with the F1-d detail; the pass stays Completed |
+| Unsecure, or another pass that may release | in isolation | incomplete | ordinary | `Untouched` + `HeldInIsolation`; its mirror comes off; the pass stays Completed |
+| Any pass | in isolation | complete | ordinary | Leaves isolation like any row (Unsecure; F3) |
+| Any secure pass | ordinary | either | Secure | Moves IN; a move into isolation is never held |
+
+- "Failed and carried, never re-owned" applies only to row 1: a non-isolated incomplete record in the ordinary pass.
+- "A Decision Record is never moved out" was wrong. Only an incomplete record is held; a complete one moves out.
+- `ReportHeldDecisionRecordAsync` now logs a Warning when the rule gives no team (refused or unowned). The Warning carries
+  the outcome and refusal code, no names, and the row stays where it is. This is a log line only, so it has no test.
+
+**Also noticed (coordinator items).**
+1. *Re-file of an author-owned hard-deny row.* The R4b-2 note placed this in `AfterRefileAsync`; that was wrong.
+   `AfterRefileAsync`'s descendant pass never writes a user-owned ordinary row. Only gate Decision Records are re-owned
+   from a user there. The write was in the re-file itself: `ReparentAsync`'s settle re-owned a user-owned row to the
+   answer, which for a hard-deny row is now the restricted-content team.
+   - Now the settle keeps the author, and writes nothing, when the row is owned by a user and the answer is the content
+     team (`InPlaceOfDefaultTeamId` set). It answers `Unchanged` with `AuthorKeptRestrictedContentReason`. This matches
+     the ordinary pass.
+   - A Secure answer still takes the row into isolation. A user-owned row of any other table is still re-owned to the
+     default team.
+   - `KeepCreatorUnlessTargetIsTeamOwned` does not fit: it keys on the target parent's owner, not on the row's. The new
+     check reuses the R4b-2 marker instead of adding a rule.
+   - The row's author is read in the same committed read (`RowOwnership.OwningUser`).
+   - Tests in `RestrictedContentOwnerTests`: keeps its author (fires); still goes Secure (control); another table is still
+     re-owned (control).
+2. *`TodoAssigneeOwnerReconciliationJob.IsConfigurationRefusal`.* Left unchanged: the job cannot reach the new code. It asks
+   `ForUserTeam` and `ForParents`, neither of which names a table (`ChildEntityLogicalName` is null). Its rows are Signals and
+   Decision Records, neither in the hard-deny set.
+3. The Secure safeguard in the ordinary exit is unchanged (coordinator: fine as it is).
 
 ### Issues to file (issue-ready text; the coordinator files them)
 
