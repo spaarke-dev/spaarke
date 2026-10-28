@@ -25,7 +25,7 @@ and the code disagree, the code is right and this guide must be fixed.
 | **Workforce SPA user** | An employee (workforce Entra identity) using the external SPA or Teams. Either a licensed **systemuser** or an unlicensed **contact-only** employee. |
 | **Partner** | An external person signing in through Entra External ID (CIAM) to the SPA. Always a **contact**. |
 | **Grant** | A row in `sprk_externalrecordaccess` that gives a contact (or a whole organization) a level on a core record. Written by **Manage Access**. |
-| **Share** | A native Dataverse record share (`principalobjectaccess`) to a systemuser or team. Written by Manage Access "+ User", the Assigned-To rule, or the platform **Share** button. |
+| **Share** | A native Dataverse record share (`principalobjectaccess`) to a systemuser or team. Written by Manage Access "Add person" (for an internal user), the Assigned-To rule, or the platform **Share** button. |
 | **Access Permission** | The record's policy column `sprk_accesspermission`: **Standard**, **Limited** or **Restricted** (§3). |
 | **Secure** | The record's flag `sprk_issecure`. A Secure record is owned by a memberless team in an empty business unit, so only explicit shares reach it (§8). |
 | **Access level** | **View Only**, **Collaborate**, **Full Access** (§4). |
@@ -84,7 +84,7 @@ and the code disagree, the code is right and this guide must be fixed.
 |---|---|
 | Who decides? | Dataverse, natively. |
 | From what? | Security roles and their **depth** (User / Business Unit / Deep / Global), the record's owner (user or team) and owning business unit, the person's team memberships, and record **shares**. |
-| What does UAC change? | It writes shares (Manage Access "+ User", the Assigned-To rule, secure-child mirroring) and moves ownership (Secure records go to the memberless Secure Record Owners team). It never adds a second check inside the MDA. |
+| What does UAC change? | It writes shares (Manage Access "Add person" for an internal user, the Assigned-To rule, secure-child mirroring) and moves ownership (Secure records go to the memberless Secure Record Owners team). It never adds a second check inside the MDA. |
 | Files (SharePoint Embedded)? | Opened through BFF routes. The BFF asks Dataverse *as the user* (their own token, `RetrievePrincipalAccess`) whether they hold the right on the document's record, then streams the file with the app identity. Editing in Office runs as the user: internal users hold a writer role on their business unit's container, and a just-in-time writer role on a Secure record's own container while Dataverse says they have Write. |
 
 The person's licence and roles do **not** by themselves give access to records in the SPA — see 1(b).
@@ -187,7 +187,8 @@ A set built over a failed read is never cached.
 **Short answer.** It depends on the user type:
 
 - **MDA users**: **both** the out-of-the-box owner model (owner, business unit, role depth, teams) **and** shares —
-  including shares written by Manage Access "+ User". Manage Access *grants* (to contacts) do not affect the MDA.
+  including shares written by Manage Access "Add person" for an internal user. Manage Access *grants* (to contacts) do
+  not affect the MDA.
 - **Workforce SPA users (licensed)**: their own Dataverse-style access (owner/membership, or Dataverse itself if the
   impersonated read is on) **plus** Manage Access grants to their linked contact.
 - **Workforce SPA users (contact-only)** and **partners**: **Manage Access grants** (and, for contact-only workforce
@@ -196,7 +197,7 @@ A set built over a failed read is never cached.
 | Source of access | MDA user | Workforce SPA — licensed | Workforce SPA — contact-only | Partner |
 |---|---|---|---|---|
 | Owner field, business unit, role depth, team membership | **Yes** (Dataverse) | Yes — Dataverse if the impersonated read is on; otherwise the membership walk (owner, owning team, owning BU, people lookups) | No | No |
-| Dataverse share (Manage Access "+ User", platform Share button, Assigned-To share, secure-child mirroring) | **Yes** | Only if the impersonated read is on (or as a Secure-record Read confirmation) | No | No |
+| Dataverse share (Manage Access "Add person" for an internal user, platform Share button, Assigned-To share, secure-child mirroring) | **Yes** | Only if the impersonated read is on (or as a Secure-record Read confirmation) | No | No |
 | Manage Access grant to the person's contact (`/grant`, `/invite-and-grant`, contact-to-colleague grants, Assigned-To grant) | No | **Yes**, through the linked contact | **Yes** | **Yes** |
 | Organization-wide grant through a current organization membership | No | Yes, through the linked contact | Yes | Yes |
 | Contact standing grant (`sprk_standinggrant` + `sprk_accesspermissiongrant` on the contact) | No | No | **Yes** | No |
@@ -208,8 +209,7 @@ A set built over a failed read is never cached.
 
 | Tool | What it writes | Who it is for |
 |---|---|---|
-| **Manage Access → "+ Contact"** (the Access Grant modal) | A grant row. A contact with an email who is external goes through `/invite-and-grant` (onboard, then grant); an internal workforce contact, or one with no email, through `/grant`. | Partners and workforce contacts |
-| **Manage Access → "+ User"** | A Dataverse share (`/share-user`), at the level's share mask (§4). | Internal systemusers |
+| **Manage Access → "Add person"** (the Access Grant modal) | One entry over contacts and users; the server decides what is written. An internal user, picked directly (`/share-user`) or through the contact that represents them (`/grant`), gets a Dataverse share at the level's share mask (§4), with **no end date**. An external contact (`/grant`) gets a grant row, and `/grant` then invites them (the invite never undoes the grant). On a **Restricted** record the lookup offers users only, and none flagged external. | Internal users and partners |
 | **Manage Access → organization** | An organization-wide grant row (no contact). | Every current member of an organization |
 | **Contact Grants** (in the SPA) | A grant row issued by a contact to a colleague in their own organization (§4). A contact cannot grant themselves (409 `self_grant`). | Partners granting colleagues |
 | **Assigned-To rule** (automatic) | For each person or organization named in an "Assigned …" column: a Collaborate grant row, or a Collaborate share if the contact is linked to an eligible systemuser. Runs after BFF saves, from the form's post-save step (Update Access), and every 5 minutes. Never lowers existing access; if staff remove it, it is not re-added. Policy applies: on a **Secure** record grants and shares are only *suggested* for staff to confirm (an existing automatic grant is kept); on **Restricted** no contact or organization grant is written (a linked internal user's share still is, unless they are flagged external); on **Limited** no organization grant. When an assignment is changed or cleared, the previous person's unmodified automatic access is removed (always on save; by the 5-minute job only when its revoke switch is on). | Assignees |
@@ -220,14 +220,16 @@ A set built over a failed read is never cached.
 Every Manage Access call requires the caller to hold **Write and Share** on the record, checked as the caller. The one
 exception is **Update Access** (`/assigned-access/sync`, which re-runs the Assigned-To rule): Write is enough.
 
-> **"+ Contact" or "+ User" for an internal colleague?** Use **"+ User"**. "+ Contact" on a colleague's contact writes a
-> grant, which gives a licensed colleague access in the SPA (through their linked contact) but **not** in the model-driven
-> app. "+ User" writes a share, which the model-driven app honours. Only the Assigned-To rule makes this choice itself: it
-> shares with the internal user a contact represents (`AssignedAccessMaterializer.ResolveTargetAsync`). A single "add
-> person" entry that decides the same way on the server is proposed in #2338.
+> **Adding an internal colleague.** Pick them in "Add person", as a user or through their contact: either way they get a
+> share, which the model-driven app honours, never a contact grant. `/grant` asks who a contact represents
+> (`ContactUserRepresentation`, the same rule the Assigned-To rule uses): exactly one internal user → a share with that
+> user (no grant row; an Expiration sent with it is not applied, and the answer says so with `expiryNotApplied`); several
+> users → refused 409; unreadable → refused 503 and nothing is written; nobody → a contact grant. The contact's pending
+> Assigned-To suggestions on the record are then marked adopted, and the role candidate is no longer offered while the
+> share stands (#2338).
 
-**Where in the code**: `Api/ExternalAccess/GrantExternalAccessEndpoint.cs`, `InviteAndGrantExternalUserEndpoint.cs`,
-`InternalShareEndpoints.cs`, `ContactGrantEndpoints.cs`, `DelegationRuleFilter.cs`,
+**Where in the code**: `Api/ExternalAccess/GrantExternalAccessEndpoint.cs`, `ContactInternalUserShare.cs` (the share-or-grant
+decision), `InviteAndGrantExternalUserEndpoint.cs`, `InternalShareEndpoints.cs`, `ContactGrantEndpoints.cs`, `DelegationRuleFilter.cs`,
 `Services/ExternalAccess/AssignedAccessMaterializer.cs`, the Access Grant modal in
 `src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/`.
 
@@ -265,7 +267,7 @@ everything else is combined, so it beats every grant:
 
 - At read time, a denied record is removed from the person's set (deny wins).
 - At grant time (`/grant`, `/invite-and-grant`, contact grants), granting someone on the list is refused (422); if the
-  list cannot be read, the grant is refused (503). A "+ User" share on a Secure record is refused with 403
+  list cannot be read, the grant is refused (503). A share to a user on a Secure record is refused with 403
   (`subject_no_access`), or 500 if the list cannot be checked.
 - An entry naming a **systemuser** binds them only on **Secure** records. There it removes their direct shares within
   minutes, provided the entry's author holds Write on that record (otherwise the entry is reported as not enforced). On
@@ -364,7 +366,7 @@ never loosens. A filed child cannot be un-secured on its own; it follows its par
 2. **Roles set the grantor ceiling.** The level a person can grant is read from their own Dataverse rights on the record
    (roles plus shares), as in §4.
 3. **A grant never changes Dataverse privileges.** A Manage Access grant (`sprk_externalrecordaccess`) affects only the
-   SPA and BFF. Only shares ("+ User", Assigned-To for a linked user) change what the MDA allows, and a share still
+   SPA and BFF. Only shares ("Add person" for an internal user, Assigned-To for a linked user) change what the MDA allows, and a share still
    cannot exceed what the person's roles permit on that table.
 4. **For licensed SPA users, roles count only when the impersonated read is on.** With it off, the membership walk
    ignores role depth.
@@ -596,9 +598,9 @@ team-held copy is still reported): **Spaarke Billing Administrator** (policy tab
 
 ### Manage Access on a Secure record
 
-- **Internal users ("+ User")**: allowed at any level, under the grantor ceiling. People on the record's No Access list
+- **Internal users ("Add person", a user or their contact)**: allowed at any level, under the grantor ceiling. People on the record's No Access list
   are refused. The last person with access cannot be removed (409). Children carry the record's shares — never more.
-- **Contacts ("+ Contact")**: allowed, but **direct grants only** (Secure behaves as Limited for contacts).
+- **External contacts ("Add person")**: allowed, but **direct grants only** (Secure behaves as Limited for contacts).
 - **Organization-wide grants**: refused (`org_grant_direct_only_record`).
 - **Secure and Restricted**: every contact grant refused.
 - **Licensed SPA users**: access through a lookup or the business unit counts only if Dataverse confirms Read, and then
@@ -659,12 +661,12 @@ creator rule applies; a child moved outside Spaarke stays isolated until such a 
 ## 11. The model-driven app's Share button
 
 **Short answer.** Spaarke uses Dataverse shares as the way to give **internal users** access, so the platform **Share**
-button is kept and is a supported way to share. Spaarke writes the same kind of share itself (Manage Access "+ User",
+button is kept and is a supported way to share. Spaarke writes the same kind of share itself (Manage Access "Add person" for an internal user,
 Assigned-To, secure-child mirroring) and keeps everything consistent afterwards:
 
 | Situation | What happens |
 |---|---|
-| Ordinary record | A platform share works like a "+ User" share. It counts in the MDA; in the SPA it counts only if the impersonated read is on. |
+| Ordinary record | A platform share works like a share from "Add person". It counts in the MDA; in the SPA it counts only if the impersonated read is on. |
 | **Restricted** record | The Share button is hidden on the form, and on grids when any selected row is Restricted (also whenever the setting cannot be read). A share to a user flagged external made any other way is removed by the form's post-save Update Access call and by the 5-minute job. |
 | **Secure** record | Allowed. The record's children receive the new share within 2 minutes; an unshare is passed on the same way. |
 | Person on the **No Access** list, Secure record | Their direct share is removed within minutes. |
@@ -760,7 +762,7 @@ code already does; deviating needs an ADR conflict resolution (CLAUDE.md §6.5).
 | An organization grant is refused | The record (or a parent) is Secure or Limited | Grant the people directly, or change the policy if appropriate |
 | A child record is visible on the parent in the SPA but not in the MDA | The child is user-owned or owned by a non-default team (reported, not moved), or the ordinary-moves switch is off, after an ordinary parent moved (§7) | Check `ResultJson.ordinaryMoves` of the `secure-child-reconciliation` job; reassign the child, or share it |
 | Someone who should not see Secure records can | Their business unit is an ancestor of the secure one with a Deep Read role, or they hold Global Read | Check `[SECURE-CENSUS]`; move them out of the root business unit or narrow the role depth |
-| Share button missing on a record | The record is Restricted (by design) | Use Manage Access "+ User" for internal users |
+| Share button missing on a record | The record is Restricted (by design) | Use Manage Access "Add person" for internal users |
 | Remove Secure refused | Caller is not a Full Access holder or the creator (403), or a parent is Secure (409 `access_follows_parent`) | Ask a Full Access holder; un-secure the parent instead |
 | Change not visible yet | Caches (up to 2 minutes) or a background job not yet run (2–5 minutes) | Wait, then re-check; look for the job's log line |
 

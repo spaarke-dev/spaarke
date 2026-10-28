@@ -123,6 +123,14 @@
  * - The dead `onSetStandingGrant` wiring is removed (the modal has had no
  *   standing-grant control since task 073 UAT v1.0.24 #5).
  *
+ * v1.0.55 (task 193, unified-access-control-r2 — #2338): Manage Access has ONE "Add person" entry. `pickPerson` opens
+ *   the native lookup over contact and systemuser together (users only, none flagged external, on a Restricted
+ *   record) and replaces `pickContact` and `pickUser`; `isInternalContact` is removed, because the server decides: a
+ *   contact goes to `/grant`, which shares with the internal user it represents or grants the contact. The bundled
+ *   modal names who a contact was shared with ("your colleague" when the name cannot be read), says shares with
+ *   colleagues have no end date when an Expiration was sent, and stops offering a role candidate whose represented
+ *   user holds a share.
+ *
  * v1.0.54 (task 099c review round 2, PR #2062): no change in this file's logic. In the bundled modal's Expiration:
  *   when shares end on different dates and the earliest has already passed, no disabled Apply is offered - the line says
  *   to choose the UTC minimum date or later, and picking a valid date offers Apply; the "choose an Expiration before
@@ -1529,7 +1537,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       title: (this.context.parameters.title?.raw as string) || undefined,
       showTitle,
       showVersion,
-      versionText: 'v1.0.54 • Built 2026-10-17',
+      versionText: 'v1.0.55 • Built 2026-10-28',
       // Task 175 (owner round 87): only the options at or above the parent's floor.
       accessPermissionOptions: accessPermissionPill.options,
       // Labels pulled from each bound field's Dataverse metadata so they
