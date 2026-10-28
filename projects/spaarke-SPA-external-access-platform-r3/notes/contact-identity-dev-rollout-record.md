@@ -29,7 +29,7 @@
   | `xms_edov` | absent | **present, JSON boolean `true`** |
 
   So Entra emits `xms_edov` in v2 **access** tokens for a work account once the resource app requests it. Until now that had only been inferred from the documentation.
-- A probe for a customer-directory (Dewey Cheatham) workforce user needs that user's sign-in and its own owner go (pending).
+- **Token probe, customer-directory member (owner go; the owner signed in as the Dewey Cheatham test member in an isolated Azure CLI profile, deleted afterwards):** v2 access token for the dev BFF, `tid` = Dewey Cheatham `bc3aa7f4`, `acct` 0, `email` present, **`xms_edov` present, JSON boolean `true`**. A customer-directory work account therefore carries the verified-domain signal too. The bind's tenant leg stays as the fallback when the claim is absent.
 
 ## 4. `removeUnverifiedEmailClaim` (read 2026-10-28)
 
