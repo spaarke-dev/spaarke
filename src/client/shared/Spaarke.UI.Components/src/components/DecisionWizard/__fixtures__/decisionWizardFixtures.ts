@@ -71,6 +71,60 @@ export const reviseBudget: DecisionAction = {
   excludes: ['approve-variance'],
 };
 
+/** Task 167 (D-193): Create budget as the plan route returns it: live option lists, a currency default from the matter's business unit. */
+export const EURO_ID = 'eeeeeeee-0000-0000-0000-0000000000e1';
+export const DOLLAR_ID = 'eeeeeeee-0000-0000-0000-0000000000d1';
+export const createBudget: DecisionAction = {
+  code: 'create-budget',
+  label: 'Create budget',
+  workType: 'fund',
+  recordClass: 'Judgement',
+  isRecommended: true,
+  parameters: [
+    { code: 'amount', label: 'Budget amount', kind: 'Money', required: true },
+    {
+      code: 'category',
+      label: 'Category',
+      kind: 'Choice',
+      required: false,
+      options: [
+        { value: '100000000', label: 'Fees' },
+        { value: '100000001', label: 'Expenses' },
+      ],
+      optionsSource: 'metadata:sprk_budget.sprk_budgetcategory',
+    },
+    { code: 'year', label: 'Year', kind: 'Text', required: false },
+    { code: 'startDate', label: 'Start date', kind: 'Date', required: false },
+    { code: 'endDate', label: 'End date', kind: 'Date', required: false, notBefore: 'startDate' },
+    {
+      code: 'period',
+      label: 'Period',
+      kind: 'Choice',
+      required: false,
+      options: [
+        { value: '0', label: 'Annual' },
+        { value: '1', label: 'Quarter 1' },
+      ],
+      optionsSource: 'metadata:sprk_budget.sprk_budgetperiod',
+    },
+    {
+      code: 'currency',
+      label: 'Currency',
+      kind: 'Choice',
+      required: false,
+      options: [
+        { value: DOLLAR_ID, label: 'US Dollar (USD)' },
+        { value: EURO_ID, label: 'Euro (EUR)' },
+      ],
+      optionsSource: 'currency:active',
+      defaultValue: EURO_ID,
+    },
+    { code: 'reason', label: 'Reason for the budget', kind: 'TextArea', required: true },
+  ],
+  effectLines: ["Creates the matter's first budget", 'Records the budget and your reason on the Decision Record'],
+  excludes: ['approve-variance'],
+};
+
 export const approveVariance: DecisionAction = {
   code: 'approve-variance',
   label: 'Approve variance',
@@ -196,6 +250,13 @@ export const pathBPlan: DecisionPlan = {
   nextSteps: [addTodo, createEvent],
   dismissalReasons: decideReasons,
   ruleDescription,
+};
+
+/** Task 167: the no-budget plan after the server swapped Create budget in for Revise budget. */
+export const createBudgetPlan: DecisionPlan = {
+  ...pathBPlan,
+  actions: [createBudget],
+  nextSteps: [],
 };
 
 /** The same actions with Approve variance FIRST (a rule may list either; the earlier one taken removes the later). */
