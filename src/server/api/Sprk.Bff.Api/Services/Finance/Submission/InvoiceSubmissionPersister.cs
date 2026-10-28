@@ -366,6 +366,13 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             var staged = await _files.ReadStagedSourceAsync(
                 StoredFilePurpose.InvoicePdf, new StoredFileParent(StoredFileParentKind.Invoice, InvoiceIdFor(submissionId)),
                 StoredFileIds.ForUpload(submissionId), ct).ConfigureAwait(false);
+            if (staged is { SourceUnreadable: true })
+            {
+                // Review round 5: a source the stage recorded but that cannot be read is not an upload; refuse rather than persist as one.
+                _logger.LogWarning("Invoice submission {SubmissionId}: its staged file records a source that cannot be read; nothing persisted", submissionId);
+                return Result(SubmissionPersistStatus.Refused, submissionId, SubmissionReasonCodes.DocumentUnavailable);
+            }
+
             if (staged is { SourceDocumentId: { } emlId })
             {
                 if (outcome.Submission.Channel != InvoiceSubmissionChannel.Internal || staged.SourceVersion is null)
@@ -723,7 +730,8 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             var identity = EmlPartIdentity(ordinal);
             var fileId = StoredFileIds.ForAttachment(submission.SubmissionId, identity);
             var staged = await _files.ReadStagedSourceAsync(StoredFilePurpose.InvoiceSupportingFile, parent, fileId, ct).ConfigureAwait(false);
-            if (staged is null || staged.SourceDocumentId != invoicePart.SourceDocumentId || staged.SourceAttachmentIdentity != identity)
+            if (staged is null || staged.SourceUnreadable || staged.SourceDocumentId != invoicePart.SourceDocumentId
+                || staged.SourceAttachmentIdentity != identity)
             {
                 _logger.LogWarning("Invoice submission {SubmissionId}: its staged email part {Ordinal} is missing or records another source; nothing persisted",
                     submission.SubmissionId, ordinal);

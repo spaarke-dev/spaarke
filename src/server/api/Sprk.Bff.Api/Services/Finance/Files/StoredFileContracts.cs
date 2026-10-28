@@ -496,6 +496,8 @@ internal sealed record StagedSourceManifest(IReadOnlyList<int> SupportingOrdinal
 /// <summary>
 /// ebilling-r1 task 094 (from-email): a staged blob read back with the source facts its stage recorded
 /// (<see cref="StoredFileService.ReadStagedSourceAsync"/>). Every fact is null when the stage recorded none (an upload).
+/// <paramref name="SourceUnreadable"/> (review round 5) is true when a source key is present but its value cannot be read: the blob is
+/// NOT an upload, and its readers refuse it (fail closed) rather than treat it as one.
 /// </summary>
 internal sealed record StagedSource(
     StagedBlob Blob,
@@ -505,7 +507,8 @@ internal sealed record StagedSource(
     string? SourceAttachmentIdentity,
     IReadOnlyList<int> SupportingOrdinals,
     string? Extension,
-    string? ContentType);
+    string? ContentType,
+    bool SourceUnreadable = false);
 
 /// <summary>The answer of a stage: the blob, or a refusal code (nothing written).</summary>
 public sealed record StageResult(StagedBlob? Blob, string? RefusalCode)

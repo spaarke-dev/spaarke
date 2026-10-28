@@ -147,27 +147,66 @@ public sealed class StoredFileService
 
         var metadata = properties.Metadata;
         string? Value(string key) => metadata.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value) ? value : null;
+        // Review round 5: a source key that is present but cannot be read marks the blob unreadable (fail closed), never an upload.
+        var unreadable = false;
+        Guid? IdOf(string key)
+        {
+            if (Value(key) is not { } raw)
+                return null;
+            if (Guid.TryParse(raw, out var id) && id != Guid.Empty)
+                return id;
+            unreadable = true;
+            return null;
+        }
+
         var ordinals = new List<int>();
         foreach (var token in (Value(StoredFileBlobs.MetadataEmlParts) ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries))
         {
             if (!int.TryParse(token, NumberStyles.None, CultureInfo.InvariantCulture, out var ordinal))
             {
-                _logger.LogWarning("Stored file {FileId}: its staged part list is not readable", fileId);
-                return null;
+                unreadable = true;
+                ordinals.Clear();
+                break;
             }
 
             ordinals.Add(ordinal);
         }
 
+        var document = IdOf(StoredFileBlobs.MetadataSourceDocument);
+        var communication = IdOf(StoredFileBlobs.MetadataSourceCommunication);
+        long? version = null;
+        if (Value(StoredFileBlobs.MetadataSourceVersion) is { } rawVersion)
+        {
+            if (long.TryParse(rawVersion, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed))
+                version = parsed;
+            else
+                unreadable = true;
+        }
+
+        string? extension = null;
+        if (Value(StoredFileBlobs.MetadataExtension) is { } rawExtension)
+        {
+            if (IsExtension(rawExtension))
+                extension = rawExtension;
+            else
+                unreadable = true;
+        }
+
+        if (unreadable)
+        {
+            _logger.LogWarning("Stored file {FileId}: a source fact its stage recorded is not readable", fileId);
+        }
+
         return new StagedSource(
             new StagedBlob(container, name, sha, properties.ContentLength, Reused: true),
-            Guid.TryParse(Value(StoredFileBlobs.MetadataSourceDocument), out var document) && document != Guid.Empty ? document : null,
-            Guid.TryParse(Value(StoredFileBlobs.MetadataSourceCommunication), out var communication) && communication != Guid.Empty ? communication : null,
-            long.TryParse(Value(StoredFileBlobs.MetadataSourceVersion), NumberStyles.None, CultureInfo.InvariantCulture, out var version) ? version : null,
+            document,
+            communication,
+            version,
             Value(StoredFileBlobs.MetadataSourceAttachment),
             ordinals,
-            Value(StoredFileBlobs.MetadataExtension) is { } extension && IsExtension(extension) ? extension : null,
-            string.IsNullOrWhiteSpace(properties.ContentType) ? null : properties.ContentType);
+            extension,
+            string.IsNullOrWhiteSpace(properties.ContentType) ? null : properties.ContentType,
+            unreadable);
     }
 
     /// <summary>

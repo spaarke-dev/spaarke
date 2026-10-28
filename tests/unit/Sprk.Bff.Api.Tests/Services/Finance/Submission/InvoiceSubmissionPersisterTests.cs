@@ -2023,6 +2023,51 @@ public class InvoiceSubmissionPersisterTests
         store.Transactions.Should().BeEmpty();
     }
 
+    /// <summary>The metadata of a staged from-email part of <see cref="Submission"/> (the fake gateway's own dictionary: writes change the blob).</summary>
+    private static Dictionary<string, string> StagedMetadata(Store store, StoredFilePurpose purpose, Guid fileId) =>
+        store.Files.Gateway.Get(
+            StoredFileSchema.ContainerOf(purpose),
+            StoredFileBlobName.Build(store.Files.TenantId, new StoredFileParent(StoredFileParentKind.Invoice, InvoiceId), fileId))!.Metadata;
+
+    [Theory(DisplayName = "094 round 5 (must fire): an Invoice part whose stage records a source key that cannot be read is Refused document_unavailable (fail closed), never persisted as an upload")]
+    [InlineData(StoredFileBlobs.MetadataSourceDocument, "not-a-guid")]
+    [InlineData(StoredFileBlobs.MetadataSourceDocument, "00000000-0000-0000-0000-000000000000")]
+    [InlineData(StoredFileBlobs.MetadataSourceCommunication, "not-a-guid")]
+    [InlineData(StoredFileBlobs.MetadataSourceVersion, "seven")]
+    [InlineData(StoredFileBlobs.MetadataEmlParts, "1,x")]
+    [InlineData(StoredFileBlobs.MetadataExtension, "../pdf")]
+    public async Task FromEmail_AnUnreadableSourceKeyOnTheInvoicePart_IsRefused_NoTransaction(string key, string value)
+    {
+        var outcome = await new ProcessorHarness { Channel = InvoiceSubmissionChannel.Internal }.RunAsync();
+        var store = FromEmailStore();
+        StageFromEmail(store, version: store.DocumentVersion);
+        StagedMetadata(store, StoredFilePurpose.InvoicePdf, FileId)[key] = value;
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Refused);
+        result.ReasonCode.Should().Be(SubmissionReasonCodes.DocumentUnavailable);
+        store.DocumentReads.Should().BeEmpty();
+        store.Transactions.Should().BeEmpty();
+    }
+
+    [Theory(DisplayName = "094 round 5 (must fire): a Supporting part whose stage records a source key that cannot be read is Refused file_unservable before any write")]
+    [InlineData(StoredFileBlobs.MetadataSourceCommunication, "not-a-guid")]
+    [InlineData(StoredFileBlobs.MetadataExtension, ".x/y")]
+    public async Task FromEmail_AnUnreadableSourceKeyOnASupportingPart_IsRefused_NoTransaction(string key, string value)
+    {
+        var outcome = await new ProcessorHarness { Channel = InvoiceSubmissionChannel.Internal }.RunAsync();
+        var store = FromEmailStore();
+        StageFromEmail(store, version: store.DocumentVersion);
+        StagedMetadata(store, StoredFilePurpose.InvoiceSupportingFile, EmailSupportingFile)[key] = value;
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Refused);
+        result.ReasonCode.Should().Be(SubmissionReasonCodes.FileUnservable);
+        store.Transactions.Should().BeEmpty();
+    }
+
     [Fact(DisplayName = "094 from-email (must fire): a sourced stage on a submission that is not Channel Internal is Refused document_unavailable before any read of the .eml")]
     public async Task FromEmail_ASourcedStageOnAnSpaSubmission_IsRefused()
     {
