@@ -16,6 +16,7 @@ using Spaarke.Dataverse;
 using Spaarke.Scheduling;
 using Sprk.Bff.Api.Infrastructure.DI;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.ExternalAccess;
 using Sprk.Bff.Api.Services.Jobs;
 using Xunit;
@@ -61,6 +62,7 @@ public class ExternalAccessReconciliationTests
 
     private readonly FakeDataverse _dataverse = new();
     private readonly ContactGrantTable _grants = new();
+    private readonly FakeRecordShareTable _shares = new();
     private readonly GrantPolicyTestDoubles.FlagStubParticipationService _participations = new(RootRecordFlags.None);
     private readonly CapturingLogger _log = new();
     private readonly FakeTimeProvider _time = new(Now);
@@ -311,6 +313,148 @@ public class ExternalAccessReconciliationTests
         ((string?)recordGone.Parent!.Attribute("type")).Should().Be("or", "it is one more way a row can need reconciling");
     }
 
+    // ── R5 (task 193 G1, owner decision (a)): a paired grant whose user no longer holds the share ──────────────────
+
+    [Fact]
+    public async Task R5_APairedGrantWhoseUserNoLongerHoldsAShare_IsEnded_AndKeepsItsPairing()
+    {
+        var (id, _, user) = SeedPairedGrant();
+
+        var result = await RunAsync(writes: true);
+
+        result.Success.Should().BeTrue();
+        State(Grant(id)).Should().Be(1);
+        Status(Grant(id)).Should().Be(2);
+        Grant(id).GetAttributeValue<EntityReference>(ExternalAccessReconciliationJob.PairedSystemUserAttribute).Id
+            .Should().Be(user, "ending the grant does not erase what it was paired with");
+        Rule("R5")["Planned"].Should().Be(1);
+        Rule("R5")["Changed"].Should().Be(1);
+        Rule("R1")["Planned"].Should().Be(0, "a dated grant is not R1's");
+    }
+
+    [Fact]
+    public async Task R5_AnUnpairedGrant_IsLeftAlone_EvenWithNoShareAnywhere()
+    {
+        var id = SeedGrant(expires: Today.AddDays(60));
+
+        await RunAsync(writes: true);
+
+        State(Grant(id)).Should().Be(0);
+        Rule("R5")["Planned"].Should().Be(0);
+        _dataverse.Writes.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(1)]          // Read only
+    [InlineData(0x80007)]    // a full-access mask
+    public async Task R5_APairedGrantWhoseUserStillHoldsAShare_IsLeftAlone(int mask)
+    {
+        var (id, matter, user) = SeedPairedGrant();
+        _shares.Seed("sprk_matter", matter, DataversePrincipalRef.User(user), mask);
+
+        var result = await RunAsync(writes: true);
+
+        result.Success.Should().BeTrue();
+        State(Grant(id)).Should().Be(0);
+        Rule("R5")["Planned"].Should().Be(0);
+        Paired().GetProperty("shareHeld").GetInt32().Should().Be(1);
+        _dataverse.Writes.Should().BeEmpty();
+    }
+
+    /// <summary>Another user's share on the record is not the paired user's: the grant is still ended.</summary>
+    [Fact]
+    public async Task R5_AShareHeldOnlyBySomeoneElse_DoesNotKeepThePairedGrant()
+    {
+        var (id, matter, _) = SeedPairedGrant();
+        _shares.Seed("sprk_matter", matter, DataversePrincipalRef.User(Guid.NewGuid()), 1);
+
+        await RunAsync(writes: true);
+
+        State(Grant(id)).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task R5_WhenTheRecordsSharesCannotBeRead_ThePairedGrantIsUnchanged_TheFaultIsCounted_AndTheRunIsPartial()
+    {
+        var (id, matter, _) = SeedPairedGrant();
+        var (other, _, _) = SeedPairedGrant();
+        _shares.FailReadsOfRecord = ("sprk_matter", matter);
+
+        var result = await RunAsync(writes: true);
+
+        State(Grant(id)).Should().Be(0, "never end access on a read that failed");
+        State(Grant(other)).Should().Be(1, "one record's fault does not stop the others");
+        Paired().GetProperty("shareUnreadable").GetInt32().Should().Be(1);
+        Rule("R5")["Changed"].Should().Be(1);
+        result.Success.Should().BeFalse();
+        Report().GetProperty("status").GetString().Should().Be("partial");
+        result.ErrorMessage.Should().Contain("retried on the next run");
+    }
+
+    [Fact]
+    public async Task R5_ReportOnly_PlansTheEnd_AndWritesNothing()
+    {
+        var (id, _, _) = SeedPairedGrant();
+
+        await RunAsync(writes: null);
+
+        Rule("R5")["Planned"].Should().Be(1);
+        Rule("R5")["Changed"].Should().Be(0);
+        State(Grant(id)).Should().Be(0);
+        _dataverse.Writes.Should().BeEmpty();
+        BeforeStateFor(id).Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task R5_WhenThePairingColumnIsNotProvisioned_SkipsR5Alone_AndTheRunStillSucceeds()
+    {
+        var (paired, _, _) = SeedPairedGrant();
+        var undated = SeedGrant(expires: null);
+        _grants.PairingReadFailure = new HttpRequestException(
+            "Simulated 400: Could not find a property named 'sprk_pairedsystemuser'.", null, System.Net.HttpStatusCode.BadRequest);
+
+        var result = await RunAsync(writes: true);
+
+        result.Success.Should().BeTrue();
+        State(Grant(paired)).Should().Be(0);
+        Grant(undated).Contains(ExternalAccessReconciliationJob.ExpiresDateAttribute).Should().BeTrue("R1 still ran");
+        Paired().GetProperty("columnMissing").GetBoolean().Should().BeTrue();
+        Rule("R5")["Scanned"].Should().Be(0);
+        Rule("R5")["ScanFailed"].Should().Be(false);
+        _dataverse.FetchXml.Should().NotContain(f => f.Contains(ExternalAccessReconciliationJob.PairedSystemUserAttribute),
+            "no scan names a column this environment lacks");
+    }
+
+    [Fact]
+    public async Task R5_WhenThePairingColumnCannotBeProbed_NothingIsEnded_AndTheRunIsRecordedFailed()
+    {
+        var (paired, _, _) = SeedPairedGrant();
+        _grants.PairingReadFailure = new HttpRequestException(
+            "Simulated Dataverse read failure.", null, System.Net.HttpStatusCode.ServiceUnavailable);
+
+        var result = await RunAsync(writes: true);
+
+        result.Success.Should().BeFalse();
+        State(Grant(paired)).Should().Be(0);
+        Rule("R5")["ScanFailed"].Should().Be(true);
+        Report().GetProperty("status").GetString().Should().Be("error");
+    }
+
+    [Fact]
+    public void ThePairedGrantScan_AdmitsOnlyActivePairedRows_AndSelectsThePairingAndEveryRecordLookup()
+    {
+        var fetch = XDocument.Parse(ExternalAccessReconciliationJob.BuildPairedGrantScanFetchXml(1, null));
+        var entity = fetch.Descendants("entity").Single();
+
+        entity.Elements("attribute").Select(a => (string?)a.Attribute("name")).Should()
+            .Contain(ExternalAccessReconciliationJob.RootLookupAttributes.Select(r => r.Attribute))
+            .And.Contain(ExternalAccessReconciliationJob.PairedSystemUserAttribute)
+            .And.Contain("statecode");
+        entity.Descendants("condition").Should().Contain(c =>
+            (string?)c.Attribute("attribute") == ExternalAccessReconciliationJob.PairedSystemUserAttribute
+            && (string?)c.Attribute("operator") == "not-null");
+    }
+
     // ── The boundary every rule shares ──────────────────────────────────────────────────────────────
 
     [Fact]
@@ -548,8 +692,13 @@ public class ExternalAccessReconciliationTests
         Rule("R1")["Truncated"].Should().Be(true);
         result.ErrorMessage.Should().Contain($"stopped after {ExternalAccessReconciliationJob.MaxPages} pages");
         result.Success.Should().BeFalse();
-        _dataverse.FetchXml.Count(x => x.Contains($"name=\"{GrantEntity}\"", StringComparison.Ordinal))
+        var grantScans = _dataverse.FetchXml.Where(x => x.Contains($"name=\"{GrantEntity}\"", StringComparison.Ordinal)).ToList();
+        grantScans.Count(x => !x.Contains(ExternalAccessReconciliationJob.PairedSystemUserAttribute, StringComparison.Ordinal))
             .Should().Be(ExternalAccessReconciliationJob.MaxPages, "it pages to the ceiling and stops");
+        // R5 (task 193 G1) is its own scan of the same table, bounded the same way.
+        grantScans.Count(x => x.Contains(ExternalAccessReconciliationJob.PairedSystemUserAttribute, StringComparison.Ordinal))
+            .Should().Be(ExternalAccessReconciliationJob.MaxPages);
+        Rule("R5")["Truncated"].Should().Be(true);
     }
 
     [Fact]
@@ -582,12 +731,13 @@ public class ExternalAccessReconciliationTests
         result.Skipped.Should().BeFalse("Skipped belongs to the host (ADR-036 A1 rule 1), never to a job");
 
         var rules = Report().GetProperty("rules").EnumerateArray().ToList();
-        rules.Should().HaveCount(4);
+        rules.Should().HaveCount(5);
         rules.Select(r => r.GetProperty("rule").GetString()).Should().Equal(
             ExternalAccessReconciliationJob.RuleStampDefaultExpiry,
             ExternalAccessReconciliationJob.RuleDeactivateOrphanedOrgGrant,
             ExternalAccessReconciliationJob.RuleDeactivateEndedMembership,
-            ExternalAccessReconciliationJob.RuleDeactivateRecordGone);
+            ExternalAccessReconciliationJob.RuleDeactivateRecordGone,
+            ExternalAccessReconciliationJob.RuleEndPairedGrantShareGone);
 
         foreach (var rule in rules)
         {
@@ -1142,6 +1292,25 @@ public class ExternalAccessReconciliationTests
         return row.Id;
     }
 
+    /// <summary>
+    /// Task 193 G1: an ACTIVE, dated contact grant on a live matter, PAIRED with an internal user (<c>sprk_pairedsystemuser</c>).
+    /// </summary>
+    private (Guid Id, Guid Matter, Guid User) SeedPairedGrant(Guid? matter = null, Guid? user = null)
+    {
+        var id = SeedGrant(expires: Today.AddDays(60));
+        var row = Grant(id);
+        var matterId = matter ?? Guid.NewGuid();
+        var userId = user ?? Guid.NewGuid();
+        row["sprk_matter"] = new EntityReference("sprk_matter", matterId);
+        row[ExternalAccessReconciliationJob.PairedSystemUserAttribute] = new EntityReference("systemuser", userId);
+        return (id, matterId, userId);
+    }
+
+    private JsonElement Paired() => Report()
+        .GetProperty("rules").EnumerateArray()
+        .Single(r => r.GetProperty("rule").GetString() == ExternalAccessReconciliationJob.RuleEndPairedGrantShareGone)
+        .GetProperty("paired").Clone();
+
     private Guid SeedMembership(DateOnly? end, int? state = 0)
     {
         var row = new Entity(JunctionEntity, Guid.NewGuid());
@@ -1178,6 +1347,8 @@ public class ExternalAccessReconciliationTests
         // The issuer-access reads of R1's contact-issued rule (round 42 item 2) — resolved only when such a row exists.
         services.AddSingleton<DataverseWebApiClient>(_grants);
         services.AddSingleton<ExternalParticipationService>(_participations);
+        // R5's share reads (task 193 G1) — resolved only when a paired grant is planned.
+        services.AddSingleton<IDataverseRecordShareService>(_shares);
         using var provider = services.BuildServiceProvider();
 
         var job = new ExternalAccessReconciliationJob(
@@ -1218,6 +1389,7 @@ public class ExternalAccessReconciliationTests
             "R1" => ExternalAccessReconciliationJob.RuleStampDefaultExpiry,
             "R2" => ExternalAccessReconciliationJob.RuleDeactivateOrphanedOrgGrant,
             "R4" => ExternalAccessReconciliationJob.RuleDeactivateRecordGone,
+            "R5" => ExternalAccessReconciliationJob.RuleEndPairedGrantShareGone,
             _ => ExternalAccessReconciliationJob.RuleDeactivateEndedMembership,
         };
 

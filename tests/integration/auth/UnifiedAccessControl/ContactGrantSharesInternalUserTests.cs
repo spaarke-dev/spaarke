@@ -41,7 +41,8 @@ public class ContactGrantSharesInternalUserTests
     private ContactInternalUserShare Decision() => new(
         new ContactUserRepresentation(_h.Identities, _h.Store, _h.Participations),
         _h.Shares, _h.Cache.Mock.Object, _h.Children, _h.Guard,
-        TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(), _h.WorkforceIdentity);
+        TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(),
+        _h.Identities, _h.Ownership, _h.OwnerPrivileges, _h.Time, _h.WorkforceIdentity);
 
     private Task<IResult> Grant(
         Guid contactId, ExternalAccessLevel level = ExternalAccessLevel.Collaborate, DateOnly? expiry = null,
@@ -106,8 +107,12 @@ public class ContactGrantSharesInternalUserTests
 
     // ── /grant: the decision matrix ─────────────────────────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Task 193 G1 (owner F1-b, decisions (a) and (iii)): the colleague is SHARED with (model-driven app, no end date) AND the
+    /// contact is granted (workforce app), paired with the share and dated today + 90 as any grant. Never invited, never emailed.
+    /// </summary>
     [Fact]
-    public async Task Grant_ContactRepresentingOneUser_SharesWithThatUser_AtTheLevel_AndWritesNoGrantRow()
+    public async Task Grant_ContactRepresentingOneUser_SharesWithThatUser_AndGrantsTheContactPairedWithThem_UntilTodayPlus90()
     {
         var (contact, user) = Colleague();
 
@@ -115,14 +120,20 @@ public class ContactGrantSharesInternalUserTests
 
         var body = result.Should().BeOfType<Ok<GrantAccessResponse>>().Subject.Value!;
         body.SharedWithUser.Should().Be(new SharedWithUser(user, "Ada Lovelace"));
-        body.AccessRecordId.Should().Be(Guid.Empty);
+        body.AccessRecordId.Should().Be(Guid.Empty, "the answer's own id stays the share's; the paired row is in workforceApp");
         body.GrantedAccessLevel.Should().Be(ExternalAccessLevel.Collaborate);
         body.Invite.Should().BeNull("an internal user is never invited");
         body.ExpiryNotApplied.Should().BeNull("no expiry was sent, so there is nothing to report");
         _h.Shares.MaskOf(MatterTable, _matter, DataversePrincipalRef.User(user)).Should().Be(CollaborateMask);
-        _h.Grants.Rows.Should().BeEmpty("a share, not a contact grant");
+
+        var grant = _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle("the paired workforce-app grant").Subject;
+        grant.AccessLevel.Should().Be((int)ExternalAccessLevel.Collaborate);
+        grant.ExpiresDate.Should().Be(ExternalGrantLifecycle.DefaultExpiry(Today), "dated as any grant (owner decision (a))");
+        _h.Grants.PairedUsers[grant.Id].Should().Be(user, "sprk_pairedsystemuser names the colleague (owner decision (iii))");
+        body.WorkforceApp.Should().Be(new WorkforceAppAccess(true, null, ExternalGrantLifecycle.DefaultExpiry(Today), grant.Id));
         _h.Ciam.Attempts.Should().BeEmpty();
         _h.Emails.InviteUrls.Should().BeEmpty();
+        _h.Emails.Sent.Should().BeEmpty("the paired grant sends no contact email: the share core told the colleague in-app");
     }
 
     [Fact]
@@ -184,9 +195,11 @@ public class ContactGrantSharesInternalUserTests
 
         var result = await Grant(contact);
 
-        result.Should().BeOfType<Ok<GrantAccessResponse>>().Subject.Value!.SharedWithUser!.SystemUserId.Should().Be(user);
+        var body = result.Should().BeOfType<Ok<GrantAccessResponse>>().Subject.Value!;
+        body.SharedWithUser!.SystemUserId.Should().Be(user);
         _h.Shares.MaskOf(MatterTable, _matter, DataversePrincipalRef.User(user)).Should().Be(CollaborateMask);
-        _h.Grants.Rows.Should().BeEmpty();
+        _h.Grants.Rows.Should().BeEmpty("task 193 G1: the grant core refuses a contact grant on Restricted; the share stands");
+        body.WorkforceApp.Should().Be(WorkforceAppAccess.NotGiven(ExternalGrantLifecycle.RecordRestrictedReasonCode));
     }
 
     [Fact]
@@ -211,7 +224,7 @@ public class ContactGrantSharesInternalUserTests
         var result = await Grant(contact);
 
         result.Should().BeOfType<Ok<GrantAccessResponse>>().Subject.Value!.SharedWithUser!.SystemUserId.Should().Be(user);
-        _h.Grants.Rows.Should().BeEmpty();
+        _h.Grants.PairedUsers.Values.Should().ContainSingle().Which.Should().Be(user, "the paired grant beside the share");
     }
 
     [Fact]
@@ -244,11 +257,12 @@ public class ContactGrantSharesInternalUserTests
     }
 
     /// <summary>
-    /// C-fix2 (expiry ruling (c)): picking a colleague through their contact behaves exactly like picking them as a user —
-    /// shared with no end date. The expiry the request carried is not applied, and the answer says so.
+    /// C-fix2 (expiry ruling (c)): picking a colleague through their contact shares exactly as picking them as a user: no end
+    /// date, and the answer says the expiry was not applied to the share. G1 (owner decision (a)): the paired workforce-app
+    /// grant takes the requested date, and the answer says until when.
     /// </summary>
     [Fact]
-    public async Task Grant_ContactRepresentingOneUser_WithAnExpiry_SharesWithNoEndDate_AndSaysExpiryNotApplied()
+    public async Task Grant_ContactRepresentingOneUser_WithAnExpiry_SharesWithNoEndDate_AndThePairedGrantTakesTheDate()
     {
         var (contact, user) = Colleague();
 
@@ -256,10 +270,10 @@ public class ContactGrantSharesInternalUserTests
 
         var body = result.Should().BeOfType<Ok<GrantAccessResponse>>().Subject.Value!;
         body.SharedWithUser!.SystemUserId.Should().Be(user);
-        body.ExpiryNotApplied.Should().BeTrue();
+        body.ExpiryNotApplied.Should().BeTrue("the SHARE has no end date");
         _h.Shares.MaskOf(MatterTable, _matter, DataversePrincipalRef.User(user)).Should().Be(CollaborateMask);
-        _h.Grants.Rows.Should().BeEmpty("no grant row, so no expiry anywhere");
-        _h.Grants.WriteCount.Should().Be(0);
+        _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle().Which.ExpiresDate.Should().Be(Today.AddDays(30));
+        body.WorkforceApp!.Until.Should().Be(Today.AddDays(30));
     }
 
     [Fact]
@@ -299,7 +313,7 @@ public class ContactGrantSharesInternalUserTests
         body.SharedWithUser.Should().Be(new SharedWithUser(user, null));
         _h.Shares.MaskOf(MatterTable, _matter, DataversePrincipalRef.User(user)).Should().Be(CollaborateMask,
             "the share stands: the name is display only");
-        _h.Grants.Rows.Should().BeEmpty();
+        body.WorkforceApp!.Visible.Should().BeTrue("the paired grant does not depend on the name either");
     }
 
     // ── /invite-and-grant: never CIAM-invite an internal user ─────────────────────────────────────────────────────────
@@ -321,23 +335,27 @@ public class ContactGrantSharesInternalUserTests
         _h.Ciam.Attempts.Should().BeEmpty("never CIAM-invite an internal user");
         _h.Emails.InviteUrls.Should().BeEmpty();
         _h.Emails.Onboarding.Should().BeEmpty();
-        _h.Grants.Rows.Should().BeEmpty();
+        var grant = _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle("task 193 G1: the paired workforce-app grant").Subject;
+        _h.Grants.PairedUsers[grant.Id].Should().Be(user);
+        body.WorkforceApp.Should().Be(new WorkforceAppAccess(true, null, ExternalGrantLifecycle.DefaultExpiry(Today), grant.Id));
         _h.Identities.Contacts[contact].Flag.Should().BeNull("decided before the binder's link refusal, which flags");
     }
 
-    /// <summary>C-fix2: the same on /invite-and-grant — shared with no end date, never invited, and the answer says so.</summary>
+    /// <summary>C-fix2: the same on /invite-and-grant — shared with no end date, never invited, and the answer says so. G1: the
+    /// paired workforce-app grant takes the requested date.</summary>
     [Fact]
-    public async Task InviteAndGrant_ExistingContactLinkedToOneInternalUser_WithAnExpiry_SharesWithNoEndDate_AndSaysExpiryNotApplied()
+    public async Task InviteAndGrant_ExistingContactLinkedToOneInternalUser_WithAnExpiry_SharesWithNoEndDate_AndThePairedGrantTakesTheDate()
     {
-        var (_, user) = Colleague();
+        var (contact, user) = Colleague();
 
         var result = await InviteAndGrant(expiry: Today.AddDays(30));
 
         var body = result.Should().BeOfType<Ok<InviteAndGrantResponse>>().Subject.Value!;
         body.SharedWithUser!.SystemUserId.Should().Be(user);
-        body.ExpiryNotApplied.Should().BeTrue();
+        body.ExpiryNotApplied.Should().BeTrue("the SHARE has no end date");
         _h.Shares.MaskOf(MatterTable, _matter, DataversePrincipalRef.User(user)).Should().Be(CollaborateMask);
-        _h.Grants.Rows.Should().BeEmpty("no grant row, so no expiry anywhere");
+        _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle().Which.ExpiresDate.Should().Be(Today.AddDays(30));
+        body.WorkforceApp!.Until.Should().Be(Today.AddDays(30));
         _h.Ciam.Attempts.Should().BeEmpty();
         _h.Emails.InviteUrls.Should().BeEmpty();
     }
@@ -415,7 +433,8 @@ public class ContactGrantSharesInternalUserTests
         var body = result.Should().BeOfType<Ok<GrantAccessResponse>>().Subject.Value!;
         body.SharedWithUser!.SystemUserId.Should().Be(user);
         _h.Shares.Writes.Should().NotBeEmpty("the share stands; the ledger is never a reason to undo it");
-        _h.Grants.WriteCount.Should().Be(0, "still no contact grant row");
+        _h.Grants.Updates.Should().BeEmpty("the ledger write failing writes no grant row beside the paired one");
+        _h.Grants.Creates.Should().ContainSingle("only the paired workforce-app grant");
         row.State.Should().Be(AssignedAccessState.PendingConfirmation, "the write failed, and the next pass repairs it");
     }
 
@@ -445,7 +464,9 @@ public class ContactGrantSharesInternalUserTests
         extensions["sharedWithUser"].Should().Be(new SharedWithUser(user, "Ada Lovelace"));
         extensions["expiryNotApplied"].Should().Be(true);
         _h.Shares.Writes.Should().NotBeEmpty("the record's own share stands");
-        _h.Grants.WriteCount.Should().Be(0, "no contact grant row");
+        var grant = _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle("the paired workforce-app grant, as with the 200").Subject;
+        extensions["workforceApp"].Should().Be(new WorkforceAppAccess(
+            true, null, DateOnly.FromDateTime(_h.Time.GetUtcNow().UtcDateTime).AddDays(30), grant.Id));
         row.State.Should().Be(AssignedAccessState.Adopted);
         row.SystemUserId.Should().Be(user);
     }
@@ -586,5 +607,212 @@ public class ContactGrantSharesInternalUserTests
         Status(result).Should().Be(StatusCodes.Status503ServiceUnavailable);
         ReasonCode(result).Should().Be(ContactInternalUserShare.RepresentationUnreadableReasonCode);
         NothingWritten();
+    }
+
+    // ── Task 193 G1 (owner F1-b; decisions 1, 2, (a), (iii)): the paired workforce-app grant ───────────────────────────
+
+    private Task<IResult> ShareUser(Guid user, ExternalAccessLevel level = ExternalAccessLevel.Collaborate) =>
+        InternalShareEndpoints.ShareAsync(
+            new ShareRecordWithUserRequest("matter", _matter, user, level),
+            _h.Shares, _h.Grants, _h.Participations, _h.Cache.Mock.Object, new InternalUserShareTests.StubCallerRightsProbe(EveryRight),
+            _h.Children, _h.Guard, TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(), _h.Materializer,
+            _h.Notifier, InternalUserShareCoreTests.Rig.Caller(), NullLogger<Program>.Instance, CancellationToken.None,
+            _h.WorkforceIdentity, Decision(), _h.AccessibleRecords);
+
+    private void ShareOnly(IResult result, Guid user, string reason)
+    {
+        var body = result.Should().BeOfType<Ok<GrantAccessResponse>>().Subject.Value!;
+        body.SharedWithUser!.SystemUserId.Should().Be(user);
+        _h.Shares.MaskOf(MatterTable, _matter, DataversePrincipalRef.User(user)).Should().Be(CollaborateMask, "the share stands");
+        _h.Grants.Creates.Should().BeEmpty("no workforce-app grant was written");
+        _h.Grants.PairedUsers.Should().BeEmpty();
+        body.WorkforceApp.Should().Be(WorkforceAppAccess.NotGiven(reason));
+    }
+
+    [Fact]
+    public async Task G1_Grant_WhenThePairingColumnIsNotProvisioned_SharesOnly_WritesNoUnpairedGrant_AndSaysSo()
+    {
+        var (contact, user) = Colleague();
+        _h.Grants.PairingColumnMissing = true;
+
+        var result = await Grant(contact);
+
+        ShareOnly(result, user, ContactInternalUserShare.WorkforcePairingColumnMissingReasonCode);
+        _h.Grants.ActiveRowsOf(_matter, contact).Should().BeEmpty("fail closed: never a grant the share's removal could not find");
+    }
+
+    [Fact]
+    public async Task G1_Grant_WhenThePairingCannotBeRead_SharesOnly_AndSaysSo()
+    {
+        var (contact, user) = Colleague();
+        _h.Grants.FailPairingReads = true;
+
+        var result = await Grant(contact);
+
+        ShareOnly(result, user, ContactInternalUserShare.WorkforcePairingUnreadableReasonCode);
+    }
+
+    [Fact]
+    public async Task G1_Grant_WhenTheGrantWriteFails_KeepsTheShare_AndSaysTheWorkforceGrantFailed()
+    {
+        var (contact, user) = Colleague();
+        _h.Grants.GrantCreateFailure = new HttpRequestException("Simulated Dataverse write failure.");
+
+        var result = await Grant(contact);
+
+        ShareOnly(result, user, ContactInternalUserShare.WorkforceGrantFailedReasonCode);
+    }
+
+    /// <summary>
+    /// Unreadable flags: the share is refused before anything is written (the No Access check cannot tell whether the record
+    /// is secure, fail closed), so there is no share for a grant to pair with, and no grant either.
+    /// </summary>
+    [Fact]
+    public async Task G1_Grant_WhenTheFlagsAreUnreadable_RefusesTheShare_AndWritesNoGrant()
+    {
+        var (contact, _) = Colleague();
+        _h.Participations.Flags[_matter] = RootRecordFlags.Unreadable;
+
+        var result = await Grant(contact);
+
+        Status(result).Should().BeOneOf(StatusCodes.Status500InternalServerError, StatusCodes.Status503ServiceUnavailable);
+        NothingWritten();
+    }
+
+    /// <summary>Decision 1: Secure is share + grant, as Standard and Limited (only Restricted and unreadable flags share only).</summary>
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    public async Task G1_Grant_OnAStandardOrSecureRecord_SharesAndGrantsThePairedContact(bool secure, bool restricted)
+    {
+        _h.Participations.Flags[_matter] = new RootRecordFlags(IsSecure: secure, IsRestricted: restricted);
+        var (contact, user) = Colleague();
+
+        var result = await Grant(contact);
+
+        var grant = _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle().Subject;
+        _h.Grants.PairedUsers[grant.Id].Should().Be(user);
+        var visible = result switch
+        {
+            Ok<GrantAccessResponse> ok => ok.Value!.WorkforceApp,
+            ProblemHttpResult problem => (WorkforceAppAccess?)problem.ProblemDetails.Extensions["workforceApp"],
+            _ => null,
+        };
+        visible!.Visible.Should().BeTrue();
+    }
+
+    /// <summary>Idempotent re-add: the one paired grant is kept (no second row, no rewrite), the share re-shared at the same level.</summary>
+    [Fact]
+    public async Task G1_Grant_ReAdd_KeepsTheOnePairedGrant_WritesNoGrantChange_AndTheShareIsUnchanged()
+    {
+        var (contact, user) = Colleague();
+        await Grant(contact);
+        var first = _h.Grants.ActiveRowsOf(_matter, contact).Single();
+        var createsBefore = _h.Grants.Creates.Count;
+        var updatesBefore = _h.Grants.Updates.Count;
+
+        var again = await Grant(contact);
+
+        var body = again.Should().BeOfType<Ok<GrantAccessResponse>>().Subject.Value!;
+        body.WorkforceApp.Should().Be(new WorkforceAppAccess(true, null, first.ExpiresDate, first.Id));
+        _h.Grants.Creates.Should().HaveCount(createsBefore, "the existing paired grant is kept");
+        _h.Grants.Updates.Should().HaveCount(updatesBefore, "already paired with this user, at this level and date: nothing to write");
+        _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle();
+        _h.Shares.MaskOf(MatterTable, _matter, DataversePrincipalRef.User(user)).Should().Be(CollaborateMask);
+    }
+
+    /// <summary>Adoption on re-add (owner decision (iii)): a grant the contact already held, unpaired, is stamped with the user.</summary>
+    [Fact]
+    public async Task G1_Grant_ReAdd_OverAnUnpairedGrant_AdoptsIt_StampingThePairing_InOneWrite()
+    {
+        var (contact, user) = Colleague();
+        var existing = _h.Grants.Seed(ExternalGrantRootType.Matter, _matter, contact, null, (int)ExternalAccessLevel.Collaborate,
+            Today.AddDays(40));
+
+        var result = await Grant(contact);
+
+        result.Should().BeOfType<Ok<GrantAccessResponse>>().Subject.Value!.WorkforceApp
+            .Should().Be(new WorkforceAppAccess(true, null, Today.AddDays(40), existing.Id), "a live grant keeps its date");
+        _h.Grants.Creates.Should().BeEmpty();
+        _h.Grants.Updates.Should().ContainSingle().Which.Payload.Should().Contain($"/systemusers({user:D})");
+        _h.Grants.PairedUsers[existing.Id].Should().Be(user);
+    }
+
+    // ── /share-user: the reverse lookup (decision 2) ─────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task G1_ShareUser_WithTheOneContactThatRepresentsThem_SharesAndGrantsThatContactPairedWithThem()
+    {
+        var (contact, user) = Colleague();
+
+        var result = await ShareUser(user);
+
+        var body = result.Should().BeOfType<Ok<ShareRecordWithUserResponse>>().Subject.Value!;
+        _h.Shares.MaskOf(MatterTable, _matter, DataversePrincipalRef.User(user)).Should().Be(CollaborateMask);
+        var grant = _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle().Subject;
+        grant.ExpiresDate.Should().Be(ExternalGrantLifecycle.DefaultExpiry(Today));
+        _h.Grants.PairedUsers[grant.Id].Should().Be(user);
+        body.WorkforceApp.Should().Be(new WorkforceAppAccess(true, null, ExternalGrantLifecycle.DefaultExpiry(Today), grant.Id));
+        _h.Emails.InviteUrls.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task G1_ShareUser_WithNoContactThatRepresentsThem_SharesOnly_AndSaysSo()
+    {
+        var user = Guid.NewGuid();
+        _h.Identities.AddSystemUser(user, Guid.NewGuid(), $"{user:N}@firm.example");
+        SeedUser(user, "Bea Unlinked");
+
+        var result = await ShareUser(user);
+
+        var body = result.Should().BeOfType<Ok<ShareRecordWithUserResponse>>().Subject.Value!;
+        _h.Shares.MaskOf(MatterTable, _matter, DataversePrincipalRef.User(user)).Should().Be(CollaborateMask);
+        _h.Grants.Creates.Should().BeEmpty();
+        body.WorkforceApp.Should().Be(WorkforceAppAccess.NotGiven(ContactInternalUserShare.WorkforceNoLinkedContactReasonCode));
+    }
+
+    [Fact]
+    public async Task G1_ShareUser_WhenTheirLinkCannotBeRead_SharesOnly_AndNeverGuessesAContact()
+    {
+        var (_, user) = Colleague();
+        _h.Store.FailLinkRead = true;
+
+        var result = await ShareUser(user);
+
+        var body = result.Should().BeOfType<Ok<ShareRecordWithUserResponse>>().Subject.Value!;
+        _h.Shares.MaskOf(MatterTable, _matter, DataversePrincipalRef.User(user)).Should().Be(CollaborateMask);
+        _h.Grants.Creates.Should().BeEmpty();
+        body.WorkforceApp.Should().Be(WorkforceAppAccess.NotGiven(ContactInternalUserShare.WorkforceLinkUnreadableReasonCode));
+    }
+
+    [Fact]
+    public async Task G1_ShareUser_WhenTwoContactsRepresentThem_SharesOnly_AndPicksNeither()
+    {
+        var (contact, user) = Colleague();
+        var oid = _h.Identities.SystemUsers[user].Oid!.Value;
+        var second = _h.Contact(oid: oid.ToString());
+        _h.Store.UsersByLink.GetOrAdd(second, _ => new List<AssignedLinkCandidate>())
+            .Add(new AssignedLinkCandidate(user, second, oid, false, 0, null, false));
+
+        var result = await ShareUser(user);
+
+        var body = result.Should().BeOfType<Ok<ShareRecordWithUserResponse>>().Subject.Value!;
+        _h.Grants.Creates.Should().BeEmpty();
+        body.WorkforceApp.Should().Be(WorkforceAppAccess.NotGiven(ContactInternalUserShare.WorkforceSeveralContactsReasonCode));
+        _h.Grants.ActiveRowsOf(_matter, contact).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task G1_ShareUser_OnARestrictedRecord_SharesOnly_WithTheGrantCoresReason()
+    {
+        _h.Participations.Flags[_matter] = new RootRecordFlags(IsSecure: false, IsRestricted: true);
+        var (_, user) = Colleague();
+
+        var result = await ShareUser(user);
+
+        var body = result.Should().BeOfType<Ok<ShareRecordWithUserResponse>>().Subject.Value!;
+        _h.Shares.MaskOf(MatterTable, _matter, DataversePrincipalRef.User(user)).Should().Be(CollaborateMask);
+        _h.Grants.Creates.Should().BeEmpty();
+        body.WorkforceApp.Should().Be(WorkforceAppAccess.NotGiven(ExternalGrantLifecycle.RecordRestrictedReasonCode));
     }
 }

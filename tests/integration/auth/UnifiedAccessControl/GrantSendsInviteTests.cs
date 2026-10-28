@@ -186,7 +186,11 @@ public class GrantSendsInviteTests
 
         body.SharedWithUser!.SystemUserId.Should().Be(user);
         body.Invite.Should().BeNull("an internal user is never invited");
-        _h.Grants.Rows.Should().BeEmpty();
+        // Task 193 G1 (owner F1-b): the contact that represents them is granted too, PAIRED with them — still no invite.
+        var grant = _h.Grants.Rows.Should().ContainSingle().Subject;
+        grant.ContactId.Should().Be(contact);
+        _h.Grants.PairedUsers[grant.Id].Should().Be(user);
+        body.WorkforceApp!.Visible.Should().BeTrue();
         _h.Ciam.Attempts.Should().BeEmpty();
         _h.Emails.InviteUrls.Should().BeEmpty();
         _h.Identities.Contacts[contact].Flag.Should().BeNull("a grant never flags a contact; only an explicit Invite does");

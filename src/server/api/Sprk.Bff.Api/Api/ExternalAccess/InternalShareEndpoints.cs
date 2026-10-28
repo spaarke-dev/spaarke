@@ -290,11 +290,36 @@ public static class InternalShareEndpoints
         HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken ct,
-        [FromServices] IOptionsMonitor<WorkforceIdentityOptions>? workforceIdentity = null)
-        => (await InternalUserShareCore.ShareAsync(
-                request, recordShare, dataverseClient, participations, cache, callerAccessProbe, secureChildShares,
-                noAccessGuard, relatedRoots, assignedAccess, accessNotifier, httpContext, logger, ct, workforceIdentity))
-            .Result;
+        [FromServices] IOptionsMonitor<WorkforceIdentityOptions>? workforceIdentity = null,
+        [FromServices] ContactInternalUserShare? pairedGrant = null,
+        [FromServices] IAccessibleRecordSetService? accessibleRecords = null)
+    {
+        var shared = await InternalUserShareCore.ShareAsync(
+            request, recordShare, dataverseClient, participations, cache, callerAccessProbe, secureChildShares,
+            noAccessGuard, relatedRoots, assignedAccess, accessNotifier, httpContext, logger, ct, workforceIdentity);
+
+        // Task 193 G1 (owner F1-b, decision 2): a colleague picked directly gets the same two things as one added through their
+        // contact: the share (above) and, beside it, the workforce-app grant on the ONE contact that represents them, paired
+        // with the share. Only after the record's own share is confirmed (the 200, or children_incomplete); a grant that is
+        // not written leaves the share standing, and the answer says why. Both services are registered in every host; the
+        // auth tests that drive this handler without them exercise the share alone.
+        if (shared.Shared is not { } confirmed || pairedGrant is null || accessibleRecords is null
+            || GrantExternalAccessEndpoint.ResolveExplicitRoot(request.RecordType, request.RecordId) is not { Ok: true } root)
+            return shared.Result;
+
+        var workforceApp = await pairedGrant.GrantPairedForUserAsync(
+            confirmed.SystemUserId, root.Type, root.Id, request.AccessLevel!.Value, dataverseClient, participations,
+            accessibleRecords, callerAccessProbe, httpContext, logger, ct);
+
+        if (shared.ChildrenIncomplete)
+        {
+            if (shared.Result is Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult { ProblemDetails: { } problem })
+                problem.Extensions["workforceApp"] = workforceApp;
+            return shared.Result;
+        }
+
+        return TypedResults.Ok(confirmed.Response with { WorkforceApp = workforceApp });
+    }
 
     // =========================================================================
     // POST /unshare-user

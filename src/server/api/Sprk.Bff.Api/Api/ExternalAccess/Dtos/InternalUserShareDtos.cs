@@ -45,13 +45,38 @@ public record ShareRecordWithUserRequest(
 /// <c>true</c> when the share gave the user access and they could not be sent the in-app notification (task 181, owner
 /// round 89). The share itself stands. Additive.
 /// </param>
+/// <param name="WorkforceApp">
+/// Task 193 G1 (owner F1-b, 2026-10-28): set whenever the record was SHARED with an internal colleague: whether their
+/// workforce-app access was given too (a contact grant on the contact that represents them, paired with the share), until
+/// when, and — when it was not — why. Absent otherwise. Additive.
+/// </param>
 public record ShareRecordWithUserResponse(
     Guid SystemUserId,
     ExternalAccessLevel? AccessLevel,
     int AccessRightsMask,
     string Outcome,
     bool Narrowed,
-    bool NotificationFailed = false);
+    bool NotificationFailed = false,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    WorkforceAppAccess? WorkforceApp = null);
+
+/// <summary>
+/// Task 193 G1 (owner F1-b and decision (a), 2026-10-28): what "Add person" did about an internal colleague's WORKFORCE-APP
+/// access. The record is shared with them (model-driven app, no end date); beside the share, the contact that represents
+/// them is granted (workforce app), paired with the share, through the grant core with all its checks.
+/// </summary>
+/// <param name="Visible"><c>true</c> when the paired contact grant is in place: the record shows in their workforce app.</param>
+/// <param name="Reason">Why it is not (<paramref name="Visible"/> <c>false</c>): the grant core's refusal code (for example
+/// <c>sdap.access.grant.record_restricted</c>), or one of <see cref="ContactInternalUserShare"/>'s workforce reason codes. Only
+/// the share was written then. <c>null</c> when visible.</param>
+/// <param name="Until">The date the workforce-app access lasts until — the request's expiry, else today + 90, as any grant
+/// (owner decision (a)). <c>null</c> when not visible.</param>
+/// <param name="AccessRecordId">The paired grant row. <c>null</c> when not visible.</param>
+public record WorkforceAppAccess(bool Visible, string? Reason = null, DateOnly? Until = null, Guid? AccessRecordId = null)
+{
+    /// <summary>Only the share was written; the workforce-app grant was not, for <paramref name="reason"/>.</summary>
+    public static WorkforceAppAccess NotGiven(string reason) => new(false, reason);
+}
 
 /// <summary>
 /// Task 193 (#2338): the internal user a record was SHARED with because the contact named as a grantee represents them

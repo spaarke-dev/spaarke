@@ -1625,6 +1625,7 @@ internal sealed class ContactGrantTable : DataverseWebApiClient
         GrantReadsById.Clear();
         Trail.Clear();
         FailUpdates = FailRetrieve = false;
+        PairingReadFailure = null;
         BeforeCreate = null;
         BeforeConditionalWrite = null;
     }
@@ -1714,9 +1715,19 @@ internal sealed class ContactGrantTable : DataverseWebApiClient
 
     private Guid NextId() => Guid.Parse($"eeeeeeee-0140-0000-0000-{++_seq:D12}");
 
+    /// <summary>
+    /// Task 193 G1: a grant read selecting the pairing column (<c>sprk_pairedsystemuser</c>) throws this — a 400 is the column
+    /// not provisioned, anything else a read fault. Unset, such a read answers as any grant read.
+    /// </summary>
+    public Exception? PairingReadFailure { get; set; }
+
     public override Task<List<T>> QueryAsync<T>(string entitySetName, string? filter = null, string? select = null,
         int? top = null, int? skip = null, CancellationToken cancellationToken = default)
     {
+        if (entitySetName == GrantSet && PairingReadFailure is { } pairingFailure && select is not null
+            && select.Contains(ExternalGrantLifecycle.PairedSystemUserValueProperty, StringComparison.Ordinal))
+            throw pairingFailure;
+
         object rows = entitySetName switch
         {
             GrantSet => MatchGrants(filter ?? string.Empty),

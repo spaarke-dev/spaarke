@@ -188,7 +188,7 @@ public static class InviteAndGrantExternalUserEndpoint
             var decision = await contactShare.DecideAsync(
                 existingContactId, grantRoot.Type, grantRoot.Id, (ExternalAccessLevel)request.AccessLevel,
                 dataverseClient, participations, callerAccessProbe, assignedAccess, accessNotifier, accessibleRecords,
-                request.OrganizationId, request.ExpiryDate is not null, httpContext, logger, ct);
+                request.OrganizationId, request.ExpiryDate, httpContext, logger, ct);
 
             if (decision.Result is { } answered)
                 return answered;
@@ -205,7 +205,8 @@ public static class InviteAndGrantExternalUserEndpoint
                     EmailSent: null,
                     EmailErrorCode: null,
                     SharedWithUser: sharedWith,
-                    ExpiryNotApplied: request.ExpiryDate is not null ? true : null));
+                    ExpiryNotApplied: request.ExpiryDate is not null ? true : null,
+                    WorkforceApp: decision.WorkforceApp));
         }
 
         // Task 138: the record's access policy, BEFORE onboarding. The grantee is a named Contact, so this is

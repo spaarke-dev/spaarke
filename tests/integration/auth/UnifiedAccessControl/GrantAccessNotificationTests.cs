@@ -101,8 +101,8 @@ public class GrantAccessNotificationTests
 
         var body = OkBody<GrantAccessResponse>(await Grant(contact));
 
-        body.SharedWithUser!.SystemUserId.Should().Be(user, "task 193: a represented contact is shared with, not granted");
-        _h.Grants.Rows.Should().BeEmpty();
+        body.SharedWithUser!.SystemUserId.Should().Be(user, "task 193: a represented contact is shared with");
+        _h.Grants.Rows.Should().ContainSingle("task 193 G1: beside the share, the paired workforce-app grant, which tells no one");
         body.NotificationFailed.Should().BeFalse();
         var sent = _h.SentNotifications.Should().ContainSingle().Subject;
         OwnerOf(sent).Should().Be(user);
@@ -337,11 +337,12 @@ public class GrantAccessNotificationTests
     }
 
     /// <summary>
-    /// Task 193: a represented contact already holding a View Only contact grant is shared with at the asked level, and told;
-    /// the contact grant row is left as it was.
+    /// Task 193: a represented contact already holding a View Only contact grant is shared with at the asked level, and told
+    /// once. G1 (owner F1-b): the existing grant is ADOPTED as the paired workforce-app grant: the same row, stamped with the
+    /// user, at the asked level as any re-add (never a second row, never a second notice).
     /// </summary>
     [Fact]
-    public async Task Grant_ToARepresentedContactHoldingAContactGrant_SharesAtTheLevel_AndTellsThem()
+    public async Task Grant_ToARepresentedContactHoldingAContactGrant_SharesAtTheLevel_AdoptsTheGrant_AndTellsThemOnce()
     {
         var (contact, user) = Colleague();
         _h.Grants.Seed(ExternalGrantRootType.Matter, _matter, contact, null, (int)ExternalAccessLevel.ViewOnly, Today.AddDays(60));
@@ -352,16 +353,18 @@ public class GrantAccessNotificationTests
         OwnerOf(sent).Should().Be(user);
         sent.GetAttributeValue<string>("body").Should().Be("Gina Granter gave you Collaborate access.");
         _h.Shares.MaskOf("sprk_matter", _matter, DataversePrincipalRef.User(user)).Should().Be(CollaborateMask);
-        _h.Grants.Rows.Should().ContainSingle().Which.AccessLevel.Should().Be((int)ExternalAccessLevel.ViewOnly);
+        var adopted = _h.Grants.Rows.Should().ContainSingle().Subject;
+        adopted.AccessLevel.Should().Be((int)ExternalAccessLevel.Collaborate);
+        _h.Grants.PairedUsers[adopted.Id].Should().Be(user);
     }
 
     /// <summary>
     /// Task 193 (expiry ruling (c)): a represented contact is shared with, with no end date, whatever expiry the request
-    /// carried (the answer says expiryNotApplied); the user gains access, so they are told. The old contact grant row and its
-    /// date are left as they were.
+    /// carried (the answer says expiryNotApplied); the user gains access, so they are told. G1 (owner decision (a)): the
+    /// contact's grant is adopted as the paired workforce-app grant and takes the requested date.
     /// </summary>
     [Fact]
-    public async Task Grant_ToARepresentedContact_WithAnExpiry_SharesWithNoEndDate_AndTellsThem()
+    public async Task Grant_ToARepresentedContact_WithAnExpiry_SharesWithNoEndDate_TheWorkforceGrantTakesTheDate_AndTellsThemOnce()
     {
         var (contact, _) = Colleague();
         _h.Grants.Seed(ExternalGrantRootType.Matter, _matter, contact, null, (int)ExternalAccessLevel.Collaborate, Today.AddDays(60));
@@ -371,8 +374,10 @@ public class GrantAccessNotificationTests
             _h.Grants, _h.Participations, _h.AccessibleRecords, new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), new EverythingProbe(),
             _h.Materializer, _h.Notifier, _h.Invites, Context(), NullLogger<Program>.Instance, _h.Time, CancellationToken.None, _h.ContactShare);
 
-        OkBody<GrantAccessResponse>(result).ExpiryNotApplied.Should().BeTrue();
-        _h.Grants.ActiveRowsOf(_matter, contact).Single().ExpiresDate.Should().Be(Today.AddDays(60), "the old row is untouched");
+        var body = OkBody<GrantAccessResponse>(result);
+        body.ExpiryNotApplied.Should().BeTrue("the SHARE has no end date");
+        body.WorkforceApp!.Until.Should().Be(Today.AddDays(80));
+        _h.Grants.ActiveRowsOf(_matter, contact).Single().ExpiresDate.Should().Be(Today.AddDays(80), "the paired grant takes the date");
         _h.Shares.Writes.Should().NotBeEmpty();
         _h.SentNotifications.Should().ContainSingle();
     }

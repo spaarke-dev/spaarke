@@ -134,13 +134,15 @@ public static class GrantExternalAccessEndpoint
         // nobody → the grant below, unchanged. The share core answers a disabled, non-person or Restricted-barred user with
         // its own refusal. An organization grant is not a person and never asks.
         // A share has no end date (as when the user is picked directly): a requested ExpiryDate is not applied to it, and the
-        // answer says so (expiryNotApplied), never silently.
+        // answer says so (expiryNotApplied), never silently. Task 193 G1 (owner F1-b, decision (a)): beside the share the
+        // contact is granted, paired with it (the colleague's workforce-app access), dated as any grant: the requested date,
+        // else today + 90 (workforceApp says until when, or why it was not written).
         if (!isOrgGrant)
         {
             var decision = await contactShare.DecideAsync(
                 request.ContactId, root.Type, root.Id, request.AccessLevel, dataverseClient, participations,
                 callerAccessProbe, assignedAccess, accessNotifier, accessibleRecords, request.OrganizationId,
-                request.ExpiryDate is not null, httpContext, logger, ct);
+                request.ExpiryDate, httpContext, logger, ct);
 
             if (decision.Result is { } answered)
                 return answered;
@@ -154,7 +156,8 @@ public static class GrantExternalAccessEndpoint
                     NotificationFailed: share.NotificationFailed,
                     Invite: null,
                     SharedWithUser: sharedWith,
-                    ExpiryNotApplied: request.ExpiryDate is not null ? true : null));
+                    ExpiryNotApplied: request.ExpiryDate is not null ? true : null,
+                    WorkforceApp: decision.WorkforceApp));
         }
 
         // ── Resolve caller identity for granted-by reference ─────────────────
@@ -384,6 +387,13 @@ public static class GrantExternalAccessEndpoint
     /// resolves it itself, on a create only. Either way the ONE place that writes <c>ownerid</c> is
     /// <see cref="BuildGrantPayload"/>.
     /// </param>
+    /// <param name="pairing">
+    /// Task 193 G1 (owner decision (iii)): the internal user this contact grant is written WITH (Manage Access's "Add person"
+    /// shared the record with them), and what the key's active rows already record. A create binds
+    /// <c>sprk_pairedsystemuser</c>; a match ADOPTS the survivor — stamped (in the same write as any level or date change)
+    /// unless it already records this user. <c>null</c> for every other caller: the column is never written, and an existing
+    /// pairing is left as it is. Passed only by <see cref="ContactInternalUserShare"/>, after it read the column.
+    /// </param>
     internal static async Task<GrantUpsertOutcome> CreateGrantAsync(
         GrantAccessRequest request,
         ExternalGrantRootType rootType,
@@ -401,7 +411,8 @@ public static class GrantExternalAccessEndpoint
         CancellationToken ct,
         ContactGrantIssuer? contactIssuer = null,
         bool reAddRestoresLapsed = false,
-        Guid? resolvedOwnerTeamId = null)
+        Guid? resolvedOwnerTeamId = null,
+        GrantPairing? pairing = null)
     {
         // A missing ceiling is a caller bug, never "uncapped" (WP-1). Thrown, so it surfaces as the caller's 500.
         ArgumentNullException.ThrowIfNull(ceiling);
@@ -500,6 +511,9 @@ public static class GrantExternalAccessEndpoint
                 : survivor.ExpiresDate is { } current && current >= request.ExpiryDate!.Value ? null : request.ExpiryDate;
             var expiryChanged = expiryToWrite.HasValue && expiryToWrite != survivor.ExpiresDate;
             var levelChanged = survivor.AccessLevel != requestedLevel;
+            // Task 193 G1: a paired re-add ADOPTS the existing grant — the row is stamped with the internal user it now pairs
+            // with, unless it already records exactly that user (ContactInternalUserShare read the column first).
+            var pairWrite = pairing is { } pairWith && pairWith.MustStamp(survivor.Id);
 
             // ── ADR-003: do not report success over a grant that confers nothing ─────────────
             //
@@ -593,7 +607,7 @@ public static class GrantExternalAccessEndpoint
             if (!confersAccess && request.ExpiryDate is null)
                 return ConfersNoAccess();
 
-            if (levelChanged || expiryChanged)
+            if (levelChanged || expiryChanged || pairWrite)
             {
                 var update = new Dictionary<string, object?>();
 
@@ -602,6 +616,9 @@ public static class GrantExternalAccessEndpoint
 
                 if (expiryChanged)
                     update["sprk_expiresdate"] = FormatDateOnly(expiryToWrite!.Value);
+
+                if (pairWrite)
+                    update[$"{ExternalGrantLifecycle.PairedSystemUserNavigationProperty}@odata.bind"] = $"/systemusers({pairing!.SystemUserId:D})";
 
                 // Task 140: a systemuser (or the Assigned-To rule) CHANGING a row a contact issued takes the row over —
                 // the contact stamp is cleared, so the contact can no longer revoke a decision somebody else made (the
@@ -643,10 +660,10 @@ public static class GrantExternalAccessEndpoint
 
                 logger.LogInformation(
                     "[EXT-GRANT] Grant {Key} updated in place on record {AccessRecordId}: " +
-                    "level {OldLevel} → {NewLevel}, expiry {OldExpiry} → {NewExpiry}.",
+                    "level {OldLevel} → {NewLevel}, expiry {OldExpiry} → {NewExpiry}, paired={Paired}.",
                     key, survivor.Id,
                     survivor.AccessLevel, levelChanged ? requestedLevel : survivor.AccessLevel,
-                    survivor.ExpiresDate, expiryChanged ? expiryToWrite : survivor.ExpiresDate);
+                    survivor.ExpiresDate, expiryChanged ? expiryToWrite : survivor.ExpiresDate, pairWrite);
             }
             else
             {
@@ -705,7 +722,8 @@ public static class GrantExternalAccessEndpoint
             ? request with { ExpiryDate = ExternalGrantLifecycle.DefaultExpiry(today) }
             : request;
         var payload = BuildGrantPayload(
-            createRequest, rootType, rootId, owner.TeamId!.Value, grantedBySystemUserId, today, contactIssuer?.ContactId);
+            createRequest, rootType, rootId, owner.TeamId!.Value, grantedBySystemUserId, today, contactIssuer?.ContactId,
+            pairing?.SystemUserId);
         Guid accessRecordId;
         try
         {
@@ -1510,6 +1528,10 @@ public static class GrantExternalAccessEndpoint
     /// Task 140: the CONTACT who issued the grant through the contact-side routes, bound to <c>sprk_grantedbycontact</c>.
     /// Null for every other writer — a contact-issued grant never carries <c>sprk_grantedby</c> as well.
     /// </param>
+    /// <param name="pairedSystemUserId">
+    /// Task 193 G1: the internal user the grant is paired with, bound to <c>sprk_pairedsystemuser</c>. Null for every other
+    /// writer.
+    /// </param>
     /// <param name="owningTeamId">
     /// Task 099b (D-11): the team that owns the row (<see cref="ResolveGrantOwnerAsync"/>), bound to <c>ownerid</c>. REQUIRED:
     /// a payload without it would leave the row owned by the application identity in the root business unit, where no
@@ -1518,7 +1540,8 @@ public static class GrantExternalAccessEndpoint
     /// <exception cref="ArgumentException"><paramref name="owningTeamId"/> is <see cref="Guid.Empty"/>.</exception>
     internal static object BuildGrantPayload(
         GrantAccessRequest request, ExternalGrantRootType rootType, Guid rootId, Guid owningTeamId,
-        string? grantedBySystemUserId, DateOnly? today = null, Guid? grantedByContactId = null)
+        string? grantedBySystemUserId, DateOnly? today = null, Guid? grantedByContactId = null,
+        Guid? pairedSystemUserId = null)
     {
         if (owningTeamId == Guid.Empty)
             throw new ArgumentException("A grant row is never created without its owner team (D-11).", nameof(owningTeamId));
@@ -1565,6 +1588,13 @@ public static class GrantExternalAccessEndpoint
         {
             payload[$"{ExternalGrantLifecycle.GrantedByContactNavigationProperty}@odata.bind"] = $"/contacts({issuerContactId})";
             payload[ExternalGrantLifecycle.GrantedByContactIdAttribute] = ExternalGrantLifecycle.ContactIssuerProvenance(issuerContactId);
+        }
+
+        // Task 193 G1 (owner decision (iii)): the internal user this contact grant was written WITH — field-secured, written
+        // only here and on the match path's adoption. Only ContactInternalUserShare passes it, after it read the column.
+        if (pairedSystemUserId is { } pairedUserId && pairedUserId != Guid.Empty)
+        {
+            payload[$"{ExternalGrantLifecycle.PairedSystemUserNavigationProperty}@odata.bind"] = $"/systemusers({pairedUserId:D})";
         }
 
         if (request.ExpiryDate.HasValue)

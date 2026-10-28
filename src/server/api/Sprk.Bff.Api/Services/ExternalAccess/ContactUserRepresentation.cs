@@ -153,6 +153,114 @@ public sealed class ContactUserRepresentation
             contact.Status == LookupStatus.Read ? ContactRepresentationStatus.Read : ContactRepresentationStatus.ColumnMissing,
             row, users, oidUnconfirmed, null, null);
     }
+
+    /// <summary>
+    /// Task 193 G1 (owner decision 2): the REVERSE of <see cref="ResolveAsync"/> — the ONE contact that represents
+    /// <paramref name="systemUserId"/>, for the paired workforce-app grant of a colleague picked directly (/share-user).
+    /// </summary>
+    /// <remarks>
+    /// <para>Candidates are the user's own link (<c>sprk_primarycontact</c>) and every contact whose binding carries the user's
+    /// oid. Each is kept only when the FORWARD rule (<see cref="ResolveAsync"/>) says it represents this user — so the two
+    /// directions can never disagree. Exactly one kept candidate pairs; none is
+    /// <see cref="UserContactStatus.None"/>; more than one is <see cref="UserContactStatus.Several"/> (never pick one of two).</para>
+    /// <para>Status-first, fail closed: any read that fails is <see cref="UserContactStatus.Unreadable"/>, never "no contact".
+    /// A missing binding column means no oid binding can exist, so the link alone decides (as <see cref="ResolveAsync"/>).</para>
+    /// </remarks>
+    internal async Task<UserContactResolution> ResolveContactForUserAsync(Guid systemUserId, CancellationToken ct)
+    {
+        var candidates = new List<Guid>();
+        try
+        {
+            var user = await _identities.GetSystemUserAsync(systemUserId, ct).ConfigureAwait(false);
+            if (user.Status != LookupStatus.Read || user.Row is not { } row || row.SystemUserId != systemUserId)
+                return UserContactResolution.Failed(null, $"Systemuser {systemUserId}'s link could not be read ({user.Status}).");
+
+            if (row.PrimaryContactId is { } linked && linked != Guid.Empty)
+                candidates.Add(linked);
+
+            if (row.Oid is { } oid && oid != Guid.Empty)
+            {
+                var byOid = await _identities.FindContactsByOidAsync(oid, ct).ConfigureAwait(false);
+                switch (byOid.Status)
+                {
+                    case LookupStatus.Read:
+                        candidates.AddRange(byOid.Rows.Select(r => r.ContactId).Where(id => id != Guid.Empty));
+                        break;
+                    case LookupStatus.ColumnMissing:
+                        break; // no binding column: no contact can carry the oid
+                    default:
+                        return UserContactResolution.Failed(null, $"The contacts bound to systemuser {systemUserId}'s oid could not be read ({byOid.Status}).");
+                }
+            }
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            return UserContactResolution.Failed(ex, $"The contact systemuser {systemUserId} is linked to could not be read.");
+        }
+
+        var kept = new List<(Guid ContactId, int Represents)>();
+        foreach (var contactId in candidates.Distinct())
+        {
+            ContactRepresentation forward;
+            try
+            {
+                forward = await ResolveAsync(contactId, rootIsRestricted: null, BindingColumnMissingPolicy.DecideOnLink, ct)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                return UserContactResolution.Failed(ex, $"Who contact {contactId} represents could not be read.");
+            }
+
+            switch (forward.Status)
+            {
+                case ContactRepresentationStatus.Read:
+                case ContactRepresentationStatus.ColumnMissing:
+                    if (forward.Users.Any(u => u.SystemUserId == systemUserId))
+                        kept.Add((contactId, forward.Users.Count));
+                    break;
+                case ContactRepresentationStatus.NotFound:
+                case ContactRepresentationStatus.Inactive:
+                    break; // represents nobody
+                default:
+                    return UserContactResolution.Failed(forward.Fault, forward.FaultDetail ?? $"Who contact {contactId} represents could not be read.");
+            }
+        }
+
+        return kept.Count switch
+        {
+            0 => new UserContactResolution(UserContactStatus.None, null, false, null, null),
+            1 => new UserContactResolution(UserContactStatus.One, kept[0].ContactId, kept[0].Represents > 1, null, null),
+            _ => new UserContactResolution(UserContactStatus.Several, null, false, null, null),
+        };
+    }
+}
+
+/// <summary>How <see cref="ContactUserRepresentation.ResolveContactForUserAsync"/> ended.</summary>
+internal enum UserContactStatus
+{
+    /// <summary>Exactly one contact represents the user: <see cref="UserContactResolution.ContactId"/>.</summary>
+    One,
+
+    /// <summary>No contact represents the user.</summary>
+    None,
+
+    /// <summary>More than one contact represents the user: none is picked.</summary>
+    Several,
+
+    /// <summary>A read failed: which contact represents the user is not known. Never "none".</summary>
+    Unreadable,
+}
+
+/// <summary>The answer of <see cref="ContactUserRepresentation.ResolveContactForUserAsync"/>.</summary>
+/// <param name="ContactId">The one contact (<see cref="UserContactStatus.One"/>), else <c>null</c>.</param>
+/// <param name="ContactRepresentsOthers">The one contact ALSO represents another user — the forward rule (/grant) refuses such
+/// a contact, so it is not paired either.</param>
+internal sealed record UserContactResolution(
+    UserContactStatus Status, Guid? ContactId, bool ContactRepresentsOthers, Exception? Fault, string? FaultDetail)
+{
+    internal static UserContactResolution Failed(Exception? fault, string detail)
+        => new(UserContactStatus.Unreadable, null, false, fault, detail);
 }
 
 /// <summary>What a contact read with no binding column (<see cref="LookupStatus.ColumnMissing"/>) means for a caller.</summary>

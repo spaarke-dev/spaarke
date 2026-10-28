@@ -554,6 +554,19 @@ internal static class AssignedAccessTestDoubles
         /// <summary>Task 193: every query selecting EXACTLY these columns throws (e.g. the share list's name read).</summary>
         public string? FailQueriesSelecting { get; set; }
 
+        /// <summary>
+        /// Task 193 G1: the internal user each grant row is PAIRED with (<c>sprk_pairedsystemuser</c>) — written by a create's or
+        /// an update's <c>sprk_PairedSystemUser@odata.bind</c>, answered to a read that selects the column. Kept beside the rows
+        /// (not on <see cref="ExternalGrantRow"/>), as production reads it only in its own one-column read.
+        /// </summary>
+        public ConcurrentDictionary<Guid, Guid> PairedUsers { get; } = new();
+
+        /// <summary>Task 193 G1: the pairing column is not provisioned — a grant read selecting it answers 400, as Dataverse does.</summary>
+        public bool PairingColumnMissing { get; set; }
+
+        /// <summary>Task 193 G1: a grant read selecting the pairing column fails for another reason (503).</summary>
+        public bool FailPairingReads { get; set; }
+
         /// <summary>System users the share routes can read (eligible internal people unless seeded otherwise).</summary>
         public ConcurrentDictionary<Guid, Sprk.Bff.Api.Api.ExternalAccess.InternalShareEndpoints.SystemUserRow> SystemUsers { get; } = new();
 
@@ -658,6 +671,25 @@ internal static class AssignedAccessTestDoubles
                 lock (_gate)
                     GrantQueryTops.Add(top);
                 BeforeGrantQuery?.Invoke(Interlocked.Increment(ref _grantQueries));
+
+                if (select is not null && select.Contains(ExternalGrantLifecycle.PairedSystemUserValueProperty, StringComparison.Ordinal))
+                {
+                    if (PairingColumnMissing)
+                        throw new HttpRequestException(
+                            "Simulated 400: Could not find a property named 'sprk_pairedsystemuser'.", null, System.Net.HttpStatusCode.BadRequest);
+                    if (FailPairingReads)
+                        throw new HttpRequestException(
+                            "Simulated Dataverse read failure.", null, System.Net.HttpStatusCode.ServiceUnavailable);
+
+                    var paired = MatchGrants(filter)
+                        .Select(r => new Dictionary<string, object?>
+                        {
+                            ["sprk_externalrecordaccessid"] = r.Id,
+                            [ExternalGrantLifecycle.PairedSystemUserValueProperty] = PairedUsers.TryGetValue(r.Id, out var u) ? u : null,
+                        })
+                        .ToList();
+                    return Task.FromResult(JsonSerializer.Deserialize<List<T>>(JsonSerializer.Serialize(paired))!);
+                }
             }
 
             if (FailRootOwnerQueries && entitySetName is "sprk_projects" or "sprk_matters" or "sprk_workassignments")
@@ -783,6 +815,9 @@ internal static class AssignedAccessTestDoubles
                 Creates.Add((entitySetName, JsonSerializer.Serialize(payload)));
             }
 
+            if (BoundId(payload, $"{ExternalGrantLifecycle.PairedSystemUserNavigationProperty}@odata.bind") is { } pairedWith)
+                PairedUsers[row.Id] = pairedWith;
+
             return Task.FromResult(row.Id);
         }
 
@@ -804,6 +839,9 @@ internal static class AssignedAccessTestDoubles
                 var expiry = Regex.Match(json, @"""sprk_expiresdate"":""(\d{4}-\d{2}-\d{2})""");
                 if (expiry.Success)
                     row.ExpiresDate = DateOnly.ParseExact(expiry.Groups[1].Value, "yyyy-MM-dd", CultureInfo.InvariantCulture);
+                var paired = Regex.Match(json, @"""sprk_PairedSystemUser@odata.bind"":""/systemusers\(([0-9a-fA-F-]{36})\)""");
+                if (paired.Success)
+                    PairedUsers[id] = Guid.Parse(paired.Groups[1].Value);
             }
 
             return Task.CompletedTask;
@@ -1195,7 +1233,7 @@ internal static class AssignedAccessTestDoubles
         public Sprk.Bff.Api.Api.ExternalAccess.ContactInternalUserShare ContactShare => new(
             new ContactUserRepresentation(Identities, Store, Participations), SharesOverride ?? Shares, Cache.Mock.Object,
             Children, Guard, Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(),
-            WorkforceIdentity);
+            Identities, Ownership, OwnerPrivileges, Time, WorkforceIdentity);
 
         /// <summary>Task 181: every <c>appnotification</c> the grant notifier wrote through task 100's NotificationService.</summary>
         public ConcurrentQueue<Microsoft.Xrm.Sdk.Entity> SentNotifications { get; } = new();

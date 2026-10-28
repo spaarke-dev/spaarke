@@ -8,6 +8,7 @@ using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Spaarke.Scheduling;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Jobs;
 
 namespace Sprk.Bff.Api.Services.ExternalAccess;
@@ -54,6 +55,12 @@ namespace Sprk.Bff.Api.Services.ExternalAccess;
 ///     <c>ExternalGrantLifecycle.DeriveKey</c>) but still reads as an active grant. The grant carries no TEXT copy of its
 ///     record id (live metadata, 2026-10-06), so emptiness of the lookups IS the evidence and no per-row read is made; a
 ///     row naming any record, live or not, is not R4's.</item>
+///   <item><b>R5</b> (task 193 G1, owner decision (a), 2026-10-28) — an ACTIVE grant PAIRED with an internal user
+///     (<c>sprk_pairedsystemuser</c>: Manage Access's "Add person" shared the record with the user and granted the contact that
+///     represents them) is deactivated when that user no longer holds a direct share on the record. The reverse (the grant
+///     gone, the share kept) is left alone. A share read that fails changes nothing, is counted, and the run is reported
+///     partial (retried tomorrow); a grant with no pairing is never R5's. Its own scan, after the one above, so a missing
+///     column (the schema script not yet applied) skips R5 alone. See <see cref="ResolvePairedGrantsAsync"/>.</item>
 /// </list>
 /// R4 wins over R2 and R1 on the same row (a row with no record ends whatever else is true of it), and R2 wins over
 /// R1: stamping an expiry onto a row this run is about to deactivate is wasted work, and would put two updates for one
@@ -167,6 +174,12 @@ public sealed class ExternalAccessReconciliationJob : IScheduledJob
     /// <summary>R4 — deactivate an active grant whose record is gone (every record lookup empty; owner round 71).</summary>
     internal const string RuleDeactivateRecordGone = "R4-deactivate-grant-whose-record-is-gone";
 
+    /// <summary>R5 (task 193 G1): end a PAIRED grant whose internal user no longer holds a share on the record.</summary>
+    internal const string RuleEndPairedGrantShareGone = "R5-end-paired-grant-whose-share-is-gone";
+
+    /// <summary>The pairing lookup (task 193 G1) — <see cref="ExternalGrantLifecycle.PairedSystemUserAttribute"/>.</summary>
+    internal const string PairedSystemUserAttribute = ExternalGrantLifecycle.PairedSystemUserAttribute;
+
     internal const string JunctionEntityLogicalName = "sprk_contactorganization";
     internal const string OrganizationEntityLogicalName = "sprk_organization";
 
@@ -253,7 +266,8 @@ public sealed class ExternalAccessReconciliationJob : IScheduledJob
         var grantDeactivate = new RuleCounts(RuleDeactivateOrphanedOrgGrant, ExternalGrantLifecycle.EntityLogicalName);
         var membershipDeactivate = new RuleCounts(RuleDeactivateEndedMembership, JunctionEntityLogicalName);
         var grantRecordGone = new RuleCounts(RuleDeactivateRecordGone, ExternalGrantLifecycle.EntityLogicalName);
-        var rules = new[] { grantStamp, grantDeactivate, membershipDeactivate, grantRecordGone };
+        var pairedShareGone = new RuleCounts(RuleEndPairedGrantShareGone, ExternalGrantLifecycle.EntityLogicalName);
+        var rules = new[] { grantStamp, grantDeactivate, membershipDeactivate, grantRecordGone, pairedShareGone };
 
         var status = StatusOk;
         var problems = new List<string>();
@@ -286,6 +300,13 @@ public sealed class ExternalAccessReconciliationJob : IScheduledJob
                 row => PlanMembershipChange(row, today),
                 new[] { membershipDeactivate },
                 writesEnabled, cancellationToken).ConfigureAwait(false);
+
+            // ── Paired grants: R5 (task 193 G1) ──────────────────────────────────────────────────────────
+            // Its own scan, AFTER the one above: a row R2 or R4 already ended is no longer active, and a scan naming a column
+            // this environment lacks fails only R5 — so the column is probed first and a missing one skips R5 alone.
+            await ReconcilePairedGrantsAsync(
+                services, entityService, idempotency, context, mode, pairedShareGone, writesEnabled, cancellationToken)
+                .ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -336,6 +357,13 @@ public sealed class ExternalAccessReconciliationJob : IScheduledJob
                     $"{rule.Rule}: {unresolved.Unresolved} contact-issued row(s) were left unchanged because their issuing " +
                     "contact's own access could not be read; see the per-row errors.");
             }
+
+            if (rule.Paired is { ShareUnreadable: > 0 } pairedFaults)
+            {
+                problems.Add(
+                    $"{rule.Rule}: {pairedFaults.ShareUnreadable} paired grant(s) were left unchanged because their record's " +
+                    "shares could not be read; they are retried on the next run.");
+            }
         }
 
         if (status == StatusOk && problems.Count > 0)
@@ -346,7 +374,8 @@ public sealed class ExternalAccessReconciliationJob : IScheduledJob
         var duration = _timeProvider.GetElapsedTime(started);
         var changed = rules.Sum(r => r.Changed);
 
-        LogHeartbeat(status, mode, today, context, grantStamp, grantDeactivate, membershipDeactivate, grantRecordGone, rules, duration);
+        LogHeartbeat(status, mode, today, context, grantStamp, grantDeactivate, membershipDeactivate, grantRecordGone, pairedShareGone,
+            rules, duration);
 
         return new JobRunResult(
             Success: status == StatusOk,
@@ -381,6 +410,7 @@ public sealed class ExternalAccessReconciliationJob : IScheduledJob
         RuleCounts grantDeactivate,
         RuleCounts membershipDeactivate,
         RuleCounts grantRecordGone,
+        RuleCounts pairedShareGone,
         IReadOnlyList<RuleCounts> rules,
         TimeSpan duration)
     {
@@ -394,6 +424,8 @@ public sealed class ExternalAccessReconciliationJob : IScheduledJob
             "r2Scanned={R2Scanned} r2Planned={R2Planned} r2Changed={R2Changed} r2Failed={R2Failed} r2Truncated={R2Truncated} r2ScanFailed={R2ScanFailed} " +
             "r3Scanned={R3Scanned} r3Planned={R3Planned} r3Changed={R3Changed} r3Failed={R3Failed} r3Truncated={R3Truncated} r3ScanFailed={R3ScanFailed} " +
             "r4Scanned={R4Scanned} r4Planned={R4Planned} r4Changed={R4Changed} r4Failed={R4Failed} r4Truncated={R4Truncated} r4ScanFailed={R4ScanFailed} " +
+            "r5Scanned={R5Scanned} r5Planned={R5Planned} r5Changed={R5Changed} r5Failed={R5Failed} r5Truncated={R5Truncated} r5ScanFailed={R5ScanFailed} " +
+            "r5ShareHeld={R5ShareHeld} r5ShareUnreadable={R5ShareUnreadable} r5ColumnMissing={R5ColumnMissing} " +
             "claimHeld={ClaimHeld} alreadyApplied={AlreadyApplied} markFailed={MarkFailed} durationMs={DurationMs} " +
             "trigger={Trigger} runId={RunId} correlationId={CorrelationId}",
             status, mode, today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), context.Attempt,
@@ -404,6 +436,8 @@ public sealed class ExternalAccessReconciliationJob : IScheduledJob
             grantDeactivate.Scanned, grantDeactivate.Planned, grantDeactivate.Changed, grantDeactivate.Failed, grantDeactivate.Truncated, grantDeactivate.ScanFailed,
             membershipDeactivate.Scanned, membershipDeactivate.Planned, membershipDeactivate.Changed, membershipDeactivate.Failed, membershipDeactivate.Truncated, membershipDeactivate.ScanFailed,
             grantRecordGone.Scanned, grantRecordGone.Planned, grantRecordGone.Changed, grantRecordGone.Failed, grantRecordGone.Truncated, grantRecordGone.ScanFailed,
+            pairedShareGone.Scanned, pairedShareGone.Planned, pairedShareGone.Changed, pairedShareGone.Failed, pairedShareGone.Truncated, pairedShareGone.ScanFailed,
+            pairedShareGone.Paired?.ShareHeld ?? 0, pairedShareGone.Paired?.ShareUnreadable ?? 0, pairedShareGone.Paired?.ColumnMissing ?? false,
             rules.Sum(r => r.ClaimHeld), rules.Sum(r => r.AlreadyApplied), rules.Sum(r => r.MarkFailed),
             (long)duration.TotalMilliseconds, context.Trigger, context.RunId, context.CorrelationId);
     }
@@ -1080,6 +1114,206 @@ public sealed class ExternalAccessReconciliationJob : IScheduledJob
         static DateOnly Min(DateOnly a, DateOnly b) => a <= b ? a : b;
     }
 
+    /// <summary>
+    /// R5 (task 193 G1): probes the pairing column, then scans the ACTIVE paired grants and ends each whose user no longer
+    /// holds a share on its record (<see cref="ResolvePairedGrantsAsync"/>). The column missing (the schema script not yet
+    /// applied) skips R5 alone, reported in its counts and a Warning: the BFF writes no pairing then, so there is nothing to
+    /// reconcile. A probe that fails otherwise is a failed scan, as any.
+    /// </summary>
+    private async Task ReconcilePairedGrantsAsync(
+        IServiceProvider services,
+        IGenericEntityService entityService,
+        IIdempotencyService idempotency,
+        JobRunContext context,
+        string mode,
+        RuleCounts r5,
+        bool writesEnabled,
+        CancellationToken ct)
+    {
+        var report = r5.Paired = new PairedGrantReport();
+
+        GrantPairingReadStatus column;
+        Exception? fault = null;
+        try
+        {
+            var dataverseClient = services.GetRequiredService<DataverseWebApiClient>();
+            (column, fault) = await ExternalGrantLifecycle.ProbePairingColumnAsync(dataverseClient, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        // A reader that cannot be resolved is a failed scan: reported, never "nothing to do".
+        catch (Exception ex)
+        {
+            column = GrantPairingReadStatus.Unreadable;
+            fault = ex;
+        }
+
+        if (column == GrantPairingReadStatus.ColumnMissing)
+        {
+            report.ColumnMissing = true;
+            _logger.LogWarning(
+                "[EXT-ACCESS-RECON] {Rule} skipped: {Table}.{Column} is not provisioned in this environment, so no grant is paired. correlationId={CorrelationId}",
+                r5.Rule, ExternalGrantLifecycle.EntityLogicalName, PairedSystemUserAttribute, context.CorrelationId);
+            return;
+        }
+
+        if (column != GrantPairingReadStatus.Read)
+        {
+            r5.ScanFailed = true;
+            r5.ScanError = fault?.Message ?? "the pairing column could not be probed";
+            _logger.LogError(fault,
+                "[EXT-ACCESS-RECON] {Rule}: the pairing column could not be probed; nothing was written and the run is recorded FAILED. correlationId={CorrelationId}",
+                r5.Rule, context.CorrelationId);
+            return;
+        }
+
+        await ReconcileAsync(
+            entityService, idempotency, context, mode,
+            page => BuildPairedGrantScanFetchXml(page.Page, page.Cookie),
+            PlanPairedGrantChange,
+            new[] { r5 },
+            writesEnabled, ct,
+            resolve: (planned, token) => ResolvePairedGrantsAsync(services, planned, report, context, token)).ConfigureAwait(false);
+
+        _logger.LogInformation(
+            "[EXT-ACCESS-RECON] {Rule}: scanned={Scanned} pairedShareGone={Planned} shareHeld={ShareHeld} shareUnreadable={ShareUnreadable} mode={Mode} correlationId={CorrelationId}",
+            r5.Rule, r5.Scanned, r5.Planned, report.ShareHeld, report.ShareUnreadable, mode, context.CorrelationId);
+    }
+
+    /// <summary>
+    /// R5's per-row plan: an ACTIVE row paired with a user, on a record — pending until <see cref="ResolvePairedGrantsAsync"/>
+    /// has read the record's shares. A row with no pairing, or no record (R4's), is not R5's.
+    /// </summary>
+    internal static PlannedChange? PlanPairedGrantChange(Entity row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        if (row.Id == Guid.Empty || !IsActive(StateCodeOf(row)))
+            return null;
+
+        if (row.GetAttributeValue<EntityReference>(PairedSystemUserAttribute) is not { } paired || paired.Id == Guid.Empty)
+            return null;
+
+        if (RootOf(row) is not { } root)
+            return null;
+
+        return new PlannedChange(
+            RuleEndPairedGrantShareGone,
+            ExternalGrantLifecycle.EntityLogicalName,
+            row.Id,
+            BeforeState: $"statecode={Describe(StateCodeOf(row))} pairedSystemUser={paired.Id} root={root.Type}:{root.Id}",
+            AfterState: "(decided by the paired user's share on the record)",
+            Fields: new Dictionary<string, object>())
+        {
+            Paired = new PairedGrant(paired.Id, root),
+        };
+    }
+
+    /// <summary>
+    /// Decides R5 for the paired grants the scan planned (task 193 G1, owner decision (a)): each record's direct shares are
+    /// read ONCE (<see cref="IDataverseRecordShareService.GetPrincipalAccessOrThrowAsync"/>, the strict read the share routes
+    /// use); a paired user holding any rights there keeps the grant (dropped from the write), one holding none has the grant
+    /// DEACTIVATED. A record whose shares cannot be read leaves its paired grants unchanged and counts each as a fault (never
+    /// ends access on a guess, never hides the fault).
+    /// </summary>
+    private async Task ResolvePairedGrantsAsync(
+        IServiceProvider services,
+        Dictionary<string, List<PlannedChange>> planned,
+        PairedGrantReport report,
+        JobRunContext context,
+        CancellationToken ct)
+    {
+        var pending = planned[RuleEndPairedGrantShareGone];
+        if (pending.Count == 0)
+            return;
+
+        IDataverseRecordShareService? recordShare = null;
+        try
+        {
+            recordShare = services.GetRequiredService<IDataverseRecordShareService>();
+        }
+        // A missing share reader is a fault for every paired row — reported, never a write.
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "[EXT-ACCESS-RECON] The share reader could not be resolved; {Count} paired grant(s) are left unchanged. correlationId={CorrelationId}",
+                pending.Count, context.CorrelationId);
+        }
+
+        var sharesByRoot = new Dictionary<(ExternalGrantRootType, Guid), IReadOnlyList<DataversePrincipalAccess>?>();
+        var resolved = new List<PlannedChange>(pending.Count);
+        foreach (var change in pending)
+        {
+            ct.ThrowIfCancellationRequested();
+            var paired = change.Paired!;
+
+            if (!sharesByRoot.TryGetValue(paired.Root, out var shares))
+            {
+                shares = null;
+                if (recordShare is not null)
+                {
+                    try
+                    {
+                        shares = await recordShare.GetPrincipalAccessOrThrowAsync(
+                            ExternalGrantRoot.LogicalNameFor(paired.Root.Type), paired.Root.Id, ct).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+                    // One record's shares failing leaves its paired grants unchanged; the others are still decided.
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex,
+                            "[EXT-ACCESS-RECON] {Rule}: the shares on {RootType} {RootId} could not be read; its paired grant(s) are left unchanged. correlationId={CorrelationId}",
+                            RuleEndPairedGrantShareGone, paired.Root.Type, paired.Root.Id, context.CorrelationId);
+                    }
+                }
+
+                sharesByRoot[paired.Root] = shares;
+            }
+
+            if (shares is null)
+            {
+                report.ShareUnreadable++;
+                continue;
+            }
+
+            var principal = DataversePrincipalRef.User(paired.SystemUserId);
+            var mask = shares.Where(sh => sh.Principal == principal).Aggregate(0, (m, sh) => m | sh.AccessRightsMask);
+            if (mask != 0)
+            {
+                report.ShareHeld++;
+                continue;
+            }
+
+            resolved.Add(change with
+            {
+                AfterState = $"statecode={StateCodeInactive} statuscode={StatusCodeInactive} (paired user {paired.SystemUserId} " +
+                             "no longer holds a share on the record; pairing kept)",
+                Fields = DeactivationFields(),
+            });
+        }
+
+        planned[RuleEndPairedGrantShareGone] = resolved;
+    }
+
+    /// <summary>The R5 scan: ACTIVE grant rows that carry a pairing, with their record lookups. Ordered by id for stable paging.</summary>
+    internal static string BuildPairedGrantScanFetchXml(int page, string? pagingCookie)
+    {
+        var entity = new XElement("entity", new XAttribute("name", ExternalGrantLifecycle.EntityLogicalName),
+            Attributes(new[] { "sprk_externalrecordaccessid", "statecode", PairedSystemUserAttribute }
+                .Concat(RootLookupAttributes.Select(r => r.Attribute)).ToArray()),
+            new XElement("order", new XAttribute("attribute", "sprk_externalrecordaccessid")),
+            new XElement("filter", new XAttribute("type", "and"),
+                ActiveOrNullStateFilter(),
+                Condition(PairedSystemUserAttribute, "not-null")));
+
+        return Fetch(page, pagingCookie, entity);
+    }
+
     /// <summary>The record a grant row names — project, matter or work assignment, in <c>DeriveKey</c>'s order.</summary>
     private static (ExternalGrantRootType Type, Guid Id)? RootOf(Entity row)
     {
@@ -1320,6 +1554,27 @@ public sealed class ExternalAccessReconciliationJob : IScheduledJob
         /// (<see cref="ResolveContactIssuedAsync"/>) — until then it carries no fields and is never written.
         /// </summary>
         public ContactIssuedUndated? ContactIssued { get; init; }
+
+        /// <summary>Set on an R5 change (task 193 G1), decided after the scan by <see cref="ResolvePairedGrantsAsync"/>.</summary>
+        public PairedGrant? Paired { get; init; }
+    }
+
+    /// <summary>A paired grant awaiting its R5 decision: the user it is paired with and the record it grants.</summary>
+    internal sealed record PairedGrant(Guid SystemUserId, (ExternalGrantRootType Type, Guid Id) Root);
+
+    /// <summary>R5's report (task 193 G1): what the run found about the paired grants beyond the planned ends.</summary>
+    internal sealed class PairedGrantReport
+    {
+        /// <summary>The pairing column is not provisioned here: R5 was skipped.</summary>
+        public bool ColumnMissing;
+
+        /// <summary>Paired grants whose user still holds a share: left alone.</summary>
+        public int ShareHeld;
+
+        /// <summary>Paired grants whose record's shares could not be read: left unchanged, retried on the next run.</summary>
+        public int ShareUnreadable;
+
+        public object ToReport() => new { columnMissing = ColumnMissing, shareHeld = ShareHeld, shareUnreadable = ShareUnreadable };
     }
 
     /// <summary>A contact-issued undated grant row awaiting its R1 decision (session 27 round 42 item 2).</summary>
@@ -1413,9 +1668,13 @@ public sealed class ExternalAccessReconciliationJob : IScheduledJob
         /// <summary>R1 only: the contact-issued undated rows of this run (round 42 item 2); null on the other rules.</summary>
         public ContactIssuedReport? ContactIssued;
 
+        /// <summary>R5 only (task 193 G1): the paired grants' report; null on the other rules.</summary>
+        public PairedGrantReport? Paired;
+
         public object ToReport() => new
         {
             contactIssued = ContactIssued?.ToReport(),
+            paired = Paired?.ToReport(),
             rule = Rule,
             entity = EntityLogicalName,
             Scanned,
