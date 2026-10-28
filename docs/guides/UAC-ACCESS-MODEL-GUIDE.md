@@ -379,7 +379,8 @@ Assigned-To automatic grants are not limited by anyone's role.
 | **Spaarke Basic User** | Read and AppendTo at Deep on matter, project, work assignment and document; Read on the grant table; no Write or Share | Default role for B2B guest users; cannot manage access |
 | **Spaarke Access Administrator** | Create, Read, Write, Append, AppendTo on `sprk_noaccessentry` at Global | Authors No Access entries; assigned together with a role that holds Share |
 | **Secure Record Owner** | User (Basic) depth on the secure table set | Held only by the Secure Record Owners team; created by provisioning, not in the solution |
-| **Restricted Content Owner** | Read at User (Basic) depth on exactly the five hard-deny tables (`config/restricted-content-owner-role.json`) | Created once in the root business unit (Dataverse copies it into every unit); each customer unit's copy is held only by that unit's memberless Spaarke Restricted Content Owners team. Set up per customer unit by `scripts/Set-RestrictedContentOwnerTeam.ps1`, not in the solution |
+| **Restricted Content Owner** | Read at User (Basic) depth on exactly the five hard-deny tables (`config/restricted-content-owner-role.json`) | Created once in the root business unit (Dataverse copies it into every unit); each customer unit's copy is held only by that unit's memberless Spaarke Restricted Content Owners team. Set up per customer unit by `scripts/Set-CustomerOwnerTeams.ps1`, not in the solution |
+| **Customer Configuration Owner** | Read at User (Basic) depth on exactly the declared customer configuration tables (`sprk_aisearchindex`, `sprk_fieldmappingprofile`, `sprk_fieldmappingrule`; `config/customer-configuration-owner-role.json`) | Created once in the root business unit; each customer unit's copy is held only by that unit's memberless Spaarke Customer Configuration Owners team, so Dataverse accepts the team as the owner of the customer's configuration rows. Set up by the same run of `scripts/Set-CustomerOwnerTeams.ps1`, not in the solution |
 
 Partners are contacts, not systemusers, and hold no Dataverse role.
 
@@ -721,6 +722,15 @@ teams.)
 | **Secure Record Owners** (named, non-default, in the Secure Record business unit) | Every Secure record, its family, and the grant rows on it | **None, ever** — that is what makes the record reachable only by shares. Spaarke refuses to add anyone to a team in that business unit. |
 | A business unit's **default owner team** | Ordinary records, children created through Spaarke, grant rows on ordinary records, contacts created by registration (the customer business unit's team) | Everyone in the business unit (managed by the platform) |
 | **Spaarke Restricted Content Owners** (named, non-default, one in EACH customer's top business unit; never the root) | Ordinary rows of the five hard-deny tables (stored files, procedure assignments, rule sets, rules, rule versions) under that customer unit | **None, ever.** Its copy of the role holds Read at Basic on those five tables only. |
+| **Spaarke Customer Configuration Owners** (named, non-default, one in EACH customer's top business unit; never the root) | The customer's configuration rows of the declared tables (AI Search indexes, field-mapping profiles and rules), which seeders own to this team | **None, ever.** Its copy of the role holds Read at Basic on those tables only. |
+
+**Customer configuration rows** (R4b-3b, field-mapping #2399) are owned in the customer's top business unit, never the
+root, which holds only Spaarke product data. Dataverse refuses to assign a row to a principal whose roles lack Read on
+the table (`0x80040299`), and the unit's default team is not an acceptable owner (a role on it reaches every member of
+the unit), so the owner is this second memberless team. The BFF does not resolve it: seeders own customer configuration
+rows to this team. Users keep reading the rows through their own roles: Spaarke Core User holds Read on these tables at
+Deep, which reaches the rows for a user homed in the customer's top unit or above it (the root); a user homed in a unit
+below it does not reach them.
 
 **The hard-deny tables' ordinary rows sit in the customer's top business unit** (the team's unit;
 `RestrictedContentOwnerTeam.CustomerTopBusinessUnitAsync`), whichever unit below it the answer came from. Dataverse depth

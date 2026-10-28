@@ -818,6 +818,33 @@ The ebilling writers are the first that would hit it.
 Dataverse accepts the steps text-match OR query (`sprk_steps like '%<id>%'`, up to 200 per query). Record its duration and
 the Decision Record count, and compare them with a direct query of the same records.
 
+### R4b-3b: the customer configuration owner team (field-mapping #2399, owner shape A; as built)
+
+A second declared, memberless team in each customer top business unit: `Spaarke Customer Configuration Owners`, holding
+that unit's copy of the role `Customer Configuration Owner` (created once in the root). The role holds Read at Basic on
+exactly `sprk_aisearchindex`, `sprk_fieldmappingprofile` and `sprk_fieldmappingrule` (field-mapping's list) and nothing else.
+No BFF resolver change: seeders own customer configuration rows to this team (field-mapping task 004 owns that seeder).
+- `config/customer-configuration-owner-role.json` is the role's one definition; its `tables` array is the declared list.
+- `scripts/Set-RestrictedContentOwnerTeam.ps1` is renamed `scripts/Set-CustomerOwnerTeams.ps1` and generalised to the
+  declared role files (`$DeclaredRoleFiles`): one run sets up both teams in the named customer unit. It keeps the
+  refusals (root, Secure Record, not a direct child of the root), refuses two files that declare the same team, role or
+  table, refuses owner-decision drift in EITHER team before writing anything, and `-Verify` fails on drift or members in
+  either team. Older mentions of the old name above are history.
+- `RestrictedContentOwnerRoleGuardTests` checks each declared role against its own exact table set: the hard-deny tables
+  for the restricted-content role, `CustomerConfigurationTables` (the guard's declared array, kept equal to the JSON) for
+  the configuration role. A configuration table may never be a hard-deny table, an ownership parent or a secure-child
+  table. The two files declare different teams, roles and tables, and the script names both files. 14 configuration
+  must-fire controls (Write on each new table, another table's Read privilege on each, tables outside the set, a missing
+  declared table, raised depths, another access, team name, business unit) plus one restricted-content control (a
+  configuration table added).
+- Dev (read-only, 2026-10-28): the three tables are UserOwned; their Read privileges are prvReadsprk_AISearchIndex,
+  prvReadsprk_FieldMappingProfile and prvReadsprk_FieldMappingRule. A re-own would move 11 index, 7 profile and 40 rule rows
+  to BU1's team, all user-owned in the root today. Spaarke Core User holds Read on all three at Deep. BU1 has no child
+  unit; 2 enabled users are homed in it, both holding BU1's Core User copy, so they read the rows after the re-own (they
+  do not reach them in the root today). The 5 enabled holders of Core User homed in the root read them before and after.
+- The dry run for BU1 found both teams and both roles missing (a 12-step plan); the root and Secure Record are refused;
+  `-Verify` exits 1 with 4 findings. The live apply waits for the owner's go.
+
 **Round 138 (no code change in 194b).** Task 196b will make the Unsecure root pass KEEP its children's mirrors. That
 supersedes items 3a and 3a′ as built on this branch: a child the Unsecure pass touches loses its mirror (A2's held row,
 the F4 table's Unsecure row). They stay as they are here until 196b lands.

@@ -1815,9 +1815,18 @@ Run intake no longer takes `communicationGraphResource` / `emailGraphResource`. 
 > **after H10 and before** that BFF runs. Without it every such write is refused (`record_owner_restricted_content_team_unresolved`,
 > also when the team has a member or there are two, when the answer is in the root itself, or when it sits under
 > `Secure Record`), and Dataverse refuses the team as an owner while the role lacks Read. Provisioning does not create it
-> yet, so run `scripts/Set-RestrictedContentOwnerTeam.ps1 -CustomerBusinessUnitId <H10's customerBusinessUnitId>`: dry run,
+> yet, so run `scripts/Set-CustomerOwnerTeams.ps1 -CustomerBusinessUnitId <H10's customerBusinessUnitId>`: dry run,
 > then `-Apply`, then `-Verify`, which must exit 0. The full sequence is §12.2, "Phase 5d". Secure rows of these tables still
 > go to `Secure Record Owners`.
+>
+> **The same run sets up the customer configuration owner team (R4b-3b, field-mapping #2399).** Customer configuration rows
+> (`sprk_aisearchindex`, `sprk_fieldmappingprofile`, `sprk_fieldmappingrule`: the one list is
+> `config/customer-configuration-owner-role.json`) are owned in the customer's own business unit by a second memberless team,
+> `Spaarke Customer Configuration Owners`, holding that unit's copy of the role `Customer Configuration Owner` (created once in
+> the root; Read at Basic on exactly those tables). Dataverse refuses to assign a row to a team without Read on its table
+> (`0x80040299`), and the unit's default team is not an acceptable owner (a role on it reaches every member). The BFF does not
+> resolve this team: **seeders own customer configuration rows to this team**, so it must exist before a seeder runs for the
+> customer. Users keep reading the rows through their own roles (`Spaarke Core User`, Deep).
 
 Secure projects, matters and work assignments (unified-access-control-r2) need Dataverse security configuration that
 no solution import can create. Since T256, **H7b creates it on every run**, after H6 and before H9:
@@ -2281,18 +2290,22 @@ pac admin assign-user --environment "https://spaarke-acme.crm.dynamics.com/" `
     -SecretName "spe-owning-app-<name>" -KeyVaultName "<bff-kv>","<operator-kv>"
 .\scripts\Repair-SpeConfigSecretName.ps1 ... -MintClientSecret -Apply
 .\scripts\Repair-SpeConfigSecretName.ps1 ... -Verify
-# Phase 5d — Restricted-content owner team (unified-access-control-r2 task 194b R4b-3, R4b-2c; AFTER H10, BEFORE Phase 6
-# deploys a BFF that carries the hard-deny rule). The memberless 'Spaarke Restricted Content Owners' team in the CUSTOMER's
+# Phase 5d — Customer owner teams (unified-access-control-r2 task 194b R4b-3, R4b-2c, R4b-3b; AFTER H10, BEFORE Phase 6
+# deploys a BFF that carries the hard-deny rule and before a seeder writes the customer's configuration rows). One run sets
+# up both declared teams. (1) The memberless 'Spaarke Restricted Content Owners' team in the CUSTOMER's
 # business unit (H10's customerBusinessUnitId, a direct child of the root; never the root, never 'Secure Record'), holding
 # that unit's copy of the role 'Restricted Content Owner' (created once in the root; Read at Basic on exactly the five tables
 # in config/restricted-content-owner-role.json) and no other role. Without it every ordinary write to those tables is refused
 # (record_owner_restricted_content_team_unresolved). Run once per customer business unit. The script refuses the root, the
 # Secure Record unit and a unit that is not a direct child of the root. -Apply never removes a member, moves a team or takes
 # a role off another principal: it refuses that drift (owner decision). -Verify lists other customer units that lack the team
-# as information only.
-.\scripts\Set-RestrictedContentOwnerTeam.ps1 -EnvironmentUrl "<dv-org-url>" -CustomerBusinessUnitId "<customerBusinessUnitId>"            # dry run: the plan, no writes
-.\scripts\Set-RestrictedContentOwnerTeam.ps1 -EnvironmentUrl "<dv-org-url>" -CustomerBusinessUnitId "<customerBusinessUnitId>" -Apply     # create the team (and the role once), add the five, strip the rest, assign
-.\scripts\Set-RestrictedContentOwnerTeam.ps1 -EnvironmentUrl "<dv-org-url>" -CustomerBusinessUnitId "<customerBusinessUnitId>" -Verify    # MUST exit 0 (no drift)
+# as information only. (2) The memberless 'Spaarke Customer Configuration Owners' team in the same unit, holding that unit's
+# copy of the role 'Customer Configuration Owner' (Read at Basic on exactly the tables in
+# config/customer-configuration-owner-role.json: sprk_aisearchindex, sprk_fieldmappingprofile, sprk_fieldmappingrule). The BFF
+# does not resolve it; seeders own customer configuration rows to this team.
+.\scripts\Set-CustomerOwnerTeams.ps1 -EnvironmentUrl "<dv-org-url>" -CustomerBusinessUnitId "<customerBusinessUnitId>"            # dry run: the plan for both teams, no writes
+.\scripts\Set-CustomerOwnerTeams.ps1 -EnvironmentUrl "<dv-org-url>" -CustomerBusinessUnitId "<customerBusinessUnitId>" -Apply     # create each team (and each role once), add its tables, strip the rest, assign
+.\scripts\Set-CustomerOwnerTeams.ps1 -EnvironmentUrl "<dv-org-url>" -CustomerBusinessUnitId "<customerBusinessUnitId>" -Verify    # MUST exit 0 (no drift in either team)
 
 # Phase 6 — BFF deploy
 # Phase 7b (Set-ExternalFlagForB2BGuests.ps1) takes -CustomerTenantIds on a Model 1 stamp — see Phase 7b below.
