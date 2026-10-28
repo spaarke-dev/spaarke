@@ -2,7 +2,25 @@
 
 > **Format (2026-10-06):** CURRENT state only, REWRITTEN at each checkpoint. Standing directives + gotchas: project `CLAUDE.md` → "Standing directives & gotchas" (incl. "Multi-customer add-in (Model 1)" and "Guest sign-in, PCFs and telemetry" blocks). History: git log + `notes/handoff-history/` (do not load on recovery; the pre-2026-10-21 state, including the Console run log, is archived in `notes/handoff-history/2026-10.md`).
 
-> **Last Updated**: 2026-10-27 (by task-execute): task 133 slices A+B merged (#2357, #2359); waiting on ebilling for the rest.
+> **Last Updated**: 2026-10-28 (by context-handoff): fixing #2412 and #2416 (owner go 2026-10-28; email-communication-intelligence is CLOSED, so its engine is ours to fix).
+
+## 🔥 ACTIVE NOW (2026-10-28): owner-approved fixes #2412 + #2416
+
+- **#2412 (ISS-027)**: the save-pane choice must win over a conflicting 1.0 match.
+  - Branch `task/word-2412-caller-regarding`, worktree **C:\wt2412**, commit 1d349e240b, **PR #2417** (open, NO auto-merge yet).
+  - Change: `RungMatch.CallerSupplied`; `ExplicitReferenceRung` sets it; `AssociationStatusMapper` lets exactly one caller target settle its field.
+  - Publish size +1,029 bytes against bafe310ca4; master publish kept at scratchpad `pub2412-master(.zip)`; C:\wt2412m is a detached master worktree for size checks (remove later with Remove-WorktreeSafe).
+  - **Review round 1 findings to FIX NOW:**
+    - (F1) Quick Save sends the engine's guess as caller-supplied. In `communicationSuggestionsService.ts` `fetchEnginePreSelection`, return null when `model.state === 'requires-review'` (no `model.primary`; it currently falls back to `candidates[0]`). Add a must-not-fire jest test.
+    - (F1-low) Mapper: build `callerDecided` only from fields where the write is the caller's target.
+    - (K4) Docs: RungMatch.cs and ExplicitReferenceRung.cs say "outbound send" supplies caller regarding (only EmailUploadCaptureService does); fix `docs/architecture/communication-intelligence-architecture.md:120`.
+    - (K1) File an issue: the suggestions endpoint (CommunicationService.cs:432) ignores an existing filing.
+  - Then re-check the fix diff (scoped), merge with `--auto --merge`, and ask R3 for a dev BFF deploy (OK on content; owner go in R3).
+- **#2416 (ISS-028)**: a typed Document Name replaced the email subject.
+  - Server: `task/word-2416-docname-server`, **C:\wt2416**, 9939b19f6b, **PR #2419** (`EmailMetadata.DocumentName`; +94 bytes).
+  - Client: `task/word-2416-docname-client`, **C:\wt2416c**, 25ca6bf796, **PR #2420 DRAFT**. HOLD it until the server is live on dev.
+  - An adversarial review is running (opus agent); act on its findings.
+- After both are live: the owner re-tests one save with a typed name. Offer to correct the owner's 10-28 test record (comm 12f1f3f8…, doc 536204ff…) only if they ask.
 
 ## ⚡ Quick Recovery (READ THIS FIRST)
 
