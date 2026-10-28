@@ -22,7 +22,13 @@
  */
 import * as React from 'react';
 import { Button, Text, Spinner, tokens } from '@fluentui/react-components';
-import { CheckmarkCircleFilled, PersonRegular, MailRegular, CalendarRegular } from '@fluentui/react-icons';
+import {
+  CheckmarkCircleFilled,
+  ErrorCircleFilled,
+  PersonRegular,
+  MailRegular,
+  CalendarRegular,
+} from '@fluentui/react-icons';
 
 import { WizardShell } from '../Wizard/WizardShell';
 import type { IWizardShellHandle, IWizardStepConfig, IWizardSuccessConfig } from '../Wizard/wizardShellTypes';
@@ -594,7 +600,7 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
 
     if (result.status === 'error') {
       return {
-        icon: <CheckmarkCircleFilled fontSize={64} style={{ color: tokens.colorPaletteRedForeground1 }} />,
+        icon: <ErrorCircleFilled fontSize={64} style={{ color: tokens.colorPaletteRedForeground1 }} />,
         title: 'Error',
         body: (
           <Text size={300} style={{ color: tokens.colorNeutralForeground2 }}>
