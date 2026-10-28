@@ -1,3 +1,5 @@
+using Spaarke.Dataverse;
+
 namespace Sprk.Bff.Api.Services.Dataverse;
 
 /// <summary>
@@ -150,6 +152,13 @@ internal static class RecordFamilyEdges
     internal static string? RecordNumberColumnOf(string table) =>
         RecordNumberColumns.TryGetValue(table, out var column) ? column : null;
 
+    /// <summary>Document link targets that are relationships, not filing parents (identities and the email activity).</summary>
+    /// <remarks>Declared before <see cref="All"/>: static fields initialise in textual order, and <see cref="Build"/> reads it.</remarks>
+    private static readonly HashSet<string> DocumentLinkTargetsThatAreNotFiling = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "contact", "sprk_organization", "email",
+    };
+
     /// <summary>Every edge, all kinds. Readers take a kind's view (<see cref="Of"/>), never this list directly.</summary>
     internal static readonly IReadOnlyList<Edge> All = Build();
 
@@ -232,14 +241,16 @@ internal static class RecordFamilyEdges
             ("sprk_regardingevent", Event), ("sprk_regardinginvoice", Invoice), ("sprk_regardingmatter", Matter),
             ("sprk_regardingproject", Project), ("sprk_regardingtodo", ToDo),
             ("sprk_regardingworkassignment", WorkAssignment)));
-        // The document link vocabulary (DocumentLinkFields) minus identities, the email and the service request, plus the
-        // parent document. Left out: sprk_canonicaldocument (its canonical copy) and sprk_currentversionid (its version).
-        rows.AddRange(Secure(Document,
-            ("sprk_matter", Matter), ("sprk_relatedmatter", Matter), ("sprk_project", Project),
-            ("sprk_relatedproject", Project), ("sprk_invoice", Invoice), ("sprk_relatedinvoice", Invoice),
-            ("sprk_workassignment", WorkAssignment), ("sprk_relatedworkassignment", WorkAssignment),
-            ("sprk_relatedagreement", Agreement), ("sprk_relatedcommunication", Communication),
-            ("sprk_relatedevent", Event), ("sprk_relatedtodo", ToDo), ("sprk_parentdocument", Document)));
+        // A document's record links come from the ONE declaration of that vocabulary (DocumentLinkFields — a second copy
+        // drifts silently; DocumentLinkVocabularyGuardTests), minus the links to an identity or the email activity. Its
+        // link to a service request is that request's own family (ServiceRequestRelations), outside the Secure family.
+        // The content pin still pins every row this produces. Plus the parent document; left out: sprk_canonicaldocument
+        // (its canonical copy) and sprk_currentversionid (its version).
+        rows.AddRange(DocumentLinkFields.All
+            .Where(f => !DocumentLinkTargetsThatAreNotFiling.Contains(f.TargetEntityLogicalName))
+            .Select(f => Row(Document, f.LogicalName, f.TargetEntityLogicalName,
+                inSecureFamily: !string.Equals(f.TargetEntityLogicalName, ServiceRequest, StringComparison.OrdinalIgnoreCase))));
+        rows.AddRange(Secure(Document, ("sprk_parentdocument", Document)));
         rows.AddRange(Secure("sprk_emailartifact", ("sprk_document", Document)));
         rows.AddRange(Secure("sprk_emailreviewlog", ("sprk_communication", Communication)));
         rows.AddRange(Secure(Event,
@@ -280,14 +291,14 @@ internal static class RecordFamilyEdges
             ("sprk_regardingproject", Project), ("sprk_regardingreportcard", ReportCard),
             ("sprk_regardingworkassignment", WorkAssignment)));
 
-        // --- a service request's own family: ExternalDataService.ServiceRequestRelations at de38296499 ---
+        // --- a service request's own family: ExternalDataService.ServiceRequestRelations at de38296499 (the document's
+        // link is above, from DocumentLinkFields) ---
         rows.AddRange(new[]
         {
             (Analysis, "sprk_regardingservicerequest"),
             (Communication, "sprk_regardingservicerequest"),
             ("sprk_communicationthread", "sprk_regardingservicerequest"),
             ("sprk_decisionrecord", "sprk_regardingservicerequest"),
-            (Document, "sprk_relatedservicerequest"),
             (Event, "sprk_regardingservicerequest"),
             ("sprk_memo", "sprk_regardingservicerequest"),
             ("sprk_signal", "sprk_regardingservicerequest"),

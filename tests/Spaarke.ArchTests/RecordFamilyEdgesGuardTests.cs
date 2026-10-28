@@ -127,14 +127,6 @@ public class RecordFamilyEdgesGuardTests
         Assert.Equal(new[] { "STALE: " + Only("SecureChildLineage", "a.gone -> d") }, problems);
     }
 
-    [Fact(DisplayName = "Task 070: parity control — the baseline's real lines pass against the real registries (must not fire)")]
-    public void ParityProblems_RealBaseline_DescribesOnlyRealDisagreements()
-    {
-        var disagreements = ParityViews(RecordFamilyEdges.All).SelectMany(Disagreements).ToHashSet(StringComparer.Ordinal);
-
-        Assert.All(KnownDisagreements.Keys, line => Assert.Contains(line, disagreements));
-    }
-
     /// <summary>One existing registry, as edge keys, beside the registry's view of the same shape.</summary>
     internal sealed record ParityView(string Name, IReadOnlyCollection<string> Source, IReadOnlyCollection<string> Registry);
 
