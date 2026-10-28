@@ -156,6 +156,47 @@ public class ExternalAccessContactSecuritySchemaAgreementTests
         text.Should().Contain("Path = 'WhoAmI'", "the proof's first read is the user's own systemuser");
     }
 
+    [Fact]
+    public void TheScriptsProofReads_HaveNoConditionOnTheFieldPermissionsTable_AndSelectIt()
+    {
+        // Dataverse refuses a FetchXML condition on fieldpermission.entityname given a table's logical name (the read
+        // faults), so the proof reads select entityname and leave the table to the BFF's in-code check.
+        var text = File.ReadAllText(ScriptPath());
+
+        text.Should().NotContain("<condition attribute=`\"entityname`\"", "a FetchXML condition on fieldpermission.entityname is refused");
+        text.Should().Contain("<attribute name=`\"entityname`\" />");
+        text.Should().Contain("<condition attribute=`\"canread`\" operator=`\"eq`\" value=`\"4`\" />");
+        text.Should().Contain("<condition attribute=`\"attributelogicalname`\" operator=`\"in`\">$securedColumnValues</condition>");
+    }
+
+    [Fact]
+    public void TheScriptsProofReads_WhenActAsUserIsNotHonoured_PassOnlyByALiveRoleRead_AsItsOwnState()
+    {
+        var text = File.ReadAllText(ScriptPath());
+
+        // The role leg is read live, as the operator (no MSCRMCallerID), by the System Administrator template id.
+        text.Should().Contain("$holdsAdmin = @((Invoke-DvGet $rolePath).value).Count -gt 0");
+        text.Should().Contain("value=`\"627090ff-40a3-4053-8790-584edc5be201`\"");
+        // Its pass is its own state with its own text, never a plain OK; without the role it stays FAIL.
+        text.Should().Contain(
+            "Report 'OK-ROLE' \"$($u.fullname): OK (role leg: app user holds System Administrator; act-as-user not honoured, not verified).");
+        text.Should().Contain("and it does not hold System Administrator, so its proof reads are not verified. Run -Verify as a user who may act on behalf of another user, or grant its security role Read on these tables.");
+        text.Should().Contain("the cause is not established");
+        // OK-ROLE passes (it is not a gap) and is named in the summary.
+        text.Should().Contain("if ($State -in 'MISSING', 'FAIL') { $gaps.Add($What) }");
+        text.Should().Contain("if ($State -eq 'OK-ROLE') { $roleLegOnly.Add($What) }");
+    }
+
+    [Fact]
+    public void TheScriptsAddedText_IsAscii_OutsideTheKnownDashes()
+    {
+        // A non-ASCII character in a message breaks the pwsh-output JSON parse of the script tests. The em and box-drawing
+        // dashes already present are tolerated; nothing else is.
+        var others = File.ReadAllText(ScriptPath()).Where(c => c > 0x7F && c != '—' && c != '─').Distinct().ToArray();
+
+        others.Should().BeEmpty();
+    }
+
     // ── The guard bites: the script parser on a seeded script ─────────────────────────────────────────
 
     private const string Seed = """

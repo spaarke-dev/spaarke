@@ -40,7 +40,14 @@
                         user must be able to READ every platform table that proof reads — systemuser (WhoAmI), role,
                         systemuserroles, fieldpermission, systemuserprofiles, teamprofiles, teammembership — or every
                         such empty read is refused (fail closed). The proof's own queries are run AS that user
-                        (MSCRMCallerID); the operator running -Verify needs the act-on-behalf-of privilege for it.
+                        (MSCRMCallerID); the operator running -Verify needs the act-on-behalf-of privilege for it. An
+                        answer means the table is readable; the grant itself is checked in (d). The field-permission
+                        reads select entityname and have no condition on it (Dataverse refuses a FetchXML condition on
+                        fieldpermission.entityname given a table's logical name; the BFF checks the table in code).
+                        When WhoAmI as that user answers another id (act-as-user not honoured; the cause is not
+                        established), the reads are not run: the user is OK-ROLE, a passing state of its own, when a
+                        live role query (by the System Administrator role template id, through systemuserroles, read as
+                        the operator) shows it holds System Administrator, so the proof's role leg holds; otherwise FAIL.
       (h) STANDING GRANT -Verify only, read-only. Each -BffApplicationIds application user may update
                         contact.sprk_standinggrant ONLY through its DIRECT membership of Standing Grant Administrators
                         (the person removal clears the standing grant), and no other profile it holds, directly or through
@@ -210,10 +217,13 @@ $IsDryRun = -not $Apply.IsPresent
 . (Join-Path $PSScriptRoot 'common/DataverseSolutionMembership.ps1')
 . (Join-Path $PSScriptRoot 'common/StandingGrantWriterInvariant.ps1')
 $gaps = [System.Collections.Generic.List[string]]::new()
+# (g) users that pass by the proof's role leg only (OK-ROLE): passing, but named in the summary.
+$roleLegOnly = [System.Collections.Generic.List[string]]::new()
 function Report([string]$State, [string]$What) {
-    $color = switch ($State) { 'OK' { 'Green' } 'MISSING' { 'Yellow' } 'WOULD' { 'Cyan' } 'DONE' { 'Green' } 'INFO' { 'Gray' } default { 'Red' } }
+    $color = switch ($State) { 'OK' { 'Green' } 'OK-ROLE' { 'DarkGreen' } 'MISSING' { 'Yellow' } 'WOULD' { 'Cyan' } 'DONE' { 'Green' } 'INFO' { 'Gray' } default { 'Red' } }
     Write-Host ("  {0,-8} {1}" -f $State, $What) -ForegroundColor $color
     if ($State -in 'MISSING', 'FAIL') { $gaps.Add($What) }
+    if ($State -eq 'OK-ROLE') { $roleLegOnly.Add($What) }
 }
 
 $org = (Invoke-DvGet 'organizations?$select=name').value[0].name
@@ -419,7 +429,13 @@ foreach ($solutionName in $SolutionUniqueNames) {
 
 # ── (g) PROOF READS (verify only) ───────────────────────────────────────────────────────────────────────────
 # The BFF's readability proof (SecuredColumnReadProof) reads these platform tables as the BFF application user. Each of its
-# queries is run here AS that user (MSCRMCallerID), read-only; a refused read is FAIL.
+# queries is run here AS that user (MSCRMCallerID), read-only; a refused read is FAIL. An answer means the table is readable
+# (that is what (g) checks), not that a grant exists. The field-permission reads select entityname and have no condition on
+# it: Dataverse refuses a FetchXML condition on fieldpermission.entityname given a table's logical name, so the BFF checks
+# the table in code.
+# When WhoAmI as that user answers another id, the act-on-behalf header was not honoured (the cause is not established), and
+# the reads cannot be made as it. The user then passes only by the proof's role leg: a role of the System Administrator
+# template, joined through systemuserroles, read here as the operator. That pass is its own state (OK-ROLE), never a plain OK.
 $ProofTables = @('systemuser', 'role', 'systemuserroles', 'fieldpermission', 'systemuserprofiles', 'teamprofiles', 'teammembership')
 function Invoke-DvGetAs([string]$Path, [string]$SystemUserId) {
     $h = $headers.Clone(); $h['MSCRMCallerID'] = $SystemUserId
@@ -427,16 +443,18 @@ function Invoke-DvGetAs([string]$Path, [string]$SystemUserId) {
 }
 if ($Verify) {
     Write-Host "`n(g) Proof reads, as each BFF application user ($($ProofTables -join ', '))"
+    $securedColumnValues = ($Columns | ForEach-Object { "<value>$_</value>" }) -join ''
     foreach ($u in $bffUsers) {
         $sid = $u.systemuserid.ToString().ToLowerInvariant()
         $member = "<filter><condition attribute=`"systemuserid`" operator=`"eq`" value=`"$sid`" /></filter>"
-        $fieldPermission = "<fetch top=`"1`"><entity name=`"fieldpermission`"><attribute name=`"attributelogicalname`" />" +
-            "<filter><condition attribute=`"entityname`" operator=`"eq`" value=`"$Table`" /><condition attribute=`"canread`" operator=`"eq`" value=`"4`" /></filter>"
+        $rolePath = 'roles?fetchXml=' + [uri]::EscapeDataString(
+            "<fetch top=`"1`"><entity name=`"role`"><attribute name=`"roleid`" /><filter><condition attribute=`"roletemplateid`" operator=`"eq`" value=`"627090ff-40a3-4053-8790-584edc5be201`" /></filter>" +
+            "<link-entity name=`"systemuserroles`" from=`"roleid`" to=`"roleid`" link-type=`"inner`">$member</link-entity></entity></fetch>")
+        $fieldPermission = "<fetch top=`"1`"><entity name=`"fieldpermission`"><attribute name=`"attributelogicalname`" /><attribute name=`"entityname`" />" +
+            "<filter><condition attribute=`"canread`" operator=`"eq`" value=`"4`" /><condition attribute=`"attributelogicalname`" operator=`"in`">$securedColumnValues</condition></filter>"
         $proofReads = @(
             @{ What = 'systemuser (WhoAmI)'; Path = 'WhoAmI' }
-            @{ What = 'role + systemuserroles'; Path = 'roles?fetchXml=' + [uri]::EscapeDataString(
-                "<fetch top=`"1`"><entity name=`"role`"><attribute name=`"roleid`" /><filter><condition attribute=`"roletemplateid`" operator=`"eq`" value=`"627090ff-40a3-4053-8790-584edc5be201`" /></filter>" +
-                "<link-entity name=`"systemuserroles`" from=`"roleid`" to=`"roleid`" link-type=`"inner`">$member</link-entity></entity></fetch>") }
+            @{ What = 'role + systemuserroles'; Path = $rolePath }
             @{ What = 'fieldpermission + systemuserprofiles'; Path = 'fieldpermissions?fetchXml=' + [uri]::EscapeDataString(
                 $fieldPermission + "<link-entity name=`"systemuserprofiles`" from=`"fieldsecurityprofileid`" to=`"fieldsecurityprofileid`" link-type=`"inner`">$member</link-entity></entity></fetch>") }
             @{ What = 'fieldpermission + teamprofiles + teammembership'; Path = 'fieldpermissions?fetchXml=' + [uri]::EscapeDataString(
@@ -447,8 +465,20 @@ if ($Verify) {
             try {
                 $answer = Invoke-DvGetAs $r.Path $sid
                 if ($r.Path -eq 'WhoAmI' -and "$($answer.UserId)".ToLowerInvariant() -ne $sid) {
-                    Report 'FAIL' "$($u.fullname): WhoAmI as this user answered $($answer.UserId), not $sid — the reads below were not made as it"
-                    continue
+                    # The reads cannot be made as this user; none of them is reported as read by it.
+                    $notHonoured = "WhoAmI as this user answered $($answer.UserId), not $sid (act-as-user not honoured; the cause is not established)"
+                    try { $holdsAdmin = @((Invoke-DvGet $rolePath).value).Count -gt 0 }
+                    catch {
+                        Report 'FAIL' "$($u.fullname): $notHonoured, and its System Administrator role could not be read ($($_.Exception.Message)); it is not assumed to pass."
+                        break
+                    }
+                    if ($holdsAdmin) {
+                        Report 'OK-ROLE' "$($u.fullname): OK (role leg: app user holds System Administrator; act-as-user not honoured, not verified). The BFF's readability proof is satisfied by its role leg; $notHonoured, so its table reads were not run as it."
+                    }
+                    else {
+                        Report 'FAIL' "$($u.fullname): $notHonoured, and it does not hold System Administrator, so its proof reads are not verified. Run -Verify as a user who may act on behalf of another user, or grant its security role Read on these tables."
+                    }
+                    break
                 }
                 Report 'OK' "$($u.fullname) reads $($r.What)"
             }
@@ -491,7 +521,14 @@ if ($Apply) {
 }
 
 if ($Verify) {
-    if ($gaps.Count -eq 0) { Write-Host "`nVERIFY PASS: every column is in place, field-secured, granted exactly as listed, in every listed solution, only the listed profiles can access it, every BFF application user reads the tables its readability proof reads, and updates the standing grant only through its direct Standing Grant Administrators membership." -ForegroundColor Green; exit 0 }
+    if ($gaps.Count -eq 0) {
+        Write-Host "`nVERIFY PASS: every column is in place, field-secured, granted exactly as listed, in every listed solution, only the listed profiles can access it, every BFF application user reads the tables its readability proof reads (or, where OK-ROLE, holds System Administrator), and updates the standing grant only through its direct Standing Grant Administrators membership." -ForegroundColor Green
+        if ($roleLegOnly.Count -gt 0) {
+            Write-Host "OK-ROLE ($($roleLegOnly.Count)): the proof reads were not run as these users (act-as-user not honoured); each passes by the System Administrator role leg only:" -ForegroundColor DarkGreen
+            $roleLegOnly | ForEach-Object { Write-Host "  - $_" -ForegroundColor DarkGreen }
+        }
+        exit 0
+    }
     Write-Host "`nVERIFY FAIL ($($gaps.Count)):" -ForegroundColor Red
     $gaps | ForEach-Object { Write-Host "  - $_" -ForegroundColor Red }
     exit 1
