@@ -402,6 +402,80 @@ public class RestrictedContentOwnerTests
         directory.Assignments.Should().ContainSingle().Which.TeamId.Should().Be(GeneralTeam);
     }
 
+    [Fact(DisplayName = "R4b-2c rule 1: an author-owned hard-deny row re-filed while the content team is missing keeps its author — written, not refused")]
+    public async Task ReFilingAnAuthorOwnedPolicy_WhenTheContentTeamIsMissing_KeepsItsAuthor_AndWritesTheChange()
+    {
+        var (directory, resolution) = await ReFileAuthorOwnedAsync(
+            "sprk_policy", "sprk_matter", CustomerChildMatter, World(FakeDirectory.Standard(withRestrictedContentTeam: false)));
+
+        resolution.Outcome.Should().Be(RecordOwnerOutcome.Unchanged, "author wins: the content team is never asked for in place of an author");
+        resolution.Reason.Should().Be(RecordOwnershipContext.AuthorKeptRestrictedContentReason);
+        directory.Assignments.Should().BeEmpty();
+        directory.Row("sprk_policy", Policy).GetAttributeValue<EntityReference>("sprk_matter").Id.Should().Be(CustomerChildMatter);
+    }
+
+    [Fact(DisplayName = "R4b-2c rule 1: the content team becoming unusable before the settle leaves an author-owned row with its author — no throw")]
+    public async Task ReFilingAnAuthorOwnedPolicy_WhenTheContentTeamBecomesUnusableBeforeTheSettle_KeepsItsAuthor_WithoutThrowing()
+    {
+        var directory = World().WithRecord("sprk_policy", Policy, GeneralBu, extra: new()
+        {
+            ["sprk_matter"] = new EntityReference("sprk_matter", OrdinaryMatter),
+            ["owninguser"] = new EntityReference("systemuser", FakeDirectory.CallerUserId),
+            ["ownerid"] = new EntityReference("systemuser", FakeDirectory.CallerUserId),
+        });
+        var request = new RecordReparent
+        {
+            EntityLogicalName = "sprk_policy",
+            RecordId = Policy,
+            ParentChanges = new Dictionary<string, EntityReference?> { ["sprk_matter"] = new EntityReference("sprk_matter", CustomerChildMatter) },
+        };
+
+        var act = () => directory.Resolver().ReparentAsync(
+            request,
+            _ =>
+            {
+                directory.Write("sprk_policy", Policy, new Dictionary<string, object?> { ["sprk_matter"] = new EntityReference("sprk_matter", CustomerChildMatter) });
+                directory.WithTeamMember(ContentTeam, FakeDirectory.CallerUserId); // the team is unusable from here on
+                return Task.CompletedTask;
+            },
+            CancellationToken.None);
+
+        var resolution = (await act.Should().NotThrowAsync()).Subject;
+        resolution.Outcome.Should().Be(RecordOwnerOutcome.Unchanged);
+        resolution.Reason.Should().Be(RecordOwnershipContext.AuthorKeptRestrictedContentReason);
+        directory.Assignments.Should().BeEmpty();
+        directory.Row("sprk_policy", Policy).GetAttributeValue<EntityReference>("sprk_matter").Id.Should().Be(CustomerChildMatter);
+    }
+
+    [Fact(DisplayName = "R4b-2c must fire: a default-team-owned hard-deny row re-filed while the content team is missing is refused — the change is not written")]
+    public async Task ReFilingADefaultTeamOwnedPolicy_WhenTheContentTeamIsMissing_Refuses()
+    {
+        var directory = World(FakeDirectory.Standard(withRestrictedContentTeam: false))
+            .WithRecord("sprk_policy", Policy, ChildBu, owningTeam: ChildTeam,
+                extra: new() { ["sprk_matter"] = new EntityReference("sprk_matter", OrdinaryMatter) });
+        var request = new RecordReparent
+        {
+            EntityLogicalName = "sprk_policy",
+            RecordId = Policy,
+            ParentChanges = new Dictionary<string, EntityReference?> { ["sprk_matter"] = new EntityReference("sprk_matter", CustomerChildMatter) },
+        };
+        var written = false;
+
+        var resolution = await directory.Resolver().ReparentAsync(
+            request,
+            _ =>
+            {
+                written = true;
+                return Task.CompletedTask;
+            },
+            CancellationToken.None);
+
+        resolution.Outcome.Should().Be(RecordOwnerOutcome.Refused);
+        resolution.RefusalCode.Should().Be(RecordOwnerRefusal.RestrictedContentOwnerTeamUnresolved);
+        written.Should().BeFalse();
+        directory.Assignments.Should().BeEmpty();
+    }
+
     private sealed class RecordingLog : ILogger<RecordOwnershipResolver>
     {
         public List<(LogLevel Level, string Message)> Entries { get; } = new();

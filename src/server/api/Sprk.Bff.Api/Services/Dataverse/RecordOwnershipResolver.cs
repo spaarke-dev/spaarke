@@ -2111,6 +2111,13 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         var secureOnlyAfter = SecureOnlyColumns(request.EntityLogicalName, byColumn);
         var resolution = await ResolveReparentOwnerAsync(request, parents, secureOnlyAfter, ct).ConfigureAwait(false);
 
+        // R4b-2c (rule 1, owner round 137 "author wins"): the restricted-content team is asked for only in place of a default
+        // team, so an author-owned row keeps its author whether or not that team can be used — never a refusal for it.
+        if (AuthorKeepsRestrictedContent(resolution, current.GetAttributeValue<EntityReference>(OwningUserColumn)?.Id))
+        {
+            resolution = RecordOwnerResolution.Unchanged(RecordOwnershipContext.AuthorKeptRestrictedContentReason);
+        }
+
         if (resolution.IsRefused)
         {
             _logger.LogWarning(
@@ -2241,6 +2248,16 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             throw;
         }
     }
+
+    /// <summary>
+    /// R4b-2c (rule 1): whether a re-file's answer for a row owned by <paramref name="owningUser"/> is the restricted-content
+    /// team that cannot be used — asked only in place of a default team, which never replaces a kept author — so the row
+    /// keeps its author rather than refusing. A row owned by a team (a default team included) still refuses.
+    /// </summary>
+    private static bool AuthorKeepsRestrictedContent(RecordOwnerResolution answer, Guid? owningUser) =>
+        owningUser is { } user && user != Guid.Empty
+        && answer.IsRefused
+        && answer.RefusalCode == RecordOwnerRefusal.RestrictedContentOwnerTeamUnresolved;
 
     /// <summary>
     /// #2143: how many times a re-file's owner write is tried against a row that keeps changing — the attempt count of the
@@ -2511,6 +2528,12 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                     "Re-file of {Entity} {RecordId}: its parents changed after the change was written (a concurrent writer); "
                     + "the owner is re-derived from the parents it holds now: {Outcome} {TeamId} (attempt {Attempt}, #2143).",
                     request.EntityLogicalName, request.RecordId, target.Outcome, target.OwningTeamId, attempt);
+            }
+
+            // R4b-2c (rule 1): an author-owned row whose answer is now an unusable restricted-content team keeps its author.
+            if (AuthorKeepsRestrictedContent(target, state.OwningUser))
+            {
+                return (RecordOwnerResolution.Unchanged(RecordOwnershipContext.AuthorKeptRestrictedContentReason), filingIsOwn);
             }
 
             if (target.IsRefused)
