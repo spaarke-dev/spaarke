@@ -2003,3 +2003,24 @@ Reading:
   2. Every ownership write goes through `RecordOwnershipResolver`.
   3. New code asks "is this row isolated" through one shared predicate keyed on the Secure Record BU (never a team id), and reads families through W7.
 - Ontology D-191's "Secure family qualifier, materialised by `sprk_securefamily`" stays a design target, not a scheduled build. Ontology, field-mapping and ebilling were told the same day.
+
+### Round 131 (2026-10-28): owner of the hard-deny tables (086, #2368), and how a colleague added through "Add person" sees the record (193, #2338)
+
+**1. 086: ordinary owner of the hard-deny tables.** These are `sprk_storedfile`, `sprk_procedureassignment`, `sprk_ruleset`, `sprk_policy` and `sprk_policyversion`.
+- While the record is ordinary, the owner is a **dedicated owner team in the root BU with no members**. Its own role grants Read only, at Basic, on exactly those five tables. This replaces the "owned by the application" proposal (a).
+- A Secure row still goes to the Secure Record Owners team.
+- Why this team: Dataverse only accepts a team as owner when the team can read the table, and every member of the owning team can then read every such row. Using the root BU's default team would expose these rows to the whole BU.
+- Binding conditions:
+  - The resolver answers this team only at the ordinary exit.
+  - The resolver fails closed if the team is missing, is outside the root BU, or has any member.
+  - Unsecure moves these rows to this team.
+  - The team and role are codified (config JSON plus an -Apply/-Verify script). They go live on dev only with the owner's separate go, and every customer environment needs them before a BFF carrying the rule runs.
+  - 191 never grants BU-depth or Deep Read on these tables.
+- Built in 194b (R4b). Ebilling records it as EB-D-168.
+
+**2. 193: a colleague added through "Add person" sees the record in the workforce app too, whichever way they were picked.**
+- A workforce user signs in as themselves, and is linked to their contact. The workforce app shows what the grants on that contact allow. The Dataverse share targets the system user and gives model-driven app access, and it can't target a contact.
+- So adding an internal colleague writes both a share to their system user and a grant on their linked contact. This applies whether the colleague was picked as a user or through their contact.
+- Neither the share nor the grant has an end date, so the two can't drift.
+- Revoking removes both. No invite is sent.
+- A contact with no linked system user keeps today's behaviour: a plain contact grant.
