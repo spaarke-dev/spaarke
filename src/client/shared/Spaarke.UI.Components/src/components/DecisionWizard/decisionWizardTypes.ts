@@ -45,6 +45,12 @@ export interface DecisionParameter {
   lookupEntity?: string | null;
   options?: DecisionOption[] | null;
   optionsSource?: string | null;
+  /** Task 167 (D-193): the server's starting value (a Choice's option value), shown as a prefilled default and never a choice. */
+  defaultValue?: string | null;
+  /** Task 167 (D-193): the code of a Date parameter of the same step this one must not be earlier than (End date after Start date). */
+  notBefore?: string | null;
+  /** Task 167 (D-193, review F4-4): for a Text, the most characters the target column holds; the step flags a longer value before Record decision. */
+  maxLength?: number | null;
 }
 
 /** One catalog action (or Next-step creator) as the plan route returns it. */

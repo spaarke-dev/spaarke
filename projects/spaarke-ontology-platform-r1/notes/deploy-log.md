@@ -438,3 +438,31 @@ Criterion 89 (blank the writer client id, expect the writer-failure alert to fir
   - `POST /api/admin/jobs/signal-reevaluation/trigger` at 13:02:40Z → run `5414d2d6`, ManualAdmin; Succeeded at 13:04:02Z (82 s).
   - Result: policiesEvaluated 6, hits 149, supersededClosed 54, reraised 54, written 2, unchanged 86. Zero refused, policyFailures, accessDenied and anomalies.
   - Read-back, `sprk_signalstatus` (`statecode` stays Active by design): v2 has 56 Resolved (54 superseded, plus 2 Acted); v3 has 54 Open.
+
+## 2026-10-28 14:23Z — Console `b445886fed` on dev (task 165, docs→master #2391)
+- **What:** PR #2391 (docs→master, head `756aa0b866`) merged as `b445886fed`. All CI checks passed with none pending. Before merging, a merge-tree preview against master was clean, and master's 11 newer commits (field-mapping docs) overlap none of its files.
+- **Deploy:** `deploy-spaarke-ai.yml` run 40704903667, triggered by the push. It completed with success at 14:23:32Z. No BFF, external SPA or landing change.
+- **Contents:** an optional `WizardShell` `resetKey`; `DecisionWizard` stays one dialog (165). Also the POL-MATTER-NOBUDGET v3 config and tests (166, already applied) and notes.
+- **Notices:** before and after notices went to R3 and uac-r2. word-add-in had no objection and asked not to receive the after-notice.
+- **Dev BFF at the same time:** R3 deployed `e56a3a51d4`. R3's read-back at 14:11:58Z showed DLL `1.0.0+e56a3a51d4…` with `OrdinaryMovesWritesEnabled` off. Ontology gave its OK first. The decide-lane smoke runs after R3's after-notice.
+- **Owner:** reload with Ctrl+F5, then re-check check 2 (one dialog on open, on › and on record) and check 4 (Create budget on v3 items).
+
+## 2026-10-28 — dev BFF `e56a3a51d4` (R3): ontology decide-lane smoke
+- **Deploy:** R3. DLL `1.0.0+e56a3a51d431d924003948ce88ae85940eefbda8`, live from 14:11:58Z. The UAC server gate (14:11–14:41Z) passed. `OrdinaryMovesWritesEnabled` is off: the report-only pass shows moved=0 and writesAttempted=0. Rollback point: the `de38296499` snapshot.
+- **Smoke, run as the owner via az CLI against the BFF API:** PASS.
+  - `GET /api/v1/signals/worklist` returned 200 in 3.8 s, with the Decide lane populated.
+  - `GET /api/v1/signals/47dfaafa-…/decision-plan` returned 200 for a v3 item (`policyVersionId …6313`). Actions: `create-budget` (recommended, first), then `assign-task`. Next steps: `add-todo`, then `assign-work`. This is D-192, and it is check 4 on the server.
+  - **fm-037:** `POST /api/v1/child-records/sprk_workassignment` with `{sprk_name: "zz-fm037-ontology-smoke", sprk_assignedtointernal: contact 8e9918a9…}` returned 201 (id `57e37569-a2c2-4d50-a7a1-b889cf73b168`). Read back: `sprk_assignedto` = `sprk_assignedtointernal` = 8e9918a9…, and the row is team-owned (owneridtype 9). Assign Work rows created before the deploy (for example `10686fa6…`, 00:05Z) have `sprk_assignedto` empty.
+  - **Not exercised:** a real decision commit through Assign Work. Committing one would act on the owner's open UAT items, so the owner's re-check covers it.
+- **Test data:** `zz-fm037-ontology-smoke` (`57e37569-…`) was deleted on 2026-10-28 with the owner's OK. A query by name returns no rows.
+
+## 2026-10-28 — `sprk_budgetnumber` autonumber `BUD-{SEQNUM:6}` on spaarkedev1 (task 167, D-193, owner-approved schema change)
+- **Before:** `AutoNumberFormat` was empty and MaxLength was 20. Existing budget numbers (`B001`, `B002`, `B003-01`, and some blank) are not renumbered.
+- **Change:** a Web API `PUT EntityDefinitions(LogicalName='sprk_budget')/Attributes(LogicalName='sprk_budgetnumber')`.
+  - The body is the full `StringAttributeMetadata` with only `AutoNumberFormat` changed.
+  - Headers: `MSCRM.MergeLabels: true` and `MSCRM.SolutionUniqueName: SpaarkeMaster`. The repo source carries the same format in `SpaarkeMaster/Entities/sprk_Budget/Entity.xml`.
+  - Then `PublishXml` for `sprk_budget` only. There was no tenant-wide publish.
+- **Read-back:** `AutoNumberFormat = BUD-{SEQNUM:6}`, MaxLength 20.
+- **Proof of numbering:** comes with the next budget created (the owner's UAT). No test budget was created, because deleting one needs the owner's OK.
+- **Code:** PR #2403 merged to docs as `4f52d3641f`. It reaches dev with the next docs→master merge and R3's BFF deploy (currency default, budget fields, year rule). The autonumber works now for any create path.
+
