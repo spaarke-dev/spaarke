@@ -222,7 +222,8 @@ public class OfficeDocumentPersistence
         Guid? emailCommunicationId = null,
         Guid? jobId = null,
         string? emailMessageIdFallback = null,
-        bool emailCommunicationResolved = false)
+        bool emailCommunicationResolved = false,
+        EditableContentIdentity? editableContentIdentity = null)
     {
         // Task 080 (write-path invariant I-6): an Office document create is ALWAYS team-owned. The writers resolve the
         // team (or refuse) before calling; a null here is a writer that skipped that step, and creating the row anyway
@@ -280,45 +281,13 @@ public class OfficeDocumentPersistence
 
         if (IsEditableContent(request.ContentType))
         {
-            canonicalHash = null;
-
-            // Guarded for the same reason the Compose create branch is: the detector documents itself as
-            // never-throwing, but an editable save must not become the ONE path where a dedup hiccup fails
-            // a user's save. Worst case here is a document created without its dedup stamp — recoverable
-            // on the next save; a lost draft is not.
-            try
-            {
-                // The detector's EDITABLE seam: pure identity resolution — no notification, no suppression.
-                // (ContentDedupDetector.ResolveContentIdentityAsync already excludes hash-linked copies from
-                // the canonical lookup, so a link never points at a copy that is about to graduate.)
-                var (liveHash, existingCanonicalId) = await _dedupDetector
-                    .ResolveContentIdentityAsync(driveId, itemId, cancellationToken);
-                canonicalHash = liveHash;
-                linkedCanonicalId = existingCanonicalId;
-
-                // Graduate-on-divergence, evaluated BEFORE the create so the pre-existing row's metadata is
-                // honest regardless of what this save goes on to do. Reachable on the shipped Office path
-                // today because the SPE upload uses ConflictBehavior.Replace — a re-save under the same name
-                // lands on the SAME drive-item, so the row recorded for that item is exactly the one whose
-                // content just changed. It is also the seam FR-11's version-save (task 023) calls once it
-                // resolves an existing document row.
-                //
-                // Ordering, stated plainly: linkedCanonicalId was resolved BEFORE this graduation, so if the
-                // row graduating here would itself have become a valid link target, this save links to the
-                // older canonical (or to nothing) instead. That is deliberate — it is the CONSERVATIVE
-                // direction (a missing link, never a wrong one), and the case only arises from the D1
-                // same-drive-item collision that FR-11 (task 023) owns. Re-resolving after graduation would
-                // cost a second SPE round-trip to chase a state this path is not meant to create.
-                await GraduateLinkedCopyIfDivergedAsync(itemId, canonicalHash, cancellationToken);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex,
-                    "Editable content-dedup resolution failed (non-fatal) for DriveId={DriveId}, ItemId={ItemId}; " +
-                    "creating the document without a dedup stamp.",
-                    driveId, itemId);
-                linkedCanonicalId = null;
-            }
+            // UAC task 194b V-fix 3 (option a): the caller resolved the identity after the upload and asked its owner question
+            // with the canonical in it (OfficeDocumentPersistence.DocumentOwnershipOf), so the create links exactly that one.
+            // Without it (a caller that asked no such question), the identity is resolved here, as before.
+            var identity = editableContentIdentity
+                           ?? await ResolveEditableContentIdentityAsync(driveId, itemId, cancellationToken);
+            canonicalHash = identity.CanonicalHash;
+            linkedCanonicalId = identity.CanonicalDocumentId;
         }
         else
         {
@@ -734,6 +703,61 @@ public class OfficeDocumentPersistence
     };
 
     /// <summary>
+    /// UAC task 194b V-fix 3 (coordinator ruling, option a): the EDITABLE content's identity — its live hash and the
+    /// byte-identical canonical it will be linked to (<c>sprk_canonicaldocument</c>), if any — read from the uploaded item
+    /// BEFORE the document is created, so the save's owner question can hold the canonical as a Secure-only parent
+    /// (<see cref="DocumentOwnershipOf"/>): a copy of Secure content is created Secure, never re-owned afterwards. Runs the
+    /// graduate-on-divergence step first, as the create did. Non-fatal (NFR-04): a failure is logged and answers no canonical
+    /// (the document is created unlinked), keeping a hash already read.
+    /// </summary>
+    internal async Task<EditableContentIdentity> ResolveEditableContentIdentityAsync(
+        string driveId, string itemId, CancellationToken cancellationToken)
+    {
+        string? canonicalHash = null;
+        Guid? linkedCanonicalId = null;
+
+        // Guarded for the same reason the Compose create branch is: the detector documents itself as
+        // never-throwing, but an editable save must not become the ONE path where a dedup hiccup fails
+        // a user's save. Worst case here is a document created without its dedup stamp — recoverable
+        // on the next save; a lost draft is not.
+        try
+        {
+            // The detector's EDITABLE seam: pure identity resolution — no notification, no suppression.
+            // (ContentDedupDetector.ResolveContentIdentityAsync already excludes hash-linked copies from
+            // the canonical lookup, so a link never points at a copy that is about to graduate.)
+            var (liveHash, existingCanonicalId) = await _dedupDetector
+                .ResolveContentIdentityAsync(driveId, itemId, cancellationToken);
+            canonicalHash = liveHash;
+            linkedCanonicalId = existingCanonicalId;
+
+            // Graduate-on-divergence, evaluated BEFORE the create so the pre-existing row's metadata is
+            // honest regardless of what this save goes on to do. Reachable on the shipped Office path
+            // today because the SPE upload uses ConflictBehavior.Replace — a re-save under the same name
+            // lands on the SAME drive-item, so the row recorded for that item is exactly the one whose
+            // content just changed. It is also the seam FR-11's version-save (task 023) calls once it
+            // resolves an existing document row.
+            //
+            // Ordering, stated plainly: linkedCanonicalId was resolved BEFORE this graduation, so if the
+            // row graduating here would itself have become a valid link target, this save links to the
+            // older canonical (or to nothing) instead. That is deliberate — it is the CONSERVATIVE
+            // direction (a missing link, never a wrong one), and the case only arises from the D1
+            // same-drive-item collision that FR-11 (task 023) owns. Re-resolving after graduation would
+            // cost a second SPE round-trip to chase a state this path is not meant to create.
+            await GraduateLinkedCopyIfDivergedAsync(itemId, canonicalHash, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Editable content-dedup resolution failed (non-fatal) for DriveId={DriveId}, ItemId={ItemId}; " +
+                "creating the document without a dedup stamp.",
+                driveId, itemId);
+            linkedCanonicalId = null;
+        }
+
+        return new EditableContentIdentity(canonicalHash, linkedCanonicalId);
+    }
+
+    /// <summary>
     /// NFR-08 link half (task 028), mirroring the Compose create-on-save branch: the just-created EDITABLE
     /// document is byte-identical to an existing canonical RIGHT NOW, so record that as a hash-linked copy
     /// (<c>sprk_canonicaldocument</c>) and NOTIFY the saver — never silent, and never a suppressed create.
@@ -971,7 +995,8 @@ public class OfficeDocumentPersistence
     /// unfiled (the resolver's unfiled answer, as the reconciler gives it) when it has none.
     /// </summary>
     internal static Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext DocumentOwnershipOf(
-        string? associationType, Guid? associationId, Guid? relatedCommunicationId, Guid? callerObjectId)
+        string? associationType, Guid? associationId, Guid? relatedCommunicationId, Guid? callerObjectId,
+        Guid? canonicalDocumentId = null)
     {
         var association = new UpdateDocumentRequest();
         DocumentAssociationMap.TryApply(association, associationType, associationId);
@@ -988,6 +1013,16 @@ public class OfficeDocumentPersistence
 
         if (communication is not null)
             lookups.Add(KeyValuePair.Create(RelatedCommunicationColumn, (Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent?)communication));
+
+        // UAC task 194b V-fix 3: an editable copy's canonical, under its own column — ForRow holds it as a Secure-only parent
+        // (RecordOwnershipResolver.IsSecureOnlyParent): in secure-if-any, never the primary.
+        if (canonicalDocumentId is { } canonicalId && canonicalId != Guid.Empty)
+        {
+            lookups.Add(KeyValuePair.Create(
+                CanonicalDocumentAttribute,
+                (Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent?)
+                    new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(DocumentLogicalName, canonicalId)));
+        }
 
         return Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForRow(
             DocumentLogicalName, lookups, callerObjectId: callerObjectId);
@@ -1035,3 +1070,9 @@ public class OfficeDocumentPersistence
         return communicationId;
     }
 }
+
+/// <summary>
+/// UAC task 194b V-fix 3: an editable Office save's content identity (<see cref="OfficeDocumentPersistence.ResolveEditableContentIdentityAsync"/>):
+/// its live hash and the canonical it is byte-identical to, if any.
+/// </summary>
+public sealed record EditableContentIdentity(string? CanonicalHash, Guid? CanonicalDocumentId);

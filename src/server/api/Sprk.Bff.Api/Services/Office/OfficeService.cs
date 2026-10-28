@@ -1054,6 +1054,64 @@ internal class OfficeService : IOfficeService
                 };
                 await _jobs.RecordAsync(jobRecord, null, cancellationToken);
 
+                // ══ UAC task 194b V-fix 3 (coordinator ruling, option a) — AN EDITABLE COPY'S CANONICAL IS IN ITS OWNER QUESTION ══
+                // An editable save byte-identical to an existing canonical is created LINKED to it (sprk_canonicaldocument), and
+                // that link is a Secure-only parent (RecordOwnershipResolver.IsSecureOnlyParent): a copy of Secure content is
+                // Secure. The identity can only be read from the uploaded item, so it is read here, after the upload and before
+                // the create, and the owner question is asked again WITH the canonical (the one asked above, before anything
+                // was written, did not have it). The create then links exactly that canonical, owned as this answer says — never
+                // re-owned afterwards. An ordinary canonical never moves the copy: it is not the primary. A refusal writes no
+                // document and removes the upload this save made.
+                EditableContentIdentity? editableIdentity = null;
+                if (OfficeDocumentPersistence.IsEditableContent(request.ContentType))
+                {
+                    editableIdentity = await _documentPersistence.ResolveEditableContentIdentityAsync(driveId, itemId, cancellationToken);
+                    if (editableIdentity.CanonicalDocumentId is { } canonicalId)
+                    {
+                        var copyOwner = await _ownershipResolver.ResolveOwnerAsync(
+                            OfficeDocumentPersistence.DocumentOwnershipOf(
+                                request.TargetEntity?.EntityType,
+                                request.TargetEntity?.EntityId,
+                                emailCommunicationId,
+                                Guid.TryParse(userId, out var copyCallerObjectId) ? copyCallerObjectId : null,
+                                canonicalDocumentId: canonicalId) with
+                            {
+                                RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfObjectId(userId),
+                            },
+                            cancellationToken);
+                        if (!copyOwner.IsOwned)
+                        {
+                            if (await _documentPersistence.IsUploadUnreferencedAsync(itemId, canonicalId, cancellationToken))
+                            {
+                                await _storageUploader.DeleteFromSpeAsync(driveId, itemId, cancellationToken);
+                            }
+
+                            jobRecord = jobRecord with
+                            {
+                                Status = JobStatus.Failed,
+                                CurrentPhase = "OwnerUnresolved",
+                                CompletedAt = DateTimeOffset.UtcNow
+                            };
+                            await _jobs.RecordAsync(jobRecord, copyOwner.Reason, cancellationToken);
+
+                            return new SaveResponse
+                            {
+                                Success = false,
+                                Error = new SaveError
+                                {
+                                    Code = OfficeErrorCodes.RecordOwnerUnresolved,
+                                    Message = "This document is identical to an existing document, and an owner could not be "
+                                              + "assigned with that document taken into account, so it was not saved.",
+                                    Retryable = false
+                                }
+                            };
+                        }
+
+                        owningTeamId = copyOwner.OwningTeamId;
+                        createdByPersonId = copyOwner.CreatedByPerson;
+                    }
+                }
+
                 // Create Document record with SPE pointers
                 var (documentId, wasContentDuplicate, relatedCommunicationId) = await _documentPersistence.CreateDocumentWithSpePointersAsync(
                     request,
@@ -1076,7 +1134,9 @@ internal class OfficeService : IOfficeService
                     emailCommunicationId: emailCommunicationId,
                     jobId: jobId,
                     emailMessageIdFallback: emailMessageIdFallback,
-                    emailCommunicationResolved: emailCommunicationResolved);
+                    emailCommunicationResolved: emailCommunicationResolved,
+                    // V-fix 3: the identity the owner question above was asked with, so the create links exactly that canonical.
+                    editableContentIdentity: editableIdentity);
 
                 // FR-C3 (email-communication-intelligence-r2, R-3): the content is byte-identical to an existing
                 // canonical document (returned as `documentId`). No second document was created — and there is
