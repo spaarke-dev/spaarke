@@ -123,6 +123,11 @@
  * - The dead `onSetStandingGrant` wiring is removed (the modal has had no
  *   standing-grant control since task 073 UAT v1.0.24 #5).
  *
+ * v1.0.59 (task 193 G3d): no change in this file's logic. In the bundled modal, `pairedGrantEnded: false` no longer
+ *   promises a timing (the daily clean-up ends the grant only when its writes are on). It says the workforce app access
+ *   could not be removed just now and is still listed under Current Access, where it can be revoked; a paired grant
+ *   whose share is gone stays listed as its own row with Revoke.
+ *
  * v1.0.58 (task 193 G3b): `fetchExistingGrants` maps a grant's `pairedWith` (`kind: 'share'`, the user's
  *   `systemUserId`) — the share an "Add person" workforce-app grant goes with. In the bundled modal, Add person says
  *   whether the record shows in the colleague's workforce app (until when, or why not) and that the share itself has no
@@ -1559,7 +1564,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       title: (this.context.parameters.title?.raw as string) || undefined,
       showTitle,
       showVersion,
-      versionText: 'v1.0.58 • Built 2026-10-28',
+      versionText: 'v1.0.59 • Built 2026-10-28',
       // Task 175 (owner round 87): only the options at or above the parent's floor.
       accessPermissionOptions: accessPermissionPill.options,
       // Labels pulled from each bound field's Dataverse metadata so they
