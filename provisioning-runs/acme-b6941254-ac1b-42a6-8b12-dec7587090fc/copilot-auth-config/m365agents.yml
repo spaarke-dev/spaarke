@@ -30,3 +30,4 @@ provision:
       isPKCEEnabled: true
     writeToEnvironmentFile:
       configurationId: SPAARKE_COPILOT_AUTH_CONFIG_ID
+projectId: 6bb3986a-58aa-4438-90e9-dd1772ae598b

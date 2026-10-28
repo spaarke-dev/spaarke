@@ -1965,7 +1965,12 @@ The package has no `permissions`, `webApplicationInfo`, bot or knowledge capabil
    `SPAARKE_COPILOT_AUTH_CONFIG_ID` — commit that file: the toolkit skips creation only while that variable has a
    value, so a run from a fresh folder creates a second auth config. Scope is comma-separated there; `appId` is
    required by the driver and unused with `AnyApp`. The portal's **Client password authentication method** does not
-   apply (no secret). The portal still shows, edits and deletes the auth config.
+   apply (no secret). The portal still shows, edits and deletes the auth config. **Sign in with the Spaarke work
+   account**, not a personal Microsoft account: the browser reuses whatever account is already signed in, and
+   `--tenant` does not stop it. A personal account fails `oauth/register` with `Request failed with status code 401`;
+   `~/.fx/account/homeId.cache.appStudio` then ends in the consumer tenant `9188040d-6c67-4c5b-b112-36a304b66dad`.
+   Fix: `atk auth logout m365`, sign in again choosing the work account, re-run `atk provision` (safe — nothing was
+   created).
 7. **Record the id** on the customer's registry row. PATCH `sprk_copilotauthconfigid` on `sprk_dataverseenvironment`
    with your own identity (`pac data update` or the Web API). The id is not a secret; re-renders and decommission read
    it from the row.
