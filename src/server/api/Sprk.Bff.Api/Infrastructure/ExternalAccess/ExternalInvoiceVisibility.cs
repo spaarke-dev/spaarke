@@ -23,7 +23,8 @@ namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 /// <see cref="ExternalMultiRootRule.ReadLiveParentsAsync"/> + <see cref="ChildRowRoots"/> over the document row and
 /// <c>ExternalParticipationService.GetEffectiveRootRecordFlagsAsync</c>.</para>
 /// <para><b>Fail closed.</b> A Stored File or submission page that may be cut short, a source link that is not a GUID, a
-/// Stored File with a source communication or attachment identity but no source document, a source that does
+/// Stored File with a source communication or attachment identity but no source document, a submission whose document link
+/// is empty, a source that does
 /// not come back, an unreadable own value, marker, chain or communication, a root that cannot be resolved and a flag that
 /// cannot be read each hide the invoice. A failed read THROWS; the caller-aware seam
 /// (<see cref="ExternalDataService.HideInvoicesForAsync"/>) turns that into "every asked invoice hidden".</para>
@@ -232,10 +233,11 @@ internal static class ExternalInvoiceVisibility
     /// <summary>
     /// Where an invoice's Submit Invoice sources are recorded: an entity set, its primary id, its invoice lookup, its source
     /// document lookup, and the columns that name a source this rule cannot check (a row with one of them but no source
-    /// document hides its invoice: the source is unknowable, as 090's file route treats it).
+    /// document hides its invoice: the source is unknowable, as 090's file route treats it). When
+    /// <paramref name="EmptySourceIsUnreadable"/> is set, every row of the invoice is read and an empty source link hides it.
     /// </summary>
     private sealed record SourceLinks(string EntitySet, string IdColumn, string InvoiceValue, string SourceValue,
-        IReadOnlyList<string> UnknowableSourceColumns);
+        IReadOnlyList<string> UnknowableSourceColumns, bool EmptySourceIsUnreadable = false);
 
     /// <summary>The Stored Files of an invoice (094, 095): the source document, or a source communication or attachment
     /// identity with no document (a shape the schema allows and no writer creates today; hidden as unreadable).</summary>
@@ -248,10 +250,12 @@ internal static class ExternalInvoiceVisibility
         });
 
     /// <summary>The submissions of an invoice: <c>sprk_invoicesubmission.sprk_document</c> (the confirm route records its source
-    /// only there; review round 1, F1).</summary>
+    /// only there; review round 1, F1). A submission whose document link is empty hides the invoice (review round 2); the
+    /// submission evaluation refuses a submission with no document before any invoice exists
+    /// (<c>SubmissionEvaluationOutcome</c>, <c>DocumentMissing</c>).</summary>
     private static readonly SourceLinks SubmissionSources = new(
         "sprk_invoicesubmissions", "sprk_invoicesubmissionid", "_sprk_invoice_value", "_sprk_document_value",
-        Array.Empty<string>());
+        Array.Empty<string>(), EmptySourceIsUnreadable: true);
 
     /// <summary>
     /// Reads the source links of <paramref name="asked"/> from one table, one read per chunk, into
@@ -263,12 +267,15 @@ internal static class ExternalInvoiceVisibility
         SourceLinks links, IReadOnlyList<Guid> asked, CommunicationOpenThreadGate.RowQuery query,
         Dictionary<Guid, List<Guid>> sourcesOf, Dictionary<Guid, InvoiceHiddenReason> hidden, Action counted, CancellationToken ct)
     {
-        var anySource = string.Join(" or ", new[] { links.SourceValue }.Concat(links.UnknowableSourceColumns).Select(c => $"{c} ne null"));
+        // Rows with no source at all are left out by the filter, unless an empty source link itself hides the invoice.
+        var anySource = links.EmptySourceIsUnreadable
+            ? string.Empty
+            : " and (" + string.Join(" or ", new[] { links.SourceValue }.Concat(links.UnknowableSourceColumns).Select(c => $"{c} ne null")) + ")";
         var select = new[] { links.IdColumn, links.InvoiceValue, links.SourceValue }.Concat(links.UnknowableSourceColumns);
         var chunks = await CommunicationOpenThreadGate.ReadChunksAsync(asked, (chunk, c) => query(links.EntitySet,
             $"$select={string.Join(",", select)}" +
             $"&$filter=({string.Join(" or ", chunk.Select(id => $"{links.InvoiceValue} eq {id:D}"))})" +
-            $" and ({anySource})&$top={MaxSourceFilesPerChunk + 1}", c), ct).ConfigureAwait(false);
+            $"{anySource}&$top={MaxSourceFilesPerChunk + 1}", c), ct).ConfigureAwait(false);
         foreach (var (chunk, rows) in chunks)
         {
             counted();
@@ -294,8 +301,9 @@ internal static class ExternalInvoiceVisibility
                 switch (LinkOf(row, links.SourceValue))
                 {
                     case null:
-                        // No source document. A source communication or attachment with no document cannot be checked.
-                        if (links.UnknowableSourceColumns.Any(column => IsSet(row, column)))
+                        // No source document. An empty link where one is required, or a source communication or attachment
+                        // with no document, cannot be checked.
+                        if (links.EmptySourceIsUnreadable || links.UnknowableSourceColumns.Any(column => IsSet(row, column)))
                             hidden.TryAdd(invoiceId, InvoiceHiddenReason.SourceLinkUnreadable);
                         break;
                     case var source when source == ExternalDocumentNarrowing.UnreadableLink:

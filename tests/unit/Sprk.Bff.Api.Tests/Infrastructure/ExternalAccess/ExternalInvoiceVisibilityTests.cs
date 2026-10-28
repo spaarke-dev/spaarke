@@ -351,9 +351,37 @@ public sealed class ExternalInvoiceVisibilityTests
         var matter = Guid.NewGuid();
         _world.Flags[matter] = RootRecordFlags.None;
         _world.SubmissionSource(invoice, permission: Standard, matter: matter);
-        _world.Submission(invoice, document: null); // a submission naming no document is not a source
 
         await ShouldBeVisible(caller, invoice);
+    }
+
+    // Review round 2: a submission whose document link is empty hides the invoice (a submission with no document is refused
+    // before any invoice exists, so the shape is never a legitimate one).
+
+    [Theory, MemberData(nameof(ExternalCallers))]
+    public async Task ConfirmRoute_ASubmissionWhoseDocumentLinkIsEmpty_HidesTheInvoice(string caller)
+    {
+        var invoice = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        _world.Flags[matter] = RootRecordFlags.None;
+        _world.SubmissionSource(invoice, permission: Standard, matter: matter);
+        _world.Submission(invoice, document: null);
+
+        await ShouldBeHidden(caller, invoice, InvoiceHiddenReason.SourceLinkUnreadable);
+    }
+
+    [Theory, MemberData(nameof(ExternalCallers))]
+    public async Task ConfirmRoute_ADocumentLinkEmptiedAfterTheInvoiceWasCreated_HidesTheInvoice(string caller)
+    {
+        var invoice = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        _world.Flags[matter] = RootRecordFlags.None;
+        _world.SubmissionSource(invoice, permission: Restricted, matter: matter);
+        await ShouldBeHidden(caller, invoice, InvoiceHiddenReason.SourceHidden);
+
+        _world.SetSubmissions(invoice, "_sprk_document_value", null);
+
+        await ShouldBeHidden(caller, invoice, InvoiceHiddenReason.SourceLinkUnreadable);
     }
 
     [Theory, MemberData(nameof(ExternalCallers))]
@@ -879,8 +907,21 @@ internal sealed class InvoiceWorld : HttpMessageHandler
         var row = new Dictionary<string, object?> { [family.IdColumn] = id.ToString() };
         if (family.InvoiceLink is { } invoiceLink) row[invoiceLink] = invoice?.ToString();
         if (family.LineLink is { } lineLink) row[lineLink] = line?.ToString();
+        // A real submission always names its document (one with an empty link hides its invoice): give it a clean one.
+        if (table == "sprk_invoicesubmission" && invoice is not null)
+            row["_sprk_document_value"] = Document(Guid.NewGuid()).ToString();
         Seed(family.EntitySet, row);
         return id;
+    }
+
+    /// <summary>Sets <paramref name="column"/> on every submission of <paramref name="invoice"/>.</summary>
+    public void SetSubmissions(Guid invoice, string column, object? value)
+    {
+        lock (_sets)
+        {
+            foreach (var row in _sets["sprk_invoicesubmissions"].Where(r => (string?)r["_sprk_invoice_value"] == invoice.ToString()))
+                row[column] = value;
+        }
     }
 
     public void SetDocument(Guid id, string column, object? value)
