@@ -737,15 +737,14 @@ that is not a default team. Picked over "decide Stay before asking", which would
 the ask. With the team absent, an author-owned policy and a non-default-team policy leave the pass Completed. A
 default-team policy is still Refused, and the pass is Incomplete.
 
-**Not changed, reported (same class as F2, outside the brief).** The same refusal also hits `ReparentAsync` for a user-owned
-hard-deny row:
-- before the write, the re-file is refused;
-- in the settle, `RecordOwnerUnsettledException` is thrown;
-- yet the row would keep its author once the team resolved (the R4b-2b kept-author rule).
-
-On dev no writer re-files these tables: the 6 policies have no matter, and the ontology save and publish do not ask. So it
-is latent. The fix is the F2 treatment at both points: Unchanged with `AuthorKeptRestrictedContentReason` when
-`OwningUser` is set.
+**`ReparentAsync`: author wins (R4b-2d, owner round 137 rule 1).** The same refusal used to hit `ReparentAsync` for a
+user-owned hard-deny row whose answer is the content team: it was refused before the write, and the settle threw
+`RecordOwnerUnsettledException`. Both points now return Unchanged with `AuthorKeptRestrictedContentReason` when the row
+has an owning user (one predicate, `AuthorKeepsRestrictedContent`). The change is written and nothing throws. A row owned
+by a team, a default team included, still refuses when the team cannot be used. Tests in `RestrictedContentOwnerTests`:
+- the team missing before the write (author-owned): Unchanged, the change written, no assignment;
+- the team becoming unusable before the settle (author-owned): no throw, Unchanged, no assignment;
+- must fire: a default-team-owned row with the team missing is refused and the change is not written.
 
 **F3 tests (`SecureChildOrdinaryParentMoveTests`).**
 - (a) An over-match: the steps mention Signal B outside `resolvedSignalIds`. The record is read into the pass and stays at its
@@ -818,6 +817,10 @@ The ebilling writers are the first that would hit it.
 **Later (not this run).** Run a live report-only pass on dev against a root with more than one Signal below it. It proves
 Dataverse accepts the steps text-match OR query (`sprk_steps like '%<id>%'`, up to 200 per query). Record its duration and
 the Decision Record count, and compare them with a direct query of the same records.
+
+**Round 138 (no code change in 194b).** Task 196b will make the Unsecure root pass KEEP its children's mirrors. That
+supersedes items 3a and 3a′ as built on this branch: a child the Unsecure pass touches loses its mirror (A2's held row,
+the F4 table's Unsecure row). They stay as they are here until 196b lands.
 
 ### Issues to file (issue-ready text; the coordinator files them)
 
