@@ -274,3 +274,58 @@ Sources: **design** = [`design.md`](../design.md) §8 (D-1..D-12, §8.0c) and §
 - **Unchanged:** the BFF Signal read route still withholds it (157, D-176). Options A, B and D are not pursued.
 - **Related:** #2310 is closed. DI-120 (#2118) stays open separately.
 
+## D-191 — One canonical "Family" concept, with kinds (owner, 2026-10-27)
+
+- **Decision:** a Family is a set of records joined by typed edges of ONE kind. **Filing** is the kind now: a record and everything filed under it, a tree with one root. It is what field-mapping-r1's W7 builds (`RecordFamilyEdges`, `RecordFamilyReader`, `GET /api/v1/records/{table}/{id}/family`, the Family modal), and unified-access-control-r2 owns the edge content. A peer kind for patent and trademark families (e.g. Priority) comes later, as a graph with no root. "Secure family" is a qualifier (the Filing family of a Secure root), not a kind. Recorded in component model §3.
+- **Why:** the owner wants one family concept, not two, with future value for IP families. "Patent family" is the industry term, so the IP concept keeps the word.
+- **Guidance given to W7 (not a decision, field-mapping's to apply):**
+  - walk one kind at a time;
+  - push and Assigned-To are defined for Filing only and refused server-side for any other kind;
+  - the response describes the walk from an anchor, with an optional root;
+  - members carry `kind` and `edgeKind`;
+  - edge TYPES stay in code (parity-ratcheted), edge INSTANCES of a future peer kind live in Dataverse.
+- **Earlier discussion (found 2026-10-27, unified-access-control-r2):** the "family table" the owner remembers is UAC's Secure family.
+  - Round 94 (2026-10-12): the owner directed a `sprk_securefamily` table with a single-membership lookup on every family table.
+  - Round 100b (2026-10-14): an owner team per family was decided, conditional on platform spikes 2–7. It is NOT BUILT. **Deferred to the roadmap by UAC round 130 (#2362)**; see the last bullet.
+  - `projects/unified-access-control-r2/notes/secure-family-design-research-2026-10-12.md` §8 leaves an owner choice open: keep it secure-only, or generalise it to a record family for every core root, with a secure flag. That choice is still the owner's. Either way it is a materialisation of the Filing kind, so D-191 holds.
+  - ebilling has nothing (its "invoice family" is a table group). project-coordination's session held the question undelivered.
+- **Access rule (from uac-r2):** Secure-family membership comes only from Filing edges; a peer kind never confers it, crosses it, or carries actions across it.
+- **Clarification: one family per record (owner, 2026-10-27).** Approved in unified-access-control-r2's session as **UAC round 129**, with the owner's words verbatim in `projects/unified-access-control-r2/notes/session27-owner-decisions-and-research.md` (`47f452e522`). uac-r2 checked this wording against 194b slice 1 (`5b320ca0ec`): it matches. The subjects of the Signals a Decision Record resolves feed secure-if-any only, never the primary parent or the family. Since the 194b re-file answer (c) (2026-10-28), those subjects come from the record's stored `sprk_steps.resolvedSignalIds`, not from the FK.
+  - A record filed under several parents belongs to exactly ONE family: its **primary** parent's.
+  - The primary is the I-6 primary-parent rule, the same one that decides ownership: `RecordOwnershipContext.InPrimaryOrder` / `OrderedParentsOf` in `RecordOwnershipResolver.cs`, from UAC 194b, which is not yet on master. The order:
+    - Signals and Decision Records: the core record first, then the subject, then lineage order.
+    - Regarding-pair hosts such as To Do: the lookup that repeats the pair's record first, then the document carrier, then the communication carrier.
+    - Every other table: `SecureChildLineage.LookupOrder`.
+  - The other filing edges are **secondary**. They can be navigated, but they make the record a member of no other family.
+  - **Security is a separate question.** Secure-if-any still runs over ALL of a record's filing parents. A record can be isolated because a secondary parent is Secure, even though its family is its primary parent's. "Family" must not be read as "the security boundary": the Secure qualifier (`sprk_securefamily`) describes a family, and a row's isolation comes from its filing edges.
+  - **Projects (#2352, owner choice (a)):** a project has ONE filing root, its regarding pair. The Project ↔ Matter N:N stays an association; it is not a Filing edge. UAC task 195 makes the wizards write the pair. W7 models the pair as the Matter → Project filing edge.
+  - **W7 guidance:** `RecordFamilyReader` takes the primary parent from `InPrimaryOrder`, through `RecordFamilyEdges` (UAC-owned content), never from a second ordering.
+- **The family entity is deferred (owner, 2026-10-28).** Approved in unified-access-control-r2's session as **UAC round 130**, tracked as **#2362** (`notes/session27-owner-decisions-and-research.md`, `c1e4e8322d`).
+  - The Secure family qualifier's materialisation, `sprk_securefamily` with an owner team per family, is a **deferred design target, not a scheduled build**. UAC §8's open choice (secure-only, or a family for every root) waits with it.
+  - Nothing fails without it:
+    - isolation is the Secure Record Owners team in the Secure BU, plus mirror shares;
+    - membership is the primary-parent rule above;
+    - grouping is the core-ancestor stamps plus W7's `RecordFamilyReader`.
+  - **Binding now, so that a later build stays cheap; ontology code follows these too:**
+    1. Membership stays computable from stored data: the primary-parent rule, and one filing root per project.
+    2. Every ownership write goes through `RecordOwnershipResolver`.
+    3. New code asks "is this row isolated" through one shared predicate keyed on the Secure Record business unit, never a team id. It reads families through W7, never through raw lookups.
+  - **Existing ontology code, checked 2026-10-28:**
+    - No team id is hard-coded.
+    - `TodoAssigneeOwnerReconciliationJob` is already keyed on the Secure BU.
+    - `SignalSuppressionService.IsSecureOwned` (:285) compares the owner with the one resolved Secure owner team. It is correct today and would miss per-family teams. Logged as DI-129 (#2364). The shared predicate, named by uac-r2 and on master: `SecureRecordOwnerTeam.IsInSecureBusinessUnit` with `ResolveSecureBusinessUnitAsync`. The job's local check switches to the same pair when it is next touched.
+  - **Revisit triggers (#2362):**
+    - mirror-share growth near Dataverse limits;
+    - a feature that needs one deterministic family key across Secure records that the stamps and W7 cannot serve;
+    - structural isolation required between Secure families.
+
+## D-192 — "Matter has no active budget" items offer Create budget (owner, 2026-10-28)
+
+- **Decision (owner, this session, UAT round 1 re-check, check 4):** publish **POL-MATTER-NOBUDGET v3**.
+  - Plan actions: `revise-budget` first, then `assign-task`.
+  - Next steps: `add-todo` and `assign-work`.
+  - On a matter with no active budget, task 161's substitution (D-180) shows `revise-budget` as **Create budget**. The person who owns the item can set the budget or hand it off.
+- **Why:** v2's plan was `assign-task` only. 161 substitutes Create budget only where a plan offers Revise budget, so the rule that says "this matter has no budget" never offered a way to create one. The fee or scope change items did (verified by the owner).
+- `create-budget` stays non-authorable (D-180). The plan names `revise-budget`, and the server decides what is shown.
+- v1 and v2 rows stay, and Signals and Decision Records keep the version they cite (D-14).
+- **Approved:** the config change, and the dev apply through `Apply-DoLanePolicies.ps1 -DefinitionPath config/know-promotion.policies.json`, with a clean `-WhatIf` first. Task 166.
