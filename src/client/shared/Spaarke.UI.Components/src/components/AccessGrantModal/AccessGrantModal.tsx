@@ -17,16 +17,13 @@
  *
  * Write path (per the task's binding constraint — MUST reuse the built
  * `sprk_externalrecordaccess` write path, MUST NOT write directly to the table):
- *   - External contact with a known email → `POST /api/v1/external-access/invite-and-grant`
- *     (the built, atomic onboard+grant+CIAM-email endpoint). This is the literal
- *     endpoint task 041's steps named.
- *   - Internal workforce contact (or an external contact with no email on file)
- *     → `POST /api/v1/external-access/grant` (the built, audited grant CORE that
- *     `/invite-and-grant` itself calls internally — same write, same table, same
- *     `sprk_grantedby` provenance — invoked directly rather than through the
- *     onboard-first endpoint, because `/invite-and-grant`'s contract is
- *     structurally email+CIAM-onboard-first and would incorrectly attempt to
- *     CIAM-provision an internal workforce person).
+ *   - Every contact → `POST /api/v1/external-access/grant` (task 193, #2338: one
+ *     "Add person" entry). The modal never classifies a contact; the SERVER
+ *     decides. A contact who represents exactly one internal colleague is SHARED
+ *     with that user (the answer carries `sharedWithUser` and no grant row is
+ *     written; a share has no end date, and `expiryNotApplied` says when the
+ *     add's Expiration was not applied). Anyone else is granted, and an unbound
+ *     contact with an email is invited by the same call (task 185 slice E).
  *   - Revoke (both) → `POST /api/v1/external-access/revoke` (the built endpoint).
  *
  * INTERNAL NOTIFICATION (unified-access-control-r2 task 181, owner round 89
@@ -49,14 +46,14 @@
  * grant types this modal OFFERS. The server enforces the same rule at write
  * time (`ExternalGrantLifecycle.DecideGrantPolicy`), so this is the matching
  * affordance, not the enforcement:
- *   - Restricted: "+ Contact", "+ Organization" and the role-based candidate
- *     (contact) rows are NOT rendered — no contact-based access is possible.
- *     "+ User" (an internal POA share), user rows, their level dropdowns and
- *     Add stay ENABLED: Restricted never limits internal access. Revoke of
- *     existing access stays available.
+ *   - Restricted: "+ Organization" and the role-based candidate (contact) rows
+ *     are NOT rendered, and "Add person" looks up users only (none flagged
+ *     external) — no contact-based access is possible. User shares, user rows,
+ *     their level dropdowns and Add stay ENABLED: Restricted never limits
+ *     internal access. Revoke of existing access stays available.
  *   - Limited (and Secure): "+ Organization" is not rendered — contacts get
- *     access only through grants made to them by name. "+ Contact", the
- *     candidates and "+ User" stay enabled.
+ *     access only through grants made to them by name. "Add person" (contacts
+ *     and users) and the candidates stay enabled.
  *   - Standard (the default when the prop is omitted): every option, task
  *     041's baseline.
  * Each non-standard state shows ONE explanatory MessageBar ("Restricted
@@ -72,9 +69,10 @@
  * `sprk_accesslevel` (`accessLevelOptions` / `defaultAccessLevel`): it only
  * touches which grantee kinds are offered, never the level a grant carries.
  *
- * "+ USER" — INTERNAL SYSTEM-USER SHARES (task 065, unified-access-control-r2,
- * spec FR-29). A FOURTH write path alongside the three above: picking a
- * `systemuser` (native advanced lookup, {@link IAccessGrantModalProps.pickUser})
+ * INTERNAL SYSTEM-USER SHARES (task 065, unified-access-control-r2, spec
+ * FR-29). A FOURTH write path alongside the three above: picking a
+ * `systemuser` with "Add person" (native advanced lookup over contacts and
+ * users, {@link IAccessGrantModalProps.pickPerson}; task 193)
  * stages it into the SAME "Add Access Permissions" list (its own per-row level
  * dropdown), and `Add (N)` commits it via `POST
  * /api/v1/external-access/share-user` — a Dataverse POA share, NOT a
@@ -104,8 +102,8 @@
  * table-level `hasEntityPrivilege` — which is what the host did until
  * v1.0.31 — was not. A 403 with a `sdap.access.deny.delegation_*`
  * reason code is rendered as a persistent, dismissable-only-by-reopening
- * banner (`accessDenyState` below) that disables every write action (+User,
- * +Contact, +Organization, Add, Revoke) — never a toast, never a raw error.
+ * banner (`accessDenyState` below) that disables every write action (Add
+ * person, +Organization, Add, Revoke) — never a toast, never a raw error.
  * A 401 (expired sign-in) gets its own distinct banner for the same reason.
  *
  * M8 / M2 (task-024 finding, transferred to this task 2026-09-09; owner
@@ -193,11 +191,11 @@ import {
 } from '@fluentui/react-components';
 import { PersonRegular, PersonAccountsRegular, DismissCircleRegular, BuildingRegular } from '@fluentui/react-icons';
 import { SprkModal } from '../SprkModal';
-// Record picker (task 073 v1.0.24) — "+ Contact" / "+ Organization" open the host's
+// Record picker (task 073 v1.0.24) — "Add person" / "+ Organization" open the host's
 // NATIVE Dataverse advanced-lookup side pane (Xrm.Utility.lookupObjects, injected as
-// pickContact/pickOrganization) — the same advanced-find surface the wizards use. The
+// pickPerson/pickOrganization) — the same advanced-find surface the wizards use. The
 // modal renders `nonBlocking` so that page-level pane is not covered by a backdrop.
-// "+ User" (task 065, FR-29) mirrors the same pattern via pickUser.
+// "Add person" (task 193) looks up contacts and system users together.
 import type {
   AccessPermissionState,
   IAccessGrantModalProps,
@@ -252,7 +250,7 @@ const useStyles = makeStyles({
     lineHeight: tokens.lineHeightBase500,
     color: tokens.colorNeutralForeground1,
   },
-  // Subsection header row: title on the left, action buttons (+ Contact / + Organization) right-aligned.
+  // Subsection header row: title on the left, action buttons (Add person / + Organization) right-aligned.
   sectionHeaderRow: {
     display: 'flex',
     flexDirection: 'row',
@@ -798,6 +796,32 @@ function userShareRefusalDetail(err: unknown, user: IUserPick): string | null {
   return `System user ${who}: ${err.detail}`;
 }
 
+/** Task 193 (#2338): `/grant`'s refusals when the contact is linked to more than one internal user (409) or who it
+ * represents could not be read (503). Nothing was written. */
+const CONTACT_REPRESENTS_SEVERAL_USERS_REASON_CODE = 'sdap.access.grant.contact_represents_several_users';
+const CONTACT_REPRESENTATION_UNREADABLE_REASON_CODE = 'sdap.access.grant.contact_representation_unreadable';
+
+/**
+ * Task 193 (#2338): the named sentence when `/grant` refused a contact because of who the contact represents — linked to
+ * several users, unreadable, or one colleague who cannot receive a share (the share core's refusals, as `/share-user`
+ * answers them). `null` for any other failure. The server's sentence says "this contact"/"this user", so the modal
+ * names the contact.
+ */
+function contactShareRefusalDetail(err: unknown, contactName: string): string | null {
+  if (!(err instanceof AccessGrantModalApiError) || !err.reasonCode) return null;
+  if (
+    err.reasonCode === CONTACT_REPRESENTS_SEVERAL_USERS_REASON_CODE ||
+    err.reasonCode === CONTACT_REPRESENTATION_UNREADABLE_REASON_CODE
+  ) {
+    return `${contactName}: ${err.detail}`;
+  }
+  if (!USER_SHARE_NAMED_REFUSAL_CODES.has(err.reasonCode)) return null;
+  if (err.reasonCode === USER_NOT_INTERNAL_REASON_CODE) {
+    return `${contactName} is linked to a user flagged as external. Restricted records cannot be shared with external users.`;
+  }
+  return `${contactName} (linked to an internal user): ${err.detail}`;
+}
+
 /** The server's own explanation when the record's access policy refused a
  * grant (task 138), or `null` for any other failure. */
 function grantPolicyRefusalDetail(err: unknown): string | null {
@@ -935,6 +959,27 @@ interface IGrantBatchOutcome {
    * {@link INVITE_CONTACT_ALREADY_HAS_ACCOUNT_REASON_CODE}). They stay selected; the notice shows the server's text and
    * the sign-in link for staff to pass on. */
   alreadyHasAccount?: IAlreadyHasAccount[];
+  /** Task 193 (#2338): the contacts `/grant` answered with a share with the colleague they represent. */
+  sharedWithColleagues?: ISharedWithColleague[];
+}
+
+/** Task 193 (#2338): a contact add the server answered by sharing with the one colleague the contact represents. */
+interface ISharedWithColleague {
+  /** The colleague's name, or {@link COLLEAGUE_FALLBACK_NAME} when the server could not read it. */
+  name: string;
+  /** The add carried an Expiration, which the share does not take (a share has no end date). */
+  expiryNotApplied: boolean;
+}
+
+/** Task 193: the colleague's label when the server shared with them but could not read their name. */
+export const COLLEAGUE_FALLBACK_NAME = 'your colleague';
+
+/** Task 193 (#2338; expiry ruling (c)): the notice's sentence for a contact add the server answered with a share. A
+ * share has no end date; when the add carried an Expiration, the server says it was not applied, and so does this. */
+export function sharedWithColleagueSentence(shared: ISharedWithColleague): string {
+  return shared.expiryNotApplied
+    ? `Shared with ${shared.name}. Shares with colleagues have no end date.`
+    : `Shared with ${shared.name} — internal user.`;
 }
 
 /** Slice C2b: a person `/invite` sent nothing to because they already have an account. */
@@ -969,10 +1014,12 @@ export function safeSignInHref(url: string | undefined): string | undefined {
   }
 }
 
-/** Slice B3: `/invite-and-grant`'s 503 when the person's organisation could not be checked (nothing was written). */
+/** Slice B3: `/invite`'s 503 when the person's organisation could not be checked (nothing was written); `/grant` reports
+ * it as its invite's `errorCode` (the grant stands). */
 export const INVITE_TENANT_LOOKUP_UNAVAILABLE_REASON_CODE = 'sdap.access.invite.tenant_lookup_unavailable';
 
-/** Slice B3: the invite status of a person who will sign in with their work account (`onboardStatus` / `invite.status`). */
+/** Slice B3: the invite status of a person who will sign in with their work account (`/invite`'s `status`, `/grant`'s
+ * `invite.status`). */
 const WORK_ACCOUNT_INVITED_STATUS = 'WorkAccountInvited';
 
 /** Slice B3: added to the batch notice after the names of people invited for a work-account sign-in. */
@@ -986,7 +1033,7 @@ export function tenantLookupRetrySentence(names: string[]): string {
 /** `/grant`'s `invite.status` when the automatic invite did not complete (the grant stands). */
 const GRANT_INVITE_FAILED_STATUS = 'Failed';
 
-/** C2d: `/invite-and-grant`'s `emailErrorCode` when the invite email was attempted and not sent (the grant stands). */
+/** C2d: `/invite`'s `emailErrorCode` when the invite email was attempted and not sent. */
 export const INVITE_EMAIL_NOT_SENT_REASON_CODE = 'sdap.access.invite.email_not_sent';
 
 /** The batch notice's sentence for people granted by `/grant` whose invite was not sent; the notice offers Retry. */
@@ -1049,7 +1096,13 @@ function buildGrantBatchNotice(outcome: IGrantBatchOutcome): IModalNotice {
   const alreadyHasAccount = outcome.alreadyHasAccount ?? [];
   // Slice B3: who was invited for a work-account sign-in, named once, before the other suffixes.
   const workAccount = outcome.workAccountInvited ?? [];
-  const workSuffix = workAccount.length > 0 ? ` ${workAccount.join(', ')}: ${WORK_ACCOUNT_INVITED_SENTENCE}` : '';
+  // Task 193: the contacts the server shared with their colleague instead, named first.
+  const sharedSuffix = (outcome.sharedWithColleagues ?? [])
+    .map(shared => ` ${sharedWithColleagueSentence(shared)}`)
+    .join('');
+  const workSuffix = `${sharedSuffix}${
+    workAccount.length > 0 ? ` ${workAccount.join(', ')}: ${WORK_ACCOUNT_INVITED_SENTENCE}` : ''
+  }`;
   // Task 149: shares that WERE written (counted in `granted`) while some related records of the secure record are not
   // updated yet — the server's sentence is appended to whichever notice applies, never reported as a failure.
   // Task 181: likewise the could-not-notify sentence, last.
@@ -1140,7 +1193,7 @@ function describeOwnAccessPermission(
 ): { intent: 'error' | 'warning'; title: string; text: string } | null {
   const restrictedText =
     'Only internal users can be given access to this record. Contacts and organizations cannot be granted ' +
-    'access or invited. You can still share it with a colleague (+ User) and revoke existing access.';
+    'access or invited. You can still share it with a colleague (Add person) and revoke existing access.';
   if (state === 'restricted') {
     return isSecureRecord
       ? {
@@ -1194,12 +1247,10 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   // searchContacts / searchOrganizations remain in the props contract (SPA-host
   // fallback) but are unused by this PCF-hosted modal, which uses the native
   // advanced-lookup pickers below (task 073 UAT v1.0.24 #1/#4).
-  pickContact,
+  // Task 193 (#2338): the one "Add person" native picker (contacts and users together).
+  pickPerson,
   pickOrganization,
-  // "+ User" native picker (task 065, FR-29) — mirrors pickContact/pickOrganization.
-  pickUser,
   onOpenContact,
-  isInternalContact,
   title = 'Manage Access',
   accessLevelOptions = DEFAULT_ACCESS_LEVEL_OPTIONS,
   defaultAccessLevel,
@@ -1230,8 +1281,8 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   // computed from the props alone — never from `effectiveAccessLevel` or any other
   // per-grant `sprk_accesslevel` concept above, so the two stay structurally
   // independent (see the module doc comment).
-  //   - contactGrantsOffered: Restricted admits no contact-based access, so neither
-  //     "+ Contact" nor the role-based candidates are offered. "+ User" is unaffected.
+  //   - contactGrantsOffered: Restricted admits no contact-based access, so neither contacts ("Add person" looks up
+  //     users only) nor the role-based candidates are offered. User shares are unaffected.
   //   - organizationGrantsOffered: an organization-wide grant needs a Standard record
   //     (Limited and Secure admit only named, direct contact grants).
   const isRestricted = accessPermissionState === 'restricted';
@@ -1312,15 +1363,15 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   const [selectedCandidateIds, setSelectedCandidateIds] = React.useState<Set<string>>(new Set());
   const [approving, setApproving] = React.useState(false);
   // A native advanced-lookup pick is in flight — used only to disable the
-  // "+ Contact"/"+ Organization" buttons so a double-click can't open two panes.
+  // "Add person"/"+ Organization" buttons so a double-click can't open two panes.
   const [picking, setPicking] = React.useState(false);
 
   // Per-row access level (task 073 v1.0.23) — keyed by item id (contactId/orgId/systemUserId).
   // NO default: a row is not grantable until the admin picks its level ("Pick access level").
   const [rowLevels, setRowLevels] = React.useState<Record<string, number | undefined>>({});
-  // Contacts + organizations + users staged via the native "+ Contact" /
-  // "+ Organization" / "+ User" advanced lookup — appended into the "Add
-  // Access Permissions" list as selectable rows.
+  // Contacts + organizations + users staged via the native "Add person" /
+  // "+ Organization" advanced lookup — appended into the "Add Access
+  // Permissions" list as selectable rows.
   const [lookedUpContacts, setLookedUpContacts] = React.useState<IContactSearchResult[]>([]);
   /** Contacts whose `/grant` was written but whose invite was not sent. Their grant stands, so Retry invites them through
    * `/invite` (which always sends) instead of granting again: a re-grant answers an invite whose marker was written before
@@ -1771,103 +1822,65 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     /** `/grant`: the grant was written but its automatic invite did not complete (`invite.status` Failed); `errorCode`
      * is the server's reason. Absent when the invite was sent, not needed, or not reported. */
     inviteFailed?: { errorCode?: string };
+    /** Task 193: `/grant` shared with the colleague the contact represents (no grant row). */
+    sharedWith?: ISharedWithColleague;
   }
 
-  /** The additive fields `/grant`, `/invite-and-grant` and `/share-user` return (task 139; task 181's
-   * `notificationFailed`; on `/invite-and-grant` it is set only for an already-onboarded contact's grant email —
-   * a contact onboarded by the request is told by the CIAM email, R3 task 036). */
+  /** The additive fields `/grant` and `/share-user` return (task 139; task 181's `notificationFailed`). */
   interface IGrantWriteResponseBody {
     grantedAccessLevel?: number | null;
     narrowed?: boolean;
     notificationFailed?: boolean;
-    /** `/invite-and-grant`: how the person was onboarded (slice B3: `WorkAccountInvited`). */
-    onboardStatus?: string;
     /** `/grant`: what the grant did about the person's invite (slice B3: `WorkAccountInvited`). */
     invite?: { status?: string; errorCode?: string | null } | null;
-    /** `/invite-and-grant`: whether the invite email was sent. Only `false` with `email_not_sent` is a send that did not
-     * happen; `contact_already_has_account` means none was due, and `null` or absent (an older server) reports nothing. */
-    emailSent?: boolean | null;
-    emailErrorCode?: string | null;
+    /** `/grant` (task 193, #2338): the contact represents exactly one internal colleague, so the record was SHARED with
+     * that user and no grant row was written. `fullName` is `null` when the server could not read it. */
+    sharedWithUser?: { systemUserId: string; fullName?: string | null } | null;
+    /** `/grant` (task 193): the answer is a share and the add carried an Expiration, which a share does not take. */
+    expiryNotApplied?: boolean;
   }
 
   /**
-   * The single grant core shared by candidate-approve and named-add (per the
-   * task's "no duplicate write path" constraint). Classifies the contact
-   * internal-vs-external and routes to the correct BUILT endpoint. Throws only
-   * when the grant write itself fails; what the server reported with it is
-   * returned so a caller driving multiple grants (approve-selected) can
-   * aggregate one notice instead of each write overwriting the last.
+   * The single contact write shared by candidate-approve and named-add (per the task's "no duplicate write path"
+   * constraint). Task 193 (#2338): every contact goes to `/grant` and the SERVER decides — it shares with the one
+   * colleague the contact represents (`sharedWithUser`, no grant row) or grants the contact, inviting an unbound one
+   * with an email. The modal never classifies a contact. Throws only when the write itself fails; what the server
+   * reported with it is returned so a caller driving multiple grants (approve-selected) can aggregate one notice
+   * instead of each write overwriting the last.
    */
   const grantContact = React.useCallback(
-    async (
-      contact: { contactId: string; fullName: string; email?: string },
-      opts: { level: number }
-    ): Promise<IGrantOutcome> => {
-      const [firstName, ...rest] = contact.fullName.trim().split(/\s+/);
-      const lastName = rest.join(' ') || firstName;
-
-      // Fail SAFE toward "internal" on a classification error: the
-      // consequence of wrongly treating an external contact as internal is
-      // a missed CIAM-invite email (annoying, recoverable — the operator can
-      // re-invite from the grant list); the consequence of wrongly treating
-      // an internal workforce person as external is an UNWANTED CIAM account
-      // creation for someone who already has an M365 identity. The two
-      // failure directions are not symmetric, so the catch must not default
-      // to the more harmful one.
-      const internal = await isInternalContact(contact.contactId).catch(() => true);
-      // Task 099c: the record's applied Expiration rides on the add (see addExpiryDate).
-      const expiryBody = addExpiryDate ? { expiryDate: addExpiryDate } : {};
-      let data: IGrantWriteResponseBody | undefined;
-
-      if (!internal && contact.email) {
-        // External, known email → the built, atomic onboard+grant+CIAM-email endpoint.
-        // Polymorphic root (task 070/071): send {recordType, recordId} — the BFF
-        // binds the correct typed root lookup (project|matter|workassignment).
-        data = await postJson<IGrantWriteResponseBody>('/api/v1/external-access/invite-and-grant', {
-          email: contact.email,
-          recordType,
-          recordId,
-          accessLevel: opts.level,
-          firstName,
-          lastName,
-          ...expiryBody,
-        });
-      } else {
-        // Internal workforce contact, or an external contact with no email on
-        // file → the built grant-only core (no CIAM onboarding attempted).
-        // Task 181: the server notifies the internal user this contact represents (it decides that itself).
-        data = await postJson<IGrantWriteResponseBody>('/api/v1/external-access/grant', {
-          contactId: contact.contactId,
-          recordType,
-          recordId,
-          accessLevel: opts.level,
-          ...expiryBody,
-        });
-      }
+    async (contact: { contactId: string }, opts: { level: number }): Promise<IGrantOutcome> => {
+      const data = await postJson<IGrantWriteResponseBody>('/api/v1/external-access/grant', {
+        contactId: contact.contactId,
+        recordType,
+        recordId,
+        accessLevel: opts.level,
+        // Task 099c: the record's applied Expiration rides on the add (see addExpiryDate). A share does not take it, and
+        // the server then says so (expiryNotApplied).
+        ...(addExpiryDate ? { expiryDate: addExpiryDate } : {}),
+      });
 
       // Task 139: every grant is capped at the caller's own level; the server
       // says when it did, and the batch notice reports it.
       return {
         notificationFailed: data.notificationFailed === true,
         narrowed: data.narrowed === true,
-        // C5: "invited" only when the invite email was not reported as unsent; one that did not send is never "invited".
-        workAccountInvited:
-          data.emailSent !== false &&
-          (data.onboardStatus === WORK_ACCOUNT_INVITED_STATUS || data.invite?.status === WORK_ACCOUNT_INVITED_STATUS),
-        // C2d: `/invite-and-grant` whose invite email was attempted and not sent takes the same path as `/grant`'s failed
-        // invite (the not-sent notice, and Retry through `/invite`). Already-has-account, sent, or not reported: none.
-        // C5: an email reported sent never offers Retry.
+        workAccountInvited: data.invite?.status === WORK_ACCOUNT_INVITED_STATUS,
+        // The grant was written but its automatic invite did not complete: the not-sent notice, and Retry through
+        // `/invite`.
         inviteFailed:
-          data.emailSent === true
-            ? undefined
-            : data.invite?.status === GRANT_INVITE_FAILED_STATUS
-              ? { errorCode: data.invite.errorCode ?? undefined }
-              : data.emailSent === false && data.emailErrorCode === INVITE_EMAIL_NOT_SENT_REASON_CODE
-                ? { errorCode: data.emailErrorCode }
-                : undefined,
+          data.invite?.status === GRANT_INVITE_FAILED_STATUS
+            ? { errorCode: data.invite.errorCode ?? undefined }
+            : undefined,
+        sharedWith: data.sharedWithUser
+          ? {
+              name: data.sharedWithUser.fullName || COLLEAGUE_FALLBACK_NAME,
+              expiryNotApplied: data.expiryNotApplied === true,
+            }
+          : undefined,
       };
     },
-    [isInternalContact, postJson, recordId, recordType, addExpiryDate]
+    [postJson, recordId, recordType, addExpiryDate]
   );
 
   /**
@@ -1917,8 +1930,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
 
   // Unified "Available Contacts & Organizations & Users" list (task 073 v1.0.23; task
   // 065 adds the 'user' kind): role-based membership candidates + any contacts/
-  // organizations/users staged via the "+ Contact" / "+ Organization" / "+ User"
-  // side pane. Each item carries its own per-row access level. Granted contacts are
+  // organizations/users staged via the "Add person" / "+ Organization" side pane. Each item carries its own per-row access level. Granted contacts are
   // excluded by loadData() (user shares are not — a user with no share is simply
   // absent from Current Access, so nothing to exclude here).
   interface IAvailableItem {
@@ -2049,6 +2061,8 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     const organisationUnchecked: string[] = [];
     // Slice C2b: `/invite` sent nothing because the person already has an account; kept selected with the server's text.
     const alreadyHasAccount: { item: IAvailableItem; message: string; signInUrl?: string }[] = [];
+    // Task 193: contacts the server answered by sharing with the colleague they represent.
+    const sharedWithColleagues: ISharedWithColleague[] = [];
     for (const it of selected) {
       const level = rowLevels[it.id];
       // Unreachable: the missing-level guard above returned before any write. Narrows `level` for the writes below.
@@ -2069,6 +2083,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
           anyNotificationFailed = anyNotificationFailed || outcome.notificationFailed;
           anyNarrowed = anyNarrowed || outcome.narrowed;
           if (outcome.workAccountInvited) workAccountInvited.push(it.name);
+          if (outcome.sharedWith) sharedWithColleagues.push(outcome.sharedWith);
           if (outcome.inviteFailed) {
             inviteNotSent.push(it);
             if (outcome.inviteFailed.errorCode === INVITE_TENANT_LOOKUP_UNAVAILABLE_REASON_CODE) {
@@ -2135,9 +2150,11 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         }
         // Task 138: a refusal by the record's access policy carries the
         // server's own explanation — kept, and shown instead of a generic error.
+        // Task 193: a contact refused because of who it represents is named, as a user is.
         const refusal =
           grantPolicyRefusalDetail(err) ??
-          (it.kind === 'user' && it.user ? userShareRefusalDetail(err, it.user) : null);
+          (it.kind === 'user' && it.user ? userShareRefusalDetail(err, it.user) : null) ??
+          (it.kind === 'contact' && it.contact ? contactShareRefusalDetail(err, it.name) : null);
         if (refusal) {
           policyRefusals.push(refusal);
           continue;
@@ -2189,6 +2206,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
           message: a.message,
           signInUrl: a.signInUrl,
         })),
+        sharedWithColleagues,
       })
     );
     // Success (for Save's close decision) iff nothing failed, nothing was refused
@@ -2244,24 +2262,36 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     else onClose();
   }, [selectedOfferedCount, onClose]);
 
-  // ── Native advanced-lookup pickers (task 073 v1.0.24 #1/#4) ─────────────────
-  // `+ Contact` / `+ Organization` open the host's NATIVE Dataverse advanced-lookup
-  // side pane (Xrm.Utility.lookupObjects, injected as pickContact/pickOrganization)
+  // ── Native advanced-lookup pickers (task 073 v1.0.24 #1/#4; task 193) ───────
+  // "Add person" / "+ Organization" open the host's NATIVE Dataverse advanced-lookup
+  // side pane (Xrm.Utility.lookupObjects, injected as pickPerson/pickOrganization)
   // — the same advanced-find surface the wizards use. The pick is staged into the
   // "Add Access Permissions" list and auto-selected. Works because the modal is
   // `nonBlocking` (no backdrop covering the page-level lookup pane).
-  const openContactPicker = React.useCallback(async () => {
-    if (!pickContact) return;
+
+  /** Task 193 (#2338): the ONE "Add person" lookup over contacts and system users. A picked contact is staged as a
+   * contact (Add sends it to `/grant`, where the server decides between a share and a grant); a picked user as a user
+   * (Add sends it to `/share-user`). On a Restricted record the lookup offers users only, and none flagged external
+   * (task 114) — a Restricted record admits no contact-based access. */
+  const openPersonPicker = React.useCallback(async () => {
+    if (!pickPerson) return;
     setPicking(true);
     try {
-      const picked = await pickContact();
+      const picked = await pickPerson({ includeContacts: contactGrantsOffered, excludeExternal: isRestricted });
       if (!picked) return;
-      setLookedUpContacts(prev => (prev.some(c => c.contactId === picked.contactId) ? prev : [...prev, picked]));
-      setSelectedCandidateIds(prev => new Set(prev).add(picked.contactId));
+      if (picked.kind === 'contact') {
+        const contact = picked.contact;
+        setLookedUpContacts(prev => (prev.some(c => c.contactId === contact.contactId) ? prev : [...prev, contact]));
+        setSelectedCandidateIds(prev => new Set(prev).add(contact.contactId));
+      } else {
+        const user = picked.user;
+        setLookedUpUsers(prev => (prev.some(u => u.id === user.id) ? prev : [...prev, user]));
+        setSelectedCandidateIds(prev => new Set(prev).add(user.id));
+      }
     } finally {
       setPicking(false);
     }
-  }, [pickContact]);
+  }, [pickPerson, contactGrantsOffered, isRestricted]);
 
   const openOrgPicker = React.useCallback(async () => {
     if (!pickOrganization) return;
@@ -2275,22 +2305,6 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       setPicking(false);
     }
   }, [pickOrganization]);
-
-  /** Opens the host's NATIVE advanced-lookup side pane for a single `systemuser`
-   * (task 065, FR-29) — mirrors {@link openContactPicker}/{@link openOrgPicker}. */
-  const openUserPicker = React.useCallback(async () => {
-    if (!pickUser) return;
-    setPicking(true);
-    try {
-      // Task 114: a Restricted record cannot be shared with a user flagged external, so the lookup leaves them out.
-      const picked = await pickUser({ excludeExternal: isRestricted });
-      if (!picked) return;
-      setLookedUpUsers(prev => (prev.some(u => u.id === picked.id) ? prev : [...prev, picked]));
-      setSelectedCandidateIds(prev => new Set(prev).add(picked.id));
-    } finally {
-      setPicking(false);
-    }
-  }, [pickUser, isRestricted]);
 
   /** Task 142 (owner A3 = prompt): "Grant" on a suggestion writes through the NORMAL path — `/share-user` for a contact
    * that represents an internal user, `/grant` otherwise — at Collaborate (owner rule 5), and the server marks the entry
@@ -2323,10 +2337,17 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
             });
         await loadData();
         const notificationFailed = data.notificationFailed === true;
+        // Task 193: `/grant` may answer a contact with a share with the colleague the contact represents.
+        const shared = data.sharedWithUser
+          ? ` ${sharedWithColleagueSentence({
+              name: data.sharedWithUser.fullName || COLLEAGUE_FALLBACK_NAME,
+              expiryNotApplied: data.expiryNotApplied === true,
+            })}`
+          : '';
         setNoticeIfCurrent({
           intent: notificationFailed ? 'warning' : 'success',
           text:
-            `Granted ${name} access (suggested from ${entry.sourceFieldLabel}).` +
+            `Granted ${name} access (suggested from ${entry.sourceFieldLabel}).${shared}` +
             (notificationFailed ? ` ${NOTIFICATION_FAILED_SENTENCE}` : ''),
         });
       } catch (err) {
@@ -2572,7 +2593,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   // delegation gate), which renders its own banner below. The Access-Permission
   // gate is NOT part of this any more (task 138): it HIDES the grantee kinds a
   // record does not admit (contactGrantsOffered / organizationGrantsOffered)
-  // instead of disabling everything — on a Restricted record "+ User", user rows,
+  // instead of disabling everything — on a Restricted record "Add person" (users), user rows,
   // their level dropdowns and Add must stay usable, because Restricted never
   // limits internal access.
   const actionsBlocked = accessDenyState !== null;
@@ -2686,7 +2707,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       <SprkModal
         // task 073 v1.0.24 — the modal is `nonBlocking` (Fluent non-modal: no
         // backdrop, no focus trap) so the host's NATIVE advanced-lookup pane
-        // (Xrm.Utility.lookupObjects, opened by "+ Contact"/"+ Organization")
+        // (Xrm.Utility.lookupObjects, opened by "Add person"/"+ Organization")
         // renders on top and stays interactive instead of being covered by a
         // modal backdrop — the proven CommunicationActions composer pattern.
         open={open}
@@ -2839,10 +2860,9 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                   </div>
                 )}
 
-                {/* Add Access Permissions (task 073 UAT v1.0.24 #2; task 065 adds "+ User") —
-                    role-based members + looked-up contacts/orgs/users. "+ Contact" / "+ Organization" /
-                    "+ User" (icon-only, #4) open the NATIVE advanced-lookup pane. Select, choose a
-                    level, Add. */}
+                {/* Add Access Permissions (task 073 UAT v1.0.24 #2; task 193: one "Add person") —
+                    role-based members + looked-up contacts/orgs/users. "Add person" / "+ Organization"
+                    (icon-only, #4) open the NATIVE advanced-lookup pane. Select, choose a level, Add. */}
                 <div className={styles.section} style={{ marginTop: tokens.spacingVerticalL }}>
                   <div className={styles.sectionHeaderRow}>
                     <Text className={styles.sectionTitle}>Add Access Permissions</Text>
@@ -2890,17 +2910,18 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                           )}
                         </div>
                       )}
-                      {/* Icon-only "+" triggers (task 073 UAT v1.0.24 #4; task 065 adds "+ User") —
-                          open the native advanced-lookup pane (pickContact/pickOrganization/pickUser). */}
-                      {pickContact && contactGrantsOffered && (
-                        <Tooltip content="Add contact" relationship="label">
+                      {/* Icon-only "+" triggers (task 073 UAT v1.0.24 #4) — open the native advanced-lookup pane
+                          (pickPerson/pickOrganization). Task 193 (#2338): ONE "Add person" over contacts and users
+                          replaced "+ Contact" and "+ User"; on a Restricted record it looks up users only. */}
+                      {pickPerson && (
+                        <Tooltip content="Add person" relationship="label">
                           <Button
                             appearance="secondary"
                             size="small"
                             icon={<PersonRegular />}
-                            onClick={() => void openContactPicker()}
+                            onClick={() => void openPersonPicker()}
                             disabled={actionsBlocked || picking}
-                            aria-label="Add contact"
+                            aria-label="Add person"
                           >
                             +
                           </Button>
@@ -2915,20 +2936,6 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                             onClick={() => void openOrgPicker()}
                             disabled={actionsBlocked || picking}
                             aria-label="Add organization"
-                          >
-                            +
-                          </Button>
-                        </Tooltip>
-                      )}
-                      {pickUser && (
-                        <Tooltip content="Add user" relationship="label">
-                          <Button
-                            appearance="secondary"
-                            size="small"
-                            icon={<PersonAccountsRegular />}
-                            onClick={() => void openUserPicker()}
-                            disabled={actionsBlocked || picking}
-                            aria-label="Add user"
                           >
                             +
                           </Button>
@@ -2968,10 +2975,10 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                     {availableItems.length === 0 ? (
                       <Text className={styles.emptyState}>
                         {!contactGrantsOffered
-                          ? 'No users yet. Use “+ User” to share this record with a colleague.'
+                          ? 'No users yet. Use “Add person” to share this record with a colleague.'
                           : !organizationGrantsOffered
-                            ? 'No contacts or users yet. Use “+ Contact” or “+ User” to add.'
-                            : 'No contacts, organizations or users yet. Use “+ Contact”, “+ Organization” or “+ User” to add.'}
+                            ? 'No contacts or users yet. Use “Add person” to add.'
+                            : 'No contacts, organizations or users yet. Use “Add person” or “+ Organization” to add.'}
                       </Text>
                     ) : (
                       availableItems.map(item => (

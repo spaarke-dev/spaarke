@@ -56,7 +56,6 @@ function props(
     fetchCandidates: jest.fn(async () => []),
     fetchExistingGrants,
     searchContacts: jest.fn(async () => []),
-    isInternalContact: jest.fn(async () => false),
     canGrantAccess: true,
     ...overrides,
   };

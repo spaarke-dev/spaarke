@@ -51,7 +51,6 @@ function makeProps(
     fetchExistingGrants: jest.fn(async () => []),
     fetchStandingContacts: jest.fn(async () => []),
     searchContacts: jest.fn(async (): Promise<IContactSearchResult[]> => []),
-    isInternalContact: jest.fn(async () => false),
     ...overrides,
   };
 }

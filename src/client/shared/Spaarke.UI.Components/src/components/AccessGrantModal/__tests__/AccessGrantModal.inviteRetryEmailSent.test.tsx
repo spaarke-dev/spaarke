@@ -65,7 +65,6 @@ function makeProps(authenticatedFetch: jest.Mock): IAccessGrantModalProps {
     fetchCandidates: jest.fn(async () => [CANDIDATE]),
     fetchExistingGrants: jest.fn(async () => []),
     searchContacts: jest.fn(async () => []),
-    isInternalContact: jest.fn(async () => true),
     canGrantAccess: true,
   };
 }

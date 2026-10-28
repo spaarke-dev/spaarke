@@ -28,6 +28,7 @@ import type {
   IContactSearchResult,
   IOrganizationPick,
 } from '../types';
+import { personFromContact } from './personPickDouble';
 
 const SET_EXPIRY_PATH = '/api/v1/external-access/set-record-share-expiry';
 const RECORD_ID = 'matter-099c';
@@ -74,7 +75,6 @@ function props(
     fetchCandidates: jest.fn(async () => []),
     fetchExistingGrants,
     searchContacts: jest.fn(async () => []),
-    isInternalContact: jest.fn(async () => false),
     canGrantAccess: true,
     ...overrides,
   };
@@ -331,7 +331,6 @@ describe('AccessGrantModal — toolbar Expiration (task 099c)', () => {
 // ── Adds carry the record's date (task 099c, main-session decision 2026-10-17: option A) ────────────────────────────
 
 const GRANT_PATH = '/api/v1/external-access/grant';
-const INVITE_PATH = '/api/v1/external-access/invite-and-grant';
 
 /** The level dropdown in the row containing `start` (AccessGrantModal.test.tsx's helper, by element). */
 function levelComboIn(start: HTMLElement): HTMLElement {
@@ -362,9 +361,9 @@ function bodiesFor(fetchMock: ReturnType<typeof fetchDouble>, p: string): Array<
 const PICKED_CONTACT: IContactSearchResult = { contactId: 'contact-new', fullName: 'Nia New' };
 const PICKED_ORG: IOrganizationPick = { id: 'org-new', name: 'Acme LLP' };
 
-/** Adds the looked-up contact (no email: `/grant`) and organization, both at Collaborate, with one Add. */
+/** Adds the looked-up contact and organization (both `/grant`), both at Collaborate, with one Add. */
 async function addContactAndOrganization(): Promise<void> {
-  fireEvent.click(await screen.findByRole('button', { name: 'Add contact' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Add person' }));
   await screen.findByRole('checkbox', { name: 'Select Nia New' });
   fireEvent.click(screen.getByRole('button', { name: 'Add organization' }));
   await screen.findByRole('checkbox', { name: 'Select Acme LLP' });
@@ -379,7 +378,7 @@ function addProps(
   overrides: Partial<IAccessGrantModalProps> = {}
 ): IAccessGrantModalProps {
   return props(fetchExistingGrants, fetchMock, {
-    pickContact: jest.fn(async () => PICKED_CONTACT),
+    pickPerson: jest.fn(async () => personFromContact(PICKED_CONTACT)),
     pickOrganization: jest.fn(async () => PICKED_ORG),
     ...overrides,
   });
@@ -406,7 +405,7 @@ describe('AccessGrantModal — every add sends the record Expiration (task 099c)
     expect(expiryCalls(fetchMock)).toHaveLength(0);
   });
 
-  it('no share: a changed field is what the add sends (invite route included), with no Apply call', async () => {
+  it('no share: a changed field is what the add sends (a contact with an email included), with no Apply call', async () => {
     const fetchMock = fetchDouble(async () => jsonResponse({}));
     const candidate: IAccessGrantCandidate = {
       contactId: 'contact-cand',
@@ -429,9 +428,10 @@ describe('AccessGrantModal — every add sends the record Expiration (task 099c)
     await pickLevelFor('Cass Candidate', 'Collaborate');
     fireEvent.click(addButton());
 
-    await waitFor(() => expect(bodiesFor(fetchMock, INVITE_PATH)).toHaveLength(1));
-    expect(bodiesFor(fetchMock, INVITE_PATH)[0]).toMatchObject({
-      email: 'cass@outsidefirm.com',
+    // Task 193: every contact goes to /grant (the server invites an unbound one with an email).
+    await waitFor(() => expect(bodiesFor(fetchMock, GRANT_PATH)).toHaveLength(1));
+    expect(bodiesFor(fetchMock, GRANT_PATH)[0]).toMatchObject({
+      contactId: 'contact-cand',
       expiryDate: '2099-12-31',
     });
     expect(expiryCalls(fetchMock)).toHaveLength(0);
@@ -500,7 +500,7 @@ describe('AccessGrantModal — every add sends the record Expiration (task 099c)
       addProps(
         jest.fn(async () => [share('a', 'Ann Able', '2099-03-01'), share('b', 'Bo Baker', '2099-08-01')]),
         fetchMock,
-        { pickContact: jest.fn(async () => ({ contactId: 'contact-b', fullName: 'Bo Baker' })) }
+        { pickPerson: jest.fn(async () => personFromContact({ contactId: 'contact-b', fullName: 'Bo Baker' })) }
       )
     );
     const input = await expiryInput();
@@ -509,7 +509,7 @@ describe('AccessGrantModal — every add sends the record Expiration (task 099c)
       'Apply, or adding a person, sets them to this date.'
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Add contact' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add person' }));
     await screen.findByRole('checkbox', { name: 'Select Bo Baker' });
     await pickLevelFor('Bo Baker', 'Collaborate');
     fireEvent.click(addButton());
@@ -601,7 +601,7 @@ describe('AccessGrantModal — Expiration review round 1 (task 099c, PR #2062)',
     const input = await expiryInput();
     await waitFor(() => expect(input.value).toBe('2099-03-01'));
     await screen.findByRole('button', { name: 'Grant Pat Paralegal' });
-    fireEvent.click(screen.getByRole('button', { name: 'Add contact' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add person' }));
     await screen.findByRole('checkbox', { name: 'Select Nia New' });
     await pickLevelFor('Nia New', 'Collaborate');
     expect(addButton()).not.toBeDisabled();
@@ -710,7 +710,7 @@ describe('AccessGrantModal — Expiration review round 1 (task 099c, PR #2062)',
     await screen.findByTestId('share-expiry-default');
     fireEvent.change(input, { target: { value: '2099-12-31' } });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Add contact' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add person' }));
     await screen.findByRole('checkbox', { name: 'Select Nia New' });
     await pickLevelFor('Nia New', 'Collaborate');
     fireEvent.click(addButton());
@@ -737,7 +737,7 @@ describe('AccessGrantModal — Expiration review round 1 (task 099c, PR #2062)',
       )
     );
     await screen.findByTestId('share-expiry-default');
-    fireEvent.click(screen.getByRole('button', { name: 'Add contact' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add person' }));
     await screen.findByRole('checkbox', { name: 'Select Nia New' });
     await pickLevelFor('Nia New', 'Collaborate');
     fireEvent.click(addButton());
@@ -761,7 +761,7 @@ describe('AccessGrantModal — Expiration review round 1 (task 099c, PR #2062)',
     await screen.findByTestId('share-expiry-default');
     expect(((await expiryInput()) as HTMLInputElement).value).toBe('2099-12-31');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Add contact' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add person' }));
     await screen.findByRole('checkbox', { name: 'Select Nia New' });
     await pickLevelFor('Nia New', 'Collaborate');
     fireEvent.click(addButton());
@@ -931,7 +931,7 @@ describe('AccessGrantModal — Expiration review round 2 (task 099c, PR #2062)',
     await screen.findByTestId('share-expiry-default');
     fireEvent.change(input, { target: { value: '2099-12-31' } });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Add contact' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add person' }));
     await screen.findByRole('checkbox', { name: 'Select Nia New' });
     await pickLevelFor('Nia New', 'Collaborate');
     fireEvent.click(addButton());

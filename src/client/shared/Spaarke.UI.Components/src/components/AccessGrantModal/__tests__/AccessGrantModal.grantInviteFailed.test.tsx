@@ -75,7 +75,6 @@ function makeProps(authenticatedFetch: jest.Mock): IAccessGrantModalProps {
     fetchExistingGrants: jest.fn(async () => []),
     searchContacts: jest.fn(async () => []),
     // Routed through `/grant` (the core that reports the automatic invite in `invite`).
-    isInternalContact: jest.fn(async () => true),
     canGrantAccess: true,
   };
 }

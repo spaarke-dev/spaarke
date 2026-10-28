@@ -15,7 +15,8 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { AccessGrantModal, NOTIFICATION_FAILED_SENTENCE } from '../AccessGrantModal';
 import { throwingAuthenticatedFetch } from '../../../__tests__/helpers/authenticatedFetchDouble';
-import type { IAccessGrantModalProps, IAccessGrantCandidate, IUserPick } from '../types';
+import type { IAccessGrantModalProps, IAccessGrantCandidate, IUserPick, IPersonPick } from '../types';
+import { personFromUser } from './personPickDouble';
 
 const renderWithTheme = (ui: React.ReactElement) => render(<FluentProvider theme={webLightTheme}>{ui}</FluentProvider>);
 
@@ -32,7 +33,11 @@ const CHILDREN_INCOMPLETE = 'sdap.access.user_share.children_incomplete';
 
 function jsonResponse(body: unknown, ok = true, status = ok ? 200 : 500): Response {
   // A BFF ProblemDetails always carries `status`.
-  return { ok, status, json: async () => (ok ? body : { status, ...(body as Record<string, unknown>) }) } as unknown as Response;
+  return {
+    ok,
+    status,
+    json: async () => (ok ? body : { status, ...(body as Record<string, unknown>) }),
+  } as unknown as Response;
 }
 
 /** Every read answers empty; `/grant` and `/share-user` answer what the test says. */
@@ -55,8 +60,7 @@ function makeProps(authenticatedFetch: jest.Mock): IAccessGrantModalProps {
     fetchCandidates: jest.fn(async () => [INTERNAL]),
     fetchExistingGrants: jest.fn(async () => []),
     searchContacts: jest.fn(async () => []),
-    isInternalContact: jest.fn(async () => true),
-    pickUser: jest.fn(async (): Promise<IUserPick | null> => USER_PICK),
+    pickPerson: jest.fn(async (): Promise<IPersonPick | null> => personFromUser(USER_PICK)),
     canGrantAccess: true,
   };
 }
@@ -82,7 +86,7 @@ async function grantTheInternalContact(): Promise<void> {
 
 async function stageTheUser(): Promise<void> {
   await screen.findByText('Ralph Internal');
-  fireEvent.click(await screen.findByRole('button', { name: 'Add user' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Add person' }));
   await screen.findByText('Uma Userton');
   await pickLevelFor('Uma Userton', 'Collaborate');
 }
@@ -95,7 +99,9 @@ describe('AccessGrantModal — internal grant notification (task 181)', () => {
   it('a /grant that reports notificationFailed adds the could-not-notify sentence', async () => {
     renderWithTheme(
       <AccessGrantModal
-        {...makeProps(fetchWith(jsonResponse({ accessRecordId: 'g-1', narrowed: false, notificationFailed: true }), null))}
+        {...makeProps(
+          fetchWith(jsonResponse({ accessRecordId: 'g-1', narrowed: false, notificationFailed: true }), null)
+        )}
       />
     );
 

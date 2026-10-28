@@ -1,8 +1,9 @@
 /**
- * AccessGrantModal — "+ User" internal system-user share tests (task 065,
- * unified-access-control-r2, spec FR-29).
+ * AccessGrantModal — internal system-user share tests (task 065,
+ * unified-access-control-r2, spec FR-29; task 193: a user picked with the one
+ * "Add person" lookup).
  *
- * Covers the FOURTH write path this task adds (POST /share-user via pickUser,
+ * Covers the FOURTH write path this task adds (POST /share-user via pickPerson,
  * revoke via /unshare-user, list via GET /user-shares), the M8 fix
  * (postJson/getJson no longer read a failed response's body as success), the
  * designed 401/403 delegation-deny banner (task 008 FR-07 — "a designed UI
@@ -18,7 +19,14 @@ import { confirmRevoke } from '../../../__tests__/helpers/confirmDialog';
 import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
 import { AccessGrantModal } from '../AccessGrantModal';
 import { apiErrorFor, throwingAuthenticatedFetch } from '../../../__tests__/helpers/authenticatedFetchDouble';
-import type { IAccessGrantModalProps, IAccessGrantCandidate, IAccessGrantRecord, IUserPick } from '../types';
+import type {
+  IAccessGrantModalProps,
+  IAccessGrantCandidate,
+  IAccessGrantRecord,
+  IUserPick,
+  IPersonPick,
+} from '../types';
+import { personFromUser } from './personPickDouble';
 
 const renderWithTheme = (ui: React.ReactElement, theme = webLightTheme) =>
   render(<FluentProvider theme={theme}>{ui}</FluentProvider>);
@@ -97,7 +105,6 @@ function baseAuthenticatedFetch(extra?: (url: string, init?: RequestInit) => Res
 function makeProps(overrides?: Partial<IAccessGrantModalProps>): IAccessGrantModalProps {
   const fetchCandidates = jest.fn(async () => [CANDIDATE]);
   const fetchExistingGrants = jest.fn(async () => [EXISTING_GRANT]);
-  const isInternalContact = jest.fn(async () => false);
   const searchContacts = jest.fn(async () => []);
   const authenticatedFetch = baseAuthenticatedFetch();
 
@@ -110,8 +117,7 @@ function makeProps(overrides?: Partial<IAccessGrantModalProps>): IAccessGrantMod
     fetchCandidates,
     fetchExistingGrants,
     searchContacts,
-    isInternalContact,
-    // Stated EXPLICITLY since task 118 inverted the default to `false` (fail closed). The "+ User" share
+    // Stated EXPLICITLY since task 118 inverted the default to `false` (fail closed). The "Add person" share
     // flow is only reachable once the host has a "yes" from the server, so these tests say so.
     canGrantAccess: true,
     ...overrides,
@@ -144,16 +150,16 @@ async function findPostInit(fetchMock: jest.Mock, path: string): Promise<Request
   return call[1];
 }
 
-describe('AccessGrantModal — "+ User" internal system-user share (task 065)', () => {
+describe('AccessGrantModal — "Add person" internal system-user share (task 065)', () => {
   describe('pick -> level -> confirm', () => {
-    it('"+ User" opens the native lookup (pickUser), stages + auto-selects the pick, and issues exactly ONE POST to /share-user with the chosen level', async () => {
-      const pickUser = jest.fn(async (): Promise<IUserPick | null> => USER_PICK);
-      const props = makeProps({ pickUser });
+    it('"Add person" opens the native lookup (pickPerson), stages + auto-selects the pick, and issues exactly ONE POST to /share-user with the chosen level', async () => {
+      const pickPerson = jest.fn(async (): Promise<IPersonPick | null> => personFromUser(USER_PICK));
+      const props = makeProps({ pickPerson });
       renderWithTheme(<AccessGrantModal {...props} />);
 
       await screen.findByText('Gene Gatekeeper');
-      fireEvent.click(await screen.findByRole('button', { name: 'Add user' }));
-      await waitFor(() => expect(pickUser).toHaveBeenCalled());
+      fireEvent.click(await screen.findByRole('button', { name: 'Add person' }));
+      await waitFor(() => expect(pickPerson).toHaveBeenCalled());
       expect(await screen.findByText('Uma Userton')).toBeInTheDocument();
 
       await pickLevelFor('Uma Userton', 'Collaborate');
@@ -176,14 +182,14 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
       await screen.findByText(/Granted access to 1 item/);
     });
 
-    it('does not render the "+ User" button when pickUser is not supplied', async () => {
+    it('does not render the "Add person" button when pickPerson is not supplied', async () => {
       renderWithTheme(<AccessGrantModal {...makeProps()} />);
       await screen.findByText('Gene Gatekeeper');
-      expect(screen.queryByRole('button', { name: 'Add user' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Add person' })).not.toBeInTheDocument();
     });
 
     it('surfaces a narrowed-level notice when the server reports narrowed: true', async () => {
-      const pickUser = jest.fn(async (): Promise<IUserPick | null> => USER_PICK);
+      const pickPerson = jest.fn(async (): Promise<IPersonPick | null> => personFromUser(USER_PICK));
       const authenticatedFetch = baseAuthenticatedFetch(url =>
         url.includes('/share-user')
           ? jsonResponse({
@@ -196,13 +202,13 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
           : null
       );
       const props = makeProps({
-        pickUser,
+        pickPerson,
         authenticatedFetch: authenticatedFetch as unknown as IAccessGrantModalProps['authenticatedFetch'],
       });
       renderWithTheme(<AccessGrantModal {...props} />);
 
       await screen.findByText('Gene Gatekeeper');
-      fireEvent.click(await screen.findByRole('button', { name: 'Add user' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Add person' }));
       await screen.findByText('Uma Userton');
       await pickLevelFor('Uma Userton', 'Full Access');
       fireEvent.click(addButton());
@@ -332,7 +338,7 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
 
   describe('M8 — a failed response is never read as success', () => {
     it('a 500 ProblemDetails from /share-user surfaces as a failure notice, not a silent success', async () => {
-      const pickUser = jest.fn(async (): Promise<IUserPick | null> => USER_PICK);
+      const pickPerson = jest.fn(async (): Promise<IPersonPick | null> => personFromUser(USER_PICK));
       const authenticatedFetch = baseAuthenticatedFetch(url =>
         url.includes('/share-user')
           ? jsonResponse(
@@ -347,13 +353,13 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
           : null
       );
       const props = makeProps({
-        pickUser,
+        pickPerson,
         authenticatedFetch: authenticatedFetch as unknown as IAccessGrantModalProps['authenticatedFetch'],
       });
       renderWithTheme(<AccessGrantModal {...props} />);
 
       await screen.findByText('Gene Gatekeeper');
-      fireEvent.click(await screen.findByRole('button', { name: 'Add user' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Add person' }));
       await screen.findByText('Uma Userton');
       await pickLevelFor('Uma Userton', 'View Only');
       fireEvent.click(addButton());
@@ -370,7 +376,7 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
     it('/share-user children_incomplete shows the server’s sentence, not "1 failed"', async () => {
       const detail =
         'The record was shared, but 1 of its 6 related records (documents, events, to-dos and communications) could not be updated yet. They are updated automatically within a few minutes, or you can try again.';
-      const pickUser = jest.fn(async (): Promise<IUserPick | null> => USER_PICK);
+      const pickPerson = jest.fn(async (): Promise<IPersonPick | null> => personFromUser(USER_PICK));
       const authenticatedFetch = baseAuthenticatedFetch(url =>
         url.includes('/share-user') && !url.includes('/unshare-user')
           ? jsonResponse(
@@ -381,13 +387,13 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
           : null
       );
       const props = makeProps({
-        pickUser,
+        pickPerson,
         authenticatedFetch: authenticatedFetch as unknown as IAccessGrantModalProps['authenticatedFetch'],
       });
       renderWithTheme(<AccessGrantModal {...props} />);
 
       await screen.findByText('Gene Gatekeeper');
-      fireEvent.click(await screen.findByRole('button', { name: 'Add user' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Add person' }));
       await screen.findByText('Uma Userton');
       await pickLevelFor('Uma Userton', 'View Only');
       fireEvent.click(addButton());
@@ -405,7 +411,7 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
     it('Save with a staged /share-user that answers children_incomplete stays open once to show the warning, then closes', async () => {
       const detail =
         'The record was shared, but 1 of its 6 related records (documents, events, to-dos and communications) could not be updated yet. They are updated automatically within a few minutes, or you can try again.';
-      const pickUser = jest.fn(async (): Promise<IUserPick | null> => USER_PICK);
+      const pickPerson = jest.fn(async (): Promise<IPersonPick | null> => personFromUser(USER_PICK));
       const authenticatedFetch = baseAuthenticatedFetch(url =>
         url.includes('/share-user') && !url.includes('/unshare-user')
           ? jsonResponse(
@@ -416,13 +422,13 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
           : null
       );
       const props = makeProps({
-        pickUser,
+        pickPerson,
         authenticatedFetch: authenticatedFetch as unknown as IAccessGrantModalProps['authenticatedFetch'],
       });
       renderWithTheme(<AccessGrantModal {...props} />);
 
       await screen.findByText('Gene Gatekeeper');
-      fireEvent.click(await screen.findByRole('button', { name: 'Add user' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Add person' }));
       await screen.findByText('Uma Userton');
       await pickLevelFor('Uma Userton', 'View Only');
       fireEvent.click(screen.getByRole('button', { name: 'Save' }));
@@ -484,7 +490,7 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
 
   describe('delegation deny (task 008 FR-07) — designed banner, not a toast', () => {
     it('a 403 sdap.access.deny.delegation_write_required on /share-user renders the Write-access-required banner and disables further actions; no share is created', async () => {
-      const pickUser = jest.fn(async (): Promise<IUserPick | null> => USER_PICK);
+      const pickPerson = jest.fn(async (): Promise<IPersonPick | null> => personFromUser(USER_PICK));
       const authenticatedFetch = baseAuthenticatedFetch(url =>
         url.includes('/share-user')
           ? jsonResponse(
@@ -499,13 +505,13 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
           : null
       );
       const props = makeProps({
-        pickUser,
+        pickPerson,
         authenticatedFetch: authenticatedFetch as unknown as IAccessGrantModalProps['authenticatedFetch'],
       });
       renderWithTheme(<AccessGrantModal {...props} />);
 
       await screen.findByText('Gene Gatekeeper');
-      fireEvent.click(await screen.findByRole('button', { name: 'Add user' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Add person' }));
       await screen.findByText('Uma Userton');
       await pickLevelFor('Uma Userton', 'View Only');
       fireEvent.click(addButton());
@@ -518,7 +524,7 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
       ).toBeInTheDocument();
 
       // Actions are now disabled — server truth, not a client-side pre-check.
-      await waitFor(() => expect(screen.getByRole('button', { name: 'Add user' })).toBeDisabled());
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Add person' })).toBeDisabled());
       expect(addButton()).toBeDisabled();
 
       // No raw error/console noise — this is a designed state, not an exception.
@@ -542,20 +548,20 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
         'Whether you can change who has access to this record could not be checked. Close Manage Access and open it again to retry.',
       ],
     ])('a 403 %s on /share-user shows "%s" and disables further actions', async (reasonCode, title, sentence) => {
-      const pickUser = jest.fn(async (): Promise<IUserPick | null> => USER_PICK);
+      const pickPerson = jest.fn(async (): Promise<IPersonPick | null> => personFromUser(USER_PICK));
       const authenticatedFetch = baseAuthenticatedFetch(url =>
         url.includes('/share-user')
           ? jsonResponse({ title: 'Forbidden', detail: 'Refused.', reasonCode }, false, 403)
           : null
       );
       const props = makeProps({
-        pickUser,
+        pickPerson,
         authenticatedFetch: authenticatedFetch as unknown as IAccessGrantModalProps['authenticatedFetch'],
       });
       renderWithTheme(<AccessGrantModal {...props} />);
 
       await screen.findByText('Gene Gatekeeper');
-      fireEvent.click(await screen.findByRole('button', { name: 'Add user' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Add person' }));
       await screen.findByText('Uma Userton');
       await pickLevelFor('Uma Userton', 'View Only');
       fireEvent.click(addButton());
@@ -565,7 +571,7 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
       if (reasonCode.endsWith('check_failed')) {
         expect(screen.queryByText(/security role/)).not.toBeInTheDocument();
       }
-      await waitFor(() => expect(screen.getByRole('button', { name: 'Add user' })).toBeDisabled());
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Add person' })).toBeDisabled());
     });
 
     it('proactively surfaces the deny banner on OPEN when GET /user-shares itself 403s (the read is also delegation-gated), disabling Revoke too', async () => {
@@ -620,18 +626,18 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
     });
 
     it('a 401 renders a distinct "Sign-in expired" banner', async () => {
-      const pickUser = jest.fn(async (): Promise<IUserPick | null> => USER_PICK);
+      const pickPerson = jest.fn(async (): Promise<IPersonPick | null> => personFromUser(USER_PICK));
       const authenticatedFetch = baseAuthenticatedFetch(url =>
         url.includes('/share-user') ? jsonResponse({ title: 'Unauthorized' }, false, 401) : null
       );
       const props = makeProps({
-        pickUser,
+        pickPerson,
         authenticatedFetch: authenticatedFetch as unknown as IAccessGrantModalProps['authenticatedFetch'],
       });
       renderWithTheme(<AccessGrantModal {...props} />);
 
       await screen.findByText('Gene Gatekeeper');
-      fireEvent.click(await screen.findByRole('button', { name: 'Add user' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Add person' }));
       await screen.findByText('Uma Userton');
       await pickLevelFor('Uma Userton', 'View Only');
       fireEvent.click(addButton());
@@ -901,11 +907,11 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
   });
 
   describe('adr-021-dark-mode', () => {
-    it('renders the "+ User" action, the user-share badge, and the deny banner correctly under webDarkTheme with no console errors', async () => {
+    it('renders the "Add person" action, the user-share badge, and the deny banner correctly under webDarkTheme with no console errors', async () => {
       const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
       const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
 
-      const pickUser = jest.fn(async (): Promise<IUserPick | null> => USER_PICK);
+      const pickPerson = jest.fn(async (): Promise<IPersonPick | null> => personFromUser(USER_PICK));
       const authenticatedFetch = baseAuthenticatedFetch(url => {
         if (url.includes('/user-shares')) {
           return jsonResponse({
@@ -930,16 +936,16 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
         return null;
       });
       const props = makeProps({
-        pickUser,
+        pickPerson,
         authenticatedFetch: authenticatedFetch as unknown as IAccessGrantModalProps['authenticatedFetch'],
       });
       renderWithTheme(<AccessGrantModal {...props} />, webDarkTheme);
 
       expect(await screen.findByText('Shared Sam')).toBeInTheDocument();
       expect(screen.getByText('User (share)')).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Add user' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Add person' })).toBeInTheDocument();
 
-      fireEvent.click(screen.getByRole('button', { name: 'Add user' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Add person' }));
       await screen.findByText('Uma Userton');
       await pickLevelFor('Uma Userton', 'View Only');
       fireEvent.click(addButton());
@@ -966,35 +972,35 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
     }
 
     async function pickAndAdd(name: string): Promise<void> {
-      fireEvent.click(await screen.findByRole('button', { name: 'Add user' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Add person' }));
       await screen.findByText(name);
       await pickLevelFor(name, 'View Only');
       fireEvent.click(addButton());
     }
 
-    it('on a Restricted record the "+ User" lookup is asked to leave out users flagged external', async () => {
-      const pickUser = jest.fn(async (): Promise<IUserPick | null> => null);
-      renderWithTheme(<AccessGrantModal {...makeProps({ pickUser, accessPermissionState: 'restricted' })} />);
-      fireEvent.click(await screen.findByRole('button', { name: 'Add user' }));
-      await waitFor(() => expect(pickUser).toHaveBeenCalledWith({ excludeExternal: true }));
+    it('on a Restricted record the "Add person" lookup is asked for users only, leaving out users flagged external', async () => {
+      const pickPerson = jest.fn(async (): Promise<IPersonPick | null> => personFromUser(null));
+      renderWithTheme(<AccessGrantModal {...makeProps({ pickPerson, accessPermissionState: 'restricted' })} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Add person' }));
+      await waitFor(() => expect(pickPerson).toHaveBeenCalledWith({ includeContacts: false, excludeExternal: true }));
     });
 
-    it('on a standard record the "+ User" lookup is not filtered', async () => {
-      const pickUser = jest.fn(async (): Promise<IUserPick | null> => null);
-      renderWithTheme(<AccessGrantModal {...makeProps({ pickUser })} />);
-      fireEvent.click(await screen.findByRole('button', { name: 'Add user' }));
-      await waitFor(() => expect(pickUser).toHaveBeenCalledWith({ excludeExternal: false }));
+    it('on a standard record the "Add person" lookup offers contacts and users, unfiltered', async () => {
+      const pickPerson = jest.fn(async (): Promise<IPersonPick | null> => personFromUser(null));
+      renderWithTheme(<AccessGrantModal {...makeProps({ pickPerson })} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Add person' }));
+      await waitFor(() => expect(pickPerson).toHaveBeenCalledWith({ includeContacts: true, excludeExternal: false }));
     });
 
     it('a picked user row shows the email beside the name', async () => {
-      const pickUser = jest.fn(async (): Promise<IUserPick | null> => EXTERNAL_PICK);
-      renderWithTheme(<AccessGrantModal {...makeProps({ pickUser })} />);
-      fireEvent.click(await screen.findByRole('button', { name: 'Add user' }));
+      const pickPerson = jest.fn(async (): Promise<IPersonPick | null> => personFromUser(EXTERNAL_PICK));
+      renderWithTheme(<AccessGrantModal {...makeProps({ pickPerson })} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Add person' }));
       expect(await screen.findByText('System user · ralph.schroeder@hotmail.com')).toBeInTheDocument();
     });
 
     it('the external-user refusal names the person and says why, instead of "1 failed. Please try again."', async () => {
-      const pickUser = jest.fn(async (): Promise<IUserPick | null> => EXTERNAL_PICK);
+      const pickPerson = jest.fn(async (): Promise<IPersonPick | null> => personFromUser(EXTERNAL_PICK));
       const authenticatedFetch = refusingFetch(
         'sdap.access.user_share.user_not_internal',
         'This record is Restricted to internal users, and this user is flagged as external, so it was not shared with them.'
@@ -1002,7 +1008,7 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
       renderWithTheme(
         <AccessGrantModal
           {...makeProps({
-            pickUser,
+            pickPerson,
             accessPermissionState: 'restricted',
             authenticatedFetch: authenticatedFetch as unknown as IAccessGrantModalProps['authenticatedFetch'],
           })}
@@ -1018,7 +1024,7 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
     });
 
     it('a disabled-user refusal names the person in front of the server sentence', async () => {
-      const pickUser = jest.fn(async (): Promise<IUserPick | null> => USER_PICK);
+      const pickPerson = jest.fn(async (): Promise<IPersonPick | null> => personFromUser(USER_PICK));
       const authenticatedFetch = refusingFetch(
         'sdap.access.user_share.user_disabled',
         'This user is disabled, so the record was not shared with them.'
@@ -1026,7 +1032,7 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
       renderWithTheme(
         <AccessGrantModal
           {...makeProps({
-            pickUser,
+            pickPerson,
             authenticatedFetch: authenticatedFetch as unknown as IAccessGrantModalProps['authenticatedFetch'],
           })}
         />
@@ -1052,14 +1058,14 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
         'Whether this person is on the No Access list could not be checked, so nothing was shared. Try again.',
       ],
     ])('a %s refusal names the person instead of the generic retry message', async (reasonCode, status, detail) => {
-      const pickUser = jest.fn(async (): Promise<IUserPick | null> => USER_PICK);
+      const pickPerson = jest.fn(async (): Promise<IPersonPick | null> => personFromUser(USER_PICK));
       const authenticatedFetch = baseAuthenticatedFetch(url =>
         url.includes('/share-user') ? jsonResponse({ title: 'Not shared', detail, reasonCode }, false, status) : null
       );
       renderWithTheme(
         <AccessGrantModal
           {...makeProps({
-            pickUser,
+            pickPerson,
             authenticatedFetch: authenticatedFetch as unknown as IAccessGrantModalProps['authenticatedFetch'],
           })}
         />
@@ -1070,11 +1076,11 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
     });
 
     it('while the lookup is open the modal stays visible (dimmed), instead of disappearing', async () => {
-      let resolvePick: (v: IUserPick | null) => void = () => {};
-      const pickUser = jest.fn(() => new Promise<IUserPick | null>(r => (resolvePick = r)));
-      renderWithTheme(<AccessGrantModal {...makeProps({ pickUser })} />);
-      fireEvent.click(await screen.findByRole('button', { name: 'Add user' }));
-      await waitFor(() => expect(pickUser).toHaveBeenCalled());
+      let resolvePick: (v: IPersonPick | null) => void = () => {};
+      const pickPerson = jest.fn(() => new Promise<IPersonPick | null>(r => (resolvePick = r)));
+      renderWithTheme(<AccessGrantModal {...makeProps({ pickPerson })} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Add person' }));
+      await waitFor(() => expect(pickPerson).toHaveBeenCalled());
 
       const dialog = screen.getByRole('dialog');
       expect(dialog.style.visibility).not.toBe('hidden');

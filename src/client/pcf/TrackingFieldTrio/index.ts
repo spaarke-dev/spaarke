@@ -289,8 +289,8 @@ import {
   type IExistingGrantsRead,
   type IContactSearchResult,
   type IOrganizationPick,
-  type IUserPick,
-  type IUserPickOptions,
+  type IPersonPick,
+  type IPersonPickOptions,
   type ISecureOwnerInfo,
   type IContactOrganizationMembership,
   type ExternalGrantRootType,
@@ -310,7 +310,7 @@ import {
 import { resolveThemeWithUserPreference, setupThemeListener } from '@spaarke/ui-components/dist/utils/themeStorage';
 // Shared side-pane Advanced Lookup (task 071) — adopted as-is per §11: the PCF
 // host wires INavigationService.openLookup (→ Xrm.Utility.lookupObjects) and
-// passes plain pickContact/pickOrganization callbacks into the Xrm-free modal.
+// passes plain pickPerson/pickOrganization callbacks into the Xrm-free modal.
 import { createXrmNavigationService } from '@spaarke/ui-components/dist/utils/adapters';
 import type { INavigationService } from '@spaarke/ui-components/dist/types/serviceInterfaces';
 import type { ILookupItem } from '@spaarke/ui-components/dist/types/LookupTypes';
@@ -1266,35 +1266,71 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     }));
   };
 
-  /** Opens the SHARED side-pane Advanced Lookup for a single Contact (task 071 —
-   * INavigationService.openLookup → Xrm.Utility.lookupObjects) and enriches the
-   * pick with the contact's email via a host-context read, so the modal's
-   * external-vs-internal grant routing (which keys off email) stays correct.
-   * Returns `null` when the user cancels. The GUID is already `cleanGuid`-
-   * normalized by the adapter, so it is safe to send in an `@odata.bind`. */
-  private pickContact = async (): Promise<IContactSearchResult | null> => {
+  /** Opens the SHARED side-pane Advanced Lookup for ONE person — a Contact or a `systemuser` (task 193, #2338: the
+   * modal's one "Add person" entry, which replaced "+ Contact" and "+ User"). `INavigationService.openLookup` (task 071)
+   * wraps `Xrm.Utility.lookupObjects` and passes `entityTypes` straight through, so both types are offered in one
+   * lookup. The modal asks for users only on a Restricted record (`includeContacts: false`, which admits no
+   * contact-based access). With `excludeExternal` (task 114, a Restricted record) the lookup leaves out users flagged
+   * `sprk_isexternal = true` — blank counts as internal, hence the `null` branch (FetchXML `ne` drops nulls). The
+   * lookup's "recent records" list may not apply the filter, so `/share-user` still refuses such a user and the modal
+   * names them. The pick is enriched with the person's email via a host-context read (shown beside the name); a failed
+   * read still returns the pick, named as the lookup named it. The modal never asks whether a contact is an internal
+   * user — the server decides when it is granted. Returns `null` when the user cancels, and for any other entity type
+   * the lookup answers (fail closed: nothing is staged). The GUID is already `cleanGuid`-normalized by the adapter. */
+  private pickPerson = async (options: IPersonPickOptions): Promise<IPersonPick | null> => {
+    const entityTypes = options.includeContacts ? ['contact', 'systemuser'] : ['systemuser'];
     const results = await this.getNavService().openLookup({
-      entityType: 'contact',
-      entityTypes: ['contact'],
+      entityType: entityTypes[0],
+      entityTypes,
       allowMultiSelect: false,
+      filters: options.excludeExternal
+        ? [
+            {
+              entityLogicalName: 'systemuser',
+              filterXml:
+                '<filter type="or"><condition attribute="sprk_isexternal" operator="ne" value="1" />' +
+                '<condition attribute="sprk_isexternal" operator="null" /></filter>',
+            },
+          ]
+        : undefined,
     });
     const picked = results[0];
     if (!picked) return null;
-    try {
-      const rec = (await this.context.webAPI.retrieveRecord(
-        'contact',
-        picked.id,
-        '?$select=fullname,emailaddress1'
-      )) as unknown as { fullname?: string; emailaddress1?: string };
-      return {
-        contactId: picked.id,
-        fullName: rec?.fullname ?? picked.name,
-        email: rec?.emailaddress1 ?? undefined,
-      };
-    } catch {
-      // Email enrichment failed — still return the pick (routes as grant-only).
-      return { contactId: picked.id, fullName: picked.name };
+    if (picked.entityType === 'contact' && options.includeContacts) {
+      try {
+        const rec = (await this.context.webAPI.retrieveRecord(
+          'contact',
+          picked.id,
+          '?$select=fullname,emailaddress1'
+        )) as unknown as { fullname?: string; emailaddress1?: string };
+        return {
+          kind: 'contact',
+          contact: {
+            contactId: picked.id,
+            fullName: rec?.fullname ?? picked.name,
+            email: rec?.emailaddress1 ?? undefined,
+          },
+        };
+      } catch {
+        return { kind: 'contact', contact: { contactId: picked.id, fullName: picked.name } };
+      }
     }
+    if (picked.entityType === 'systemuser') {
+      try {
+        const rec = (await this.context.webAPI.retrieveRecord(
+          'systemuser',
+          picked.id,
+          '?$select=fullname,internalemailaddress'
+        )) as unknown as { fullname?: string; internalemailaddress?: string };
+        return {
+          kind: 'user',
+          user: { id: picked.id, name: rec?.fullname ?? picked.name, email: rec?.internalemailaddress ?? undefined },
+        };
+      } catch {
+        return { kind: 'user', user: { id: picked.id, name: picked.name } };
+      }
+    }
+    return null;
   };
 
   /** Opens the SHARED side-pane Advanced Lookup for a single `sprk_organization`
@@ -1309,54 +1345,6 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     });
     const picked = results[0];
     return picked ? { id: picked.id, name: picked.name } : null;
-  };
-
-  /** Opens the SHARED side-pane Advanced Lookup for a single `systemuser`
-   * (task 065, FR-29) — the "+ User" internal system-user share picker,
-   * mirroring {@link pickContact}/{@link pickOrganization} exactly.
-   * `INavigationService.openLookup` (task 071) wraps `Xrm.Utility.lookupObjects`
-   * generically by `entityType`/`entityTypes` with no per-entity allow-list, so
-   * `systemuser` works with no adapter change — verified against
-   * `xrmNavigationServiceAdapter.ts`'s `openLookup`, which passes
-   * `entityTypes` straight through. Returns `null` when the user cancels.
-   *
-   * Task 114 (owner test feedback 2026-10-07): with `excludeExternal` (a Restricted record) the lookup leaves out
-   * users flagged `sprk_isexternal = true` — blank counts as internal, hence the `null` branch (FetchXML `ne` drops
-   * nulls). The lookup's "recent records" list may not apply the filter, so `/share-user` still refuses such a user
-   * and the modal names them. The pick is enriched with the user's email, like {@link pickContact}. */
-  private pickUser = async (options?: IUserPickOptions): Promise<IUserPick | null> => {
-    const results = await this.getNavService().openLookup({
-      entityType: 'systemuser',
-      entityTypes: ['systemuser'],
-      allowMultiSelect: false,
-      filters: options?.excludeExternal
-        ? [
-            {
-              entityLogicalName: 'systemuser',
-              filterXml:
-                '<filter type="or"><condition attribute="sprk_isexternal" operator="ne" value="1" />' +
-                '<condition attribute="sprk_isexternal" operator="null" /></filter>',
-            },
-          ]
-        : undefined,
-    });
-    const picked = results[0];
-    if (!picked) return null;
-    try {
-      const rec = (await this.context.webAPI.retrieveRecord(
-        'systemuser',
-        picked.id,
-        '?$select=fullname,internalemailaddress'
-      )) as unknown as { fullname?: string; internalemailaddress?: string };
-      return {
-        id: picked.id,
-        name: rec?.fullname ?? picked.name,
-        email: rec?.internalemailaddress ?? undefined,
-      };
-    } catch {
-      // Email enrichment failed — still return the pick, named as the lookup named it.
-      return { id: picked.id, name: picked.name };
-    }
   };
 
   /** Task 067: which of the given contacts hold an ACTIVE membership in which of the given (walled) organizations —
@@ -1432,15 +1420,6 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     } catch {
       return null;
     }
-  };
-
-  /** Classifies a contact internal-workforce (has a linked `systemuser` via
-   * `sprk_primarycontact`) vs external — drives `AccessGrantModal`'s
-   * invite-and-grant vs grant-only routing decision. */
-  private isInternalContact = async (contactId: string): Promise<boolean> => {
-    const options = `?$filter=_sprk_primarycontact_value eq ${contactId}&$select=systemuserid&$top=1`;
-    const result = await this.context.webAPI.retrieveMultipleRecords('systemuser', options);
-    return result.entities.length > 0;
   };
 
   /** Reads the record's STANDING-grant members (task 073 UAT #2): the record's
@@ -1685,16 +1664,15 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
                     searchContacts: this.searchContacts,
                     searchOrganizations: this.searchOrganizations,
                     // NATIVE advanced-lookup pickers (task 073 UAT v1.0.24 #1/#4) —
-                    // "+ Contact"/"+ Organization" open Xrm.Utility.lookupObjects (the
+                    // "Add person"/"+ Organization" open Xrm.Utility.lookupObjects (the
                     // same advanced-find surface the wizards use). The modal is
                     // nonBlocking so the lookup pane isn't covered by a backdrop.
-                    pickContact: this.pickContact,
+                    // Task 193 (#2338): ONE "Add person" over contacts and users; the
+                    // server decides a contact's share-or-grant (no isInternalContact).
+                    pickPerson: this.pickPerson,
                     pickOrganization: this.pickOrganization,
-                    // "+ User" native picker (task 065, FR-29) — mirrors pickContact/pickOrganization.
-                    pickUser: this.pickUser,
                     // Contact-name link → open the Contact record (task 073 UAT v1.0.24 #6).
                     onOpenContact: this.openContactRecord,
-                    isInternalContact: this.isInternalContact,
                     // Access-Permission sharing gate (task 043, FR-14 Option A; task 138) —
                     // the bound field's raw value folded with the record's Secure flag,
                     // failing closed; see mapAccessPermissionToState()'s doc comment.

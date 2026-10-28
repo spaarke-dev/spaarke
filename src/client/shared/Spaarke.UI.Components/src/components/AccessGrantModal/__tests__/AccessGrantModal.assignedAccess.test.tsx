@@ -99,7 +99,6 @@ function makeProps(fetchMock: jest.Mock, grants: IAccessGrantRecord[] = []): IAc
     fetchCandidates: jest.fn(async () => []),
     fetchExistingGrants: jest.fn(async () => grants),
     searchContacts: jest.fn(async () => []),
-    isInternalContact: jest.fn(async () => false),
     canGrantAccess: true,
     accessPermissionState: 'limited',
     isSecureRecord: true,
