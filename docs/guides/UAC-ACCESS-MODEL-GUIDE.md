@@ -1,6 +1,6 @@
 # Unified Access Control (UAC) — How Access Works Guide
 
-> **Last Updated**: 2026-10-27 (verified against master `3ff2c04bf5`)
+> **Last Updated**: 2026-10-28 (verified against master `bafe310ca4` plus task 193's "Add person" branch, run G3c)
 > **Purpose**: Explain, end to end, how Spaarke decides who can see and change a record — for every kind of user, every
 > access setting, and every family of related records — so that people understand the behaviour and every new feature is
 > built to the same model.
@@ -25,6 +25,7 @@ and the code disagree, the code is right and this guide must be fixed.
 | **Workforce SPA user** | An employee (workforce Entra identity) using the external SPA or Teams. Either a licensed **systemuser** or an unlicensed **contact-only** employee. |
 | **Partner** | An external person signing in through Entra External ID (CIAM) to the SPA. Always a **contact**. |
 | **Grant** | A row in `sprk_externalrecordaccess` that gives a contact (or a whole organization) a level on a core record. Written by **Manage Access**. |
+| **Paired grant** | The grant "Add person" writes to the one contact that represents an internal colleague, beside their share, so the record shows in their workforce app. The row names the colleague in `sprk_pairedsystemuser`, and it ends when the share is removed (§2). |
 | **Share** | A native Dataverse record share (`principalobjectaccess`) to a systemuser or team. Written by Manage Access "Add person" (for an internal user), the Assigned-To rule, or the platform **Share** button. |
 | **Access Permission** | The record's policy column `sprk_accesspermission`: **Standard**, **Limited** or **Restricted** (§3). |
 | **Secure** | The record's flag `sprk_issecure`. A Secure record is owned by a memberless team in an empty business unit, so only explicit shares reach it (§8). |
@@ -198,7 +199,7 @@ A set built over a failed read is never cached.
 |---|---|---|---|---|
 | Owner field, business unit, role depth, team membership | **Yes** (Dataverse) | Yes — Dataverse if the impersonated read is on; otherwise the membership walk (owner, owning team, owning BU, people lookups) | No | No |
 | Dataverse share (Manage Access "Add person" for an internal user, platform Share button, Assigned-To share, secure-child mirroring) | **Yes** | Only if the impersonated read is on (or as a Secure-record Read confirmation) | No | No |
-| Manage Access grant to the person's contact (`/grant`, `/invite-and-grant`, contact-to-colleague grants, Assigned-To grant) | No | **Yes**, through the linked contact | **Yes** | **Yes** |
+| Manage Access grant to the person's contact (`/grant`, `/invite-and-grant`, the paired grant "Add person" writes beside a colleague's share, contact-to-colleague grants, Assigned-To grant) | No | **Yes**, through the linked contact | **Yes** | **Yes** |
 | Organization-wide grant through a current organization membership | No | Yes, through the linked contact | Yes | Yes |
 | Contact standing grant (`sprk_standinggrant` + `sprk_accesspermissiongrant` on the contact) | No | No | **Yes** | No |
 | Organization expansion (organization's standing grant) | No | No | **Yes** | No |
@@ -209,7 +210,7 @@ A set built over a failed read is never cached.
 
 | Tool | What it writes | Who it is for |
 |---|---|---|
-| **Manage Access → "Add person"** (the Access Grant modal) | One entry over contacts and users; the server decides what is written. An internal user, picked directly (`/share-user`) or through the contact that represents them (`/grant`), gets a Dataverse share at the level's share mask (§4), with **no end date**. An external contact (`/grant`) gets a grant row, and `/grant` invites an unbound contact that has an email (the invite never undoes the grant). On a **Restricted** record the lookup offers users only, and none flagged external. | Internal users and partners |
+| **Manage Access → "Add person"** (the Access Grant modal) | One entry over contacts and users; the server decides what is written. An internal user, picked directly (`/share-user`) or through the contact that represents them (`/grant`), gets a Dataverse share at the level's share mask (§4), with **no end date**, plus a **paired grant** at the same level on the one contact that represents them, so the record also shows in their workforce app (dated: the Expiration sent, else today + 90). An external contact (`/grant`) gets a grant row, and `/grant` invites an unbound contact that has an email (the invite never undoes the grant). On a **Restricted** record the lookup offers users only, and none flagged external. | Internal users and partners |
 | **Manage Access → organization** | An organization-wide grant row (no contact). | Every current member of an organization |
 | **Contact Grants** (in the SPA) | A grant row issued by a contact to a colleague in their own organization (§4). A contact cannot grant themselves (409 `self_grant`). | Partners granting colleagues |
 | **Assigned-To rule** (automatic) | For each person or organization named in an "Assigned …" column: a Collaborate grant row, or a Collaborate share if the contact is linked to an eligible systemuser. Runs after BFF saves, from the form's post-save step (Update Access), and every 5 minutes. Never lowers existing access; if staff remove it, it is not re-added. Policy applies: on a **Secure** record grants and shares are only *suggested* for staff to confirm (an existing automatic grant is kept); on **Restricted** no contact or organization grant is written (a linked internal user's share still is, unless they are flagged external); on **Limited** no organization grant. When an assignment is changed or cleared, the previous person's unmodified automatic access is removed (always on save; by the 5-minute job only when its revoke switch is on). | Assignees |
@@ -220,16 +221,82 @@ A set built over a failed read is never cached.
 Every Manage Access call requires the caller to hold **Write and Share** on the record, checked as the caller. The one
 exception is **Update Access** (`/assigned-access/sync`, which re-runs the Assigned-To rule): Write is enough.
 
-> **Adding an internal colleague.** Pick them in "Add person", as a user or through their contact: either way they get a
-> share, which the model-driven app honours, never a contact grant. `/grant` asks who a contact represents
-> (`ContactUserRepresentation`, the same rule the Assigned-To rule uses): exactly one internal user → a share with that
-> user (no grant row; an Expiration sent with it is not applied, and the answer says so with `expiryNotApplied`); several
-> users → refused 409; unreadable → refused 503 and nothing is written; nobody → a contact grant. The contact's pending
-> Assigned-To suggestions on the record are then marked adopted, and the role candidate is no longer offered while the
-> share stands (#2338).
+> **Adding an internal colleague.** Pick them in "Add person", as a user or through their contact. Either way they get a
+> share, which the model-driven app honours, and a paired grant on their contact, which the workforce app honours.
+> `/grant` asks who a contact represents (`ContactUserRepresentation`, the same rule the Assigned-To rule uses): exactly
+> one internal user → a share with that user, plus the paired grant; several users → refused 409; unreadable → refused
+> 503 and nothing is written; nobody → a contact grant only. `/share-user` asks the reverse question: it takes the user's
+> primary contact and the contacts bound to their sign-in, keeps only those that represent the user, and pairs only when
+> exactly one remains. The contact's pending Assigned-To suggestions on the record are then marked adopted, and the role
+> candidate is no longer offered while the share stands (#2338).
+
+### Adding an internal colleague: the share and the paired workforce-app grant
+
+The share is written first. Only after it is confirmed does the BFF write the paired grant, through the same grant core
+as `/grant` (grantor ceiling, never lower, the No Access list, a lapsed row restored). The grant row names the colleague
+in `sprk_pairedsystemuser`. The contact gets **no invite and no notification**.
+
+| | The share | The paired grant |
+|---|---|---|
+| What honours it | The model-driven app (and the SPA only if the impersonated read is on) | The workforce SPA and Teams, through the colleague's linked contact |
+| Level | The level picked, as the share mask (§4) | The same level |
+| End date | None. An Expiration sent with it is not applied to the share (`expiryNotApplied`) | The Expiration sent, else today + 90. A live re-add keeps its date; a lapsed one is restored with today's |
+| Secure record | Written | Written, as on a Standard record |
+| Restricted record | Written | **Not written** (Restricted allows no contact grant) |
+
+The answer's `workforceApp` says what happened to the grant: `visible: true` with `until`, or `visible: false` with a
+`reason`. When the share stands without the grant, the modal says "They can open the record in this app, but it won't
+show in their workforce app because …", with one plain reason per group:
+
+| The modal says "… because" | Server reasons (`workforceApp.reason`) |
+|---|---|
+| the record is Restricted | `sdap.access.grant.record_restricted` |
+| that needs exactly one contact record linked only to them | `sdap.access.share.workforce_no_linked_contact`, `…workforce_several_linked_contacts`, `sdap.access.grant.contact_represents_several_users` |
+| workforce app access is not set up in this environment yet | `sdap.access.share.workforce_pairing_column_missing` (see the deploy note below) |
+| that access could not be set up just now; adding them again retries it | a read or write that failed: `…workforce_pairing_unreadable`, `…workforce_grant_failed`, `…workforce_link_unreadable`, and the grant core's `caller_rights_unreadable`, `policy_unreadable`, `owner_unreadable`, `no_access_unverifiable` |
+| their contact is on this record's No Access List | `sdap.access.grant.grantee_denied` |
+| (a sentence of its own) "Their contact already holds higher workforce app access to this record, which is left as it is." | `sdap.access.grant.would_lower_existing` |
+| that access could not be given | any other code |
+
+The modal never shows the codes. If the No Access flags cannot be read, the share itself is refused and nothing is
+written.
+
+**Current Access** lists the share and its paired grant together: the grant row sits under its share, and the share row
+notes "(workforce app access until {date})". The share row has one Revoke, which removes both.
+
+**What each removal ends.** The share is always removed first, then its paired grant. The grant is found by
+`sprk_pairedsystemuser` on that record; a grant the operator gave the contact on purpose, or one paired with someone
+else, is never ended.
+
+| Removal | Ends the paired grant? |
+|---|---|
+| Current Access Revoke on the share (`/unshare-user`) | **Yes**, once the share is confirmed gone. This includes a user who held no share, so a repeat finishes an earlier half-done revoke. The answer carries `pairedGrantEnded` |
+| No Access enforcement (a person walled off a Secure record) | **Yes**, for each covered user whose share is gone |
+| Restricted enforcement (a user flagged external) | **Yes**, for each user whose share it removed |
+| Secure-root inheritance (a parent's share withdrawn from a filed record) | **Yes**, when the inherited share is removed outright; not on the Remove Secure cascade |
+| The Assigned-To rule withdrawing its share (the assignment changed) | **Yes** |
+| Remove Secure (`/unsecure-project`) | **No**: the person keeps their access (owner round 135; task 196) |
+| Current Access Revoke on the paired grant alone (`/revoke`), project closure, person removal | Ends the grant only. **The share stays**, and the modal says so |
+| A share removed outside Spaarke (the platform Share dialog, an import) | Not at once: the daily clean-up below |
+
+**When the grant cannot be ended.** Sometimes the share is removed but the paired grant cannot be ended: the pairing
+could not be read, a row was not deactivated, or the file-container clean-up failed. Then the share stays removed,
+`pairedGrantEnded` is `false`, the failure is logged at Error with ids only, and the modal adds "Workforce-app access will
+be removed within a day." A system path reports itself not complete. The daily clean-up is rule **R5** of the
+external-access reconciliation job (05:00 UTC). It ends every active paired grant whose user no longer holds a direct
+share on the record, and keeps the pairing on the row; a share it cannot read leaves the row for the next run. R5 writes
+only when `ExternalAccess:Reconciliation:WritesEnabled` is `true`. In report-only mode (the default) it lists the grant
+and leaves it active until its date or a manual Revoke.
+
+> **Deploy note: the pairing column.** The pairing needs `sprk_externalrecordaccess.sprk_pairedsystemuser`, created by
+> `scripts/Deploy-ExternalRecordAccessPairedSystemUser.ps1` (dry run → `-Apply` → `-Verify`) **before** the BFF. Until
+> it is applied, "Add person" still shares and answers `workforce_pairing_column_missing` (logged at Error,
+> `PAIRING-COLUMN-MISSING`, for each add). The removal paths log one Warning per pass and end only the share, Current
+> Access shows no pairing, and R5 is skipped with a Warning.
 
 **Where in the code**: `Api/ExternalAccess/GrantExternalAccessEndpoint.cs`, `ContactInternalUserShare.cs` (the share-or-grant
-decision), `InviteAndGrantExternalUserEndpoint.cs`, `InternalShareEndpoints.cs`, `ContactGrantEndpoints.cs`, `DelegationRuleFilter.cs`,
+decision and the paired grant), `ExternalGrantRevocationService.cs` (`RevokePairedWithAsync`, the one paired end),
+`Services/ExternalAccess/ExternalAccessReconciliationJob.cs` (R5), `scripts/Deploy-ExternalRecordAccessPairedSystemUser.ps1`, `InviteAndGrantExternalUserEndpoint.cs`, `InternalShareEndpoints.cs`, `ContactGrantEndpoints.cs`, `DelegationRuleFilter.cs`,
 `Services/ExternalAccess/AssignedAccessMaterializer.cs`, the Access Grant modal in
 `src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/`.
 
@@ -598,7 +665,8 @@ team-held copy is still reported): **Spaarke Billing Administrator** (policy tab
 
 ### Manage Access on a Secure record
 
-- **Internal users ("Add person", a user or their contact)**: allowed at any level, under the grantor ceiling. People on the record's No Access list
+- **Internal users ("Add person", a user or their contact)**: allowed at any level, under the grantor ceiling. They get the share and the
+  paired workforce-app grant, as on a Standard record (§2). People on the record's No Access list
   are refused. The last person with access cannot be removed (409). Children carry the record's shares — never more.
 - **External contacts ("Add person")**: allowed, but **direct grants only** (Secure behaves as Limited for contacts).
 - **Organization-wide grants**: refused (`org_grant_direct_only_record`).
@@ -763,6 +831,8 @@ code already does; deviating needs an ADR conflict resolution (CLAUDE.md §6.5).
 | A child record is visible on the parent in the SPA but not in the MDA | The child is user-owned or owned by a non-default team (reported, not moved), or the ordinary-moves switch is off, after an ordinary parent moved (§7) | Check `ResultJson.ordinaryMoves` of the `secure-child-reconciliation` job; reassign the child, or share it |
 | Someone who should not see Secure records can | Their business unit is an ancestor of the secure one with a Deep Read role, or they hold Global Read | Check `[SECURE-CENSUS]`; move them out of the root business unit or narrow the role depth |
 | Share button missing on a record | The record is Restricted (by design) | Use Manage Access "Add person" for internal users |
+| A colleague added with "Add person" can open the record in the MDA, but it does not show in their workforce app | No paired grant was written: the record is Restricted, they have no single linked contact, the pairing column is not deployed, or a read failed (the modal named the reason, §2) | Link exactly one contact to them, apply `Deploy-ExternalRecordAccessPairedSystemUser.ps1`, or add them again |
+| A colleague whose share was removed still sees the record in their workforce app | The paired grant was not ended (`pairedGrantEnded: false`), or the share was removed outside Spaarke | Revoke the paired grant in Current Access. R5 ends it the next morning only while `ExternalAccess:Reconciliation:WritesEnabled` is on |
 | Remove Secure refused | Caller is not a Full Access holder or the creator (403), or a parent is Secure (409 `access_follows_parent`) | Ask a Full Access holder; un-secure the parent instead |
 | Change not visible yet | Caches (up to 2 minutes) or a background job not yet run (2–5 minutes) | Wait, then re-check; look for the job's log line |
 
