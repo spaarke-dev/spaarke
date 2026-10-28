@@ -280,7 +280,10 @@ foreach ($group in $plan | Group-Object { $_.Role.Id }) {
         }
     }
     foreach ($r in @($group.Group | Where-Object Action -eq 'Remove')) {
-        Invoke-DvPost "roles($($role.Id))/Microsoft.Dynamics.CRM.RemovePrivilegeRole" @{ PrivilegeId = $r.Privilege.Id }
+        # The bound action's one parameter is 'Privilege', an entity reference (Web API $metadata), not 'PrivilegeId'.
+        Invoke-DvPost "roles($($role.Id))/Microsoft.Dynamics.CRM.RemovePrivilegeRole" @{
+            Privilege = @{ '@odata.type' = 'Microsoft.Dynamics.CRM.privilege'; privilegeid = $r.Privilege.Id }
+        }
     }
 }
 
