@@ -3,11 +3,16 @@ import { authenticatedJsonFetch } from '@shared/services/authenticatedJsonFetch'
 
 /**
  * Entity types that can be selected as association targets.
+ *
+ * Task 133: `WorkAssignment` exists ONLY for the Invoice view's core-record picker (Matter, Project, Work Assignment).
+ * It is deliberately NOT in {@link ALL_ENTITY_TYPES}, not in the Save picker's `allowedTypes` (SaveFlow) and not a
+ * "+ New" type (CreateRecordForm): a Work Assignment is a record an invoice is submitted against, never a Save
+ * target from this pane.
  */
-export type EntityType = 'Matter' | 'Project' | 'Invoice' | 'Account' | 'Contact';
+export type EntityType = 'Matter' | 'Project' | 'Invoice' | 'Account' | 'Contact' | 'WorkAssignment';
 
 /**
- * All valid entity types for filtering.
+ * All valid entity types for filtering. Task 133: `WorkAssignment` is left out on purpose (see {@link EntityType}).
  */
 export const ALL_ENTITY_TYPES: EntityType[] = ['Matter', 'Project', 'Invoice', 'Account', 'Contact'];
 
@@ -20,6 +25,7 @@ export const ENTITY_LOGICAL_NAMES: Record<EntityType, string> = {
   Invoice: 'sprk_invoice',
   Account: 'account',
   Contact: 'contact',
+  WorkAssignment: 'sprk_workassignment',
 };
 
 /**

@@ -20,7 +20,7 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **Found** | 2026-10-20, task 003 (pre-existing) |
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2137 |
 | **Class** | F1 (existence oracle) + F2 (duplicate mechanism) |
-| **Owner task** | Push site: 040 (reuse `MappingSourceReadProbe.CheckCallerReadAsync`). Quick-create filter sites (source + Assigned To) and `TodoSourceAccessFilter`: **operator decision**; small, but outside a planned task |
+| **Owner task** | **Timing (F1): fixed by PR #2331** (owner-approved 2026-10-27): quick-create source + Assigned To, push and to-do source use the equalised gate call; `CheckCallerReadAsync` lost its non-equalised mode. **Duplicate copies (F2): still open on #2137**; push consolidates in 040. Other non-equalised sites found in review: #2334 |
 | **Failure** | `GetCallerRightsAsync` (not timing-equalised) makes a missing id ~1.6 s slower than a denied one, with identical text |
 
 ## DI-003 — Seeder creates Copy rules with no `sprk_syncmode`; `/push` skips them in new environments

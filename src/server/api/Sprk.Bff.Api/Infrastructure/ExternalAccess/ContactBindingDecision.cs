@@ -10,7 +10,7 @@
 //
 // It grows out of task 013's DecideWorkforceEmailMatch / ReadOidBinding (A-18), which this file supersedes:
 // that decision compared a column that does not exist in dev (contact.azureactivedirectoryobjectid) and
-// never wrote a binding, so an unbound contact stayed hijackable forever. Here the binding key is the Entra
+// never wrote a binding, so a contact was never tied to one sign-in identity. Here the binding key is the Entra
 // oid in contact.sprk_externalobjectid — ONE field for both planes (SPA-r2 FR-11) — and the plane that wrote
 // it is recorded in contact.sprk_identityplane.
 //
@@ -214,6 +214,15 @@ public sealed record CollisionFlag(
     /// <summary>True when <paramref name="party"/>'s collision is already recorded.</summary>
     public bool Records(CollisionParty party) => Parties.Any(p => p.IsSameCollision(party));
 
+    /// <summary>
+    /// The flag of a row read while the BFF's read of the collision columns is not proven
+    /// (<see cref="ContactBindingRow.CollisionColumnsUnproven"/>): <paramref name="read"/>, or a placeholder when nothing was
+    /// read, marked as one whose parties cannot be read. A flag read without proof may hide parties, so it is never
+    /// overwritten (<see cref="ContactBindingDecision.ShouldWriteFlag"/>) and never cleared (<see cref="ContactBindingDecision.ReconcileFlag"/>).
+    /// </summary>
+    public static CollisionFlag ReadWithoutProof(CollisionFlag? read)
+        => (read ?? new CollisionFlag(DateTimeOffset.MinValue, null, null, null)) with { HasUnreadableParties = true };
+
     /// <summary>A flag whose parties are <paramref name="parties"/> (the first becomes the summary); null for none.</summary>
     public static CollisionFlag? FromParties(IReadOnlyList<CollisionParty> parties)
     {
@@ -275,8 +284,48 @@ public sealed record ContactBindingRow(
     /// <summary>Only <c>statecode = 0</c> resolves or binds (ADR-003).</summary>
     public bool IsActive => StateCode == 0;
 
-    /// <summary>The binding, read by <see cref="ContactBindingDecision.ReadBinding"/>.</summary>
-    public BindingState Binding => ContactBindingDecision.ReadBinding(RawOid, RawPlane);
+    /// <summary>
+    /// <c>true</c> when this row was read while the BFF's read of the field-secured binding columns
+    /// (<see cref="DataverseContactIdentityStore.BindingColumns"/>: the binding and its plane) was NOT
+    /// proven (<see cref="SecuredColumnReadProof"/>). An empty plane on such a row may be a hidden one, so its binding is
+    /// <see cref="BindingKind.Unreadable"/>: never Unbound (no bind onto it) and never a plane-less legacy binding.
+    /// </summary>
+    public bool IdentityColumnsUnproven { get; init; }
+
+    /// <summary>
+    /// <c>true</c> when this row was read while the BFF's read of the five field-secured collision-flag columns
+    /// (<see cref="DataverseContactIdentityStore.CollisionColumns"/>) was NOT proven (<see cref="SecuredColumnReadProof"/>).
+    /// A hidden flag reads as no flag, so <see cref="Flag"/> is then <see cref="CollisionFlag.ReadWithoutProof"/>: no
+    /// collision is written over it (a write sets every collision column) and the reconciliation job never clears it.
+    /// </summary>
+    public bool CollisionColumnsUnproven { get; init; }
+
+    /// <summary>
+    /// Slice C: <c>contact.sprk_externalaccessremovedon</c> as read with the row (<see cref="ContactBindingDecision.ExternalAccessRemovedOnColumn"/>):
+    /// when an administrator removed the person's external access. <c>null</c> when it read empty.
+    /// </summary>
+    public DateTimeOffset? RemovedOn { get; init; }
+
+    /// <summary>
+    /// Slice C: <c>true</c> when this row's removed marker read EMPTY while the BFF's read of that column was NOT proven
+    /// (<see cref="SecuredColumnReadProof"/>, its own column set). A hidden marker reads empty, so the row counts as removed.
+    /// </summary>
+    public bool RemovedMarkerUnproven { get; init; }
+
+    /// <summary>
+    /// Slice C: the person's external access was removed by an administrator (<see cref="RemovedOn"/> set), or whether it was
+    /// cannot be read (<see cref="RemovedMarkerUnproven"/>). Either way the contact neither resolves, binds nor is invited
+    /// (fail closed), whatever its <c>statecode</c>.
+    /// </summary>
+    public bool IsRemoved => RemovedOn is not null || RemovedMarkerUnproven;
+
+    /// <summary>
+    /// The binding, read by <see cref="ContactBindingDecision.ReadBinding"/>; <see cref="BindingKind.Unreadable"/> when the
+    /// plane read empty and the identity columns' read is not proven (<see cref="IdentityColumnsUnproven"/>).
+    /// </summary>
+    public BindingState Binding => IdentityColumnsUnproven && RawPlane is null
+        ? BindingState.Unreadable
+        : ContactBindingDecision.ReadBinding(RawOid, RawPlane);
 }
 
 /// <summary>How a lookup ended. Anything but <see cref="Read"/> denies.</summary>
@@ -432,7 +481,14 @@ public sealed record RegistrationEmailDecision(
     Guid? ContactId = null,
     string? DenyCode = null,
     IReadOnlyList<Guid>? FlagContactIds = null,
-    IdentityCollisionReason? FlagReason = null);
+    IdentityCollisionReason? FlagReason = null)
+{
+    /// <summary>
+    /// C5: with <see cref="ContactBindingDecision.DenyContactRemoved"/>, <c>true</c> when the matched contact's removed marker
+    /// is not set but its empty read is not proven (retryable), <c>false</c> for an administrator's removal (final).
+    /// </summary>
+    public bool RemovedMarkerUnproven { get; init; }
+}
 
 /// <summary>A systemuser whose <c>sprk_primarycontact</c> points at a contact under consideration.</summary>
 public sealed record SystemUserReference(Guid SystemUserId, Guid? Oid, Guid LinkedContactId);
@@ -445,6 +501,45 @@ public sealed record ReferenceLookup(LookupStatus Status, IReadOnlyList<SystemUs
 
     /// <summary>A reference lookup that read these rows.</summary>
     public static ReferenceLookup Of(params SystemUserReference[] references) => new(LookupStatus.Read, references);
+}
+
+/// <summary>
+/// Why an email bind was refused for its invite stamp (<see cref="ContactBindingDecision.CheckInviteStamp"/>). OPERATOR-ONLY:
+/// logged by the binder, never answered — every value is denied with the one code
+/// <see cref="ContactBindingDecision.DenyContactNotInvited"/>. No value carries an address or a hash.
+/// </summary>
+public enum InviteStampFailure
+{
+    /// <summary>No email-hash stamp: never written, cleared by a bind, or its column is not provisioned.</summary>
+    NoStamp,
+
+    /// <summary>The stamp read empty while the BFF's read of the stamp columns is not proven. Treated as no stamp.</summary>
+    StampUnproven,
+
+    /// <summary>The invite marker the stamp was written with is outside its window (<see cref="ContactBindingDecision.InviteMarkerWindow"/>).</summary>
+    StampExpired,
+
+    /// <summary>The stored value does not parse, or is of a version this code does not know. Treated as no stamp.</summary>
+    StampMalformed,
+
+    /// <summary>The token's email is not the address the invite recorded.</summary>
+    TokenEmailMismatch,
+
+    /// <summary>The contact's current <c>emailaddress1</c> is not the address the invite recorded.</summary>
+    ContactEmailMismatch,
+
+    /// <summary>
+    /// Workforce plane: the token's <c>xms_edov</c> is not boolean true, and its <c>tid</c> is not the tenant the invite named
+    /// (or the invite named none).
+    /// </summary>
+    TenantNotVerified,
+
+    /// <summary>
+    /// The stamp is for the other kind of sign-in: a work-account invite (it names a tenant,
+    /// <see cref="ContactBindingDecision.IsWorkAccountInvite"/>) is met only by a Workforce or WorkforceHome token, and a
+    /// portal-account invite (no tenant) only by a CIAM token.
+    /// </summary>
+    StampPlaneMismatch,
 }
 
 /// <summary>
@@ -486,6 +581,35 @@ public sealed record BindIntentLookup(
     /// </summary>
     internal string? InviteCodeHash { get; init; }
 
+    /// <summary>
+    /// <c>contact.sprk_externalinvitedemailhash</c> as stored (<see cref="InviteEmailStamp"/>'s <c>v1:</c> value), or null:
+    /// the address the current invite was sent to, hashed. Read in the marker's own query. INTERNAL so the compiler-generated
+    /// <see cref="object.ToString"/> of this record never prints it (never log a hash).
+    /// </summary>
+    internal string? InvitedEmailHash { get; init; }
+
+    /// <summary><c>contact.sprk_externalinvitedtenantid</c> as stored (GUID text the invite named), or null.</summary>
+    public string? RawInvitedTenantId { get; init; }
+
+    /// <summary>
+    /// <c>contact.emailaddress1</c> read in the SAME query as the stamp (so at the same row version). INTERNAL so the
+    /// compiler-generated <see cref="object.ToString"/> never prints an address.
+    /// </summary>
+    internal string? CurrentEmail { get; init; }
+
+    /// <summary>
+    /// The row version the stamp was read at. An email bind decided on this stamp is written conditional on this version,
+    /// and only when the binding read saw the same version (otherwise the row changed between the reads: re-read).
+    /// </summary>
+    public string? ETag { get; init; }
+
+    /// <summary>
+    /// True when a stamp column read EMPTY while the BFF's read of the stamp columns is not proven
+    /// (<see cref="SecuredColumnReadProof"/>): an empty value may be a hidden one. Either way an empty stamp is no stamp, so
+    /// the bind is refused; this only names the reason for the operator.
+    /// </summary>
+    public bool StampColumnsUnproven { get; init; }
+
     /// <summary>The marker read failed.</summary>
     public static BindIntentLookup Failed(Guid contactId) =>
         new(contactId, LookupStatus.Failed, null);
@@ -509,6 +633,18 @@ public sealed record BindingRequest(
     /// compiler-generated <see cref="object.ToString"/> of this record never prints it (never log a code, CLAUDE.md §9).
     /// </summary>
     internal string? InviteCode { get; init; }
+
+    /// <summary>
+    /// Workforce plane: the token's <c>tid</c>, parsed, or null. An email bind on this plane needs it to equal the tenant the
+    /// invite named, unless <see cref="EmailDomainOwnerVerified"/> is true.
+    /// </summary>
+    public Guid? TokenTenantId { get; init; }
+
+    /// <summary>
+    /// Workforce plane: the token's <c>xms_edov</c> claim (the email's domain is verified by the tenant that owns it). True
+    /// ONLY for a boolean <c>true</c> claim; an absent, false, non-boolean or repeated claim is not verified (fail closed).
+    /// </summary>
+    public bool? EmailDomainOwnerVerified { get; init; }
 
     /// <summary>The plane marker this caller's oid belongs to.</summary>
     public IdentityPlaneMarker CallerPlane =>
@@ -571,6 +707,13 @@ public sealed record BindingDecision(
     /// </summary>
     public bool ConsumeInviteCode { get; init; }
 
+    /// <summary>
+    /// Slice C2c: on a <see cref="ContactBindingDecision.DenyContactRemoved"/> deny, <c>true</c> when the contact's removed
+    /// marker is not SET but its empty read is not proven (an unreadable state), <c>false</c> when the marker is set. The
+    /// person's answer is the same either way; the flag only lets the binder log the two cases apart.
+    /// </summary>
+    public bool RemovedMarkerUnproven { get; init; }
+
     /// <summary>True for an outcome that ends the decision.</summary>
     public bool IsTerminal => Action is not (BindingAction.NeedEmailLookup or BindingAction.NeedReferenceLookup
         or BindingAction.NeedLinkedContact or BindingAction.NeedIntentLookup);
@@ -607,13 +750,45 @@ public sealed record InviteDecision(
     IReadOnlyList<Guid>? FlagContactIds = null);
 
 /// <summary>
+/// Slice C2b: <see cref="ContactBindingDecision.DecideCreateAroundRemoval"/>'s answer for a contact create whose email no
+/// ACTIVE contact carries. <see cref="MayCreate"/> only when no inactive contact for the email is removed (or unproven) and
+/// the read succeeded.
+/// </summary>
+/// <param name="MayCreate">True when the create may go ahead.</param>
+/// <param name="RemovedContactId">The removed inactive contact that refuses the create; null otherwise.</param>
+/// <param name="DenyCode">
+/// The sign-in and registration decision code when the create may not go ahead: <see cref="ContactBindingDecision.DenyContactRemoved"/>
+/// for a removal (logged; the person is answered as not invited), the lookup's deny code for a read that failed.
+/// </param>
+/// <param name="InviteReasonCode">
+/// The invite path's answer for the same refusal: <see cref="ContactBindingDecision.InviteContactRemovedAdminReinstate"/> for
+/// a removal, <see cref="ContactBindingDecision.InviteContactLookupFailed"/> for a read that failed.
+/// </param>
+public sealed record CreateAroundRemovalDecision(
+    bool MayCreate,
+    Guid? RemovedContactId = null,
+    string? DenyCode = null,
+    string? InviteReasonCode = null)
+{
+    /// <summary>True when the refusal is a removal, or a removal that cannot be ruled out (not a read that failed).</summary>
+    public bool IsRemoval => RemovedContactId is not null;
+
+    /// <summary>
+    /// Slice C2c: <c>true</c> when the refusing contact's marker is not set but its empty read is not proven. The invite path
+    /// answers <see cref="ContactBindingDecision.InviteContactRemovedStateUnavailable"/> (retryable) then, not the
+    /// administrator-reinstate refusal.
+    /// </summary>
+    public bool MarkerUnproven { get; init; }
+}
+
+/// <summary>
 /// The single identity-binding decision. Pure: every input is a value, every output is a value.
 /// </summary>
 public static class ContactBindingDecision
 {
     // ── Deny codes (auth.md: {domain}.{area}.{action}.{reason}) ─────────────────────────────────────
     // Each deny has its OWN code: on every plane the HTTP answer is the same 403, so the code is the only
-    // thing in the audit trail that tells an outage from a hijack attempt from an ordinary non-contact.
+    // thing in the audit trail that tells an outage from an identity conflict from an ordinary non-contact.
 
     /// <summary>The caller's own oid is unusable.</summary>
     public const string DenyUnidentifiableCaller = "sdap.access.deny.unidentifiable_caller";
@@ -633,7 +808,7 @@ public static class ContactBindingDecision
     /// <summary>More than one active contact carries the email.</summary>
     public const string DenyContactEmailAmbiguous = "sdap.access.deny.contact_email_ambiguous";
 
-    /// <summary>The email matched a contact bound to a different oid (the A-18 hijack).</summary>
+    /// <summary>The email matched a contact bound to a different oid (A-18: a contact is bound to one oid).</summary>
     public const string DenyContactBoundToDifferentOid = "sdap.access.deny.contact_bound_to_different_oid";
 
     /// <summary>The matched contact's binding cannot be read.</summary>
@@ -675,6 +850,22 @@ public static class ContactBindingDecision
     /// <summary>The create write failed.</summary>
     public const string DenyContactCreateFailed = "sdap.access.deny.contact_create_failed";
 
+    /// <summary>
+    /// ISS-005 (#1673): no owner team could be resolved from <c>ExternalAccess:CustomerBusinessUnitId</c> (unset, the Secure
+    /// Record business unit, or not exactly one default owner team), so the create is refused and nothing is written. ONE
+    /// code for every contact create: the registration route answers it as 500 (<c>ExternalRegistrationEndpoints.ReasonOwnerUnconfigured</c>
+    /// is this value) and the first-sign-in create answers it the same way (<c>CallerPrincipalResolver</c>).
+    /// </summary>
+    public const string DenyOwnerUnconfigured = "sdap.access.registration_owner_unconfigured";
+
+    /// <summary>
+    /// ISS-005 (#1673 UAC round 3, F): the licensed-user link's contact create was refused by Dataverse because the owner team
+    /// cannot own a contact (error 0x80040299, "Privilege Check For Owner": the customer business unit's default owner team
+    /// holds no security role with Read on contact). Its own code so the reconciliation run can tell a role fault from an
+    /// unset <c>ExternalAccess:CustomerBusinessUnitId</c>. Never an API response code: the link route does not surface it.
+    /// </summary>
+    public const string DenyOwnerPrivilegeMissing = "sdap.access.deny.owner_privilege_missing";
+
     /// <summary>The binding column reads as masked (field-level security without Read): no write is safe.</summary>
     public const string DenyBindingColumnMasked = "sdap.access.deny.binding_column_masked";
 
@@ -696,8 +887,37 @@ public static class ContactBindingDecision
     /// contact, but the caller did not prove THIS environment's invite: a pending invite (<c>sprk_externalinvitedon</c> set
     /// within the last 30 days, owner round 97) together with its matching invite code. A grant alone is not an invite.
     /// Nothing is written and nothing is flagged: no other person is involved.
+    /// <para>The same code answers every invite-stamp refusal of an email bind, on the CIAM and Workforce token planes and at
+    /// WorkforceHome registration (<see cref="CheckInviteStamp"/>): no current stamp, a stamp whose recorded address is not
+    /// the token's email or the contact's current <c>emailaddress1</c>, or (Workforce) a tenant the invite did not name. The
+    /// specific leg is logged for the operator only (<see cref="InviteStampFailure"/>). Staff answer: invite the person again.</para>
     /// </summary>
     public const string DenyContactNotInvited = "sdap.access.deny.contact_not_invited";
+
+    /// <summary>
+    /// Slice C: an administrator removed this person's external access (<see cref="ExternalAccessRemovedOnColumn"/> is set),
+    /// or whether they did cannot be read (<see cref="ContactBindingRow.IsRemoved"/>). A removed contact neither resolves nor
+    /// binds, on any plane and whatever its <c>statecode</c>; nothing is written and nothing is flagged. Only an
+    /// administrator can reinstate the person. This is the decision's code, kept in the logs for operators: the person's own
+    /// sign-in and registration answer with the same status, code, title and detail as their ordinary
+    /// <see cref="DenyContactNotInvited"/> refusal. Staff surfaces (invite, grant, reinstate) name the removal.
+    /// </summary>
+    public const string DenyContactRemoved = "sdap.access.deny.contact_removed";
+
+    /// <summary>
+    /// Slice C: an invite (staff or automatic) to a contact whose external access an administrator removed, or whose removed
+    /// marker cannot be read. Refused (409, nothing written or sent): only an administrator can reinstate the person.
+    /// </summary>
+    public const string InviteContactRemovedAdminReinstate = "sdap.access.deny.contact_removed_admin_reinstate";
+
+    /// <summary>
+    /// Slice C2c: whether an administrator removed this person's external access could not be established (the removed
+    /// marker read empty on a read that is not proven, or could not be read at all). The staff-facing invite and grant
+    /// surfaces refuse with this RETRYABLE code (503, nothing written or sent), so an outage is never reported as a removal
+    /// an administrator must undo. The person's own sign-in still decides <see cref="DenyContactRemoved"/> (logged), and is
+    /// answered as not invited.
+    /// </summary>
+    public const string InviteContactRemovedStateUnavailable = "sdap.access.deny.contact_removed_state_unavailable";
 
     // ── Invite reason codes ─────────────────────────────────────────────────────────────────────────
 
@@ -724,6 +944,26 @@ public static class ContactBindingDecision
     public const string InviteMarkerNotWritten = "sdap.access.invite.invite_marker_not_written";
 
     /// <summary>
+    /// Slice B2 — the invited email's organisation could not be looked up (a fault, a timeout or an answer that is not
+    /// definite), so the invite could not tell a work account from a portal account. Retryable (503): nothing was created,
+    /// written or sent. Staff retry; the kind of sign-in is never chosen by the request.
+    /// </summary>
+    public const string InviteTenantLookupUnavailable = "sdap.access.invite.tenant_lookup_unavailable";
+
+    /// <summary>
+    /// Slice B2 — a work-account invite resolved to a contact that already carries a sign-in (a portal account). One
+    /// contact carries one sign-in, so no work-account invite is added to it. Nothing was written or sent.
+    /// </summary>
+    public const string InviteContactAlreadyBound = "sdap.access.invite.contact_already_bound";
+
+    /// <summary>
+    /// Slice C2b — a staff invite (<c>/invite</c>) whose contact already has a portal account (bound: "AlreadyProvisioned").
+    /// No invite email is due and none is sent; nothing is written. The response says <c>emailSent: false</c> with this code,
+    /// staff text and the portal sign-in link for staff to pass on.
+    /// </summary>
+    public const string InviteContactAlreadyHasAccount = "sdap.access.invite.contact_already_has_account";
+
+    /// <summary>
     /// ADR-028 A9 (r3 task 046): more than one ENABLED systemuser carries the same stored home link (<c>tid</c>, <c>oid</c>).
     /// Resolving to one of them would merge two people, so the caller is denied; an operator resolves it.
     /// </summary>
@@ -742,9 +982,13 @@ public static class ContactBindingDecision
     /// <para><b>A plane marker with no oid is UNREADABLE, never unbound.</b> Once
     /// <c>sprk_externalobjectid</c> is field-secured, a reader without FLS Read gets it back as null — in a
     /// returned row AND inside a filter, where Dataverse substitutes null. A bound contact would then look
-    /// unbound and be handed to whoever's email matched. <c>sprk_identityplane</c> is not secured, and every
-    /// BFF write sets both columns together, so "marker present, oid absent" is the detectable signature of
-    /// masking (or of an operator who cleared one column and not the other). Either way it denies.</para>
+    /// unbound and be handed to whoever's email matched. Every BFF write sets both columns together, so "marker
+    /// present, oid absent" is the detectable signature of masking (or of an operator who cleared one column and not
+    /// the other). Either way it denies.</para>
+    /// <para><b>An EMPTY plane is trusted only on a proven read.</b> <c>sprk_identityplane</c> is field-secured too, so
+    /// a hidden plane reads empty, like no plane. This parse cannot tell them apart: a row read while the identity
+    /// columns' read is not proven is <see cref="BindingKind.Unreadable"/> whenever its plane is empty
+    /// (<see cref="ContactBindingRow.IdentityColumnsUnproven"/>, set by the store from <see cref="SecuredColumnReadProof"/>).</para>
     /// <para><b>An oid with no marker is a pre-141 CIAM binding.</b> Every writer before this task was the
     /// CIAM path (verified 2026-09-30: 6 of 6), and the schema step backfills them as External. Reading it as
     /// External keeps today's invite idempotency for those rows if the backfill has not run yet.</para>
@@ -859,6 +1103,14 @@ public static class ContactBindingDecision
         }
 
         var row = rows[0];
+
+        // Slice C — a contact whose external access an administrator removed (or whose marker cannot be read) is never
+        // bound or resolved by email, and never created around.
+        if (row.IsRemoved)
+        {
+            return DenyRemoved(row);
+        }
+
         var binding = row.Binding;
 
         // E5
@@ -875,7 +1127,7 @@ public static class ContactBindingDecision
                 return new BindingDecision(BindingAction.ResolveByOid, row.ContactId);
             }
 
-            // E7 — the A-18 hijack, on either plane.
+            // E7 — A-18, a contact bound to a different oid, on either plane.
             return Collide(IdentityCollisionReason.BoundToDifferentOid, DenyContactBoundToDifferentOid, row.ContactId);
         }
 
@@ -910,11 +1162,12 @@ public static class ContactBindingDecision
             return Collide(IdentityCollisionReason.LinkedToOtherUser, DenyContactLinkedToOtherUser, row.ContactId);
         }
 
-        // E11 — the CIAM plane binds only on THIS environment's intent (task 184, owner round 96). A CIAM token for this
-        // customer's audience is obtainable by any CIAM user, so an email match alone is no evidence this customer means
-        // this person. The workforce and systemuser planes are unchanged: their callers are admitted by the member test
-        // or are directory-synced licensed users (Model 1 workforce sign-in is under separate owner discussion).
-        if (request.Plane == BindingPlane.CiamToken)
+        // E11 — the token planes bind by email only on THIS environment's invite (task 184, owner round 96). On the CIAM
+        // plane: the pending invite, its code, and the invite stamp. On the Workforce token plane: the invite stamp, whose
+        // recorded address must be the token's email and the contact's current emailaddress1, and whose invited tenant must
+        // be the token's tid unless xms_edov is boolean true (CheckInviteStamp). The systemuser plane is unchanged: its
+        // email is directory-synced from a licensed user.
+        if (request.Plane is BindingPlane.CiamToken or BindingPlane.WorkforceToken)
         {
             if (intent is null)
             {
@@ -928,8 +1181,9 @@ public static class ContactBindingDecision
     }
 
     /// <summary>
-    /// E11's marker leg on the CIAM plane (task 185, owner round 98). It binds, and tells the binder to consume the code,
-    /// only when the marker is current (<see cref="IsInviteMarkerCurrent"/>: at most 30 days old, at most 5 minutes in the
+    /// E11 on the token planes. On the Workforce token plane it binds only when the invite stamp holds
+    /// (<see cref="CheckInviteStamp"/>, with the tenant leg). On the CIAM plane, E11's marker leg (task 185, owner round 98)
+    /// binds, and tells the binder to consume the code, only when the invite stamp holds (without the tenant leg) and the marker is current (<see cref="IsInviteMarkerCurrent"/>: at most 30 days old, at most 5 minutes in the
     /// future) AND the presented code matches the contact's stored hash (<see cref="InviteCode.Matches"/>, constant time).
     /// FAIL CLOSED: a lookup for another contact, or a marker read that FAILED, denies <see cref="DenyContactLookupFailed"/>.
     /// Every other non-match (no code, a wrong or superseded code, no stored hash, an expired or far-future marker, a marker
@@ -944,34 +1198,139 @@ public static class ContactBindingDecision
             return Deny(DenyContactLookupFailed);
         }
 
-        var invited = intent.InviteStatus == LookupStatus.Read
-            && IsInviteMarkerCurrent(intent.InvitedOn, intent.AsOf)
-            && InviteCode.Matches(intent.InviteCodeHash, request.InviteCode, contactId);
+        var ciam = request.Plane == BindingPlane.CiamToken;
+        var invited = (!ciam
+                || (intent.InviteStatus == LookupStatus.Read
+                    && IsInviteMarkerCurrent(intent.InvitedOn, intent.AsOf)
+                    && InviteCode.Matches(intent.InviteCodeHash, request.InviteCode, contactId)))
+            && CheckInviteStamp(intent, request.Email, requireTenantProof: !ciam, request.TokenTenantId,
+                request.EmailDomainOwnerVerified) is null;
         return invited
-            ? new BindingDecision(BindingAction.BindByEmail, contactId) { ConsumeInviteCode = true }
+            ? new BindingDecision(BindingAction.BindByEmail, contactId) { ConsumeInviteCode = ciam }
             : Deny(DenyContactNotInvited);
     }
 
     /// <summary>
-    /// Task 185 (design note §5.1): the OPERATOR-only reason E11's marker leg answered <see cref="DenyContactNotInvited"/> —
-    /// <c>no-marker</c>, <c>marker-expired</c>, <c>no-stored-hash</c>, <c>no-code-presented</c> or <c>code-mismatch</c>, in
-    /// the order <see cref="DecideIntent"/> tests them. For the binder's log line only: it names no code and no hash, and
-    /// the HTTP answer never tells the reasons apart (no oracle). <c>null</c> when the leg would not deny not-invited. Pure.
+    /// The invite-stamp rule every email bind onto an existing contact by a token caller meets (CIAM and Workforce token
+    /// planes, WorkforceHome registration): <c>null</c> when it is met, else the first leg that is not, for the operator log.
+    /// Pure. In order:
+    /// <list type="number">
+    ///   <item>a stamp exists: the stamp read ran (<see cref="LookupStatus.Read"/>) and the email hash is not empty (an empty
+    ///   one read without proof is <see cref="InviteStampFailure.StampUnproven"/>, still no stamp);</item>
+    ///   <item>it is current: its invite marker is within <see cref="InviteMarkerWindow"/> (<see cref="IsInviteMarkerCurrent"/>,
+    ///   the CIAM marker's own window);</item>
+    ///   <item>it parses as a version this code writes (<see cref="InviteEmailStamp"/>; an unknown version is no stamp);</item>
+    ///   <item>its recorded address is <paramref name="tokenEmail"/>, and is the contact's current <c>emailaddress1</c> read
+    ///   with the stamp (both normalised, compared in fixed time);</item>
+    ///   <item>it is for this kind of sign-in (<see cref="IsWorkAccountInvite"/>): with <paramref name="requireTenantProof"/>
+    ///   (the Workforce and WorkforceHome tokens) a work-account invite, which names a tenant; without it (CIAM) a
+    ///   portal-account invite, which names none;</item>
+    ///   <item>with <paramref name="requireTenantProof"/>: <paramref name="emailDomainOwnerVerified"/> is true, or
+    ///   <paramref name="tokenTenantId"/> is the tenant the invite named.</item>
+    /// </list>
+    /// </summary>
+    public static InviteStampFailure? CheckInviteStamp(
+        BindIntentLookup intent, string? tokenEmail, bool requireTenantProof, Guid? tokenTenantId, bool? emailDomainOwnerVerified)
+    {
+        ArgumentNullException.ThrowIfNull(intent);
+
+        if (intent.InviteStatus != LookupStatus.Read || string.IsNullOrWhiteSpace(intent.InvitedEmailHash))
+        {
+            return intent.InviteStatus == LookupStatus.Read && intent.StampColumnsUnproven
+                ? InviteStampFailure.StampUnproven
+                : InviteStampFailure.NoStamp;
+        }
+
+        if (!IsInviteMarkerCurrent(intent.InvitedOn, intent.AsOf))
+        {
+            return InviteStampFailure.StampExpired;
+        }
+
+        if (!InviteEmailStamp.IsWellFormed(intent.InvitedEmailHash))
+        {
+            return InviteStampFailure.StampMalformed;
+        }
+
+        if (!InviteEmailStamp.Matches(intent.InvitedEmailHash, tokenEmail))
+        {
+            return InviteStampFailure.TokenEmailMismatch;
+        }
+
+        if (!InviteEmailStamp.Matches(intent.InvitedEmailHash, intent.CurrentEmail))
+        {
+            return InviteStampFailure.ContactEmailMismatch;
+        }
+
+        if (IsWorkAccountInvite(intent) != requireTenantProof
+            || (!requireTenantProof && !string.IsNullOrWhiteSpace(intent.RawInvitedTenantId)))
+        {
+            return InviteStampFailure.StampPlaneMismatch;
+        }
+
+        if (requireTenantProof
+            && emailDomainOwnerVerified != true
+            && !(tokenTenantId is { } tid && IsGuid(intent.RawInvitedTenantId, tid)))
+        {
+            return InviteStampFailure.TenantNotVerified;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Task 185 (design note §5.1): the OPERATOR-only reason E11 answered <see cref="DenyContactNotInvited"/> — on the CIAM
+    /// plane <c>no-marker</c>, <c>marker-expired</c>, <c>no-stored-hash</c>, <c>no-code-presented</c> or <c>code-mismatch</c>,
+    /// in the order <see cref="DecideIntent"/> tests them; then, on both token planes, the invite stamp's leg
+    /// (<see cref="StampReason"/>). For the binder's log line only: it names no code, no address and no hash, and the HTTP
+    /// answer never tells the reasons apart (no oracle). <c>null</c> when the leg would not deny not-invited. Pure.
     /// </summary>
     internal static string? NotInvitedReason(BindingRequest request, BindIntentLookup intent, Guid contactId)
     {
         if (intent.ContactId != contactId || intent.InviteStatus is not (LookupStatus.Read or LookupStatus.ColumnMissing))
             return null;
-        if (intent.InviteStatus == LookupStatus.ColumnMissing || intent.InvitedOn is null)
-            return "no-marker";
-        if (!IsInviteMarkerCurrent(intent.InvitedOn, intent.AsOf))
-            return "marker-expired";
-        if (string.IsNullOrEmpty(intent.InviteCodeHash))
-            return "no-stored-hash";
-        if (string.IsNullOrEmpty(request.InviteCode))
-            return "no-code-presented";
-        return InviteCode.Matches(intent.InviteCodeHash, request.InviteCode, contactId) ? null : "code-mismatch";
+        if (request.Plane == BindingPlane.CiamToken)
+        {
+            if (intent.InviteStatus == LookupStatus.ColumnMissing || intent.InvitedOn is null)
+                return "no-marker";
+            if (!IsInviteMarkerCurrent(intent.InvitedOn, intent.AsOf))
+                return "marker-expired";
+            if (string.IsNullOrEmpty(intent.InviteCodeHash))
+                return "no-stored-hash";
+            if (string.IsNullOrEmpty(request.InviteCode))
+                return "no-code-presented";
+            if (!InviteCode.Matches(intent.InviteCodeHash, request.InviteCode, contactId))
+                return "code-mismatch";
+        }
+
+        return CheckInviteStamp(intent, request.Email, requireTenantProof: request.Plane != BindingPlane.CiamToken,
+                request.TokenTenantId, request.EmailDomainOwnerVerified) is { } failure
+            ? StampReason(failure)
+            : null;
     }
+
+    /// <summary>The operator log word for an invite-stamp leg (<c>stamp-</c> + the leg). Pure.</summary>
+    internal static string StampReason(InviteStampFailure failure) => failure switch
+    {
+        InviteStampFailure.NoStamp => "stamp-none",
+        InviteStampFailure.StampUnproven => "stamp-unproven",
+        InviteStampFailure.StampExpired => "stamp-expired",
+        InviteStampFailure.StampMalformed => "stamp-malformed",
+        InviteStampFailure.TokenEmailMismatch => "stamp-token-email-mismatch",
+        InviteStampFailure.ContactEmailMismatch => "stamp-contact-email-mismatch",
+        InviteStampFailure.TenantNotVerified => "stamp-tenant-not-verified",
+        InviteStampFailure.StampPlaneMismatch => "stamp-plane-mismatch",
+        _ => "stamp-unknown",
+    };
+
+    /// <summary>
+    /// True when the invite stamp is a work-account invite: it names the tenant (a non-empty GUID) the invited email's
+    /// organisation resolved to at invite time, which is one of this deployment's customer tenants
+    /// (<c>WorkforceIdentity:CustomerTenantIds</c>). Only a Workforce or WorkforceHome token can meet it. A portal-account
+    /// invite names no tenant (the store refuses a tenant together with an invite code, and no code without one), so a
+    /// stamp that names anything else, a non-GUID included, is met by no sign-in. Pure.
+    /// </summary>
+    public static bool IsWorkAccountInvite(BindIntentLookup intent)
+        => intent is not null && Guid.TryParse(intent.RawInvitedTenantId?.Trim(), out var tenant) && tenant != Guid.Empty;
 
     /// <summary>
     /// Task 184 (owner round 97) — a pending-invite marker counts for <see cref="InviteMarkerWindow"/> (30 days) after the
@@ -1035,6 +1394,12 @@ public static class ContactBindingDecision
         if (oidRows.Count == 1)
         {
             var carrier = oidRows[0];
+            if (carrier.IsRemoved)
+            {
+                // Slice C — a removed contact verifies no link and binds nothing.
+                return DenyRemoved(carrier);
+            }
+
             if (carrier.ContactId == linkedContactId)
             {
                 // L3 / L4
@@ -1062,6 +1427,12 @@ public static class ContactBindingDecision
         if (linked is null)
         {
             return Deny(DenyLinkedContactMissing);
+        }
+
+        // Slice C — a removed linked contact verifies no link and binds nothing.
+        if (linked.IsRemoved)
+        {
+            return DenyRemoved(linked);
         }
 
         var binding = linked.Binding;
@@ -1147,6 +1518,20 @@ public static class ContactBindingDecision
         }
 
         var row = rows[0];
+
+        // Slice C — an ordinary invite never reaches a contact whose external access an administrator removed. Refused,
+        // nothing flagged: only an administrator reinstates the person. Slice C2c: a marker that is not set but whose empty
+        // read is not proven is not a removal an administrator must undo — it fails retryably, nothing written or sent.
+        if (row.RemovedOn is not null)
+        {
+            return new InviteDecision(InviteContactAction.Refuse, row.ContactId, InviteContactRemovedAdminReinstate);
+        }
+
+        if (row.IsRemoved)
+        {
+            return new InviteDecision(InviteContactAction.Fail, row.ContactId, InviteContactRemovedStateUnavailable);
+        }
+
         var binding = row.Binding;
         if (binding.Kind == BindingKind.Unreadable)
         {
@@ -1183,6 +1568,42 @@ public static class ContactBindingDecision
         return binding.Kind == BindingKind.Bound
             ? new InviteDecision(InviteContactAction.AlreadyProvisioned, row.ContactId)
             : new InviteDecision(InviteContactAction.ProvisionExisting, row.ContactId);
+    }
+
+    /// <summary>
+    /// Slice C2b: the ONE rule that no contact is created around a removal. Consulted before EVERY contact create whose email
+    /// no active contact carries (the invite create, registration, the first sign-in create and the licensed-user link
+    /// create), over the INACTIVE contacts for that email (<see cref="IContactIdentityStore.FindInactiveContactsByEmailAsync"/>).
+    /// A contact among them whose external access an administrator removed, or whose removed marker cannot be read
+    /// (<see cref="ContactBindingRow.IsRemoved"/>), refuses the create: <see cref="DenyContactRemoved"/> (the invite path
+    /// answers <see cref="InviteContactRemovedAdminReinstate"/> for a set marker and the retryable
+    /// <see cref="InviteContactRemovedStateUnavailable"/> for an unproven one). A read that failed refuses too, with the lookup's code (the
+    /// invite path: <see cref="InviteContactLookupFailed"/>): a create is never reached while a removal cannot be ruled out.
+    /// An unmarked inactive contact does not stop the create here (registration flags it separately). Nothing is flagged.
+    /// Pure.
+    /// </summary>
+    public static CreateAroundRemovalDecision DecideCreateAroundRemoval(ContactLookup inactiveLookup)
+    {
+        ArgumentNullException.ThrowIfNull(inactiveLookup);
+
+        if (inactiveLookup.Status != LookupStatus.Read)
+        {
+            return new CreateAroundRemovalDecision(false, DenyCode: LookupDenyCode(inactiveLookup.Status),
+                InviteReasonCode: InviteContactLookupFailed);
+        }
+
+        // Slice C2c: a set marker wins over an unproven one, so a removal is reported as a removal.
+        if (inactiveLookup.Rows.FirstOrDefault(r => r.ContactId != Guid.Empty && r.RemovedOn is not null) is { } removed)
+        {
+            return new CreateAroundRemovalDecision(false, removed.ContactId, DenyContactRemoved, InviteContactRemovedAdminReinstate);
+        }
+
+        return inactiveLookup.Rows.FirstOrDefault(r => r.ContactId != Guid.Empty && r.IsRemoved) is { } unproven
+            ? new CreateAroundRemovalDecision(false, unproven.ContactId, DenyContactRemoved, InviteContactRemovedStateUnavailable)
+            {
+                MarkerUnproven = true,
+            }
+            : new CreateAroundRemovalDecision(true);
     }
 
     /// <summary>
@@ -1478,6 +1899,31 @@ public static class ContactBindingDecision
     /// </summary>
     public const string ExternalInviteCodeHashColumn = "sprk_externalinvitecodehash";
 
+    /// <summary>
+    /// <c>contact.sprk_externalinvitedemailhash</c> — the salted hash of the email address the latest invite was sent to
+    /// (never the address; <see cref="InviteEmailStamp"/>). FIELD-SECURED: only the BFF reads or writes it, no reader profile
+    /// (<c>scripts/Set-ExternalAccessContactSecuritySchema.ps1</c>). Written by every invite in the same request as
+    /// <see cref="ExternalInvitedOnColumn"/>, read in the marker's own query, cleared by every bind.
+    /// </summary>
+    public const string ExternalInvitedEmailHashColumn = "sprk_externalinvitedemailhash";
+
+    /// <summary>
+    /// <c>contact.sprk_externalinvitedtenantid</c> — the Entra tenant id (GUID text) the latest invite named, when it named
+    /// one. FIELD-SECURED: only the BFF reads or writes it, no reader profile
+    /// (<c>scripts/Set-ExternalAccessContactSecuritySchema.ps1</c>). Written (or cleared) with the email hash at every invite,
+    /// cleared by every bind.
+    /// </summary>
+    public const string ExternalInvitedTenantIdColumn = "sprk_externalinvitedtenantid";
+
+    /// <summary>
+    /// <c>contact.sprk_externalaccessremovedon</c> — when an administrator removed all external access for the person (UTC).
+    /// FIELD-SECURED: every user reads it, only the BFF writes it
+    /// (<c>scripts/Set-ExternalAccessContactSecuritySchema.ps1</c>). Slice C reads it with every binding row
+    /// (<see cref="ContactBindingRow.IsRemoved"/>) and in the live composition read; an empty value counts only on a proven
+    /// read. Nothing in the BFF writes it yet.
+    /// </summary>
+    public const string ExternalAccessRemovedOnColumn = "sprk_externalaccessremovedon";
+
     // ── ADR-028 A9 — home principals (r3 task 046; design notes/a9-bff-design.md §3, §4, §5) ────────────────────
 
     /// <summary>
@@ -1653,6 +2099,12 @@ public static class ContactBindingDecision
 
         if (matches.Count == 1)
         {
+            // Slice C — a removed contact resolves to nothing, whatever its statecode.
+            if (matches[0].IsRemoved)
+            {
+                return DenyRemoved(matches[0]);
+            }
+
             return matches[0].IsActive
                 ? new BindingDecision(BindingAction.ResolveByOid, matches[0].ContactId)
                 : Deny(DenyContactInactive);
@@ -1749,6 +2201,16 @@ public static class ContactBindingDecision
         }
 
         var row = rows[0];
+
+        // Slice C — a removed contact is never registered onto, bound or created around.
+        if (row.IsRemoved)
+        {
+            return new RegistrationEmailDecision(RegistrationEmailAction.Deny, row.ContactId, DenyCode: DenyContactRemoved)
+            {
+                RemovedMarkerUnproven = row.RemovedOn is null,
+            };
+        }
+
         var binding = row.Binding;
         if (binding.Kind == BindingKind.Bound && callerOid != Guid.Empty && binding.Oid == callerOid)
         {
@@ -1795,12 +2257,19 @@ public static class ContactBindingDecision
     {
         ArgumentNullException.ThrowIfNull(inactiveLookup);
 
-        if (inactiveLookup.Status != LookupStatus.Read)
+        // Slice C — the person whose external access an administrator removed is told so, never flagged as a duplicate; a
+        // read that failed denies. The one create-around-removal rule decides both.
+        var removal = DecideCreateAroundRemoval(inactiveLookup);
+        if (!removal.MayCreate)
         {
-            return new RegistrationEmailDecision(RegistrationEmailAction.Deny, DenyCode: LookupDenyCode(inactiveLookup.Status));
+            return new RegistrationEmailDecision(RegistrationEmailAction.Deny, removal.RemovedContactId, DenyCode: removal.DenyCode)
+            {
+                RemovedMarkerUnproven = removal.MarkerUnproven,
+            };
         }
 
         var rows = inactiveLookup.Rows.Where(r => !r.IsActive && r.ContactId != Guid.Empty).ToList();
+
         return rows.Count == 0
             ? new RegistrationEmailDecision(RegistrationEmailAction.Create)
             : new RegistrationEmailDecision(RegistrationEmailAction.Conflict,
@@ -1835,6 +2304,13 @@ public static class ContactBindingDecision
 
         if (rows.Count == 1)
         {
+            // Slice C — a removed contact (or one whose removed marker cannot be read) resolves to nothing, whatever its
+            // statecode: reactivating the row does not reinstate the person.
+            if (rows[0].IsRemoved)
+            {
+                return DenyRemoved(rows[0]);
+            }
+
             // D3 — never falls through to the email bind and never creates a replacement: deactivating a
             // contact is how an operator removes a person, and auto-creation must not undo that.
             return rows[0].IsActive
@@ -1849,6 +2325,10 @@ public static class ContactBindingDecision
         => status == LookupStatus.ColumnMissing ? DenyBindingColumnMissing : DenyContactLookupFailed;
 
     private static BindingDecision Deny(string code) => new(BindingAction.Deny, DenyCode: code);
+
+    /// <summary>Slice C2c: the removed-person deny, flagged when the marker is unproven rather than set (logs only).</summary>
+    private static BindingDecision DenyRemoved(ContactBindingRow row)
+        => Deny(DenyContactRemoved) with { RemovedMarkerUnproven = row.RemovedOn is null };
 
     private static BindingDecision Collide(IdentityCollisionReason reason, string code, params Guid[] contactIds)
         => Collide(reason, code, (IEnumerable<Guid>)contactIds);

@@ -289,3 +289,18 @@ describe('LookupField — pre-existing behaviour still holds', () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 });
+
+describe('LookupField — hint', () => {
+  it('shows the hint and links it to the input with aria-describedby (WCAG)', () => {
+    renderField({ hint: 'Leave blank to use the default' });
+
+    const hint = screen.getByText('Leave blank to use the default');
+    expect(hint.id).not.toBe('');
+    expect(screen.getByRole('textbox').getAttribute('aria-describedby')).toContain(hint.id);
+  });
+
+  it('adds no aria-describedby when no hint is given', () => {
+    renderField();
+    expect(screen.getByRole('textbox').getAttribute('aria-describedby')).toBeNull();
+  });
+});

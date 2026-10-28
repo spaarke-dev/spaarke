@@ -196,6 +196,15 @@ public sealed class AssignedAccessMaterializer
     /// </summary>
     internal const string DenyListUnreadableFailure = "deny-list-unreadable";
 
+    /// <summary>
+    /// Slice B3: the failure kind of an invite this pass owed and did not send because the email's organisation could not be
+    /// looked up (<see cref="ContactBindingDecision.InviteTenantLookupUnavailable"/>). The grant was written; no invite stamp
+    /// was. "Deferred" is NOT an automatic retry: a background pass never invites (task 185 I-9), so the invite is sent by a
+    /// staff Invite, or by the next internal user's pass that writes a grant for the contact. The root reports incomplete
+    /// with this kind so staff see the owed invite, and <see cref="AssignedAccessReconciliationJob"/> counts it.
+    /// </summary>
+    internal const string InviteDeferredFailure = "invite-deferred";
+
     private static readonly int CollaborateMask = RecordShareLevels.MaskForRightsCsv(RecordShareLevels.CollaborateRights);
 
     private readonly AssignedAccessStore _store;
@@ -1241,7 +1250,21 @@ public sealed class AssignedAccessMaterializer
             switch (actor)
             {
                 case ActorKind.Internal:
-                    return await _invites.InviteOnGrantAsync(subject.Id).ConfigureAwait(false);
+                    {
+                        var invite = await _invites.InviteOnGrantAsync(subject.Id, run.Request.RootType, run.RootId)
+                            .ConfigureAwait(false);
+                        if (invite is { Status: GrantInviteStatus.Failed, ErrorCode: ContactBindingDecision.InviteTenantLookupUnavailable })
+                        {
+                            // Slice B3: the grant stands and no stamp was written. Not retried automatically (I-9: a
+                            // background pass never invites): a staff Invite, or the next internal pass that writes a grant
+                            // for this contact, sends it. Reported on the root so the owed invite is visible.
+                            run.Fail(subject, InviteDeferredFailure,
+                                "The invite after this grant was not sent: the person's organisation could not be looked up. " +
+                                "The grant stands. Send the invite again with Invite.");
+                        }
+
+                        return invite;
+                    }
 
                 case ActorKind.Partner:
                     {
@@ -1740,7 +1763,7 @@ public sealed class AssignedAccessMaterializer
         // The ONE grant core (task 139, WP-1): policy, never-lower, No Access, expiry default, dedupe, invalidation.
         return GrantExternalAccessEndpoint.CreateGrantAsync(
             request, run.Request.RootType, run.RootId, run.Today, GrantCeiling.AssignedToRule, run.Request.GrantorOid,
-            _dataverse, _participations, _accessibleRecords, _ownership, _ownerPrivileges, _logger, ct);
+            _dataverse, _participations, _accessibleRecords, _identities, _ownership, _ownerPrivileges, _logger, ct);
     }
 
     /// <summary>

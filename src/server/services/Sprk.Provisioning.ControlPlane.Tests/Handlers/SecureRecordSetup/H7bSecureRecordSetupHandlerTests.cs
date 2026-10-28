@@ -61,8 +61,17 @@ public sealed class H7bSecureRecordSetupHandlerTests
 
         result.Should().BeOfType<HandlerResult.Success>();
         var notes = repo.LastWrittenRun!.GateStates[H7bSecureRecordSetupHandler.SetupGateId].Evidence!.Value.GetProperty("notes");
-        notes.GetArrayLength().Should().Be(1);
-        notes[0].GetString().Should().Contain("sprk_externalinvitecodehash").And.Contain("absent");
+        // #2317: the BFF-only columns and the removed-on marker are recorded the same way while they are absent.
+        var recorded = notes.EnumerateArray().Select(n => n.GetString()!).ToArray();
+        var absentColumns = new[] { SecureRecordSetupProcedure.InviteCodeHashColumn }
+            .Concat(SecureRecordSetupProcedure.BffOnlyColumns)
+            .Append(SecureRecordSetupProcedure.AccessRemovedOnColumn)
+            .ToArray();
+        recorded.Should().HaveCount(absentColumns.Length);
+        foreach (var column in absentColumns)
+        {
+            recorded.Should().ContainSingle(n => n.Contains(column) && n.Contains("absent"));
+        }
     }
 
     [Fact]

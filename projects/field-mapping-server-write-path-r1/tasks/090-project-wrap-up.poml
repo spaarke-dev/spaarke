@@ -13,7 +13,7 @@
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Closes the project; must run alone after every other task, and edits shared index and README files.</parallel-reason>
-    <deps>061, 062, 063</deps>
+    <deps>061, 062, 063, 037, 038, 076</deps>
     <tags>wrap-up, docs</tags>
     <estimated-effort>3-4 hours</estimated-effort>
   </metadata>

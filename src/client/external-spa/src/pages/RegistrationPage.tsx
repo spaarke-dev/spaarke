@@ -14,6 +14,7 @@
  *                                  popup leaves the page as it was, with an explanation, and sends nothing
  *   contact conflict (403)         an administrator must resolve the record
  *   email missing (403)            the sign-in carried no email address
+ *   not invited (403)              no current invitation names this sign-in: ask for a new invitation
  *   error                          anything else: "Try again" repeats the same request
  *
  * ADR-021: Fluent v9 semantic tokens only. ADR-012: the shared `EmptyState` shell renders the message states.
@@ -68,6 +69,7 @@ type View =
   | { kind: 'linkRequired'; busy: boolean; notice?: 'cancelled' | 'failed' | 'unavailable' }
   | { kind: 'conflict' }
   | { kind: 'emailMissing' }
+  | { kind: 'notInvited' }
   | { kind: 'linkBlocked' }
   | { kind: 'signin' }
   /**
@@ -141,6 +143,8 @@ function refusalView(reason: RegistrationRefusal, confirm: boolean): View {
       return { kind: 'conflict' };
     case 'registration_email_missing':
       return { kind: 'emailMissing' };
+    case 'contact_not_invited':
+      return { kind: 'notInvited' };
     case 'invalid':
       return { kind: 'form', formError: 'Check the values you entered and try again.' };
     case 'signin':
@@ -310,6 +314,13 @@ export const RegistrationPage: React.FC<RegistrationPageProps> = ({ prefill, log
         <Warning48Regular className={s.iconWarning} />,
         'We could not read your email address',
         'Your sign-in did not include an email address, so we cannot register you. Contact your administrator.'
+      );
+
+    case 'notInvited':
+      return message(
+        <Warning48Regular className={s.iconWarning} />,
+        'You need an invitation',
+        'This sign-in cannot be registered until you are invited. Ask the person who invited you to send a new invitation.'
       );
 
     case 'linkBlocked':

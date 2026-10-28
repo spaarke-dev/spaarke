@@ -567,6 +567,9 @@ internal static class AssignedAccessTestDoubles
         /// </summary>
         public Action<int>? BeforeGrantQuery { get; set; }
 
+        /// <summary>Slice C2b: the <c>$top</c> of every grant-table query, in order (null when none was asked).</summary>
+        public List<int?> GrantQueryTops { get; } = new();
+
         private int _grantQueries;
 
         /// <summary>Every Dataverse write this table took (grant creates and updates).</summary>
@@ -621,8 +624,15 @@ internal static class AssignedAccessTestDoubles
             if (FailQueries)
                 throw new HttpRequestException("Simulated Dataverse query failure.");
 
+            // As the Web API client does: a cancelled token ends the read.
+            cancellationToken.ThrowIfCancellationRequested();
+
             if (entitySetName == GrantSet)
+            {
+                lock (_gate)
+                    GrantQueryTops.Add(top);
                 BeforeGrantQuery?.Invoke(Interlocked.Increment(ref _grantQueries));
+            }
 
             if (FailRootOwnerQueries && entitySetName is "sprk_projects" or "sprk_matters" or "sprk_workassignments")
                 throw new HttpRequestException("Simulated root-owner read failure.");
@@ -645,6 +655,8 @@ internal static class AssignedAccessTestDoubles
                 "systemusers" => SystemUsers.Values
                     .Where(u => filter is not null && filter.Contains($"systemuserid eq {u.Id}", StringComparison.OrdinalIgnoreCase))
                     .ToList(),
+                // Slice C2c: a person's organization memberships (the contact → organizations direction).
+                ExternalOrganizationMembership.EntitySet => MatchMemberships(filter),
                 "sprk_projects" or "sprk_matters" or "sprk_workassignments" => RootOwners.Keys.Union(RootCreators.Keys)
                     .Where(id => filter is not null && filter.Contains(id.ToString(), StringComparison.OrdinalIgnoreCase))
                     .Select(id => new Dictionary<string, object?>
@@ -662,6 +674,14 @@ internal static class AssignedAccessTestDoubles
         public override Task<T?> RetrieveAsync<T>(string entitySetName, Guid id, string? select = null,
             CancellationToken cancellationToken = default) where T : default
         {
+            // Slice C2c: a contact's container-permission key (its email), read by the SPE cleanup.
+            if (entitySetName == "contacts")
+            {
+                return Task.FromResult(ContactEmails.TryGetValue(id, out var email)
+                    ? JsonSerializer.Deserialize<T>(JsonSerializer.Serialize(new Dictionary<string, object?> { ["emailaddress1"] = email }))
+                    : default);
+            }
+
             // Task 181: the grant notification reads a root's display name by id, selecting that one column.
             if (entitySetName is "sprk_projects" or "sprk_matters" or "sprk_workassignments")
             {
@@ -687,6 +707,12 @@ internal static class AssignedAccessTestDoubles
         public List<string> ContactCreates { get; } = new();
 
         /// <summary>
+        /// UAC re-check K1: when set, a <c>contacts</c> create throws this (with <see cref="AcceptContactCreates"/>), as the Web API
+        /// client throws a bare <see cref="HttpRequestException"/> on Dataverse's 403 "Read Privilege Check For Owner failed".
+        /// </summary>
+        public Exception? ContactCreateFailure { get; set; }
+
+        /// <summary>
         /// Task 099b review round 1: when set, every GRANT-row create throws this — as the Web API client throws a bare
         /// <see cref="HttpRequestException"/> on Dataverse's 403 "Read Privilege Check For Owner failed".
         /// </summary>
@@ -696,6 +722,9 @@ internal static class AssignedAccessTestDoubles
         {
             if (entitySetName == "contacts" && AcceptContactCreates)
             {
+                if (ContactCreateFailure is { } contactFailure)
+                    throw contactFailure;
+
                 lock (_gate)
                     ContactCreates.Add(JsonSerializer.Serialize(entity));
                 return Task.FromResult(Guid.NewGuid());
@@ -760,8 +789,28 @@ internal static class AssignedAccessTestDoubles
                 return Enumerable.Empty<ExternalGrantRow>();
 
             var root = Regex.Match(filter, @"_sprk_(project|matter|workassignment)_value eq ([0-9a-fA-F-]{36})");
-            var rootId = Guid.Parse(root.Groups[2].Value);
             var activeOnly = filter.Contains("statecode eq 0", StringComparison.Ordinal);
+
+            // Slice C3: a person's grants across every root (ExternalGrantLifecycle.ActiveRowsForContactFilter) name no root.
+            if (!root.Success && filter.Contains("_sprk_contact_value eq null", StringComparison.Ordinal))
+            {
+                // Slice C2c: an organization's grants across every root (ExternalGrantLifecycle.ActiveOrganizationGrantsFilter).
+                var orgId = Guid.Parse(Regex.Match(filter, @"_sprk_organization_value eq ([0-9a-fA-F-]{36})").Groups[1].Value);
+                lock (_gate)
+                    return _rows.Where(r => r.OrganizationId == orgId && r.ContactId is null && (!activeOnly || r.IsActive)).ToList();
+            }
+
+            if (!root.Success)
+            {
+                var person =Regex.Match(filter, @"_sprk_contact_value eq ([0-9a-fA-F-]{36})");
+                if (!person.Success)
+                    throw new InvalidOperationException($"Unexpected grant filter: {filter}");
+                var personId = Guid.Parse(person.Groups[1].Value);
+                lock (_gate)
+                    return _rows.Where(r => r.ContactId == personId && (!activeOnly || r.IsActive)).ToList();
+            }
+
+            var rootId = Guid.Parse(root.Groups[2].Value);
 
             lock (_gate)
             {
@@ -776,6 +825,38 @@ internal static class AssignedAccessTestDoubles
                 return contact.Success
                     ? candidates.Where(r => r.ContactId == Guid.Parse(contact.Groups[1].Value)).ToList()
                     : candidates.ToList();
+            }
+        }
+
+        /// <summary>Slice C2c: a contact's <c>emailaddress1</c> as the SPE cleanup reads it by id. Empty by default.</summary>
+        public ConcurrentDictionary<Guid, string> ContactEmails { get; } = new();
+
+        /// <summary>Slice C2c: contact ↔ organization junction rows (statecode 0 = active). Empty by default.</summary>
+        public List<(Guid ContactId, Guid OrganizationId, int StateCode)> Memberships { get; } = new();
+
+        /// <summary>Slice C2c: a membership read fails (every other query still answers).</summary>
+        public bool FailMembershipQueries { get; set; }
+
+        private List<ExternalOrganizationMembership.ContactOrganizationRow> MatchMemberships(string? filter)
+        {
+            if (FailMembershipQueries)
+                throw new HttpRequestException("Simulated membership read failure.");
+
+            var contact = Regex.Match(filter ?? string.Empty, @"_sprk_contact_value eq ([0-9a-fA-F-]{36})");
+            var organization = Regex.Match(filter ?? string.Empty, @"_sprk_organization_value eq ([0-9a-fA-F-]{36})");
+            var activeOnly = filter?.Contains("statecode eq 0", StringComparison.Ordinal) == true;
+            lock (_gate)
+            {
+                return Memberships
+                    .Where(m => (!contact.Success || m.ContactId == Guid.Parse(contact.Groups[1].Value))
+                                && (!organization.Success || m.OrganizationId == Guid.Parse(organization.Groups[1].Value))
+                                && (!activeOnly || m.StateCode == 0))
+                    .Select(m => new ExternalOrganizationMembership.ContactOrganizationRow
+                    {
+                        ContactId = m.ContactId,
+                        OrganizationId = m.OrganizationId,
+                    })
+                    .ToList();
             }
         }
 
@@ -1145,12 +1226,18 @@ internal static class AssignedAccessTestDoubles
                 .AddInMemoryCollection(new Dictionary<string, string?> { ["ExternalAccess:PortalUrl"] = "https://external.test" })
                 .Build();
             return new Sprk.Bff.Api.Api.ExternalAccess.ExternalInviteService(
-                Grants, ciam ?? Ciam, Emails, IdentityBindingTestKit.Binder(identities), settings,
+                Grants, ciam ?? Ciam, Emails, IdentityBindingTestKit.Binder(identities), Organizations, settings,
                 new Sprk.Bff.Api.Configuration.CustomerIdentity(
                     Options.Create(new Sprk.Bff.Api.Configuration.CustomerOptions { Id = "acme" }), settings,
                     NullLogger<Sprk.Bff.Api.Configuration.CustomerIdentity>.Instance),
                 Time, InviteLogger);
         }
+
+        /// <summary>
+        /// Slice B3: the organisation decision the invite service makes for an automatic invite. A deployment with no customer
+        /// tenants by default (every invite a portal account, the discovery endpoint never called); a test sets a scripted one.
+        /// </summary>
+        public InviteOrganizationResolver Organizations { get; set; } = InviteOrganizationTestKit.PortalOnly();
 
         /// <summary>Task 185 slice E: the invite service's logger; set a capturing logger to assert what it writes.</summary>
         public ILogger<Sprk.Bff.Api.Api.ExternalAccess.ExternalInviteService> InviteLogger { get; set; } =
@@ -1249,7 +1336,14 @@ internal static class AssignedAccessTestDoubles
     /// Task 185 slice E: an invite service over an EMPTY world, for handler tests that are not about the invite: no contact
     /// is found, so nothing is invited (it answers Failed, contact_not_active), and it never throws.
     /// </summary>
-    internal static Sprk.Bff.Api.Api.ExternalAccess.ExternalInviteService InertInvites() => new Harness().Invites;
+    /// <remarks>Slice C3: <c>/grant</c> reads the grantee's removed marker through this service's identity store; in this
+    /// empty world no contact was removed, so the live read answers "not removed" (a test about removal seeds its own).</remarks>
+    internal static Sprk.Bff.Api.Api.ExternalAccess.ExternalInviteService InertInvites()
+    {
+        var harness = new Harness();
+        harness.Identities.LiveRemovedMarkerOverride = RemovedMarkerRead.NotRemoved;
+        return harness.Invites;
+    }
 
     /// <summary>Task 185 slice F: the provisioner and its Graph client factory, REAL, over a configuration with no Ciam:*.</summary>
     internal static Sprk.Bff.Api.Services.Registration.CiamUserProvisioningService NoCiamProvisioner()
