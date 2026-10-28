@@ -246,7 +246,10 @@ internal static class NoAccessEnforcementTestDoubles
 
         public NoAccessShareEnforcer Enforcer => new(
             Store, Participations, Identities, Shares, Cache.Mock.Object, Lease, ChildShares(), Entities(), WorkforceIdentity,
-            NullLogger<NoAccessShareEnforcer>.Instance);
+            NullLogger<NoAccessShareEnforcer>.Instance, PairedGrants);
+
+        /// <summary>Task 193 G2b: the grant revoke the enforcer is given; none by default (the shares alone, as before).</summary>
+        public Sprk.Bff.Api.Api.ExternalAccess.ExternalGrantRevocationService? PairedGrants { get; set; }
 
         /// <summary>r3 task 048: the customer home directories the enforcer also clears root sets under (none by default).</summary>
         public Microsoft.Extensions.Options.IOptionsMonitor<WorkforceIdentityOptions> WorkforceIdentity { get; set; } =

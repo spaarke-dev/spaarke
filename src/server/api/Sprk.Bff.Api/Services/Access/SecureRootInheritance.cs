@@ -519,6 +519,7 @@ public sealed partial class SecureRootInheritance
     private readonly Sprk.Bff.Api.Services.Ai.Membership.IMembershipCacheInvalidator _accessCacheInvalidator;
     private readonly Sprk.Bff.Api.Services.Documents.DocumentContainerRelocator? _fileRelocator;
     private readonly IRecordOwnershipResolver _ownership;
+    private readonly Sprk.Bff.Api.Api.ExternalAccess.ExternalGrantRevocationService? _pairedGrants;
 
     public SecureRootInheritance(
         IGenericEntityService dataverse,
@@ -539,8 +540,13 @@ public sealed partial class SecureRootInheritance
         Sprk.Bff.Api.Services.Documents.DocumentContainerRelocator? fileRelocator = null,
         // Task 175: the ONE ownership rule, for the owner a cascaded un-secure gives a record (its parents' business unit's
         // team). Optional for the same reason; without it the rule is constructed over this class's own reader.
-        IRecordOwnershipResolver? ownership = null)
+        IRecordOwnershipResolver? ownership = null,
+        // Task 193 G2b: the one grant revoke, which ends the grant PAIRED with an inherited share this rule removes
+        // (EndInheritedSourceAsync). Registered unconditionally (ExternalAccessModule); optional for the same reason —
+        // without it the share alone is removed.
+        Sprk.Bff.Api.Api.ExternalAccess.ExternalGrantRevocationService? pairedGrants = null)
     {
+        _pairedGrants = pairedGrants;
         _ownership = ownership ?? new RecordOwnershipResolver(dataverse, configuration,
             Microsoft.Extensions.Logging.Abstractions.NullLogger<RecordOwnershipResolver>.Instance);
         _accessCacheInvalidator = accessCacheInvalidator ?? new Sprk.Bff.Api.Services.Ai.Membership.NullMembershipCacheInvalidator(
@@ -1977,6 +1983,10 @@ public sealed partial class SecureRootInheritance
     /// <param name="endingParent">Task 158 r1c-v2 (round 39 item 1): a parent whose sharing is ending as a whole — the
     /// matter or project being UNSECURED — which therefore justifies nothing any more, though its flag still reads secure
     /// until the unsecure's last step. <c>null</c> for every other caller.</param>
+    /// <summary>Task 193 G2b: why an inherited share's end is not done when the grant paired with it was not ended.</summary>
+    internal const string PairedGrantNotEndedDetail =
+        "the share was removed, but the external access paired with it could not be ended yet (the reconciliation job ends it)";
+
     private async Task<EndOutcome> EndInheritedSourceAsync(
         string logical, Guid recordId, AssignedAccessLedgerRow row, CancellationToken ct,
         (string Table, Guid Id)? endingParent = null)
@@ -2124,6 +2134,18 @@ public sealed partial class SecureRootInheritance
                 "[SECURE-INHERIT] {Principal}'s inherited share on {Table} {RecordId} was {Action} (its parent no longer shares them).",
                 principal, logical, recordId, prior != 0 ? $"put back to mask {prior}" : "removed");
 
+            // Task 193 G2b (owner F1-b: the paired grant follows the share): the user's share is confirmed GONE (not put back
+            // to a level they held before), so every grant on the record PAIRED with them ("Add person") is ended through the
+            // one grant revoke, the same call /unshare-user makes. The share first, then the grant. One that is not ended
+            // leaves this end not done (reported); the revoke logs it at Error with ids only, and the reconciliation job's R5
+            // ends it. A pairing column that is not provisioned is the revoke's Warning: the share alone is removed, as before.
+            // Not on an UNSECURE's cascade (endingParent set): owner round 135 — unsecure keeps all access, and that change
+            // to the unsecure path is tracked separately, so this task leaves the unsecure's behaviour as it is.
+            var pairedNotEnded = endingParent is null
+                && prior == 0 && principal.Kind == DataversePrincipalKind.SystemUser && _pairedGrants is not null
+                && (await _pairedGrants.RevokePairedWithAsync(rootType, recordId, principal.Id, ct).ConfigureAwait(false))
+                    .PairedGrantEnded is false;
+
             // Round 47 item 1 (2): task 142's materializer runs at once for the assignment whose covering share just ended — on
             // a secure record the assignee is SUGGESTED (owner A3), never silently dropped. Its outcome is 142's: one that does
             // not complete leaves the row Skipped, which 142's own job re-evaluates (<= 5 minutes).
@@ -2143,9 +2165,14 @@ public sealed partial class SecureRootInheritance
 
             // The record's own children carry its shares.
             var cascade = await _synchronizer.SyncRootAsync(logical, recordId, ct).ConfigureAwait(false);
-            return cascade.IsComplete
+            var notDone = new List<string>();
+            if (pairedNotEnded)
+                notDone.Add(PairedGrantNotEndedDetail);
+            if (!cascade.IsComplete)
+                notDone.Add($"its own related records were not all brought into line ({cascade.Status})");
+            return notDone.Count == 0
                 ? new EndOutcome(true, true, null, StillCarried: carried)
-                : new EndOutcome(false, true, $"its own related records were not all brought into line ({cascade.Status})", StillCarried: carried);
+                : new EndOutcome(false, true, string.Join("; ", notDone), StillCarried: carried);
         }
         catch (LedgerRowChangedException changed)
         {

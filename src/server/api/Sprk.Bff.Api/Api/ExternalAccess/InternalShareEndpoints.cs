@@ -351,10 +351,7 @@ public static class InternalShareEndpoints
         ILogger<Program> logger,
         CancellationToken ct,
         [FromServices] IOptionsMonitor<WorkforceIdentityOptions>? workforceIdentity = null,
-        [FromServices] SpeContainerMembershipService? speContainerMembership = null,
-        [FromServices] Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver? containerResolver = null,
-        [FromServices] TimeProvider? timeProvider = null,
-        [FromServices] IContactIdentityStore? identityStore = null)
+        [FromServices] ExternalGrantRevocationService? pairedGrants = null)
     {
         var result = await UnshareRecordShareAsync(
             request, recordShare, dataverseClient, participations, cache, assignedAccess, secureChildShares, relatedRoots,
@@ -364,18 +361,15 @@ public static class InternalShareEndpoints
         // GONE — removed now, or held none (the 200), or the record's own share removed with its children still catching up
         // (children_incomplete) — every grant on the record PAIRED with them is ended through the one grant revoke. The share
         // first, then the grant: a share removal that failed or was refused changes nothing here. A grant that is not ended
-        // leaves the share removed and says so (pairedGrantEnded = false); the reconciliation job's R5 ends it next run. Both
-        // SPE services are registered in every host (the /revoke route requires them); the auth tests that drive this
-        // handler without them exercise the share alone.
-        if (speContainerMembership is null || containerResolver is null || !ShareConfirmedGone(result)
+        // leaves the share removed and says so (pairedGrantEnded = false); the reconciliation job's R5 ends it next run. The
+        // grant revoke is registered in every host (ExternalAccessModule, task 193 G2b); the auth tests that drive this
+        // handler without it exercise the share alone.
+        if (pairedGrants is null || !ShareConfirmedGone(result)
             || GrantExternalAccessEndpoint.ResolveExplicitRoot(request.RecordType, request.RecordId) is not { Ok: true } root
             || request.SystemUserId is not { } systemUserId)
             return result;
 
-        var paired = await new ExternalGrantRevocationService(
-                dataverseClient, speContainerMembership, participations, assignedAccess, containerResolver,
-                timeProvider ?? TimeProvider.System, identityStore, logger)
-            .RevokePairedWithAsync(root.Type, root.Id, systemUserId, ct);
+        var paired = await pairedGrants.RevokePairedWithAsync(root.Type, root.Id, systemUserId, ct);
 
         if (paired.PairedGrantEnded is not { } ended)
             return result;

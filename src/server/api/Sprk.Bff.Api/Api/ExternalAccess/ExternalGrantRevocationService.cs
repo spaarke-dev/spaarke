@@ -106,8 +106,12 @@ internal sealed record PersonOrganizationGrantSpeCleanup(
 /// <item><b>Cost of doing nothing:</b> a second surface that removes a person's grants would have to copy the sweep, the
 /// SPE cleanup, the cache invalidation and the ledger marking, and the copies would drift.</item>
 /// </list>
+/// <para><b>Task 193 G2b.</b> The class is <c>public</c> (its members stay <c>internal</c>) only so the public share-removal
+/// services (<see cref="NoAccessShareEnforcer"/>, <see cref="RestrictedExternalShareRemover"/>,
+/// <see cref="Sprk.Bff.Api.Services.Access.SecureRootInheritance"/>) can take it in their public constructors and end the
+/// grant PAIRED with a share they remove (<see cref="RevokePairedWithAsync"/>), the same call <c>/unshare-user</c> makes.</para>
 /// </remarks>
-internal sealed class ExternalGrantRevocationService
+public sealed class ExternalGrantRevocationService
 {
     private readonly DataverseWebApiClient _dataverse;
     private readonly SpeContainerMembershipService _speContainerMembership;
@@ -146,7 +150,7 @@ internal sealed class ExternalGrantRevocationService
     /// Revokes the logical grant (root x grantee) that <paramref name="accessRecordId"/> belongs to. Never reports
     /// <see cref="GrantRevocationStatus.Revoked"/> while a row of the grant may remain active.
     /// </summary>
-    public async Task<GrantRevocation> RevokeAsync(Guid accessRecordId, CancellationToken ct)
+    internal async Task<GrantRevocation> RevokeAsync(Guid accessRecordId, CancellationToken ct)
     {
         // ── Step 1: Deactivate EVERY active row for this logical grant ───────
         //
@@ -269,7 +273,7 @@ internal sealed class ExternalGrantRevocationService
     /// <see cref="PairedGrantRevocationStatus.Failed"/>, logged at Error with ids only; the reconciliation job's R5 ends a
     /// paired grant whose share is gone on its next run.
     /// </remarks>
-    public async Task<PairedGrantRevocation> RevokePairedWithAsync(
+    internal async Task<PairedGrantRevocation> RevokePairedWithAsync(
         ExternalGrantRootType rootType, Guid rootId, Guid systemUserId, CancellationToken ct)
     {
         var read = await ExternalGrantLifecycle.ReadPairingsOnRecordAsync(
@@ -339,6 +343,23 @@ internal sealed class ExternalGrantRevocationService
     }
 
     /// <summary>
+    /// Task 193 G2b: <see cref="RevokePairedWithAsync(ExternalGrantRootType, Guid, Guid, CancellationToken)"/> for a
+    /// share-removal path that names the record by its table's logical name (<c>sprk_matter</c>). A table that is not a
+    /// grant root carries no grant, so nothing is paired there.
+    /// </summary>
+    internal Task<PairedGrantRevocation> RevokePairedWithAsync(
+        string logicalName, Guid recordId, Guid systemUserId, CancellationToken ct)
+    {
+        foreach (var type in new[] { ExternalGrantRootType.Project, ExternalGrantRootType.Matter, ExternalGrantRootType.WorkAssignment })
+        {
+            if (string.Equals(ExternalGrantRoot.LogicalNameFor(type), logicalName, StringComparison.OrdinalIgnoreCase))
+                return RevokePairedWithAsync(type, recordId, systemUserId, ct);
+        }
+
+        return Task.FromResult(new PairedGrantRevocation(PairedGrantRevocationStatus.NonePaired));
+    }
+
+    /// <summary>
     /// Slice C2c: the most organization grants one organization contributes to a person's cleanup. One more is read; a page
     /// above the bound reports the cleanup not completed (more grants may remain), never a truncated success.
     /// </summary>
@@ -369,7 +390,7 @@ internal sealed class ExternalGrantRevocationService
     /// (<c>RemoveContactSpePermissionAsync</c>); only the person-to-roots walk is new. Cost of doing nothing: a removed person
     /// keeps a container permission on every secure root their organization is granted, because that grant is not revoked.</para>
     /// </remarks>
-    public async Task<PersonOrganizationGrantSpeCleanup> RemovePersonOrganizationGrantPermissionsAsync(
+    internal async Task<PersonOrganizationGrantSpeCleanup> RemovePersonOrganizationGrantPermissionsAsync(
         Guid contactId, CancellationToken ct)
     {
         OrganizationMemberSet organizations;

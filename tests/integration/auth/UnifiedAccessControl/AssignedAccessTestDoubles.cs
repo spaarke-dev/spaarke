@@ -1334,7 +1334,34 @@ internal static class AssignedAccessTestDoubles
         /// </summary>
         public RestrictedExternalShareRemover RestrictedRemover => new(
             Participations, SharesOverride ?? Shares, Grants, Cache.Mock.Object, Children, Lease, WorkforceIdentity,
-            NullLogger<RestrictedExternalShareRemover>.Instance);
+            NullLogger<RestrictedExternalShareRemover>.Instance, PairedGrants);
+
+        /// <summary>Task 193 G2b: the grant revoke the Restricted remover is given; none by default (the shares alone, as before).</summary>
+        public Sprk.Bff.Api.Api.ExternalAccess.ExternalGrantRevocationService? PairedGrants { get; set; }
+
+        /// <summary>
+        /// Task 193 G2b: the PRODUCTION grant revoke over this harness's grant table, flags and materializer, for a record on
+        /// the shared business-unit container (no SPE permission of its own to remove).
+        /// </summary>
+        public Sprk.Bff.Api.Api.ExternalAccess.ExternalGrantRevocationService PairedGrantRevokeFor(string logicalName, Guid rootId) => new(
+            Grants,
+            new SpeContainerMembershipService(
+                TestInfrastructure.TestSpeOwnership.AllowAll(Moq.Mock.Of<Sprk.Bff.Api.Infrastructure.Graph.IGraphClientFactory>()),
+                NullLogger<SpeContainerMembershipService>.Instance),
+            Participations, Materializer, TestRecordContainerResolver.ForNonSecureRecord(logicalName, rootId), Time, null,
+            NullLogger.Instance);
+
+        /// <summary>Task 193 G2b: host scopes that resolve <see cref="PairedGrantRevokeFor"/> (the materializer reaches the grant
+        /// revoke through a scope, as in production).</summary>
+        public void ScopesResolvingPairedGrantRevoke(string logicalName, Guid rootId)
+        {
+            var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+            Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddScoped(
+                services, _ => PairedGrantRevokeFor(logicalName, rootId));
+            Scopes = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions
+                .GetRequiredService<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>(
+                    Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(services));
+        }
 
         /// <summary>r3 task 048: the customer home directories the remover also clears root sets under (none by default).</summary>
         public IOptionsMonitor<WorkforceIdentityOptions> WorkforceIdentity { get; set; } = IdentityBindingTestKit.Tenants();

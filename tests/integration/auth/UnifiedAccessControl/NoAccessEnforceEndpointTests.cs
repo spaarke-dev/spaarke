@@ -228,6 +228,12 @@ public sealed class NoAccessEnforceTestFixture : WorkspaceTestFixture
 {
     internal Harness Harness { get; private set; } = new();
 
+    /// <summary>
+    /// Task 193 G2b: the grant world the enforcer's paired-grant end reads — the PRODUCTION grant revoke over an empty grant
+    /// table, so no grant is paired with anyone (the host's Web API client double answers no grant read).
+    /// </summary>
+    internal AssignedAccessTestDoubles.Harness Grants { get; private set; } = new();
+
     /// <summary>Whether the caller holds the entry table's Write privilege — Write on every row of the organization-owned table.</summary>
     public bool CallerHoldsEntryWritePrivilege { get; set; }
 
@@ -238,6 +244,7 @@ public sealed class NoAccessEnforceTestFixture : WorkspaceTestFixture
     public void Reset()
     {
         Harness = new Harness();
+        Grants = new AssignedAccessTestDoubles.Harness();
         CallerHoldsEntryWritePrivilege = false;
         ProbedPrivileges.Clear();
         ProbedTargets.Clear();
@@ -269,6 +276,8 @@ public sealed class NoAccessEnforceTestFixture : WorkspaceTestFixture
             services.AddScoped<Sprk.Bff.Api.Services.Access.IDataverseRecordShareService>(_ => Harness.Shares);
             services.RemoveAll<Sprk.Bff.Api.Infrastructure.Cache.ITenantCache>();
             services.AddScoped(_ => Harness.Cache.Mock.Object);
+            services.RemoveAll<ExternalGrantRevocationService>();
+            services.AddScoped(_ => Grants.PairedGrantRevokeFor("sprk_project", Guid.Empty));
         });
     }
 

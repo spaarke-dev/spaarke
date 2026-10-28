@@ -676,6 +676,39 @@ public sealed class AssignedAccessMaterializer
         }
     }
 
+    /// <summary>
+    /// Task 193 G2b (owner F1-b: the paired grant follows the share): this rule removed <paramref name="user"/>'s share on
+    /// the root (confirmed by read-back, not put back to an earlier level). An "Add person" share at the level this rule
+    /// wrote reads as this rule's, so the share removed may be the one a grant is PAIRED with: every such grant on the root
+    /// is ended through the one grant revoke, the same call <c>/unshare-user</c> makes, resolved in its own scope (the
+    /// revoke depends on this class, so it cannot be a constructor dependency). The share first, then the grant. One that is
+    /// not ended is a failure (<c>paired-grant-not-ended</c>), so the run is not complete; the revoke logs it at Error with
+    /// ids only, and the reconciliation job's R5 ends it. A pairing column that is not provisioned is the revoke's Warning.
+    /// </summary>
+    private async Task EndPairedGrantsAsync(Run run, AssignedSubject subject, Guid user, CancellationToken ct)
+    {
+        if (_scopes is null)
+        {
+            _logger.LogWarning(
+                "[ASSIGNED-ACCESS] {Type} {RootId}: {User}'s share was removed; no host scope to end a grant paired with it now — " +
+                "the reconciliation job ends it.", run.Logical, run.RootId, user);
+            return;
+        }
+
+        using var scope = _scopes.CreateScope();
+        var paired = await scope.ServiceProvider.GetRequiredService<Sprk.Bff.Api.Api.ExternalAccess.ExternalGrantRevocationService>()
+            .RevokePairedWithAsync(run.Request.RootType, run.RootId, user, ct).ConfigureAwait(false);
+        if (paired.PairedGrantEnded is false)
+        {
+            run.Fail(subject, PairedGrantNotEndedKind,
+                $"The automatic share of user {user} was removed, but the external access paired with it could not be ended " +
+                "yet. The scheduled safety net ends it.");
+        }
+    }
+
+    /// <summary>Task 193 G2b: the failure kind of a paired grant that was not ended after its share was removed.</summary>
+    internal const string PairedGrantNotEndedKind = "paired-grant-not-ended";
+
     /// <summary>The assigned subjects (registry order) and the fields that name each.</summary>
     private static Dictionary<AssignedSubject, List<string>> Desired(
         IReadOnlyList<(string Field, AssignedSubjectKind Kind)> registry, AssignedRootSnapshot root)
@@ -1617,6 +1650,8 @@ public sealed class AssignedAccessMaterializer
 
                     await EndAsync(restoreTo != 0 ? AssignedAccessReason.PriorLevelRestored : AssignedAccessReason.AccessRemoved,
                         restoreTo != 0 ? AssignedAccessAction.Restored : AssignedAccessAction.Revoked).ConfigureAwait(false);
+                    if (restoreTo == 0)
+                        await EndPairedGrantsAsync(run, subject, user, ct).ConfigureAwait(false);
                     return;
                 }
 

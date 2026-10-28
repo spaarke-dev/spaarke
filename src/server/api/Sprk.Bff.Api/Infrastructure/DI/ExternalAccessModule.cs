@@ -329,6 +329,22 @@ public static class ExternalAccessModule
         // store, the guard, the share seam, the tenant cache), so no Null-Object is needed.
         services.AddScoped<AssignedAccessStore>();
         services.AddScoped<AssignedAccessMaterializer>();
+        // Task 193 G2b (#2338): the ONE grant revoke, resolvable so every path that removes a share because the person must no
+        // longer see the record (/unshare-user, the No Access enforcer, the Restricted remover, the secure-root inheritance,
+        // the materializer) ends the grant PAIRED with that share through the same call (RevokePairedWithAsync).
+        // §11 — Existing: ExternalGrantRevocationService, built by hand by each caller. Extension: this registers that class
+        // as it is; no new type. Cost of doing nothing: each share-removal path would build its own copy from eight
+        // dependencies, or leave the paired grant (workforce-app access) active up to a day until the reconciliation job's R5.
+        // Every dependency is registered unconditionally (ADR-032); the logger is the class's own (its constructor takes ILogger).
+        services.AddScoped(sp => new Sprk.Bff.Api.Api.ExternalAccess.ExternalGrantRevocationService(
+            sp.GetRequiredService<DataverseWebApiClient>(),
+            sp.GetRequiredService<SpeContainerMembershipService>(),
+            sp.GetRequiredService<ExternalParticipationService>(),
+            sp.GetRequiredService<AssignedAccessMaterializer>(),
+            sp.GetRequiredService<Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver>(),
+            sp.GetRequiredService<TimeProvider>(),
+            sp.GetRequiredService<IContactIdentityStore>(),
+            sp.GetRequiredService<ILoggerFactory>().CreateLogger<Sprk.Bff.Api.Api.ExternalAccess.ExternalGrantRevocationService>()));
         // Task 193 (#2338): the ONE contact -> user rule (who a contact represents), over the identity store, the store above
         // and the participation service — all unconditional, so this is too (ADR-032). The personal To Do assignee's callers
         // and Manage Access's /grant resolve it; the materializer and the grant notifier build it from the same stores.

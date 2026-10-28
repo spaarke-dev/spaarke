@@ -833,9 +833,7 @@ public class ContactGrantSharesInternalUserTests
             TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(), new Spaarke.Scheduling.ProcessLocalScheduledJobLease(),
             InternalUserShareCoreTests.Rig.Caller(), NullLogger<Program>.Instance, CancellationToken.None,
             _h.WorkforceIdentity,
-            pairing ? Spe() : null,
-            pairing ? TestRecordContainerResolver.ForNonSecureRecord(MatterTable, _matter) : null,
-            _h.Time, null);
+            pairing ? _h.PairedGrantRevokeFor(MatterTable, _matter) : null);
     }
 
     private Task<IResult> RevokeGrant(Guid accessRecordId) =>

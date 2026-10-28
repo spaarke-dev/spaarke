@@ -207,6 +207,7 @@ public sealed class NoAccessShareEnforcer
     private readonly IGenericEntityService _dataverse;
     private readonly IOptionsMonitor<WorkforceIdentityOptions> _workforceIdentity;
     private readonly ILogger<NoAccessShareEnforcer> _logger;
+    private readonly Sprk.Bff.Api.Api.ExternalAccess.ExternalGrantRevocationService? _pairedGrants;
 
     /// <param name="store">The enforcer's Dataverse reads.</param>
     /// <param name="participations">Flags and organization reads.</param>
@@ -224,6 +225,9 @@ public sealed class NoAccessShareEnforcer
     /// matter or project — through the one child-direction walk, never a second copy. Registered unconditionally
     /// (GraphModule), so the enforcer gains no asymmetric dependency.</param>
     /// <param name="logger">Logger.</param>
+    /// <param name="pairedGrants">Task 193 G2b: the one grant revoke, which ends the grant PAIRED with a walled user's share
+    /// once that share is gone (<see cref="EnforceForUserAsync"/>). Registered unconditionally (ExternalAccessModule);
+    /// optional only so this enforcer's test compositions keep compiling — without it the shares alone are enforced.</param>
     public NoAccessShareEnforcer(
         NoAccessEnforcementStore store,
         ExternalParticipationService participations,
@@ -234,8 +238,10 @@ public sealed class NoAccessShareEnforcer
         SecureChildShareSynchronizer secureChildShares,
         IGenericEntityService dataverse,
         IOptionsMonitor<WorkforceIdentityOptions> workforceIdentity,
-        ILogger<NoAccessShareEnforcer> logger)
+        ILogger<NoAccessShareEnforcer> logger,
+        Sprk.Bff.Api.Api.ExternalAccess.ExternalGrantRevocationService? pairedGrants = null)
     {
+        _pairedGrants = pairedGrants;
         _workforceIdentity = workforceIdentity ?? throw new ArgumentNullException(nameof(workforceIdentity));
         _store = store;
         _participations = participations;
@@ -985,9 +991,38 @@ public sealed class NoAccessShareEnforcer
             return; // S5 kept the share on purpose; residual access through it is the share itself
         }
 
+        await EndPairedGrantsAsync(logicalName, recordId, userId, run, ct).ConfigureAwait(false);
+
         await ReportResidualAccessAsync(logicalName, entitySet, recordId, userId, shares, owner, run, ct)
             .ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// Task 193 G2b (owner F1-b: the paired grant follows the share): the walled user's direct share on the record is
+    /// confirmed GONE — removed now, or held none — so every grant on the record PAIRED with them ("Add person") is ended
+    /// through the one grant revoke, the same call <c>/unshare-user</c> makes. The share first, then the grant. Whatever
+    /// the entry names — the user, a contact they represent, or an organization of such contacts — the covered users are
+    /// these, so the pairing ends either way. A grant that is not ended is a failure (<c>paired-grant-not-ended</c>), so the
+    /// entry is never reported fully enforced while it may still be active; the revoke logs it at Error with ids only, and
+    /// the reconciliation job's R5 ends it. A pairing column that is not provisioned is the revoke's Warning: the share
+    /// alone is enforced, as before.
+    /// </summary>
+    private async Task EndPairedGrantsAsync(string logicalName, Guid recordId, Guid userId, Run run, CancellationToken ct)
+    {
+        if (_pairedGrants is null)
+            return;
+
+        var paired = await _pairedGrants.RevokePairedWithAsync(logicalName, recordId, userId, ct).ConfigureAwait(false);
+        if (paired.PairedGrantEnded is false)
+        {
+            run.Fail(logicalName, recordId, userId, PairedGrantNotEndedKind,
+                $"User {userId}'s share on this record is gone, but the external access paired with it could not be ended " +
+                "yet. The scheduled safety net ends it; open the record's Manage Access to check.");
+        }
+    }
+
+    /// <summary>Task 193 G2b: the failure kind of a paired grant that was not ended after its share was gone.</summary>
+    internal const string PairedGrantNotEndedKind = "paired-grant-not-ended";
 
     /// <summary>
     /// Owner S5 under concurrency (task 143 r1): the removal of a direct share on a secure record runs under a
