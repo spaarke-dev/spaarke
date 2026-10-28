@@ -422,3 +422,15 @@ Criterion 89 (blank the writer client id, expect the writer-failure alert to fir
 - Ontology tables were checked only, all OK: the writer profile's only member is `mi-ontology-writer-dev`; it holds field permission on `sprk_createdbyperson` for budgetrevision, decisionrecord and signal, and nothing else.
 - Policy tables: only the BFF-Managed Field Writers may set `sprk_createdbyperson`. Ontology authoring never references the column (checked on master and ebilling), so nothing breaks. The missing creator stamp is DI-128 (#2336).
 
+
+## 2026-10-28 — POL-MATTER-NOBUDGET v3 on spaarkedev1 (D-192, task 166)
+
+- **Approval and source:** owner approved in this session, after a clean `-WhatIf`. Source: docs `4e6f26c1f1` (PR #2385, reviewed).
+- **Command:** `Apply-DoLanePolicies.ps1 -DefinitionPath config/know-promotion.policies.json`, about 12:38Z.
+  - `-WhatIf`: create v3, end v2, move the pointer; no other write.
+  - Apply: created v3 `…6313` (plan `revise-budget`, `assign-task`; next steps `add-todo`, `assign-work`). Ended v2 `sprk_inforceto` at 2026-10-28T00:00:00Z (backdated to v3's `inForceFrom`; review K1, accepted). Current version now points at v3. The enabled flag is unchanged (True). READ-BACK OK.
+  - `-Verify -RequireRows`: policy, v1, v2 and v3 all IN SYNC (exit 0).
+- **Effect:**
+  - Open v2 Signals keep v2's plan (Assign Task only) until the next re-evaluation pass, nightly at 02:30Z. That pass closes them as Superseded and raises v3 Signals, which offer Create budget, then Assign Task.
+  - Matters whose v2 item was Acted are not re-raised (D-119).
+  - The job was not triggered manually.
