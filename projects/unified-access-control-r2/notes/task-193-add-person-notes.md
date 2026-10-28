@@ -31,12 +31,23 @@ Branch `fix/uac-193-add-person` (worktree C:/wt193), based on 078f62bcad (R3 #23
 | Share requested with an expiry | (n/a) | Shared with no end date; `expiryNotApplied: true`; the modal says so (same as picking the user directly) |
 | /invite-and-grant for an email resolving to one active contact that represents a user | CIAM invite + grant | Share; `onboardStatus: SharedWithInternalUser`; no CIAM account, email or grant row |
 | Modal | "+ Contact" / "+ User" | One "Add person" lookup; on a Restricted record, users only |
+| A No Access entry naming the contact or its firm, on a NON-secure record, contact representing a user | 422 `grantee_denied` | Unchanged: still 422, nothing written (V-fix; an explicit deny is honoured on the contact route; a direct /share-user pick keeps the owner's Q4 rule) |
+| Visibility in the workforce SPA/Teams of a colleague added through their contact | Visible (contact grant) | **OWNER RULING PENDING:** share only = MDA access, not visible in the SPA while ImpersonatedRootSets is off (same as a direct user pick) |
+
+## Security verifiers (a7d0f8186d)
+- A (server): ready. Authorization parity with /share-user verified mechanically (the core diff is 2 lines). Fail-closed holds.
+- B (client/contract): not ready. F1-a: the children_incomplete share path drops sharedWithUser, expiryNotApplied and the adopt. F1-b: SPA visibility (owner).
+- V-fix round: F1-a; the delegation-filter timing oracle (#2334) fixed in scope; No Access on the contact route; no emails in ExternalInviteService logs or exception messages; a ceiling test on /grant; "Shared with X" wording; stale comments; guide line 212.
+- Link columns (`contact.sprk_externalobjectid`, `systemuser.sprk_primarycontact`) are field-secured, with the BFF as the only writer (task 141, `Set-ContactIdentityBindingSchema.ps1`). That bounds who can make a contact "represent" a user (System Administrators excepted).
 
 ## Known limits
 - K: Available hides a represented-and-shared role contact only through its Assigned-To ledger entry. A role contact with no ledger row (the Assigned-To sync never ran on that record) stays offered after a share to its colleague. Re-adding it is harmless: /grant shares again at the same level and names the colleague.
 - K: A ledger-adopt failure after a confirmed share keeps the share and returns 200. It is logged at Error through the materializer's shared mark path (no email, no name).
 - K: The SpaarkeMaster solution-export copies of the TrackingFieldTrio bundle and the `sprk_spaarkeai` web resource update at the next release export, not on this branch.
-- Filed: #2371 (inactive contact: /grant writes a dormant row; the contact-side route refuses).
+- K: a stale ledger link (contact relinked from user A to user B while A holds a share) briefly hides the candidate, until the next Assigned-To sync.
+- K: re-adding a represented contact that already holds a contact grant shares and leaves the grant row as it was (still visible and revocable in Current Access).
+- K: the /invite Retry doesn't ask who the contact represents (rare: the contact gets linked between the grant and the Retry).
+- Filed: #2371 (inactive contact: /grant writes a dormant row; the contact-side route refuses); #2377 (an internal user's email with no active contact still gets a CIAM invite).
 
 ## Gates (D1-fix2 / D2)
 Unit (touched): 8921/0/2 · ArchTests 1577 · BFF integration 186/0/8 · Spe integration 353/0/23 · jest (modal) 306 · lint ratchet ok · PCF build PASS (1.03 MiB, +9.4 KB) · no CVE. Publish delta: +7.4 KB at Run C; re-measure before the PR.
