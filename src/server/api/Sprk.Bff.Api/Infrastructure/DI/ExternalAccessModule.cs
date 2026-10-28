@@ -333,6 +333,9 @@ public static class ExternalAccessModule
         // and the participation service — all unconditional, so this is too (ADR-032). The personal To Do assignee's callers
         // and Manage Access's /grant resolve it; the materializer and the grant notifier build it from the same stores.
         services.AddScoped<ContactUserRepresentation>();
+        // Task 193 (#2338) step 3: the share-or-grant decision for a contact grantee (/grant and /invite-and-grant) — the
+        // resolver above plus the /share-user write core. Every dependency is registered unconditionally (ADR-032).
+        services.AddScoped<Sprk.Bff.Api.Api.ExternalAccess.ContactInternalUserShare>();
 
         // Principal-agnostic caller resolution (teams-app-r1 task 025 · R2 FR-22 · Option A). The
         // reusable abstraction that lets the /api/v1/external collaboration endpoints serve BOTH the

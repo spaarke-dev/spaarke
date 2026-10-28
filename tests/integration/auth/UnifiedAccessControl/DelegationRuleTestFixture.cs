@@ -222,8 +222,17 @@ public class DelegationRuleTestFixture : WorkspaceTestFixture
             // call from a unit-test host.
             services.RemoveAll<Spaarke.Dataverse.IGenericEntityService>();
             services.AddSingleton(_ => Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.EntitiesOver(() => FilingWorld).Object);
+
+            // Task 193: /grant and /invite-and-grant ask who a contact (or the invite email's contact) represents before the
+            // policy. An in-memory identity store (empty unless a test seeds it) instead of the real one — a network call from a
+            // unit-test host, which would fail closed (503) ahead of the policy answer these tests pin.
+            services.RemoveAll<IContactIdentityStore>();
+            services.AddSingleton<IContactIdentityStore>(IdentityStore);
         });
     }
+
+    /// <summary>Task 193: the contacts and links the host's identity reads see (empty: no contact represents anyone).</summary>
+    internal Sprk.Bff.Api.Tests.AccessControl.IdentityBinding.InMemoryContactIdentityStore IdentityStore { get; } = new();
 
     /// <summary>Task 175: the rows /can-manage-access walks for followsParents (work assignments, projects, their parents).</summary>
     internal Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld FilingWorld { get; set; } =

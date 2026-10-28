@@ -23,10 +23,17 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// Task 185 slice E (§12 I-1): what the grant did about the contact's CIAM invite — an unbound contact with an email is
 /// invited automatically. <c>null</c> for an organization grant. Additive; no other field changes.
 /// </param>
+/// <param name="SharedWithUser">
+/// Task 193 (#2338): set when the contact represents exactly ONE internal user, so the record was SHARED with that user
+/// instead of granted to the contact. Then no grant row was written: <paramref name="AccessRecordId"/> is
+/// <see cref="Guid.Empty"/>, <paramref name="Invite"/> is <c>null</c>, and <paramref name="GrantedAccessLevel"/>,
+/// <paramref name="Narrowed"/> and <paramref name="NotificationFailed"/> describe the share. <c>null</c> for a grant. Additive.
+/// </param>
 public record GrantAccessResponse(
     Guid AccessRecordId,
     bool SpeContainerMembershipGranted,
     ExternalAccessLevel? GrantedAccessLevel = null,
     bool Narrowed = false,
     bool NotificationFailed = false,
-    GrantInviteResult? Invite = null);
+    GrantInviteResult? Invite = null,
+    SharedWithUser? SharedWithUser = null);

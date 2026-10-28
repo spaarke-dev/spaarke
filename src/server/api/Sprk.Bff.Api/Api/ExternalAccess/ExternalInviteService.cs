@@ -131,6 +131,9 @@ public sealed class ExternalInviteService
 
         // A contact an internal user links to is that user's: they sign in on the workforce plane (and are told in-app by
         // the grant notifier). No external account is ever attached to it (the invite core refuses it).
+        // Task 193 (#2338): a SECOND safety net, never the decider. /grant and /invite-and-grant decide "never CIAM-invite an
+        // internal user" earlier, through ContactUserRepresentation (a represented user is shared with, not invited), so a
+        // contact grant that reaches here represents nobody. Any link still answers NotNeeded: it never invites.
         var references = await store.FindSystemUsersLinkingAsync(new[] { contactId }, ct).ConfigureAwait(false);
         if (references.Status != LookupStatus.Read)
             return GrantInviteAssessment.Done(Failed(ContactBindingDecision.InviteContactLookupFailed));

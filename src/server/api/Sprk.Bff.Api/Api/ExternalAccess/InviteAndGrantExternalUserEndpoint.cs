@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Mvc;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Infrastructure.Cache;
@@ -63,6 +64,12 @@ public static class InviteAndGrantExternalUserEndpoint
         return group;
     }
 
+    /// <summary>
+    /// Task 193: <see cref="InviteAndGrantResponse.OnboardStatus"/> when the email's contact represents an internal user and
+    /// the record was shared with that user — nobody was onboarded.
+    /// </summary>
+    internal const string SharedWithInternalUserStatus = "SharedWithInternalUser";
+
     /// <summary>Handles <c>POST /api/v1/external-access/invite-and-grant</c>. Internal so the auth tests can drive it directly.</summary>
     internal static async Task<IResult> InviteAndGrantAsync(
         InviteExternalUserRequest request,
@@ -83,7 +90,8 @@ public static class InviteAndGrantExternalUserEndpoint
         HttpContext httpContext,
         ILogger<Program> logger,
         TimeProvider timeProvider,
-        CancellationToken ct)
+        CancellationToken ct,
+        [FromServices] ContactInternalUserShare? contactShare = null)
     {
         // ── Validation ───────────────────────────────────────────────────────
         // C5: the request's own shape is validated first, on every host, before any lookup: a malformed request is a 400
@@ -134,6 +142,63 @@ public static class InviteAndGrantExternalUserEndpoint
         var today = ExternalGrantLifecycle.TodayUtc(timeProvider);
         if (GrantExternalAccessEndpoint.ValidateRequestedExpiry(request.ExpiryDate, today, httpContext) is { } expiryProblem)
             return expiryProblem;
+
+        // ── Task 193 (#2338) step 4: never CIAM-invite an internal user ──
+        // An email that names ONE existing contact which represents an internal user takes /grant's decision: exactly one
+        // represented user → shared at the requested level (no CIAM account, no email, no grant row); several → 409;
+        // unreadable → 503. Decided by ContactUserRepresentation, BEFORE the contact policy (a share is not a contact
+        // grant) and before anything is onboarded. The binder's link refusal below and the invite core's link guard stay
+        // as safety nets, never the decider. No contact, or two (the binder refuses those), goes on unchanged.
+        contactShare ??= httpContext.RequestServices?.GetRequiredService<ContactInternalUserShare>();
+        if (contactShare is not null)
+        {
+            ContactLookup existing;
+            try
+            {
+                existing = await binder.Store.FindActiveContactsByEmailAsync(request.Email, ct);
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                logger.LogError(ex,
+                    "[EXT-INVITE-GRANT] The contact lookup for the invite email failed on {RootType} {RootId}. Nothing was " +
+                    "onboarded or granted.", grantRoot.Type, grantRoot.Id);
+                existing = ContactLookup.Failed;
+            }
+
+            if (existing.Status != LookupStatus.Read)
+            {
+                // Not "no contact yet": an unread lookup may hide a colleague's contact, so nothing is onboarded.
+                return InviteExternalUserEndpoint.LookupFailureResult(new InviteExternalUserEndpoint.InviteLookupFailure(
+                    ContactBindingDecision.InviteContactLookupFailed,
+                    ContactIdentityBinder.InviteMessage(ContactBindingDecision.InviteContactLookupFailed)!),
+                    httpContext);
+            }
+
+            var activeContacts = existing.Rows.Where(r => r.IsActive && r.ContactId != Guid.Empty).ToList();
+            if (activeContacts.Count == 1)
+            {
+                var existingContactId = activeContacts[0].ContactId;
+                var decision = await contactShare.DecideAsync(
+                    existingContactId, grantRoot.Type, grantRoot.Id, (ExternalAccessLevel)request.AccessLevel,
+                    dataverseClient, participations, callerAccessProbe, assignedAccess, accessNotifier, httpContext, logger, ct);
+
+                if (decision.Result is { } answered)
+                    return answered;
+
+                if (decision is { Shared: { } sharedWith, ShareResponse: { } share })
+                    return TypedResults.Ok(new InviteAndGrantResponse(
+                        existingContactId,
+                        SharedWithInternalUserStatus,
+                        Guid.Empty,
+                        PortalUrl: string.Empty,
+                        GrantedAccessLevel: share.AccessLevel,
+                        Narrowed: share.Narrowed,
+                        NotificationFailed: share.NotificationFailed,
+                        EmailSent: null,
+                        EmailErrorCode: null,
+                        SharedWithUser: sharedWith));
+            }
+        }
 
         // Task 138: the record's access policy, BEFORE onboarding. The grantee is a named Contact, so this is
         // refused only on a Restricted record (or when the policy cannot be read). The grant core checks again

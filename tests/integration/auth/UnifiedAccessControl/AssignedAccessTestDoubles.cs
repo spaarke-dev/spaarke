@@ -551,6 +551,9 @@ internal static class AssignedAccessTestDoubles
         /// <summary>Task 114 verifier V3: a root-owner read fails (every other query still answers).</summary>
         public bool FailRootOwnerQueries { get; set; }
 
+        /// <summary>Task 193: every query selecting EXACTLY these columns throws (e.g. the share list's name read).</summary>
+        public string? FailQueriesSelecting { get; set; }
+
         /// <summary>System users the share routes can read (eligible internal people unless seeded otherwise).</summary>
         public ConcurrentDictionary<Guid, Sprk.Bff.Api.Api.ExternalAccess.InternalShareEndpoints.SystemUserRow> SystemUsers { get; } = new();
 
@@ -643,6 +646,9 @@ internal static class AssignedAccessTestDoubles
         {
             if (FailQueries)
                 throw new HttpRequestException("Simulated Dataverse query failure.");
+
+            if (FailQueriesSelecting is { } failing && select == failing)
+                throw new HttpRequestException("Simulated Dataverse query failure for this select.");
 
             // As the Web API client does: a cancelled token ends the read.
             cancellationToken.ThrowIfCancellationRequested();

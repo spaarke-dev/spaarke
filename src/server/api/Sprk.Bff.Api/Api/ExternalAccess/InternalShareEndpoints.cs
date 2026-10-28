@@ -1046,7 +1046,7 @@ public static class InternalShareEndpoints
     /// its users out — names <c>null</c>, unmarked — rather than failing the list: who holds which rights has already been
     /// read.
     /// </summary>
-    private static async Task<IReadOnlyDictionary<Guid, SystemUserRow>> ReadNamesAsync(
+    internal static async Task<IReadOnlyDictionary<Guid, SystemUserRow>> ReadNamesAsync(
         DataverseWebApiClient dataverseClient, IReadOnlyList<Guid> systemUserIds, ILogger logger, CancellationToken ct)
     {
         var names = new Dictionary<Guid, SystemUserRow>();

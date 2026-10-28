@@ -35,6 +35,13 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// Why <paramref name="EmailSent"/> is <c>false</c>: <see cref="GrantInviteStatus.EmailNotSentReasonCode"/> (attempted, not
 /// sent) or <see cref="ContactBindingDecision.InviteContactAlreadyHasAccount"/> (none due); otherwise <c>null</c>. Additive.
 /// </param>
+/// <param name="SharedWithUser">
+/// Task 193 (#2338): set when the email named an existing contact that represents exactly ONE internal user, so the record
+/// was SHARED with that user — never a CIAM invite, an email or a grant row. Then <paramref name="OnboardStatus"/> is
+/// <c>"SharedWithInternalUser"</c>, <paramref name="AccessRecordId"/> is <see cref="Guid.Empty"/>, <paramref name="PortalUrl"/>
+/// is empty (the colleague uses the model-driven app), <paramref name="EmailSent"/> is <c>null</c>, and the level fields
+/// describe the share. <c>null</c> otherwise. Additive.
+/// </param>
 public record InviteAndGrantResponse(
     Guid ContactId,
     string OnboardStatus,
@@ -44,4 +51,5 @@ public record InviteAndGrantResponse(
     bool Narrowed = false,
     bool NotificationFailed = false,
     bool? EmailSent = null,
-    string? EmailErrorCode = null);
+    string? EmailErrorCode = null,
+    SharedWithUser? SharedWithUser = null);

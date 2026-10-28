@@ -53,6 +53,16 @@ public record ShareRecordWithUserResponse(
     bool Narrowed,
     bool NotificationFailed = false);
 
+/// <summary>
+/// Task 193 (#2338): the internal user a record was SHARED with because the contact named as a grantee represents them
+/// (<c>/grant</c>, <c>/invite-and-grant</c>). Answered only after the share was confirmed.
+/// </summary>
+/// <param name="SystemUserId">The person the record is now shared with.</param>
+/// <param name="FullName">
+/// Their name, for display only — read AFTER the share, so <c>null</c> when it could not be read; the share stands either way.
+/// </param>
+public record SharedWithUser(Guid SystemUserId, string? FullName);
+
 /// <summary>Request body for <c>POST /api/v1/external-access/unshare-user</c>.</summary>
 /// <param name="RecordType"><c>project</c> | <c>matter</c> | <c>workassignment</c> (case-insensitive). Required.</param>
 /// <param name="RecordId">The record whose share is removed. Required.</param>

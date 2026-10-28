@@ -183,6 +183,27 @@ public class AuthorizationGateTimingTests
         denied.Asks.Should().Be(unknown.Asks).And.Be(3);
     }
 
+    /// <summary>
+    /// Task 193 (#2334 at the grantor ceiling): /grant's and /invite-and-grant's ceiling probe asks the gate question, so a
+    /// record that does not exist and one the caller cannot see both become a "none" ceiling (403 caller_cannot_grant) after
+    /// the same work.
+    /// </summary>
+    [Fact]
+    public async Task GrantorCeilingProbe_AnUnknownAndADeniedRecord_AreTheSameNoneCeiling_AfterTheSameWork()
+    {
+        var unknown = new TimingProbe();
+        var denied = new TimingProbe();
+
+        var a = await Sprk.Bff.Api.Api.ExternalAccess.GrantExternalAccessEndpoint.ProbeGrantorCeilingAsync(
+            unknown, InternalUserShareCoreTests.Rig.Caller(), ExternalGrantRootType.Matter, Unknown, CancellationToken.None);
+        var b = await Sprk.Bff.Api.Api.ExternalAccess.GrantExternalAccessEndpoint.ProbeGrantorCeilingAsync(
+            denied, InternalUserShareCoreTests.Rig.Caller(), ExternalGrantRootType.Matter, Denied, CancellationToken.None);
+
+        b.Should().BeEquivalentTo(a, "both are the \"none\" ceiling");
+        denied.Waits.Should().Equal(unknown.Waits).And.Equal(NotFoundSchedule);
+        denied.Asks.Should().Be(unknown.Asks).And.Be(3);
+    }
+
     [Fact]
     public async Task QuickCreateSourceCheck_AnUnknownAndADeniedSource_AreTheSame403_AfterTheSameWork()
     {
