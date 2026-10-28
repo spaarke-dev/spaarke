@@ -1,6 +1,6 @@
 # 095 from-email: wire contract (pinned 2026-10-27 for word-add-in-r1)
 
-> **Agreed by word-add-in-r1 at 717cf238d9 (2026-10-27).** Changes since: EB-D-160 (re-attempt after Failed, section 5), agreed by word-add-in-r1 2026-10-27; `marks_invalid` reason `invoice_not_pdf` (2026-10-27, from their review).
+> **Agreed by word-add-in-r1 at 717cf238d9 (2026-10-27).** Changes 2026-10-28 (095 review round 1, for word-add-in-r1's agreement): firm details out of K (sections 2, 4, 5); EB-D-165 rows (section 5); new 422 `attachment_not_preserved` and two body-shape keys (section 6); `firmId` and `poNumber` rules (section 2); 500 `OFFICE_AUTH_ERROR` and the firms route's 404 (sections 6, 8). Earlier changes: EB-D-160 (re-attempt after Failed, section 5), agreed by word-add-in-r1 2026-10-27; `marks_invalid` reason `invoice_not_pdf` (2026-10-27, from their review).
 
 Binding for 095 and word-add-in-r1; changes need word-add-in-r1's agreement first. Behaviour is model §9.1 (v5.9 FINAL); this pins names, statuses and codes only. Citations: `work/ebilling-r1` @ 786d1ea17a, under `src/server/api/Sprk.Bff.Api/` unless shown. NEW = no existing code to follow.
 
@@ -57,11 +57,11 @@ Header `X-Idempotency-Key`: optional (section 4). Body (camelCase):
 
 | Field | Type | Required | Rule | Refusal |
 |---|---|---|---|---|
-| `firmId` | GUID (`sprk_organization` id) | yes | Must be linked to `targetEntity` (D-106). For `Correction` it must equal the old invoice's firm. | 400 `ebilling.submission.firm_invalid` (not a firm); 403 `ebilling.submission.firm_not_linked`; Correction mismatch: 409 `correction_not_allowed` reason `different_firm` |
+| `firmId` | GUID (`sprk_organization` id) | yes | Must be linked to `targetEntity` (D-106). For `Correction` it must equal the old invoice's firm. | A firm id that does not exist: 403 reasonCode `sdap.access.deny.insufficient_rights` (the Finance filter's AppendTo check on the firm runs first; Changed 2026-10-28). 400 `ebilling.submission.firm_invalid`: the empty GUID, or an inactive firm (Changed 2026-10-28). 403 `ebilling.submission.firm_not_linked`; Correction mismatch: 409 `correction_not_allowed` reason `different_firm` |
 | `firmInvoiceNumber` | string, trimmed, 1-100 | yes | Typed by the user (D-91); the tracking number is `{firmInvoiceNumber}.{n}` (D-87). A different number read from the PDF holds the invoice for review, never refuses it. | 400 `ebilling.submission.firm_invoice_number_required` |
-| `poNumber` | string or null | no | Stored as given. | none |
+| `poNumber` | string or null | no | Trimmed; blank (empty or whitespace) is stored as null (Changed 2026-10-28). Over 100 characters after trimming: the body-shape 400. | none |
 
-The firm fields are part of the idempotency key K (section 4): the same email, record and marks with another firm or number is a different submission, which the duplicate rule then answers (section 5).
+The firm fields are **not** part of the idempotency key K (section 4; Changed 2026-10-28, 095 review F2): the same email, record and marks with another firm or number is the same submission with other details, which section 5 answers (409 `document_already_submitted` while its latest attempt is not Failed; a new attempt with the new details after Failed). They stay in the `X-Idempotency-Key` cache binding.
 
 ## 3. Response
 
@@ -80,9 +80,9 @@ The firm fields are part of the idempotency key K (section 4): the same email, r
 
 **Rule: the server derives the operation key; the client cannot choose or collide it.**
 
-- **K** is the §9.1 key: the RFC Message-ID (`OfficeEmailEnricher.ResolveRfcMessageId`, :603); the core record (kind, id); `mode`; `invoiceId` (empty for New); `firmId`; `firmInvoiceNumber` (trimmed); and every mark as (`fileName`, `size`, `contentType`, `mark`), sorted ordinal by fileName, then size, contentType, mark (OP-1, OP-3).
+- **K** is the §9.1 key: the RFC Message-ID (`OfficeEmailEnricher.ResolveRfcMessageId`, :603); the core record (kind, id); `mode`; `invoiceId` (empty for New); and every mark as (`fileName`, `size`, `contentType`, `mark`), sorted ordinal by fileName, then size, contentType, mark (OP-3). Changed 2026-10-28 (095 review F2): `firmId` and `firmInvoiceNumber` are no longer in K, so another firm or number cannot make a second invoice for one email (section 5). K has no caller (OP-5).
 - **Ids:** submission id = `IdOf("ebilling-from-email-submission-" + K)` and job id = `IdOf("ebilling-from-email-job-" + K)` (InvoiceSubmissionPersister.cs:199). This is the 050a scheme (InvoiceSubmissionService.cs:204-207): one row per key, race-safe through the allocator's `AlreadyCreated`.
-- **`X-Idempotency-Key`:** the existing header (IdempotencyFilter.cs:112; the add-in sends it, `useSaveFlow.ts:1229`), opaque and optional. It names only the per-user 24 h response cache (:108, :181-207), bound to K as in OfficeEndpoints.cs:384-386, so a reused header on another body is never replayed. Send one value per user action; reuse it on retries. Never compared with K.
+- **`X-Idempotency-Key`:** the existing header (IdempotencyFilter.cs:112; the add-in sends it, `useSaveFlow.ts:1229`), opaque and optional. It names only the per-user 24 h response cache (:108, :181-207), bound to K plus `firmId` and the trimmed `firmInvoiceNumber` as in OfficeEndpoints.cs:384-386, so a reused header on another body (including another firm or number) is never replayed (Changed 2026-10-28). Send one value per user action; reuse it on retries. Never compared with K.
 - A body `idempotencyKey` is not accepted (it is ignored).
 
 ## 5. Duplicate replay
@@ -93,7 +93,9 @@ The firm fields are part of the idempotency key K (section 4): the same email, r
 | The same, from the response cache | 202 with the identical body plus `X-Idempotency-Status: cached` (IdempotencyFilter.cs:113) |
 | Same K, latest submission ended **Failed** | **A new attempt** (EB-D-160): 202 with a NEW `submissionId`, `jobId` and `trackingNumber` (`{firmInvoiceNumber}.{n+1}` through the allocator). Ids derive from K plus a generation; generation 1 is the first attempt's derivation. Two concurrent retries of one Failed K create exactly one new attempt; the other gets its 202 replay |
 | Same K, latest submission ended **Rejected** | 409 `ebilling.submission.submission_already_ended` (D-139 stands for Rejected) |
-| Same K, other details differ (Invoice part SHA-256; firm or number after OP-1) | 409 `ebilling.submission.document_already_submitted` (:457-467) |
+| Same K, other details differ (Invoice part SHA-256; firm or number after OP-1) | 409 `ebilling.submission.document_already_submitted` (:457-467), detail "This email was already submitted as an invoice with other details. Nothing was saved." Applies while the latest attempt is not Failed; after Failed the request is a new attempt carrying the new details (row above). Changed 2026-10-28 (095 review F2): with firm and number out of K this row now catches them; before, they made a different K and so a second invoice |
+| Another caller submits the same email and marking, and the latest submission (by someone else) ended **Failed** | **A new attempt created by this caller** (EB-D-165, owner 2026-10-28, uac-r2 recommended): 202 with a NEW `submissionId`, `jobId` and `trackingNumber`, as in the Failed row above; the new submission's creator is this caller. Added 2026-10-28 |
+| Another caller, same email, the latest submission (by someone else) is Received, Processing, Accepted or Rejected | 409 `ebilling.submission.document_already_submitted`, detail: "This email was already submitted as an invoice for this record by someone else. Nothing was saved." (names no person or id; 095 review F1-2). Same code as today; only the text changes |
 | Same header, different K | Not a replay: handled as its own operation |
 | Same header, first request still running | 409 `OFFICE_IDEMPOTENCY_CONFLICT`; retry shortly (IdempotencyFilter.cs:255-272) |
 | Different marking, mode or invoice | A different K: a new submission (§9.1) |
@@ -111,7 +113,7 @@ ProblemDetails (ADR-019). Own refusals carry `errorCode` (submission routes, Inv
 | 403 | `sdap.access.error.system_failure` (reasonCode) | Step 0 or a rights read faulted | – | yes | :341, :594-597 |
 | 403 | `sdap.access.deny.insufficient_rights` (reasonCode) | Finance check: no Read + AppendTo on the core record | – | no | :338 |
 | 403 | `OFFICE_009` + reasonCode `insufficient_rights` | EntityAccessFilter, same rights | `entityType` | no | EntityAccessFilter.cs:286-301 |
-| 400 | ValidationProblem (no code) | Body shape: missing field, bad GUID, other entity type, unknown `mode`, `invoiceId` vs `mode`, no RFC `internetMessageId` (OP-2) | `errors` {jsonPath: [msg]} | no | FinanceEndpoints.cs:143 |
+| 400 | ValidationProblem (no code) | Body shape: missing field, bad GUID, other entity type, unknown `mode`, `invoiceId` vs `mode`, no RFC `internetMessageId` (OP-2); a null `email.attachments[i]` entry (key `email.attachments[i]`); a `message/*` content type on a mark of `Invoice` or `Supporting` (key `marks[i].contentType`: an attached email cannot be kept byte-for-byte). The last two Added 2026-10-28 (095 review F1, F4) | `errors` {jsonPath: [msg]} | no | FinanceEndpoints.cs:143 |
 | 429 | `OFFICE_015` | The Office Save bucket, shared with `/office/save` | `Retry-After` header, `retryAfterSeconds`, `limit` | after Retry-After | OfficeRateLimitFilter.cs:135, :359 |
 | 503 | `ebilling.disabled` | eBilling is off | – | no | EbillingEnabledFilter.cs:22 |
 | 400 | `ebilling.submission.marks_invalid` NEW | Marks break a rule (below) | `reason`, `fileName` (when one file) | no | §9.1 Marks |
@@ -121,6 +123,8 @@ ProblemDetails (ADR-019). Own refusals carry `errorCode` (submission routes, Inv
 | 503 | `ebilling.submission.record_unavailable` | Transient Dataverse fault | – | yes | InvoiceSubmissionContracts.cs:289 |
 | 503 | `ebilling.submission.failed` | The job could not be queued | – | yes | :290 |
 | 409 | `ebilling.submission.document_core_record_mismatch` | The communication is filed under another core record | – | no | :279 |
+| 422 | `ebilling.submission.attachment_not_preserved` NEW | A marked file could not be kept byte-for-byte in the saved email (checked after the `.eml` is built, before it is uploaded); nothing is saved or submitted. `detail` names the internal upload route. Added 2026-10-28 (095 review F1) | – | no | OfficeService.SaveCoreAsync |
+| 500 | `OFFICE_AUTH_ERROR` | The EntityAccessFilter's access probe faulted. Added 2026-10-28 (095 review F7) | `correlationId` | yes | EntityAccessFilter.cs:304-320 |
 | 409 | `ebilling.submission.correction_not_allowed` NEW | Correction refused | `reason`: `invoice_status` (+`invoiceStatus`), `different_firm`, `different_core_record` | no | §9.1 Existing invoice |
 | 404 | `sdap.access.deny.record_unavailable` (reasonCode) | Correction: `invoiceId` the caller cannot Write, or absent | – | no | ProblemDetailsHelper.cs:357-367; 097 constraint 1 |
 | 409 | RecordOwnerRefused reasonCode | No owner team for the new rows | – | no | InvoiceSubmissionHttp.cs:108 |
@@ -140,7 +144,7 @@ Field names and codes in this file are binding once word-add-in-r1 agrees (095 P
 - **OP-2:** `email.internetMessageId` is required; a missing or non-RFC value is the 400 body-shape refusal, and Graph is not asked.
 - **OP-3:** marks match attachments on (`fileName`, `size`, `contentType`); K uses (fileName, size, contentType, mark), sorted. Two non-inline attachments equal on all three are 400 `marks_invalid` reason `ambiguous_attachment`.
 - **OP-4 (owner, EB-D-160, 2026-10-27):** a re-attempt after **Failed** is allowed on this route (a generation in the id derivation, a new tracking suffix); after **Rejected** D-139 stands (409 `submission_already_ended`). The 050a confirm route keeps D-139 unchanged.
-- **OP-5:** K has no caller. The same email, record, firm, number and marks from a second user is the same submission and answers 409 `document_already_submitted`; it prevents a second invoice for one email.
+- **OP-5:** K has no caller. The same email, record and marks from a second user is the same submission and answers 409 `document_already_submitted` while its latest attempt is Received, Processing, Accepted or Rejected; it prevents a second invoice for one email. Changed 2026-10-28 (EB-D-165): after another user's attempt ended Failed, this caller's request is a new attempt created by this caller (section 5).
 - **OP-6:** the in-process save keeps `/office/save`'s AI defaults; the .eml is an ordinary Document under its own Restricted narrowing, and D7 rules govern its indexing. Channel: `Internal` (R1 supports SPA and Internal; the reserved Outlook value is not enabled in R1).
 - **OP-7:** until task 097 merges, `mode: "Correction"` answers 409 `ebilling.submission.correction_not_allowed` with `reason: "not_available"` before any write. After 097 the reasons are `invoice_status`, `different_firm`, `different_core_record`.
 - **OP-8:** code is `errorCode ?? reasonCode` (route refusals carry `errorCode`, filter denials `reasonCode`), as the existing finance routes do.
@@ -154,7 +158,7 @@ Field names and codes in this file are binding once word-add-in-r1 agrees (095 P
 `GET /api/finance/core-records/{entityType}/{entityId}/firms`, in the /api/finance group with step 0, internal callers only.
 
 - `entityType`: `Matter` | `Project` | `WorkAssignment` (as `targetEntity.entityType`); anything else is 400 ValidationProblem.
-- Gate: the caller's Read on the core record (the same gate the submission applies); no Read or not found: 404 reasonCode `sdap.access.deny.record_unavailable`.
+- Gate: the caller's Read on the core record (the same gate the submission applies); no Read or not found: 404 reasonCode `sdap.access.deny.record_unavailable`. The same 404 answers a step-0 refusal and a rights-read fault on this route (the uniform read gate; Added 2026-10-28, 095 review F7).
 - **200** `[{ "firmId": "guid", "name": "string" }]`, sorted by name (ordinal, case-insensitive), then id. It holds exactly the firms D-106 accepts: the record's assigned law firms (`sprk_assignedlawfirm1`, `sprk_assignedlawfirm2`; the one definition is `InvoiceSubmissionService.CheckFirmLinkAsync`), each at most once. **No linked firm: 200 `[]`** (the view says no firm is linked to this record).
 - A read fault: 503 `ebilling.submission.record_unavailable`; never a partial or empty list on a fault.
 - Every `firmId` it returns passes `firm_not_linked` on the from-email route at that moment.
@@ -172,10 +176,13 @@ Field names and codes in this file are binding once word-add-in-r1 agrees (095 P
 | Failed | `ebilling.submission.email_save_failed` | NEW (095/094): the .eml save did not finish |
 | Failed | `ebilling.submission.document_unavailable` | The marked parts could not be read from the saved .eml |
 | Failed | `ebilling.submission.file_malicious` | A marked file failed the malware scan (task 092) |
+| Failed | `ebilling.submission.file_scan_timeout` | The malware scan of a marked file did not finish in time (about 19 minutes across retries; task 092). A re-attempt is allowed (EB-D-160). Added 2026-10-27, agreed by word-add-in-r1 |
 | Failed | `ebilling.submission.file_unservable` | A marked file could not be stored or verified (task 092) |
 | Failed | `ebilling.submission.source_check_failed` | NEW (094 step 5): the source's filing or isolation re-check failed at commit |
 | Failed | `ebilling.submission.processing_failed` | Any other processing failure |
 | Rejected | `ebilling.submission.blocked` | A blocking rule rejected the invoice |
 | Rejected | `ebilling.submission.returned` | Returned to the firm |
+
+`ebilling.submission.attachment_not_preserved` (Added 2026-10-28) is a synchronous 422 from the submit (section 6), never an `outcomeReasonCode`: a request it refuses creates no submission.
 
 Replay after `Failed` or `Rejected` follows section 5: after `Failed` the same request makes a new attempt; after `Rejected` it is 409 `submission_already_ended` (EB-D-160).

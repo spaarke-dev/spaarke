@@ -47,7 +47,7 @@ None of these writes anything, except a refusal after the save; that case is rec
 6. A firm or firm-link read fault answers 503 `ebilling.submission.record_unavailable`, the contract's one transient-Dataverse code. The internal intake's `firm_unverifiable` is not in the add-in's closed set (section 6).
 7. A save the Office pipeline resolved as a content duplicate of another document answers `eml_ambiguous`.
 8. The duplicate path (step 1a) requires every marked SHA-256 to be among the candidate `.eml`'s parts.
-9. OP-5: a different creator answers 409 `document_already_submitted` for any status, including Failed. EB-D-160's new attempt is for the same caller only. See open question Q1.
+9. OP-5: a different creator's LIVE attempt (Received, Processing, Accepted, Rejected) answers 409 `document_already_submitted` with its own text. After another creator's attempt ended Failed, this caller gets a new attempt (EB-D-165, review round 1 below). Was: 409 for any status (Q1, now settled).
 10. **The response cache serves only requests that carry `X-Idempotency-Key`.** The route passes `mayReplayResponse` for this.
     - Without the header, `IdempotencyFilter` keys its 24-hour cache on the body. An identical retry after a Failed attempt would then get the failed attempt's cached 202, not the new attempt EB-D-160 grants.
     - The handler's K replay answers a repeat either way, and the in-flight lock still applies.
@@ -126,7 +126,7 @@ ADR-010: the ceiling goes 169 → 171, for `ISubmitInvoiceFromEmail` and `IOffic
   - only the Office persistence passes `submissionNarrowing`;
   - only `CreateDocumentRequest` has the property.
 - `RecordOwnerAssignmentCensusTests`: `OfficeService.SaveAsync` → `SaveCoreAsync`. The body moved and still names the person.
-- The `InvoiceSubmissionService` filing probe is a `new Entity { ... }` with no logical name, never written, so it is outside the task 146 create census.
+- The `InvoiceSubmissionService` filing probe is `new Entity(DocumentEntity) { ... }`, never written. It is a `Waived`/`Permanent` entry in the task 146 create census (review round 1, uac K2); it used to leave out its logical name to stay outside the census.
 - `RouteAuthorizationGuardTests.Ledger`: the reason for `InvoiceSubmissionEndpoints.cs` now names both routes; the count is unchanged.
 - `DocumentAccessPermissionWriterGuardTests`: the reason for the stager names task 095.
 
@@ -164,7 +164,7 @@ ADR-010: the ceiling goes 169 → 171, for `ISubmitInvoiceFromEmail` and `IOffic
 
 ## 8. Open questions
 
-- Q1 (OP-5, owner): should a Failed attempt by another user let this user re-attempt? Today the answer is 409 `document_already_submitted`.
+- Q1 (OP-5, owner): settled by EB-D-165 (2026-10-28): yes, a new attempt created by this caller. Built in review round 1.
 - Q2 (094): confirm the Supporting Stored File id derivation, `ForAttachment(submissionId, "eml-part-{ordinal}")`.
 - Q3 (094): where `EmlMarkedPartReader` runs (intake or job), and so how its outcomes surface.
 
@@ -187,3 +187,43 @@ ADR-010: the ceiling goes 169 → 171, for `ISubmitInvoiceFromEmail` and `IOffic
   - 095's own delta: **+0.05 MB**.
   - Delta against master: +0.89 MB. That is all ebilling-r1 work not yet on master.
 - No package or csproj change, so no new CVE surface.
+
+## 10. Review round 1 (2026-10-28)
+
+Findings from the adversarial review and uac-r2's review, fixed on this branch. Each code fix has a test that failed before it.
+
+| Item | Finding | Fix | Tests |
+|---|---|---|---|
+| A | Attachment bytes changed in the `.eml` build (adversarial F1, uac F1-1): MimeKit wrote text/* 7-bit or QP and rewrote CRLF/LF; a message/rfc822 part was a MessagePart the reader skips. Result: 503, then a permanent `eml_ambiguous` | Base64 on every regular attachment part (`OfficeEmailEnricher.BuildEmlFromMetadata`). A `message/*` type on an Invoice or Supporting mark is the step-0 body-shape 400 (`marks[i].contentType`). After the build and before the upload, the save checks every marked SHA-256 (counted) against the parts read back; a miss refuses with NEW 422 `ebilling.submission.attachment_not_preserved` and records the save's job Failed | `OfficeSubmissionEmailSaveContractTests`: `BuiltEml_ATextAttachment_KeepsItsBytes_UnderBothNewlineFormats` (CRLF csv, LF csv, long-line text/plain), `SubmissionSave_AMarkedPartTheBuiltEmlDoesNotCarry_IsRefused_BeforeTheUploadAndTheCreate`, `SubmissionSave_TwoIdenticalMarkedFiles_NeedTwoParts`; route `BodyShape_...(marks[2].contentType)`, `Marks_AnAttachedEmailMarkedDontSave_IsAccepted`; service `Save_AMarkedPartNotPreserved_Is422AttachmentNotPreserved_AndNothingIsSubmitted` |
+| B | The same email with another firm or number made a second invoice (adversarial F2) | The firm and the number left K (K is now `v2`); they stay in the `X-Idempotency-Key` cache binding. A live attempt with other firm details is 409 `document_already_submitted` ("other details" text); after Failed it is a new attempt with the new details. Ids stay deterministic from K and the generation | service `Replay_TheSameEmailAndInvoice_WithAnotherNumberOrFirm_LatestLive_Is409DocumentAlreadySubmitted` (must fire), `ReAttempt_AfterFailed_WithAnotherNumber_IsANewAttempt_WithTheNewDetails`, `Fresh_ADifferentInvoicePartOfTheSameEmail_IsANewSubmission` (must not fire); route `Replay_SameEmailAndInvoice_AnotherFirmInvoiceNumber_LatestLive_Is409DocumentAlreadySubmitted`, `Replay_TheSameHeaderOnAnotherNumber_IsNotTheCachedAnswer_ItIsTheHandlers409`; rules `Key_DoesNotChangeWithTheFirmOrTheNumber_ButTheCacheBindingDoes` |
+| C | EB-D-165 (OP-5) | A latest attempt that ended Failed is a new attempt whoever made it, created by this caller. It runs the whole fresh path: the filters, the firm and its link, the filing, this caller's own save (the narrowing in the one create). The earlier `.eml` candidates are the caller's own only, so nothing of another person's failed attempt is reused. A race on one Failed attempt: the deterministic id and the allocator's `AlreadyCreated` let one create; the loser re-reads the winner's row under the same check and gets 409 | service `ReAttempt_AfterAnotherPersonsFailedAttempt_IsANewGeneration_CreatedByThisCaller_OnTheFreshPath_EBD165`, `ReAttempt_AfterAnotherPersonsFailedAttempt_StillChecksTheFirmLink`, `ReAttempt_TwoCallersRaceOnOneFailedAttempt_ExactlyOneNewGeneration_TheOtherGets409`; route `Replay_SameK_AnotherUsersFailedAttempt_IsANewAttemptCreatedByThisCaller_EBD165` |
+| D | Creator-mismatch text (uac F1-2) | "This email was already submitted as an invoice for this record by someone else. Nothing was saved." Same code | service `Replay_AnotherPersonsLiveAttemptOfK_Is409DocumentAlreadySubmitted_WithTheSomeoneElseText` (Received, Processing, Accepted, Rejected); route `Replay_SameK_FromAnotherUser_LatestLive_Is409DocumentAlreadySubmitted_WithTheSomeoneElseText` |
+| E | `"attachments":[null]` was a 500 (adversarial F4) | Body-shape 400 keyed `email.attachments[i]` | route `BodyShape_...(email.attachments[1])` |
+| F | `IdempotencyFilter` ran the handler twice when it threw (adversarial F5; `/office/save` too) | The fail-open catch covers the cache read only; the lock and cache-set helpers catch their own faults; a handler exception propagates once | `IdempotencyFilterTests.InvokeAsync_HandlerThrows_IsInvokedExactlyOnce_AndTheExceptionSurfaces`, `InvokeAsync_CacheFault_FailsOpen_WithExactlyOneInvocation` |
+| G | Writer guard gap (adversarial F6, uac K1) | `SubmissionMarkerWriterGuardTests`: only `OfficeService.SaveCoreAsync` passes `submissionNarrowing` to `CreateDocumentWithSpePointersAsync` (named, or positionally as the 16th argument); only `FromEmailSubmissionService.SubmitAsync` uses `SaveEmailForSubmissionAsync` (a call or a method group) | `TheSubmissionNarrowingIsReachedOnlyThroughTheFromEmailSubmission`, control `Callers_MustFireAndMustNotFire` |
+| H | Census reshape (uac K2) | The probe is `new Entity(DocumentEntity)` again, listed `Waived`/`Permanent` | `RecordOwnerAssignmentCensusTests` (CENSUSED BUT ABSENT proves the site is seen) |
+| I | Contract text (adversarial F3, F7) | Contract sections 2, 4, 5, 6, 7, 8, 9 marked "Changed/Added 2026-10-28" | doc only |
+
+**`IOfficeSubmissionEmailSave.SaveEmailForSubmissionAsync`** now takes the marked SHA-256 list (one entry per marked part). Task 094 does not call it; no seam change.
+
+### Seeding proofs (round 1; each reverted)
+
+| Seed | Fired |
+|---|---|
+| No base64 on attachment parts | the three `BuiltEml_ATextAttachment_...` cases |
+| No step-0 `message/*` refusal | `BodyShape_...(marks[2].contentType)` |
+| The post-build check always passes | `SubmissionSave_AMarkedPartTheBuiltEmlDoesNotCarry_...`, `SubmissionSave_TwoIdenticalMarkedFiles_NeedTwoParts` |
+| No firm-details check | 4 service and 3 route F2 tests |
+| The old order (creator before Failed) | the EB-D-165 must-fire (service and route) and the race test |
+| C isolation: the concurrent `AlreadyCreated` path answers as a replay without re-checking the winner's row | `ReAttempt_TwoCallersRaceOnOneFailedAttempt_ExactlyOneNewGeneration_TheOtherGets409` |
+| The old "other details" text for another person | the 4+4 someone-else text tests and the race test |
+| No null-attachment rule | `BodyShape_...(email.attachments[1])` |
+| F: the HEAD `IdempotencyFilter` (double invoke) | `InvokeAsync_HandlerThrows_IsInvokedExactlyOnce_AndTheExceptionSurfaces` |
+
+### Recorded, not fixed
+
+- Adversarial K1, K2, K4, K6: as section 7 (K1 two concurrent first attempts can both save; K2 a seam failure after the save leaves the `.eml`; K4 a save in flight answers `eml_ambiguous`; K6 the same header within 24 h gets the cached 202).
+- The fresh path does not re-check the communication's filing after the save; task 094 step 5 re-checks it at commit (`source_check_failed`).
+- uac K3: 409 `document_core_record_mismatch` is accepted as the answer per D-140.
+- uac K5, handed to task 094: `sprk_createdbyperson` = the caller on the submission row; model step A on the duplicate path; the caller's Read on the `.eml` and its communication.
+- #2363 (filed by uac): plain `/office/save` CRLF. The base64 change in `BuildEmlFromMetadata` applies to every email save, so it should also fix #2363's `.eml` attachment bytes; #2363 stays open for its own verification.
