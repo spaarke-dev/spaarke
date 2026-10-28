@@ -41,6 +41,10 @@ internal sealed class OwnershipDirectory
     /// <summary>The Secure Record BU's NAMED owner team (task 144).</summary>
     public static readonly Guid SecureNamedTeam = Guid.Parse("d9ec0b6f-0000-4000-8000-000000000003");
 
+    /// <summary>UAC task 194b R4b-2: the restricted-content owner team — named, non-default, in the ROOT business unit
+    /// (<see cref="GeneralBu"/>), no members.</summary>
+    public static readonly Guid RestrictedContentTeam = Guid.Parse("0e5c0e5c-0086-4086-8086-000000000086");
+
     public const string SecureBuName = "Secure Record";
     public const string SecureOwnerTeamName = "Secure Record Owners";
 
@@ -51,7 +55,10 @@ internal sealed class OwnershipDirectory
     private readonly HashSet<string> _unreadable = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<(Guid SystemUserId, Guid ObjectId, Guid BusinessUnit, bool Disabled)> _users = new();
     private readonly List<(Guid TeamId, Guid BusinessUnit, bool IsDefault, int TeamType, string Name)> _teams = new();
-    private readonly List<(Guid BusinessUnitId, string Name)> _businessUnits = new();
+    private readonly List<(Guid BusinessUnitId, string Name, Guid? Parent)> _businessUnits = new();
+
+    /// <summary>R4b-2: team membership rows (teamid, systemuserid).</summary>
+    private readonly List<(Guid TeamId, Guid SystemUserId)> _memberships = new();
     private bool _ignoreAssignments;
 
     public List<string> QueriedEntities { get; } = new();
@@ -70,13 +77,21 @@ internal sealed class OwnershipDirectory
     /// ACCESS team with the right name and an OWNER team with the wrong name — so a named-team query that dropped
     /// <c>teamtype</c> or <c>name</c> matches two rows (or a decoy first) and refuses.
     /// </summary>
-    public static OwnershipDirectory Standard(bool withDefaultTeams = true, bool withNamedSecureTeam = true)
+    public static OwnershipDirectory Standard(
+        bool withDefaultTeams = true, bool withNamedSecureTeam = true, bool withRestrictedContentTeam = true)
     {
+        // R4b-2: the general unit is the ROOT business unit (no parent); the others sit under it.
         var directory = new OwnershipDirectory()
             .WithUser(CallerUserId, CallerOid, GeneralBu)
             .WithBusinessUnit(GeneralBu, "Spaarke")
-            .WithBusinessUnit(ChildBu, "Spaarke Business Unit 1")
-            .WithBusinessUnit(SecureBu, SecureBuName);
+            .WithBusinessUnit(ChildBu, "Spaarke Business Unit 1", parent: GeneralBu)
+            .WithBusinessUnit(SecureBu, SecureBuName, parent: GeneralBu);
+
+        if (withRestrictedContentTeam)
+        {
+            directory.WithTeam(RestrictedContentTeam, GeneralBu, isDefault: false, teamType: 0,
+                Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeam.DefaultOwnerTeamName);
+        }
 
         if (withDefaultTeams)
         {
@@ -443,9 +458,16 @@ internal sealed class OwnershipDirectory
         return this;
     }
 
-    public OwnershipDirectory WithBusinessUnit(Guid businessUnitId, string name)
+    public OwnershipDirectory WithBusinessUnit(Guid businessUnitId, string name, Guid? parent = null)
     {
-        _businessUnits.Add((businessUnitId, name));
+        _businessUnits.Add((businessUnitId, name, parent));
+        return this;
+    }
+
+    /// <summary>R4b-2: <paramref name="systemUserId"/> is a member of <paramref name="teamId"/>.</summary>
+    public OwnershipDirectory WithTeamMember(Guid teamId, Guid systemUserId)
+    {
+        _memberships.Add((teamId, systemUserId));
         return this;
     }
 
@@ -464,8 +486,11 @@ internal sealed class OwnershipDirectory
                 new System.ServiceModel.FaultReason($"'{query.EntityName}' entity doesn't contain attribute with Name = '{absent}'."));
         }
 
-        var conditions = query.Criteria.Conditions.ToDictionary(
+        // R4b-2: a Null condition (the root business unit) has no value; it is read separately.
+        var conditions = query.Criteria.Conditions.Where(c => c.Operator != ConditionOperator.Null).ToDictionary(
             c => c.AttributeName, c => c.Values.Single(), StringComparer.OrdinalIgnoreCase);
+        var rootOnly = query.Criteria.Conditions.Any(c =>
+            c.Operator == ConditionOperator.Null && string.Equals(c.AttributeName, "parentbusinessunitid", StringComparison.OrdinalIgnoreCase));
 
         IEnumerable<Entity> rows = query.EntityName switch
         {
@@ -482,8 +507,11 @@ internal sealed class OwnershipDirectory
                     ["businessunitid"] = new EntityReference("businessunit", t.BusinessUnit),
                 }),
             "businessunit" => _businessUnits
-                .Where(b => MatchesName(conditions, b.Name))
+                .Where(b => MatchesName(conditions, b.Name) && (!rootOnly || b.Parent is null))
                 .Select(b => new Entity("businessunit", b.BusinessUnitId)),
+            "teammembership" => _memberships
+                .Where(m => Matches(conditions, "teamid", m.TeamId))
+                .Select(m => new Entity("teammembership", Guid.NewGuid()) { ["systemuserid"] = m.SystemUserId }),
             _ => RecordQuery(query, conditions),
         };
 

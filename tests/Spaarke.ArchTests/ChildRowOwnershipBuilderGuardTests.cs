@@ -146,6 +146,8 @@ public class ChildRowOwnershipBuilderGuardTests
         // UAC task 194b V-fix 3: the Secure-only parents (a copy's canonical) are part of the question, read from the row by
         // the same builders (RecordOwnershipResolver.IsSecureOnlyParent) — never set by hand outside them.
         "set_" + nameof(RecordOwnershipContext.SecureOnlyParents),
+        // UAC task 194b R4b-2: the row's table decides the hard-deny exit (RecordOwnershipResolver.IsRestrictedContentTable).
+        "set_" + nameof(RecordOwnershipContext.ChildEntityLogicalName),
     ];
 
     /// <summary>

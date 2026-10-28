@@ -38,6 +38,10 @@ internal sealed class SecureChildShareWorld
 
     public static readonly Guid SomeUser = Guid.Parse("8d7bad7a-e39e-f011-bbd3-7c1e5217cd7c");
 
+    /// <summary>UAC task 194b R4b-2: the restricted-content owner team — named, non-default, in the ROOT business unit
+    /// (<see cref="GeneralBu"/>), no members.</summary>
+    public static readonly Guid RestrictedContentTeam = Guid.Parse("0e5c0e5c-0086-4086-8086-000000000086");
+
     public const string SecureBuName = "Secure Record";
     public const string SecureOwnerTeamName = "Secure Record Owners";
 
@@ -88,12 +92,15 @@ internal sealed class SecureChildShareWorld
     {
         var world = new SecureChildShareWorld { OwnerTeam = secureTeam, OwnerTeamBusinessUnit = secureBu };
         world.Add("businessunit", GeneralBu, ("name", "Spaarke"));
-        world.Add("businessunit", secureBu, ("name", SecureBuName));
+        // R4b-2: the general unit is the ROOT business unit (no parent); the Secure Record unit sits under it.
+        world.Add("businessunit", secureBu, ("name", SecureBuName), ("parentbusinessunitid", new EntityReference("businessunit", GeneralBu)));
         world.Team(GeneralTeam, GeneralBu, "Spaarke", isDefault: true, teamType: 0);
         world.Team(SecureDefaultTeam, secureBu, SecureBuName, isDefault: true, teamType: 0);
         world.Team(Guid.NewGuid(), secureBu, SecureOwnerTeamName, isDefault: false, teamType: 1); // access team, right name
         world.Team(Guid.NewGuid(), secureBu, SecureOwnerTeamName + " Extra", isDefault: false, teamType: 0);
         world.Team(secureTeam, secureBu, SecureOwnerTeamName, isDefault: false, teamType: 0);
+        world.Team(RestrictedContentTeam, GeneralBu,
+            Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeam.DefaultOwnerTeamName, isDefault: false, teamType: 0);
         world.User(SomeUser, GeneralBu);
         return world;
     }

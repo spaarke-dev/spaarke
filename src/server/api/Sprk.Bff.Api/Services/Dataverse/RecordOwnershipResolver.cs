@@ -253,6 +253,9 @@ public sealed class RecordOwnerLookupCache
 
     /// <summary>Each business unit's default owner team answer, once read.</summary>
     internal Dictionary<Guid, RecordOwnerResolution> DefaultOwnerTeams { get; } = new();
+
+    /// <summary>R4b-2: the restricted-content owner team's identification and member check, once read (the pass reports it).</summary>
+    public Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeamIdentity? RestrictedContentOwnerTeam { get; internal set; }
 }
 
 public sealed record RecordOwnershipContext
@@ -279,6 +282,14 @@ public sealed record RecordOwnershipContext
     /// Filled by <see cref="ForRow"/> (and so <see cref="ForChild"/>) and <see cref="ForExistingRowAsync"/>, never by hand.
     /// </summary>
     public IReadOnlyList<RecordOwnershipParent> SecureOnlyParents { get; init; } = Array.Empty<RecordOwnershipParent>();
+
+    /// <summary>
+    /// UAC task 194b R4b-2: the table of the row this question is about. A hard-deny table
+    /// (<see cref="RecordOwnershipResolver.IsRestrictedContentTable"/>) takes the restricted-content owner team where its
+    /// ordinary answer would be a business unit's default team. Filled by <see cref="ForRow"/> (and so <see cref="ForChild"/>),
+    /// <see cref="ForExistingRowAsync"/> and the re-file, never by hand; <c>null</c> leaves every answer as it was.
+    /// </summary>
+    public string? ChildEntityLogicalName { get; init; }
 
     /// <summary>The acting user's Dataverse systemuserid, when known (HTTP paths that already resolved it).</summary>
     public Guid? CallerSystemUserId { get; init; }
@@ -635,9 +646,9 @@ public sealed record RecordOwnershipContext
         // V-fix 3: the Secure-only parents ride with every question built here (only sprk_document holds one today).
         var secureOnly = SecureOnlyParentsOf(row);
         if (!CorePairTables.Contains(row.LogicalName))
-            return new ExistingRowOwnership(ForParents(rest) with { SecureOnlyParents = secureOnly });
+            return new ExistingRowOwnership(ForParents(rest) with { SecureOnlyParents = secureOnly, ChildEntityLogicalName = row.LogicalName });
 
-        var undetermined = new ExistingRowOwnership(ForParents(rest) with { SecureOnlyParents = secureOnly });
+        var undetermined = new ExistingRowOwnership(ForParents(rest) with { SecureOnlyParents = secureOnly, ChildEntityLogicalName = row.LogicalName });
         var typeRef = row.GetAttributeValue<EntityReference>(CoreRecordTypeColumn)?.Id is { } t && t != Guid.Empty ? t : (Guid?)null;
         var coreText = row.GetAttributeValue<string>(CoreRecordIdColumn)?.Trim();
         Guid? coreId = Guid.TryParse(coreText, out var parsed) && parsed != Guid.Empty ? parsed : null;
@@ -670,7 +681,7 @@ public sealed record RecordOwnershipContext
         {
             // Fix round F1-c: the assignee rule is the To Do job's, and only for the rows that job keeps (its own predicate);
             // every other no-core row is decided over its parents, as its writer decided it ([subject, ..SignalSubjects]).
-            var noCore = ForParents(new[] { subject }.Concat(signalSubjects).Concat(rest)) with { SecureOnlyParents = secureOnly };
+            var noCore = ForParents(new[] { subject }.Concat(signalSubjects).Concat(rest)) with { SecureOnlyParents = secureOnly, ChildEntityLogicalName = row.LogicalName };
             if (subject is null || !string.Equals(subject.EntityLogicalName, TodoTable, StringComparison.OrdinalIgnoreCase))
                 return Asked(new ExistingRowOwnership(noCore));
             if (reads.Links is null || reads.CoreAncestors is null)
@@ -722,7 +733,7 @@ public sealed record RecordOwnershipContext
         }
 
         return Asked(new ExistingRowOwnership(
-            ForParents(parents.Concat(signalSubjects).Concat(rest)) with { SecureOnlyParents = secureOnly }));
+            ForParents(parents.Concat(signalSubjects).Concat(rest)) with { SecureOnlyParents = secureOnly, ChildEntityLogicalName = row.LogicalName }));
     }
 
     internal const string DecisionRecordTable = "sprk_decisionrecord";
@@ -804,6 +815,7 @@ public sealed record RecordOwnershipContext
         return ForParents(PrimaryOrdered(name, held, pairId), callerObjectId, callerSystemUserId) with
         {
             SecureOnlyParents = SecureOnlyOf(name, held),
+            ChildEntityLogicalName = name, // R4b-2
         };
     }
 
@@ -1395,6 +1407,10 @@ public static class RecordOwnerRefusal
     /// cannot be determined → held"), never created unfiled in its place (task 146 verifier item 4).
     /// </summary>
     public const string ParentUndetermined = "record_owner_parent_undetermined";
+
+    /// <summary>UAC task 194b R4b-2: a hard-deny row's restricted-content owner team is missing, ambiguous, outside the root
+    /// business unit or has a member (<see cref="Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeamStatus"/>).</summary>
+    public const string RestrictedContentOwnerTeamUnresolved = "record_owner_restricted_content_team_unresolved";
 }
 
 /// <summary>
@@ -1442,6 +1458,14 @@ public sealed record RecordOwnerResolution(
     /// team of its own.
     /// </summary>
     public bool IsSecureOwner { get; init; }
+
+    /// <summary>
+    /// UAC task 194b R4b-2: on a hard-deny row's answer (<see cref="RecordOwnershipResolver.IsRestrictedContentTable"/>), the
+    /// business unit's default team the restricted-content owner team replaced — the ordinary answer the row would otherwise
+    /// have had, so a caller comparing business units (the ordinary pass's report on a row it never moves) compares as before.
+    /// <c>null</c> on every other answer.
+    /// </summary>
+    public Guid? InPlaceOfDefaultTeamId { get; init; }
 
     /// <summary>
     /// Set on a refused RE-FILE that would have taken the row out of a secure record without F3's permission (owner round
@@ -1719,6 +1743,26 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     public static bool IsSecureOnlyParent(string? table, string? column) =>
         table is not null && column is not null && SecureOnlyLookups.Contains((table, column));
 
+    /// <summary>
+    /// UAC task 194b R4b-2 (owner round 131, the 086 ruling): the HARD-DENY tables. A row of one of these whose ordinary answer
+    /// would be a business unit's default team goes instead to the restricted-content owner team
+    /// (<see cref="Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeam"/>: the root business unit, no members, Read
+    /// only at Basic on exactly these tables), so no business-unit depth reaches it. A Secure answer is unchanged, and so is
+    /// every answer that keeps the creator (the reconciler's unfiled rows, a writer's KeepCreator). Read through
+    /// <see cref="IsRestrictedContentTable"/> at the resolver's ordinary exits, for the table
+    /// <see cref="RecordOwnershipContext.ChildEntityLogicalName"/> names.
+    /// </summary>
+    private static readonly HashSet<string> RestrictedContentTableSet = new(
+        ["sprk_storedfile", "sprk_procedureassignment", "sprk_ruleset", "sprk_policy", "sprk_policyversion"],
+        StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The hard-deny tables (<see cref="RestrictedContentTableSet"/>).</summary>
+    public static IReadOnlyCollection<string> RestrictedContentTables => RestrictedContentTableSet;
+
+    /// <summary>True when <paramref name="table"/> is a hard-deny table (<see cref="RestrictedContentTableSet"/>).</summary>
+    public static bool IsRestrictedContentTable(string? table) =>
+        !string.IsNullOrWhiteSpace(table) && RestrictedContentTableSet.Contains(table.Trim());
+
     private sealed class CitationComparer : IEqualityComparer<(string Table, string Column)>
     {
         public static readonly CitationComparer Instance = new();
@@ -1870,12 +1914,12 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         // is reached only when NO parent was named at all. A named-but-unresolvable parent refuses below.
         if (context.CallerSystemUserId is { } systemUserId && systemUserId != Guid.Empty)
         {
-            return await ResolveFromUserAsync("systemuserid", systemUserId, ct).ConfigureAwait(false);
+            return await ResolveFromUserAsync("systemuserid", systemUserId, context, ct).ConfigureAwait(false);
         }
 
         if (context.CallerObjectId is { } objectId && objectId != Guid.Empty)
         {
-            return await ResolveFromUserAsync("azureactivedirectoryobjectid", objectId, ct).ConfigureAwait(false);
+            return await ResolveFromUserAsync("azureactivedirectoryobjectid", objectId, context, ct).ConfigureAwait(false);
         }
 
         // ── 3. Neither. Refuse upstream. ───────────────────────────────────────────────────────────────
@@ -2333,6 +2377,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             {
                 Parents = parents,
                 SecureOnlyParents = secureOnly, // V-fix 3: secure-if-any only
+                ChildEntityLogicalName = request.EntityLogicalName, // R4b-2
                 CallerSystemUserId = request.CallerSystemUserId,
                 CallerObjectId = request.CallerObjectId,
                 WhenUnfiled = request.WhenUnfiled,
@@ -3576,7 +3621,9 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             return RecordOwnerResolution.Refused(RecordOwnerRefusal.ParentUnresolved, primaryUndecided);
         }
 
-        return await ResolveDefaultOwnerTeamAsync(facts[0].BusinessUnitId, ct, context.LookupCache).ConfigureAwait(false);
+        return await OrdinaryExitAsync(
+            await ResolveDefaultOwnerTeamAsync(facts[0].BusinessUnitId, ct, context.LookupCache).ConfigureAwait(false),
+            context, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -3865,7 +3912,8 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// Resolves the acting user's business unit, then that BU's owner team.
     /// <paramref name="userKeyColumn"/> selects which identity the caller is known by.
     /// </summary>
-    private async Task<RecordOwnerResolution> ResolveFromUserAsync(string userKeyColumn, Guid userKey, CancellationToken ct)
+    private async Task<RecordOwnerResolution> ResolveFromUserAsync(
+        string userKeyColumn, Guid userKey, RecordOwnershipContext context, CancellationToken ct)
     {
         // TOP 2, not TOP 1 — the same contract RecordContainerResolver.ResolveForActingUserAsync keeps for the
         // same fact. One row is the answer; two mean the key maps to more than one Dataverse user and the
@@ -3924,7 +3972,44 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
 
         return secureBu.Id == businessUnitId
             ? await ResolveNamedSecureOwnerTeamAsync(businessUnitId.Value, ct).ConfigureAwait(false)
-            : await ResolveDefaultOwnerTeamAsync(businessUnitId.Value, ct).ConfigureAwait(false);
+            : await OrdinaryExitAsync(
+                await ResolveDefaultOwnerTeamAsync(businessUnitId.Value, ct).ConfigureAwait(false), context, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// UAC task 194b R4b-2 (owner round 131): the ordinary exit. A business unit's default team answer for a row of a hard-deny
+    /// table (<see cref="IsRestrictedContentTable"/>, the table <see cref="RecordOwnershipContext.ChildEntityLogicalName"/>
+    /// names) becomes the restricted-content owner team's — identified once per pass when the question carries the pass's
+    /// cache — recording the default team it replaced (<see cref="RecordOwnerResolution.InPlaceOfDefaultTeamId"/>). Every
+    /// other answer passes through unchanged: a Secure answer, a refusal, and an answer that keeps the creator never reach a
+    /// default team. FAIL CLOSED: a team that cannot be used refuses (<see cref="RecordOwnerRefusal.RestrictedContentOwnerTeamUnresolved"/>),
+    /// never the default team.
+    /// </summary>
+    private async Task<RecordOwnerResolution> OrdinaryExitAsync(
+        RecordOwnerResolution defaultTeam, RecordOwnershipContext context, CancellationToken ct)
+    {
+        if (!defaultTeam.IsOwned || defaultTeam.IsSecureOwner || !IsRestrictedContentTable(context.ChildEntityLogicalName))
+            return defaultTeam;
+
+        var identity = context.LookupCache?.RestrictedContentOwnerTeam
+                       ?? await Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeam
+                           .IdentifyAsync(_dataverse, _configuration, ct).ConfigureAwait(false);
+        if (context.LookupCache is not null)
+            context.LookupCache.RestrictedContentOwnerTeam = identity;
+
+        if (!identity.IsResolved)
+        {
+            _logger.LogError(
+                "Refusing to resolve an owning team for a {Table} row: the restricted-content owner team cannot be used "
+                + "({Status}; {MembersFound} member(s) read). A hard-deny row is never owned by a business unit's default team "
+                + "(UAC task 194b R4b-2).",
+                context.ChildEntityLogicalName, identity.Status, identity.MembersFound);
+            return RecordOwnerResolution.Refused(
+                RecordOwnerRefusal.RestrictedContentOwnerTeamUnresolved,
+                $"the restricted-content owner team cannot be used ({identity.Status})");
+        }
+
+        return RecordOwnerResolution.Owned(identity.OwnerTeamId!.Value) with { InPlaceOfDefaultTeamId = defaultTeam.OwningTeamId };
     }
 
     /// <summary>
