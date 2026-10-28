@@ -163,6 +163,26 @@ public class AuthorizationGateTimingTests
     // refusal text was identical. Each test runs the PRODUCTION filter / handler step over the TimingProbe and asserts
     // the unknown and the denied record take the same work: the same asks and the same recorded waits.
 
+    /// <summary>
+    /// Task 193 (#2334 at the share core): /share-user's caller-rights probe asks the gate question, so its 403
+    /// caller_cannot_grant for a record that does not exist and for one the caller cannot see take the same work. The same
+    /// core serves /grant's share for a contact that represents an internal user.
+    /// </summary>
+    [Fact]
+    public async Task ShareUserCallerRights_AnUnknownAndADeniedRecord_AreTheSame403_AfterTheSameWork()
+    {
+        var unknown = new TimingProbe();
+        var denied = new TimingProbe();
+
+        var a = await ShareUser(unknown, Unknown);
+        var b = await ShareUser(denied, Denied);
+
+        StatusOf(a).Should().Be(StatusCodes.Status403Forbidden);
+        StatusOf(b).Should().Be(StatusCodes.Status403Forbidden);
+        denied.Waits.Should().Equal(unknown.Waits).And.Equal(NotFoundSchedule);
+        denied.Asks.Should().Be(unknown.Asks).And.Be(3);
+    }
+
     [Fact]
     public async Task QuickCreateSourceCheck_AnUnknownAndADeniedSource_AreTheSame403_AfterTheSameWork()
     {
@@ -303,6 +323,16 @@ public class AuthorizationGateTimingTests
     }
 
     private static int? StatusOf(object? result) => (result as IStatusCodeHttpResult)?.StatusCode;
+
+    /// <summary>/share-user through the PRODUCTION share core, over an enabled person and an ordinary record.</summary>
+    private static async Task<object?> ShareUser(TimingProbe probe, Guid recordId)
+    {
+        var rig = new InternalUserShareCoreTests.Rig();
+        var user = Guid.NewGuid();
+        rig.Users.SeedPerson(user, "Ada Lovelace");
+        var shared = await rig.ShareAsync(recordId, user, ExternalAccessLevel.ViewOnly, probe, InternalUserShareCoreTests.Rig.Caller());
+        return shared.Result;
+    }
 
     /// <summary>The production probe with its wire steps answered from memory and its waits recorded, never slept.</summary>
     private sealed class TimingProbe : CallerRecordAccessProbe
