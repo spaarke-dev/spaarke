@@ -552,12 +552,14 @@ internal class OfficeService : IOfficeService
                     .ResolveEmailCommunicationAsync(request, emailCommunicationId, emailMessageIdFallback, cancellationToken);
                 if (!communicationResolved)
                 {
+                    // 194b V-fix (verifier B F1/F2): a read that FAILED is transient, not a refusal: the retryable
+                    // OFFICE_014 (502), which the add-in offers to retry. OFFICE_022 stays for an owner the rule refuses.
                     return new SaveResponse
                     {
                         Success = false,
                         Error = new SaveError
                         {
-                            Code = OfficeErrorCodes.RecordOwnerUnresolved,
+                            Code = OfficeErrorCodes.DataverseError,
                             Message = "This email's record could not be read to assign the item an owner, so it was not "
                                       + "saved. Try again.",
                             Retryable = true

@@ -19,6 +19,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Api.Office.Errors;
 using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Communication;
@@ -632,10 +633,44 @@ public class OfficeEmailDocumentCommunicationLinkTests
 
         var response = await factory.CreateClient().PostAsJsonAsync("/api/office/save", EmailSave());
 
-        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        // 194b V-fix (verifier B F1/F2): a failed read is transient — the retryable OFFICE_014 (502), which the add-in
+        // (errorMessages.ts) offers to retry; never OFFICE_022, which tells the user to ask an administrator.
+        response.StatusCode.Should().Be(HttpStatusCode.BadGateway);
+        var (code, retryable) = await ErrorCodeOfAsync(response);
+        code.Should().Be(OfficeErrorCodes.DataverseError);
+        retryable.Should().BeTrue();
         ownership.Requests.Should().NotContain(q => q.Parents.Any(p => p.EntityLogicalName == "sprk_matter"),
             "never a question about the association alone");
         world.ShouldHaveWrittenNothing();
+    }
+
+    [Fact]
+    [Trait("status", "task-194b-uac-r2")]
+    public async Task EmailSave_WhenTheOwnerRuleRefuses_IsStillOffice022_AndWritesNoJobUploadOrDocument()
+    {
+        // The other case: the communication was read, and the ownership rule itself refuses — a real refusal (OFFICE_022).
+        var store = new CommunicationStore { FailCapture = true };
+        store.Seed(RfcId);
+        var ownership = new RecordOwnershipResolverDouble { TeamId = null };
+        var world = new OfficeVersionSaveWorld();
+        using var factory = Host(world, store, documentOwnership: ownership);
+
+        var response = await factory.CreateClient().PostAsJsonAsync("/api/office/save", EmailSave());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await ErrorCodeOfAsync(response)).Code.Should().Be(OfficeErrorCodes.RecordOwnerUnresolved);
+        world.ShouldHaveWrittenNothing();
+    }
+
+    /// <summary>The ProblemDetails <c>errorCode</c> and <c>retryable</c> extensions.</summary>
+    private static async Task<(string? Code, bool? Retryable)> ErrorCodeOfAsync(HttpResponseMessage response)
+    {
+        using var body = System.Text.Json.JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var code = body.RootElement.TryGetProperty("errorCode", out var c) ? c.GetString() : null;
+        bool? retryable = body.RootElement.TryGetProperty("retryable", out var r) && r.ValueKind is System.Text.Json.JsonValueKind.True or System.Text.Json.JsonValueKind.False
+            ? r.GetBoolean()
+            : null;
+        return (code, retryable);
     }
 
     // ── Helpers ────────────────────────────────────────────────────────────────────────────────────────────────────
