@@ -3311,12 +3311,15 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// creator"): when the PRIMARY parent is a child-table row (<see cref="IsReparentableChild"/>) that is not team-owned and is
     /// filed, its own filing answers in its place, through the same look-through a content row of such a parent already took
     /// (<see cref="RecordOwnershipContext.KeepCreatorUnlessTargetIsTeamOwned"/>), followed for at most
-    /// <see cref="MaxLineageDepth"/> levels (<paramref name="lookThroughDepth"/>); past that it REFUSES, never "ordinary". A core
-    /// record (a root, a service request) is never looked through: a user-owned root keeps its own business unit. An UNFILED
-    /// user-owned parent keeps its own business unit too, as before.</remarks>
+    /// <see cref="MaxLineageDepth"/> levels (<paramref name="lookThroughDepth"/>), never twice through the same primary
+    /// (<paramref name="lookedThrough"/>: two such rows filed under each other). Fix round R (A3): at a revisit or at the bound
+    /// it STOPS looking through and decides over the parents it holds — the lineage walk and the secure check, which have
+    /// their own bound and their own seen set — and refuses only when that answer would be ordinary (the primary's business
+    /// unit is then unknown), never "ordinary". A core record (a root, a service request) is never looked through: a user-owned
+    /// root keeps its own business unit. An UNFILED user-owned parent keeps its own business unit too, as before.</remarks>
     private async Task<RecordOwnerResolution> ResolveFromParentsAsync(
         IReadOnlyList<RecordOwnershipParent> parents, RecordOwnershipContext context, bool committedReads, CancellationToken ct,
-        int lookThroughDepth = 0)
+        int lookThroughDepth = 0, IReadOnlySet<RecordOwnershipParent>? lookedThrough = null)
     {
         var facts = new List<ParentFacts>(parents.Count);
         foreach (var parent in parents)
@@ -3354,21 +3357,26 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         // parent itself stays among the parents, so secure-if-any reads the same set as before. An unfiled one keeps its own
         // business unit (below), and a root is never looked through.
         var contentRow = context.KeepCreatorUnlessTargetIsTeamOwned;
-        if (!facts[0].HasOwningTeam && (contentRow || IsReparentableChild(facts[0].Parent.EntityLogicalName)))
+        string? primaryUndecided = null;
+        if (!facts[0].HasOwningTeam && (contentRow || IsReparentableChild(facts[0].Parent.EntityLogicalName))
+            && (lookThroughDepth >= MaxLineageDepth || lookedThrough?.Contains(facts[0].Parent) == true))
         {
-            if (lookThroughDepth >= MaxLineageDepth)
+            // Fix round R (A3): the look-through stops here — a primary already looked through (a loop) or the bound. Whether
+            // the row is secure is still decided below over every parent it holds (secure-if-any); only an ordinary answer,
+            // which would need this primary's business unit, refuses.
+            primaryUndecided = lookThroughDepth >= MaxLineageDepth
+                ? $"the record's primary parent runs through more than {MaxLineageDepth} levels of records that are not "
+                  + $"team-owned (still unresolved at {facts[0].Parent.EntityLogicalName} {facts[0].Parent.RecordId:D}), so its "
+                  + "business unit cannot be decided"
+                : $"the record's primary parent {facts[0].Parent.EntityLogicalName} {facts[0].Parent.RecordId:D} is not "
+                  + "team-owned and its filing loops back to it, so its business unit cannot be decided";
+        }
+        else if (!facts[0].HasOwningTeam && (contentRow || IsReparentableChild(facts[0].Parent.EntityLogicalName)))
+        {
+            var visited = new HashSet<RecordOwnershipParent>(lookedThrough ?? new HashSet<RecordOwnershipParent>())
             {
-                _logger.LogWarning(
-                    "Refusing to resolve an owning team: the primary parent chain is still not team-owned after {MaxDepth} "
-                    + "levels (at {Entity} {RecordId}); its business unit cannot be decided (task 194b).",
-                    MaxLineageDepth, facts[0].Parent.EntityLogicalName, facts[0].Parent.RecordId);
-                return RecordOwnerResolution.Refused(
-                    RecordOwnerRefusal.ParentUnresolved,
-                    $"the record's primary parent runs through more than {MaxLineageDepth} levels of records that are not "
-                    + $"team-owned (still unresolved at {facts[0].Parent.EntityLogicalName} {facts[0].Parent.RecordId:D}), so its "
-                    + "business unit cannot be decided");
-            }
-
+                facts[0].Parent,
+            };
             var parentFiling = await ReadOwnershipParentsOfAsync(facts[0].Parent, committedReads, ct).ConfigureAwait(false);
             if (parentFiling is null)
             {
@@ -3394,13 +3402,13 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
 
                 return await ResolveFromParentsAsync(
                     inherited, context with { KeepCreatorUnlessTargetIsTeamOwned = false }, committedReads, ct,
-                    lookThroughDepth + 1).ConfigureAwait(false);
+                    lookThroughDepth + 1, visited).ConfigureAwait(false);
             }
 
             if (parentFiling.Count > 0)
             {
                 var filedUnder = parentFiling.Concat(facts.Select(f => f.Parent)).Distinct().ToList();
-                return await ResolveFromParentsAsync(filedUnder, context, committedReads, ct, lookThroughDepth + 1)
+                return await ResolveFromParentsAsync(filedUnder, context, committedReads, ct, lookThroughDepth + 1, visited)
                     .ConfigureAwait(false);
             }
         }
@@ -3463,6 +3471,15 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         if (secureBu.Id is { } secureBuId && decisive.Any(f => f.BusinessUnitId == secureBuId))
         {
             return await ResolveNamedSecureOwnerTeamAsync(secureBuId, ct).ConfigureAwait(false);
+        }
+
+        if (primaryUndecided is not null)
+        {
+            _logger.LogWarning(
+                "Refusing to resolve an owning team: no parent is secure, and the primary parent {Entity} {RecordId} could not be "
+                + "looked through (a loop or the depth bound), so the ordinary business unit cannot be decided (194b A3).",
+                facts[0].Parent.EntityLogicalName, facts[0].Parent.RecordId);
+            return RecordOwnerResolution.Refused(RecordOwnerRefusal.ParentUnresolved, primaryUndecided);
         }
 
         return await ResolveDefaultOwnerTeamAsync(facts[0].BusinessUnitId, ct).ConfigureAwait(false);
