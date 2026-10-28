@@ -134,7 +134,13 @@ public static class ExternalInvoiceSubmissionEndpoints
     }
 
     private static IResult GetAsync(HttpContext http) =>
-        Scope(http) is { Submission: { } view } ? Results.Ok(view) : NoScope();
+        Scope(http) is { Submission: { } view } ? Results.Ok(ExternalView(view)) : NoScope();
+
+    /// <summary>
+    /// ebilling-r1 task 098 review round 4b: the view an external caller is answered with. The submission's document link is read
+    /// to decide the submission and is never returned to an external caller (no external client reads it).
+    /// </summary>
+    internal static InvoiceSubmissionView ExternalView(InvoiceSubmissionView view) => view with { DocumentId = null };
 
     /// <summary>The most record ids returned per kind (matters, projects, work assignments): the picker's own page is 200 rows per source.</summary>
     internal const int MaxFirmRecordsPerKind = 200;
@@ -232,7 +238,10 @@ public static class ExternalInvoiceSubmissionEndpoints
         return Results.Ok(new ExternalInvoiceFirmRecords(firmId, matters, projects, workAssignments, partial, truncated));
     }
 
-    private static async Task<IResult> ListAsync(HttpContext http, InvoiceSubmissionService service, CancellationToken ct)
+    private static async Task<IResult> ListAsync(
+        HttpContext http, InvoiceSubmissionService service,
+        [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceSubmissionHiding? hideSubmissions, ILogger<Program> logger,
+        CancellationToken ct)
     {
         if (Scope(http) is not { } scope)
         {
@@ -248,12 +257,55 @@ public static class ExternalInvoiceSubmissionEndpoints
                 principal.GetAccessibleProjectIds().ToList(),
                 principal.AccessibleWorkAssignmentIds,
                 ct);
-            return Results.Ok(views);
+            var visible = await VisibleSubmissionsAsync(principal, views, hideSubmissions, logger, ct);
+            return Results.Ok(visible.Select(ExternalView).ToList());
         }
         catch (SdapProblemException ex)
         {
             return InvoiceSubmissionHttp.ReadFault(ex);
         }
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 098 (model 9.1, (a')), review round 4b: THE decision of BOTH external submission reads (this list and the
+    /// single read, <see cref="ExternalInvoiceSubmissionAuthorizationFilter"/>): the submissions of <paramref name="views"/> the
+    /// caller may see, in order, decided in ONE call of the caller-aware seam (<see cref="ExternalInvoiceSubmissionHiding"/>:
+    /// with an invoice, the invoice predicate; without one, the submission's own source). A withheld submission is omitted, never
+    /// marked. No seam withholds every asked submission (fail closed; logged at Error, a registration defect). A failed read
+    /// THROWS <see cref="InvoiceSubmissionService.ReadUnavailable"/> (EB-D-169: the routes answer a retryable 503, never 200
+    /// <c>[]</c> and never the not-found 404); it never shows a row.
+    /// </summary>
+    internal static async Task<IReadOnlyList<InvoiceSubmissionView>> VisibleSubmissionsAsync(
+        CallerPrincipal principal, IReadOnlyList<InvoiceSubmissionView> views, ExternalInvoiceSubmissionHiding? hideSubmissions,
+        ILogger logger, CancellationToken ct)
+    {
+        if (views.Count == 0)
+            return views;
+
+        if (hideSubmissions is null)
+        {
+            logger.LogError(
+                "[EBILLING-SUBMIT] The submission decision (ExternalInvoiceSubmissionHiding) is not registered: {Count} submission(s) "
+                + "withheld (fail closed).", views.Count);
+            return Array.Empty<InvoiceSubmissionView>();
+        }
+
+        var decision = await hideSubmissions(principal, views, ct).ConfigureAwait(false);
+        if (decision.Faulted)
+        {
+            // EB-D-169: the decision could not be read. A retryable 503 for the whole page; no row is shown.
+            throw InvoiceSubmissionService.ReadUnavailable();
+        }
+
+        var kept = views.Where(v => decision.IsVisible(v.SubmissionId)).ToList();
+        if (kept.Count < views.Count)
+        {
+            logger.LogInformation(
+                "[EBILLING-SUBMIT] {Withheld} of {Count} submission(s) withheld: decided by their invoice or their source ({Reasons}).",
+                views.Count - kept.Count, views.Count, decision.HiddenSummary());
+        }
+
+        return kept;
     }
 }
 

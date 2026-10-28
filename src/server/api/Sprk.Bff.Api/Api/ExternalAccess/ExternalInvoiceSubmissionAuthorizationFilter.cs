@@ -50,7 +50,8 @@ public static class ExternalInvoiceSubmissionAuthorizationFilterExtensions
                 coreKind,
                 services.GetRequiredService<ExternalParticipationService>(),
                 services.GetRequiredService<InvoiceSubmissionService>(),
-                services.GetRequiredService<ILogger<ExternalInvoiceSubmissionAuthorizationFilter>>());
+                services.GetRequiredService<ILogger<ExternalInvoiceSubmissionAuthorizationFilter>>(),
+                services.GetService<ExternalInvoiceSubmissionHiding>());
             return await filter.InvokeAsync(context, next);
         });
     }
@@ -116,19 +117,24 @@ internal sealed class ExternalInvoiceSubmissionAuthorizationFilter : IEndpointFi
     private readonly ExternalParticipationService _participations;
     private readonly InvoiceSubmissionService _submissions;
     private readonly ILogger<ExternalInvoiceSubmissionAuthorizationFilter> _logger;
+    private readonly ExternalInvoiceSubmissionHiding? _hideSubmissions;
 
+    /// <param name="hideSubmissions">ebilling-r1 task 098 (review round 4b): the submission decision the list applies too. Null
+    /// withholds every submission on the read-one route (fail closed).</param>
     public ExternalInvoiceSubmissionAuthorizationFilter(
         ExternalInvoiceSubmissionAccess access,
         InvoiceCoreRecordKind? coreKind,
         ExternalParticipationService participations,
         InvoiceSubmissionService submissions,
-        ILogger<ExternalInvoiceSubmissionAuthorizationFilter> logger)
+        ILogger<ExternalInvoiceSubmissionAuthorizationFilter> logger,
+        ExternalInvoiceSubmissionHiding? hideSubmissions = null)
     {
         _access = access;
         _coreKind = coreKind;
         _participations = participations;
         _submissions = submissions;
         _logger = logger;
+        _hideSubmissions = hideSubmissions;
     }
 
     public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
@@ -294,6 +300,26 @@ internal sealed class ExternalInvoiceSubmissionAuthorizationFilter : IEndpointFi
         if (view is not { FirmId: { } firmId, CoreRecord: { } core }
             || !firms.Contains(firmId)
             || !principal.RightsOn(core.GrantRootType, core.RecordId).HasFlag(AccessRights.Read))
+        {
+            return (null, ProblemDetailsHelper.UniformRecordNotFound(http));
+        }
+
+        // ebilling-r1 task 098 (model 9.1, (a')), review round 4b: THE decision the list applies
+        // (ExternalInvoiceSubmissionEndpoints.VisibleSubmissionsAsync): with an invoice, the invoice predicate; without one, the
+        // submission's own source. A withheld submission is the SAME 404 as a missing one; no seam withholds it too (fail closed).
+        // A failed read is a retryable 503 (EB-D-169), never the not-found 404, and never shows the submission.
+        IReadOnlyList<InvoiceSubmissionView> visible;
+        try
+        {
+            visible = await ExternalInvoiceSubmissionEndpoints.VisibleSubmissionsAsync(
+                principal, new[] { view }, _hideSubmissions, _logger, http.RequestAborted);
+        }
+        catch (SdapProblemException ex)
+        {
+            return (null, InvoiceSubmissionHttp.ReadFault(ex));
+        }
+
+        if (visible.Count == 0)
         {
             return (null, ProblemDetailsHelper.UniformRecordNotFound(http));
         }
