@@ -21,8 +21,8 @@ Branch `task/ebill-098-external-marker`, based on `786d1ea17a`. Rigor FULL, opus
 | (b) Invoice thread: list, post, delete-own | ExternalMessageEndpoints.cs `EvaluateRecordGateAsync` invoice block (~810-827) | Same answer as a non-existent or cross-tenant invoice id, with no message read and no row written | Fault or no predicate: refused the same way |
 | (b) Messages on a matter or project thread regarding an invoice, and the notification feed | ExternalMessageEndpoints.cs:514 (`SecureRootsFilter`), `RegardingInvoicesVisibleAsync` :532, ExternalNotificationFeedEndpoints.cs | Withheld from the list, the feed and the count. One predicate call per page | Fault or malformed regarding: withheld |
 | (b′) Documents filed to an invoice: list, content, versions, upload | ExternalProjectDataEndpoints.cs:1415, `RightsForInvoiceAsync` → `InvoiceVisibleToAsync` :1350 | 403 with the same body as a missing invoice; nothing touched | Fault: refused the same way |
-| (c) Submission read | ExternalInvoiceSubmissionAuthorizationFilter.cs:309 | `UniformRecordNotFound`, the same 404 as a missing submission | Fault or no predicate: 404 |
-| (c) Submission list | ExternalInvoiceSubmissionEndpoints.cs:253/266 `WithoutHiddenInvoicesAsync` | Row omitted; the others are kept | Fault: the row is omitted |
+| (c) Submission read | ExternalInvoiceSubmissionAuthorizationFilter.cs:311 → `VisibleSubmissionsAsync` (review round 4b) | `UniformRecordNotFound`, the same 404 as a missing submission. With an invoice, decided by the invoice; without one, by its own source | Fault or no seam: 404 |
+| (c) Submission list | ExternalInvoiceSubmissionEndpoints.cs:260 → `VisibleSubmissionsAsync` :276 (review round 4b) | Row omitted; the others are kept | Fault or no seam: every asked row is omitted |
 | (d) AI `read_query` | DataverseReadQueryHandler.cs:191-212, 369-418 | Invoice or line rows dropped. One seam call per table per page | The seam throws: error with no data. A row without an id is hidden |
 | (d) AI `search_data` | DataverseSearchDataHandler.cs:358-375 | Hidden hits dropped and the count adjusted. No warning reveals that anything was dropped | The seam throws: error with no data |
 | (d) AI `describe` | DataverseDescribeHandler.cs:378-453 | Same `NotFound` and message as a missing record | The seam throws: error with no data |
@@ -285,6 +285,87 @@ Rules 1 (Spa), 2 (Internal with a document) and 4 (an unknown channel hides) are
 **Known limit K1.** `sprk_invoicesubmission.sprk_channel`, the submission's `sprk_invoice` link and submission Delete are security inputs too, like `sprk_document`. Changing one changes which rule decides the invoice. They are filed under #2372 (field-secured, BFF-only write) and tied to 191.
 
 **Observed, not changed.** A purpose value outside `StoredFilePurpose` (non-null) is treated as "not an InvoicePdf". When it is sourceless it is not a source; when it has a source, it is decided by that source. No writer creates such a value.
+
+## Review round 4b, 2026-10-28 (a submission without an invoice)
+
+**The defect.** The submission list and the single read applied the invoice predicate only when the submission had an invoice. A submission with no invoice was not decided by its source while it was Received or Processing, nor ever if it ended Failed or Rejected. The row also returned `documentId` to the external caller.
+
+**One function.** `ExternalInvoiceVisibility.DecideSubmissionsAsync(IReadOnlyCollection<InvoiceSubmissionView>, InvoiceVisibilityReaders, CancellationToken)` decides a page, keyed by submission id:
+- **with an invoice:** the invoice predicate (`DecideAsync`), as before;
+- **without one, Spa:** visible;
+- **without one, Internal with a document:** decided by that document through `DecideSourceDocumentsAsync`, so the marker is honoured;
+- **without one, Internal with an empty link:** withheld (`source_link_unreadable`);
+- **without one, an unknown, unreadable or reserved channel:** withheld (`source_kind_unknown`).
+
+It makes one invoice decision and one source decision per page.
+
+The caller-aware entry is `ExternalDataService.HideSubmissionsForAsync` (ExternalDataService.cs:1965). It is bound to the new seam `ExternalInvoiceSubmissionHiding` (ExternalAccessModule.cs:133) and follows the same rules as `HideInvoicesForAsync`:
+- an internal systemuser sees every submission and causes no read;
+- a failed read withholds every asked submission (`Faulted`).
+
+Both routes call `ExternalInvoiceSubmissionEndpoints.VisibleSubmissionsAsync` (ExternalInvoiceSubmissionEndpoints.cs:276). The list calls it at :260 and the single read at ExternalInvoiceSubmissionAuthorizationFilter.cs:311. A withheld row is omitted from the list. A withheld single read is `UniformRecordNotFound`, with the same body as a missing submission. No seam withholds everything.
+
+**A behaviour change on a fault.** A failed read now withholds every asked row of the page, including a Spa row with no invoice. Before, a fault withheld only the rows that had an invoice.
+
+**Server-only fields.**
+- `InvoiceSubmissionView.ChannelValue` (`[JsonIgnore]`) holds the raw `sprk_channel` value. The decision uses the predicate's enum test.
+- `DocumentId` is read for the decision. `ExternalInvoiceSubmissionEndpoints.ExternalView` clears it on both external routes, and it is `[JsonIgnore(WhenWritingNull)]`, so the external body has no `documentId` key. The internal route still returns it when it is set; only the null value is now omitted there.
+
+**The `documentId` serialization finding.**
+- The external routes returned `documentId`.
+- No external client reads it: the SPA's `InvoiceSubmissionStatusView` (Spaarke.UI.Components `InvoiceSubmission/types.ts`) has no such field, and `web-api-client.ts` reads nothing else.
+- 051's note lists the getStatus shape without it.
+- 044's note §2 lists `documentId` in the status view "for both GETs". That is a description of the view, and no consumer depends on it. 052, not started, uses the shared component's type, which does not have the field.
+- So removing it from the external body breaks no agreed external contract. The internal route is unchanged.
+
+**Guard** (`ExternalInvoiceVisibilityGuardTests`):
+- Reach primitives added: `ExternalInvoiceSubmissionHiding.Invoke`, `ExternalDataService.HideSubmissionsForAsync` and `ExternalInvoiceVisibility.DecideSubmissionsAsync`. `DecideSourceDocumentsAsync` alone is not a reach.
+- Controls:
+  - `InvoiceGuardControlListsSubmissionsThroughTheSubmissionSeam`: must not fire;
+  - `InvoiceGuardControlListsSubmissionsWithOnlyTheSourceDecision`: must fire.
+- `TheSubmissionListAndRead_CallOneDecisionFunction`: `ListAsync` and `DecideReadOneAsync` both call `VisibleSubmissionsAsync`, and it is the only method in either type that applies a decision primitive. Its detector has must-fire and must-not-fire controls (`SubmissionDecisionDetector_MustFireAndMustNotFire`).
+
+**Tests** (`ExternalInvoiceVisibilityTests`, the real `HideSubmissionsForAsync` over `InvoiceWorld`; each for a contact and a flagged systemuser):
+- `Submission_DecidedBeforeItsInvoiceExists_AndAfter_DiffersOnlyForAnInternalEmptyLink`. One submission is decided at Received, then again after the persister's writer-shaped commit, per source (before → after):
+  - SPA upload: visible → visible;
+  - internal upload: withheld → visible;
+  - legacy confirm and from-document, readable: visible → visible;
+  - legacy confirm and from-document, isolated: withheld → withheld;
+  - from-email, marked `.eml`: withheld → visible;
+  - from-email, unmarked restricted `.eml`: withheld → withheld.
+- Must fire:
+  - `NoInvoice_AnIsolatedSubmissionDocument_IsWithheld_AtEveryStatus` (Received, Processing, Failed, Rejected);
+  - `NoInvoice_ASubmissionDocumentUnderARestrictedRoot_IsWithheld`;
+  - `NoInvoice_Internal_AnEmptyDocumentLink_IsWithheld`;
+  - `NoInvoice_AnUnknownOrUnreadableChannel_IsWithheld` (null, 999, the reserved Mailbox value).
+- Must not fire:
+  - `NoInvoice_Spa_IsVisible` (no read);
+  - `NoInvoice_Internal_AReadableSubmissionDocument_IsVisible`;
+  - `NoInvoice_Internal_ASubmissionsOwnEml_HonoursTheMarker`.
+- Fail closed: `AFailedRead_WithholdsEveryAskedSubmission_AndSaysFaulted`, with the documents read or the Stored File read failing.
+- Also:
+  - `AnInternalSystemuser_SeesEverySubmission_AndNothingIsRead`;
+  - `ASubmissionTheDecisionWasNotAskedAbout_IsNeverVisible`;
+  - `ThePageOfSubmissions_IsDecidedInBatchedReads_NotOnePerSubmission` (40 submissions: one documents read, one Stored File read, one submission read).
+
+**Route tests** (`InvoiceSubmissionEndpointsContractTests`). The seam is now the real `HideSubmissionsForAsync` over `InvoiceWorld`, and the existing task 098 cases are reseeded on it. The stored fixture submission now carries the SPA writer shape (channel Spa).
+- `Task098_4b_an_isolated_submission_document_without_an_invoice_is_withheld_on_the_read_and_the_list`: Received, Processing and Failed, for both callers. The read is the same 404 body as a missing submission, and the row is omitted from the list.
+- `Task098_4b_without_an_invoice_an_internal_empty_link_or_an_unknown_channel_is_withheld_on_the_read_and_the_list`.
+- `Task098_4b_without_an_invoice_spa_and_a_readable_internal_document_are_visible_on_the_read_and_the_list`.
+- `Task098_4b_a_failed_source_read_withholds_on_the_read_and_the_list`.
+- `Task098_list_withholds_every_asked_submission_when_the_invoice_read_fails`.
+- `Task098_4b_the_external_routes_never_return_the_document_id_and_the_internal_route_still_does`.
+
+**Seeding proofs.** Each seed was one change, rebuilt and run against both classes (328 tests), then restored. The diff hash was identical before and after (`4b_seeds.py` in the session scratchpad).
+
+| Seed | Failed | Tests that failed |
+|---|---|---|
+| S1, the no-invoice decision dropped | 43 | the before/after theory, every NoInvoice must-fire, the marker test, fail closed, batching, and the route tests for isolated, empty-link/unknown and failed read |
+| S2, an Internal empty link treated as visible | 10 | the before/after theory (internal upload, from-email), `NoInvoice_Internal_AnEmptyDocumentLink_IsWithheld`, the route empty-link/unknown test |
+| S3, the unknown-channel withhold dropped | 8 | `NoInvoice_AnUnknownOrUnreadableChannel_IsWithheld`, the route empty-link/unknown test |
+| S4, the fail-closed read dropped (a fault shows every row) | 8 | `AFailedRead_WithholdsEveryAskedSubmission_AndSaysFaulted`, the route failed-source-read test, the invoice-read list test, the read "fault" case |
+| S4b, no seam treated as nothing withheld | 1 | the read "no predicate" case |
+| S5, `documentId` returned to external callers | 1 | `Task098_4b_the_external_routes_never_return_the_document_id_and_the_internal_route_still_does` |
 
 ## Escalation
 
