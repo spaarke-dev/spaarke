@@ -462,7 +462,12 @@ What moves, and what does not:
   different business units takes the resolver's answer for its primary parent, the same answer a new child would get.
   The primary is fixed per table, never the order the columns come back in: a document's parent document, then its
   matter, project or work assignment, then the rest; a To Do's record regarding; a budget revision's budget, then its
-  matter. A contact is never a parent, so a document filed only to a contact is unfiled. Each move is a conditional write (it is refused if the row changed since it was read), logged with the previous
+  matter. A contact is never a parent, so a document filed only to a contact is unfiled. When the primary parent is
+  itself a child row that a user (not a team) owns and that is filed, its own filing decides the business unit, not its
+  creator's: the resolver looks through it to what it is filed under, in that row's own primary order, up to 4 levels.
+  A loop back to a row already looked through, or a fifth level, leaves the business unit undecided: the child is then
+  refused (`primaryUndecided`) and reported, never moved, unless one of its parents is Secure, which is still decided
+  over every parent. An unfiled user-owned primary keeps its own business unit. Each move is a conditional write (it is refused if the row changed since it was read), logged with the previous
   owner, and read back.
 - **Never moved by this job:** a Secure child (owned by the Secure Record Owners team or any team in the Secure Record
   business unit), and nothing is moved into or out of isolation — that is the Secure pass's (§10). A child the rule would

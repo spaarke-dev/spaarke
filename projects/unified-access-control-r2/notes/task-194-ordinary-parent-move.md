@@ -315,8 +315,8 @@ ranks it as the reconciler does:
   `sprk_relatedcommunication`, but the save and the upload worker asked about the association alone. A secure
   communication beside an ordinary association was seen only by the reconciler's next pass. The save now resolves the
   communication first (the capture's id, or a read by Message-ID) and asks over both
-  (`OfficeDocumentPersistence.DocumentOwnershipOf`). A failed read refuses the save (OFFICE_022, retryable). The worker
-  asks the same question over the payload's communication.
+  (`OfficeDocumentPersistence.DocumentOwnershipOf`). A failed read refuses the save. The worker asks the same question
+  over the payload's communication. (V-fix 4 changed the failed read's code from OFFICE_022 to OFFICE_014; see below.)
 - **Contact ruling (coordinator): the reconciler is right.** A contact is never an ownership parent; people lookups are
   never family. A document filed to a contact is filed only by its communication, and is unfiled when that is empty.
   `AssociationTargetOwnershipOf` was removed. Dev: 0 documents hold `sprk_relatedcontact`.
@@ -337,11 +337,54 @@ ranks it as the reconciler does:
   `RecordOwnershipResolver` and the copy in `SecureChildShareSynchronizer` are gone. No behaviour change: the resolver
   passes its logger, so its ambiguity error log stays.
 
+**V-fix (after both verifiers on bd5208d0b5).**
+- **1, isolation: a task regarding an ownership parent that `sprk_event` cannot file is refused** (79edcf637e).
+  `TaskActionCore` dropped such a regarding (no column for it) and asked about no parent, so the task landed in the acting
+  user's team even under a Secure document, To Do, agreement or billing event. Now `TaskActionCore.RegardingRefusalOf`
+  refuses it, fail closed, with `task_regarding_not_filable`: the playbook node fails (`ValidationFailed`), the ad-hoc
+  route answers 422 `CREATE_TASK_FAILED` naming the code, and nothing is written. A regarding type that is not an
+  ownership parent and has no column (for example `systemuser`) still creates the task unfiled. The other `ForChild`
+  callers were checked for the same lost-target pattern; none loses its primary:
+  - Office To Do: every `TodoRegardingMap` column it asks about is written.
+  - `InquiryReplyTodoCreator`: the matter is written through `ApplyResolverFieldsAsync`.
+  - `TodoGenerationService`: the builder throws on an unmapped type; the content source is the permanent exemption above.
+  - `CommunicationService` secure copy: its links are written as columns.
+- **2, isolation: the ordinary pass never writes on an incomplete question** (fed2e4ac08). A Decision Record whose
+  resolved Signals cannot all be read now gets `Failed` (with the reason) in `DecideOrdinaryRowCoreAsync` when the answer
+  is ordinary, instead of an owner computed from part of its parents. A question that is secure on what it could read is
+  still reported for the secure pass.
+- **3, parity: `sprk_canonicaldocument` in the writers' question: STOPPED, not changed.** Task 146's comment in
+  `ComposeCreateOnSavePromoter` (~:252) gives the reason Compose excludes the link: "a byte-identical canonical is not a
+  parent; following it could hand the saver's own document to another record's team". Task 148 R5 recorded the
+  remaining difference as an under-share only. Including the link as an ownership parent would make an ordinary copy
+  take the canonical's business unit (the saver's document handed to another business unit's team), and the link is
+  severed when the copy diverges, so the question would change after the fact. Reported to the coordinator for a
+  decision (for example: the canonical counts for secure-if-any only, never as the ordinary primary).
+- **4, behaviour: a transient communication read on an Office save is retryable** (5b5ffee272). A failed read of the
+  email's communication now answers 502 `OFFICE_014` (`DataverseError`, `retryable: true`), which the add-in's
+  `errorMessages.ts` already treats as recoverable. `OFFICE_022` stays for a real owner refusal (403, not recoverable).
+- **5, performance: per-pass lookup cache** (cb18593a6e). Each reconcile pass shares a `RecordOwnerLookupCache`
+  (`RecordOwnershipContext.LookupCache`): the Secure Record business unit (primed from the ordinary pass's own read) and
+  each business unit's default owner team are read once per pass, not per row. The cache lives exactly as long as the
+  pass, and only answers are kept. Test shape (12 events under a moved matter): Secure Record business-unit reads 14 → 2
+  (the pass's fixed setup reads), default-team reads 12 → 1, so 2 reads saved per row; on verifier B's dev shape (about
+  180 reads per root) that removes 2 of each row's reads. Not cached, on purpose: `ReownOrdinaryRowCoreAsync`'s
+  pre-write guard still reads the Secure Record business unit fresh before each write.
+- **6, guard: builders matched by metadata identity** (8333a22a19). See the guard baseline below.
+- **7, test: the event writer is compared with its written row** (cc8365fd81). `EventOwnershipContextTests` runs the real
+  handler and compares its question with `OrderedParentsOf` over the Web API body it wrote. No hand-written list.
+
 ### Known limits accepted in R (recorded, not filed separately unless listed under "Issues to file")
 
-- **Capture before refusal (R4-2).** The Office save runs the email capture before the owner question, so a save refused
-  for an unreadable communication has already captured the email. The capture is best-effort and idempotent on the
-  Message-ID, as mailbox intake would make it.
+- **Capture before refusal (R4-2, widened by V-fix).** The Office save runs the email capture before the owner question,
+  so every email or attachment save that is then refused, for any reason (an unreadable communication, now a retryable
+  OFFICE_014, or an owner refusal, OFFICE_022), has already captured the email. The capture is best-effort and idempotent
+  on the Message-ID, as mailbox intake would make it, so a retry does not duplicate it.
+- **Email saved to an Event or To Do association (V-fix).** `sprk_document`'s primary order
+  (`SecureChildLineage.DocumentPrimaryRank`) ranks the parent document, then the matter, project or work assignment, then
+  the other links in declaration order. An email saved to an Event or To Do association therefore takes its business
+  unit from the communication (`sprk_relatedcommunication`), not from the event or To Do, when the two are in different
+  ordinary business units. Writer and reconciler agree (one order). Secure-if-any reads both. Dev: 0 rows.
 - **CommunicationService case 2 (R3b-2).** The outbound secure-links copy, when all its links are ordinary and in
   different business units, is now owned by `sprk_document`'s primary (for example the project) rather than the first
   link named. With any secure link it is the Secure team in either order (proven through the real resolver). Dev: 0
@@ -354,6 +397,13 @@ ranks it as the reconciler does:
   is secure. Under the ordinary rule the document's own lookups decide, in the table's order.
 
 ### The guard baseline (`ChildRowOwnershipBuilderGuardTests`)
+
+Since V-fix 6, `RecordOwnershipContext`'s own builders are exempt by metadata identity (each pinned by its signature), not
+by name, so a new overload that shares a builder's name is scanned like any other caller (control:
+`Detector_ExemptsABuilderByIdentity_NotByName`). **Remaining guard K:** the exemptions and the ratchet below are still
+matched by (type, method) NAME, and the guard sees only how a question is BUILT: it cannot check that the columns a
+writer hands `ForRow` are the columns it writes (`ForRow` semantics cannot be scanned from IL). The per-writer parity
+tests (`OrderedParentsOf(written)` against the writer's question) carry that.
 
 Permanent exemptions (not a child row's owner in a table's order):
 - `RecordOwnershipContext.ContentOf`
