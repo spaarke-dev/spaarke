@@ -373,6 +373,95 @@ public class ExternalInvoiceVisibilityGuardTests
         return (callers, deciders);
     }
 
+    // ── Review round 5 (F1): the assistant tools decide submission rows with the routes' function ─────────────────────────
+
+    /// <summary>
+    /// The functions the assistant tools' family seam decides through (<see cref="AppOnlyInvoiceFamilyHiding"/> is bound to the
+    /// first by <c>ExternalAccessModule</c>, pinned by <see cref="TheAppOnlyInvoiceFamilySeam_HasOnlyListedConsumers"/>). Each must
+    /// reach <see cref="ExternalInvoiceVisibility.DecideSubmissionsAsync"/>, so a submission row is decided exactly as on the
+    /// routes (with an invoice, the invoice predicate; without one, its own source). Every other function that maps family rows
+    /// to their invoices (<see cref="ExternalInvoiceVisibility.ReadInvoicesOfAsync"/>) is held to the same rule.
+    /// </summary>
+    private static readonly string[] ToolFamilyDecisionFunctions =
+    {
+        $"{typeof(ExternalDataService).FullName}::{nameof(ExternalDataService.HideInvoiceFamilyRowsAsync)}",
+        $"{typeof(ExternalInvoiceVisibility).FullName}::{nameof(ExternalInvoiceVisibility.HiddenFamilyRowsAsync)}",
+    };
+
+    [Fact(DisplayName = "Task 098 review round 5: the assistant tools decide submission rows with DecideSubmissionsAsync, the routes' function")]
+    public void TheAssistantTools_DecideSubmissionsWithTheRoutesFunction()
+    {
+        var (unreached, toolDeciders) = ToolSubmissionDecisions(
+            BffTypes.Value, ToolFamilyDecisionFunctions,
+            type => (IlCallScan.Outermost(type).Namespace ?? string.Empty).StartsWith("Sprk.Bff.Api.Services.Ai.Handlers", StringComparison.Ordinal));
+
+        Assert.True(unreached.Count == 0 && toolDeciders.Count == 0,
+            "The assistant tools must decide invoice-family rows only through AppOnlyInvoiceFamilyHiding, whose decision reaches " +
+            "ExternalInvoiceVisibility.DecideSubmissionsAsync (a submission with no invoice is decided by its own source, as on the " +
+            "routes):\n" + string.Join("\n",
+                unreached.Select(f => $"DOES NOT REACH DecideSubmissionsAsync: {f}")
+                    .Concat(toolDeciders.Select(d => $"TOOL DECIDES WITHOUT THE FAMILY SEAM: {d}"))));
+    }
+
+    [Fact(DisplayName = "Task 098 review round 5: negative control — a family decision without DecideSubmissionsAsync, or a tool deciding through another seam, is flagged; the real shape is not")]
+    public void ToolSubmissionDecisionDetector_MustFireAndMustNotFire()
+    {
+        var fixtures = new[]
+        {
+            typeof(ToolDecisionControlFamilyMappingWithoutTheSubmissionDecision),
+            typeof(ToolDecisionControlFamilyMappingWithTheSubmissionDecision),
+            typeof(ToolDecisionControlToolDecidesWithTheInvoiceSeam), typeof(ToolDecisionControlToolUsesTheFamilySeam),
+        };
+
+        var (unreached, toolDeciders) = ToolSubmissionDecisions(
+            fixtures.SelectMany(IlCallScan.WithNested), Array.Empty<string>(),
+            type => IlCallScan.Outermost(type).Name.StartsWith("ToolDecisionControlTool", StringComparison.Ordinal));
+
+        Assert.Equal(new[] { $"{typeof(ToolDecisionControlFamilyMappingWithoutTheSubmissionDecision).FullName}::HiddenAsync" }, unreached.ToArray());
+        Assert.Equal(new[] { $"{typeof(ToolDecisionControlToolDecidesWithTheInvoiceSeam).FullName}::ExecuteChatAsync" }, toolDeciders.ToArray());
+    }
+
+    /// <summary>
+    /// Among <paramref name="types"/>: the family decision functions (<paramref name="required"/> plus every method that calls
+    /// <see cref="ExternalInvoiceVisibility.ReadInvoicesOfAsync"/>) that do NOT reach
+    /// <see cref="ExternalInvoiceVisibility.DecideSubmissionsAsync"/>; and the methods of tool types (<paramref name="isTool"/>)
+    /// that apply an invoice decision other than the family seam or the submission decision.
+    /// </summary>
+    private static (IReadOnlyList<string> Unreached, IReadOnlyList<string> ToolDeciders) ToolSubmissionDecisions(
+        IEnumerable<Type> types, IEnumerable<string> required, Func<Type, bool> isTool)
+    {
+        var list = types.ToList();
+        var reaches = ReachSet(list, target => target.DeclaringType == typeof(ExternalInvoiceVisibility)
+            && target.Name == nameof(ExternalInvoiceVisibility.DecideSubmissionsAsync));
+        var mapping = $"{typeof(ExternalInvoiceVisibility).FullName}::{nameof(ExternalInvoiceVisibility.ReadInvoicesOfAsync)}";
+        var functions = new SortedSet<string>(required, StringComparer.Ordinal);
+        var toolDeciders = new SortedSet<string>(StringComparer.Ordinal);
+        foreach (var (caller, callerMethod, target) in IlCallScan.MethodReferences(list))
+        {
+            var source = ExternalDocumentNarrowingGuardTests.SourceKey(caller, callerMethod);
+            if (target.DeclaringType == typeof(ExternalInvoiceVisibility)
+                && target.Name == nameof(ExternalInvoiceVisibility.ReadInvoicesOfAsync) && source != mapping)
+                functions.Add(source);
+            if (isTool(caller) && DecidesOutsideTheToolSeam(target))
+                toolDeciders.Add(source);
+        }
+
+        return (functions.Where(f => !reaches.Contains(f)).ToList(), toolDeciders.ToList());
+    }
+
+    /// <summary>An invoice decision a tool must not apply itself: every reach primitive except the family seam and the
+    /// submission decision, and the source decision alone.</summary>
+    private static bool DecidesOutsideTheToolSeam(MethodBase target) =>
+        target.DeclaringType is { } declaring
+        && (IsReach(target)
+            || (declaring == typeof(ExternalInvoiceVisibility) && target.Name == nameof(ExternalInvoiceVisibility.DecideSourceDocumentsAsync)))
+        && !(declaring == typeof(AppOnlyInvoiceFamilyHiding)
+            || declaring == typeof(ExternalInvoiceSubmissionHiding)
+            || (declaring == typeof(ExternalDataService)
+                && target.Name is nameof(ExternalDataService.HideInvoiceFamilyRowsAsync) or nameof(ExternalDataService.HideSubmissionsForAsync))
+            || (declaring == typeof(ExternalInvoiceVisibility)
+                && target.Name is nameof(ExternalInvoiceVisibility.HiddenFamilyRowsAsync) or nameof(ExternalInvoiceVisibility.DecideSubmissionsAsync)));
+
     // ── The assistant tools' app-only seam is an allow-list (the second exception to the User-OBO rule) ───────────────────
 
     /// <summary>
@@ -739,6 +828,47 @@ internal sealed class InvoiceGuardControlListsSubmissionsWithOnlyTheSourceDecisi
         return await ExternalInvoiceVisibility.DecideSourceDocumentsAsync(
             views.Select(v => v.DocumentId ?? Guid.Empty).ToList(), readers, cost: null, ct);
     }
+}
+
+/// <summary>Control (round 5), MUST FIRE: maps family rows to invoices and decides them with the invoice predicate only.</summary>
+internal static class ToolDecisionControlFamilyMappingWithoutTheSubmissionDecision
+{
+    internal static async Task<InvoiceVisibilityResult> HiddenAsync(
+        IReadOnlyCollection<Guid> rows, InvoiceVisibilityReaders readers, CancellationToken ct)
+    {
+        var invoices = await ExternalInvoiceVisibility.ReadInvoicesOfAsync("sprk_invoicesubmission", rows, readers.Query, ct);
+        return await ExternalInvoiceVisibility.DecideAsync(invoices.Values.SelectMany(v => v).ToList(), readers, ct);
+    }
+}
+
+/// <summary>Control (round 5), MUST NOT FIRE: maps family rows, and decides submission rows through a helper that calls
+/// DecideSubmissionsAsync.</summary>
+internal static class ToolDecisionControlFamilyMappingWithTheSubmissionDecision
+{
+    internal static async Task<InvoiceVisibilityResult> HiddenAsync(
+        IReadOnlyCollection<Guid> rows, InvoiceVisibilityReaders readers, CancellationToken ct)
+    {
+        await ExternalInvoiceVisibility.ReadInvoicesOfAsync("sprk_invoicesubmission", rows, readers.Query, ct);
+        return await Submissions(rows, readers, ct);
+    }
+
+    private static Task<InvoiceVisibilityResult> Submissions(IReadOnlyCollection<Guid> rows, InvoiceVisibilityReaders readers, CancellationToken ct) =>
+        ExternalInvoiceVisibility.DecideSubmissionsAsync(
+            rows.Select(id => new Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionView { SubmissionId = id }).ToList(), readers, ct);
+}
+
+/// <summary>Control (round 5), MUST FIRE: a tool that decides family rows with the external routes' invoice seam.</summary>
+internal sealed class ToolDecisionControlToolDecidesWithTheInvoiceSeam(ExternalInvoiceHiding hide)
+{
+    internal async Task<bool> ExecuteChatAsync(CallerPrincipal caller, Guid row, CancellationToken ct) =>
+        (await hide(caller, new[] { row }, ct)).IsVisible(row);
+}
+
+/// <summary>Control (round 5), MUST NOT FIRE: a tool that decides family rows through the family seam.</summary>
+internal sealed class ToolDecisionControlToolUsesTheFamilySeam(AppOnlyInvoiceFamilyHiding hide)
+{
+    internal async Task<bool> ExecuteChatAsync(Guid row, CancellationToken ct) =>
+        !(await hide("sprk_invoicesubmission", new[] { row }, ct)).Contains(row);
 }
 
 /// <summary>Control (one function): the shared decision; it invokes the seam.</summary>

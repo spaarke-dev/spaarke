@@ -939,6 +939,42 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
         result.Data.Should().BeNull();
     }
 
+    // Review round 5 (F1): a submission with no invoice is decided by its own source, as on the routes (the REAL seam).
+
+    [Fact]
+    public async Task ExecuteChatAsync_Task098_R5_ExternalCallerOnSubmissions_ANoInvoiceInternalSubmissionWhoseSourceIsWithheld_IsDropped()
+    {
+        AsExternalCaller();
+        var world = new Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld();
+        var withheld = world.PendingSubmission(
+            world.Document(Guid.NewGuid(), permission: Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.RestrictedPermission), Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.InternalChannel);
+        var spa = world.PendingSubmission(null, Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.SpaChannel);
+        SetupFamilyTable("sprk_invoicesubmission", "sprk_invoicesubmissions", "sprk_invoicesubmissionid", "sprk_name");
+        UserReadReturns("sprk_invoicesubmissions", FamilyRows("sprk_invoicesubmissionid", (withheld, "Internal"), (spa, "Spa")));
+        _hideInvoiceFamily = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyHidingStubs.Real(world);
+
+        var result = await ReadAsync("SELECT sprk_name FROM sprk_invoicesubmission");
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        Names(result).Should().Equal("Spa");
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_Task098_R5_ExternalCallerOnSubmissions_ANoInvoiceSpaSubmission_StaysVisible()
+    {
+        AsExternalCaller();
+        var world = new Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld();
+        var spa = world.PendingSubmission(null, Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.SpaChannel);
+        SetupFamilyTable("sprk_invoicesubmission", "sprk_invoicesubmissions", "sprk_invoicesubmissionid", "sprk_name");
+        UserReadReturns("sprk_invoicesubmissions", FamilyRows("sprk_invoicesubmissionid", (spa, "Spa")));
+        _hideInvoiceFamily = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyHidingStubs.Real(world);
+
+        var result = await ReadAsync("SELECT sprk_name FROM sprk_invoicesubmission");
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        Names(result).Should().Equal("Spa");
+    }
+
     [Fact]
     public async Task ExecuteChatAsync_Task098_InternalCallerOnInvoices_NeverReachesThePredicate()
     {

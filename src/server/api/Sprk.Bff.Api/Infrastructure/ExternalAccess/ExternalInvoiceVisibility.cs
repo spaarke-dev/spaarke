@@ -30,7 +30,8 @@ namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 /// (<see cref="ExternalDataService.HideInvoicesForAsync"/>) turns that into "every asked invoice hidden".</para>
 /// <para><b>Taint closure.</b> <see cref="HiddenFamilyRowsAsync"/> maps a row of the invoice family (lines, submissions,
 /// approvals, external identifiers, corrections, Decision Records, Signals, Stored Files) to its invoice, directly or through
-/// its invoice line, read app-only, and hides it with its invoice.</para>
+/// its invoice line, read app-only, and hides it with its invoice. A submission row is decided by
+/// <see cref="DecideSubmissionsAsync"/> (review round 5), so one with no invoice is decided by its own source, as on the routes.</para>
 /// <para><b>Cost.</b> One Stored File read and one submission read per 50 invoices; one source read per 50 sources; the 188 decision (one read per hop
 /// level, at most three, plus the communication and thread reads); one live-parent walk; one effective-flag read per root type
 /// (at most three). Logs carry counts only (ADR-015).</para>
@@ -358,6 +359,7 @@ internal static class ExternalInvoiceVisibility
     private const string StoredFileAttachmentIdentity = Sprk.Bff.Api.Services.Finance.Files.StoredFileSchema.SourceAttachmentIdentity;
     private const string StoredFilePurposeColumn = Sprk.Bff.Api.Services.Finance.Files.StoredFileSchema.Purpose;
 
+    private const string SubmissionTable = "sprk_invoicesubmission";
     private const string SubmissionSet = "sprk_invoicesubmissions";
     private const string SubmissionIdField = "sprk_invoicesubmissionid";
     private const string SubmissionInvoiceValue = "_sprk_invoice_value";
@@ -552,13 +554,18 @@ internal static class ExternalInvoiceVisibility
     /// The taint closure (model 9.1): which of <paramref name="rowIds"/> (rows of <paramref name="table"/>, a table of
     /// <see cref="FamilyTables"/>) are hidden because their invoice, directly or through their invoice line, is hidden. The
     /// rows' links are read BY ID app-only (a row that does not come back, or a link that is not a GUID, hides the row); a row
-    /// with no invoice and no line is not hidden. A failed read THROWS.
+    /// with no invoice and no line is not hidden, EXCEPT a submission (review round 5): <c>sprk_invoicesubmission</c> rows are
+    /// decided by <see cref="DecideSubmissionsAsync"/>, the function the submission routes use, so a submission with no invoice
+    /// is decided by its own source exactly as on the routes. A failed read THROWS.
     /// </summary>
     internal static async Task<IReadOnlySet<Guid>> HiddenFamilyRowsAsync(
         string table, IReadOnlyCollection<Guid> rowIds, InvoiceVisibilityReaders readers, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(rowIds);
         ArgumentNullException.ThrowIfNull(readers);
+        if (string.Equals(table, SubmissionTable, StringComparison.OrdinalIgnoreCase))
+            return await HiddenSubmissionRowsAsync(rowIds, readers, ct).ConfigureAwait(false);
+
         var invoicesOf = await ReadInvoicesOfAsync(table, rowIds, readers.Query, ct).ConfigureAwait(false);
         var decidable = invoicesOf.Values.SelectMany(v => v).Where(id => id != ExternalDocumentNarrowing.UnreadableLink)
             .Distinct().ToList();
@@ -570,6 +577,74 @@ internal static class ExternalInvoiceVisibility
                 || decision is null || !decision.IsVisible(invoice)))
             .Select(kv => kv.Key)
             .ToHashSet();
+    }
+
+    /// <summary>
+    /// Review round 5 (F1): the assistant tools' decision over submission rows. Each row's invoice link, <c>sprk_channel</c> and
+    /// <c>_sprk_document_value</c> are read BY ID app-only in one read per chunk, and the page is decided by
+    /// <see cref="DecideSubmissionsAsync"/>: with an invoice, the invoice predicate; without one, the submission's own source.
+    /// A row that does not come back, or whose invoice link is not a GUID, is hidden. A failed read THROWS.
+    /// </summary>
+    private static async Task<IReadOnlySet<Guid>> HiddenSubmissionRowsAsync(
+        IReadOnlyCollection<Guid> rowIds, InvoiceVisibilityReaders readers, CancellationToken ct)
+    {
+        var distinct = rowIds.Where(id => id != Guid.Empty).Distinct().ToList();
+        var hidden = new HashSet<Guid>();
+        if (distinct.Count == 0)
+            return hidden;
+
+        var views = await ReadSubmissionViewsAsync(distinct, readers.Query, ct).ConfigureAwait(false);
+        var decidable = new List<Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionView>();
+        foreach (var id in distinct)
+        {
+            if (views.TryGetValue(id, out var view) && view.InvoiceId != ExternalDocumentNarrowing.UnreadableLink)
+                decidable.Add(view);
+            else
+                hidden.Add(id); // not back, or an invoice that cannot be decided
+        }
+
+        if (decidable.Count == 0)
+            return hidden;
+
+        var decision = await DecideSubmissionsAsync(decidable, readers, ct).ConfigureAwait(false);
+        foreach (var view in decidable.Where(v => !decision.IsVisible(v.SubmissionId)))
+            hidden.Add(view.SubmissionId);
+        return hidden;
+    }
+
+    /// <summary>
+    /// The submissions <paramref name="ids"/>, read BY ID app-only (one read per chunk), as the view
+    /// <see cref="DecideSubmissionsAsync"/> decides: the invoice link, the document link (a value that is not a GUID reads as
+    /// <see cref="ExternalDocumentNarrowing.UnreadableLink"/>) and the raw channel value. A row that does not come back is
+    /// absent. A failed read THROWS.
+    /// </summary>
+    private static async Task<IReadOnlyDictionary<Guid, Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionView>> ReadSubmissionViewsAsync(
+        IReadOnlyList<Guid> ids, CommunicationOpenThreadGate.RowQuery query, CancellationToken ct)
+    {
+        var columns = new[] { SubmissionIdField, SubmissionInvoiceValue, SubmissionDocumentValue, SubmissionChannel };
+        var chunks = await CommunicationOpenThreadGate.ReadChunksAsync(ids, (chunk, c) => query(SubmissionSet,
+            $"$select={string.Join(",", columns)}" +
+            $"&$filter={string.Join(" or ", chunk.Select(id => $"{SubmissionIdField} eq {id:D}"))}&$top={chunk.Length}", c), ct)
+            .ConfigureAwait(false);
+        var found = new Dictionary<Guid, Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionView>();
+        foreach (var (chunk, rows) in chunks)
+        {
+            var inChunk = chunk.ToHashSet();
+            foreach (var row in rows)
+            {
+                if (LinkOf(row, SubmissionIdField) is not { } id || !inChunk.Contains(id))
+                    continue;
+                found[id] = new Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionView
+                {
+                    SubmissionId = id,
+                    InvoiceId = LinkOf(row, SubmissionInvoiceValue),
+                    DocumentId = LinkOf(row, SubmissionDocumentValue),
+                    ChannelValue = IntOf(row, SubmissionChannel),
+                };
+            }
+        }
+
+        return found;
     }
 
     /// <summary>
@@ -700,7 +775,8 @@ internal delegate Task<InvoiceVisibilityResult> ExternalInvoiceSubmissionHiding(
 /// <summary>
 /// The assistant's <c>dataverse.*</c> tools' seam (task 098 surface (d)): of <paramref name="rowIds"/> (rows of an invoice-family
 /// table the USER's own read returned), the ids an external caller may NOT see. The rows' invoice links and the decision are
-/// read app-only; only the hidden id set comes back (a hide decision; no row data). The tool has already decided the caller is
+/// read app-only (a submission row is decided by <see cref="ExternalInvoiceVisibility.DecideSubmissionsAsync"/>, as on the
+/// routes); only the hidden id set comes back (a hide decision; no row data). The tool has already decided the caller is
 /// external. A failed read THROWS (the tool call fails with no data). Registered by <c>AddExternalAccess</c>.
 /// </summary>
 public delegate Task<IReadOnlySet<Guid>> AppOnlyInvoiceFamilyHiding(

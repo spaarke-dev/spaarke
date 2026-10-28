@@ -6,12 +6,14 @@ using FluentAssertions;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.DI;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Finance.Submission;
@@ -1170,6 +1172,43 @@ public sealed class ExternalInvoiceVisibilityTests
         decision.Cost.SourceReads.Should().Be(1);
     }
 
+    /// <summary>
+    /// Review round 5 (F3): the production wiring. <c>AddExternalAccess</c> (the real module, not a test registration) registers
+    /// <see cref="ExternalInvoiceSubmissionHiding"/> bound to <see cref="ExternalDataService.HideSubmissionsForAsync"/>: the
+    /// page is decided over the module's app-only <see cref="ExternalDataService"/> (whose transport is the double here).
+    /// </summary>
+    [Fact]
+    public async Task TheSubmissionSeam_IsRegisteredByAddExternalAccess_AndDelegatesToHideSubmissionsForAsync()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Dataverse:ServiceUrl"] = "https://org.test" })
+            .Build());
+        services.AddSingleton<Azure.Core.TokenCredential>(new ExternalRecordDocumentRoutesTests.InMemoryExternalDataService.TestCredential());
+        services.AddSingleton<Sprk.Bff.Api.Infrastructure.Cache.ITenantCache>(new Sprk.Bff.Api.Tests.Infrastructure.Cache.InMemoryTenantCache());
+        services.AddHttpContextAccessor();
+        // Production registers the filing reader elsewhere; a parentless source makes no filing read (strict: any call fails).
+        services.AddSingleton(new Mock<IGenericEntityService>(MockBehavior.Strict).Object);
+        services.AddExternalAccess();
+        services.AddHttpClient<ExternalDataService>().ConfigurePrimaryHttpMessageHandler(() => _world);
+        await using var provider = services.BuildServiceProvider();
+        await using var scope = provider.CreateAsyncScope();
+        var withheld = Guid.NewGuid();
+        var spa = Guid.NewGuid();
+        var isolated = _world.Document(Guid.NewGuid(), permission: Restricted);
+
+        var seam = scope.ServiceProvider.GetRequiredService<ExternalInvoiceSubmissionHiding>();
+        var decision = await seam(Caller("contact"),
+            new[] { SubmissionView(withheld, InvoiceWorld.InternalChannel, isolated), SubmissionView(spa, InvoiceWorld.SpaChannel) },
+            CancellationToken.None);
+
+        decision.Faulted.Should().BeFalse(decision.HiddenSummary());
+        decision.IsVisible(spa).Should().BeTrue();
+        decision.HiddenReason(withheld).Should().Be(InvoiceHiddenReason.SourceHidden);
+        _world.Reads("sprk_documents").Should().ContainSingle("the submission's own document, read app-only through the module's service");
+    }
+
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════
     // 188 unchanged at the option's default
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -1232,8 +1271,103 @@ public sealed class ExternalInvoiceVisibilityTests
         var hidden = await _world.NewService(_identity.Object)
             .HideInvoiceFamilyRowsAsync(table, new[] { ofHidden, ofVisible, ofNone, missing }, _world.RootFlags);
 
+        if (table == "sprk_invoicesubmission")
+        {
+            // Review round 5 (F1): a submission with no invoice is decided by its own source, as on the routes. This row has no
+            // channel, so it is withheld (source_kind_unknown).
+            hidden.Should().BeEquivalentTo(new[] { ofHidden, ofNone, missing },
+                "a submission of a hidden invoice, one with no invoice and no channel, and one that does not come back are hidden");
+            return;
+        }
+
         hidden.Should().BeEquivalentTo(new[] { ofHidden, missing },
             "a row of a hidden invoice and a row that does not come back are hidden; a row of a visible invoice or of none is not");
+    }
+
+    // ── Review round 5 (F1): the assistant tools decide a submission row with the routes' function ──────────────────────
+
+    public static TheoryData<string, bool> SubmissionSourcesWithoutAnInvoice => new()
+    {
+        { "spa", false },
+        { "internal-readable-document", false },
+        { "internal-marked-eml", false },
+        { "internal-isolated-document", true },
+        { "internal-unmarked-restricted-eml", true },
+        { "internal-empty-link", true },
+        { "unknown-channel", true },
+        { "no-channel", true },
+    };
+
+    [Theory, MemberData(nameof(SubmissionSourcesWithoutAnInvoice))]
+    public async Task TaintClosure_ASubmissionWithoutAnInvoice_IsDecidedAsOnTheRoutes(string source, bool hiddenExpected)
+    {
+        (int? Channel, Guid? Document) shape = source switch
+        {
+            "spa" => (InvoiceWorld.SpaChannel, null),
+            "internal-readable-document" =>
+                (InvoiceWorld.InternalChannel, _world.Document(Guid.NewGuid(), permission: Standard, matter: CleanMatter())),
+            "internal-marked-eml" => (InvoiceWorld.InternalChannel, _world.SubmissionEml(marked: true, FirmCommunication(), CleanMatter())),
+            "internal-isolated-document" =>
+                (InvoiceWorld.InternalChannel, _world.Document(Guid.NewGuid(), permission: Restricted, matter: CleanMatter())),
+            "internal-unmarked-restricted-eml" =>
+                (InvoiceWorld.InternalChannel, _world.SubmissionEml(marked: false, FirmCommunication(), CleanMatter())),
+            "internal-empty-link" => (InvoiceWorld.InternalChannel, null),
+            "unknown-channel" => (999, null),
+            "no-channel" => (null, null),
+            _ => throw new ArgumentOutOfRangeException(nameof(source)),
+        };
+        var (channel, document) = shape;
+        var submission = _world.PendingSubmission(document, channel);
+
+        var tool = await _world.NewService(_identity.Object)
+            .HideInvoiceFamilyRowsAsync("sprk_invoicesubmission", new[] { submission }, _world.RootFlags);
+        var route = await DecideSubmissions("contact", SubmissionView(submission, channel, document));
+
+        tool.Contains(submission).Should().Be(hiddenExpected, route.HiddenSummary());
+        tool.Contains(submission).Should().Be(!route.IsVisible(submission), "the tools and the routes decide a submission alike");
+    }
+
+    [Fact]
+    public async Task TaintClosure_ASubmissionWhoseDocumentLinkIsNotAGuid_IsHidden()
+    {
+        var submission = _world.PendingSubmission(null, InvoiceWorld.InternalChannel);
+        _world.SetRow("sprk_invoicesubmissions", "sprk_invoicesubmissionid", submission, "_sprk_document_value", "not-a-guid");
+
+        var hidden = await _world.NewService(_identity.Object)
+            .HideInvoiceFamilyRowsAsync("sprk_invoicesubmission", new[] { submission }, _world.RootFlags);
+
+        hidden.Should().Contain(submission);
+    }
+
+    [Fact]
+    public async Task TaintClosure_SubmissionRows_AreReadOnce_WithTheirChannelAndDocument()
+    {
+        var spa = _world.PendingSubmission(null, InvoiceWorld.SpaChannel);
+        var isolated = _world.PendingSubmission(
+            _world.Document(Guid.NewGuid(), permission: Restricted, matter: CleanMatter()), InvoiceWorld.InternalChannel);
+        var invoice = Guid.NewGuid();
+        var withInvoice = _world.SpaUpload(invoice);
+
+        var hidden = await _world.NewService(_identity.Object)
+            .HideInvoiceFamilyRowsAsync("sprk_invoicesubmission", new[] { spa, isolated, withInvoice }, _world.RootFlags);
+
+        hidden.Should().BeEquivalentTo(new[] { isolated });
+        var byId = _world.Reads("sprk_invoicesubmissions").Where(u => u.Contains("sprk_invoicesubmissionid eq", StringComparison.Ordinal)).ToList();
+        byId.Should().ContainSingle("one app-only read of the rows by id for the page");
+        byId[0].Should().Contain("sprk_channel").And.Contain("_sprk_document_value").And.Contain("_sprk_invoice_value");
+    }
+
+    [Fact]
+    public async Task TaintClosure_ASubmissionDecisionFault_Throws_SoTheToolReturnsNoData()
+    {
+        var submission = _world.PendingSubmission(
+            _world.Document(Guid.NewGuid(), permission: Standard, matter: CleanMatter()), InvoiceWorld.InternalChannel);
+        _world.Faults["sprk_documents"] = HttpStatusCode.ServiceUnavailable;
+
+        var act = () => _world.NewService(_identity.Object)
+            .HideInvoiceFamilyRowsAsync("sprk_invoicesubmission", new[] { submission }, _world.RootFlags);
+
+        await act.Should().ThrowAsync<Exception>();
     }
 
     [Theory]
@@ -1633,6 +1767,22 @@ internal sealed class InvoiceWorld : HttpMessageHandler
             row["sprk_purpose"] = InvoiceSupportingFile;
         Seed(family.EntitySet, row);
         return id;
+    }
+
+    /// <summary>Review round 5: a submission with NO invoice yet (Received, Processing, or a terminal outcome that produced none),
+    /// naming <paramref name="document"/> on the raw <paramref name="channel"/>; returns its id.</summary>
+    public Guid PendingSubmission(Guid? document, object? channel)
+    {
+        var submission = Guid.NewGuid();
+        Seed("sprk_invoicesubmissions", new Dictionary<string, object?>
+        {
+            ["sprk_invoicesubmissionid"] = submission.ToString(),
+            ["_sprk_invoice_value"] = null,
+            ["_sprk_document_value"] = document?.ToString(),
+            ["sprk_channel"] = channel,
+            ["sprk_name"] = "SUB-0002",
+        });
+        return submission;
     }
 
     /// <summary>Sets <paramref name="column"/> on every submission of <paramref name="invoice"/>.</summary>
