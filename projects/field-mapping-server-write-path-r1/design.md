@@ -776,3 +776,15 @@ Still open: classify `sprk_procedureassignment` and record-scoped ruleset rules 
 - **Query count:** the worst case is about (edges per level × 4 levels) batched reads per view, 100 or more for a big matter. Measure p95 on dev and record it. Narrow each level to the edges whose parent table is present only if it hurts in practice.
 - **Truncation favours the anchor:** in a truncated full-family view, the anchor's ancestor chain and its own subtree are filled first. Siblings' branches are the ones cut, and "load more" reaches them (UAC C4; tested).
 - **Permissiveness:** the view is exactly as permissive as Dataverse read for the caller, never more. Gaps Dataverse itself has today (e.g. the flagged-external systemuser reading Restricted rows, UAC task 191) show here as they do in the MDA.
+
+### 12.12 The family abstraction contract (UAC-r2 round 130, 2026-10-28, owner decision; #2362)
+
+The structured family entity (`sprk_securefamily`) is **not built now**; it is on the roadmap. Until it exists, W7 is the family:
+
+- **`RecordFamilyEdges` + `RecordFamilyReader` + `GET /api/v1/records/{table}/{id}/family` are the family abstraction.** Every caller reads a family through them (the reader in the BFF, the endpoint from clients), never through raw parent lookups. Push (task 040) finds a source's children through the edges and the primary-parent rule, not through `ResolveParentLookup` or a hand-written lookup.
+- **The implementation can be replaced, the contract cannot.** If `sprk_securefamily` is built later, it replaces how the reader finds members; the reader's public surface, the FR-31 response and the callers stay the same. The reader therefore exposes no lookup names, edge internals or storage details (registry rows stay `internal` data the reader consumes).
+- **Membership stays computed:** the primary-parent rule via `InPrimaryOrder` (UAC 194b), the Matter → Project pair edge only (UAC 195), no stored family key.
+- **W7 adds no family lookup column and no family table.**
+- **Binding now (round 130):**
+  - every ownership write goes through `RecordOwnershipResolver` (W7 is read-only and writes none);
+  - new code that tests isolation does so through UAC's one shared predicate keyed on the Secure Record business unit, never a hard-coded team id. W7 does not decide isolation (Dataverse read does, as the caller); 070's C2 guard and any test fixture follow the same rule.
