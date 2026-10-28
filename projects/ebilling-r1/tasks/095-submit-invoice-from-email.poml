@@ -4,7 +4,7 @@
     <title>Submit Invoice from the Outlook add-in: POST /api/finance/invoice-submissions/from-email (email-only save + submission)</title>
     <phase>3 Procedures and files (WP3, EB-D-148) — wave W3-F</phase>
     <gate>blocked until 094 and 088 are done AND #2177 (task 130, T8) is merged and deployed to dev</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>New authorized BFF endpoint (tags bff-api, auth) that writes an own-Restricted .eml and a submission all or nothing; tenant-isolation marker with an ArchTest.</rigor-reason>
     <model-tier>opus</model-tier>
