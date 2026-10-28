@@ -882,6 +882,131 @@ public class SecureChildOrdinaryParentMoveTests
             "only a record that resolved a Signal of the pass is read into it");
     }
 
+    private int DecisionRecordTextMatchReads() => _world.Queries.Count(q =>
+        q.EntityName == "sprk_decisionrecord" && SecureChildShareWorld.HasLike(q.Criteria));
+
+    [Fact(DisplayName = "R4b-2c F3a must not fire: a Decision Record whose steps mention the Signal OUTSIDE resolvedSignalIds is read in by the text match, decided by its own question, and stays put")]
+    public async Task MakeSecure_AnOverMatchedDecisionRecord_IsDecidedByItsOwnQuestion_AndStays()
+    {
+        var x = Guid.NewGuid();
+        _world.SecureRoot(Matter, x);
+        E2UnderXWithSignalB(x, GeneralTeam);
+        var record = DecisionRecordAboutE1Resolving(GeneralTeam);
+        _world.Set("sprk_decisionrecord", record, "sprk_steps",
+            "{\"reviewId\":\"" + Guid.NewGuid().ToString("D") + "\",\"resolvedSignalIds\":[],\"steps\":[{\"note\":\"see signal "
+            + SignalB.ToString("D") + "\"}]}");
+
+        var report = await Reconciler().ReconcileAsync(
+            Matter, x, SecureChildReconcileMode.Apply, SecureChildPassTrigger.Provisioning, CancellationToken.None);
+
+        report.Tables.Where(t => t.Table == "sprk_decisionrecord").Sum(t => t.Examined).Should().Be(1,
+            "the text match over-reads it into the pass");
+        _world.OwnerOf("sprk_decisionrecord", record).Should().Be(DataversePrincipalRef.Team(GeneralTeam),
+            "its own question (core M1, subject E1, no resolved Signal) is ordinary");
+        _world.OwnerWrites.Should().NotContain(w => w.Id == record);
+        report.Changes.Should().NotContain(c => c.Id == record
+            && (c.Outcome == SecureChildRowOutcome.Changed || c.Outcome == SecureChildRowOutcome.Refused
+                || c.Outcome == SecureChildRowOutcome.Failed));
+    }
+
+    [Fact(DisplayName = "R4b-2c F3b: the ORDINARY-parent-move pass reads in a Decision Record outside the matter's lineage that resolved a Signal of the pass, and keeps it at its core's team")]
+    public async Task TheOrdinaryPass_ReadsInADecisionRecord_ThatResolvedASignalOfThePass()
+    {
+        MatterMovedToB();
+        E2UnderXWithSignalB(MatterId, GeneralTeam);
+        var record = DecisionRecordAboutE1Resolving(GeneralTeam);
+
+        var report = await Reconciler().ReconcileOrdinaryParentMoveAsync(
+            Matter, MatterId, SecureChildReconcileMode.Apply, maxWrites: 200, CancellationToken.None);
+
+        report.Tables.Where(t => t.Table == "sprk_decisionrecord").Sum(t => t.Examined).Should().Be(1,
+            "the discovery runs in the ordinary pass too");
+        _world.OwnerOf("sprk_event", E2).Should().Be(DataversePrincipalRef.Team(TeamB), "E2 follows its matter");
+        _world.OwnerOf("sprk_decisionrecord", record).Should().Be(DataversePrincipalRef.Team(GeneralTeam),
+            "its core M1 is its primary: the move of a resolved Signal's subject never moves it to B");
+        _world.OwnerWrites.Should().NotContain(w => w.Id == record);
+        report.Changes.Should().NotContain(c => c.Id == record && c.Outcome != SecureChildRowOutcome.AlreadyCorrect);
+    }
+
+    [Theory(DisplayName = "R4b-2c F3c must fire: a fault in the Decision Record steps read or the Signal-link read fails the pass — nothing written")]
+    [InlineData("steps")]
+    [InlineData("link")]
+    public async Task MakeSecure_AFaultInTheDecisionRecordDiscovery_FailsThePass_AndWritesNothing(string which)
+    {
+        var x = Guid.NewGuid();
+        _world.SecureRoot(Matter, x);
+        E2UnderXWithSignalB(x, GeneralTeam);
+        var record = DecisionRecordAboutE1Resolving(GeneralTeam, idFormat: which == "link" ? "N" : "D");
+        _world.Set("sprk_signal", SignalB, "sprk_decisionrecord", new EntityReference("sprk_decisionrecord", record));
+        if (which == "steps")
+            _world.FailingLikeReadsOf("sprk_decisionrecord");
+        else
+            _world.FailingIdListReadsOf("sprk_decisionrecord", record);
+
+        var report = await Reconciler().ReconcileAsync(
+            Matter, x, SecureChildReconcileMode.Apply, SecureChildPassTrigger.Provisioning, CancellationToken.None);
+
+        report.Status.Should().Be(SecureChildReconcileStatus.Failed, which);
+        _world.OwnerWrites.Should().BeEmpty("no row is decided on a walk that could not be read whole");
+        _world.OwnerOf("sprk_event", E2).Should().Be(DataversePrincipalRef.Team(GeneralTeam));
+        _world.OwnerOf("sprk_decisionrecord", record).Should().Be(DataversePrincipalRef.Team(GeneralTeam));
+    }
+
+    [Fact(DisplayName = "R4b-2c F3d must fire: a Signal linked under a Decision Record the discovery found is walked below it, and decided by its own question")]
+    public async Task MakeSecure_ASignalLinkedUnderAFoundDecisionRecord_IsWalked_AndDecidedByItsOwnQuestion()
+    {
+        var x = Guid.NewGuid();
+        _world.SecureRoot(Matter, x);
+        E2UnderXWithSignalB(x, GeneralTeam);
+        var record = DecisionRecordAboutE1Resolving(GeneralTeam);
+        // Reached ONLY through its link to the found record (sprk_signal.sprk_decisionrecord, a lineage lookup); its subject is
+        // the ordinary E1. The link files nothing for ownership (a Decision Record is no ownership parent), so its own question
+        // decides it.
+        var signalC = Guid.NewGuid();
+        Row("sprk_signal", signalC, TeamRef(GeneralTeam),
+            ("sprk_decisionrecord", "sprk_decisionrecord", record), ("sprk_regardingevent", "sprk_event", E1));
+        _world.Set("sprk_signal", signalC, "sprk_regardingrecordid", E1.ToString("D"));
+
+        var report = await Reconciler().ReconcileAsync(
+            Matter, x, SecureChildReconcileMode.Apply, SecureChildPassTrigger.Provisioning, CancellationToken.None);
+
+        _world.OwnerOf("sprk_decisionrecord", record).Should().Be(DataversePrincipalRef.Team(SecureChildShareWorld.SecureTeam));
+        report.Tables.Where(t => t.Table == "sprk_signal").Sum(t => t.Examined).Should().Be(2,
+            "Signal B, and Signal C below the found Decision Record");
+        _world.OwnerOf("sprk_signal", signalC).Should().Be(DataversePrincipalRef.Team(GeneralTeam),
+            "its own question (subject E1) is ordinary");
+        _world.OwnerWrites.Should().NotContain(w => w.Id == signalC);
+    }
+
+    [Fact(DisplayName = "R4b-2c F3e: past 200 Signals the steps read is chunked — each read names at most 200 Signals, and a Decision Record that resolved one of the second chunk is found")]
+    public async Task MakeSecure_FindsADecisionRecord_PastTheFirstChunkOfSignals()
+    {
+        var x = Guid.NewGuid();
+        _world.SecureRoot(Matter, x);
+        Row("sprk_event", E2, TeamRef(GeneralTeam), ("sprk_regardingmatter", Matter, x));
+        var signals = Enumerable.Range(0, SecureChildShareSynchronizer.DescendantConditionsPerQuery + 50)
+            .Select(_ => Guid.NewGuid()).ToList();
+        foreach (var signal in signals)
+        {
+            Row("sprk_signal", signal, TeamRef(GeneralTeam), ("sprk_regardingevent", "sprk_event", E2));
+            _world.Set("sprk_signal", signal, "sprk_regardingrecordid", E2.ToString("D"));
+        }
+
+        var record = DecisionRecordAboutE1Resolving(GeneralTeam);
+        _world.Set("sprk_decisionrecord", record, "sprk_steps", StepsListingIn("D", signals[^1]));
+
+        var report = await Reconciler().ReconcileAsync(
+            Matter, x, SecureChildReconcileMode.Apply, SecureChildPassTrigger.Provisioning, CancellationToken.None);
+
+        DecisionRecordTextMatchReads().Should().Be(2, "250 Signals: two chunks");
+        _world.Queries.Where(q => q.EntityName == "sprk_decisionrecord" && SecureChildShareWorld.HasLike(q.Criteria))
+            .Select(q => q.Criteria.Filters.Sum(f => f.Conditions.Count))
+            .Should().OnlyContain(n => n <= SecureChildShareSynchronizer.DescendantConditionsPerQuery);
+        _world.OwnerOf("sprk_decisionrecord", record).Should().Be(DataversePrincipalRef.Team(SecureChildShareWorld.SecureTeam),
+            "it resolved the last Signal, in the second chunk");
+        report.Changes.Should().ContainSingle(c => c.Id == record).Which.Outcome.Should().Be(SecureChildRowOutcome.Changed);
+    }
+
     [Fact(DisplayName = "194b R4b-2b F3 must fire: an Unsecure RELEASES a Decision Record whose question is complete and all ordinary")]
     public async Task AnUnsecure_ReleasesACompleteAllOrdinaryDecisionRecord()
     {
