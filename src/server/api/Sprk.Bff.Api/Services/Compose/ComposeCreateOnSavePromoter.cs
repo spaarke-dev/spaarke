@@ -249,9 +249,10 @@ internal sealed class ComposeCreateOnSavePromoter
         // read logs LOUDLY and the create proceeds unassociated (mirrors the source having no links —
         // never fails the save); the idempotent existing-row branch above never reaches here, so an
         // existing record's links are never mutated.
-        // Task 146: the records the new document is FILED to — exactly the inherited links, never the dedup
-        // canonical link below (a byte-identical canonical is not a parent; following it could hand the saver's own
-        // document to another record's team).
+        // Task 146: the records the new document is FILED to — exactly the inherited links. The dedup canonical link
+        // below joins the question as a SECURE-ONLY parent (UAC 194b V-fix 3, RecordOwnershipResolver.IsSecureOnlyParent): a
+        // copy of Secure content is Secure, but a byte-identical canonical never decides the copy's business unit — following
+        // it as a filing parent could hand the saver's own document to another record's team.
         // Fix round R (B2): keyed by the column each is copied to, so the question is asked in sprk_document's primary order.
         var filedUnder = new List<KeyValuePair<string, Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent?>>();
         if (request.SourceDocumentRecordId is { } sourceRecordId)
@@ -331,6 +332,11 @@ internal sealed class ComposeCreateOnSavePromoter
                 if (canonicalId is { } canonical)
                 {
                     entity[ComposeService.CanonicalDocumentAttribute] = new EntityReference(ComposeService.DocumentLogicalName, canonical);
+                    // V-fix 3: asked under its own column, so ForRow holds it for secure-if-any only (never the primary).
+                    filedUnder.Add(KeyValuePair.Create(
+                        ComposeService.CanonicalDocumentAttribute,
+                        (Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent?)new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(
+                            ComposeService.DocumentLogicalName, canonical)));
                     // Was `FindFirst("oid")` with no schema form: under inbound claim mapping the short
                     // claim does not exist, so this resolved NULL and NotifyLinkedCopyAsync bailed with
                     // "no resolvable uploader oid" — the linked-copy notification was never delivered.
