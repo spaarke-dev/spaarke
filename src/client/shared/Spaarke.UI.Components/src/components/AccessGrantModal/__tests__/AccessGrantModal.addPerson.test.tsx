@@ -197,14 +197,16 @@ describe('AccessGrantModal — one "Add person" entry (task 193)', () => {
     expect(await screen.findByText(`Shared with ${COLLEAGUE_FALLBACK_NAME} — internal user.`)).toBeInTheDocument();
   });
 
-  it('expiryNotApplied: the notice says shares with colleagues have no end date', async () => {
+  it('expiryNotApplied: the notice says the share itself has no end date', async () => {
     const fetchMock = fetchWith({ ...SHARED_WITH_ADA, expiryNotApplied: true });
     renderWithTheme(<AccessGrantModal {...makeProps(fetchMock, personFromContact(ADA_CONTACT))} />);
 
     await addPerson(ADA_CONTACT.fullName);
 
     expect(
-      await screen.findByText('Shared with Ada Lovelace. Shares with colleagues have no end date.')
+      await screen.findByText(
+        'Shared with Ada Lovelace. The share itself has no end date, so the Expiration was not applied to it.'
+      )
     ).toBeInTheDocument();
     // The add did carry the record's Expiration (today + 90 with no share yet); the server did not apply it.
     expect(bodyOf(postsTo(fetchMock, GRANT)[0]).expiryDate).toEqual(expect.any(String));
@@ -258,7 +260,8 @@ describe('AccessGrantModal — one "Add person" entry (task 193)', () => {
 
     expect(
       await screen.findByText(
-        'Shared with Ada Lovelace. Shares with colleagues have no end date. Suggested from Assigned Paralegal 1.'
+        'Shared with Ada Lovelace. The share itself has no end date, so the Expiration was not applied to it. ' +
+          'Suggested from Assigned Paralegal 1.'
       )
     ).toBeInTheDocument();
     expect(screen.queryByText(/^Granted/)).not.toBeInTheDocument();
@@ -346,8 +349,8 @@ describe('AccessGrantModal — one "Add person" entry (task 193)', () => {
 
     expect(
       await screen.findByText(
-        'Shared with Ada Lovelace. Shares with colleagues have no end date. 2 related records are not updated yet; ' +
-          'they complete automatically.'
+        'Shared with Ada Lovelace. The share itself has no end date, so the Expiration was not applied to it. ' +
+          '2 related records are not updated yet; they complete automatically.'
       )
     ).toBeInTheDocument();
     expect(screen.queryByText(/^Granted/)).not.toBeInTheDocument();
@@ -386,8 +389,8 @@ describe('AccessGrantModal — one "Add person" entry (task 193)', () => {
 
     expect(
       await screen.findByText(
-        'Shared with Ada Lovelace. Shares with colleagues have no end date. Suggested from Assigned Paralegal 1. ' +
-          '2 related records are not updated yet; they complete automatically.'
+        'Shared with Ada Lovelace. The share itself has no end date, so the Expiration was not applied to it. ' +
+          'Suggested from Assigned Paralegal 1. 2 related records are not updated yet; they complete automatically.'
       )
     ).toBeInTheDocument();
   });
@@ -397,7 +400,7 @@ describe('AccessGrantModal — one "Add person" entry (task 193)', () => {
       'Shared with Ada Lovelace — internal user.'
     );
     expect(sharedWithColleagueSentence({ name: COLLEAGUE_FALLBACK_NAME, expiryNotApplied: true })).toBe(
-      'Shared with your colleague. Shares with colleagues have no end date.'
+      'Shared with your colleague. The share itself has no end date, so the Expiration was not applied to it.'
     );
   });
 

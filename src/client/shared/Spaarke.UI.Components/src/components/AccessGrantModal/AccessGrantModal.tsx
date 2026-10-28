@@ -24,6 +24,11 @@
  *     written; a share has no end date, and `expiryNotApplied` says when the
  *     add's Expiration was not applied). Anyone else is granted, and an unbound
  *     contact with an email is invited by the same call (task 185 slice E).
+ *     Task 193 G3b: a share with a colleague (through `/grant` or `/share-user`)
+ *     also answers `workforceApp`: whether the paired grant on their contact
+ *     shows the record in their workforce app, until when, or why not. The notice
+ *     says so in plain words; Current Access lists a share with its paired grant
+ *     (`pairedWith`), and the revoke confirmations say what each removes.
  *   - Revoke (both) → `POST /api/v1/external-access/revoke` (the built endpoint).
  *
  * INTERNAL NOTIFICATION (unified-access-control-r2 task 181, owner round 89
@@ -186,6 +191,7 @@ import {
   Field,
   Input,
   makeStyles,
+  mergeClasses,
   tokens,
   shorthands,
 } from '@fluentui/react-components';
@@ -316,6 +322,11 @@ const useStyles = makeStyles({
     minHeight: '28px',
     paddingBlock: tokens.spacingVerticalXS,
     borderBottom: `${tokens.strokeWidthThin} solid ${tokens.colorNeutralStroke3}`,
+  },
+  // Task 193 G3b: a workforce-app grant listed under the share it goes with — indented, so the two read as one pair.
+  pairedRow: {
+    paddingLeft: tokens.spacingHorizontalXL,
+    borderLeft: `${tokens.strokeWidthThick} solid ${tokens.colorNeutralStroke2}`,
   },
   rowMain: {
     display: 'flex',
@@ -558,6 +569,11 @@ class AccessGrantModalApiError extends Error {
    * with, and says when the add's Expiration was not applied (a share has no end date). */
   readonly sharedWithUser?: { systemUserId: string; fullName?: string | null };
   readonly expiryNotApplied?: boolean;
+  /** Task 193 G3b: the same 500 (`/grant` or `/share-user`) also says what happened to the colleague's workforce-app
+   * access (`workforceApp`), as the 200 does. */
+  readonly workforceApp?: IWorkforceAppAccess;
+  /** Task 193 G3b: `/unshare-user`'s related-records-pending 500 says whether the paired workforce-app grant was ended. */
+  readonly pairedGrantEnded?: boolean;
 
   constructor(
     status: number,
@@ -571,6 +587,8 @@ class AccessGrantModalApiError extends Error {
       notificationFailed?: boolean;
       sharedWithUser?: { systemUserId: string; fullName?: string | null };
       expiryNotApplied?: boolean;
+      workforceApp?: IWorkforceAppAccess;
+      pairedGrantEnded?: boolean;
     }
   ) {
     super(`AccessGrantModal request failed (${status}): ${detail}`);
@@ -585,6 +603,8 @@ class AccessGrantModalApiError extends Error {
     this.notificationFailed = extras?.notificationFailed;
     this.sharedWithUser = extras?.sharedWithUser;
     this.expiryNotApplied = extras?.expiryNotApplied;
+    this.workforceApp = extras?.workforceApp;
+    this.pairedGrantEnded = extras?.pairedGrantEnded;
     // Restore the prototype chain (extending built-ins across ES5/ts-jest
     // transpilation targets can otherwise break `instanceof` checks) — same
     // fix as communicationApi.ts's SendCommunicationError.
@@ -639,6 +659,9 @@ class AccessGrantModalApiError extends Error {
       // Task 193: extensions of `/grant`'s related-records-pending 500 when the contact was answered with a share.
       sharedWithUser?: unknown;
       expiryNotApplied?: unknown;
+      // Task 193 G3b: `workforceApp` (the add's 500) and `pairedGrantEnded` (`/unshare-user`'s 500).
+      workforceApp?: unknown;
+      pairedGrantEnded?: unknown;
     };
     const reasonCode = typeof body.reasonCode === 'string' ? body.reasonCode : undefined;
     const detail = body.detail ?? body.title ?? `HTTP ${status}`;
@@ -654,6 +677,8 @@ class AccessGrantModalApiError extends Error {
       notificationFailed: body.notificationFailed === true,
       sharedWithUser: sharedWithUserOf(body.sharedWithUser),
       expiryNotApplied: body.expiryNotApplied === true,
+      workforceApp: workforceAppOf(body.workforceApp),
+      pairedGrantEnded: typeof body.pairedGrantEnded === 'boolean' ? body.pairedGrantEnded : undefined,
     });
   }
 }
@@ -672,6 +697,37 @@ function sharedWithColleagueOfError(err: unknown): ISharedWithColleague | null {
   return {
     name: err.sharedWithUser.fullName || COLLEAGUE_FALLBACK_NAME,
     expiryNotApplied: err.expiryNotApplied === true,
+    workforceApp: err.workforceApp,
+  };
+}
+
+/** Task 193 G3b: the `workforceApp` an error carries, for a user share whose related records are pending. */
+function workforceAppOfError(err: unknown): IWorkforceAppAccess | undefined {
+  return err instanceof AccessGrantModalApiError ? err.workforceApp : undefined;
+}
+
+/**
+ * Task 193 G1/G3b: what "Add person" did about an internal colleague's WORKFORCE-APP access, beside the share
+ * (`workforceApp` on `/grant`, `/share-user` and their related-records-pending 500). The share gives them the record in
+ * this app (no end date); the paired grant on the contact that represents them shows it in their workforce app, until
+ * `until`. When `visible` is false only the share was written, and `reason` is the server's code (never shown).
+ */
+export interface IWorkforceAppAccess {
+  visible: boolean;
+  reason?: string;
+  /** Date Only, `yyyy-MM-dd`. */
+  until?: string;
+}
+
+/** Task 193 G3b: reads a `workforceApp` value; anything without a boolean `visible` is absent. */
+function workforceAppOf(raw: unknown): IWorkforceAppAccess | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const value = raw as { visible?: unknown; reason?: unknown; until?: unknown };
+  if (typeof value.visible !== 'boolean') return undefined;
+  return {
+    visible: value.visible,
+    reason: typeof value.reason === 'string' ? value.reason : undefined,
+    until: typeof value.until === 'string' && value.until ? value.until : undefined,
   };
 }
 
@@ -933,6 +989,98 @@ export function describeResidualAccess(fullName: string, terms: readonly string[
   );
 }
 
+/** Task 193 G3b: one Current Access row, with the other half of its "Add person" pair when that is listed too. */
+export interface ICurrentAccessEntry {
+  row: IAccessGrantRecord;
+  /** A direct share row: the workforce-app grant row(s) paired with it, listed right below it. */
+  pairedGrants?: IAccessGrantRecord[];
+  /** A grant row paired with a share: the share row it is listed under, or `null` when that share is not listed. */
+  pairedShare?: IAccessGrantRecord | null;
+}
+
+/**
+ * Task 193 G3b: Current Access in display order, with each "Add person" pair shown together — a direct share row
+ * followed by the workforce-app grant row(s) paired with it (`pairedWith`, read on either side). A paired grant whose
+ * share is not listed stays where it was (`pairedShare: null`). Every other row keeps its order. Pure.
+ */
+export function groupPairedAccess(rows: readonly IAccessGrantRecord[]): ICurrentAccessEntry[] {
+  const shares = rows.filter(r => classifyCurrentAccessRow(r) === 'share');
+  const shareFor = (grant: IAccessGrantRecord): IAccessGrantRecord | null | undefined => {
+    if (!grant.accessRecordId || classifyCurrentAccessRow(grant) === 'share') return undefined;
+    const id = cleanGuid(grant.accessRecordId);
+    const share = shares.find(
+      s =>
+        (s.pairedWith?.kind === 'grant' && cleanGuid(s.pairedWith.id) === id) ||
+        (grant.pairedWith?.kind === 'share' && cleanGuid(grant.pairedWith.id) === cleanGuid(s.contactId))
+    );
+    if (share) return share;
+    return grant.pairedWith?.kind === 'share' ? null : undefined;
+  };
+  const grantsByShare = new Map<IAccessGrantRecord, IAccessGrantRecord[]>();
+  const pairedShareOf = new Map<IAccessGrantRecord, IAccessGrantRecord | null>();
+  for (const row of rows) {
+    const share = shareFor(row);
+    if (share === undefined) continue;
+    pairedShareOf.set(row, share);
+    if (share) grantsByShare.set(share, [...(grantsByShare.get(share) ?? []), row]);
+  }
+  const entries: ICurrentAccessEntry[] = [];
+  for (const row of rows) {
+    const share = pairedShareOf.get(row);
+    if (share) continue; // listed under its share
+    const pairedGrants = grantsByShare.get(row);
+    if (pairedGrants) {
+      entries.push({ row, pairedGrants });
+      for (const grant of pairedGrants) entries.push({ row: grant, pairedShare: row });
+    } else {
+      entries.push(share === null ? { row, pairedShare: null } : { row });
+    }
+  }
+  return entries;
+}
+
+/** Task 193 G3b: the note on a share row whose workforce-app grant is listed below it. */
+export function pairedShareNote(pairedGrants: readonly IAccessGrantRecord[]): string {
+  // `noUncheckedIndexedAccess` is off, so `[0]` is typed as present although an empty list has none.
+  const grant: IAccessGrantRecord | undefined = pairedGrants.length > 0 ? pairedGrants[0] : undefined;
+  if (!grant?.expiresDate) return '(with workforce app access)';
+  return grant.isExpired
+    ? `(workforce app access expired ${formatGrantDate(grant.expiresDate)})`
+    : `(workforce app access until ${formatGrantDate(grant.expiresDate)})`;
+}
+
+/** Task 193 G3b: the meta line of a workforce-app grant row that goes with a share. */
+export function pairedGrantMeta(share: IAccessGrantRecord | null, grantedDate: string | undefined): string {
+  const whose = share ? `${share.fullName}'s share` : 'a share';
+  return `Workforce app access that goes with ${whose} · granted ${formatGrantDate(grantedDate)}`;
+}
+
+/** Task 193 G3b: the revoke confirmation's sentence for a share that has a workforce-app grant paired with it. */
+export const REVOKE_PAIRED_SHARE_SENTENCE =
+  'This removes both their share and the workforce app access that goes with it.';
+
+/** Task 193 G3b: the revoke confirmation for a workforce-app grant that goes with a share (the share stays). */
+export function revokePairedGrantSentence(fullName: string): string {
+  return (
+    `Remove ${fullName}'s workforce app access? The record will no longer show in their workforce app. Their share ` +
+    'stays, so they can still open the record in this app. To remove both, revoke the share instead.'
+  );
+}
+
+/** Task 193 G3b: `/unshare-user` ended the share, but the paired workforce-app grant is left for the daily clean-up. */
+export const PAIRED_GRANT_NOT_ENDED_SENTENCE = 'Workforce-app access will be removed within a day.';
+
+/** Task 193 G3b: the notice after removing a share — `pairedGrantEnded` from `/unshare-user` (absent: no pair). */
+export function unshareNotice(fullName: string, pairedGrantEnded: boolean | undefined): IModalNotice {
+  if (pairedGrantEnded === true) {
+    return { intent: 'success', text: `Removed ${fullName}'s share and their workforce app access.` };
+  }
+  if (pairedGrantEnded === false) {
+    return { intent: 'info', text: `Removed ${fullName}'s share. ${PAIRED_GRANT_NOT_ENDED_SENTENCE}` };
+  }
+  return { intent: 'success', text: `Removed ${fullName}'s share.` };
+}
+
 /**
  * Builds the revoke notice from the response body — the owner's 2026-09-10
  * directive: distinguish fully revoked / grant-revoked-but-file-access-may-
@@ -1000,17 +1148,78 @@ interface ISharedWithColleague {
   name: string;
   /** The add carried an Expiration, which the share does not take (a share has no end date). */
   expiryNotApplied: boolean;
+  /** Task 193 G3b: what the server did about their workforce-app access; absent when it did not say. */
+  workforceApp?: IWorkforceAppAccess;
 }
 
 /** Task 193: the colleague's label when the server shared with them but could not read their name. */
 export const COLLEAGUE_FALLBACK_NAME = 'your colleague';
 
-/** Task 193 (#2338; expiry ruling (c)): the notice's sentence for a contact add the server answered with a share. A
- * share has no end date; when the add carried an Expiration, the server says it was not applied, and so does this. */
+/** Task 193 G3b: a share whose add carried an Expiration — the SHARE has no end date (the workforce-app access, when
+ * given, takes the Expiration). */
+export const SHARE_EXPIRY_NOT_APPLIED_SENTENCE = 'The share itself has no end date, so the Expiration was not applied to it.';
+
+/** Task 193 G3b: the opening of the sentence for a colleague who was shared with but got no workforce-app access. */
+const WORKFORCE_APP_NOT_SHOWN_LEAD = "They can open the record in this app, but it won't show in their workforce app";
+
+/**
+ * Task 193 G3b: why the record won't show in the colleague's workforce app, one plain clause per group of the server's
+ * reasons (`workforceApp.reason`, never shown). The grant core's own refusals are passed on by the server as they are.
+ */
+const WORKFORCE_APP_REASON_GROUPS: ReadonlyArray<{ codes: readonly string[]; because: string }> = [
+  { codes: ['sdap.access.grant.record_restricted'], because: 'because the record is Restricted.' },
+  {
+    codes: [
+      'sdap.access.share.workforce_no_linked_contact',
+      'sdap.access.share.workforce_several_linked_contacts',
+      'sdap.access.grant.contact_represents_several_users',
+    ],
+    because: 'because that needs exactly one contact record linked only to them.',
+  },
+  {
+    codes: ['sdap.access.share.workforce_pairing_column_missing'],
+    because: 'because workforce app access is not set up in this environment yet.',
+  },
+  {
+    codes: [
+      'sdap.access.share.workforce_pairing_unreadable',
+      'sdap.access.share.workforce_grant_failed',
+      'sdap.access.share.workforce_link_unreadable',
+      'sdap.access.grant.caller_rights_unreadable',
+      'sdap.access.grant.policy_unreadable',
+      'sdap.access.grant.owner_unreadable',
+      'sdap.access.grant.no_access_unverifiable',
+    ],
+    because: 'because that access could not be set up just now; adding them again retries it.',
+  },
+  { codes: ['sdap.access.grant.grantee_denied'], because: "because their contact is on this record's No Access List." },
+];
+
+/** Task 193 G3b: the grant core's never-lower refusal: their contact already holds MORE workforce-app access. */
+const WORKFORCE_APP_WOULD_LOWER_REASON_CODE = 'sdap.access.grant.would_lower_existing';
+
+/** Task 193 G3b: the sentence for a share that gave no workforce-app access (`workforceApp.visible` false). */
+export function workforceAppNotShownSentence(reason: string | undefined): string {
+  if (reason === WORKFORCE_APP_WOULD_LOWER_REASON_CODE) {
+    return 'Their contact already holds higher workforce app access to this record, which is left as it is.';
+  }
+  const group = reason ? WORKFORCE_APP_REASON_GROUPS.find(g => g.codes.includes(reason)) : undefined;
+  return `${WORKFORCE_APP_NOT_SHOWN_LEAD} ${group ? group.because : 'because that access could not be given.'}`;
+}
+
+/** Task 193 (#2338; expiry ruling (c)) and G3b: the notice's sentence for an add the server answered with a share —
+ * "Shared with X", then whether the record shows in their workforce app (until when, or why not), then, when the add
+ * carried an Expiration, that the share itself has no end date. */
 export function sharedWithColleagueSentence(shared: ISharedWithColleague): string {
-  return shared.expiryNotApplied
-    ? `Shared with ${shared.name}. Shares with colleagues have no end date.`
-    : `Shared with ${shared.name} — internal user.`;
+  const app = shared.workforceApp;
+  const lead = !app
+    ? shared.expiryNotApplied
+      ? `Shared with ${shared.name}.`
+      : `Shared with ${shared.name} — internal user.`
+    : app.visible
+      ? `Shared with ${shared.name} — visible in their workforce app${app.until ? ` until ${formatGrantDate(app.until)}` : ''}.`
+      : `Shared with ${shared.name}. ${workforceAppNotShownSentence(app.reason)}`;
+  return shared.expiryNotApplied ? `${lead} ${SHARE_EXPIRY_NOT_APPLIED_SENTENCE}` : lead;
 }
 
 /** Task 193: a suggestion the server answered with a share leads with "Shared with X", then names the suggestion. */
@@ -1084,7 +1293,8 @@ export function inviteNotSentRetrySentence(inviteNotSent: {
 
 /** The notice the modal shows; `retry` adds a Retry action that re-runs Add for the rows still selected (slice B3). */
 interface IModalNotice {
-  intent: 'success' | 'warning' | 'error';
+  /** `'info'` (task 193 G3b): a neutral note, such as a paired grant left for the daily clean-up. */
+  intent: 'success' | 'info' | 'warning' | 'error';
   text: string;
   retry?: boolean;
   /** Slice C2c: the sign-in links in `text` that render as links: each one {@link safeSignInHref} accepted. Any other
@@ -1266,8 +1476,10 @@ function describeOwnAccessPermission(
  * (task 065, `/unshare-user`). The two use different endpoints and different
  * identifying fields, so the confirm dialog branches on `kind`. */
 type PendingRevoke =
-  | { kind: 'grant'; accessRecordId: string; contactId: string; fullName: string }
-  | { kind: 'share'; systemUserId: string; fullName: string };
+  /** `pairedWithShare` (task 193 G3b): a workforce-app grant that goes with a share — removing it keeps the share. */
+  | { kind: 'grant'; accessRecordId: string; contactId: string; fullName: string; pairedWithShare?: boolean }
+  /** `hasPairedGrant` (task 193 G3b): removing this share also ends its workforce-app grant (the server does both). */
+  | { kind: 'share'; systemUserId: string; fullName: string; hasPairedGrant?: boolean };
 
 export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   open,
@@ -1547,6 +1759,8 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         externalNoAccess?: boolean;
         // Task 175: the secure parent that passed this share on (task 158's provenance); absent/null = a direct share.
         inheritedFrom?: { recordType?: unknown; recordId?: unknown } | null;
+        // Task 193 G2: the workforce-app grant paired with this share (`kind: 'grant'`, its accessRecordId).
+        pairedWith?: { id?: unknown; kind?: unknown } | null;
       }>;
     }>(`/api/v1/external-access/user-shares?${query}`);
     return (data.shares ?? []).map(s => {
@@ -1574,6 +1788,9 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         externalNoAccess: s.externalNoAccess === true,
       };
       if (inheritedFrom) row.inheritedFrom = inheritedFrom;
+      if (s.pairedWith?.kind === 'grant' && typeof s.pairedWith.id === 'string' && s.pairedWith.id) {
+        row.pairedWith = { id: s.pairedWith.id, kind: 'grant' };
+      }
       return row;
     });
   }, [getJson, recordType, recordId]);
@@ -1876,6 +2093,8 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     inviteFailed?: { errorCode?: string };
     /** Task 193: `/grant` shared with the colleague the contact represents (no grant row). */
     sharedWith?: ISharedWithColleague;
+    /** Task 193 G3b: `/share-user`: what the server did about the colleague's workforce-app access. */
+    workforceApp?: IWorkforceAppAccess;
   }
 
   /** The additive fields `/grant` and `/share-user` return (task 139; task 181's `notificationFailed`). */
@@ -1890,6 +2109,9 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     sharedWithUser?: { systemUserId: string; fullName?: string | null } | null;
     /** `/grant` (task 193): the answer is a share and the add carried an Expiration, which a share does not take. */
     expiryNotApplied?: boolean;
+    /** `/grant` and `/share-user` (task 193 G1): on a share, whether the colleague's workforce-app access was given too
+     * (read with {@link workforceAppOf}). */
+    workforceApp?: unknown;
   }
 
   /**
@@ -1928,6 +2150,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
           ? {
               name: data.sharedWithUser.fullName || COLLEAGUE_FALLBACK_NAME,
               expiryNotApplied: data.expiryNotApplied === true,
+              workforceApp: workforceAppOf(data.workforceApp),
             }
           : undefined,
       };
@@ -2072,7 +2295,11 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         systemUserId: user.id,
         accessLevel: level,
       });
-      return { narrowed: data.narrowed === true, notificationFailed: data.notificationFailed === true };
+      return {
+        narrowed: data.narrowed === true,
+        notificationFailed: data.notificationFailed === true,
+        workforceApp: workforceAppOf(data.workforceApp),
+      };
     },
     [postJson, recordType, recordId]
   );
@@ -2149,7 +2376,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
           anyNarrowed = anyNarrowed || outcome.narrowed;
           anyNotificationFailed = anyNotificationFailed || outcome.notificationFailed;
           // F-final: a user picked directly is a share, so the notice leads with "Shared with X" as for a contact.
-          sharedWithColleagues.push({ name: it.name, expiryNotApplied: false });
+          sharedWithColleagues.push({ name: it.name, expiryNotApplied: false, workforceApp: outcome.workforceApp });
         }
         granted += 1;
       } catch (err) {
@@ -2189,7 +2416,9 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
           // Task 193: a contact answered with a share names the colleague (and the end date) here too.
           const pendingShare =
             sharedWithColleagueOfError(err) ??
-            (it.kind === 'user' && it.user ? { name: it.name, expiryNotApplied: false } : null);
+            (it.kind === 'user' && it.user
+              ? { name: it.name, expiryNotApplied: false, workforceApp: workforceAppOfError(err) }
+              : null);
           if (pendingShare) sharedWithColleagues.push(pendingShare);
           // Task 181: that response also says whether the person could not be notified.
           anyNotificationFailed =
@@ -2388,11 +2617,15 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
               {
                 name: data.sharedWithUser.fullName || COLLEAGUE_FALLBACK_NAME,
                 expiryNotApplied: data.expiryNotApplied === true,
+                workforceApp: workforceAppOf(data.workforceApp),
               },
               entry.sourceFieldLabel
             )
           : entry.systemUserId
-            ? suggestionSharedLead({ name, expiryNotApplied: false }, entry.sourceFieldLabel)
+            ? suggestionSharedLead(
+                { name, expiryNotApplied: false, workforceApp: workforceAppOf(data.workforceApp) },
+                entry.sourceFieldLabel
+              )
             : `Granted ${name} access (suggested from ${entry.sourceFieldLabel}).`;
         setNoticeIfCurrent({
           intent: notificationFailed ? 'warning' : 'success',
@@ -2410,7 +2643,8 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
           const notificationFailed = err instanceof AccessGrantModalApiError && err.notificationFailed === true;
           // Task 193: a contact answered with a share names the colleague (and the end date) here too.
           const pendingShare =
-            sharedWithColleagueOfError(err) ?? (entry.systemUserId ? { name, expiryNotApplied: false } : null);
+            sharedWithColleagueOfError(err) ??
+            (entry.systemUserId ? { name, expiryNotApplied: false, workforceApp: workforceAppOfError(err) } : null);
           const lead = pendingShare
             ? suggestionSharedLead(pendingShare, entry.sourceFieldLabel)
             : `Granted ${name} access (suggested from ${entry.sourceFieldLabel}).`;
@@ -2543,12 +2777,20 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
           contactId: pendingRevoke.contactId,
         });
         const fullName = pendingRevoke.fullName;
+        const pairedWithShare = pendingRevoke.pairedWithShare === true;
         setPendingRevoke(null);
         await loadData();
-        setNoticeIfCurrent(buildRevokeNotice(fullName, data));
+        const notice = buildRevokeNotice(fullName, data);
+        // Task 193 G3b: a workforce-app grant that goes with a share ends alone; the share stays (as the server does).
+        setNoticeIfCurrent(
+          pairedWithShare && notice.intent === 'success'
+            ? { intent: 'success', text: `Removed ${fullName}'s workforce app access. Their share stays.` }
+            : notice
+        );
       } else {
-        // Internal user share (task 063/065): unshare-user, not /revoke.
-        await postJson('/api/v1/external-access/unshare-user', {
+        // Internal user share (task 063/065): unshare-user, not /revoke. Task 193 G2: it ends the paired workforce-app
+        // grant too, and says whether it could (`pairedGrantEnded`; absent when none is paired).
+        const data = await postJson<{ pairedGrantEnded?: unknown } | null>('/api/v1/external-access/unshare-user', {
           recordType,
           recordId,
           systemUserId: pendingRevoke.systemUserId,
@@ -2556,7 +2798,8 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         const fullName = pendingRevoke.fullName;
         setPendingRevoke(null);
         await loadData();
-        setNoticeIfCurrent({ intent: 'success', text: `Removed ${fullName}'s share.` });
+        const ended = data?.pairedGrantEnded;
+        setNoticeIfCurrent(unshareNotice(fullName, typeof ended === 'boolean' ? ended : undefined));
       }
     } catch (err) {
       const { deny, parentRefusal } = splitAccessFailure(err);
@@ -2618,9 +2861,13 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         // Task 149: the share on the record IS gone; some related records of the secure record still need
         // updating (the server completes them within minutes). Reload so the row disappears, and show the
         // server's sentence — never "Failed to revoke", which would claim the share is still there.
+        // Task 193 G3b: the same answer says when the paired workforce-app grant was left for the daily clean-up.
         setPendingRevoke(null);
         await loadData();
-        setNoticeIfCurrent({ intent: 'warning', text: err.detail });
+        setNoticeIfCurrent({
+          intent: 'warning',
+          text: err.pairedGrantEnded === false ? `${err.detail} ${PAIRED_GRANT_NOT_ENDED_SENTENCE}` : err.detail,
+        });
       } else {
         setNoticeIfCurrent({
           intent: 'error',
@@ -2797,7 +3044,11 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
               <MessageBar intent={notice.intent} style={{ marginBottom: tokens.spacingVerticalM }}>
                 <MessageBarBody>
                   <MessageBarTitle>
-                    {notice.intent === 'success' ? 'Success' : notice.intent === 'warning' ? 'Notice' : 'Error'}
+                    {notice.intent === 'success'
+                      ? 'Success'
+                      : notice.intent === 'warning' || notice.intent === 'info'
+                        ? 'Notice'
+                        : 'Error'}
                   </MessageBarTitle>
                   {noticeContent(notice.text, notice.links)}
                 </MessageBarBody>
@@ -3135,7 +3386,8 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                     ) : existingGrants.length === 0 ? (
                       <Text className={styles.emptyState}>No active grants for this record.</Text>
                     ) : (
-                      existingGrants.map(grant => {
+                      // Task 193 G3b: an "Add person" share and its workforce-app grant are listed together.
+                      groupPairedAccess(existingGrants).map(({ row: grant, pairedGrants, pairedShare }) => {
                         // Row kind (noAccess.ts classifyCurrentAccessRow):
                         //  - an internal system-user POA share (task 065) is checked FIRST: a share also carries
                         //    no accessRecordId, so it must not fall into the standing branch;
@@ -3166,10 +3418,16 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                             : isUserShare
                               ? `share-${grant.contactId}`
                               : `standing-${grant.contactId}`;
+                        // Task 193 G3b: a direct share with a paired workforce-app grant (listed below it, or not
+                        // listed), and a grant that goes with a share (`pairedShare`: the share row, or null).
+                        const hasPairedGrant =
+                          rowKind === 'share' && (!!pairedGrants || grant.pairedWith?.kind === 'grant');
+                        const goesWithShare = pairedShare !== undefined;
                         return (
                           <div
-                            className={styles.row}
+                            className={pairedShare ? mergeClasses(styles.row, styles.pairedRow) : styles.row}
                             key={rowKey}
+                            data-paired={hasPairedGrant ? 'share' : goesWithShare ? 'grant' : undefined}
                             data-access-state={
                               vetoReason
                                 ? 'vetoed'
@@ -3199,12 +3457,15 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                                     ? EXTERNAL_USER_NO_ACCESS_LABEL
                                     : isInherited
                                       ? `${describeInheritedShare(grant)} — last updated ${formatGrantDate(grant.grantedDate)}`
-                                      : `Internal user share — last updated ${formatGrantDate(grant.grantedDate)}`
+                                      : `Internal user share — last updated ${formatGrantDate(grant.grantedDate)}` +
+                                        (hasPairedGrant ? ` ${pairedShareNote(pairedGrants ?? [])}` : '')
                                   : isStanding
                                     ? 'Standing grant — ongoing access to assigned records'
                                     : isOrg
                                       ? 'Organization grant — all organization contacts have access'
-                                      : autoSourceFor(grant.contactId)
+                                      : goesWithShare
+                                        ? pairedGrantMeta(pairedShare ?? null, grant.grantedDate)
+                                        : autoSourceFor(grant.contactId)
                                         ? `Automatic — ${autoSourceFor(grant.contactId)!.sourceFieldLabel} · granted ${formatGrantDate(grant.grantedDate)}`
                                         : grant.grantedByContactName
                                           ? // Task 140: issued by a contact from the external SPA (sprk_grantedbycontact).
@@ -3263,6 +3524,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                                           kind: 'share',
                                           systemUserId: grant.contactId,
                                           fullName: grant.fullName,
+                                          hasPairedGrant,
                                         })
                                       }
                                       disabled={revokeBlocked}
@@ -3290,6 +3552,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                                         accessRecordId: grant.accessRecordId!,
                                         contactId: grant.contactId,
                                         fullName: grant.fullName,
+                                        pairedWithShare: goesWithShare,
                                       })
                                     }
                                     disabled={revokeBlocked}
@@ -3445,10 +3708,21 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
           </Button>
         }
       >
-        <Text>
-          Revoke access for <strong>{pendingRevoke?.fullName}</strong>? They will immediately lose access to this record
-          (unless a standing grant or other membership still applies).
-        </Text>
+        {pendingRevoke?.kind === 'grant' && pendingRevoke.pairedWithShare ? (
+          // Task 193 G3b: a workforce-app grant that goes with a share ends alone; the share stays (as the server does).
+          <Text data-testid="revoke-paired-grant">{revokePairedGrantSentence(pendingRevoke.fullName)}</Text>
+        ) : (
+          <Text>
+            Revoke access for <strong>{pendingRevoke?.fullName}</strong>? They will immediately lose access to this
+            record (unless a standing grant or other membership still applies).
+          </Text>
+        )}
+        {/* Task 193 G3b: removing the share ends its workforce-app grant too. */}
+        {pendingRevoke?.kind === 'share' && pendingRevoke.hasPairedGrant && (
+          <Text block data-testid="revoke-paired-share" style={{ marginTop: tokens.spacingVerticalS }}>
+            {REVOKE_PAIRED_SHARE_SENTENCE}
+          </Text>
+        )}
         {/* Task 142 (criterion 17): BEFORE the removal, name the read-time term that will keep this contact on the
             record (owner A2: standing and organization access stay). */}
         {pendingRevoke?.kind === 'grant' &&

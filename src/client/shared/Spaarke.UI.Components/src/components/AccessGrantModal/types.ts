@@ -93,6 +93,14 @@ export interface IAccessGrantRecord {
    * until the server removes the share (the record's next save, or its 5-minute job). Still revocable here.
    */
   externalNoAccess?: boolean;
+  /**
+   * Unified-access-control-r2 task 193 G2/G3b: the other half of an "Add person" pair — `pairedWith` from the BFF. On a
+   * share row (`/user-shares`) it names the paired workforce-app GRANT (`kind: 'grant'`, its `accessRecordId`); on a grant
+   * row (`/record-grants`, mapped by the host) the SHARE it goes with (`kind: 'share'`, the user's `systemUserId`).
+   * Display only: Current Access shows the two together, and the revoke confirmations say what each removes (removing
+   * the share ends both; removing the grant alone keeps the share). Absent on any other row.
+   */
+  pairedWith?: { id: string; kind: 'grant' | 'share' };
 }
 
 /**
