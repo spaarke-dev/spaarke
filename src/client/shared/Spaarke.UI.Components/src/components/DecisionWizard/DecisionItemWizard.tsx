@@ -15,10 +15,15 @@
  *
  * A closed item (opened closed, or just recorded) is read-only: the same steps show what was sent, the footer is
  * Back / Next / Next open item, and the status bar sits above every step.
+ *
+ * ONE dialog for the whole session (task 165): this component stays mounted from launch to close and is never keyed by the
+ * item. While an item loads, or could not be read, the same `WizardShell` shows a single Loading / Unavailable step; when the
+ * item is ready, when the host moves to another item and when an item is recorded, `resetKey` starts the shell's step state
+ * over IN PLACE. The `SprkModal` is therefore never unmounted and remounted (no close-and-reopen).
  */
 
 import * as React from 'react';
-import { Button } from '@fluentui/react-components';
+import { Button, MessageBar, MessageBarBody, Spinner, Text, makeStyles, tokens } from '@fluentui/react-components';
 import { AddCircleRegular } from '@fluentui/react-icons';
 import { WizardShell } from '../Wizard/WizardShell';
 import type { IWizardShellHandle, IWizardStepConfig } from '../Wizard/wizardShellTypes';
@@ -81,7 +86,8 @@ export function hasRecordedDecision(resolution: DecisionResolution | null | unde
   );
 }
 
-export interface DecisionItemWizardProps {
+/** Everything the wizard needs about ONE item once it has loaded. */
+export interface DecisionItemReady {
   item: DecisionWizardItem;
   plan: DecisionPlan;
   suppression: SuppressionStatus | null;
@@ -115,12 +121,37 @@ export interface DecisionItemWizardProps {
   openItemsLeft: number | null;
   /** Go to the next open item; undefined when there is none. */
   onNextOpenItem?: () => void;
+}
+
+/** What the dialog shows for the current item: its steps once loaded, else a single Loading / Unavailable step. */
+export type DecisionItemView =
+  | { status: 'loading' }
+  | { status: 'error'; message: string; onRetry: () => void }
+  | { status: 'ready'; ready: DecisionItemReady };
+
+export interface DecisionItemWizardProps {
+  /** The item the dialog is about (the Signal id); with the view's state it keys the shell's in-place reset. */
+  itemId: string;
+  view: DecisionItemView;
   nav?: SprkModalNav;
   /** Close the wizard (the host runs its discard check first). */
   onClose: () => void;
   uiScale?: number;
   today: Date;
 }
+
+const useStyles = makeStyles({
+  center: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    rowGap: tokens.spacingVerticalM,
+    padding: tokens.spacingVerticalXXL,
+  },
+});
+
+const LOADING = 'loading';
+const noDraftChange = (): void => undefined;
 
 interface SyncPlan {
   readOnly: boolean;
@@ -196,63 +227,63 @@ const ShellSync: React.FC<{ handle: IWizardShellHandle; syncRef: React.MutableRe
 };
 
 export const DecisionItemWizard: React.FC<DecisionItemWizardProps> = ({
-  item,
-  plan,
-  suppression,
-  suppressionFailed,
-  draft,
-  onDraftChange,
-  resolution,
-  justRecorded,
-  failure,
-  pinnedFailure,
-  closedIds,
-  recordResult,
-  recording,
-  onRecord,
-  lookup,
-  openLookup = null,
-  openRecord = null,
-  openItemsLeft,
-  onNextOpenItem,
+  itemId,
+  view,
   nav,
   onClose,
   uiScale,
   today,
 }) => {
+  const styles = useStyles();
+  const ready = view.status === 'ready' ? view.ready : null;
+  const plan = ready?.plan ?? null;
+  const draft = ready?.draft ?? null;
+  const resolution = ready?.resolution ?? null;
+  const justRecorded = ready?.justRecorded ?? false;
+  const failure = ready?.failure ?? null;
+  const pinnedFailure = ready?.pinnedFailure ?? null;
   const readOnly = resolution != null;
   const locked = pinnedFailure != null && !readOnly;
   const replayable = readOnly && hasRecordedDecision(resolution);
 
-  // Latest values for predicates and effects that outlive a render (dynamic steps keep their first closure).
-  const latest = React.useRef({ plan, draft, resolution, recording, failure, pinnedFailure });
-  latest.current = { plan, draft, resolution, recording, failure, pinnedFailure };
+  // What the dialog is showing, as one string: a change starts the shell's step state over in place (WizardShell `resetKey`).
+  // Loading, an unreadable item, a ready item, and that item once recorded (it reopens on its Confirm step, and the steps it
+  // listed while being decided can differ from the steps a closed item lists) each get their own.
+  const resetKey = ready ? `${itemId}${justRecorded ? ':recorded' : ''}` : `${itemId}:${view.status}`;
 
-  const onDraftRef = React.useRef(onDraftChange);
-  onDraftRef.current = onDraftChange;
+  // Latest values for predicates and effects that outlive a render (dynamic steps keep their first closure). Kept from the
+  // last ready render: the predicates are only reached from a ready item's steps.
+  const latest = React.useRef<DecisionItemReady | null>(ready);
+  if (ready) latest.current = ready;
+
+  const onDraftRef = React.useRef(ready?.onDraftChange ?? noDraftChange);
+  onDraftRef.current = ready?.onDraftChange ?? noDraftChange;
   const update = React.useCallback((change: (d: ItemDraft) => ItemDraft) => onDraftRef.current(change), []);
 
   const shellRef = React.useRef<IWizardShellHandle>(null);
   const syncRef = React.useRef<SyncPlan>(null as unknown as SyncPlan);
 
   // ---- The step list -------------------------------------------------------------------------------
-  const nextSteps = plan.nextSteps;
+  const nextSteps = plan?.nextSteps ?? [];
   const followOnCount = resolution?.followOns?.length ?? 0;
   const showNext = readOnly ? followOnCount > 0 : nextSteps.length > 0;
 
   const canonicalOrder = React.useMemo(
-    () => [
-      FOUND,
-      ...plan.actions.map(a => actionStepId(a.code)),
-      NEXT,
-      ...plan.nextSteps.map(n => followOnStepId(n.code)),
-      CONFIRM,
-    ],
+    () =>
+      plan
+        ? [
+            FOUND,
+            ...plan.actions.map(a => actionStepId(a.code)),
+            NEXT,
+            ...plan.nextSteps.map(n => followOnStepId(n.code)),
+            CONFIRM,
+          ]
+        : [],
     [plan]
   );
 
   const desiredIds: string[] = [FOUND];
-  if (!readOnly || replayable) {
+  if (plan && draft && (!readOnly || replayable)) {
     const actions = readOnly ? plan.actions : visibleActions(plan, draft);
     for (const a of actions) desiredIds.push(actionStepId(a.code));
     if (showNext) desiredIds.push(NEXT);
@@ -263,7 +294,7 @@ export const DecisionItemWizard: React.FC<DecisionItemWizardProps> = ({
 
   const cards: FollowOnCardConfig[] = React.useMemo(
     () =>
-      plan.nextSteps.map(n => ({
+      (plan?.nextSteps ?? []).map(n => ({
         id: n.code,
         label: n.label,
         icon: <AddCircleRegular />,
@@ -274,14 +305,18 @@ export const DecisionItemWizard: React.FC<DecisionItemWizardProps> = ({
             <ActionStepView kind="next" code={n.code} />
           </>
         ),
-        canAdvance: () => stepValid(n, latest.current.draft, nextScope(n.code)),
+        canAdvance: () => {
+          const l = latest.current;
+          return l ? stepValid(n, l.draft, nextScope(n.code)) : false;
+        },
         isSkippable: true,
       })),
-    [plan.nextSteps]
+    [plan?.nextSteps]
   );
 
   const makeConfig = React.useCallback(
     (stepId: string): IWizardStepConfig | null => {
+      if (!plan) return null;
       if (stepId === FOUND) {
         return {
           id: FOUND,
@@ -314,7 +349,7 @@ export const DecisionItemWizard: React.FC<DecisionItemWizardProps> = ({
           label: 'Confirm',
           canAdvance: () => {
             const l = latest.current;
-            if (l.resolution || l.recording) return false;
+            if (!l || l.resolution || l.recording) return false;
             // A message went out and the first attempt cannot be resumed: the owner decides, not another click (task 043).
             const pinned = l.pinnedFailure ?? l.failure;
             if (pinned?.sentButNotRecorded && !pinned.resumable) return false;
@@ -336,8 +371,10 @@ export const DecisionItemWizard: React.FC<DecisionItemWizardProps> = ({
           id: stepId,
           label: action.label,
           isSkippable: true,
-          canAdvance: () =>
-            latest.current.resolution ? true : stepValid(action, latest.current.draft, actionScope(code)),
+          canAdvance: () => {
+            const l = latest.current;
+            return l ? (l.resolution ? true : stepValid(action, l.draft, actionScope(code))) : false;
+          },
           renderContent: handle => (
             <>
               <ShellSync handle={handle} syncRef={syncRef} />
@@ -376,24 +413,47 @@ export const DecisionItemWizard: React.FC<DecisionItemWizardProps> = ({
   // reconciler in `ShellSync` then removes what a draft excludes.
   const baseIds = React.useMemo(() => {
     const ids = [FOUND];
-    if (!readOnly || replayable) {
+    if (plan && (!readOnly || replayable)) {
       for (const a of plan.actions) ids.push(actionStepId(a.code));
       if (showNext) ids.push(NEXT);
       ids.push(CONFIRM);
     }
     return ids;
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- base steps are fixed for the life of this mounted item
-  }, []);
-  const stepConfigs = baseIds.map(id => makeConfig(id)).filter((c): c is IWizardStepConfig => c !== null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- base steps are fixed for what the dialog shows (`resetKey`)
+  }, [resetKey]);
+  const pendingStep: IWizardStepConfig = {
+    id: LOADING,
+    label: view.status === 'error' ? 'Unavailable' : 'Loading',
+    canAdvance: () => false,
+    renderContent: () =>
+      view.status === 'error' ? (
+        <div className={styles.center} data-testid="item-error">
+          <MessageBar intent="error">
+            <MessageBarBody>{view.message}</MessageBarBody>
+          </MessageBar>
+          <Button appearance="primary" onClick={view.onRetry}>
+            Try again
+          </Button>
+        </div>
+      ) : (
+        <div className={styles.center} data-testid="item-loading">
+          <Spinner size="small" />
+          <Text>Loading the decision...</Text>
+        </div>
+      ),
+  };
+  const stepConfigs = ready
+    ? baseIds.map(id => makeConfig(id)).filter((c): c is IWizardStepConfig => c !== null)
+    : [pendingStep];
 
   // ---- Focus moves to the status bar when an item is recorded in place ---------------------------------
   const statusBarRef = React.useRef<HTMLDivElement>(null);
   React.useEffect(() => {
     if (justRecorded) statusBarRef.current?.focus();
-  }, [justRecorded]);
+  }, [justRecorded, resetKey]);
 
-  const line = composeIssueLine(item.row, today);
-  const dismissal = isDismissal(plan, draft);
+  const title = ready ? composeIssueLine(ready.item.row, today).headline : 'Decision';
+  const dismissal = plan && draft ? isDismissal(plan, draft) : false;
 
   const statusBar = resolution ? (
     <StatusBar
@@ -407,29 +467,32 @@ export const DecisionItemWizard: React.FC<DecisionItemWizardProps> = ({
       recorded={justRecorded}
       reason={resolution.reason}
       supersededBy={resolution.supersededBy}
-      openItemsLeft={justRecorded ? openItemsLeft : null}
+      openItemsLeft={justRecorded ? (ready?.openItemsLeft ?? null) : null}
     />
   ) : undefined;
 
-  const contextValue: DecisionItemContextValue = {
-    item,
-    plan,
-    suppression,
-    suppressionFailed,
-    draft,
-    update,
-    resolution,
-    justRecorded,
-    failure,
-    locked,
-    closedIds,
-    recordResult,
-    lookup,
-    openLookup,
-    openRecord,
-    openItemsLeft,
-    today,
-  };
+  // Null while the item loads: the Provider stays in the tree either way so the shell below never changes position.
+  const contextValue: DecisionItemContextValue | null = ready
+    ? {
+        item: ready.item,
+        plan: ready.plan,
+        suppression: ready.suppression,
+        suppressionFailed: ready.suppressionFailed,
+        draft: ready.draft,
+        update,
+        resolution,
+        justRecorded,
+        failure,
+        locked,
+        closedIds: ready.closedIds,
+        recordResult: ready.recordResult,
+        lookup: ready.lookup,
+        openLookup: ready.openLookup ?? null,
+        openRecord: ready.openRecord ?? null,
+        openItemsLeft: ready.openItemsLeft,
+        today,
+      }
+    : null;
 
   const baseLabel = dismissal ? 'Dismiss and record' : 'Record decision';
   const finishLabel = (pinnedFailure ?? failure)?.resumable
@@ -441,21 +504,24 @@ export const DecisionItemWizard: React.FC<DecisionItemWizardProps> = ({
   // The in-flight / after-success guard (#1386 K3): the shell leaves Finish enabled with stayOpenOnFinish and no success
   // screen, so the request itself is single-flight (parent) and the button is disabled by `canAdvance` while it runs and
   // once the item is closed.
+  const onRecord = ready?.onRecord;
   const onFinish = React.useCallback(async () => {
-    await onRecord();
+    await onRecord?.();
   }, [onRecord]);
+  const onNextOpenItem = ready?.onNextOpenItem;
 
   return (
     <DecisionItemContext.Provider value={contextValue}>
       <WizardShell
         ref={shellRef}
         open
-        title={line.headline}
+        title={title}
         steps={stepConfigs}
         initialStepId={readOnly ? lastStepId : undefined}
+        resetKey={resetKey}
         onClose={onClose}
         onFinish={onFinish}
-        finishLabel={finishLabel}
+        finishLabel={ready ? finishLabel : undefined}
         finishingLabel="Recording..."
         stayOpenOnFinish
         showSkippedSteps
@@ -464,7 +530,7 @@ export const DecisionItemWizard: React.FC<DecisionItemWizardProps> = ({
         nav={nav}
         statusBar={statusBar}
         footer={
-          readOnly
+          ready && readOnly
             ? context => ({
                 start: (
                   <Button appearance="secondary" onClick={context.close}>

@@ -37,7 +37,16 @@
  */
 
 import * as React from 'react';
-import { Button, MessageBar, MessageBarBody, Text, Spinner, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
+import {
+  Button,
+  MessageBar,
+  MessageBarBody,
+  Text,
+  Spinner,
+  makeStyles,
+  mergeClasses,
+  tokens,
+} from '@fluentui/react-components';
 
 import { ModalWindowControls } from '../ModalWindowControls';
 import { SprkModal } from '../SprkModal/SprkModal';
@@ -165,6 +174,8 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
     footer: footerOverride,
     stayOpenOnFinish = false,
     showSkippedSteps = false,
+    // ontology task 165 — additive, opt-in: a changed value starts the wizard over without unmounting the dialog
+    resetKey,
   } = props;
 
   const styles = useStyles();
@@ -229,6 +240,22 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
     }),
     [shellState, forceRender]
   );
+
+  // ── Reset in place when `resetKey` changes (task 165) ──────────────────
+  // Applied DURING render (React's derived-state pattern), not in an effect: an effect would let one render commit the new
+  // `steps` against the previous step state, and the step contents (which act on the shell state they see) would run
+  // against it before the reset landed. React re-renders this component at once with the reset state, so the committed
+  // output is never the mixed one. The dialog is not remounted; the keyed fragment below remounts only its content.
+  const [appliedResetKey, setAppliedResetKey] = React.useState(resetKey);
+  if (resetKey !== appliedResetKey) {
+    setAppliedResetKey(resetKey);
+    dispatch({ type: 'RESET', steps: stepConfigs, initialStepId });
+    setIsFinishing(false);
+    setFinishError(null);
+    setSuccessConfig(null);
+    // Dynamic steps of the previous session are gone with the state; the base configs are re-registered below.
+    configMapRef.current = new Map();
+  }
 
   // ── Reset on open (false -> true) ──────────────────────────────────────
   const prevOpenRef = React.useRef(open);
@@ -364,18 +391,21 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
       <WizardStepper steps={shellState.steps} />
 
       <div className={styles.contentArea}>
-        {/* Status bar slot (task 056) — above everything else in the content area */}
-        {statusBar}
+        {/* Keyed by `resetKey` (task 165): a reset remounts the content, never the dialog. No key: a plain fragment. */}
+        <React.Fragment key={resetKey}>
+          {/* Status bar slot (task 056) — above everything else in the content area */}
+          {statusBar}
 
-        {/* Finish error bar */}
-        {finishError && (
-          <MessageBar intent="error" role="alert">
-            <MessageBarBody>{finishError}</MessageBarBody>
-          </MessageBar>
-        )}
+          {/* Finish error bar */}
+          {finishError && (
+            <MessageBar intent="error" role="alert">
+              <MessageBarBody>{finishError}</MessageBarBody>
+            </MessageBar>
+          )}
 
-        {/* Success screen replaces step content */}
-        {successConfig ? <WizardSuccessScreen config={successConfig} /> : currentConfig?.renderContent(handle)}
+          {/* Success screen replaces step content */}
+          {successConfig ? <WizardSuccessScreen config={successConfig} /> : currentConfig?.renderContent(handle)}
+        </React.Fragment>
       </div>
     </div>
   );
