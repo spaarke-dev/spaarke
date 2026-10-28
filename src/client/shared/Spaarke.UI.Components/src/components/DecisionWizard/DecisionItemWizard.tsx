@@ -256,9 +256,15 @@ export const DecisionItemWizard: React.FC<DecisionItemWizardProps> = ({
   const latest = React.useRef<DecisionItemReady | null>(ready);
   if (ready) latest.current = ready;
 
-  const onDraftRef = React.useRef(ready?.onDraftChange ?? noDraftChange);
-  onDraftRef.current = ready?.onDraftChange ?? noDraftChange;
-  const update = React.useCallback((change: (d: ItemDraft) => ItemDraft) => onDraftRef.current(change), []);
+  // The draft updater of every item this dialog has shown, by item id. A field hands `update` to an async path (the side-pane
+  // lookup), and that pick can come back after the person moved on: `update` is bound to the item it was rendered for, so the
+  // pick lands in that item's draft, never in the item that is current when it returns (and is not lost while that one loads).
+  const updaters = React.useRef(new Map<string, (change: (d: ItemDraft) => ItemDraft) => void>());
+  if (ready) updaters.current.set(itemId, ready.onDraftChange);
+  const update = React.useMemo(
+    () => (change: (d: ItemDraft) => ItemDraft) => (updaters.current.get(itemId) ?? noDraftChange)(change),
+    [itemId]
+  );
 
   const shellRef = React.useRef<IWizardShellHandle>(null);
   const syncRef = React.useRef<SyncPlan>(null as unknown as SyncPlan);

@@ -2,7 +2,9 @@
  * DecisionWizard.oneDialog - the decision wizard shows ONE dialog from launch to close (ontology task 165, UAT round 1
  * re-check, check 2). Loading, a load error and Try again, ready, moving between items and recording change the content of
  * the same dialog; the `role="dialog"` DOM node is never unmounted and remounted (no close-and-reopen, no second open
- * animation, no focus jump to the page behind).
+ * animation). The step content remounts on a reset, so a control that had focus (Try again, Next open item) is removed; the
+ * shell then moves focus to its content area, so keyboard focus stays inside the dialog and never drops to the page behind
+ * (tests e and f; fix round 1, F1-b).
  */
 
 import '@testing-library/jest-dom';
@@ -170,6 +172,45 @@ describe('one dialog from launch to close', () => {
     expect(screen.queryByRole('button', { name: exact('Record decision') })).toBeNull();
     expect(dialog()).toBe(first);
     expect(screen.getAllByRole('dialog')).toHaveLength(1);
+  });
+
+  it('(e) focus stays inside the dialog after Try again -> ready', async () => {
+    const items = [pathBItem];
+    const loadItem = jest
+      .fn()
+      .mockRejectedValueOnce(new Error('The item could not be read.'))
+      .mockImplementation(async (id: string) => items.find(i => i.row.signalId === id));
+    renderOpen({ items, loadItem });
+    await screen.findByTestId('item-error');
+    const retry = button('Try again');
+    retry.focus();
+    expect(dialog()).toContainElement(document.activeElement as HTMLElement);
+    click(retry);
+    await found();
+    expect(document.activeElement).not.toBe(document.body);
+    expect(dialog()).toContainElement(document.activeElement as HTMLElement);
+  });
+
+  it('(f) focus stays inside the dialog after record -> Next open item', async () => {
+    renderOpen({ items: [thresholdItem, pathBItem] });
+    await found();
+    click(button('Next'));
+    fireEvent.change(screen.getByRole('textbox', { name: /^Approved overage/ }), { target: { value: '10' } });
+    click(button('Next'));
+    click(button('Skip'));
+    click(button('Next'));
+    await screen.findByTestId('step-confirm');
+    click(button('Record decision'));
+    const bar = await screen.findByTestId('status-bar');
+    await waitFor(() => expect(bar).toHaveFocus());
+
+    const nextOpen = button('Next open item');
+    nextOpen.focus();
+    click(nextOpen);
+    await screen.findByText('2 of 2');
+    await found();
+    expect(document.activeElement).not.toBe(document.body);
+    expect(dialog()).toContainElement(document.activeElement as HTMLElement);
   });
 
   it('must-not-fire: closing the wizard removes the dialog', async () => {

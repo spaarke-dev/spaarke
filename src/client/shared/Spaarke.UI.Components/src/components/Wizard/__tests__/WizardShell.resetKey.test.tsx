@@ -58,14 +58,66 @@ describe('WizardShell resetKey', () => {
   });
 
   it('a reset also forgets skipped marks, and the old content does not survive it', () => {
-    const marked = (s: string) => step(s, { renderContent: () => <input data-testid={`field-${s}`} /> });
-    const { rerender } = renderWithProviders(
-      <WizardShell {...props({ resetKey: 1, showSkippedSteps: true, steps: [marked('a'), marked('b')] })} />
-    );
+    const marked = (s: string) =>
+      step(s, { isSkippable: true, renderContent: () => <input data-testid={`field-${s}`} /> });
+    const shell = (resetKey: number) =>
+      props({ resetKey, showSkippedSteps: true, steps: [marked('a'), marked('b'), marked('c')] });
+    // The stepper labels each step with its status ("Step a, skipped").
+    const skippedSteps = () =>
+      within(screen.getByRole('navigation', { name: 'Wizard steps' })).queryAllByLabelText(/, skipped$/);
+    const { rerender } = renderWithProviders(<WizardShell {...shell(1)} />);
     fireEvent.change(screen.getByTestId('field-a'), { target: { value: 'typed' } });
-    rerender(<WizardShell {...props({ resetKey: 2, showSkippedSteps: true, steps: [marked('a'), marked('b')] })} />);
+    fireEvent.click(button('Skip'));
+    expect(screen.getByTestId('field-b')).toBeInTheDocument();
+    // The Skip landed: the stepper shows step a as skipped (a plain Next would show it completed).
+    expect(skippedSteps()).toHaveLength(1);
+
+    rerender(<WizardShell {...shell(2)} />);
+    expect(skippedSteps()).toHaveLength(0);
     // Same step id, same content type: without the reset the typed value would still be there.
     expect((screen.getByTestId('field-a') as HTMLInputElement).value).toBe('');
+  });
+
+  it('a NaN resetKey does not reset on every render (NaN equals itself)', () => {
+    const { rerender } = renderWithProviders(<WizardShell {...props({ resetKey: NaN })} />);
+    fireEvent.click(button('Next'));
+    rerender(<WizardShell {...props({ resetKey: NaN, title: 'Renamed' })} />);
+    expect(screen.getByTestId('content-b')).toBeInTheDocument();
+  });
+
+  it('after a reset, focus that was on removed content moves into the dialog, not <body>', () => {
+    const withButton = (id: string) =>
+      step(id, { renderContent: () => <button data-testid={`inner-${id}`}>inner {id}</button> });
+    const { rerender } = renderWithProviders(
+      <WizardShell {...props({ resetKey: 'one', steps: [withButton('a'), withButton('b')] })} />
+    );
+    screen.getByTestId('inner-a').focus();
+    expect(surface()).toContainElement(document.activeElement as HTMLElement);
+    rerender(<WizardShell {...props({ resetKey: 'two', steps: [withButton('x'), withButton('y')] })} />);
+    expect(document.activeElement).not.toBe(document.body);
+    expect(surface()).toContainElement(document.activeElement as HTMLElement);
+  });
+
+  it('after a reset, focus already inside the dialog is left where it is', () => {
+    const { rerender } = renderWithProviders(<WizardShell {...props({ resetKey: 'one' })} />);
+    const next = button('Next');
+    next.focus();
+    rerender(<WizardShell {...props({ resetKey: 'two' })} />);
+    expect(button('Next')).toHaveFocus();
+  });
+
+  it('must-not-fire: without resetKey the content area has no tabIndex, and nothing takes focus on a re-render', () => {
+    const { rerender } = renderWithProviders(<WizardShell {...props()} />);
+    const content = screen.getByTestId('content-a').parentElement as HTMLElement;
+    expect(content).not.toHaveAttribute('tabindex');
+    rerender(<WizardShell {...props({ title: 'Renamed' })} />);
+    expect(content).not.toHaveAttribute('tabindex');
+    expect(content).not.toHaveFocus();
+  });
+
+  it('with resetKey the content area is a programmatic focus target only (tabIndex -1)', () => {
+    renderWithProviders(<WizardShell {...props({ resetKey: 'k' })} />);
+    expect(screen.getByTestId('content-a').parentElement).toHaveAttribute('tabindex', '-1');
   });
 
   it('absent resetKey: changing steps or initialStepId after mount still has no effect (unchanged behaviour)', () => {

@@ -29,5 +29,25 @@ Scope beyond the stated contract: the resetKey tests for a finish-error clear, s
 unchanged-key case each pin one line of the new prop's contract (one line each).
 
 ## Known limit
-Keyboard focus inside the dialog after a reset is whatever Fluent leaves it on (the content remounts); focus stays in the dialog,
-never on the page behind. Recording still moves focus to the status bar (effect now also keyed on `resetKey`).
+After a reset the step content remounts, so the control that held keyboard focus (Try again, Next open item) is removed. The
+original note here said focus "stays in the dialog"; that was wrong (jsdom and browsers drop it to `<body>`). Corrected in fix
+round 1 (F1-b): `WizardShell` now moves focus to its content area. Recording still moves focus to the status bar (effect also
+keyed on `resetKey`).
+
+## Fix round 1 (adversarial review of PR #2388)
+- **F1-a late side-pane pick.** `DecisionItemWizard.update` is session-stable and called `onDraftRef.current`, the CURRENT item's
+  updater, so a Person/Lookup pick for item A released after the person moved on landed in item B's draft (same action) or was
+  dropped (B loading). Now a `Map<itemId, onDraftChange>` ref is filled while an item is ready and `update` is
+  `useMemo(..., [itemId])`, bound to the item it was rendered for. Test: `DecisionWizard.latePick.test.tsx` (B ready, B loading,
+  must-not-fire on the same item); failed at the review head (B got the value / A stayed empty), passes now.
+- **F1-b focus to `<body>`.** `WizardShell`: an effect keyed on the applied reset key (skips first mount) focuses the content
+  area when focus is not inside the dialog (embedded: when it was lost to `<body>`). The content area gets `tabIndex={-1}` (and
+  an outline-none class) ONLY when `resetKey` is set; without it the markup is unchanged. Tests: `oneDialog` (e) Try again ->
+  ready and (f) record -> Next open item; `resetKey` tests for focus moved, focus already inside left alone, no `tabindex`
+  without `resetKey`, `tabindex=-1` with it. (e), (f) and the focus-moved test failed before.
+- **F3.** The "forgets skipped marks" test now clicks Skip on step a, asserts the stepper shows it skipped, resets, and asserts no
+  step is skipped. It passed at the old head too (RESET builds a fresh state, so the behaviour was already right); the fix is that
+  it now exercises what its title says.
+- **K4.** `WizardShell` compares `!Object.is(resetKey, appliedResetKey)`; a NaN key no longer loops. One-line test added; it failed
+  (render loop) before.
+- Render-phase reset mechanism and behaviour without `resetKey` untouched.
