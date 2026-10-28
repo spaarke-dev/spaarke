@@ -2031,3 +2031,23 @@ Reading:
 - Expected: AppendTo on contact goes from Basic to Deep, and AppendTo on `sprk_organization` goes from none to Deep. A guard test with a ratchet over the wizards' bound tables enforces it.
 - A shared helper turns a Dataverse privilege error into a plain sentence (no ids, no unfilled template).
 - Order: dry-run diff, UAC review of the access consequences, then -Apply on dev.
+
+### Round 133 (2026-10-28): 193 paired-grant expiry and the pairing record
+- **Expiry: (a), a normal date plus cleanup.**
+  - The paired contact grant takes the requested date or today + 90 and renews as today. The share keeps no end date.
+  - The modal states the workforce-app end date.
+  - The existing `ExternalAccessReconciliationJob` ends a paired grant once its user no longer holds the share. A read fault changes nothing and is counted.
+  - Gaps only ever reduce access.
+- **Pairing record: a new BFF-only lookup column `sprk_pairedsystemuser` on `sprk_externalrecordaccess`.**
+  - It is field-secured and refused in caller payloads.
+  - The BFF fails closed if the column is missing.
+  - The schema goes to dev with the owner's go at deploy time.
+  - It supersedes the earlier "stamp the ledger row" idea: ledger rows exist only for Assigned-To people.
+
+### Round 134 (2026-10-28): #2382, who may add a contact to an organization
+- Linking a contact or organization to a project or matter (AppendTo) is raised for every Core User to its Read depth, as round 132 decided.
+- Making a contact a member of an organization (`sprk_contactorganization`) is access-relevant: the contact inherits the organization's grants.
+  - These writes move to **Spaarke Access Administrator** (Create, Read, Write, Append at Global).
+  - Core User, Basic User and Internal Contact User (Workforce) keep Read only.
+- The change is applied in the repo and on dev after a reviewed dry-run diff.
+- The finding behind this was told to the owner in chat. It is not recorded here.
