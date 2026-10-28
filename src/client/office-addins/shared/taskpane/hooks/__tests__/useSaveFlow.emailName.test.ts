@@ -94,12 +94,21 @@ describe('useSaveFlow — the .eml name signal (task 046)', () => {
 
     expect(email.subject).toBe('Re: Filing');
     expect(email.isNameSystemDerived).toBe(true);
+    expect(email).not.toHaveProperty('documentName');
   });
 
-  it('a Document Name the user typed is sent as the subject, unchanged, and marked as typed', async () => {
+  it('a Document Name the user typed travels as documentName, unchanged and marked as typed; the subject stays the email’s own (#2416)', async () => {
     const email = await sentEmail(outlookContext({ documentName: 'Smith engagement letter' }));
 
-    expect(email.subject).toBe('Smith engagement letter');
+    expect(email.documentName).toBe('Smith engagement letter');
+    expect(email.subject).toBe('Re: Filing');
     expect(email.isNameSystemDerived).toBe(false);
+  });
+
+  it('an email with no subject still sends a subject (the server requires one)', async () => {
+    const email = await sentEmail(outlookContext({ itemName: '', documentName: 'Typed' }));
+
+    expect(email.subject).toBe('Untitled Email');
+    expect(email.documentName).toBe('Typed');
   });
 });
