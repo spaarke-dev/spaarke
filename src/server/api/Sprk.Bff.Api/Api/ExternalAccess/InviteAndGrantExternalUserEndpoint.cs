@@ -91,7 +91,7 @@ public static class InviteAndGrantExternalUserEndpoint
         ILogger<Program> logger,
         TimeProvider timeProvider,
         CancellationToken ct,
-        [FromServices] ContactInternalUserShare? contactShare = null)
+        [FromServices] ContactInternalUserShare contactShare)
     {
         // ── Validation ───────────────────────────────────────────────────────
         // C5: the request's own shape is validated first, on every host, before any lookup: a malformed request is a 400
@@ -143,61 +143,67 @@ public static class InviteAndGrantExternalUserEndpoint
         if (GrantExternalAccessEndpoint.ValidateRequestedExpiry(request.ExpiryDate, today, httpContext) is { } expiryProblem)
             return expiryProblem;
 
+        // Slice B2: a work account (the email's organisation is a configured customer tenant) or a portal account, decided
+        // before any contact is read, onboarded or granted. A malformed domain is a 400; a lookup with no definite answer
+        // is a 503 with nothing written (retry).
+        var (organization, organizationProblem) = organizationWithoutCiam is not null
+            ? (organizationWithoutCiam, null)
+            : await InviteExternalUserEndpoint.DecideOrganizationAsync(organizations, request, httpContext, ct);
+        if (organizationProblem is not null)
+            return organizationProblem;
+        var workAccountTenantId = organization!.WorkAccountTenantId;
+
         // ── Task 193 (#2338) step 4: never CIAM-invite an internal user ──
         // An email that names ONE existing contact which represents an internal user takes /grant's decision: exactly one
         // represented user → shared at the requested level (no CIAM account, no email, no grant row); several → 409;
-        // unreadable → 503. Decided by ContactUserRepresentation, BEFORE the contact policy (a share is not a contact
-        // grant) and before anything is onboarded. The binder's link refusal below and the invite core's link guard stay
+        // unreadable → 503. Decided by ContactUserRepresentation after the organisation decision (which reads no contact),
+        // BEFORE the contact policy (a share is not a contact grant) and before anything is onboarded. The binder's link refusal below and the invite core's link guard stay
         // as safety nets, never the decider. No contact, or two (the binder refuses those), goes on unchanged.
-        contactShare ??= httpContext.RequestServices?.GetRequiredService<ContactInternalUserShare>();
-        if (contactShare is not null)
+        ContactLookup existing;
+        try
         {
-            ContactLookup existing;
-            try
-            {
-                existing = await binder.Store.FindActiveContactsByEmailAsync(request.Email, ct);
-            }
-            catch (Exception ex) when (!ct.IsCancellationRequested)
-            {
-                logger.LogError(ex,
-                    "[EXT-INVITE-GRANT] The contact lookup for the invite email failed on {RootType} {RootId}. Nothing was " +
-                    "onboarded or granted.", grantRoot.Type, grantRoot.Id);
-                existing = ContactLookup.Failed;
-            }
+            existing = await binder.Store.FindActiveContactsByEmailAsync(request.Email, ct);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            logger.LogError(ex,
+                "[EXT-INVITE-GRANT] The contact lookup for the invite email failed on {RootType} {RootId}. Nothing was " +
+                "onboarded or granted.", grantRoot.Type, grantRoot.Id);
+            existing = ContactLookup.Failed;
+        }
 
-            if (existing.Status != LookupStatus.Read)
-            {
-                // Not "no contact yet": an unread lookup may hide a colleague's contact, so nothing is onboarded.
-                return InviteExternalUserEndpoint.LookupFailureResult(new InviteExternalUserEndpoint.InviteLookupFailure(
-                    ContactBindingDecision.InviteContactLookupFailed,
-                    ContactIdentityBinder.InviteMessage(ContactBindingDecision.InviteContactLookupFailed)!),
-                    httpContext);
-            }
+        if (existing.Status != LookupStatus.Read)
+        {
+            // Not "no contact yet": an unread lookup may hide a colleague's contact, so nothing is onboarded.
+            return InviteExternalUserEndpoint.LookupFailureResult(new InviteExternalUserEndpoint.InviteLookupFailure(
+                ContactBindingDecision.InviteContactLookupFailed,
+                ContactIdentityBinder.InviteMessage(ContactBindingDecision.InviteContactLookupFailed)!),
+                httpContext);
+        }
 
-            var activeContacts = existing.Rows.Where(r => r.IsActive && r.ContactId != Guid.Empty).ToList();
-            if (activeContacts.Count == 1)
-            {
-                var existingContactId = activeContacts[0].ContactId;
-                var decision = await contactShare.DecideAsync(
-                    existingContactId, grantRoot.Type, grantRoot.Id, (ExternalAccessLevel)request.AccessLevel,
-                    dataverseClient, participations, callerAccessProbe, assignedAccess, accessNotifier, httpContext, logger, ct);
+        var activeContacts = existing.Rows.Where(r => r.IsActive && r.ContactId != Guid.Empty).ToList();
+        if (activeContacts.Count == 1)
+        {
+            var existingContactId = activeContacts[0].ContactId;
+            var decision = await contactShare.DecideAsync(
+                existingContactId, grantRoot.Type, grantRoot.Id, (ExternalAccessLevel)request.AccessLevel, request.ExpiryDate,
+                dataverseClient, participations, callerAccessProbe, assignedAccess, accessNotifier, httpContext, logger, ct);
 
-                if (decision.Result is { } answered)
-                    return answered;
+            if (decision.Result is { } answered)
+                return answered;
 
-                if (decision is { Shared: { } sharedWith, ShareResponse: { } share })
-                    return TypedResults.Ok(new InviteAndGrantResponse(
-                        existingContactId,
-                        SharedWithInternalUserStatus,
-                        Guid.Empty,
-                        PortalUrl: string.Empty,
-                        GrantedAccessLevel: share.AccessLevel,
-                        Narrowed: share.Narrowed,
-                        NotificationFailed: share.NotificationFailed,
-                        EmailSent: null,
-                        EmailErrorCode: null,
-                        SharedWithUser: sharedWith));
-            }
+            if (decision is { Shared: { } sharedWith, ShareResponse: { } share })
+                return TypedResults.Ok(new InviteAndGrantResponse(
+                    existingContactId,
+                    SharedWithInternalUserStatus,
+                    Guid.Empty,
+                    PortalUrl: string.Empty,
+                    GrantedAccessLevel: share.AccessLevel,
+                    Narrowed: share.Narrowed,
+                    NotificationFailed: share.NotificationFailed,
+                    EmailSent: null,
+                    EmailErrorCode: null,
+                    SharedWithUser: sharedWith));
         }
 
         // Task 138: the record's access policy, BEFORE onboarding. The grantee is a named Contact, so this is
@@ -208,16 +214,6 @@ public static class InviteAndGrantExternalUserEndpoint
             participations, grantRoot.Type, grantRoot.Id, GrantGranteeKind.Contact, logger, ct);
         if (!policy.IsAllowed)
             return GrantExternalAccessEndpoint.PolicyRefusalProblem(policy, httpContext);
-
-        // Slice B2: a work account (the email's organisation is a configured customer tenant) or a portal account, decided
-        // before any contact is read, onboarded or granted. A malformed domain is a 400; a lookup with no definite answer
-        // is a 503 with nothing written (retry).
-        var (organization, organizationProblem) = organizationWithoutCiam is not null
-            ? (organizationWithoutCiam, null)
-            : await InviteExternalUserEndpoint.DecideOrganizationAsync(organizations, request, httpContext, ct);
-        if (organizationProblem is not null)
-            return organizationProblem;
-        var workAccountTenantId = organization!.WorkAccountTenantId;
 
         // ── Task 139: the grantor ceiling, BEFORE onboarding ──────────────────
         // The caller's own rights on the record, re-probed as them (not trusted from the delegation filter). A probe
@@ -255,8 +251,8 @@ public static class InviteAndGrantExternalUserEndpoint
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
             logger.LogError(ex,
-                "[EXT-INVITE-GRANT] Could not check whether {Email} already has a Contact. Nothing was onboarded or granted.",
-                request.Email);
+                "[EXT-INVITE-GRANT] The invite email's contact lookup failed on {RootType} {RootId} (trace {TraceId}). " +
+                "Nothing was onboarded or granted.", grantRoot.Type, grantRoot.Id, httpContext.TraceIdentifier);
             return Results.Problem(
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Internal Server Error",
@@ -295,8 +291,9 @@ public static class InviteAndGrantExternalUserEndpoint
                 // An existing-contact outcome without a contact id, or a state this code does not know: fail closed,
                 // exactly as onboarding would — nothing is onboarded or granted.
                 logger.LogError(
-                    "[EXT-INVITE-GRANT] The invite decision for {Email} ended in an unexpected state ({Action}). Nothing " +
-                    "was onboarded or granted.", request.Email, invitee.Action);
+                    "[EXT-INVITE-GRANT] The invite decision on {RootType} {RootId} ended in an unexpected state ({Action}) " +
+                    "(trace {TraceId}). Nothing was onboarded or granted.", grantRoot.Type, grantRoot.Id, invitee.Action,
+                    httpContext.TraceIdentifier);
                 return Results.Problem(
                     statusCode: StatusCodes.Status500InternalServerError,
                     title: "Internal Server Error",

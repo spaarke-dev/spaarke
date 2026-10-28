@@ -48,6 +48,13 @@ public sealed class ContactInternalUserShare
     /// <summary>503: who the contact represents could not be read. Nothing written — never a contact grant instead.</summary>
     internal const string RepresentationUnreadableReasonCode = "sdap.access.grant.contact_representation_unreadable";
 
+    /// <summary>
+    /// 422: the contact represents an internal user, so the answer is a share, and a share carries no expiry. A requested
+    /// expiry is refused rather than dropped: the grantor asked for time-limited access and must not get a permanent share
+    /// with no sign of it. Nothing written.
+    /// </summary>
+    internal const string ExpiryNotSupportedReasonCode = "sdap.access.grant.expiry_not_supported_for_internal_user";
+
     private readonly ContactUserRepresentation _people;
     private readonly IDataverseRecordShareService _recordShare;
     private readonly ITenantCache _cache;
@@ -76,7 +83,8 @@ public sealed class ContactInternalUserShare
 
     /// <summary>
     /// Decides <paramref name="contactId"/> on <paramref name="rootType"/> <paramref name="rootId"/> at
-    /// <paramref name="level"/>. <see cref="ContactShareDecision.GrantPath"/> means the contact represents nobody: the caller
+    /// <paramref name="level"/>; <paramref name="requestedExpiry"/> is the request's own expiry (a share refuses one).
+    /// <see cref="ContactShareDecision.GrantPath"/> means the contact represents nobody: the caller
     /// goes on with its grant, unchanged. Anything else is the answer, and no grant row may be written.
     /// </summary>
     internal async Task<ContactShareDecision> DecideAsync(
@@ -84,6 +92,7 @@ public sealed class ContactInternalUserShare
         ExternalGrantRootType rootType,
         Guid rootId,
         ExternalAccessLevel level,
+        DateOnly? requestedExpiry,
         DataverseWebApiClient dataverseClient,
         ExternalParticipationService participations,
         CallerRecordAccessProbe callerAccessProbe,
@@ -140,6 +149,17 @@ public sealed class ContactInternalUserShare
         }
 
         var userId = users[0].SystemUserId;
+
+        if (requestedExpiry is not null)
+        {
+            logger.LogWarning(
+                "[CONTACT-SHARE] Contact {ContactId} represents internal user {SystemUserId}; the request carried an expiry, " +
+                "which a share cannot hold, so nothing was written on {RootType} {RootId}.", contactId, userId, rootType, rootId);
+            return ContactShareDecision.Answered(Refused(httpContext, StatusCodes.Status422UnprocessableEntity,
+                "Expiry not supported", ExpiryNotSupportedReasonCode,
+                "This contact is one of your colleagues, so the record would be shared with them, and a share has no end " +
+                "date. Nothing was given. Remove the expiry date to share it."));
+        }
         logger.LogInformation(
             "[CONTACT-SHARE] Contact {ContactId} represents internal user {SystemUserId}; sharing {RootType} {RootId} with " +
             "them instead of a contact grant.", contactId, userId, rootType, rootId);

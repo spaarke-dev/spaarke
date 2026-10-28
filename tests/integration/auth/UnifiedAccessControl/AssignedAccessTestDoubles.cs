@@ -1186,6 +1186,17 @@ internal static class AssignedAccessTestDoubles
             Store, Grants, Participations, NoAccessCheckOverride ?? AccessibleRecords, Identities, Guard, SharesOverride ?? Shares,
             Children, Cache.Mock.Object, Standing, Registry, Configuration, Time, Logger, Invites, Notifier, Ownership, OwnerPrivileges, Scopes);
 
+        /// <summary>
+        /// Task 193: the PRODUCTION share-or-grant decision /grant and /invite-and-grant take for a contact grantee, over this
+        /// harness's identity store, ledger store (who a contact represents), flags, share table, cache, child synchronizer
+        /// and No Access guard. A contact the harness links to a user is shared with, so seed that user in
+        /// <see cref="GrantTable.SystemUsers"/> (<see cref="SystemUser"/>) for the share core to read.
+        /// </summary>
+        public Sprk.Bff.Api.Api.ExternalAccess.ContactInternalUserShare ContactShare => new(
+            new ContactUserRepresentation(Identities, Store, Participations), SharesOverride ?? Shares, Cache.Mock.Object,
+            Children, Guard, Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(),
+            WorkforceIdentity);
+
         /// <summary>Task 181: every <c>appnotification</c> the grant notifier wrote through task 100's NotificationService.</summary>
         public ConcurrentQueue<Microsoft.Xrm.Sdk.Entity> SentNotifications { get; } = new();
 
@@ -1357,6 +1368,12 @@ internal static class AssignedAccessTestDoubles
     /// represents anyone, and a share's notification is written to an entity seam nobody reads. It never throws.
     /// </summary>
     internal static Sprk.Bff.Api.Api.ExternalAccess.GrantAccessNotifier InertNotifier() => new Harness().Notifier;
+
+    /// <summary>
+    /// Task 193: the share-or-grant decision over an EMPTY world, for handler tests whose contacts live in another store: no
+    /// contact is found, so none represents anyone and the grant path answers, as it does for an unlinked contact.
+    /// </summary>
+    internal static Sprk.Bff.Api.Api.ExternalAccess.ContactInternalUserShare InertContactShare() => new Harness().ContactShare;
 
     /// <summary>
     /// Task 185 slice E: an invite service over an EMPTY world, for handler tests that are not about the invite: no contact

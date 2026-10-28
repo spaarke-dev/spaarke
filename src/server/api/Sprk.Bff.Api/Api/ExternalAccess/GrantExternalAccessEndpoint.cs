@@ -100,7 +100,7 @@ public static class GrantExternalAccessEndpoint
         ILogger<Program> logger,
         TimeProvider timeProvider,
         CancellationToken ct,
-        [FromServices] ContactInternalUserShare? contactShare = null)
+        [FromServices] ContactInternalUserShare contactShare)
     {
         // ── Validation ───────────────────────────────────────────────────────
         // Grantee kind (task 073 #7): a normal grant names a Contact; an ORGANIZATION grant names an
@@ -133,30 +133,25 @@ public static class GrantExternalAccessEndpoint
         // core at the requested level (no grant row); several → 409; unreadable → 503 (never a contact grant instead);
         // nobody → the grant below, unchanged. The share core answers a disabled, non-person or Restricted-barred user with
         // its own refusal. An organization grant is not a person and never asks.
+        // A share carries no expiry, so a requested ExpiryDate is refused for it (422), never dropped.
         if (!isOrgGrant)
         {
-            // In the host the decision is always registered (ExternalAccessModule); a host without it fails closed rather
-            // than granting a contact that may represent a colleague. Only a direct test call has no services.
-            contactShare ??= httpContext.RequestServices?.GetRequiredService<ContactInternalUserShare>();
-            if (contactShare is not null)
-            {
-                var decision = await contactShare.DecideAsync(
-                    request.ContactId, root.Type, root.Id, request.AccessLevel, dataverseClient, participations,
-                    callerAccessProbe, assignedAccess, accessNotifier, httpContext, logger, ct);
+            var decision = await contactShare.DecideAsync(
+                request.ContactId, root.Type, root.Id, request.AccessLevel, request.ExpiryDate, dataverseClient,
+                participations, callerAccessProbe, assignedAccess, accessNotifier, httpContext, logger, ct);
 
-                if (decision.Result is { } answered)
-                    return answered;
+            if (decision.Result is { } answered)
+                return answered;
 
-                if (decision is { Shared: { } sharedWith, ShareResponse: { } share })
-                    return TypedResults.Ok(new GrantAccessResponse(
-                        Guid.Empty,
-                        SpeContainerMembershipGranted: false,
-                        GrantedAccessLevel: share.AccessLevel,
-                        Narrowed: share.Narrowed,
-                        NotificationFailed: share.NotificationFailed,
-                        Invite: null,
-                        SharedWithUser: sharedWith));
-            }
+            if (decision is { Shared: { } sharedWith, ShareResponse: { } share })
+                return TypedResults.Ok(new GrantAccessResponse(
+                    Guid.Empty,
+                    SpeContainerMembershipGranted: false,
+                    GrantedAccessLevel: share.AccessLevel,
+                    Narrowed: share.Narrowed,
+                    NotificationFailed: share.NotificationFailed,
+                    Invite: null,
+                    SharedWithUser: sharedWith));
         }
 
         // ── Resolve caller identity for granted-by reference ─────────────────

@@ -56,7 +56,7 @@ public class GrantSendsInviteTests
         GrantExternalAccessEndpoint.GrantAccessAsync(
             new GrantAccessRequest(contactId, Guid.Empty, level, null, null, "matter", _matter),
             _h.Grants, _h.Participations, _h.AccessibleRecords, new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), new EverythingProbe(),
-            _h.Materializer, _h.Notifier, _h.Invites, Context(), NullLogger<Program>.Instance, _h.Time, CancellationToken.None);
+            _h.Materializer, _h.Notifier, _h.Invites, Context(), NullLogger<Program>.Instance, _h.Time, CancellationToken.None, _h.ContactShare);
 
     private static GrantAccessResponse OkBody(IResult result) =>
         result.Should().BeOfType<Ok<GrantAccessResponse>>().Subject.Value!;
@@ -175,15 +175,20 @@ public class GrantSendsInviteTests
     }
 
     [Fact]
-    public async Task Grant_ToAContactAnInternalUserLinksTo_IsNotNeeded_AndTheUserIsToldInApp()
+    public async Task Grant_ToAContactAnInternalUserLinksTo_IsSharedWithThatUser_NeverInvited_AndTheUserIsToldInApp()
     {
+        // Task 193: the contact represents the user, so /grant shares with them; no invite is ever considered.
         var (contact, user) = _h.LinkedContact();
+        _h.SystemUser(isExternal: false, id: user);
         _h.Identities.Contacts[contact].Email = "person@firm.example";
 
         var body = OkBody(await Grant(contact));
 
-        body.Invite.Should().Be(new GrantInviteResult(GrantInviteStatus.NotNeeded));
+        body.SharedWithUser!.SystemUserId.Should().Be(user);
+        body.Invite.Should().BeNull("an internal user is never invited");
+        _h.Grants.Rows.Should().BeEmpty();
         _h.Ciam.Attempts.Should().BeEmpty();
+        _h.Emails.InviteUrls.Should().BeEmpty();
         _h.Identities.Contacts[contact].Flag.Should().BeNull("a grant never flags a contact; only an explicit Invite does");
         _h.SentNotifications.Should().ContainSingle().Which.GetAttributeValue<Microsoft.Xrm.Sdk.EntityReference>("ownerid").Id
             .Should().Be(user);
@@ -533,7 +538,7 @@ public class GrantSendsInviteTests
         var result = await GrantExternalAccessEndpoint.GrantAccessAsync(
             new GrantAccessRequest(contact, Guid.Empty, ExternalAccessLevel.Collaborate, null, null, "matter", _matter),
             _h.Grants, _h.Participations, _h.AccessibleRecords, new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), new EverythingProbe(),
-            _h.Materializer, _h.Notifier, invites, Context(), NullLogger<Program>.Instance, _h.Time, CancellationToken.None);
+            _h.Materializer, _h.Notifier, invites, Context(), NullLogger<Program>.Instance, _h.Time, CancellationToken.None, _h.ContactShare);
 
         OkBody(result).Invite.Should().Be(
             new GrantInviteResult(GrantInviteStatus.Failed, GrantInviteStatus.CiamNotConfiguredReasonCode));
@@ -551,7 +556,7 @@ public class GrantSendsInviteTests
         var result = await GrantExternalAccessEndpoint.GrantAccessAsync(
             new GrantAccessRequest(Guid.Empty, Guid.Empty, ExternalAccessLevel.Collaborate, null, organization, "matter", _matter),
             _h.Grants, _h.Participations, _h.AccessibleRecords, new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), new EverythingProbe(),
-            _h.Materializer, _h.Notifier, _h.Invites, Context(), NullLogger<Program>.Instance, _h.Time, CancellationToken.None);
+            _h.Materializer, _h.Notifier, _h.Invites, Context(), NullLogger<Program>.Instance, _h.Time, CancellationToken.None, _h.ContactShare);
 
         OkBody(result).Invite.Should().BeNull();
         _h.Ciam.Attempts.Should().BeEmpty();
@@ -573,7 +578,7 @@ public class GrantSendsInviteTests
                 .AddInMemoryCollection(new Dictionary<string, string?> { ["ExternalAccess:PortalUrl"] = PortalUrl })
                 .Build(),
             Sprk.Bff.Api.Tests.TestInfrastructure.TestSpeOwnership.Customer(CustomerKey),
-            _h.Materializer, _h.Notifier, Context(), NullLogger<Program>.Instance, _h.Time, CancellationToken.None);
+            _h.Materializer, _h.Notifier, Context(), NullLogger<Program>.Instance, _h.Time, CancellationToken.None, _h.ContactShare);
 
         result.Should().BeOfType<Ok<InviteAndGrantResponse>>().Subject.Value!.ContactId.Should().Be(contact);
         _h.Ciam.Attempts.Should().ContainSingle();

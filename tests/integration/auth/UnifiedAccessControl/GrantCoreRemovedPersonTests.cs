@@ -49,7 +49,7 @@ public class GrantCoreRemovedPersonTests
             new GrantAccessRequest(contactId, Guid.Empty, ExternalAccessLevel.Collaborate, null, null, "matter", _matter),
             _h.Grants, _h.Participations, _h.AccessibleRecords, new RecordOwnershipResolverDouble(), new TeamPrivilegeCheckerDouble(),
             new EverythingProbe(), _h.Materializer, _h.Notifier, _h.Invites, GranterContext(), NullLogger<Program>.Instance, _h.Time,
-            CancellationToken.None);
+            CancellationToken.None, _h.ContactShare);
 
     private Task<IResult> InviteAndGrant() =>
         InviteAndGrantExternalUserEndpoint.InviteAndGrantAsync(
@@ -60,7 +60,7 @@ public class GrantCoreRemovedPersonTests
                 .AddInMemoryCollection(new Dictionary<string, string?> { ["ExternalAccess:PortalUrl"] = "https://external.test" })
                 .Build(),
             TestSpeOwnership.Customer("acme"),
-            _h.Materializer, _h.Notifier, GranterContext(), NullLogger<Program>.Instance, _h.Time, CancellationToken.None);
+            _h.Materializer, _h.Notifier, GranterContext(), NullLogger<Program>.Instance, _h.Time, CancellationToken.None, _h.ContactShare);
 
     private Task<AssignedAccessOutcome> Sync() => _h.SyncAsync(Matter, _matter);
 
@@ -139,7 +139,11 @@ public class GrantCoreRemovedPersonTests
         var result = await Grant(Guid.NewGuid());
 
         Problem(result).StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable);
-        ReasonCode(result).Should().Be(ContactBindingDecision.InviteContactRemovedStateUnavailable);
+        // Task 193: /grant asks who the contact represents first, from the same contact read, so a read that fails is that
+        // decision's 503; a column-missing read decides on the link alone (none) and reaches the grant core's 503.
+        ReasonCode(result).Should().Be(read == "column-missing"
+            ? ContactBindingDecision.InviteContactRemovedStateUnavailable
+            : ContactInternalUserShare.RepresentationUnreadableReasonCode);
         _h.Grants.WriteCount.Should().Be(0);
     }
 

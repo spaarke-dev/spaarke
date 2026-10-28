@@ -394,7 +394,9 @@ public class GrantorCeilingTests
         var result = await InviteAndGrant(Invite(ExternalAccessLevel.ViewOnly), callerRights: null);
 
         Problem(result).Should().Be((500, ExternalGrantLifecycle.CallerRightsUnreadableReasonCode));
-        _identities.Reads.Should().BeEmpty("the invitee lookup — the onboarding seam's first step — is never reached");
+        // Task 193: only its read-only email lookup (does the email's contact represent a colleague?) precedes the probe.
+        _identities.Reads.Should().Equal(new[] { "email" },
+            "the invitee lookup — the onboarding seam's first step — is never reached");
         AssertNothingOnboardedOrWritten();
     }
 
@@ -704,8 +706,10 @@ public class GrantorCeilingTests
         var result = await InviteAndGrant(Invite(ExternalAccessLevel.ViewOnly), FullAccessCaller);
 
         OkBody<InviteAndGrantResponse>(result).ContactId.Should().Be(ContactId);
-        _identities.Reads.Count(r => r == "email").Should().Be(1,
-            "onboarding reuses the resolution the grant checks judged — it does not look the email up a second time");
+        // Task 193 reads the email once, read-only, to decide share-or-grant before the policy; the binder's resolution is
+        // then read once and reused: the checks and onboarding still judge the same contact.
+        _identities.Reads.Count(r => r == "email").Should().Be(2,
+            "task 193's decision lookup, then the ONE resolution the grant checks and onboarding share");
         _dataverse.ActiveRows.Should().ContainSingle().Which.ContactId.Should().Be(ContactId);
     }
 
@@ -781,7 +785,7 @@ public class GrantorCeilingTests
             request, _dataverse, _participations, DenyList(), new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), new FixedRightsProbe(callerRights),
             AssignedAccessTestDoubles.InertMaterializer(), AssignedAccessTestDoubles.InertNotifier(),
             AssignedAccessTestDoubles.InertInvites(), Context(), NullLogger<Program>.Instance, new FixedClock(Today),
-            CancellationToken.None);
+            CancellationToken.None, AssignedAccessTestDoubles.InertContactShare());
 
     /// <remarks>
     /// The email service is passed as null: every positive case here onboards an EXISTING contact that already has an oid
@@ -797,7 +801,7 @@ public class GrantorCeilingTests
             ciam, emailService: null!, IdentityBindingTestKit.Binder(_identities), InviteOrganizationTestKit.PortalOnly(),
             PortalConfig(), Sprk.Bff.Api.Tests.TestInfrastructure.TestSpeOwnership.Customer("acme"),
             AssignedAccessTestDoubles.InertMaterializer(), AssignedAccessTestDoubles.InertNotifier(), Context(),
-            NullLogger<Program>.Instance, new FixedClock(Today), CancellationToken.None);
+            NullLogger<Program>.Instance, new FixedClock(Today), CancellationToken.None, AssignedAccessTestDoubles.InertContactShare());
         ciam.Attempts.Should().BeEmpty("no case here creates a CIAM account");
         return result;
     }

@@ -55,7 +55,7 @@ public class GrantAccessNotificationTests
         GrantExternalAccessEndpoint.GrantAccessAsync(
             new GrantAccessRequest(contactId, Guid.Empty, level, null, null, "matter", _matter),
             _h.Grants, _h.Participations, _h.AccessibleRecords, new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), new EverythingProbe(),
-            _h.Materializer, _h.Notifier, _h.Invites, Context(), NullLogger<Program>.Instance, _h.Time, CancellationToken.None);
+            _h.Materializer, _h.Notifier, _h.Invites, Context(), NullLogger<Program>.Instance, _h.Time, CancellationToken.None, _h.ContactShare);
 
     private Task<IResult> Share(Guid user, ExternalAccessLevel level = ExternalAccessLevel.Collaborate) =>
         InternalShareEndpoints.ShareAsync(
@@ -65,6 +65,19 @@ public class GrantAccessNotificationTests
             _h.Notifier, Context(), NullLogger<Program>.Instance, CancellationToken.None);
 
     private static T OkBody<T>(IResult result) => result.Should().BeOfType<Ok<T>>().Subject.Value!;
+
+    /// <summary>
+    /// Task 193: a contact linked to an internal user, and that user as the share core reads them. Since task 193 /grant
+    /// SHARES with the user a contact represents (no contact grant), so the user is told through the share's notification.
+    /// </summary>
+    private (Guid ContactId, Guid UserId) Colleague()
+    {
+        var (contact, user) = _h.LinkedContact();
+        _h.SystemUser(isExternal: false, id: user);
+        return (contact, user);
+    }
+
+    private const int CollaborateMask = 262167; // Read + Write + Append + AppendTo + Share
 
     private static Guid OwnerOf(Entity notification) => notification.GetAttributeValue<EntityReference>("ownerid").Id;
 
@@ -82,12 +95,14 @@ public class GrantAccessNotificationTests
     // ── Who is told ─────────────────────────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task Grant_ToAContactThatRepresentsAnInternalUser_TellsThatUserOnce_WithALinkToTheRecord()
+    public async Task Grant_ToAContactThatRepresentsAnInternalUser_SharesWithThatUser_AndTellsThemOnce_WithALinkToTheRecord()
     {
-        var (contact, user) = _h.LinkedContact();
+        var (contact, user) = Colleague();
 
         var body = OkBody<GrantAccessResponse>(await Grant(contact));
 
+        body.SharedWithUser!.SystemUserId.Should().Be(user, "task 193: a represented contact is shared with, not granted");
+        _h.Grants.Rows.Should().BeEmpty();
         body.NotificationFailed.Should().BeFalse();
         var sent = _h.SentNotifications.Should().ContainSingle().Subject;
         OwnerOf(sent).Should().Be(user);
@@ -153,16 +168,19 @@ public class GrantAccessNotificationTests
         _h.SentNotifications.Should().ContainSingle("only the first share gave access");
     }
 
-    /// <summary>Beyond the named cases: the grant's "access gained" rule is separate code from the share's.</summary>
+    /// <summary>
+    /// Beyond the named cases. Since task 193 a represented contact is shared with, so a same-level /grant again is the
+    /// share's "unchanged" rule reached through /grant: nothing written, nobody told again.
+    /// </summary>
     [Fact]
-    public async Task Grant_AgainAtTheSameLevel_DoesNotTellThemAgain()
+    public async Task Grant_ToARepresentedContact_AgainAtTheSameLevel_DoesNotTellThemAgain()
     {
-        var (contact, _) = _h.LinkedContact();
+        var (contact, _) = Colleague();
         await Grant(contact);
 
         OkBody<GrantAccessResponse>(await Grant(contact)).NotificationFailed.Should().BeFalse();
 
-        _h.SentNotifications.Should().ContainSingle("the re-grant changed nothing");
+        _h.SentNotifications.Should().ContainSingle("the second share changed nothing");
     }
 
     /// <summary>Beyond the named cases: the POML's "not sent to the person granting access".</summary>
@@ -182,15 +200,19 @@ public class GrantAccessNotificationTests
     /// not the user's, and the read path vetoes a walled user — so naming the record to them would be the leak.
     /// </summary>
     [Fact]
-    public async Task Grant_ToAContactWhoseUserIsWalledOffTheSecureRecord_DoesNotNameTheRecordToThem()
+    public async Task Grant_ToAContactWhoseUserIsWalledOffTheSecureRecord_IsRefused_AndDoesNotNameTheRecordToThem()
     {
+        // Task 193: the contact represents the user, so /grant shares, and the share core's No Access guard refuses a
+        // walled user before anything is written (before task 193 a contact grant was written and the user not told).
         _h.Participations.Flags[_matter] = new RootRecordFlags(IsSecure: true, IsRestricted: false);
-        var (contact, user) = _h.LinkedContact();
+        var (contact, user) = Colleague();
         _h.DenyList.DenySystemUserOnRecord(user, _matter);
 
-        var body = OkBody<GrantAccessResponse>(await Grant(contact));
+        var result = await Grant(contact);
 
-        body.NotificationFailed.Should().BeFalse("a walled user is not someone to be told, so nothing failed");
+        result.Should().BeOfType<ProblemHttpResult>();
+        _h.Shares.Writes.Should().BeEmpty();
+        _h.Grants.Rows.Should().BeEmpty();
         _h.SentNotifications.Should().BeEmpty();
     }
 
@@ -203,15 +225,19 @@ public class GrantAccessNotificationTests
         var user = Guid.NewGuid();
         _h.Store.UsersByOid.GetOrAdd(oid, _ => new List<AssignedLinkCandidate>())
             .Add(new AssignedLinkCandidate(user, userLinkedTo, oid, false, 0, null, false));
+        _h.SystemUser(isExternal: false, id: user); // task 193: as the share core reads them
         return (contact, user);
     }
 
     [Fact]
-    public async Task Grant_ToAContactBoundToTheOidOfAnUnlinkedUser_TellsThatUser()
+    public async Task Grant_ToAContactBoundToTheOidOfAnUnlinkedUser_SharesWithThatUser_AndTellsThem()
     {
         var (contact, user) = OidOnlyContact(Guid.NewGuid());
 
-        OkBody<GrantAccessResponse>(await Grant(contact)).NotificationFailed.Should().BeFalse();
+        var body = OkBody<GrantAccessResponse>(await Grant(contact));
+
+        body.SharedWithUser!.SystemUserId.Should().Be(user, "task 193: a confirmed oid binding represents the user too");
+        body.NotificationFailed.Should().BeFalse();
 
         OwnerOf(_h.SentNotifications.Should().ContainSingle().Subject).Should().Be(user);
     }
@@ -269,12 +295,12 @@ public class GrantAccessNotificationTests
 
     /// <summary>The positive twin, so the case above is not vacuous: an active contact's linked user is told.</summary>
     [Fact]
-    public async Task Grant_WhenTheBindingColumnIsMissing_AndTheLinkedContactIsActive_TellsTheUser()
+    public async Task Grant_WhenTheBindingColumnIsMissing_AndTheLinkedContactIsActive_SharesWithTheUser_AndTellsThem()
     {
-        var (contact, user) = _h.LinkedContact();
+        var (contact, user) = Colleague();
         _h.Identities.GetContactStatus = LookupStatus.ColumnMissing;
 
-        await Grant(contact);
+        OkBody<GrantAccessResponse>(await Grant(contact)).SharedWithUser!.SystemUserId.Should().Be(user);
 
         OwnerOf(_h.SentNotifications.Should().ContainSingle().Subject).Should().Be(user);
     }
@@ -292,23 +318,32 @@ public class GrantAccessNotificationTests
 
     // ── When a grant gives access ───────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Task 193: a represented contact holding a LAPSED contact grant is shared with instead (the share gives access, so the
+    /// user is told); the old row is left as it was, never restored.
+    /// </summary>
     [Fact]
-    public async Task Grant_OverALapsedGrantAtTheSameLevel_RestoresIt_AndTellsThem()
+    public async Task Grant_ToARepresentedContactWithALapsedGrant_SharesInstead_AndTellsThem()
     {
-        var (contact, user) = _h.LinkedContact();
-        _h.Grants.Seed(ExternalGrantRootType.Matter, _matter, contact, null, (int)ExternalAccessLevel.Collaborate,
+        var (contact, user) = Colleague();
+        var lapsed = _h.Grants.Seed(ExternalGrantRootType.Matter, _matter, contact, null, (int)ExternalAccessLevel.Collaborate,
             Today.AddDays(-1));
 
-        OkBody<GrantAccessResponse>(await Grant(contact)).NotificationFailed.Should().BeFalse();
+        OkBody<GrantAccessResponse>(await Grant(contact)).SharedWithUser!.SystemUserId.Should().Be(user);
 
-        OwnerOf(_h.SentNotifications.Should().ContainSingle("the lapsed grant gave nothing; the restore gives access").Subject)
-            .Should().Be(user);
+        OwnerOf(_h.SentNotifications.Should().ContainSingle("the share gives access").Subject).Should().Be(user);
+        _h.Shares.MaskOf("sprk_matter", _matter, DataversePrincipalRef.User(user)).Should().Be(CollaborateMask);
+        _h.Grants.Rows.Should().ContainSingle().Which.ExpiresDate.Should().Be(lapsed.ExpiresDate, "the lapsed row is untouched");
     }
 
+    /// <summary>
+    /// Task 193: a represented contact already holding a View Only contact grant is shared with at the asked level, and told;
+    /// the contact grant row is left as it was.
+    /// </summary>
     [Fact]
-    public async Task Grant_RaisingTheLevel_TellsThem()
+    public async Task Grant_ToARepresentedContactHoldingAContactGrant_SharesAtTheLevel_AndTellsThem()
     {
-        var (contact, user) = _h.LinkedContact();
+        var (contact, user) = Colleague();
         _h.Grants.Seed(ExternalGrantRootType.Matter, _matter, contact, null, (int)ExternalAccessLevel.ViewOnly, Today.AddDays(60));
 
         await Grant(contact, ExternalAccessLevel.Collaborate);
@@ -316,22 +351,30 @@ public class GrantAccessNotificationTests
         var sent = _h.SentNotifications.Should().ContainSingle().Subject;
         OwnerOf(sent).Should().Be(user);
         sent.GetAttributeValue<string>("body").Should().Be("Gina Granter gave you Collaborate access.");
+        _h.Shares.MaskOf("sprk_matter", _matter, DataversePrincipalRef.User(user)).Should().Be(CollaborateMask);
+        _h.Grants.Rows.Should().ContainSingle().Which.AccessLevel.Should().Be((int)ExternalAccessLevel.ViewOnly);
     }
 
+    /// <summary>
+    /// Task 193 (C-fix): a represented contact is shared with, and a share holds no expiry, so a request carrying one is
+    /// refused (422 expiry_not_supported_for_internal_user): nothing changes and nobody is told.
+    /// </summary>
     [Fact]
-    public async Task Grant_ChangingOnlyTheExpiry_TellsNobody()
+    public async Task Grant_ToARepresentedContact_WithAnExpiry_Is422_ChangesNothing_AndTellsNobody()
     {
-        var (contact, _) = _h.LinkedContact();
+        var (contact, _) = Colleague();
         _h.Grants.Seed(ExternalGrantRootType.Matter, _matter, contact, null, (int)ExternalAccessLevel.Collaborate, Today.AddDays(60));
 
         var result = await GrantExternalAccessEndpoint.GrantAccessAsync(
             new GrantAccessRequest(contact, Guid.Empty, ExternalAccessLevel.Collaborate, Today.AddDays(80), null, "matter", _matter),
             _h.Grants, _h.Participations, _h.AccessibleRecords, new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), new EverythingProbe(),
-            _h.Materializer, _h.Notifier, _h.Invites, Context(), NullLogger<Program>.Instance, _h.Time, CancellationToken.None);
+            _h.Materializer, _h.Notifier, _h.Invites, Context(), NullLogger<Program>.Instance, _h.Time, CancellationToken.None, _h.ContactShare);
 
-        OkBody<GrantAccessResponse>(result);
-        _h.Grants.ActiveRowsOf(_matter, contact).Single().ExpiresDate.Should().Be(Today.AddDays(80));
-        _h.SentNotifications.Should().BeEmpty("they already held this level; only the date moved");
+        result.Should().BeOfType<ProblemHttpResult>().Which.ProblemDetails.Extensions["reasonCode"].Should()
+            .Be(ContactInternalUserShare.ExpiryNotSupportedReasonCode);
+        _h.Grants.ActiveRowsOf(_matter, contact).Single().ExpiresDate.Should().Be(Today.AddDays(60), "nothing was written");
+        _h.Shares.Writes.Should().BeEmpty();
+        _h.SentNotifications.Should().BeEmpty();
     }
 
     [Fact]
@@ -342,7 +385,7 @@ public class GrantAccessNotificationTests
         var result = await GrantExternalAccessEndpoint.GrantAccessAsync(
             new GrantAccessRequest(Guid.Empty, Guid.Empty, ExternalAccessLevel.Collaborate, null, organization, "matter", _matter),
             _h.Grants, _h.Participations, _h.AccessibleRecords, new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), new EverythingProbe(),
-            _h.Materializer, _h.Notifier, _h.Invites, Context(), NullLogger<Program>.Instance, _h.Time, CancellationToken.None);
+            _h.Materializer, _h.Notifier, _h.Invites, Context(), NullLogger<Program>.Instance, _h.Time, CancellationToken.None, _h.ContactShare);
 
         OkBody<GrantAccessResponse>(result).NotificationFailed.Should().BeFalse();
         _h.Grants.ActiveRowsOf(_matter, organizationId: organization).Should().ContainSingle();
@@ -352,16 +395,16 @@ public class GrantAccessNotificationTests
     // ── Best effort ─────────────────────────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task Grant_WhenTheNotificationCannotBeWritten_KeepsTheGrant_AndSaysSo()
+    public async Task Grant_ToARepresentedContact_WhenTheNotificationCannotBeWritten_KeepsTheShare_AndSaysSo()
     {
-        var (contact, _) = _h.LinkedContact();
+        var (contact, user) = Colleague();
         _h.NotificationWriteFailure = new HttpRequestException("Simulated appnotification create failure.");
 
         var body = OkBody<GrantAccessResponse>(await Grant(contact));
 
         body.NotificationFailed.Should().BeTrue();
-        _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle("a failed notification never undoes the grant")
-            .Which.AccessLevel.Should().Be((int)ExternalAccessLevel.Collaborate);
+        _h.Shares.MaskOf("sprk_matter", _matter, DataversePrincipalRef.User(user))
+            .Should().Be(CollaborateMask, "a failed notification never undoes the share");
     }
 
     /// <summary>Beyond the named cases: the share route reports the failure through its own wiring.</summary>

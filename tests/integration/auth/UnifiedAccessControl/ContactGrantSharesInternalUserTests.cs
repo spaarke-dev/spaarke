@@ -43,17 +43,18 @@ public class ContactGrantSharesInternalUserTests
         _h.Shares, _h.Cache.Mock.Object, _h.Children, _h.Guard,
         TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(), _h.WorkforceIdentity);
 
-    private Task<IResult> Grant(Guid contactId, ExternalAccessLevel level = ExternalAccessLevel.Collaborate) =>
+    private Task<IResult> Grant(
+        Guid contactId, ExternalAccessLevel level = ExternalAccessLevel.Collaborate, DateOnly? expiry = null) =>
         GrantExternalAccessEndpoint.GrantAccessAsync(
-            new GrantAccessRequest(contactId, Guid.Empty, level, null, null, "matter", _matter),
+            new GrantAccessRequest(contactId, Guid.Empty, level, expiry, null, "matter", _matter),
             _h.Grants, _h.Participations, _h.AccessibleRecords, _h.Ownership, _h.OwnerPrivileges,
             new InternalUserShareTests.StubCallerRightsProbe(EveryRight),
             _h.Materializer, _h.Notifier, _h.Invites, InternalUserShareCoreTests.Rig.Caller(), NullLogger<Program>.Instance,
             _h.Time, CancellationToken.None, Decision());
 
-    private Task<IResult> InviteAndGrant(string email = Email) =>
+    private Task<IResult> InviteAndGrant(string email = Email, DateOnly? expiry = null) =>
         InviteAndGrantExternalUserEndpoint.InviteAndGrantAsync(
-            new InviteExternalUserRequest(email, Guid.Empty, (int)ExternalAccessLevel.Collaborate, "Ada", "Lovelace", null, null,
+            new InviteExternalUserRequest(email, Guid.Empty, (int)ExternalAccessLevel.Collaborate, "Ada", "Lovelace", expiry, null,
                 "matter", _matter),
             _h.Grants, _h.Participations, _h.AccessibleRecords, _h.Ownership, _h.OwnerPrivileges,
             new InternalUserShareTests.StubCallerRightsProbe(EveryRight),
@@ -240,6 +241,30 @@ public class ContactGrantSharesInternalUserTests
         Status(result).Should().Be(StatusCodes.Status200OK);
     }
 
+    /// <summary>C-fix: a share holds no expiry, so a requested one is refused (422), never silently dropped.</summary>
+    [Fact]
+    public async Task Grant_ContactRepresentingOneUser_WithAnExpiry_Is422ExpiryNotSupported_AndWritesNothing()
+    {
+        var (contact, _) = Colleague();
+
+        var result = await Grant(contact, expiry: Today.AddDays(30));
+
+        Status(result).Should().Be(StatusCodes.Status422UnprocessableEntity);
+        ReasonCode(result).Should().Be("sdap.access.grant.expiry_not_supported_for_internal_user");
+        NothingWritten();
+    }
+
+    [Fact]
+    public async Task Grant_ContactRepresentingNobody_WithAnExpiry_IsTheGrantPath_WithThatExpiry()
+    {
+        var contact = _h.Contact();
+
+        var result = await Grant(contact, expiry: Today.AddDays(30));
+
+        result.Should().BeOfType<Ok<GrantAccessResponse>>().Subject.Value!.SharedWithUser.Should().BeNull();
+        _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle().Which.ExpiresDate.Should().Be(Today.AddDays(30));
+    }
+
     [Fact]
     public async Task Grant_WhenTheNameReadFaultsAfterTheShare_Is200_WithTheShareConfirmed_FullNameNull_AndNoGrantRow()
     {
@@ -275,6 +300,19 @@ public class ContactGrantSharesInternalUserTests
         _h.Emails.Onboarding.Should().BeEmpty();
         _h.Grants.Rows.Should().BeEmpty();
         _h.Identities.Contacts[contact].Flag.Should().BeNull("decided before the binder's link refusal, which flags");
+    }
+
+    /// <summary>C-fix: the same refusal on /invite-and-grant: a share holds no expiry; nothing is shared, invited or granted.</summary>
+    [Fact]
+    public async Task InviteAndGrant_ExistingContactLinkedToOneInternalUser_WithAnExpiry_Is422_AndWritesNothing()
+    {
+        Colleague();
+
+        var result = await InviteAndGrant(expiry: Today.AddDays(30));
+
+        Status(result).Should().Be(StatusCodes.Status422UnprocessableEntity);
+        ReasonCode(result).Should().Be(ContactInternalUserShare.ExpiryNotSupportedReasonCode);
+        NothingWritten();
     }
 
     [Fact]
