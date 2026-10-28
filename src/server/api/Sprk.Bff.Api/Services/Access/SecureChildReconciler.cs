@@ -1466,6 +1466,11 @@ public sealed class SecureChildReconciler
         private readonly Dictionary<Guid, (Guid? BusinessUnit, bool IsDefault)> _teamFacts = new();
         private int _ordinaryWritesAttempted;
 
+        // UAC task 194b V-fix (verifier B): the Secure Record business unit and each business unit's default owner team, read
+        // once for this pass and handed to every owner question it asks (RecordOwnershipContext.LookupCache). It lives exactly as
+        // long as the pass, so a business-unit or team change is seen by the next one.
+        private readonly RecordOwnerLookupCache _lookupCache = new();
+
         // UAC task 194 F1-a: each document's latest ordinary decision — whether its file may be handed to the re-file pass.
         private readonly Dictionary<Guid, bool> _documentHandOff = new();
 
@@ -1484,6 +1489,13 @@ public sealed class SecureChildReconciler
             bool unsecuring, bool mayRelease, Guid secureTeamId, CancellationToken ct, OrdinaryMove? ordinary = null)
         {
             _ordinary = ordinary;
+            if (ordinary is not null)
+            {
+                // The ordinary pass has just read the Secure Record business unit (not ambiguous, or it would have ended):
+                // its questions reuse that answer rather than reading it again per row.
+                _lookupCache.SecureBusinessUnit = (ordinary.SecureBusinessUnit, false);
+            }
+
             _owner = owner;
             _mode = mode;
             _root = root;
@@ -2655,6 +2667,7 @@ public sealed class SecureChildReconciler
                 WhenUnfiled = UnfiledOwnership.KeepCreator,
                 UnsecuringRoot = _unsecuring ? _root : null,
                 PlannedOwningTeams = _planned.Count > 0 ? new Dictionary<RecordOwnershipParent, Guid>(_planned) : null,
+                LookupCache = _lookupCache,
             };
         }
 
@@ -2742,6 +2755,7 @@ public sealed class SecureChildReconciler
                         Parents = new[] { _root },
                         WhenUnfiled = UnfiledOwnership.KeepCreator,
                         UnsecuringRoot = _unsecuring ? _root : null,
+                        LookupCache = _lookupCache,
                     },
                     _ct).ConfigureAwait(false);
             }

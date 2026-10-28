@@ -571,6 +571,37 @@ public class SecureChildOrdinaryParentMoveTests
             .Which.Should().Match<SecureChildRowChange>(c => c.Outcome == SecureChildRowOutcome.Untouched && c.Detail!.Contains("F1-d"));
     }
 
+    private int SecureBusinessUnitReads() => _world.Queries.Count(q => q.EntityName == "businessunit");
+
+    private int DefaultTeamReadsOf(Guid businessUnit) => _world.Queries.Count(q =>
+        q.EntityName == "team"
+        && q.Criteria.Conditions.Any(c => c.AttributeName == "isdefault" && Equals(c.Values.Single(), true))
+        && q.Criteria.Conditions.Any(c => c.AttributeName == "businessunitid" && Equals(c.Values.Single(), businessUnit)));
+
+    [Fact(DisplayName = "194b V-fix (verifier B): one pass over N rows reads the Secure Record business unit and each business unit's default team once for the pass, not per row; the next pass reads them again")]
+    public async Task OnePass_ReadsTheSecureBusinessUnitAndEachDefaultTeamOnce()
+    {
+        const int rows = 12;
+        MatterMovedToB();
+        for (var i = 0; i < rows; i++)
+            Row("sprk_event", Guid.NewGuid(), TeamRef(GeneralTeam), ("sprk_regardingmatter", Matter, MatterId));
+
+        var report = await Reconciler().ReconcileOrdinaryParentMoveAsync(
+            Matter, MatterId, SecureChildReconcileMode.ReportOnly, maxWrites: 200, CancellationToken.None);
+
+        report.Changes.Count(c => c.Table == "sprk_event").Should().Be(rows);
+        // The pass's own setup reads it twice (the Secure Record owner team, then the business unit itself): fixed per
+        // pass. Every row's owner question reuses the answer, so twelve rows add nothing (uncached: 2 + 12).
+        SecureBusinessUnitReads().Should().Be(2, "the pass's own read is reused by every owner question");
+        DefaultTeamReadsOf(BuB).Should().Be(1, "every row's answer is B's default team: read once for the pass");
+
+        await Reconciler().ReconcileOrdinaryParentMoveAsync(
+            Matter, MatterId, SecureChildReconcileMode.ReportOnly, maxWrites: 200, CancellationToken.None);
+
+        SecureBusinessUnitReads().Should().Be(4, "the cache lives for one pass: the next pass sees a change");
+        DefaultTeamReadsOf(BuB).Should().Be(2);
+    }
+
     /// <summary>A Signal about <paramref name="eventId"/>, owned by the general team (its subject lookup repeats its pair id).</summary>
     private void SignalAbout(Guid signal, Guid eventId)
     {

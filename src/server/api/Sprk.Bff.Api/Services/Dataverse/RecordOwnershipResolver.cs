@@ -241,6 +241,20 @@ public enum UnfiledOwnership
 /// cannot be forgotten.
 /// </para>
 /// </remarks>
+/// <summary>
+/// UAC task 194b V-fix: one reconciler pass's cache of the per-pass-constant ownership lookups
+/// (<see cref="RecordOwnershipContext.LookupCache"/>). Only answers are kept: a read that faults propagates and is asked again.
+/// Not thread-safe: a pass decides its rows one at a time.
+/// </summary>
+public sealed class RecordOwnerLookupCache
+{
+    /// <summary>The Secure Record business unit, once read.</summary>
+    internal (Guid? Id, bool Ambiguous)? SecureBusinessUnit { get; set; }
+
+    /// <summary>Each business unit's default owner team answer, once read.</summary>
+    internal Dictionary<Guid, RecordOwnerResolution> DefaultOwnerTeams { get; } = new();
+}
+
 public sealed record RecordOwnershipContext
 {
     /// <summary>Logical name of the record this one is being filed against (e.g. <c>sprk_matter</c>). Null when unfiled.</summary>
@@ -320,6 +334,14 @@ public sealed record RecordOwnershipContext
     /// Set by nothing that writes; <c>null</c> everywhere else.
     /// </summary>
     public IReadOnlyDictionary<RecordOwnershipParent, Guid>? PlannedOwningTeams { get; init; }
+
+    /// <summary>
+    /// UAC task 194b V-fix (verifier B, the app user's request budget): the lookups that are the same for every row of ONE
+    /// reconciler pass — the Secure Record business unit and each business unit's default owner team — read once and kept
+    /// here for the rest of the pass. The pass creates it and drops it with itself, so a business-unit or team change is
+    /// seen by the next pass. <c>null</c> everywhere else (each question reads them, as before).
+    /// </summary>
+    public RecordOwnerLookupCache? LookupCache { get; init; }
 
     /// <summary>True when a target record was supplied — i.e. the preferred source is available.</summary>
     public bool HasTarget =>
@@ -3475,7 +3497,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
 
         var decisive = facts.Concat(lineage.Facts).ToList();
 
-        var secureBu = await SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync(_dataverse, _configuration, ct, _logger).ConfigureAwait(false);
+        var secureBu = await SecureBusinessUnitAsync(context.LookupCache, ct).ConfigureAwait(false);
         if (secureBu.Ambiguous)
         {
             return RecordOwnerResolution.Refused(
@@ -3519,7 +3541,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             return RecordOwnerResolution.Refused(RecordOwnerRefusal.ParentUnresolved, primaryUndecided);
         }
 
-        return await ResolveDefaultOwnerTeamAsync(facts[0].BusinessUnitId, ct).ConfigureAwait(false);
+        return await ResolveDefaultOwnerTeamAsync(facts[0].BusinessUnitId, ct, context.LookupCache).ConfigureAwait(false);
     }
 
     /// <summary>How many filing levels <see cref="ReadUnownedChildLineageAsync"/> follows above a parent.</summary>
@@ -3804,7 +3826,31 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// <summary>
     /// A business unit's DEFAULT OWNER team. Both predicates are load-bearing — see <see cref="OwnerTeamType"/>.
     /// </summary>
-    private async Task<RecordOwnerResolution> ResolveDefaultOwnerTeamAsync(Guid businessUnitId, CancellationToken ct)
+    private async Task<RecordOwnerResolution> ResolveDefaultOwnerTeamAsync(
+        Guid businessUnitId, CancellationToken ct, RecordOwnerLookupCache? cache = null)
+    {
+        if (cache is not null && cache.DefaultOwnerTeams.TryGetValue(businessUnitId, out var known))
+            return known;
+        var answer = await ReadDefaultOwnerTeamAsync(businessUnitId, ct).ConfigureAwait(false);
+        if (cache is not null)
+            cache.DefaultOwnerTeams[businessUnitId] = answer;
+        return answer;
+    }
+
+    /// <summary>The Secure Record business unit: the pass's cached answer when it has one, else the one lookup
+    /// (<see cref="SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync"/>), kept for the pass.</summary>
+    private async Task<(Guid? Id, bool Ambiguous)> SecureBusinessUnitAsync(RecordOwnerLookupCache? cache, CancellationToken ct)
+    {
+        if (cache?.SecureBusinessUnit is { } known)
+            return known;
+        var answer = await SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync(_dataverse, _configuration, ct, _logger)
+            .ConfigureAwait(false);
+        if (cache is not null)
+            cache.SecureBusinessUnit = answer;
+        return answer;
+    }
+
+    private async Task<RecordOwnerResolution> ReadDefaultOwnerTeamAsync(Guid businessUnitId, CancellationToken ct)
     {
         // TOP 2 for the same reason as the user lookup. Dataverse keeps exactly one default team per business
         // unit, so a second row means the two predicates are not selecting what they claim to — refuse rather
