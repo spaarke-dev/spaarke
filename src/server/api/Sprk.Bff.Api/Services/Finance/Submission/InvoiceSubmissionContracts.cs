@@ -225,7 +225,20 @@ public sealed record InvoiceSubmissionView
     /// <summary>The stable reason code of a terminal outcome, when the job set one.</summary>
     public string? OutcomeReasonCode { get; init; }
 
+    /// <summary>
+    /// The submission's document (<c>sprk_document</c>). ebilling-r1 task 098 review round 4b: read so the external routes can decide a
+    /// submission that has no invoice yet by its source; the external routes clear it before they answer, so it is never serialized to an
+    /// external caller (no external client reads it). The internal route still returns it when it is set.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Guid? DocumentId { get; init; }
+
+    /// <summary>
+    /// ebilling-r1 task 098 review round 4b: the stored <c>sprk_channel</c> option value (null when absent), read so the external routes can
+    /// decide a submission by its channel exactly as the (a') predicate does (<see cref="InvoiceSubmissionChannel"/>). Server-side only.
+    /// </summary>
+    [JsonIgnore]
+    public int? ChannelValue { get; init; }
 
     /// <summary>The firm. Used by the routes to scope; returned to the caller (it is their own firm).</summary>
     public Guid? FirmId { get; init; }

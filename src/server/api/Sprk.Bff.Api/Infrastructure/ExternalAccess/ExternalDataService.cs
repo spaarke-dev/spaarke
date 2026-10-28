@@ -1955,6 +1955,43 @@ public class ExternalDataService
     }
 
     /// <summary>
+    /// ebilling-r1 task 098 review round 4b: THE decision of the external submission routes (list and single read) for
+    /// <paramref name="caller"/>, read app-only (<see cref="ExternalInvoiceVisibility.DecideSubmissionsAsync"/>): with an
+    /// invoice, the invoice predicate; without one, the submission's own source. Keyed by submission id. An internal systemuser
+    /// (the same test as <see cref="HideInvoicesForAsync"/>) sees every one and causes no read; every other caller gets the
+    /// decision. A failed read withholds every asked submission (<see cref="InvoiceVisibilityResult.Faulted"/>). Bound to
+    /// <see cref="ExternalInvoiceSubmissionHiding"/> by <c>AddExternalAccess</c>, with the effective root flags it needs.
+    /// </summary>
+    internal async Task<InvoiceVisibilityResult> HideSubmissionsForAsync(
+        CallerPrincipal caller, IReadOnlyCollection<Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionView> submissions,
+        EffectiveRootFlagReader rootFlags, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(caller);
+        ArgumentNullException.ThrowIfNull(submissions);
+        ArgumentNullException.ThrowIfNull(rootFlags);
+        var asked = submissions.Where(s => s is not null && s.SubmissionId != Guid.Empty).Select(s => s.SubmissionId).Distinct().ToList();
+        if (asked.Count == 0 || await IsInternalSystemUserAsync(caller, ct))
+            return InvoiceVisibilityResult.NotHidden(asked);
+        try
+        {
+            var decision = await ExternalInvoiceVisibility.DecideSubmissionsAsync(submissions, InvoiceVisibilityReadersOver(rootFlags), ct);
+            LogInvoiceVisibilityCost("external-submissions", asked.Count, decision);
+            return decision;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "[EXT-INVOICE-VISIBILITY] The (a') read for {Count} submission(s) failed. Failing CLOSED: none of them is shown.",
+                asked.Count);
+            return InvoiceVisibilityResult.ReadFailed(asked);
+        }
+    }
+
+    /// <summary>
     /// ebilling-r1 task 098 surface (d): the assistant tools' taint closure (<see cref="AppOnlyInvoiceFamilyHiding"/>): of
     /// <paramref name="rowIds"/> (rows of an invoice-family table), the ids hidden because their invoice is. The caller is
     /// already known to be external. Read app-only; a failed read THROWS (the tool call fails with no data).

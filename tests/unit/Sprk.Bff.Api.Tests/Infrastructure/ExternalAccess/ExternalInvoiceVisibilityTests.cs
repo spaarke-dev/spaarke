@@ -14,6 +14,7 @@ using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Communication;
+using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Identity;
 using Sprk.Bff.Api.Tests.Api.ExternalAccess;
 using Xunit;
@@ -392,8 +393,7 @@ public sealed class ExternalInvoiceVisibilityTests
     public async Task SpaUpload_NoSubmissionDocument_AndASourcelessInvoicePdf_IsVisible(string caller)
     {
         var invoice = Guid.NewGuid();
-        _world.Submission(invoice, document: null, channel: InvoiceWorld.SpaChannel);
-        _world.StoredFileRaw(invoice, rawSource: null, purpose: InvoiceWorld.InvoicePdf);
+        _world.SpaUpload(invoice);
 
         await ShouldBeVisible(caller, invoice);
     }
@@ -402,8 +402,7 @@ public sealed class ExternalInvoiceVisibilityTests
     public async Task InternalUpload_NoSubmissionDocument_AndASourcelessInvoicePdf_IsVisible(string caller)
     {
         var invoice = Guid.NewGuid();
-        _world.Submission(invoice, document: null, channel: InvoiceWorld.InternalChannel);
-        _world.StoredFileRaw(invoice, rawSource: null, purpose: InvoiceWorld.InvoicePdf);
+        _world.InternalUpload(invoice);
 
         await ShouldBeVisible(caller, invoice);
     }
@@ -455,44 +454,238 @@ public sealed class ExternalInvoiceVisibilityTests
     }
 
     /// <summary>
-    /// "No source at all": an InvoicePdf that carries any one source column is NOT the upload's own PDF, so an Internal
-    /// submission with an empty document link keeps the invoice hidden; with every source column empty it is visible.
+    /// Review round 4a, rule 3: an Internal submission with an empty document link is decided by the invoice's InvoicePdf.
+    /// Sourceless: the upload's own PDF, visible. With a source document: decided by that document (readable visible,
+    /// Restricted hidden), even when the row also carries a communication and part identity. With a communication or an
+    /// attachment identity only: hidden. (Replaces round 3's case that hid an InvoicePdf with a readable source document.)
     /// </summary>
-    [Theory]
-    [InlineData("contact", "document", false)]
-    [InlineData("contact", "communication", false)]
-    [InlineData("contact", "attachment", false)]
-    [InlineData("contact", "none", true)]
-    [InlineData("flagged-systemuser", "document", false)]
-    [InlineData("flagged-systemuser", "communication", false)]
-    [InlineData("flagged-systemuser", "attachment", false)]
-    [InlineData("flagged-systemuser", "none", true)]
-    public async Task InternalUpload_AnInvoicePdfCarryingAnySource_IsNotTheUploadsOwnPdf(string caller, string column, bool visible)
+    public static TheoryData<string, string, string?> Rule3InvoicePdfShapes()
+    {
+        var data = new TheoryData<string, string, string?>();
+        foreach (var caller in new[] { "contact", "flagged-systemuser" })
+        {
+            data.Add(caller, "sourceless", null);
+            data.Add(caller, "readable-document", null);
+            data.Add(caller, "readable-document-with-communication-and-part", null);
+            data.Add(caller, "restricted-document", "source_hidden");
+            data.Add(caller, "communication-only", "source_link_unreadable");
+            data.Add(caller, "attachment-only", "source_link_unreadable");
+            data.Add(caller, "communication-and-attachment-only", "source_link_unreadable");
+        }
+
+        return data;
+    }
+
+    [Theory, MemberData(nameof(Rule3InvoicePdfShapes))]
+    public async Task Rule3_AnInternalEmptyLink_IsDecidedByTheInvoicePdf(string caller, string shape, string? hiddenCode)
     {
         var invoice = Guid.NewGuid();
         var matter = Guid.NewGuid();
         _world.Flags[matter] = RootRecordFlags.None;
         _world.Submission(invoice, document: null, channel: InvoiceWorld.InternalChannel);
-        switch (column)
+        var communication = _world.Communication(internalOnly: false, _world.Thread(Open));
+        _ = shape switch
         {
-            case "document": // a readable document: the empty submission link still hides
-                _world.StoredFileRaw(invoice, _world.Document(Guid.NewGuid(), permission: Standard, matter: matter).ToString());
-                break;
-            case "communication":
-                _world.StoredFileRaw(invoice, rawSource: null, sourceCommunication: Guid.NewGuid());
-                break;
-            case "attachment":
-                _world.StoredFileRaw(invoice, rawSource: null, attachmentIdentity: "AAMkAD-attachment-1");
-                break;
-            default:
-                _world.StoredFileRaw(invoice, rawSource: null);
-                break;
+            "sourceless" => _world.WriterStoredFile(invoice, InvoiceWorld.InvoicePdf),
+            "readable-document" => _world.WriterStoredFile(invoice, InvoiceWorld.InvoicePdf,
+                sourceDocument: _world.Document(Guid.NewGuid(), permission: Standard, matter: matter)),
+            "readable-document-with-communication-and-part" => _world.WriterStoredFile(invoice, InvoiceWorld.InvoicePdf,
+                _world.Document(Guid.NewGuid(), permission: Standard, matter: matter), communication, "eml-part-1"),
+            "restricted-document" => _world.WriterStoredFile(invoice, InvoiceWorld.InvoicePdf,
+                sourceDocument: _world.Document(Guid.NewGuid(), permission: Restricted, matter: matter)),
+            "communication-only" => _world.WriterStoredFile(invoice, InvoiceWorld.InvoicePdf, sourceCommunication: communication),
+            "attachment-only" => _world.WriterStoredFile(invoice, InvoiceWorld.InvoicePdf, attachmentIdentity: "eml-part-1"),
+            "communication-and-attachment-only" => _world.WriterStoredFile(invoice, InvoiceWorld.InvoicePdf,
+                sourceCommunication: communication, attachmentIdentity: "eml-part-1"),
+            _ => throw new ArgumentOutOfRangeException(nameof(shape)),
+        };
+
+        if (hiddenCode is null)
+        {
+            await ShouldBeVisible(caller, invoice);
+            return;
         }
 
-        if (visible)
-            await ShouldBeVisible(caller, invoice);
-        else
-            await ShouldBeHidden(caller, invoice, InvoiceHiddenReason.SourceLinkUnreadable);
+        var decision = await Decide(caller, invoice);
+        decision.IsVisible(invoice).Should().BeFalse();
+        decision.HiddenSummary().Should().Contain(hiddenCode);
+    }
+
+    // Review round 4a: writer-shaped fixtures (the 094 head and 095's contract). Each carries its route's real submission row
+    // and its real Stored File rows.
+
+    private Guid CleanMatter()
+    {
+        var matter = Guid.NewGuid();
+        _world.Flags[matter] = RootRecordFlags.None;
+        return matter;
+    }
+
+    private Guid FirmCommunication() => _world.Communication(internalOnly: false, _world.Thread(Open));
+
+    [Theory, MemberData(nameof(ExternalCallers))]
+    public async Task WriterShape_FromDocument_AReadableDocument_IsVisible(string caller)
+    {
+        var invoice = Guid.NewGuid();
+        _world.FromDocument(invoice, _world.Document(Guid.NewGuid(), permission: Standard, matter: CleanMatter()));
+
+        await ShouldBeVisible(caller, invoice);
+    }
+
+    [Theory, MemberData(nameof(ExternalCallers))]
+    public async Task WriterShape_FromEmail_AMarkedEml_IsVisibleToItsFirm(string caller)
+    {
+        var invoice = Guid.NewGuid();
+        var communication = FirmCommunication();
+        _world.FromEmail(invoice, _world.SubmissionEml(marked: true, communication, CleanMatter()), communication, supportingParts: 2);
+
+        await ShouldBeVisible(caller, invoice);
+    }
+
+    [Theory, MemberData(nameof(ExternalCallers))]
+    public async Task WriterShape_FromEmail_AnUnmarkedRestrictedEml_IsHidden(string caller)
+    {
+        var invoice = Guid.NewGuid();
+        var communication = FirmCommunication();
+        _world.FromEmail(invoice, _world.SubmissionEml(marked: false, communication, CleanMatter()), communication);
+
+        await ShouldBeHidden(caller, invoice, InvoiceHiddenReason.SourceHidden);
+    }
+
+    [Theory, MemberData(nameof(ExternalCallers))]
+    public async Task WriterShape_FromEmail_NoInvoicePdf_OnlySupportingFiles_IsHidden(string caller)
+    {
+        // A supporting file never counts as the upload's own PDF, even with a source the firm may see.
+        var invoice = Guid.NewGuid();
+        var communication = FirmCommunication();
+        var eml = _world.SubmissionEml(marked: true, communication, CleanMatter());
+        _world.Submission(invoice, document: null, channel: InvoiceWorld.InternalChannel);
+        _world.WriterStoredFile(invoice, InvoiceWorld.InvoiceSupportingFile, eml, communication, "eml-part-2");
+
+        await ShouldBeHidden(caller, invoice, InvoiceHiddenReason.SourceLinkUnreadable);
+    }
+
+    [Theory, MemberData(nameof(ExternalCallers))]
+    public async Task WriterShape_FromEmail_ASupportingFileWithARestrictedSource_HidesTheInvoice(string caller)
+    {
+        // A supporting file with a source is still decided by that source.
+        var invoice = Guid.NewGuid();
+        var matter = CleanMatter();
+        var communication = FirmCommunication();
+        _world.FromEmail(invoice, _world.SubmissionEml(marked: true, communication, matter), communication, supportingParts: 0);
+        _world.WriterStoredFile(invoice, InvoiceWorld.InvoiceSupportingFile,
+            _world.Document(Guid.NewGuid(), permission: Restricted, matter: matter), communication, "eml-part-2");
+
+        await ShouldBeHidden(caller, invoice, InvoiceHiddenReason.SourceHidden);
+    }
+
+    [Theory, MemberData(nameof(ExternalCallers))]
+    public async Task WriterShape_AStoredFileWhosePurposeReadsNull_HidesTheInvoice(string caller)
+    {
+        var invoice = Guid.NewGuid();
+        _world.FromDocument(invoice, _world.Document(Guid.NewGuid(), permission: Standard, matter: CleanMatter()));
+        _world.SetStoredFile(_world.StoredFilesOf(invoice).Single(), "sprk_purpose", null);
+
+        await ShouldBeHidden(caller, invoice, InvoiceHiddenReason.SourceLinkUnreadable);
+    }
+
+    [Theory, MemberData(nameof(ExternalCallers))]
+    public async Task WriterShape_FromEmail_AFieldSecurityMaskedRow_HidesTheInvoice(string caller)
+    {
+        // The invoice is visible to its firm; one of its rows then reads as a reader without the profile reads it.
+        var invoice = Guid.NewGuid();
+        var communication = FirmCommunication();
+        _world.FromEmail(invoice, _world.SubmissionEml(marked: true, communication, CleanMatter()), communication, supportingParts: 1);
+        await ShouldBeVisible(caller, invoice);
+
+        _world.MaskStoredFile(_world.StoredFilesOf(invoice).Last());
+
+        await ShouldBeHidden(caller, invoice, InvoiceHiddenReason.SourceLinkUnreadable);
+    }
+
+    [Theory, MemberData(nameof(ExternalCallers))]
+    public async Task WriterShape_FromEmail_AFailedStoredFileRead_HidesTheInvoice(string caller)
+    {
+        var invoice = Guid.NewGuid();
+        var communication = FirmCommunication();
+        _world.FromEmail(invoice, _world.SubmissionEml(marked: true, communication, CleanMatter()), communication);
+        _world.Faults["sprk_storedfiles"] = HttpStatusCode.ServiceUnavailable;
+
+        var decision = await Decide(caller, invoice);
+
+        decision.IsVisible(invoice).Should().BeFalse();
+        decision.Faulted.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task WriterShape_FromEmail_AFailedInvoiceRead_HidesItsRows()
+    {
+        // The rows' invoice links are read first (taint closure): a failed read gives no answer at all; a link that is not a
+        // GUID hides the row. The same invoice's rows are visible when the read succeeds.
+        var invoice = Guid.NewGuid();
+        var communication = FirmCommunication();
+        var submission = _world.FromEmail(invoice, _world.SubmissionEml(marked: true, communication, CleanMatter()), communication);
+        var unreadable = _world.FamilyRow("sprk_invoicesubmission", invoice: null);
+        var service = _world.NewService(_identity.Object);
+
+        (await service.HideInvoiceFamilyRowsAsync("sprk_invoicesubmission", new[] { submission }, _world.RootFlags))
+            .Should().BeEmpty("the from-email invoice is visible to its firm");
+
+        _world.SetRow("sprk_invoicesubmissions", "sprk_invoicesubmissionid", unreadable, "_sprk_invoice_value", "not-a-guid");
+        (await service.HideInvoiceFamilyRowsAsync("sprk_invoicesubmission", new[] { submission, unreadable }, _world.RootFlags))
+            .Should().BeEquivalentTo(new[] { unreadable });
+
+        _world.Faults["sprk_invoicesubmissions"] = HttpStatusCode.ServiceUnavailable;
+        var act = () => service.HideInvoiceFamilyRowsAsync("sprk_invoicesubmission", new[] { submission }, _world.RootFlags);
+        await act.Should().ThrowAsync<Exception>("a failed invoice read gives the caller no data");
+        (await Decide("contact", invoice)).IsVisible(invoice).Should().BeFalse("the predicate's own submission read failed");
+    }
+
+    [Theory, MemberData(nameof(ExternalCallers))]
+    public async Task Rule2_ASubmissionsOwnDocument_HonoursTheMarker(string caller)
+    {
+        // The legacy confirm shape (no Stored File): the submission's own document is the only source.
+        var marked = Guid.NewGuid();
+        _world.Submission(marked, _world.SubmissionEml(marked: true, FirmCommunication(), CleanMatter()));
+        var unmarked = Guid.NewGuid();
+        _world.Submission(unmarked, _world.SubmissionEml(marked: false, FirmCommunication(), CleanMatter()));
+
+        await ShouldBeVisible(caller, marked);
+        await ShouldBeHidden(caller, unmarked, InvoiceHiddenReason.SourceHidden);
+    }
+
+    [Fact]
+    public async Task DecideSourceDocuments_DecidesEachSource_AndHidesOneItWasNotAskedOrCouldNotRead()
+    {
+        var visible = _world.Document(Guid.NewGuid(), permission: Standard, matter: CleanMatter());
+        var restricted = _world.Document(Guid.NewGuid(), permission: Restricted);
+        var missing = Guid.NewGuid();
+        var service = _world.NewService(_identity.Object);
+        var http = new HttpClient(_world);
+        CommunicationOpenThreadGate.RowQuery query = async (set, odata, ct) =>
+        {
+            var response = await http.GetAsync($"https://org.test/api/data/v9.2/{set}?{odata}", ct);
+            response.EnsureSuccessStatusCode();
+            using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+            return json.RootElement.GetProperty("value").EnumerateArray()
+                .Select(row => row.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.Clone()))
+                .ToList();
+        };
+        var readers = new InvoiceVisibilityReaders(
+            query,
+            (rows, ct) => ExternalDocumentNarrowing.DecideAsync(rows, query, ct, honourSubmissionMarker: true),
+            service.GetLiveParentRootsAsync,
+            _world.RootFlags,
+            NullLogger.Instance);
+
+        var decision = await ExternalInvoiceVisibility.DecideSourceDocumentsAsync(
+            new[] { visible, restricted, missing, Guid.Empty }, readers, cost: null, CancellationToken.None);
+
+        decision.IsVisible(visible).Should().BeTrue();
+        decision.HiddenReason(restricted).Should().Be(InvoiceHiddenReason.SourceHidden);
+        decision.HiddenReason(missing).Should().Be(InvoiceHiddenReason.SourceNotFound);
+        decision.IsVisible(Guid.Empty).Should().BeFalse();
+        decision.IsVisible(Guid.NewGuid()).Should().BeFalse("a source it was not asked about is hidden");
     }
 
     [Theory, MemberData(nameof(ExternalCallers))]
@@ -691,6 +884,289 @@ public sealed class ExternalInvoiceVisibilityTests
         _world.Reads("sprk_communicationthreads").Should().HaveCount(1);
         decision.Cost.StoredFileReads.Should().Be(1);
         decision.Cost.SubmissionReads.Should().Be(1);
+        decision.Cost.SourceReads.Should().Be(1);
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════
+    // Review round 4b: the external submission routes' decision (ExternalDataService.HideSubmissionsForAsync). A submission with
+    // an invoice is decided by the invoice predicate; one without an invoice by its own source. Writer-shaped rows throughout.
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+    private Task<InvoiceVisibilityResult> DecideSubmissions(string caller, params InvoiceSubmissionView[] submissions) =>
+        _world.NewService(_identity.Object).HideSubmissionsForAsync(Caller(caller), submissions, _world.RootFlags);
+
+    /// <summary>The submission row as <c>InvoiceSubmissionService.ToView</c> reads it (channel, document link, invoice link).</summary>
+    private static InvoiceSubmissionView SubmissionView(
+        Guid id, int? channel, Guid? document = null, Guid? invoice = null, InvoiceSubmissionStatus status = InvoiceSubmissionStatus.Received) =>
+        new()
+        {
+            SubmissionId = id,
+            Status = status.ToString(),
+            ChannelValue = channel,
+            DocumentId = document,
+            InvoiceId = invoice,
+        };
+
+    /// <summary>
+    /// Per source: the decision before the invoice exists (the submission row only, as its route writes it at Received) and after
+    /// the persister's commit (the invoice link and the invoice's Stored Files). Only an Internal submission with an empty
+    /// document link (internal upload, from-email) may differ, and only from withheld to visible.
+    /// </summary>
+    public static TheoryData<string, string, bool, bool> SubmissionSourcesBeforeAndAfter()
+    {
+        var data = new TheoryData<string, string, bool, bool>();
+        foreach (var caller in new[] { "contact", "flagged-systemuser" })
+        {
+            data.Add(caller, "spa-upload", true, true);
+            data.Add(caller, "internal-upload", false, true);
+            data.Add(caller, "confirm-legacy-readable-document", true, true);
+            data.Add(caller, "from-document-readable-document", true, true);
+            data.Add(caller, "confirm-legacy-isolated-document", false, false);
+            data.Add(caller, "from-document-isolated-document", false, false);
+            data.Add(caller, "from-email-marked-eml", false, true);
+            data.Add(caller, "from-email-unmarked-restricted-eml", false, false);
+        }
+
+        return data;
+    }
+
+    [Theory, MemberData(nameof(SubmissionSourcesBeforeAndAfter))]
+    public async Task Submission_DecidedBeforeItsInvoiceExists_AndAfter_DiffersOnlyForAnInternalEmptyLink(
+        string caller, string source, bool visibleBefore, bool visibleAfter)
+    {
+        var submission = Guid.NewGuid();
+        var invoice = Guid.NewGuid();
+        var communication = FirmCommunication();
+        var readable = _world.Document(Guid.NewGuid(), permission: Standard, matter: CleanMatter());
+        var isolated = _world.Document(Guid.NewGuid(), permission: Restricted, matter: CleanMatter());
+        var markedEml = _world.SubmissionEml(marked: true, communication, CleanMatter());
+        var unmarkedEml = _world.SubmissionEml(marked: false, communication, CleanMatter());
+        var (channel, document) = source switch
+        {
+            "spa-upload" => (InvoiceWorld.SpaChannel, (Guid?)null),
+            "internal-upload" or "from-email-marked-eml" or "from-email-unmarked-restricted-eml" => (InvoiceWorld.InternalChannel, null),
+            "confirm-legacy-readable-document" or "from-document-readable-document" => (InvoiceWorld.InternalChannel, readable),
+            "confirm-legacy-isolated-document" or "from-document-isolated-document" => (InvoiceWorld.InternalChannel, isolated),
+            _ => throw new ArgumentOutOfRangeException(nameof(source)),
+        };
+
+        var before = await DecideSubmissions(caller, SubmissionView(submission, channel, document));
+
+        // The persister's commit: the submission's invoice link and the invoice's Stored Files, in the writer's shape.
+        switch (source)
+        {
+            case "spa-upload":
+                _world.SpaUpload(invoice, submission);
+                break;
+            case "internal-upload":
+                _world.InternalUpload(invoice, submission);
+                break;
+            case "confirm-legacy-readable-document" or "confirm-legacy-isolated-document":
+                _world.Submission(invoice, document, InvoiceWorld.InternalChannel, submission);
+                break;
+            case "from-document-readable-document" or "from-document-isolated-document":
+                _world.FromDocument(invoice, document!.Value, submission);
+                break;
+            case "from-email-marked-eml":
+                _world.FromEmail(invoice, markedEml, communication, submissionId: submission);
+                break;
+            case "from-email-unmarked-restricted-eml":
+                _world.FromEmail(invoice, unmarkedEml, communication, submissionId: submission);
+                break;
+        }
+
+        var after = await DecideSubmissions(
+            caller, SubmissionView(submission, channel, document, invoice, InvoiceSubmissionStatus.Accepted));
+
+        before.IsVisible(submission).Should().Be(visibleBefore, $"before the invoice ({before.HiddenSummary()})");
+        after.IsVisible(submission).Should().Be(visibleAfter, $"after the invoice ({after.HiddenSummary()})");
+        before.Faulted.Should().BeFalse();
+        after.Faulted.Should().BeFalse();
+        var internalEmptyLink = channel == InvoiceWorld.InternalChannel && document is null;
+        if (internalEmptyLink)
+            (before.IsVisible(submission) && !after.IsVisible(submission)).Should().BeFalse("an empty link may only go from withheld to visible");
+        else
+            after.IsVisible(submission).Should().Be(before.IsVisible(submission), "the same source decides before and after the invoice");
+    }
+
+    public static TheoryData<string, InvoiceSubmissionStatus> ExternalCallersAtEveryStatusWithoutAnInvoice()
+    {
+        var data = new TheoryData<string, InvoiceSubmissionStatus>();
+        foreach (var caller in new[] { "contact", "flagged-systemuser" })
+        {
+            foreach (var status in new[]
+                     {
+                         InvoiceSubmissionStatus.Received, InvoiceSubmissionStatus.Processing, InvoiceSubmissionStatus.Failed,
+                         InvoiceSubmissionStatus.Rejected,
+                     })
+                data.Add(caller, status);
+        }
+
+        return data;
+    }
+
+    [Theory, MemberData(nameof(ExternalCallersAtEveryStatusWithoutAnInvoice))]
+    public async Task NoInvoice_AnIsolatedSubmissionDocument_IsWithheld_AtEveryStatus(string caller, InvoiceSubmissionStatus status)
+    {
+        var submission = Guid.NewGuid();
+        var isolated = _world.Document(Guid.NewGuid(), permission: Restricted, matter: CleanMatter());
+
+        var decision = await DecideSubmissions(caller, SubmissionView(submission, InvoiceWorld.InternalChannel, isolated, status: status));
+
+        decision.IsVisible(submission).Should().BeFalse();
+        decision.HiddenSummary().Should().Contain(InvoiceVisibilityResult.CodeOf(InvoiceHiddenReason.SourceHidden));
+    }
+
+    [Theory, MemberData(nameof(ExternalCallers))]
+    public async Task NoInvoice_ASubmissionDocumentUnderARestrictedRoot_IsWithheld(string caller)
+    {
+        var submission = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        _world.Flags[matter] = new RootRecordFlags(IsSecure: false, IsRestricted: true);
+        var document = _world.Document(Guid.NewGuid(), permission: Standard, matter: matter);
+
+        var decision = await DecideSubmissions(caller, SubmissionView(submission, InvoiceWorld.InternalChannel, document));
+
+        decision.IsVisible(submission).Should().BeFalse();
+        decision.HiddenSummary().Should().Contain(InvoiceVisibilityResult.CodeOf(InvoiceHiddenReason.RootRestricted));
+    }
+
+    [Theory, MemberData(nameof(ExternalCallers))]
+    public async Task NoInvoice_Spa_IsVisible(string caller)
+    {
+        var submission = Guid.NewGuid();
+
+        var decision = await DecideSubmissions(caller, SubmissionView(submission, InvoiceWorld.SpaChannel));
+
+        decision.IsVisible(submission).Should().BeTrue(decision.HiddenSummary());
+        _world.Urls.Should().BeEmpty("a Spa submission is decided without a read");
+    }
+
+    [Theory, MemberData(nameof(ExternalCallers))]
+    public async Task NoInvoice_Internal_AReadableSubmissionDocument_IsVisible(string caller)
+    {
+        var submission = Guid.NewGuid();
+        var document = _world.Document(Guid.NewGuid(), permission: Standard, matter: CleanMatter());
+
+        var decision = await DecideSubmissions(caller, SubmissionView(submission, InvoiceWorld.InternalChannel, document));
+
+        decision.IsVisible(submission).Should().BeTrue(decision.HiddenSummary());
+    }
+
+    [Theory, MemberData(nameof(ExternalCallers))]
+    public async Task NoInvoice_Internal_ASubmissionsOwnEml_HonoursTheMarker(string caller)
+    {
+        var marked = Guid.NewGuid();
+        var unmarked = Guid.NewGuid();
+
+        var decision = await DecideSubmissions(caller,
+            SubmissionView(marked, InvoiceWorld.InternalChannel, _world.SubmissionEml(marked: true, FirmCommunication(), CleanMatter())),
+            SubmissionView(unmarked, InvoiceWorld.InternalChannel, _world.SubmissionEml(marked: false, FirmCommunication(), CleanMatter())));
+
+        decision.IsVisible(marked).Should().BeTrue(decision.HiddenSummary());
+        decision.IsVisible(unmarked).Should().BeFalse();
+    }
+
+    [Theory, MemberData(nameof(ExternalCallers))]
+    public async Task NoInvoice_Internal_AnEmptyDocumentLink_IsWithheld(string caller)
+    {
+        var submission = Guid.NewGuid();
+
+        var decision = await DecideSubmissions(caller, SubmissionView(submission, InvoiceWorld.InternalChannel));
+
+        decision.IsVisible(submission).Should().BeFalse();
+        decision.HiddenSummary().Should().Be($"{InvoiceVisibilityResult.CodeOf(InvoiceHiddenReason.SourceLinkUnreadable)}=1");
+    }
+
+    [Theory]
+    [InlineData("contact", null)]
+    [InlineData("contact", 999)]
+    [InlineData("contact", 100000002)] // Mailbox: a reserved option value with no writer
+    [InlineData("flagged-systemuser", null)]
+    [InlineData("flagged-systemuser", 999)]
+    [InlineData("flagged-systemuser", 100000002)]
+    public async Task NoInvoice_AnUnknownOrUnreadableChannel_IsWithheld(string caller, int? channel)
+    {
+        var submission = Guid.NewGuid();
+        var readable = _world.Document(Guid.NewGuid(), permission: Standard, matter: CleanMatter());
+
+        var decision = await DecideSubmissions(caller, SubmissionView(submission, channel, readable));
+
+        decision.IsVisible(submission).Should().BeFalse();
+        decision.HiddenSummary().Should().Be($"{InvoiceVisibilityResult.CodeOf(InvoiceHiddenReason.SourceKindUnknown)}=1");
+    }
+
+    [Theory]
+    [InlineData("contact", "sprk_documents")]
+    [InlineData("flagged-systemuser", "sprk_documents")]
+    [InlineData("contact", "sprk_storedfiles")]
+    [InlineData("flagged-systemuser", "sprk_storedfiles")]
+    public async Task AFailedRead_WithholdsEveryAskedSubmission_AndSaysFaulted(string caller, string faultingSet)
+    {
+        var spa = Guid.NewGuid();
+        var internalWithDocument = Guid.NewGuid();
+        var withInvoice = Guid.NewGuid();
+        var invoice = Guid.NewGuid();
+        _world.SpaUpload(invoice, withInvoice);
+        var document = _world.Document(Guid.NewGuid(), permission: Standard, matter: CleanMatter());
+        _world.Faults[faultingSet] = HttpStatusCode.ServiceUnavailable;
+
+        var decision = await DecideSubmissions(caller,
+            SubmissionView(spa, InvoiceWorld.SpaChannel),
+            SubmissionView(internalWithDocument, InvoiceWorld.InternalChannel, document),
+            SubmissionView(withInvoice, InvoiceWorld.SpaChannel, invoice: invoice, status: InvoiceSubmissionStatus.Accepted));
+
+        decision.Faulted.Should().BeTrue();
+        new[] { spa, internalWithDocument, withInvoice }.Should().OnlyContain(id => !decision.IsVisible(id));
+    }
+
+    [Fact]
+    public async Task AnInternalSystemuser_SeesEverySubmission_AndNothingIsRead()
+    {
+        var isolated = _world.Document(Guid.NewGuid(), permission: Restricted);
+        var ids = Enumerable.Range(0, 3).Select(_ => Guid.NewGuid()).ToArray();
+
+        var decision = await DecideSubmissions("internal-systemuser",
+            SubmissionView(ids[0], InvoiceWorld.InternalChannel, isolated),
+            SubmissionView(ids[1], InvoiceWorld.InternalChannel),
+            SubmissionView(ids[2], channel: null));
+
+        ids.Should().OnlyContain(id => decision.IsVisible(id), "an internal systemuser is never narrowed (as on the invoice path)");
+        _world.Urls.Should().BeEmpty("an internal caller costs no read");
+    }
+
+    [Fact]
+    public async Task ASubmissionTheDecisionWasNotAskedAbout_IsNeverVisible()
+    {
+        var decision = await DecideSubmissions("contact", SubmissionView(Guid.NewGuid(), InvoiceWorld.SpaChannel));
+
+        decision.IsVisible(Guid.NewGuid()).Should().BeFalse();
+        decision.IsVisible(Guid.Empty).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ThePageOfSubmissions_IsDecidedInBatchedReads_NotOnePerSubmission()
+    {
+        var page = new List<InvoiceSubmissionView>();
+        for (var i = 0; i < 30; i++)
+        {
+            var document = _world.Document(Guid.NewGuid(), permission: Standard, matter: CleanMatter());
+            page.Add(SubmissionView(Guid.NewGuid(), InvoiceWorld.InternalChannel, document));
+        }
+
+        for (var i = 0; i < 10; i++)
+        {
+            var invoice = Guid.NewGuid();
+            var submission = _world.SpaUpload(invoice);
+            page.Add(SubmissionView(submission, InvoiceWorld.SpaChannel, invoice: invoice, status: InvoiceSubmissionStatus.Accepted));
+        }
+
+        var decision = await DecideSubmissions("contact", page.ToArray());
+
+        page.Should().OnlyContain(s => decision.IsVisible(s.SubmissionId), decision.HiddenSummary());
+        _world.Reads("sprk_documents").Should().HaveCount(1, "one source read for the page's submission documents");
+        _world.Reads("sprk_storedfiles").Should().HaveCount(1);
+        _world.Reads("sprk_invoicesubmissions").Should().HaveCount(1);
         decision.Cost.SourceReads.Should().Be(1);
     }
 
@@ -978,18 +1454,129 @@ internal sealed class InvoiceWorld : HttpMessageHandler
 
     /// <summary>A submission of <paramref name="invoice"/> naming <paramref name="document"/> on <paramref name="channel"/>
     /// (Internal by default: the confirm route's only record of its source is <c>sprk_invoicesubmission.sprk_document</c>).</summary>
-    public void Submission(Guid invoice, Guid? document) => Submission(invoice, document, InternalChannel);
+    public Guid Submission(Guid invoice, Guid? document) => Submission(invoice, document, InternalChannel);
 
-    /// <summary>A submission with an explicit raw <paramref name="channel"/> (null and unknown values allowed).</summary>
-    public void Submission(Guid invoice, Guid? document, object? channel) =>
+    /// <summary>A submission with an explicit raw <paramref name="channel"/> (null and unknown values allowed); returns its id
+    /// (<paramref name="id"/> when given: the row a submission decided before its invoice existed gets on the commit).</summary>
+    public Guid Submission(Guid invoice, Guid? document, object? channel, Guid? id = null)
+    {
+        var submission = id ?? Guid.NewGuid();
         Seed("sprk_invoicesubmissions", new Dictionary<string, object?>
         {
-            ["sprk_invoicesubmissionid"] = Guid.NewGuid().ToString(),
+            ["sprk_invoicesubmissionid"] = submission.ToString(),
             ["_sprk_invoice_value"] = invoice.ToString(),
             ["_sprk_document_value"] = document?.ToString(),
             ["sprk_channel"] = channel,
             ["sprk_name"] = "SUB-0001",
         });
+        return submission;
+    }
+
+    // ── Writer shapes (review round 4a; the 094 head and 095's contract): each seeds the submission row and the Stored File
+    //    rows its route writes, in the shape the persister writes them ──────────────────────────────────────────────────
+
+    public const int RestrictedPermission = 100000002;
+
+    /// <summary>SPA upload (092/094): Spa, no submission document, a sourceless InvoicePdf (FirmVisible Yes).</summary>
+    public Guid SpaUpload(Guid invoice, Guid? submissionId = null)
+    {
+        var submission = Submission(invoice, document: null, channel: SpaChannel, submissionId);
+        WriterStoredFile(invoice, InvoicePdf, firmVisible: true);
+        return submission;
+    }
+
+    /// <summary>Internal upload (092/094): Internal, no submission document, a sourceless InvoicePdf (FirmVisible No).</summary>
+    public Guid InternalUpload(Guid invoice, Guid? submissionId = null)
+    {
+        var submission = Submission(invoice, document: null, channel: InternalChannel, submissionId);
+        WriterStoredFile(invoice, InvoicePdf);
+        return submission;
+    }
+
+    /// <summary>Confirm / from-document on 094: Internal naming <paramref name="document"/>, and an InvoicePdf copy whose
+    /// source document is that document (FirmVisible No).</summary>
+    public Guid FromDocument(Guid invoice, Guid document, Guid? submissionId = null)
+    {
+        var submission = Submission(invoice, document, InternalChannel, submissionId);
+        WriterStoredFile(invoice, InvoicePdf, sourceDocument: document);
+        return submission;
+    }
+
+    /// <summary>
+    /// From-email 095: Internal with an EMPTY document link; an InvoicePdf whose source document is <paramref name="eml"/>,
+    /// with the email's communication, part identity "eml-part-1", source version and hash (FirmVisible No); and
+    /// <paramref name="supportingParts"/> InvoiceSupportingFile rows at "eml-part-{n}" with the same source columns.
+    /// </summary>
+    public Guid FromEmail(Guid invoice, Guid eml, Guid communication, int supportingParts = 1, Guid? submissionId = null)
+    {
+        var submission = Submission(invoice, document: null, channel: InternalChannel, submissionId);
+        WriterStoredFile(invoice, InvoicePdf, eml, communication, "eml-part-1");
+        for (var part = 2; part < 2 + supportingParts; part++)
+            WriterStoredFile(invoice, InvoiceSupportingFile, eml, communication, $"eml-part-{part}");
+        return submission;
+    }
+
+    /// <summary>The .eml a from-email submission creates (095): its own Restricted narrowing, linked to its communication, and
+    /// the submission marker (<paramref name="marked"/>; an unmarked one differs only there).</summary>
+    public Guid SubmissionEml(bool marked, Guid communication, Guid? matter = null) =>
+        Document(Guid.NewGuid(), permission: RestrictedPermission, eml: true, marker: marked, communication: communication,
+            matter: matter);
+
+    /// <summary>A Stored File as the persister writes it (every source column the route sets); returns its id.</summary>
+    public Guid WriterStoredFile(
+        Guid invoice, object? purpose, Guid? sourceDocument = null, Guid? sourceCommunication = null,
+        string? attachmentIdentity = null, bool firmVisible = false)
+    {
+        var id = Guid.NewGuid();
+        var sourced = sourceDocument is not null || sourceCommunication is not null || attachmentIdentity is not null;
+        Seed("sprk_storedfiles", new Dictionary<string, object?>
+        {
+            ["sprk_storedfileid"] = id.ToString(),
+            ["_sprk_invoice_value"] = invoice.ToString(),
+            ["sprk_purpose"] = purpose,
+            ["sprk_firmvisible"] = firmVisible,
+            ["_sprk_sourcedocument_value"] = sourceDocument?.ToString(),
+            ["_sprk_sourcecommunication_value"] = sourceCommunication?.ToString(),
+            ["sprk_sourceattachmentidentity"] = attachmentIdentity,
+            ["sprk_sourceversion"] = sourced ? "1" : null,
+            ["sprk_sourcesha256"] = sourced ? new string('a', 64) : null,
+            ["sprk_name"] = "file.pdf",
+        });
+        return id;
+    }
+
+    /// <summary>The Stored Files of <paramref name="invoice"/>, in the order they were seeded.</summary>
+    public IReadOnlyList<Guid> StoredFilesOf(Guid invoice)
+    {
+        lock (_sets)
+        {
+            return _sets["sprk_storedfiles"].Where(r => (string?)r["_sprk_invoice_value"] == invoice.ToString())
+                .Select(r => Guid.Parse((string)r["sprk_storedfileid"]!)).ToList();
+        }
+    }
+
+    /// <summary>Sets <paramref name="column"/> on the Stored File <paramref name="id"/>.</summary>
+    public void SetStoredFile(Guid id, string column, object? value) =>
+        SetRow("sprk_storedfiles", "sprk_storedfileid", id, column, value);
+
+    /// <summary>Sets <paramref name="column"/> on the row <paramref name="id"/> of <paramref name="set"/>.</summary>
+    public void SetRow(string set, string idColumn, Guid id, string column, object? value)
+    {
+        lock (_sets)
+            _sets[set].Single(r => (string?)r[idColumn] == id.ToString())[column] = value;
+    }
+
+    /// <summary>The Stored File <paramref name="id"/> as a reader without the field-security profile reads it: every secured
+    /// column but the invoice link reads null (088: purpose, firm-visible and the source columns are secured).</summary>
+    public void MaskStoredFile(Guid id)
+    {
+        foreach (var column in new[]
+                 {
+                     "sprk_purpose", "sprk_firmvisible", "_sprk_sourcedocument_value", "_sprk_sourcecommunication_value",
+                     "sprk_sourceattachmentidentity", "sprk_sourceversion", "sprk_sourcesha256",
+                 })
+            SetStoredFile(id, column, null);
+    }
 
     /// <summary>A document recorded as <paramref name="invoice"/>'s source ONLY on a submission (no Stored File).</summary>
     public Guid SubmissionSource(Guid invoice, object? permission = null, Guid? matter = null)
@@ -1040,6 +1627,10 @@ internal sealed class InvoiceWorld : HttpMessageHandler
             row["_sprk_document_value"] = Document(Guid.NewGuid()).ToString();
             row["sprk_channel"] = InternalChannel;
         }
+
+        // A Stored File always carries its purpose (the writer requires it): here a sourceless supporting file, not a source.
+        if (table == "sprk_storedfile")
+            row["sprk_purpose"] = InvoiceSupportingFile;
         Seed(family.EntitySet, row);
         return id;
     }

@@ -23,9 +23,9 @@ namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 /// <see cref="ExternalMultiRootRule.ReadLiveParentsAsync"/> + <see cref="ChildRowRoots"/> over the document row and
 /// <c>ExternalParticipationService.GetEffectiveRootRecordFlagsAsync</c>.</para>
 /// <para><b>Fail closed.</b> A Stored File or submission page that may be cut short, a source link that is not a GUID, a
-/// Stored File with a source communication or attachment identity but no source document, an Internal submission whose
-/// document link is empty when the invoice has no sourceless invoice PDF, a submission whose channel is unknown, a source that does
-/// not come back, an unreadable own value, marker, chain or communication, a root that cannot be resolved and a flag that
+/// Stored File whose purpose reads null (a masked row), a Stored File with a source communication or attachment identity but
+/// no source document, an Internal submission whose document link is empty when the invoice has no InvoicePdf that is
+/// sourceless or has a source document, a submission whose channel is unknown, a source that does not come back, an unreadable own value, marker, chain or communication, a root that cannot be resolved and a flag that
 /// cannot be read each hide the invoice. A failed read THROWS; the caller-aware seam
 /// (<see cref="ExternalDataService.HideInvoicesForAsync"/>) turns that into "every asked invoice hidden".</para>
 /// <para><b>Taint closure.</b> <see cref="HiddenFamilyRowsAsync"/> maps a row of the invoice family (lines, submissions,
@@ -119,18 +119,20 @@ internal static class ExternalInvoiceVisibility
             return new InvoiceVisibilityResult(asked, hidden, faulted: false, cost);
 
         // (1) The sources, one read per chunk of each table; both reads fail closed the same way.
-        //     Stored Files: every non-null source document. A source communication or attachment with no document hides the
-        //     invoice. A sourceless InvoicePdf is an upload's own invoice PDF.
+        //     Stored Files (review round 4a): a purpose that reads null hides the invoice; a source document is a source,
+        //     whatever else the row carries; a source communication or attachment with no document hides the invoice. An
+        //     InvoicePdf that is sourceless (an upload's own PDF) or has a source document is one rule 3 can rely on.
         //     Submissions (by channel, the shared InvoiceSubmissionChannel enum; review round 3):
         //       Spa                     never a document source; the Stored Files decide;
         //       Internal, document set  that document is a source (the confirm route records its source only here);
-        //       Internal, link empty    hidden unless the invoice has a sourceless InvoicePdf (the internal upload's own PDF);
+        //       Internal, link empty    decided by the invoice's InvoicePdf: sourceless, visible; with a source document,
+        //                               decided by that document; with no InvoicePdf, hidden;
         //       unknown or unreadable   hidden.
         var sourcesOf = new Dictionary<Guid, List<Guid>>();
-        var uploadPdfs = await ReadStoredFileSourcesAsync(asked, readers.Query, sourcesOf, hidden, cost, ct).ConfigureAwait(false);
+        var invoicePdfs = await ReadStoredFileSourcesAsync(asked, readers.Query, sourcesOf, hidden, cost, ct).ConfigureAwait(false);
         var internalWithoutDocument = await ReadSubmissionSourcesAsync(asked, readers.Query, sourcesOf, hidden, cost, ct)
             .ConfigureAwait(false);
-        foreach (var invoiceId in internalWithoutDocument.Where(id => !uploadPdfs.Contains(id)))
+        foreach (var invoiceId in internalWithoutDocument.Where(id => !invoicePdfs.Contains(id)))
             hidden.TryAdd(invoiceId, InvoiceHiddenReason.SourceLinkUnreadable);
 
         var pending = sourcesOf.Where(kv => !hidden.ContainsKey(kv.Key)).ToList();
@@ -138,9 +140,48 @@ internal static class ExternalInvoiceVisibility
         if (sourceIds.Count == 0)
             return new InvoiceVisibilityResult(asked, hidden, faulted: false, cost);
 
-        // (2) The sources themselves, by id, app-only: narrowing columns, marker, root links and live parents.
+        // (2) The sources themselves: THE source decision (rules 2-4 and the roots term).
+        var decided = await DecideSourceDocumentsAsync(sourceIds, readers, cost, ct).ConfigureAwait(false);
+
+        // The decision per invoice: hidden when ANY of its sources is.
+        foreach (var (invoiceId, sources) in pending)
+        {
+            foreach (var source in sources.Distinct())
+            {
+                if (decided.HiddenReason(source) is { } reason)
+                {
+                    hidden.TryAdd(invoiceId, reason);
+                    break;
+                }
+            }
+        }
+
+        return new InvoiceVisibilityResult(asked, hidden, faulted: false, cost);
+    }
+
+    /// <summary>
+    /// THE decision over a set of source documents for a caller who is NOT an internal systemuser (the caller has decided
+    /// that): each source read by id app-only (narrowing columns, marker, root links, live parents), task 188's narrowing with
+    /// the marker-aware rule 2 (<see cref="InvoiceVisibilityReaders.DecideSources"/>), and the roots term (the six root links and
+    /// the live roots of the source's other parents, then the EFFECTIVE flags). Every invoice decision and every
+    /// submission-route decision over a source document goes through here. <see cref="Guid.Empty"/> and an unreadable link
+    /// are never read and are hidden; a source that does not come back is hidden. Adds its reads to <paramref name="cost"/>
+    /// when one is given. A failed read THROWS.
+    /// </summary>
+    internal static async Task<SourceDocumentDecision> DecideSourceDocumentsAsync(
+        IReadOnlyCollection<Guid> sourceIds, InvoiceVisibilityReaders readers, InvoiceVisibilityCost? cost, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(sourceIds);
+        ArgumentNullException.ThrowIfNull(readers);
+        cost ??= new InvoiceVisibilityCost();
+        var reasons = new Dictionary<Guid, InvoiceHiddenReason?>();
+        var readable = sourceIds.Where(id => id != Guid.Empty && id != ExternalDocumentNarrowing.UnreadableLink).Distinct().ToList();
+        if (readable.Count == 0)
+            return new SourceDocumentDecision(reasons);
+
+        // The sources themselves, by id, app-only: narrowing columns, marker, root links and live parents.
         var sourceRows = new Dictionary<Guid, Dictionary<string, JsonElement>>();
-        var sourceChunks = await CommunicationOpenThreadGate.ReadChunksAsync(sourceIds, (chunk, c) => readers.Query(
+        var sourceChunks = await CommunicationOpenThreadGate.ReadChunksAsync(readable, (chunk, c) => readers.Query(
             ExternalDocumentNarrowing.DocumentSet,
             $"$select={string.Join(",", SourceSelectColumns)}" +
             $"&$filter={string.Join(" or ", chunk.Select(id => $"{ExternalDocumentNarrowing.DocumentPkField} eq {id:D}"))}" +
@@ -162,7 +203,7 @@ internal static class ExternalInvoiceVisibility
         var narrowing = narrowingRows.Count == 0
             ? DocumentNarrowingResult.NotNarrowed(Array.Empty<DocumentNarrowingRow>())
             : await readers.DecideSources(narrowingRows.Values.ToList(), ct).ConfigureAwait(false);
-        cost.NarrowingReads = narrowing.Cost.Reads;
+        cost.NarrowingReads += narrowing.Cost.Reads;
 
         // The roots term: the six root links ∪ the live roots of the source's other parents, then the EFFECTIVE flags.
         var live = await ExternalMultiRootRule.ReadLiveParentsAsync(
@@ -199,21 +240,11 @@ internal static class ExternalInvoiceVisibility
                 flags[(group.Key, id)] = read.TryGetValue(id, out var f) ? f : RootRecordFlags.Unreadable;
         }
 
-        // The decision per invoice: hidden when ANY of its sources is.
-        foreach (var (invoiceId, sources) in pending)
-        {
-            foreach (var source in sources.Distinct())
-            {
-                if (SourceHiddenReason(source) is { } reason)
-                {
-                    hidden.TryAdd(invoiceId, reason);
-                    break;
-                }
-            }
-        }
+        foreach (var source in readable)
+            reasons[source] = SourceHiddenReason(source);
 
-        cost.Sources = sourceIds.Count;
-        return new InvoiceVisibilityResult(asked, hidden, faulted: false, cost);
+        cost.Sources += readable.Count;
+        return new SourceDocumentDecision(reasons);
 
         InvoiceHiddenReason? SourceHiddenReason(Guid source)
         {
@@ -236,6 +267,92 @@ internal static class ExternalInvoiceVisibility
         }
     }
 
+    /// <summary>
+    /// Review round 4b: THE decision over a page of the external submission routes (the list and the single read), keyed by
+    /// SUBMISSION id, for a caller who is NOT an internal systemuser (the caller has decided that):
+    /// <list type="bullet">
+    /// <item>a submission WITH an invoice is decided by the invoice predicate (<see cref="DecideAsync"/>), as before;</item>
+    /// <item>one WITHOUT an invoice (Received, Processing, or a terminal outcome that produced none) is decided by its own
+    /// source, by channel (the shared <see cref="Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionChannel"/> enum):
+    /// Spa is visible (never a document source, rule 1); Internal with a document is decided by that document through
+    /// <see cref="DecideSourceDocumentsAsync"/> (the marker is honoured); Internal with an empty link is withheld (its source,
+    /// if any, is recorded only on the invoice's Stored Files, which do not exist yet); an unknown, unreadable or unrecognised
+    /// channel is withheld (<see cref="InvoiceHiddenReason.SourceKindUnknown"/>).</item>
+    /// </list>
+    /// One invoice decision and one source decision for the whole page. A submission it was not asked about is not visible. A
+    /// failed read THROWS; the caller-aware seam (<see cref="ExternalDataService.HideSubmissionsForAsync"/>) turns that into
+    /// "every asked submission withheld".
+    /// </summary>
+    internal static async Task<InvoiceVisibilityResult> DecideSubmissionsAsync(
+        IReadOnlyCollection<Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionView> submissions,
+        InvoiceVisibilityReaders readers, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(submissions);
+        ArgumentNullException.ThrowIfNull(readers);
+        var page = submissions.Where(s => s is not null && s.SubmissionId != Guid.Empty)
+            .GroupBy(s => s.SubmissionId).Select(g => g.First()).ToList();
+        var asked = page.Select(s => s.SubmissionId).ToList();
+        var withheld = new Dictionary<Guid, InvoiceHiddenReason>();
+        if (page.Count == 0)
+            return new InvoiceVisibilityResult(asked, withheld, faulted: false);
+
+        // (1) With an invoice: THE invoice predicate, one call for the page.
+        var invoiceIds = page.Select(s => InvoiceOf(s)).OfType<Guid>().Distinct().ToList();
+        var invoices = invoiceIds.Count == 0 ? null : await DecideAsync(invoiceIds, readers, ct).ConfigureAwait(false);
+        var cost = invoices?.Cost ?? new InvoiceVisibilityCost();
+
+        // (2) Without an invoice: by channel; an Internal submission's own document is decided with the rest of the page.
+        var decidedBy = new Dictionary<Guid, Guid>();
+        foreach (var submission in page)
+        {
+            if (InvoiceOf(submission) is { } invoiceId)
+            {
+                if (invoices!.HiddenReason(invoiceId) is { } reason)
+                    withheld[submission.SubmissionId] = reason;
+                continue;
+            }
+
+            if (submission.ChannelValue is not { } channel
+                || !Enum.IsDefined(typeof(Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionChannel), channel))
+            {
+                withheld[submission.SubmissionId] = InvoiceHiddenReason.SourceKindUnknown;
+                continue;
+            }
+
+            switch ((Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionChannel)channel)
+            {
+                case Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionChannel.Spa:
+                    break; // never a document source: visible
+                case Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionChannel.Internal:
+                    if (submission.DocumentId is { } document && document != Guid.Empty)
+                        decidedBy[submission.SubmissionId] = document;
+                    else
+                        withheld[submission.SubmissionId] = InvoiceHiddenReason.SourceLinkUnreadable; // no source to decide by yet
+                    break;
+                default:
+                    // Defined but not handled above: a channel added to the enum later is unknown here until decided.
+                    withheld[submission.SubmissionId] = InvoiceHiddenReason.SourceKindUnknown;
+                    break;
+            }
+        }
+
+        if (decidedBy.Count > 0)
+        {
+            var sources = await DecideSourceDocumentsAsync(decidedBy.Values.Distinct().ToList(), readers, cost, ct)
+                .ConfigureAwait(false);
+            foreach (var (submissionId, document) in decidedBy)
+            {
+                if (sources.HiddenReason(document) is { } reason)
+                    withheld[submissionId] = reason;
+            }
+        }
+
+        return new InvoiceVisibilityResult(asked, withheld, faulted: false, cost);
+
+        static Guid? InvoiceOf(Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionView s) =>
+            s.InvoiceId is { } id && id != Guid.Empty ? id : null;
+    }
+
     private const string StoredFileCommunicationValue =
         "_" + Sprk.Bff.Api.Services.Finance.Files.StoredFileSchema.SourceCommunication + "_value";
     private const string StoredFileAttachmentIdentity = Sprk.Bff.Api.Services.Finance.Files.StoredFileSchema.SourceAttachmentIdentity;
@@ -248,17 +365,24 @@ internal static class ExternalInvoiceVisibility
     private const string SubmissionChannel = "sprk_channel";
 
     /// <summary>
-    /// The Stored Files of <paramref name="asked"/> (094, 095), every row: a source document is collected into
-    /// <paramref name="sourcesOf"/>; a source communication or attachment identity with no document hides the invoice (a shape
-    /// the schema allows and no writer creates today; 090's file route refuses it too). Returns the invoices that have an
-    /// <see cref="Sprk.Bff.Api.Services.Finance.Files.StoredFilePurpose.InvoicePdf"/> with no source at all (an upload's own
-    /// invoice PDF). A sourceless file of any other purpose is not a source and is not an upload's PDF. A failed read THROWS.
+    /// The Stored Files of <paramref name="asked"/> (094, 095), every row (review round 4a):
+    /// <list type="bullet">
+    /// <item>a purpose that reads null hides the invoice (a row masked by field security reads its secured columns as null);</item>
+    /// <item>a source document is collected into <paramref name="sourcesOf"/> and decides the row, even when the row also
+    /// carries a source communication or attachment identity (095's from-email rows: the .eml, its communication and part);</item>
+    /// <item>a source communication or attachment identity with no document hides the invoice (a source this rule cannot
+    /// check; 090's file route refuses the shape too);</item>
+    /// <item>a sourceless file of a purpose other than InvoicePdf is not a source.</item>
+    /// </list>
+    /// Returns the invoices with an <see cref="Sprk.Bff.Api.Services.Finance.Files.StoredFilePurpose.InvoicePdf"/> rule 3 can
+    /// rely on: sourceless (an upload's own invoice PDF) or with a source document (decided by that document). A supporting
+    /// file never counts. A failed read THROWS.
     /// </summary>
     private static async Task<HashSet<Guid>> ReadStoredFileSourcesAsync(
         IReadOnlyList<Guid> asked, CommunicationOpenThreadGate.RowQuery query, Dictionary<Guid, List<Guid>> sourcesOf,
         Dictionary<Guid, InvoiceHiddenReason> hidden, InvoiceVisibilityCost cost, CancellationToken ct)
     {
-        var uploadPdfs = new HashSet<Guid>();
+        var invoicePdfs = new HashSet<Guid>();
         var rows = await ReadRowsOfInvoicesAsync(
             StoredFileSet,
             new[] { StoredFileIdField, StoredFileInvoiceValue, StoredFileSourceValue, StoredFileCommunicationValue,
@@ -266,6 +390,14 @@ internal static class ExternalInvoiceVisibility
             StoredFileInvoiceValue, asked, query, hidden, () => cost.StoredFileReads++, ct).ConfigureAwait(false);
         foreach (var (invoiceId, row) in rows)
         {
+            if (IntOf(row, StoredFilePurposeColumn) is not { } purpose)
+            {
+                // Unreadable (masked, or never written): what the row is cannot be told.
+                hidden.TryAdd(invoiceId, InvoiceHiddenReason.SourceLinkUnreadable);
+                continue;
+            }
+
+            var isInvoicePdf = purpose == (int)Sprk.Bff.Api.Services.Finance.Files.StoredFilePurpose.InvoicePdf;
             switch (LinkOf(row, StoredFileSourceValue))
             {
                 case { } source when source == ExternalDocumentNarrowing.UnreadableLink:
@@ -273,21 +405,22 @@ internal static class ExternalInvoiceVisibility
                     break;
                 case { } source:
                     AddSource(sourcesOf, invoiceId, source);
+                    if (isInvoicePdf)
+                        invoicePdfs.Add(invoiceId); // decided by its source document
                     break;
                 case null when IsSet(row, StoredFileCommunicationValue) || IsSet(row, StoredFileAttachmentIdentity):
                     // A source this rule cannot check.
                     hidden.TryAdd(invoiceId, InvoiceHiddenReason.SourceLinkUnreadable);
                     break;
-                case null when IntOf(row, StoredFilePurposeColumn)
-                    == (int)Sprk.Bff.Api.Services.Finance.Files.StoredFilePurpose.InvoicePdf:
-                    uploadPdfs.Add(invoiceId);
+                case null when isInvoicePdf:
+                    invoicePdfs.Add(invoiceId); // an upload's own invoice PDF
                     break;
                 case null:
                     break; // a sourceless file of another purpose: not a source
             }
         }
 
-        return uploadPdfs;
+        return invoicePdfs;
     }
 
     /// <summary>
@@ -295,7 +428,7 @@ internal static class ExternalInvoiceVisibility
     /// <see cref="Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionChannel"/> enum): Spa is never a document source;
     /// Internal with a document collects it into <paramref name="sourcesOf"/> (the confirm route records its source only
     /// there); an unknown, unreadable or unrecognised channel hides the invoice. Returns the invoices with an Internal
-    /// submission whose document link is empty (the caller hides them unless they have an upload's own invoice PDF). A
+    /// submission whose document link is empty (the caller hides them unless they have an InvoicePdf rule 3 can rely on). A
     /// failed read THROWS.
     /// </summary>
     private static async Task<HashSet<Guid>> ReadSubmissionSourcesAsync(
@@ -554,6 +687,17 @@ internal delegate Task<InvoiceVisibilityResult> ExternalInvoiceHiding(
     CallerPrincipal caller, IReadOnlyCollection<Guid> invoiceIds, CancellationToken ct);
 
 /// <summary>
+/// Review round 4b: the caller-aware seam of the external submission routes (<see cref="ExternalDataService.HideSubmissionsForAsync"/>,
+/// <see cref="ExternalInvoiceVisibility.DecideSubmissionsAsync"/>): which of a page of submissions the caller may see, keyed by
+/// submission id. An internal systemuser sees every one; every other caller gets the decision (with an invoice, the invoice
+/// predicate; without one, its own source); a failed read withholds every asked submission
+/// (<see cref="InvoiceVisibilityResult.Faulted"/>). Registered by <c>AddExternalAccess</c>.
+/// </summary>
+internal delegate Task<InvoiceVisibilityResult> ExternalInvoiceSubmissionHiding(
+    CallerPrincipal caller, IReadOnlyCollection<Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionView> submissions,
+    CancellationToken ct);
+
+/// <summary>
 /// The assistant's <c>dataverse.*</c> tools' seam (task 098 surface (d)): of <paramref name="rowIds"/> (rows of an invoice-family
 /// table the USER's own read returned), the ids an external caller may NOT see. The rows' invoice links and the decision are
 /// read app-only; only the hidden id set comes back (a hide decision; no row data). The tool has already decided the caller is
@@ -585,6 +729,24 @@ internal sealed class InvoiceVisibilityCost
     internal int NarrowingReads { get; set; }
     internal int RootFlagReads { get; set; }
     internal int Reads => StoredFileReads + SubmissionReads + SourceReads + NarrowingReads + RootFlagReads;
+}
+
+/// <summary>
+/// <see cref="ExternalInvoiceVisibility.DecideSourceDocumentsAsync"/>'s answer: per source document, why it is hidden, or
+/// <c>null</c> when it is visible. A source it was not asked about (or could not read) is hidden.
+/// </summary>
+internal sealed class SourceDocumentDecision
+{
+    private readonly IReadOnlyDictionary<Guid, InvoiceHiddenReason?> _reasons;
+
+    internal SourceDocumentDecision(IReadOnlyDictionary<Guid, InvoiceHiddenReason?> reasons) => _reasons = reasons;
+
+    /// <summary>Why <paramref name="source"/> is hidden; <c>null</c> only when it was decided and is visible.</summary>
+    internal InvoiceHiddenReason? HiddenReason(Guid source) =>
+        _reasons.TryGetValue(source, out var reason) ? reason : InvoiceHiddenReason.SourceNotFound;
+
+    /// <summary>Whether <paramref name="source"/> was decided and is visible.</summary>
+    internal bool IsVisible(Guid source) => HiddenReason(source) is null;
 }
 
 /// <summary>The predicate's answer for one request. An invoice it was not asked about is NOT visible.</summary>
@@ -621,6 +783,10 @@ internal sealed class InvoiceVisibilityResult
     /// <summary>Whether <paramref name="invoiceId"/> was asked and is not hidden.</summary>
     internal bool IsVisible(Guid invoiceId) =>
         invoiceId != Guid.Empty && _asked.Contains(invoiceId) && !_hidden.ContainsKey(invoiceId);
+
+    /// <summary>Why <paramref name="invoiceId"/> is not visible; <c>null</c> only when it was asked and is visible.</summary>
+    internal InvoiceHiddenReason? HiddenReason(Guid invoiceId) =>
+        IsVisible(invoiceId) ? null : _hidden.TryGetValue(invoiceId, out var reason) ? reason : InvoiceHiddenReason.SourceNotFound;
 
     /// <summary>The asked invoices that are hidden.</summary>
     internal IReadOnlyCollection<Guid> Hidden => _hidden.Keys.ToList();

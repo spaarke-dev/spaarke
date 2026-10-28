@@ -22,9 +22,13 @@ namespace Spaarke.ArchTests;
 /// <c>GetInvoiceParentsAsync</c>); a call into a family reader service (<see cref="FamilyReaderTypes"/>: Stored Files,
 /// submissions, the invoice search 152 reads through); and the family test
 /// <see cref="ExternalInvoiceVisibility.IsInvoiceFamilyTable"/>.</para>
-/// <para><b>Reach primitives</b>: a <see cref="ExternalInvoiceHiding"/> or <see cref="AppOnlyInvoiceFamilyHiding"/> invocation,
-/// <see cref="ExternalDataService.HideInvoicesForAsync"/>, <see cref="ExternalDataService.HideInvoiceFamilyRowsAsync"/>,
-/// <see cref="ExternalInvoiceVisibility.DecideAsync"/> and <see cref="ExternalInvoiceVisibility.HiddenFamilyRowsAsync"/>. Reach
+/// <para><b>Reach primitives</b>: a <see cref="ExternalInvoiceHiding"/>, <see cref="ExternalInvoiceSubmissionHiding"/> or
+/// <see cref="AppOnlyInvoiceFamilyHiding"/> invocation, <see cref="ExternalDataService.HideInvoicesForAsync"/>,
+/// <see cref="ExternalDataService.HideSubmissionsForAsync"/>, <see cref="ExternalDataService.HideInvoiceFamilyRowsAsync"/>,
+/// <see cref="ExternalInvoiceVisibility.DecideAsync"/>, <see cref="ExternalInvoiceVisibility.DecideSubmissionsAsync"/> (review
+/// round 4b: the submission routes' decision, which applies the invoice predicate to a submission with an invoice) and
+/// <see cref="ExternalInvoiceVisibility.HiddenFamilyRowsAsync"/>. The source decision alone
+/// (<see cref="ExternalInvoiceVisibility.DecideSourceDocumentsAsync"/>) is NOT a reach: it does not decide an invoice. Reach
 /// is transitive over the BFF's own methods, per SOURCE method (lambdas, local functions and state machines attributed to the
 /// method they were written in), as in task 188's guard. Reach says a method CAN get to the predicate; the surface tests
 /// (ExternalInvoiceVisibilityTests, the route and tool tests) pin the paths.</para>
@@ -160,7 +164,8 @@ public class ExternalInvoiceVisibilityGuardTests
 
         Assert.True(problems.Count == 0,
             "An external surface that returns invoice-family rows must apply the (a') predicate (ebilling-r1 task 098, model 9.1): " +
-            "inject ExternalInvoiceHiding (external routes) or AppOnlyInvoiceFamilyHiding (assistant tools), or list the method " +
+            "inject ExternalInvoiceHiding or ExternalInvoiceSubmissionHiding (external routes) or AppOnlyInvoiceFamilyHiding " +
+            "(assistant tools), or list the method " +
             "with its reason in NotInvoiceSurfaces:\n" + string.Join("\n", problems));
     }
 
@@ -173,6 +178,8 @@ public class ExternalInvoiceVisibilityGuardTests
             typeof(InvoiceGuardControlHidesThroughAHelper), typeof(InvoiceGuardControlNoInvoices),
             typeof(InvoiceGuardControlLineReadOnly), typeof(InvoiceGuardControlCallsAFamilyReader),
             typeof(InvoiceGuardControlCallsAFamilyReaderThroughItsInterface), typeof(InvoiceGuardControlCallsAnUnrelatedInterface),
+            typeof(InvoiceGuardControlListsSubmissionsThroughTheSubmissionSeam),
+            typeof(InvoiceGuardControlListsSubmissionsWithOnlyTheSourceDecision),
         };
         var scan = Scan(fixtures.SelectMany(IlCallScan.WithNested), inScope: _ => true);
 
@@ -184,10 +191,12 @@ public class ExternalInvoiceVisibilityGuardTests
                 $"{typeof(InvoiceGuardControlCallsAFamilyReaderThroughItsInterface).FullName}::ListAsync",
                 $"{typeof(InvoiceGuardControlLineReadOnly).FullName}::ListAsync",
                 $"{typeof(InvoiceGuardControlMentionOnly).FullName}::ListAsync",
+                $"{typeof(InvoiceGuardControlListsSubmissionsWithOnlyTheSourceDecision).FullName}::ListAsync",
             }.Order(StringComparer.Ordinal).ToArray(),
             flagged);
         Assert.Contains($"{typeof(InvoiceGuardControlHidesInALambda).FullName}::ListAsync", scan.Reaches);
         Assert.Contains($"{typeof(InvoiceGuardControlHidesThroughAHelper).FullName}::ListAsync", scan.Reaches);
+        Assert.Contains($"{typeof(InvoiceGuardControlListsSubmissionsThroughTheSubmissionSeam).FullName}::ListAsync", scan.Reaches);
         Assert.DoesNotContain(scan.Surfaces.Keys, k => k.StartsWith(typeof(InvoiceGuardControlNoInvoices).FullName!, StringComparison.Ordinal));
         Assert.DoesNotContain(scan.Surfaces.Keys,
             k => k.StartsWith(typeof(InvoiceGuardControlCallsAnUnrelatedInterface).FullName!, StringComparison.Ordinal));
@@ -307,6 +316,61 @@ public class ExternalInvoiceVisibilityGuardTests
         }
 
         return reaches;
+    }
+
+    // ── Review round 4b: the submission list and the single read decide through ONE function ────────────────────────────
+
+    [Fact(DisplayName = "Task 098 review round 4b: the submission list and the single read call ONE decision function, and nothing else in their types decides")]
+    public void TheSubmissionListAndRead_CallOneDecisionFunction()
+    {
+        var shared = $"{typeof(ExternalInvoiceSubmissionEndpoints).FullName}::{nameof(ExternalInvoiceSubmissionEndpoints.VisibleSubmissionsAsync)}";
+        var (callers, deciders) = SubmissionDecisions(
+            new[] { typeof(ExternalInvoiceSubmissionEndpoints), typeof(ExternalInvoiceSubmissionAuthorizationFilter) }
+                .SelectMany(IlCallScan.WithNested),
+            shared);
+
+        Assert.Contains($"{typeof(ExternalInvoiceSubmissionEndpoints).FullName}::ListAsync", callers);
+        Assert.Contains($"{typeof(ExternalInvoiceSubmissionAuthorizationFilter).FullName}::DecideReadOneAsync", callers);
+        Assert.Equal(new[] { shared }, deciders.Order(StringComparer.Ordinal).ToArray());
+    }
+
+    [Fact(DisplayName = "Task 098 review round 4b: negative control — a method that calls the shared decision is found; one that decides itself is flagged")]
+    public void SubmissionDecisionDetector_MustFireAndMustNotFire()
+    {
+        var shared = $"{typeof(SubmissionDecisionControlShared).FullName}::{nameof(SubmissionDecisionControlShared.DecideAsync)}";
+        var (callers, deciders) = SubmissionDecisions(
+            new[] { typeof(SubmissionDecisionControlShared), typeof(SubmissionDecisionControlCallsTheShared),
+                typeof(SubmissionDecisionControlDecidesItself), typeof(SubmissionDecisionControlNamesTheShared) }
+                .SelectMany(IlCallScan.WithNested),
+            shared);
+
+        Assert.Equal(new[] { $"{typeof(SubmissionDecisionControlCallsTheShared).FullName}::ReadAsync" }, callers.ToArray());
+        Assert.Equal(
+            new[] { shared, $"{typeof(SubmissionDecisionControlDecidesItself).FullName}::ReadAsync" }.Order(StringComparer.Ordinal).ToArray(),
+            deciders.Order(StringComparer.Ordinal).ToArray());
+    }
+
+    /// <summary>
+    /// Among <paramref name="types"/>: the methods that call <paramref name="shared"/> directly, and the methods that apply a
+    /// decision primitive themselves (an invoice or submission seam, the predicate's entries, or the source decision).
+    /// </summary>
+    private static (IReadOnlySet<string> Callers, IReadOnlySet<string> Deciders) SubmissionDecisions(IEnumerable<Type> types, string shared)
+    {
+        var callers = new SortedSet<string>(StringComparer.Ordinal);
+        var deciders = new SortedSet<string>(StringComparer.Ordinal);
+        foreach (var (caller, callerMethod, target) in IlCallScan.MethodReferences(types))
+        {
+            var source = ExternalDocumentNarrowingGuardTests.SourceKey(caller, callerMethod);
+            if (target.DeclaringType is { } declaring && $"{IlCallScan.Outermost(declaring).FullName}::{Normalize(target.Name)}" == shared
+                && source != shared)
+                callers.Add(source);
+            if (IsReach(target)
+                || (target.DeclaringType == typeof(ExternalInvoiceVisibility)
+                    && target.Name == nameof(ExternalInvoiceVisibility.DecideSourceDocumentsAsync)))
+                deciders.Add(source);
+        }
+
+        return (callers, deciders);
     }
 
     // ── The assistant tools' app-only seam is an allow-list (the second exception to the User-OBO rule) ───────────────────
@@ -534,11 +598,14 @@ public class ExternalInvoiceVisibilityGuardTests
     private static bool IsReach(MethodBase method) =>
         method.DeclaringType is { } declaring
         && ((declaring == typeof(ExternalInvoiceHiding) && method.Name == nameof(ExternalInvoiceHiding.Invoke))
+            || (declaring == typeof(ExternalInvoiceSubmissionHiding) && method.Name == nameof(ExternalInvoiceSubmissionHiding.Invoke))
             || (declaring == typeof(AppOnlyInvoiceFamilyHiding) && method.Name == nameof(AppOnlyInvoiceFamilyHiding.Invoke))
             || (declaring == typeof(ExternalDataService)
-                && method.Name is nameof(ExternalDataService.HideInvoicesForAsync) or nameof(ExternalDataService.HideInvoiceFamilyRowsAsync))
+                && method.Name is nameof(ExternalDataService.HideInvoicesForAsync) or nameof(ExternalDataService.HideSubmissionsForAsync)
+                    or nameof(ExternalDataService.HideInvoiceFamilyRowsAsync))
             || (declaring == typeof(ExternalInvoiceVisibility)
-                && method.Name is nameof(ExternalInvoiceVisibility.DecideAsync) or nameof(ExternalInvoiceVisibility.HiddenFamilyRowsAsync)));
+                && method.Name is nameof(ExternalInvoiceVisibility.DecideAsync) or nameof(ExternalInvoiceVisibility.DecideSubmissionsAsync)
+                    or nameof(ExternalInvoiceVisibility.HiddenFamilyRowsAsync)));
 
     private static readonly Regex CompilerPrefix = new(@"^<+([^<>]+)>", RegexOptions.Compiled);
 
@@ -645,4 +712,59 @@ internal sealed class FamilySeamControlCallsTheReaderDirectly(ExternalDataServic
 internal sealed class FamilySeamControlNamesTheSeam
 {
     internal Type? Resolve() => Type.GetType("Sprk.Bff.Api.Infrastructure.ExternalAccess.AppOnlyInvoiceFamilyHiding, Sprk.Bff.Api");
+}
+
+/// <summary>MUST NOT FIRE (review round 4b): lists submissions and applies the submission seam through a helper.</summary>
+internal sealed class InvoiceGuardControlListsSubmissionsThroughTheSubmissionSeam(
+    Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionService service, ExternalInvoiceSubmissionHiding hide)
+{
+    internal async Task<InvoiceVisibilityResult> ListAsync(CallerPrincipal caller, Guid firm, CancellationToken ct)
+    {
+        var views = await service.ListAsync(new[] { firm }, Array.Empty<Guid>(), Array.Empty<Guid>(), Array.Empty<Guid>(), ct);
+        return await Helper(caller, views, ct);
+    }
+
+    private Task<InvoiceVisibilityResult> Helper(
+        CallerPrincipal caller, IReadOnlyList<Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionView> views, CancellationToken ct) =>
+        hide(caller, views, ct);
+}
+
+/// <summary>MUST FIRE (review round 4b): lists submissions and applies only the source decision (it decides no invoice).</summary>
+internal sealed class InvoiceGuardControlListsSubmissionsWithOnlyTheSourceDecision(
+    Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionService service)
+{
+    internal async Task<SourceDocumentDecision> ListAsync(Guid firm, InvoiceVisibilityReaders readers, CancellationToken ct)
+    {
+        var views = await service.ListAsync(new[] { firm }, Array.Empty<Guid>(), Array.Empty<Guid>(), Array.Empty<Guid>(), ct);
+        return await ExternalInvoiceVisibility.DecideSourceDocumentsAsync(
+            views.Select(v => v.DocumentId ?? Guid.Empty).ToList(), readers, cost: null, ct);
+    }
+}
+
+/// <summary>Control (one function): the shared decision; it invokes the seam.</summary>
+internal static class SubmissionDecisionControlShared
+{
+    internal static Task<InvoiceVisibilityResult> DecideAsync(
+        CallerPrincipal caller, ExternalInvoiceSubmissionHiding hide, CancellationToken ct) =>
+        hide(caller, Array.Empty<Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionView>(), ct);
+}
+
+/// <summary>Control (one function), MUST NOT FIRE: calls the shared decision.</summary>
+internal sealed class SubmissionDecisionControlCallsTheShared(ExternalInvoiceSubmissionHiding hide)
+{
+    internal async Task<bool> ReadAsync(CallerPrincipal caller, CancellationToken ct) =>
+        (await SubmissionDecisionControlShared.DecideAsync(caller, hide, ct)).Faulted;
+}
+
+/// <summary>Control (one function), MUST FIRE: decides itself (a second copy of the decision).</summary>
+internal sealed class SubmissionDecisionControlDecidesItself(ExternalInvoiceHiding hide)
+{
+    internal async Task<bool> ReadAsync(CallerPrincipal caller, Guid invoice, CancellationToken ct) =>
+        (await hide(caller, new[] { invoice }, ct)).IsVisible(invoice);
+}
+
+/// <summary>Control (one function), MUST NOT BE FOUND: names the shared decision only.</summary>
+internal sealed class SubmissionDecisionControlNamesTheShared
+{
+    internal string ReadAsync() => nameof(SubmissionDecisionControlShared.DecideAsync);
 }

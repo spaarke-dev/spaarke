@@ -1563,6 +1563,7 @@ public class InvoiceSubmissionService
             ReceivedOn = row.GetAttributeValue<DateTime?>("sprk_receivedon"),
             OutcomeReasonCode = row.GetAttributeValue<string>("sprk_outcomereasoncode"),
             DocumentId = row.GetAttributeValue<EntityReference>("sprk_document")?.Id,
+            ChannelValue = channel,
             FirmId = row.GetAttributeValue<EntityReference>(TrackingNumberAllocator.FirmColumn)?.Id,
             CoreRecord = core,
             CreatedOn = row.GetAttributeValue<DateTime?>("createdon"),
