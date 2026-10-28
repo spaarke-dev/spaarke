@@ -944,6 +944,108 @@ public class SecureChildOrdinaryParentMoveTests
             _world.OwnerOf("sprk_event", e).Should().Be(DataversePrincipalRef.Team(TeamB));
     }
 
+    // ── UAC task 194b R4-3 (B4): no carried root starves; the report-only cursor ─────────────────────────────────────
+
+    private static readonly Guid[] StarvedMatters =
+    [
+        Guid.Parse("3d000000-0000-4000-8000-000000194401"), Guid.Parse("3d000000-0000-4000-8000-000000194402"),
+        Guid.Parse("3d000000-0000-4000-8000-000000194403"),
+    ];
+
+    /// <summary>Three ordinary matters moved to B, changed in id order; the first has <paramref name="firstEvents"/> events in A,
+    /// the others one each. Returns each matter's events.</summary>
+    private Guid[][] ThreeMovedMatters(int firstEvents)
+    {
+        var events = new Guid[StarvedMatters.Length][];
+        for (var i = 0; i < StarvedMatters.Length; i++)
+        {
+            MatterMovedToB(StarvedMatters[i]);
+            _world.Modified(Matter, StarvedMatters[i], DateTime.UtcNow.AddMinutes(i - 10));
+            events[i] = Enumerable.Range(0, i == 0 ? firstEvents : 1).Select(_ => Guid.NewGuid()).ToArray();
+            foreach (var e in events[i])
+                Row("sprk_event", e, TeamRef(GeneralTeam), ("sprk_regardingmatter", Matter, StarvedMatters[i]));
+        }
+
+        return events;
+    }
+
+    [Fact(DisplayName = "194b R4-3 must fire: a carried root behind one that never finishes in a run is reached within N runs (least-recently-attempted first, at least one root a run)")]
+    public async Task ACarriedRootStarvedByASliceAndACap_IsReachedWithinNRuns()
+    {
+        // The first matter needs four runs at one move a run; every clock read is past the slice, so each run walks only
+        // the root it must. In (table, id) order the first matter would take every run until it finished.
+        var events = ThreeMovedMatters(firstEvents: 4);
+        var time = new RefilePassRoundOneTests.SteppingTime { Step = TimeSpan.FromSeconds(70) };
+        var harness = new JobHarness(_world, _webApi, time: time);
+
+        var (_, run1) = await harness.RunAsync(ordinaryWrites: "true", maxMoves: "1");
+        foreach (var matter in StarvedMatters)
+            _world.Modified(Matter, matter, SecureChildShareWorld.RecordsLastModified); // found from now on only through the carry
+        for (var run = 2; run <= StarvedMatters.Length; run++)
+            await harness.RunAsync(ordinaryWrites: "true", maxMoves: "1");
+
+        run1.GetProperty("moved").GetInt32().Should().Be(1, "the slice is spent before the first root, which is walked anyway");
+        run1.GetProperty("carriedRoots").GetInt32().Should().Be(3);
+        for (var i = 0; i < StarvedMatters.Length; i++)
+            events[i].Should().Contain(e => _world.OwnerOf("sprk_event", e) == DataversePrincipalRef.Team(TeamB),
+                $"matter {i + 1} is reached within {StarvedMatters.Length} runs");
+    }
+
+    [Fact(DisplayName = "194b R4-3 must fire: the report-only cursor persists across runs: each report-only run resumes after the root the last one reached, and wraps around")]
+    public async Task TheReportOnlyCursor_PersistsAcrossRuns_AndWrapsAround()
+    {
+        ThreeMovedMatters(firstEvents: 1);
+        var time = new RefilePassRoundOneTests.SteppingTime { Step = TimeSpan.FromSeconds(70) };
+        var harness = new JobHarness(_world, _webApi, time: time);
+        static string Key(Guid matter) => $"{Matter}:{matter:D}";
+        static string[] RootsOf(JsonElement run) =>
+            run.GetProperty("changes").EnumerateArray().Select(c => c.GetProperty("root").GetString()!).Distinct().ToArray();
+
+        var runs = new List<JsonElement>();
+        for (var run = 0; run < 4; run++)
+            runs.Add((await harness.RunAsync(ordinaryWrites: null)).Ordinary);
+
+        runs.Select(RootsOf).Should().SatisfyRespectively(
+            r => r.Should().Equal(Key(StarvedMatters[0])),
+            r => r.Should().Equal(Key(StarvedMatters[1])),
+            r => r.Should().Equal(Key(StarvedMatters[2])),
+            r => r.Should().Equal(new[] { Key(StarvedMatters[0]) }, "after the last root it wraps to the first"));
+        runs[0].GetProperty("reportCursor").GetString().Should().Be(Key(StarvedMatters[0]));
+        runs[1].GetProperty("reportCursor").GetString().Should().Be(Key(StarvedMatters[1]));
+        _world.OwnerWrites.Should().BeEmpty("report-only");
+    }
+
+    [Fact(DisplayName = "194b R4-3 must not fire: a report-only run that reaches every root leaves no cursor")]
+    public async Task AReportOnlyRunThatReachesEveryRoot_LeavesNoCursor()
+    {
+        ThreeMovedMatters(firstEvents: 1);
+        var harness = new JobHarness(_world, _webApi, time: new RefilePassRoundOneTests.SteppingTime());
+
+        var (_, run) = await harness.RunAsync(ordinaryWrites: null);
+
+        run.GetProperty("timeSliceReached").GetBoolean().Should().BeFalse();
+        run.GetProperty("wouldMove").GetInt32().Should().Be(3);
+        run.GetProperty("reportCursor").ValueKind.Should().Be(JsonValueKind.Null);
+    }
+
+    [Fact(DisplayName = "194b R4-3 must not fire: an empty carry set (nothing changed, nothing carried) is a no-op")]
+    public async Task AnEmptyCarrySet_IsANoOp()
+    {
+        var time = new RefilePassRoundOneTests.SteppingTime { Step = TimeSpan.FromSeconds(70) };
+        var harness = new JobHarness(_world, _webApi, time: time);
+
+        var (result, run) = await harness.RunAsync(ordinaryWrites: "true");
+
+        run.GetProperty("retriedRoots").GetInt32().Should().Be(0);
+        run.GetProperty("rootsInRun").GetInt32().Should().Be(0);
+        run.GetProperty("carriedRoots").GetInt32().Should().Be(0);
+        run.GetProperty("timeSliceReached").GetBoolean().Should().BeFalse();
+        run.GetProperty("reportCursor").ValueKind.Should().Be(JsonValueKind.Null);
+        _world.OwnerWrites.Should().BeEmpty();
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        SecureChildReconciliationJob.OrderLeastRecentlyAttempted([], new Dictionary<(string, Guid), long>()).Should().BeEmpty();
+    }
+
     [Fact(DisplayName = "194 must fire: a re-owned document's file moves to the new business unit's container in the same run (the re-file pass)")]
     public async Task TheJob_ReownsTheDocument_AndItsFileFollows()
     {
