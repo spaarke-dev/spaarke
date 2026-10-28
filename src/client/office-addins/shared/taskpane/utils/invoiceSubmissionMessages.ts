@@ -114,7 +114,7 @@ export const SUBMISSION_ERROR_MESSAGES: Readonly<Record<string, Entry>> = {
   'ebilling.submission.submission_already_ended':
     'This email was already submitted with these same details, and the invoice was rejected. You can follow it in ' +
     `Spaarke. ${NOTHING}`,
-  'ebilling.submission.document_already_submitted': `This invoice was already submitted from this email with different details. ${NOTHING}`,
+  'ebilling.submission.document_already_submitted': `This email was already submitted as an invoice for this record. You can follow it in Spaarke. ${NOTHING}`,
   OFFICE_IDEMPOTENCY_CONFLICT: f => `This submission is still being sent. ${tryAgain(f)}`,
   // §6 access and filters
   OFFICE_AUTH_001: `Your sign-in has expired. Sign in again, then submit. ${NOTHING}`,

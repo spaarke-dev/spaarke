@@ -88,6 +88,14 @@ const PINNED_OUTCOME_CODES = [
 const refusal = (code: string, extra: Record<string, string> = {}) =>
   describeSubmissionRefusal({ kind: 'refused', status: 400, code, ...extra });
 
+describe('invoice submission messages — document_already_submitted (EB-D-165)', () => {
+  it('is neutral: the earlier submission may be by the caller or by another user', () => {
+    const message = refusal('ebilling.submission.document_already_submitted');
+    expect(message).not.toMatch(/different details/i);
+    expect(message).toMatch(/already submitted/i);
+  });
+});
+
 describe('invoice submission messages — every pinned code is mapped', () => {
   it.each(PINNED_REFUSAL_CODES)('%s has its own sentence', code => {
     const message = refusal(code);
