@@ -96,12 +96,35 @@ public static class SubmissionReasonCodes
     public const string ProcessingFailed = "ebilling.submission.processing_failed";
 
     /// <summary>
-    /// ebilling-r1 task 092 (procedure-and-file-model 9.1 step 6): the uploaded invoice PDF could not be made servable. Before the commit
-    /// its staged blob is gone or unusable, so no invoice is created; after the commit the flip of its Stored File row failed
-    /// definitively (blob missing, hash mismatch, row not flippable), so the row stays Not yet servable for the reconcile detector and
-    /// the submission is marked Failed although an invoice is linked (the one exception to "a linked submission is never Failed").
+    /// ebilling-r1 task 092 (procedure-and-file-model 9.1 steps 5-6): the invoice's file could not be made servable. Before the commit its
+    /// staged blob is gone or unusable, so no invoice is created. After the commit the flip of a Stored File row failed definitively (blob
+    /// missing, hash mismatch, row not flippable): since task 094 the commit is UNDONE (<see cref="SubmissionCommitGate"/>: the file rows
+    /// and blobs, the approval, the lines and the invoice deleted, the commit's columns cleared) and the submission is Failed with this
+    /// code, on every channel. Until the undo completes the submission is Failed with its file Not yet servable (held).
     /// </summary>
     public const string FileUnservable = "ebilling.submission.file_unservable";
+
+    /// <summary>
+    /// ebilling-r1 task 094 (procedure-and-file-model 9.1 step 5; the code task 095's contract pins): the re-run after the commit found
+    /// the Submit Invoice source filed under another core record, its secure roots not covered by the copy's, or it could not be read (any
+    /// fault is a failure, uac-r2 condition 1). The commit was undone (<see cref="SubmissionCommitGate"/>) and the submission is Failed
+    /// with this code and an administrator note; the communication's filing by step A is kept.
+    /// </summary>
+    public const string SourceCheckFailed = "ebilling.submission.source_check_failed";
+
+    /// <summary>
+    /// ebilling-r1 task 094: a job outcome only, never stored: the undo of a commit could not finish (a delete faulted), so the submission
+    /// is Failed (with <see cref="SourceCheckFailed"/> or <see cref="FileUnservable"/>) and its file stays Not yet servable until a later
+    /// delivery completes the compensation (uac-r2 condition 3, "complete or held").
+    /// </summary>
+    public const string UndoHeld = "ebilling.submission.undo_held";
+
+    /// <summary>
+    /// ebilling-r1 task 094 (9.1 step 4): the Submit Invoice source changed since the job staged its copy, and it changed again after one
+    /// re-stage, or its bytes differ from the bytes the job evaluated. Transient: nothing was committed; a redelivery evaluates the source
+    /// as it is then.
+    /// </summary>
+    public const string SourceChanged = "ebilling.submission.source_changed";
 
     /// <summary>ebilling-r1 task 092: the uploaded invoice PDF's malware scan said Malicious; it is never read. Permanent; no invoice.</summary>
     public const string FileMalicious = "ebilling.submission.file_malicious";

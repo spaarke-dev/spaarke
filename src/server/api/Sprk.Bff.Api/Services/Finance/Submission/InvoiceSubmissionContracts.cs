@@ -128,6 +128,14 @@ public sealed record InvoiceSubmissionRequest
     /// </summary>
     public Guid? ExistingDocumentId { get; init; }
 
+    /// <summary>
+    /// ebilling-r1 task 094 (Submit Invoice, procedure-and-file-model 9.1): the communication the from-document route is keyed on, with
+    /// <see cref="ExistingDocumentId"/>. When set, the document must link exactly this communication (<c>sprk_relatedcommunication</c>),
+    /// else 422 <see cref="InvoiceSubmissionErrors.SourceCommunicationMismatch"/> before anything is written. Null on the confirm route,
+    /// which is keyed on the document alone (its communication, if any, is the document's own link).
+    /// </summary>
+    public Guid? SourceCommunicationId { get; init; }
+
     /// <summary>SPA channel: the resolved external principal (the submitter contact and the document's creator stamp).</summary>
     public CallerPrincipal? ExternalCaller { get; init; }
 
@@ -297,7 +305,36 @@ public static class InvoiceSubmissionErrors
     /// </summary>
     public const string SubmissionAlreadyEnded = "ebilling.submission.submission_already_ended";
 
+    /// <summary>
+    /// ebilling-r1 task 094 (Submit Invoice step 1, #2150): the caller cannot Read the source document or its communication (asked as the
+    /// caller, gate variant: an unknown record and one the caller cannot see get the same answer on the same schedule). 403 before any
+    /// write; nothing is named.
+    /// </summary>
+    public const string SourceForbidden = "ebilling.submission.source_forbidden";
+
+    /// <summary>
+    /// ebilling-r1 task 094: the from-document route named a communication the document is not linked to (<c>sprk_relatedcommunication</c>).
+    /// 422 before any write.
+    /// </summary>
+    public const string SourceCommunicationMismatch = "ebilling.submission.source_communication_mismatch";
+
+    /// <summary>
+    /// ebilling-r1 task 094: the source document was rejected as not an invoice (<c>sprk_invoicereviewstatus</c> = RejectedNotInvoice). 409
+    /// before any write; the reject stands. The same string the job uses when a reject lands after the submission was received.
+    /// </summary>
+    public const string DocumentRejected = "ebilling.submission.document_rejected";
+
     public const string StorageNotConfigured = "ebilling.submission.storage_not_configured";
     public const string CoreRecordUnavailable = "ebilling.submission.record_unavailable";
     public const string Failed = "ebilling.submission.failed";
 }
+
+/// <summary>
+/// ebilling-r1 task 094 (procedure-and-file-model 9.1 step 2): the copy of a Submit Invoice source the job staged before the commit. The
+/// Stored File id is <see cref="Files.StoredFileIds.ForSourceVersion"/> of the submission and the source's <c>versionnumber</c> read in the
+/// same retrieve as its file pointer; the commit's guard on the source (<c>IfRowVersionMatches</c>) is at <see cref="SourceVersion"/>.
+/// </summary>
+/// <param name="Spec">The row the commit writes (Invoice PDF, Firm-visible No, the source ids, version and SHA).</param>
+/// <param name="Blob">The stage's answer for <paramref name="Spec"/>.</param>
+/// <param name="SourceVersion">The source document's row version at staging.</param>
+public sealed record StagedSourceCopy(Files.StoredFileRowSpec Spec, Files.StagedBlob Blob, long SourceVersion);

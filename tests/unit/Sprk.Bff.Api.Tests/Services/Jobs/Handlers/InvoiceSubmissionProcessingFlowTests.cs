@@ -94,7 +94,6 @@ public sealed class InvoiceSubmissionProcessingFlowTests
         /// <summary>D-122: every automated close (signal, record).</summary>
         public List<(Guid Signal, Guid Record)> Closes { get; } = [];
         public Dictionary<string, Entity> Signals { get; } = new(StringComparer.Ordinal);
-        public List<JobContract> Jobs { get; } = [];
         public List<SubmissionDecidedNotification> Notified { get; } = [];
         public List<int> StatusHistory { get; } = [];
         public Locks Locks { get; } = new();
@@ -228,15 +227,11 @@ public sealed class InvoiceSubmissionProcessingFlowTests
             var persister = BuildPersister();
             var after = BuildAfterSteps();
 
-            var documents = new Mock<IDocumentDataverseService>(MockBehavior.Strict);
-            documents.Setup(d => d.GetDocumentAsync(DocumentId.ToString(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new DocumentEntity { Id = DocumentId.ToString(), Name = "invoice", GraphDriveId = "drive-1", GraphItemId = "item-1", FileName = "invoice.pdf" });
             var spe = new Mock<ISpeFileOperations>(MockBehavior.Strict);
             spe.Setup(s => s.DownloadFileAsync("drive-1", "item-1", It.IsAny<CancellationToken>())).ReturnsAsync(() => new MemoryStream([1, 2, 3]));
 
             return new InvoiceSubmissionProcessingJobHandler(
                 Entities.Object,
-                documents.Object,
                 spe.Object,
                 TestRecordContainerResolver.ForBusinessUnitContainers("drive-1"),
                 processor,
@@ -246,8 +241,21 @@ public sealed class InvoiceSubmissionProcessingFlowTests
                 Locks,
                 Mock.Of<IOptionsMonitor<EbillingOptions>>(m => m.CurrentValue == new EbillingOptions { Enabled = Enabled }),
                 Files.Service,
+                CommitGate,
                 new QuietLog());
         }
+
+        /// <summary>Task 094: the REAL commit gate over this flow's Dataverse and file store (an upload has no source, so no isolation walk).</summary>
+        public SubmissionCommitGate CommitGate => _gate ??= new SubmissionCommitGate(
+            Entities.Object,
+            Files.Service,
+            Sprk.Bff.Api.Tests.Services.Finance.Submission.InvoiceSubmissionServiceTests.IsolationOver(
+                Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.Standard),
+            Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.SynchronizerOver(
+                Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.Standard, new Sprk.Bff.Api.Tests.AccessControl.FakeRecordShareTable()),
+            NullLogger<SubmissionCommitGate>.Instance);
+
+        private SubmissionCommitGate? _gate;
 
         public SpyProcessor? Spy { get; private set; }
 
@@ -288,6 +296,7 @@ public sealed class InvoiceSubmissionProcessingFlowTests
                 Sprk.Bff.Api.Tests.Services.Finance.Submission.InvoiceSubmissionServiceTests.IsolationOver(
                     Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.Standard),
                 Files.Service,
+                CommitGate,
                 NullLogger<InvoiceSubmissionPersister>.Instance);
         }
 
@@ -330,13 +339,7 @@ public sealed class InvoiceSubmissionProcessingFlowTests
                 return Recorder.RecordAsync(decision, ct);
             },
             Recorder.Preflight,
-            (job, _) =>
-            {
-                Jobs.Add(job);
-                return Task.CompletedTask;
-            },
-            makeUploadServable: (submissionId, ct) =>
-                InvoiceSubmissionPersister.FlipUploadFileAsync(Files.Service, submissionId, NullLogger.Instance, ct));
+            commitGate: CommitGate.RunAsync);
 
         /// <summary>D-122: SignalWriter.CloseActedByDecisionAsync's rule over the in-memory table (open -> Acted + the record).</summary>
         private Task<SignalAutomatedCloseOutcome> CloseActedAsync(Guid id, Guid recordId, DateTime setReadAt, string policyCode, CancellationToken _)
@@ -494,7 +497,6 @@ public sealed class InvoiceSubmissionProcessingFlowTests
         flow.Status.Should().Be((int)InvoiceSubmissionStatus.Accepted);
         flow.ConditionalUpdates.Should().Be(1, "the terminal status is one conditional write on the row version (13a B)");
         flow.Row.GetAttributeValue<string>("sprk_outcomereasoncode").Should().BeNull();
-        flow.Jobs.Should().NotContain(j => j.JobType == "InvoiceIndexing", "task 092 known gap: the invoice index is document-keyed, an upload has no document");
         flow.Notified.Should().ContainSingle().Which.Outcome.Should().Be(SubmissionDecisionOutcome.Accepted);
         flow.RecordCreates.Should().Be(0, "an Accepted submission has no Decision Record");
         flow.StatusHistory.Should().Equal([(int)InvoiceSubmissionStatus.Processing, (int)InvoiceSubmissionStatus.Accepted], "Received -> Processing -> one terminal, in order");
@@ -540,7 +542,6 @@ public sealed class InvoiceSubmissionProcessingFlowTests
         }
 
         flow.RecordCreates.Should().Be(1, "the automatic rejection's Decision Record, filed under the invoice");
-        flow.Jobs.Should().BeEmpty("a rejected invoice is not indexed");
         flow.Notified.Should().ContainSingle().Which.Should().Match<SubmissionDecidedNotification>(n =>
             n.Outcome == SubmissionDecisionOutcome.Rejected && n.InvoiceId == InvoiceId && n.ReasonCode == flow.LastOutcome.ReasonCode);
         flow.SignalWrites.Should().NotBeEmpty();
@@ -664,7 +665,6 @@ public sealed class InvoiceSubmissionProcessingFlowTests
         flow.LinkedInvoice.Should().BeNull();
         flow.Status.Should().Be((int)InvoiceSubmissionStatus.Processing).And.NotBe((int)InvoiceSubmissionStatus.Accepted);
         flow.SignalWrites.Should().BeEmpty();
-        flow.Jobs.Should().BeEmpty();
         flow.Notified.Should().BeEmpty();
         flow.TotalsCalls.Should().BeEmpty();
         flow.RecordCreates.Should().Be(0);
@@ -678,14 +678,14 @@ public sealed class InvoiceSubmissionProcessingFlowTests
         var flow = AgedLineRejecting();
         var job = Job();
         await flow.BuildHandler().ProcessAsync(job, CancellationToken.None);
-        var before = (flow.Transactions.Count, flow.Jobs.Count, flow.SignalWrites.Count, flow.Notified.Count, flow.RecordCreates, flow.Created.Count);
+        var before = (flow.Transactions.Count, flow.SignalWrites.Count, flow.Notified.Count, flow.RecordCreates, flow.Created.Count);
         flow.Status.Should().Be((int)InvoiceSubmissionStatus.Rejected);
 
         var handler = flow.BuildHandler();
         var again = await handler.ProcessAsync(job, CancellationToken.None);
 
         again.Status.Should().Be(JobStatus.Completed);
-        (flow.Transactions.Count, flow.Jobs.Count, flow.SignalWrites.Count, flow.Notified.Count, flow.RecordCreates, flow.Created.Count).Should().Be(before);
+        (flow.Transactions.Count, flow.SignalWrites.Count, flow.Notified.Count, flow.RecordCreates, flow.Created.Count).Should().Be(before);
         flow.Spy!.Calls.Should().Be(0, "the second delivery never reached the processor");
     }
 
@@ -703,7 +703,6 @@ public sealed class InvoiceSubmissionProcessingFlowTests
         flow.LinkedInvoice.Should().Be(InvoiceId, "the invoice is committed");
         flow.Status.Should().Be((int)InvoiceSubmissionStatus.Processing, "not terminal until the after-steps finish");
         flow.SignalWrites.Should().BeEmpty();
-        flow.Jobs.Should().BeEmpty();
         flow.Notified.Should().BeEmpty();
         flow.RecordCreates.Should().Be(0, "the Decision Record comes after the Signals");
 

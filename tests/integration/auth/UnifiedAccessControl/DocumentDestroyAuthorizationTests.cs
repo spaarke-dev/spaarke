@@ -170,6 +170,31 @@ public class DocumentDestroyAuthorizationTests
             "the refusal comes before IDocumentDataverseService.DeleteDocumentAsync, so Dataverse's Restrict never fires");
     }
 
+    [Fact(DisplayName = "094 (must fire): the Dataverse document delete counts Stored Files copied from the document (sprk_sourcedocument, Restrict) with its children; 409, nothing destroyed")]
+    public async Task DeleteDataverseDocument_WithStoredFileCopies_Is409_WithTheCount_AndDestroysNothing()
+    {
+        _fixture.ChildDocumentCounts[DocumentId] = 1;
+        _fixture.StoredFileCopyCounts[DocumentId] = 2;
+        using var client = _fixture.CreateClientWithRights("ReadAccess,DeleteAccess");
+
+        var response = await client.DeleteAsync($"/api/v1/documents/{DocumentId}");
+
+        await ShouldBeHasChildDocuments(response, expectedCount: 3);
+        _fixture.DeletedDataverseDocumentIds.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "094 (must not fire): a Stored File copied from another document does not refuse this one")]
+    public async Task DeleteDataverseDocument_WhenOnlyAnotherDocumentHasCopies_IsAllowed()
+    {
+        _fixture.StoredFileCopyCounts[Guid.NewGuid()] = 1;
+        using var client = _fixture.CreateClientWithRights("ReadAccess,DeleteAccess");
+
+        var response = await client.DeleteAsync($"/api/v1/documents/{DocumentId}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent);
+        _fixture.DeletedDataverseDocumentIds.Should().ContainSingle();
+    }
+
     // Security pass 2: a child created AFTER the count makes Dataverse's Restrict refuse the row itself. That refusal is the
     // same 409 on both routes, never a 500.
 

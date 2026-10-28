@@ -17,7 +17,8 @@ namespace Sprk.Bff.Api.Services.Finance.Submission;
 /// signals, system policy, processing stopped, so a merge is deterministic): (1) Signal plan and write refusals; (2) the system billing
 /// policy is missing, ambiguous, without a version in force or of the wrong type (review fix R5: the system Signals were not created;
 /// "disabled" is the administrator's own choice, D-125, and writes nothing); (3) processing stopped on a submission that links its invoice
-/// (review fix R3: the handler left it Processing, never Failed). Notes: section 14c.
+/// (review fix R3: the handler left it Processing, never Failed); (4) ebilling-r1 task 094: the commit was undone after the commit gate
+/// failed (<see cref="UndoneNote"/>; it replaces a "Processing stopped" segment, which has become false). Notes: section 14c.
 /// </summary>
 /// <remarks>
 /// <para><b>Codes only (ADR-015).</b> The text names the refusal code, the policy code and the subject (line or invoice, with an id prefix);
@@ -44,6 +45,7 @@ internal static class AdminAttentionText
 
     private const string PolicyPrefix = "System billing policy ";
     private const string StoppedPrefix = "Processing stopped: ";
+    private const string UndonePrefix = "Submission undone: ";
     private const int MaxCodeLength = 80;
 
     /// <summary>The room the Signal segment is never squeezed below (its header and the "… (+N more)" tail).</summary>
@@ -115,15 +117,16 @@ internal static class AdminAttentionText
     /// R3: the segment for a submission whose processing stopped while it links its invoice. Names the reason code only (ADR-015); the
     /// code is cut at <see cref="MaxCodeLength"/> characters.
     /// </summary>
-    internal static string StoppedNote(string? code) => StoppedNote(code, documentNotFiled: false);
+    internal static string StoppedNote(string? code) =>
+        $"{StoppedPrefix}{CodeOnly(code)}; the invoice is linked and the submission stays Processing: review it, then resume or correct";
 
     /// <summary>
-    /// <see cref="StoppedNote(string?)"/>; with <paramref name="documentNotFiled"/> (050a review round 2, 2(b): the confirmed document's re-file
-    /// was refused) it says that the invoice has NO document filed under it, so an invoice is never left without its document silently.
+    /// ebilling-r1 task 094 (procedure-and-file-model 9.1 step 5): the segment for a submission whose commit the gate undid
+    /// (<see cref="SubmissionCommitGate"/>). Names the reason code only (ADR-015) and says what was kept: a filing of the source
+    /// communication made by the from-document route is not undone.
     /// </summary>
-    internal static string StoppedNote(string? code, bool documentNotFiled) => documentNotFiled
-        ? $"{StoppedPrefix}{CodeOnly(code)}; the invoice is committed but its document is NOT filed under it and the submission stays Processing: resolve the document, then resume"
-        : $"{StoppedPrefix}{CodeOnly(code)}; the invoice is linked and the submission stays Processing: review it, then resume or correct";
+    internal static string UndoneNote(string? code) =>
+        $"{UndonePrefix}{CodeOnly(code)}; the invoice, its lines, approval and file were removed and the submission is Failed; a filing of its source communication made at submission is kept";
 
     /// <summary>
     /// R5: the segment for a system billing policy that is not usable. <paramref name="state"/> is
@@ -150,9 +153,12 @@ internal static class AdminAttentionText
     /// current one is kept. Deterministic: the order is always signals, policy, stopped, then any other text; the whole is capped at
     /// <see cref="InvoiceSubmissionPersister.AdminAttentionMaxLength"/> characters. Null when there is nothing to say.
     /// </summary>
-    internal static string? Merge(string? current, JsonObject? findings = null, string? policyNote = null, string? stoppedNote = null)
+    /// <remarks>Task 094: <paramref name="undoneNote"/> replaces the undone segment AND withdraws a "Processing stopped" one (the submission no
+    /// longer stays Processing); it is placed after the stopped slot.</remarks>
+    internal static string? Merge(
+        string? current, JsonObject? findings = null, string? policyNote = null, string? stoppedNote = null, string? undoneNote = null)
     {
-        string? signals = null, policy = null, stopped = null;
+        string? signals = null, policy = null, stopped = null, undone = null;
         var others = new List<string>();
         foreach (var part in (current ?? string.Empty).Split(Separator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
@@ -168,6 +174,10 @@ internal static class AdminAttentionText
             {
                 stopped ??= part;
             }
+            else if (part.StartsWith(UndonePrefix, StringComparison.Ordinal))
+            {
+                undone ??= part;
+            }
             else
             {
                 others.Add(part);
@@ -175,8 +185,9 @@ internal static class AdminAttentionText
         }
 
         policy = policyNote ?? policy;
-        stopped = stoppedNote ?? stopped;
-        var rest = new[] { policy, stopped }.Concat(others).Where(p => !string.IsNullOrEmpty(p)).Select(p => p!).ToList();
+        stopped = undoneNote is null ? stoppedNote ?? stopped : null;
+        undone = undoneNote ?? undone;
+        var rest = new[] { policy, stopped, undone }.Concat(others).Where(p => !string.IsNullOrEmpty(p)).Select(p => p!).ToList();
         if (findings is not null)
         {
             var room = InvoiceSubmissionPersister.AdminAttentionMaxLength - rest.Sum(p => p.Length + Separator.Length);

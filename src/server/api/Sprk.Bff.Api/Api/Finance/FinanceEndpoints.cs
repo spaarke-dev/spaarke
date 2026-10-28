@@ -263,6 +263,17 @@ public static class FinanceEndpoints
 
         var correlationId = httpContext.TraceIdentifier;
 
+        // ebilling-r1 task 094 (procedure-and-file-model 9.1 step 1): the confirm route runs Submit Invoice's own step 1 - the caller's
+        // Read on the document and on its communication (if it has one), and step A, which files an unfiled communication to the
+        // matter as the caller - before the intake. Outside the try below: its refusals (including the re-file route's 403) are answers.
+        if (await InvoiceSubmissionEndpoints.PrepareSourceAsync(
+                request.DocumentId, null, new InvoiceCoreRecord(InvoiceCoreRecordKind.Matter, request.MatterId), httpContext,
+                documentReadChecked: true, // the route's filter already required Read, Write and Append on the document
+                cancellationToken) is { } refused)
+        {
+            return refused;
+        }
+
         logger.LogInformation(
             "Invoice review confirm request received. DocumentId={DocumentId}, MatterId={MatterId}, " +
             "CorrelationId={CorrelationId}",

@@ -86,7 +86,8 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
     /// The snapshot of an existing-document submission (050a) over <paramref name="row"/>: its document is read from SharePoint Embedded.
     /// Task 092: the default row is an upload (no document).
     /// </summary>
-    internal static SubmissionSnapshot DocumentSnapshot(Entity row) => SubmissionSnapshot.Read(row).Snapshot! with { DocumentId = DocumentId };
+    internal static SubmissionSnapshot DocumentSnapshot(Entity row) =>
+        SubmissionSnapshot.Read(row).Snapshot! with { DocumentId = DocumentId, FileSource = SubmissionFileSource.SourceDocument };
 
     internal static SubmissionEvaluationOutcome Outcome(SubmissionEvaluationKind kind, string? reason = null, Entity? row = null) => new()
     {
@@ -251,6 +252,38 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
         }
     }
 
+    /// <summary>
+    /// Task 094: the commit gate as a STRICT scripted double. The handler calls only <see cref="SubmissionCommitGate.CompensateAsync"/> (step 0,
+    /// a held undo); the gate's own steps are proved over the real gate in <see cref="Sprk.Bff.Api.Tests.Services.Finance.Submission.InvoiceSubmissionPersisterTests"/>.
+    /// </summary>
+    internal sealed class ScriptedGate : SubmissionCommitGate
+    {
+        public ScriptedGate()
+            : base(
+                new Mock<IGenericEntityService>(MockBehavior.Strict).Object,
+                new StoredFileRig().Service,
+                Sprk.Bff.Api.Tests.Services.Finance.Submission.InvoiceSubmissionServiceTests.IsolationOver(
+                    () => Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.Standard()),
+                Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.SynchronizerOver(
+                    () => Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.Standard(),
+                    new Sprk.Bff.Api.Tests.AccessControl.FakeRecordShareTable()),
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<SubmissionCommitGate>.Instance)
+        {
+        }
+
+        public Func<Task<bool>>? Compensate { get; set; }
+        public List<Guid> CompensateCalls { get; } = [];
+
+        public override Task<SubmissionCommitGateResult> RunAsync(Guid submissionId, CancellationToken ct) =>
+            throw new InvalidOperationException("the handler never runs the gate itself (the persister and the resume do)");
+
+        public override Task<bool> CompensateAsync(Guid submissionId, CancellationToken ct)
+        {
+            CompensateCalls.Add(submissionId);
+            return (Compensate ?? throw new InvalidOperationException("CompensateAsync was not scripted"))();
+        }
+    }
+
     internal sealed class Rig
     {
         public Entity Row { get; set; } = SubmissionRow();
@@ -278,6 +311,15 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
         public string? MimeType { get; set; } = "application/pdf";
         public byte[] Bytes { get; set; } = [1, 2, 3];
         public List<string> Downloads { get; } = [];
+
+        /// <summary>Task 094: the source document's <c>versionnumber</c> as the job reads it.</summary>
+        public long DocumentVersion { get; set; } = 7;
+
+        /// <summary>Task 094: the source document is an email archive (not a Submit Invoice source).</summary>
+        public bool IsEmailArchive { get; set; }
+
+        /// <summary>Task 094: the commit gate; the handler itself calls only its compensation (step 0).</summary>
+        public ScriptedGate Gate { get; } = new();
 
         /// <summary>Task 092: the Finance file store an upload's bytes are read from (real service, in-memory blob gateway).</summary>
         public StoredFileRig Files { get; } = new();
@@ -340,19 +382,32 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
                     return Task.CompletedTask;
                 });
 
-            var documents = new Mock<IDocumentDataverseService>(MockBehavior.Strict);
-            documents.Setup(d => d.GetDocumentAsync(DocumentId.ToString(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(() => DocumentMissing
-                    ? null
-                    : new DocumentEntity
+            // Task 094 (9.1 step 2): the source document's row - pointer, version and names in ONE retrieve.
+            entities.Setup(e => e.RetrieveAsync(InvoiceSubmissionPersister.DocumentEntity, DocumentId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .Returns((string _, Guid _, string[] columns, CancellationToken _) =>
+                {
+                    columns.Should().Contain(["sprk_graphdriveid", "sprk_graphitemid", "versionnumber"], "the pointer and the version are read together");
+                    if (DocumentMissing)
                     {
-                        Id = DocumentId.ToString(),
-                        Name = "invoice",
-                        GraphDriveId = PointerContainer,
-                        GraphItemId = "item-1",
-                        FileName = "invoice.pdf",
-                        MimeType = MimeType,
-                    });
+                        return Task.FromException<Entity>(new FaultException<OrganizationServiceFault>(
+                            new OrganizationServiceFault { ErrorCode = -2147220969 }, "Does Not Exist"));
+                    }
+
+                    var document = new Entity(InvoiceSubmissionPersister.DocumentEntity, DocumentId)
+                    {
+                        ["sprk_graphdriveid"] = PointerContainer,
+                        ["sprk_graphitemid"] = "item-1",
+                        ["sprk_filename"] = "invoice.pdf",
+                        ["versionnumber"] = DocumentVersion,
+                        ["sprk_isemailarchive"] = IsEmailArchive,
+                    };
+                    if (MimeType is not null)
+                    {
+                        document["sprk_mimetype"] = MimeType;
+                    }
+
+                    return Task.FromResult(document);
+                });
 
             var spe = new Mock<ISpeFileOperations>(MockBehavior.Strict);
             spe.Setup(s => s.DownloadFileAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -373,7 +428,6 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
 
             return new InvoiceSubmissionProcessingJobHandler(
                 entities.Object,
-                documents.Object,
                 spe.Object,
                 TestRecordContainerResolver.ForBusinessUnitContainers(c => c == AllowedContainer),
                 Processor,
@@ -383,6 +437,7 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
                 Locks,
                 Mock.Of<IOptionsMonitor<EbillingOptions>>(m => m.CurrentValue == new EbillingOptions { Enabled = Enabled }),
                 Files.Service,
+                Gate,
                 Log);
         }
 
@@ -705,27 +760,6 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
         last.Row.GetAttributeValue<string>(AttentionColumn).Should().Be(AdminAttentionText.StoppedNote("ebilling.submission.signal_write_skipped"));
     }
 
-    [Theory(DisplayName = "050a review round 3 (uac-r2 F2): a re-file Retry (isolation unreadable, or the reparent faulted) on every delivery: the final delivery tells the administrator the invoice is committed and its document is NOT filed")]
-    [InlineData("ebilling.submission.document_isolation_unreadable")]
-    [InlineData("ebilling.submission.document_refile_failed")]
-    public async Task RefileRetry_OnEveryDelivery_FinalNoteSaysTheDocumentIsNotFiled(string code)
-    {
-        var deliveries = new[] { Job(), Job(), FinalJob() };
-        var rig = new Rig { Row = SubmissionRow(Processing, InvoiceId) }.HappyPath();
-        rig.After.Resume = () => Task.FromResult(AfterResult(SubmissionAfterStepsStatus.Retry, code) with { DocumentNotFiled = true });
-
-        var outcomes = new List<JobStatus>();
-        foreach (var delivery in deliveries)
-        {
-            outcomes.Add((await rig.Build().ProcessAsync(delivery, CancellationToken.None)).Status);
-        }
-
-        outcomes.Should().Equal(JobStatus.Failed, JobStatus.Failed, JobStatus.Poisoned);
-        rig.StatusWrites.Should().BeEmpty("never Failed: the invoice is committed");
-        rig.Row.GetAttributeValue<string>(AttentionColumn).Should().Be(AdminAttentionText.StoppedNote(code, documentNotFiled: true))
-            .And.Contain("the invoice is committed but its document is NOT filed under it");
-    }
-
     [Fact(DisplayName = "049 R3: the final delivery with NO link is Failed as before and sets no attention text (the Failed status is the signal)")]
     public async Task UnlinkedFinalDelivery_IsFailed_WithoutAttention()
     {
@@ -773,50 +807,6 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
         await rig.Build().ProcessAsync(Job(), CancellationToken.None);
 
         rig.Row.GetAttributeValue<string>(AttentionColumn).Should().Be(policy + AdminAttentionText.Separator + AdminAttentionText.StoppedNote(DecisionRecordRefusalReason.OwnerRefused));
-    }
-
-    [Theory(DisplayName = "050a review round 2, 2(b): a confirmed document's re-file refused after the commit: the submission stays Processing (no status write), the job is Poisoned, the administrator is told the invoice has NO document, and a replay after the cause is resolved completes it")]
-    [InlineData("ebilling.submission.document_already_invoiced")]
-    [InlineData("ebilling.submission.document_not_found")]
-    [InlineData("ebilling.submission.document_rejected")]
-    [InlineData("record_owner_secure_parent_not_isolated")]
-    public async Task RefileRefusedAfterTheCommit_StaysProcessing_TellsTheAdminTheInvoiceHasNoDocument_AndAReplayCompletes(string code)
-    {
-        var rig = new Rig().HappyPath();
-        rig.After.Run = _ => Task.FromResult(AfterResult(SubmissionAfterStepsStatus.Refused, code) with { DocumentNotFiled = true });
-
-        var outcome = await rig.Build().ProcessAsync(Job(), CancellationToken.None);
-
-        outcome.Status.Should().Be(JobStatus.Poisoned, "no redelivery can change a refused re-file; the message is dead-lettered for a replay");
-        outcome.ErrorMessage.Should().Be(code);
-        rig.StatusWrites.Should().Equal([(Processing, (string?)null)], "never Failed: the invoice is committed");
-        var text = rig.Row.GetAttributeValue<string>(AttentionColumn);
-        text.Should().Be(AdminAttentionText.StoppedNote(code, documentNotFiled: true))
-            .And.StartWith("Processing stopped: " + code)
-            .And.Contain("its document is NOT filed under it", "an invoice is never left without its document silently");
-        text.Length.Should().BeLessThanOrEqualTo(InvoiceSubmissionPersister.AdminAttentionMaxLength);
-
-        // The administrator resolves the document (e.g. unlinks it from the other invoice) and replays the message: the resume re-runs the
-        // re-file first and completes (the after-steps then withdraw the stopped segment, R7).
-        // The replay finds what the commit left: Processing with the invoice linked (and the attention text).
-        var replay = new Rig { Row = SubmissionRow(Processing, InvoiceId) }.HappyPath();
-        replay.Row[AttentionColumn] = text;
-        replay.After.Resume = () => Task.FromResult(AfterResult(SubmissionAfterStepsStatus.Completed));
-        (await replay.Build().ProcessAsync(Job(), CancellationToken.None)).Status.Should().Be(JobStatus.Completed);
-        replay.After.ResumeCalls.Should().HaveCount(1, "the replay resumes the after-steps, whose first step is the re-file");
-        replay.StatusWrites.Should().BeEmpty("the after-steps write the terminal status, not the handler");
-    }
-
-    [Fact(DisplayName = "050a review round 2, 2(b) (must not fire): an after-steps refusal that is NOT a refused re-file keeps the ordinary stopped note")]
-    public async Task OtherRefusal_KeepsTheOrdinaryStoppedNote()
-    {
-        var rig = new Rig().HappyPath();
-        rig.After.Run = _ => Task.FromResult(AfterResult(SubmissionAfterStepsStatus.Refused, "ebilling.submission.signal_plan_missing"));
-
-        await rig.Build().ProcessAsync(Job(), CancellationToken.None);
-
-        rig.Row.GetAttributeValue<string>(AttentionColumn).Should().Be(AdminAttentionText.StoppedNote("ebilling.submission.signal_plan_missing"))
-            .And.NotContain("NOT filed");
     }
 
     [Fact(DisplayName = "049 R3: a redelivery that stops for the same reason writes nothing new (idempotent); a different reason replaces only the stopped segment")]
@@ -1020,7 +1010,7 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
 
     // ── 1a: the document ──
 
-    [Fact(DisplayName = "049 E 1a / 092: an existing-document submission's bytes and MIME type reach the read request; the pointer's container is verified first")]
+    [Fact(DisplayName = "049 E 1a / 094: a source document's bytes and MIME type reach the read request; the pointer's container is verified first")]
     public async Task Document_IsDownloadedAfterTheContainerCheck_AndHandedToTheRead()
     {
         var rig = new Rig { Bytes = [9, 8, 7], MimeType = "image/png" }.HappyPath();
@@ -1106,6 +1096,135 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
         rig.StatusWrites.Should().NotContain(w => w.Status == Failed);
     }
 
+    // ── 1a (task 094, model 9.1 step 2): a Submit Invoice source document is copied, never linked ──
+
+    /// <summary>Scripts the processor to load the source document (<see cref="DocumentSnapshot"/>) and return <paramref name="kind"/>.</summary>
+    private static void LoadsTheSource(Rig rig, SubmissionEvaluationKind kind = SubmissionEvaluationKind.Accepted, string? reason = null)
+    {
+        rig.Processor.Script = async (row, load) =>
+        {
+            await load(DocumentSnapshot(row), CancellationToken.None);
+            return Outcome(kind, reason) with { Submission = DocumentSnapshot(row) };
+        };
+    }
+
+    /// <summary>The bytes of the source copy staged under <see cref="StoredFileIds.ForSourceVersion"/> of <paramref name="version"/>, or null.</summary>
+    private static byte[]? StagedCopy(Rig rig, long version)
+    {
+        var name = StoredFileBlobName.Build(
+            rig.Files.TenantId, new StoredFileParent(StoredFileParentKind.Invoice, InvoiceId), StoredFileIds.ForSourceVersion(SubmissionId, version));
+        return rig.Files.Gateway.Get(StoredFileSchema.ContainerOf(StoredFilePurpose.InvoicePdf), name)?.Content;
+    }
+
+    [Fact(DisplayName = "094 (9.1 step 2): the source's copy is staged under ForSourceVersion(submission, the version read) - Invoice PDF, Firm-visible No, the source ids, version and SHA-256 - and handed to the persister with the outcome")]
+    public async Task Source_IsStagedAsItsCopy_AndHandedToThePersister()
+    {
+        var rig = new Rig { Bytes = [5, 6, 7, 8], DocumentVersion = 41 }.HappyPath();
+        LoadsTheSource(rig);
+
+        (await rig.Build().ProcessAsync(Job(), CancellationToken.None)).Status.Should().Be(JobStatus.Completed);
+
+        var copy = rig.Persister.Calls.Should().ContainSingle().Subject.Outcome.StagedFiles.Should().ContainSingle().Subject;
+        copy.Spec.FileId.Should().Be(StoredFileIds.ForSourceVersion(SubmissionId, 41));
+        copy.SourceVersion.Should().Be(41);
+        copy.Spec.Purpose.Should().Be(StoredFilePurpose.InvoicePdf);
+        copy.Spec.Parent.Should().Be(new StoredFileParent(StoredFileParentKind.Invoice, InvoiceId));
+        copy.Spec.FirmVisible.Should().BeFalse("a Submit Invoice copy is internal until someone marks it visible");
+        copy.Spec.SourceDocumentId.Should().Be(DocumentId);
+        copy.Spec.SourceVersion.Should().Be(41);
+        copy.Spec.SubmissionId.Should().Be(SubmissionId);
+        copy.Spec.SourceSha256.Should().Be(Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(new byte[] { 5, 6, 7, 8 })).ToLowerInvariant());
+        StagedCopy(rig, 41).Should().Equal(5, 6, 7, 8);
+    }
+
+    [Fact(DisplayName = "094 must-fire: an email-archive document is not a Submit Invoice source - Failed document_unavailable, Poisoned, nothing downloaded or staged")]
+    public async Task Source_EmailArchive_IsFailed()
+    {
+        var rig = new Rig { IsEmailArchive = true }.HappyPath();
+        LoadsTheSource(rig);
+
+        var outcome = await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Poisoned);
+        rig.StatusWrites.Should().Contain((Failed, SubmissionReasonCodes.DocumentUnavailable));
+        rig.Downloads.Should().BeEmpty();
+        StagedCopy(rig, rig.DocumentVersion).Should().BeNull();
+        rig.Persister.Calls.Should().BeEmpty();
+    }
+
+    [Theory(DisplayName = "094: an evaluation that ends without a commit (Failed, or not read) deletes the staged copy - no blob is left without a row")]
+    [InlineData(SubmissionEvaluationKind.Failed, "ebilling.submission.processing_failed")]
+    [InlineData(SubmissionEvaluationKind.RejectedUnreadable, "invoice.read.unreadable")]
+    public async Task Source_NoCommit_DiscardsTheStagedCopy(SubmissionEvaluationKind kind, string reason)
+    {
+        var rig = new Rig().HappyPath();
+        LoadsTheSource(rig, kind, reason);
+
+        await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        StagedCopy(rig, rig.DocumentVersion).Should().BeNull();
+        rig.Persister.Calls.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "094 (9.1 step 4): SourceChanged with the SAME bytes at a new version: the new version is staged and the commit is tried once more with it")]
+    public async Task SourceChanged_SameBytes_RestagesAndPersistsOnce()
+    {
+        var rig = new Rig { DocumentVersion = 7 }.HappyPath();
+        LoadsTheSource(rig);
+        rig.Persister.Script.Clear();
+        rig.Persister.Script.Add(_ =>
+        {
+            rig.DocumentVersion = 8;
+            return Task.FromResult(Persist(SubmissionPersistStatus.SourceChanged, null, SubmissionReasonCodes.SourceChanged));
+        });
+        rig.Persister.Script.Add(_ => Task.FromResult(Persist(SubmissionPersistStatus.Committed, InvoiceId)));
+
+        (await rig.Build().ProcessAsync(Job(), CancellationToken.None)).Status.Should().Be(JobStatus.Completed);
+
+        rig.Persister.Calls.Should().HaveCount(2);
+        rig.Persister.Calls[1].Outcome.StagedFiles.Should().ContainSingle().Which.Spec.FileId.Should().Be(StoredFileIds.ForSourceVersion(SubmissionId, 8));
+        rig.Processor.Calls.Should().ContainSingle("the evaluation stands: the bytes it read are the bytes committed");
+        rig.After.RunCalls.Should().ContainSingle();
+    }
+
+    [Fact(DisplayName = "094 must-fire (9.1 step 4): SourceChanged with OTHER bytes: transient (Failure), the new stage is deleted, no second commit; the retry evaluates the new bytes")]
+    public async Task SourceChanged_OtherBytes_IsTransient()
+    {
+        var rig = new Rig { DocumentVersion = 7 }.HappyPath();
+        LoadsTheSource(rig);
+        rig.Persister.Script.Clear();
+        rig.Persister.Script.Add(_ =>
+        {
+            rig.DocumentVersion = 8;
+            rig.Bytes = [4, 4, 4];
+            return Task.FromResult(Persist(SubmissionPersistStatus.SourceChanged, null, SubmissionReasonCodes.SourceChanged));
+        });
+
+        var outcome = await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Failed);
+        outcome.ErrorMessage.Should().Be(SubmissionReasonCodes.SourceChanged);
+        rig.Persister.Calls.Should().ContainSingle();
+        StagedCopy(rig, 8).Should().BeNull("a copy of bytes nobody evaluated is never kept");
+        rig.StatusWrites.Should().NotContain(w => w.Status == Failed);
+    }
+
+    [Fact(DisplayName = "094: a second SourceChanged under one run does not loop - transient (Failure)")]
+    public async Task SourceChanged_Twice_IsTransient()
+    {
+        var rig = new Rig().HappyPath();
+        LoadsTheSource(rig);
+        rig.Persister.Script.Clear();
+        rig.Persister.Script.Add(_ => Task.FromResult(Persist(SubmissionPersistStatus.SourceChanged, null, SubmissionReasonCodes.SourceChanged)));
+        rig.Persister.Script.Add(_ => Task.FromResult(Persist(SubmissionPersistStatus.SourceChanged, null, SubmissionReasonCodes.SourceChanged)));
+
+        var outcome = await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Failed);
+        rig.Persister.Calls.Should().HaveCount(2);
+        rig.After.RunCalls.Should().BeEmpty();
+    }
+
     // ── 1a (task 092): an upload's bytes come from the Finance file store ──
 
     /// <summary>Scripts the processor to load the default (upload) row's PDF and keep the request it got.</summary>
@@ -1186,48 +1305,110 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
         rig.Persister.Calls.Should().BeEmpty();
     }
 
-    // ── 092: file_unservable is the one refusal that fails a submission linked to its invoice ──
+    // ── 094 (model 9.1 step 5; uac-r2 condition 3): the commit gate's undo, complete or held, on every channel ──
 
-    [Fact(DisplayName = "092 (model 9.1 step 6): the persister's FileUnservable WITH the invoice marks the submission Failed, Poisons the job and runs no after-step")]
-    public async Task PersistUnservable_WithTheInvoice_IsFailed_NoAfterStep()
+    [Theory(DisplayName = "094: the persister's Undone (the gate Failed the submission itself) - complete: Poisoned with the code; held: Failure, and Poisoned undo_held on the final delivery; the handler writes no status and runs no after-step")]
+    [InlineData(SubmissionReasonCodes.SourceCheckFailed, false, false)]
+    [InlineData(SubmissionReasonCodes.FileUnservable, false, false)]
+    [InlineData(SubmissionReasonCodes.SourceCheckFailed, true, false)]
+    [InlineData(SubmissionReasonCodes.FileUnservable, true, true)]
+    public async Task PersistUndone_MapsCompleteOrHeld(string code, bool held, bool finalDelivery)
     {
         var rig = new Rig().HappyPath();
         rig.Persister.Script.Clear();
-        rig.Persister.Script.Add(_ => Task.FromResult(Persist(SubmissionPersistStatus.Refused, InvoiceId, SubmissionReasonCodes.FileUnservable)));
+        rig.Persister.Script.Add(_ => Task.FromResult(Persist(SubmissionPersistStatus.Undone, null, code) with { UndoHeld = held }));
 
-        var outcome = await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+        var outcome = await rig.Build().ProcessAsync(finalDelivery ? FinalJob() : Job(), CancellationToken.None);
 
-        outcome.Status.Should().Be(JobStatus.Poisoned);
-        outcome.ErrorMessage.Should().Be(SubmissionReasonCodes.FileUnservable);
-        rig.StatusWrites.Should().Equal([(Processing, (string?)null), (Failed, SubmissionReasonCodes.FileUnservable)]);
-        rig.After.RunCalls.Should().BeEmpty("no after-step runs after a definitive flip failure");
+        (outcome.Status, outcome.ErrorMessage).Should().Be(!held
+            ? (JobStatus.Poisoned, code)
+            : finalDelivery ? (JobStatus.Poisoned, SubmissionReasonCodes.UndoHeld) : (JobStatus.Failed, SubmissionReasonCodes.UndoHeld));
+        rig.StatusWrites.Should().Equal([(Processing, (string?)null)], "the gate wrote Failed with its code; the handler adds nothing");
+        rig.After.RunCalls.Should().BeEmpty("no after-step runs after an undo");
         rig.After.ResumeCalls.Should().BeEmpty();
     }
 
-    [Fact(DisplayName = "092: a resume whose flip gate answers FileUnservable marks the linked submission Failed and Poisons the job")]
-    public async Task ResumeUnservable_IsFailed()
+    [Theory(DisplayName = "094: a resume whose gate undid the commit (Undone, complete or held) maps the same way; no status or attention write")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ResumeUndone_MapsCompleteOrHeld(bool held)
     {
         var rig = new Rig { Row = SubmissionRow(Processing, InvoiceId) }.HappyPath();
-        rig.After.Resume = () => Task.FromResult(AfterResult(SubmissionAfterStepsStatus.Refused, SubmissionReasonCodes.FileUnservable));
+        rig.After.Resume = () => Task.FromResult(AfterResult(SubmissionAfterStepsStatus.Undone, SubmissionReasonCodes.SourceCheckFailed) with { UndoHeld = held });
 
         var outcome = await rig.Build().ProcessAsync(Job(), CancellationToken.None);
 
-        outcome.Status.Should().Be(JobStatus.Poisoned);
-        rig.StatusWrites.Should().Equal([(Failed, SubmissionReasonCodes.FileUnservable)]);
-        rig.Writes.Should().NotContain(w => w.ContainsKey(AttentionColumn), "the Failed status is the signal; no stopped note");
+        outcome.Status.Should().Be(held ? JobStatus.Failed : JobStatus.Poisoned);
+        outcome.ErrorMessage.Should().Be(held ? SubmissionReasonCodes.UndoHeld : SubmissionReasonCodes.SourceCheckFailed);
+        rig.Writes.Should().BeEmpty("the gate wrote Failed; a linked submission's handler never writes a status");
     }
 
-    [Fact(DisplayName = "092 must-not-fire: a refusal WITHOUT an invoice keeps the ordinary FailAsync path (same Failed write, no FileUnservable special case)")]
+    [Theory(DisplayName = "094 (step 0): a Failed submission with an undo code finishes the held compensation on its redelivery and nothing else - complete: Success; still held: Failure, Poisoned undo_held on the final delivery")]
+    [InlineData(SubmissionReasonCodes.SourceCheckFailed, true, false)]
+    [InlineData(SubmissionReasonCodes.FileUnservable, true, false)]
+    [InlineData(SubmissionReasonCodes.FileUnservable, false, false)]
+    [InlineData(SubmissionReasonCodes.SourceCheckFailed, false, true)]
+    public async Task FailedWithAnUndoCode_RunsTheCompensation(string code, bool complete, bool finalDelivery)
+    {
+        var row = SubmissionRow(Failed);
+        row[InvoiceSubmissionPersister.SubmissionReasonCode] = code;
+        var rig = new Rig { Row = row }.HappyPath();
+        rig.Gate.Compensate = () => Task.FromResult(complete);
+
+        var outcome = await rig.Build().ProcessAsync(finalDelivery ? FinalJob() : Job(), CancellationToken.None);
+
+        rig.Gate.CompensateCalls.Should().Equal(SubmissionId);
+        (outcome.Status, outcome.ErrorMessage).Should().Be(complete
+            ? (JobStatus.Completed, (string?)null)
+            : finalDelivery ? (JobStatus.Poisoned, SubmissionReasonCodes.UndoHeld) : (JobStatus.Failed, SubmissionReasonCodes.UndoHeld));
+        rig.NothingRan.Should().BeTrue("a Failed submission is never evaluated, persisted or resumed again");
+        rig.Writes.Should().BeEmpty();
+    }
+
+    [Theory(DisplayName = "094 must-not-fire (step 0): a Failed submission with any other code is the terminal no-op - no compensation")]
+    [InlineData("ebilling.submission.document_unavailable")]
+    [InlineData(null)]
+    public async Task FailedWithAnotherCode_IsTheNoOp(string? code)
+    {
+        var row = SubmissionRow(Failed);
+        if (code is not null)
+        {
+            row[InvoiceSubmissionPersister.SubmissionReasonCode] = code;
+        }
+
+        var rig = new Rig { Row = row }.HappyPath();
+
+        (await rig.Build().ProcessAsync(Job(), CancellationToken.None)).Status.Should().Be(JobStatus.Completed);
+
+        rig.Gate.CompensateCalls.Should().BeEmpty();
+        rig.NothingRan.Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "094: a compensation fault throws out of the handler (the broker redelivers; step 0 runs it again)")]
+    public async Task CompensationFault_Throws()
+    {
+        var row = SubmissionRow(Failed);
+        row[InvoiceSubmissionPersister.SubmissionReasonCode] = SubmissionReasonCodes.FileUnservable;
+        var rig = new Rig { Row = row }.HappyPath();
+        rig.Gate.Compensate = () => Task.FromException<bool>(new TimeoutException("storage"));
+
+        var outcome = await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Failed, "a fault is transient, never a terminal state");
+        rig.Writes.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "094 must-not-fire: a persister refusal WITHOUT an invoice keeps the ordinary FailAsync path (Failed written by the handler)")]
     public async Task PersistRefused_WithoutTheInvoice_IsTheOrdinaryFailure()
     {
         var rig = new Rig().HappyPath();
         rig.Persister.Script.Clear();
-        rig.Persister.Script.Add(_ => Task.FromResult(Persist(SubmissionPersistStatus.Refused, null, SubmissionReasonCodes.FileUnservable)));
+        rig.Persister.Script.Add(_ => Task.FromResult(Persist(SubmissionPersistStatus.Refused, null, SubmissionReasonCodes.DocumentUnavailable)));
 
         var outcome = await rig.Build().ProcessAsync(Job(), CancellationToken.None);
 
         outcome.Status.Should().Be(JobStatus.Poisoned);
-        rig.StatusWrites.Should().Equal([(Processing, (string?)null), (Failed, SubmissionReasonCodes.FileUnservable)]);
+        rig.StatusWrites.Should().Equal([(Processing, (string?)null), (Failed, SubmissionReasonCodes.DocumentUnavailable)]);
         rig.After.RunCalls.Should().BeEmpty();
     }
 

@@ -1238,6 +1238,20 @@ public class FinanceEndpointsAuthorizationContractTests
         public Mock<IFieldMappingDataverseService> RollupWrites { get; } = new(MockBehavior.Strict);
         public RollupSeam Rollup { get; private set; } = null!;
 
+        /// <summary>
+        /// Task 094: the app-only reader the confirm's Submit Invoice step 1 uses AFTER the route's filter (the document's communication).
+        /// The default document links no communication, so step 1 adds nothing to the confirm's own checks.
+        /// </summary>
+        public Mock<IGenericEntityService> Entities { get; } = DocumentWithoutCommunication();
+
+        private static Mock<IGenericEntityService> DocumentWithoutCommunication()
+        {
+            var entities = new Mock<IGenericEntityService>(MockBehavior.Strict);
+            entities.Setup(e => e.RetrieveAsync("sprk_document", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string table, Guid id, string[] _, CancellationToken _) => new Microsoft.Xrm.Sdk.Entity(table, id));
+            return entities;
+        }
+
         /// <param name="registerProbe">False builds a host whose container has NO <see cref="CallerRecordAccessProbe"/>
         /// — the configuration fault the Privilege path must deny on.</param>
         /// <param name="ebillingEnabled">The eBilling flag (050a: the confirm route is gated by it).</param>
@@ -1279,6 +1293,7 @@ public class FinanceEndpointsAuthorizationContractTests
             }
 
             builder.Services.AddSingleton(Review.Object);
+            builder.Services.AddSingleton(Entities.Object);
             builder.Services.AddOptions<EbillingOptions>().Configure(o => o.Enabled = ebillingEnabled);
             builder.Services.AddSingleton(Search.Object);
             builder.Services.AddSingleton(Summary.Object);
@@ -1321,6 +1336,7 @@ public class FinanceEndpointsAuthorizationContractTests
         public void VerifyNoServiceWasInvoked()
         {
             Review.VerifyNoOtherCalls();
+            Entities.VerifyNoOtherCalls(); // task 094: step 1 runs after the filter, never before a denial
             Search.VerifyNoOtherCalls();
             Summary.VerifyNoOtherCalls();
             Kpi.VerifyNoOtherCalls();

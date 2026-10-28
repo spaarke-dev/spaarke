@@ -915,41 +915,66 @@ public class InvoiceSubmissionPersisterTests
             Entries.Add((logLevel, formatter(state, exception)));
     }
 
-    // ── 050a review #1 / #2: a confirm submission's EXISTING document is checked on its live row, and never linked by the transaction ──
+    // ── Task 094 (model 9.1 steps 3-5): a Submit Invoice SOURCE document is checked on its live row, COPIED (never linked, re-owned or
+    // re-shared), guarded at the version its copy was staged from, and checked again after the commit by the commit gate ──
 
-    /// <summary>The outcome as the job produces it for the confirm submission of <see cref="Document"/> (its id derived from the document).</summary>
-    private static SubmissionEvaluationOutcome AsConfirmSubmission(SubmissionEvaluationOutcome outcome)
-    {
-        var id = InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(Document);
-        return outcome with { SubmissionId = id, Submission = outcome.Submission! with { SubmissionId = id, DocumentId = Document } };
-    }
+    private static readonly Guid SourceSubmission = InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(Document);
+    private static readonly Guid SourceInvoice = InvoiceSubmissionPersister.InvoiceIdFor(SourceSubmission);
+    private static readonly Guid OtherMatter = Guid.Parse("09400000-0000-4000-8000-0000000000a9");
 
-    [Fact(DisplayName = "050a review #1: a confirm submission whose document is unlinked commits WITHOUT the document link (its re-file is the link's one writer)")]
-    public async Task ConfirmSubmission_UnlinkedDocument_CommitsWithoutTheDocumentLink()
+    /// <summary>
+    /// The outcome as the job produces it for a Submit Invoice of <see cref="Document"/>: the source-document kind (its id derived from the
+    /// document) and the copy the job staged at the document's current version (<see cref="Store.StageSourceCopy"/>).
+    /// </summary>
+    private static SubmissionEvaluationOutcome AsSource(SubmissionEvaluationOutcome outcome, Store store) => outcome with
     {
-        var outcome = AsConfirmSubmission(await new ProcessorHarness().RunAsync());
+        SubmissionId = SourceSubmission,
+        Submission = outcome.Submission! with { SubmissionId = SourceSubmission, DocumentId = Document, FileSource = SubmissionFileSource.SourceDocument },
+        StagedFiles = [store.StageSourceCopy()],
+    };
+
+    [Fact(DisplayName = "094 happy path: a source submission commits invoice, the copy's Stored File row, lines, approval, the guard and the submission in ONE transaction; the copy ends Servable; nothing links the source")]
+    public async Task Source_CommitsTheCopy_ServableAfterTheGate_NothingLinksTheSource()
+    {
         var store = new Store();
+        var outcome = AsSource(await new ProcessorHarness().RunAsync(), store);
 
-        var result = await store.Build().PersistAsync(outcome, "corr-050a");
+        var result = await store.Build().PersistAsync(outcome, "corr-094");
 
         result.Status.Should().Be(SubmissionPersistStatus.Committed);
-        store.DocumentReads.Should().ContainSingle("the live row is read before anything is built");
         store.Transactions.Single().Select(Describe).Should().Equal(
-            "Create sprk_invoice", "Create sprk_billingevent", "Create sprk_invoiceapproval", "Update sprk_document", "Update sprk_invoicesubmission");
+            "Create sprk_invoice", "Create sprk_storedfile", "Create sprk_billingevent", "Create sprk_invoiceapproval", "Update sprk_document",
+            "Update sprk_invoicesubmission");
+        // Step 3 reads the live row (version, link, review status) and runs the source check (its filing chain) before anything is built;
+        // step 5 (the gate) runs the source check again after the commit.
+        store.DocumentReads.Count(c => c.Contains("versionnumber")).Should().Be(1, "the version is read once, at step 3");
+        store.DocumentReads.Count(c => c.Contains("sprk_relatedmatter")).Should().Be(2, "the source check runs at step 3 and again at step 5");
 
-        // Review round 2, 2(a): the document's one request is the guard - conditional on the version the check read, and NO link.
+        var file = store.Transactions.Single().OfType<CreateRequest>().Single(c => c.Target.LogicalName == StoredFileSchema.Entity).Target;
+        file.Id.Should().Be(StoredFileIds.ForSourceVersion(SourceSubmission, 7));
+        file.GetAttributeValue<OptionSetValue>(StoredFileSchema.Purpose).Value.Should().Be((int)StoredFilePurpose.InvoicePdf);
+        file.GetAttributeValue<bool>(StoredFileSchema.FirmVisible).Should().BeFalse("owner K: a copy is never firm-visible");
+        file.GetAttributeValue<EntityReference>(StoredFileSchema.SourceDocument).Id.Should().Be(Document);
+        file.GetAttributeValue<string>(StoredFileSchema.SourceVersion).Should().Be("7");
+        file.GetAttributeValue<string>(StoredFileSchema.SourceSha256).Should().Be(store.SourceCopy!.Spec.SourceSha256);
+        store.CopyStatus.Should().Be(StoredFileStatus.Servable, "the gate flipped it after the re-run passed");
+        store.FileStatusAtTotals.Should().ContainSingle();
+
+        // The guard is the source's ONE request: conditional on the staged version, and NO link, owner or share write.
         var guard = store.Transactions.Single().OfType<UpdateRequest>().Single(u => u.Target.LogicalName == "sprk_document");
         guard.ConcurrencyBehavior.Should().Be(ConcurrencyBehavior.IfRowVersionMatches);
-        guard.Target.RowVersion.Should().Be("7", "the version the check read");
+        guard.Target.RowVersion.Should().Be("7", "the version the copy was staged from");
         guard.Target.Id.Should().Be(Document);
-        guard.Target.Attributes.Keys.Should().Equal(new[] { "sprk_invoicereviewstatus" }, "the guard writes nothing to sprk_invoice");
+        guard.Target.Attributes.Keys.Should().Equal(new[] { "sprk_invoicereviewstatus" }, "the guard writes nothing to sprk_invoice, the owner or the shares");
         guard.Target["sprk_invoicereviewstatus"].Should().BeNull("written back as read (the document has no decision yet)");
+        store.Transactions.Single().OfType<CreateRequest>().Single(c => c.Target.LogicalName == "sprk_invoice").Target.Attributes
+            .Should().NotContainKey(InvoiceSubmissionPersister.InvoiceDocument, "the invoice no longer links a document");
+        store.Isolation.OwnerWrites.Should().BeEmpty("the source is never re-owned");
     }
 
-    [Fact(DisplayName = "050a review round 2, 2(a): the guard writes the review status back exactly as the check read it (a value-preserving write)")]
-    public async Task ConfirmSubmission_Guard_WritesTheReviewStatusBackAsRead()
+    [Fact(DisplayName = "094: the guard writes the review status back exactly as the check read it (a value-preserving write) at the staged version")]
+    public async Task Source_Guard_WritesTheReviewStatusBackAsRead()
     {
-        var outcome = AsConfirmSubmission(await new ProcessorHarness().RunAsync());
         var store = new Store
         {
             DocumentRow = new Entity("sprk_document", Document)
@@ -958,6 +983,7 @@ public class InvoiceSubmissionPersisterTests
             },
             DocumentVersion = 42,
         };
+        var outcome = AsSource(await new ProcessorHarness().RunAsync(), store);
 
         (await store.Build().PersistAsync(outcome, null)).Status.Should().Be(SubmissionPersistStatus.Committed);
 
@@ -975,11 +1001,10 @@ public class InvoiceSubmissionPersisterTests
         { "deleted", InvoiceSubmissionErrors.DocumentNotFound },
     };
 
-    [Theory(DisplayName = "050a review round 2, 2(a): a filing, a reject or a delete between the document check and the commit rolls the transaction back (the guard) and is refused in the same delivery: no invoice committed")]
+    [Theory(DisplayName = "094 step 4: a filing, a reject or a delete between the check and the commit rolls the transaction back (the guard) and is refused in the same delivery: no invoice, the staged copy deleted")]
     [MemberData(nameof(ChangesBeforeTheCommit))]
-    public async Task ConfirmSubmission_ChangeBetweenTheCheckAndTheCommit_RollsBack_AndIsRefused(string change, string expectedCode)
+    public async Task Source_ChangeBetweenTheCheckAndTheCommit_RollsBack_AndIsRefused(string change, string expectedCode)
     {
-        var outcome = AsConfirmSubmission(await new ProcessorHarness().RunAsync());
         var store = new Store
         {
             BeforeTransaction = s =>
@@ -1003,6 +1028,7 @@ public class InvoiceSubmissionPersisterTests
                 s.DocumentVersion++;
             },
         };
+        var outcome = AsSource(await new ProcessorHarness().RunAsync(), store);
 
         var result = await store.Build().PersistAsync(outcome, null);
 
@@ -1012,87 +1038,238 @@ public class InvoiceSubmissionPersisterTests
         store.Transactions.Should().ContainSingle("the one transaction was sent and rolled back by the guard");
         store.Submission.GetAttributeValue<EntityReference>("sprk_invoice").Should().BeNull("nothing committed: the submission links no invoice");
         store.TotalsCalls.Should().BeEmpty();
+        store.CopyBlobExists.Should().BeFalse("a staged copy no commit wrote a row for is deleted");
     }
 
-    [Fact(DisplayName = "050a review round 2, 2(a): an unrelated write between the check and the commit rolls the transaction back too; nothing refuses the document, so it is the transaction's Retry")]
-    public async Task ConfirmSubmission_UnrelatedWriteBetweenTheCheckAndTheCommit_IsRetry()
+    [Fact(DisplayName = "094 step 4 (must fire): a source write between staging and the commit faults the guard: SourceChanged (the job re-stages under the new version), nothing committed, the staged copy deleted")]
+    public async Task Source_UnrelatedWriteBetweenTheCheckAndTheCommit_IsSourceChanged()
     {
-        var outcome = AsConfirmSubmission(await new ProcessorHarness().RunAsync());
         var store = new Store { BeforeTransaction = s => s.DocumentVersion++ };
+        var outcome = AsSource(await new ProcessorHarness().RunAsync(), store);
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.SourceChanged);
+        result.ReasonCode.Should().Be(SubmissionReasonCodes.SourceChanged);
+        result.InvoiceId.Should().BeNull();
+        store.DocumentReads.Count(c => c.Contains("versionnumber")).Should().Be(2, "the check, then the re-check after the rolled-back transaction");
+        store.DocumentReads.Count(c => c.Contains("sprk_relatedmatter")).Should().Be(2, "each runs the source check");
+        store.Submission.GetAttributeValue<EntityReference>("sprk_invoice").Should().BeNull();
+        store.CopyBlobExists.Should().BeFalse();
+    }
+
+    [Fact(DisplayName = "094 step 3 (must fire): a source whose live version is not the staged one is SourceChanged before anything is built; no transaction")]
+    public async Task Source_LiveVersionIsNotTheStagedOne_IsSourceChanged_NoTransaction()
+    {
+        var store = new Store();
+        var outcome = AsSource(await new ProcessorHarness().RunAsync(), store);
+        store.DocumentVersion = 8; // a write after the job staged its copy at 7
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.SourceChanged);
+        store.Transactions.Should().BeEmpty();
+        store.OwnerContexts.Should().BeEmpty();
+        store.CopyBlobExists.Should().BeFalse();
+    }
+
+    [Fact(DisplayName = "094 step 4 (must fire): a transaction fault that is not the guard is the transaction's Retry, and the staged copy is deleted")]
+    public async Task Source_OtherTransactionFault_IsRetry_StagedCopyDeleted()
+    {
+        var store = new Store { TransactionFault = new DataverseTransactionException("boom", failedRequestIndex: 0, outcomeUnknown: false, null) };
+        var outcome = AsSource(await new ProcessorHarness().RunAsync(), store);
 
         var result = await store.Build().PersistAsync(outcome, null);
 
         result.Status.Should().Be(SubmissionPersistStatus.Retry);
         result.ReasonCode.Should().Be(InvoiceSubmissionPersister.TransactionFailedCode);
-        result.InvoiceId.Should().BeNull();
-        store.DocumentReads.Should().HaveCount(2, "the check, then the re-check after the rolled-back transaction");
-        store.Submission.GetAttributeValue<EntityReference>("sprk_invoice").Should().BeNull();
+        store.CopyBlobExists.Should().BeFalse("a transaction failure deletes the staged blob");
     }
 
-    [Fact(DisplayName = "050a review #1: a confirm submission whose document is linked to ANOTHER invoice is Refused document_already_invoiced and nothing is written")]
-    public async Task ConfirmSubmission_DocumentLinkedToAnotherInvoice_IsRefused_NothingWritten()
+    [Fact(DisplayName = "094 step 4 (must not fire): an outcome-unknown transaction that did not link keeps the staged copy (the commit may yet be proved)")]
+    public async Task Source_OutcomeUnknown_NotLinked_KeepsTheStagedCopy()
     {
-        var outcome = AsConfirmSubmission(await new ProcessorHarness().RunAsync());
-        var store = new Store
-        {
-            DocumentRow = new Entity("sprk_document", Document) { ["sprk_invoice"] = new EntityReference("sprk_invoice", Guid.NewGuid()) },
-        };
+        var store = new Store { TransactionFault = new DataverseTransactionException("timeout", failedRequestIndex: -1, outcomeUnknown: true, null) };
+        var outcome = AsSource(await new ProcessorHarness().RunAsync(), store);
 
         var result = await store.Build().PersistAsync(outcome, null);
 
-        result.Status.Should().Be(SubmissionPersistStatus.Refused, "the job marks the submission Failed");
-        result.ReasonCode.Should().Be(InvoiceSubmissionErrors.DocumentAlreadyInvoiced).And.Be("ebilling.submission.document_already_invoiced");
-        result.InvoiceId.Should().BeNull();
-        store.Transactions.Should().BeEmpty();
-        store.OwnerContexts.Should().BeEmpty();
-        store.TotalsCalls.Should().BeEmpty();
+        result.Status.Should().Be(SubmissionPersistStatus.Retry);
+        result.ReasonCode.Should().Be(InvoiceSubmissionPersister.TransactionOutcomeUnknownCode);
+        store.CopyBlobExists.Should().BeTrue();
     }
 
-    [Fact(DisplayName = "050a review #1: a confirm submission whose document already links THIS submission's invoice commits (negative control)")]
-    public async Task ConfirmSubmission_DocumentLinkedToItsOwnInvoice_Commits()
+    [Fact(DisplayName = "094 step 5 (must fire): the source re-filed to another core record between the commit and the re-run is undone - Stored File blob and row, approval, lines, invoice deleted in that order; the four columns cleared; Failed with the note; no totals")]
+    public async Task Source_RefiledAfterTheCommit_IsUndone()
     {
-        var outcome = AsConfirmSubmission(await new ProcessorHarness().RunAsync());
         var store = new Store
         {
-            DocumentRow = new Entity("sprk_document", Document)
-            {
-                ["sprk_invoice"] = new EntityReference("sprk_invoice", InvoiceSubmissionPersister.InvoiceIdFor(outcome.SubmissionId)),
-            },
+            AfterCommit = s => s.DocumentRow = new Entity("sprk_document", Document) { ["sprk_matter"] = new EntityReference("sprk_matter", OtherMatter) },
         };
+        store.Submission[InvoiceSubmissionPersister.SubmissionCorrelationId] = "corr-intake";
+        store.Submission["sprk_ponumber"] = "PO-9";
+        var outcome = AsSource(await new ProcessorHarness().RunAsync(), store);
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Undone);
+        result.ReasonCode.Should().Be(SubmissionReasonCodes.SourceCheckFailed);
+        result.UndoHeld.Should().BeFalse();
+        result.InvoiceId.Should().Be(SourceInvoice);
+        store.TotalsCalls.Should().BeEmpty("nothing runs after a failed step 5");
+        ShouldBeUndone(store, SubmissionReasonCodes.SourceCheckFailed, store.SourceCopy!.Spec.FileId);
+        store.Submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionCorrelationId).Should().Be("corr-intake", "the correlation is kept");
+    }
+
+    [Fact(DisplayName = "094 step 5 (must not fire): the source still filed under the core record only passes the re-run, so nothing is undone")]
+    public async Task Source_StillFiledHere_IsNotUndone()
+    {
+        var store = new Store
+        {
+            AfterCommit = s => s.DocumentRow = new Entity("sprk_document", Document) { ["sprk_matter"] = new EntityReference("sprk_matter", Matter) },
+        };
+        var outcome = AsSource(await new ProcessorHarness().RunAsync(), store);
 
         (await store.Build().PersistAsync(outcome, null)).Status.Should().Be(SubmissionPersistStatus.Committed);
+
+        store.Deletes.Should().BeEmpty();
+        store.CopyStatus.Should().Be(StoredFileStatus.Servable);
     }
 
-    [Fact(DisplayName = "050a review #2: a confirm submission whose document was rejected as not an invoice is Refused document_rejected and nothing is written")]
-    public async Task ConfirmSubmission_DocumentRejected_IsRefused_NothingWritten()
+    /// <summary>Task 094: the undo's end state - every row of the commit gone in order, the four columns cleared, Failed with the code and note.</summary>
+    private static void ShouldBeUndone(Store store, string reasonCode, Guid fileId)
     {
-        var outcome = AsConfirmSubmission(await new ProcessorHarness().RunAsync());
+        store.Files.Dataverse.Rows.Should().NotContainKey(fileId, "the Stored File row is deleted");
+        store.Deletes.Select(d => d.Table).Should().StartWith(["sprk_invoiceapproval"]).And.EndWith("sprk_invoice",
+            "the approval first (its invoice lookup is required), then the lines, then the invoice");
+        store.Deletes.Where(d => d.Table == "sprk_billingevent").Should().NotBeEmpty();
+        store.Deletes.Should().OnlyContain(d => d.FilesLeft == 0, "the Stored File (blob and row) is deleted before the approval, lines and invoice");
+        store.Submission.GetAttributeValue<OptionSetValue>(InvoiceSubmissionPersister.SubmissionStatus).Value.Should().Be((int)InvoiceSubmissionStatus.Failed);
+        store.Submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionReasonCode).Should().Be(reasonCode);
+        store.Submission.Attributes.Should().NotContainKey(InvoiceSubmissionPersister.SubmissionInvoice);
+        store.Submission.Attributes.Should().NotContainKey(InvoiceSubmissionPersister.SubmissionFindingsJson);
+        store.Submission.Attributes.Should().NotContainKey("sprk_firminvoicenumber");
+        store.Submission.Attributes.Should().NotContainKey("sprk_ponumber");
+        store.Submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionAdminAttention).Should().Contain(AdminAttentionText.UndoneNote(reasonCode));
+        // Step A's filing is kept: the undo deletes only the commit's rows (the Dataverse here is a strict mock, so any write to the
+        // communication or the source document would throw), and the note says the filing stays.
+        store.Deletes.Select(d => d.Table).Should().NotContain(["sprk_communication", "sprk_document"]);
+        AdminAttentionText.UndoneNote(reasonCode).Should().Contain("a filing of its source communication made at submission is kept");
+    }
+
+    [Fact(DisplayName = "094 copy rule end to end: the copy a Submit Invoice committed is served on 090's download route to a caller with Read on the invoice and the source; once that caller loses Read on the source document it is the uniform 404")]
+    public async Task CopyRule_EndToEnd_LosingReadOnTheSource_RefusesTheCopy()
+    {
+        var store = new Store();
+        var outcome = AsSource(await new ProcessorHarness().RunAsync(), store);
+        (await store.Build().PersistAsync(outcome, "corr-094")).Status.Should().Be(SubmissionPersistStatus.Committed);
+        var copy = store.SourceCopy!;
+        store.CopyStatus.Should().Be(StoredFileStatus.Servable);
+        // The malware scan's verdict on the staged blob (Defender tags it after the write).
+        store.Files.Gateway.Get(copy.Blob.Container, copy.Blob.BlobPath)!.Tags = StoredFileRig.CleanTags(store.Files.Gateway.Now.AddMinutes(1));
+        await using var host = await Sprk.Bff.Api.Tests.Api.Finance.StoredFileEndpointsTests.Host.StartAsync(rig: store.Files);
+        store.Files.Probe.Grant("sprk_invoices", SourceInvoice, AccessRights.Read);
+        store.Files.Probe.Grant("sprk_documents", Document, AccessRights.Read);
+        var url = $"/api/finance/files/{copy.Spec.FileId}/content";
+
+        var served = await host.SendAsync(url);
+
+        served.StatusCode.Should().Be(System.Net.HttpStatusCode.OK, await served.Content.ReadAsStringAsync());
+        (await served.Content.ReadAsStringAsync()).Should().Be("%PDF-1.7 source copy");
+
+        // The caller loses Read on the source document (re-filed, unshared): the copy follows the source, never the invoice alone.
+        store.Files.Probe.Grant("sprk_documents", Document, AccessRights.None);
+        var storageCalls = store.Files.Gateway.StorageCalls;
+
+        var refused = await host.SendAsync(url);
+
+        refused.StatusCode.Should().Be(System.Net.HttpStatusCode.NotFound);
+        store.Files.Gateway.StorageCalls.Should().Be(storageCalls, "refused before any storage read");
+        store.Files.Probe.Calls.Should().Contain(c => c.Set == "sprk_documents" && c.Id == Document && c.Token == "caller-token");
+    }
+
+    // ── 094: the commit gate itself (model 9.1 steps 5-6; uac-r2 conditions 1 and 3), over the same Dataverse, file store and isolation ──
+
+    [Fact(DisplayName = "094 step 5 (uac-r2 condition 1, must fire): a re-run that cannot be made (the copy's roots unreadable) is a failure - undone source_check_failed, never a pass or a retry")]
+    public async Task Gate_ReRunCannotBeMade_IsUndone()
+    {
+        var store = new Store { AfterCommit = s => s.Isolation.FailingQueriesOf("sprk_invoice") };
+        var outcome = AsSource(await new ProcessorHarness().RunAsync(), store);
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Undone);
+        result.ReasonCode.Should().Be(SubmissionReasonCodes.SourceCheckFailed);
+        store.TotalsCalls.Should().BeEmpty();
+        ShouldBeUndone(store, SubmissionReasonCodes.SourceCheckFailed, store.SourceCopy!.Spec.FileId);
+    }
+
+    [Fact(DisplayName = "094 step 5 (must fire): an invoice whose file row is gone after the commit is undone file_unservable (none is never a pass)")]
+    public async Task Gate_NoFile_IsUndone_FileUnservable()
+    {
+        var store = new Store { AfterCommit = s => s.Files.Dataverse.Rows.TryRemove(s.SourceCopy!.Spec.FileId, out _) };
+        var outcome = AsSource(await new ProcessorHarness().RunAsync(), store);
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Undone);
+        result.ReasonCode.Should().Be(SubmissionReasonCodes.FileUnservable);
+        store.Submission.GetAttributeValue<OptionSetValue>(InvoiceSubmissionPersister.SubmissionStatus).Value.Should().Be((int)InvoiceSubmissionStatus.Failed);
+        store.Submission.Attributes.Should().NotContainKey(InvoiceSubmissionPersister.SubmissionInvoice);
+        // Known limit (recorded in the 094 notes): the undo finds files by their rows, so a blob whose row another writer deleted is left
+        // for the orphan sweep (StoredFileReconcileJob, disabled). It is not servable: nothing can reach a blob without its row.
+        store.CopyBlobExists.Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "094 step 6 (must not fire): once a file is Servable the re-run is skipped - a resume after the source moved neither re-checks nor undoes")]
+    public async Task Gate_AFileAlreadyServable_SkipsTheReRun()
+    {
+        var store = new Store();
+        var outcome = AsSource(await new ProcessorHarness().RunAsync(), store);
+        (await store.Build().PersistAsync(outcome, null)).Status.Should().Be(SubmissionPersistStatus.Committed);
+        var checks = store.DocumentReads.Count(c => c.Contains("sprk_relatedmatter"));
+        store.DocumentRow = new Entity("sprk_document", Document) { ["sprk_matter"] = new EntityReference("sprk_matter", OtherMatter) };
+
+        var again = await store.Gate!.RunAsync(SourceSubmission, CancellationToken.None);
+
+        again.Should().Be(SubmissionCommitGateResult.Passed);
+        store.DocumentReads.Count(c => c.Contains("sprk_relatedmatter")).Should().Be(checks, "step 5 ran and flipped in the earlier run; never twice");
+        store.Deletes.Should().BeEmpty();
+        store.CopyStatus.Should().Be(StoredFileStatus.Servable);
+    }
+
+    [Fact(DisplayName = "094 (uac-r2 condition 3): the compensation is idempotent - a second run after a complete undo deletes nothing, writes nothing and answers complete")]
+    public async Task Gate_Compensation_IsIdempotent()
+    {
         var store = new Store
         {
-            DocumentRow = new Entity("sprk_document", Document)
-            {
-                ["sprk_invoicereviewstatus"] = new OptionSetValue(InvoiceReviewService.ReviewStatusRejectedNotInvoice),
-            },
+            AfterCommit = s => s.DocumentRow = new Entity("sprk_document", Document) { ["sprk_matter"] = new EntityReference("sprk_matter", OtherMatter) },
         };
+        var outcome = AsSource(await new ProcessorHarness().RunAsync(), store);
+        (await store.Build().PersistAsync(outcome, null)).Status.Should().Be(SubmissionPersistStatus.Undone);
+        var deletes = store.Deletes.Count;
+        var attention = store.Submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionAdminAttention);
 
-        var result = await store.Build().PersistAsync(outcome, null);
+        (await store.Gate!.CompensateAsync(SourceSubmission, CancellationToken.None)).Should().BeTrue();
 
-        result.Status.Should().Be(SubmissionPersistStatus.Refused);
-        result.ReasonCode.Should().Be(InvoiceSubmissionPersister.DocumentRejectedCode).And.Be("ebilling.submission.document_rejected");
-        store.Transactions.Should().BeEmpty();
+        store.Deletes.Should().HaveCount(deletes);
+        store.Submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionAdminAttention).Should().Be(attention);
+        ShouldBeUndone(store, SubmissionReasonCodes.SourceCheckFailed, store.SourceCopy!.Spec.FileId);
     }
 
-    [Fact(DisplayName = "050a review #1: a confirm submission whose document is gone is Refused document_not_found and nothing is written")]
-    public async Task ConfirmSubmission_DocumentGone_IsRefused_NothingWritten()
+    [Fact(DisplayName = "094 (must not fire): the compensation of a submission that never committed (no link, no findings, no row) clears nothing - its firm invoice number is kept")]
+    public async Task Gate_Compensation_WithoutACommit_ClearsNothing()
     {
-        var outcome = AsConfirmSubmission(await new ProcessorHarness().RunAsync());
-        var store = new Store { DocumentDeleted = true };
+        var store = new Store();
+        store.Build();
+        store.Submission["sprk_firminvoicenumber"] = "INV-100";
+        store.Submission["sprk_ponumber"] = "PO-1";
 
-        var result = await store.Build().PersistAsync(outcome, null);
+        (await store.Gate!.CompensateAsync(InvoiceSubmissionPersisterTests.Submission, CancellationToken.None)).Should().BeTrue();
 
-        result.Status.Should().Be(SubmissionPersistStatus.Refused);
-        result.ReasonCode.Should().Be(InvoiceSubmissionErrors.DocumentNotFound);
-        store.Transactions.Should().BeEmpty();
+        store.Deletes.Should().BeEmpty();
+        store.Submission.GetAttributeValue<string>("sprk_firminvoicenumber").Should().Be("INV-100");
+        store.Submission.GetAttributeValue<string>("sprk_ponumber").Should().Be("PO-1");
     }
 
     // ── 050a review round 3 (uac-r2 F1-b): the isolation rule is decided again at commit, and again after a rolled-back transaction ──
@@ -1111,12 +1288,12 @@ public class InvoiceSubmissionPersisterTests
             .SecureChild("sprk_document", Document, ("sprk_relatedcommunication", "sprk_communication", communication));
     }
 
-    [Fact(DisplayName = "050a round 3 (uac-r2 F1-b, must fire): a confirm submission whose document became isolated under another Secure record after the confirm is Refused document_core_record_mismatch at commit: no transaction, no invoice")]
-    public async Task ConfirmSubmission_DocumentIsolatedUnderAnotherSecureRecord_IsRefused_NoInvoice()
+    [Fact(DisplayName = "094 step 3 (uac-r2 F1-b, must fire): a source isolated under another Secure record is Refused document_core_record_mismatch at commit: no transaction, no invoice")]
+    public async Task Source_DocumentIsolatedUnderAnotherSecureRecord_IsRefused_NoInvoice()
     {
-        var outcome = AsConfirmSubmission(await new ProcessorHarness().RunAsync());
         var store = new Store();
         IsolateUnderS(store.Isolation);
+        var outcome = AsSource(await new ProcessorHarness().RunAsync(), store);
 
         var result = await store.Build().PersistAsync(outcome, null);
 
@@ -1128,10 +1305,9 @@ public class InvoiceSubmissionPersisterTests
         store.Submission.GetAttributeValue<EntityReference>("sprk_invoice").Should().BeNull();
     }
 
-    [Fact(DisplayName = "050a round 3 (uac-r2 F1-b, must fire, the re-check after a rollback): the document is filed under Secure matter S between the check and the commit; the guard rolls the transaction back and the re-check refuses it in the same delivery")]
-    public async Task ConfirmSubmission_FiledUnderASecureRecordBetweenTheCheckAndTheCommit_RollsBack_AndIsRefused()
+    [Fact(DisplayName = "094 step 4 (uac-r2 F1-b, must fire, the re-check after a rollback): the source is filed under Secure matter S between the check and the commit; the guard rolls back and the re-check refuses it in the same delivery")]
+    public async Task Source_FiledUnderASecureRecordBetweenTheCheckAndTheCommit_RollsBack_AndIsRefused()
     {
-        var outcome = AsConfirmSubmission(await new ProcessorHarness().RunAsync());
         var store = new Store
         {
             BeforeTransaction = s =>
@@ -1140,6 +1316,7 @@ public class InvoiceSubmissionPersisterTests
                 s.DocumentVersion++;
             },
         };
+        var outcome = AsSource(await new ProcessorHarness().RunAsync(), store);
 
         var result = await store.Build().PersistAsync(outcome, null);
 
@@ -1147,56 +1324,101 @@ public class InvoiceSubmissionPersisterTests
         result.ReasonCode.Should().Be(InvoiceSubmissionErrors.DocumentCoreRecordMismatch);
         result.InvoiceId.Should().BeNull();
         store.Transactions.Should().ContainSingle("the one transaction was sent and rolled back by the guard");
-        store.DocumentReads.Should().HaveCount(2, "the check, then the re-check after the rolled-back transaction");
+        store.DocumentReads.Count(c => c.Contains("versionnumber")).Should().Be(2, "the check, then the re-check after the rolled-back transaction");
+        store.DocumentReads.Count(c => c.Contains("sprk_relatedmatter")).Should().Be(2, "each runs the source check");
         store.Submission.GetAttributeValue<EntityReference>("sprk_invoice").Should().BeNull("nothing committed");
         store.TotalsCalls.Should().BeEmpty();
     }
 
-    [Fact(DisplayName = "050a round 3 (uac-r2 F1-b): a document isolation that cannot be read at commit is a Retry (document_isolation_unreadable), nothing committed")]
-    public async Task ConfirmSubmission_IsolationUnreadable_IsRetry_NothingCommitted()
+    [Fact(DisplayName = "094 step 3 (uac-r2 F1-b): a source isolation that cannot be read at commit is a Retry (document_isolation_unreadable), nothing committed")]
+    public async Task Source_IsolationUnreadable_IsRetry_NothingCommitted()
     {
-        var outcome = AsConfirmSubmission(await new ProcessorHarness().RunAsync());
         var store = new Store();
         IsolateUnderS(store.Isolation);
         store.Isolation.FailingQueriesOf("sprk_communication");
+        var outcome = AsSource(await new ProcessorHarness().RunAsync(), store);
 
         var result = await store.Build().PersistAsync(outcome, null);
 
         result.Status.Should().Be(SubmissionPersistStatus.Retry);
-        result.ReasonCode.Should().Be(InvoiceDocumentRefile.IsolationUnreadableCode);
+        result.ReasonCode.Should().Be(InvoiceSubmissionPersister.IsolationUnreadableCode);
         store.Transactions.Should().BeEmpty();
     }
 
-    [Fact(DisplayName = "050a round 4 (uac-r2 F3, must fire): an ambiguous Secure Record owner team (the walk's Failed) at commit is a Retry (document_isolation_unreadable): no transaction, no invoice")]
-    public async Task ConfirmSubmission_AmbiguousSecureOwnerTeam_IsRetry_NothingCommitted()
+    [Fact(DisplayName = "094 step 3 (uac-r2 F3, must fire): an ambiguous Secure Record owner team (the walk's Failed) at commit is a Retry (document_isolation_unreadable): no transaction, no invoice")]
+    public async Task Source_AmbiguousSecureOwnerTeam_IsRetry_NothingCommitted()
     {
-        var outcome = AsConfirmSubmission(await new ProcessorHarness().RunAsync());
         var store = new Store();
         IsolateUnderS(store.Isolation);
         InvoiceSubmissionExistingDocumentTests.AddAmbiguousSecureOwnerTeam(store.Isolation);
+        var outcome = AsSource(await new ProcessorHarness().RunAsync(), store);
 
         var result = await store.Build().PersistAsync(outcome, null);
 
         result.Status.Should().Be(SubmissionPersistStatus.Retry);
-        result.ReasonCode.Should().Be(InvoiceDocumentRefile.IsolationUnreadableCode);
+        result.ReasonCode.Should().Be(InvoiceSubmissionPersister.IsolationUnreadableCode);
         result.InvoiceId.Should().BeNull();
         store.Transactions.Should().BeEmpty();
         store.Submission.GetAttributeValue<EntityReference>("sprk_invoice").Should().BeNull();
     }
 
-    [Fact(DisplayName = "050a round 3 (must not fire): a confirm submission whose document is isolated EXACTLY under the submission's own Secure matter commits")]
-    public async Task ConfirmSubmission_IsolatedUnderItsOwnSecureMatter_Commits()
+    [Fact(DisplayName = "094 (must not fire): a source isolated EXACTLY under the submission's own Secure matter commits, and its copy (under the invoice there) passes the re-run")]
+    public async Task Source_IsolatedUnderItsOwnSecureMatter_Commits()
     {
-        var outcome = AsConfirmSubmission(await new ProcessorHarness().RunAsync());
         var store = new Store();
         store.Isolation
             .SecureRoot("sprk_matter", Matter)
             .SecureChild("sprk_document", Document, ("sprk_matter", "sprk_matter", Matter));
+        var outcome = AsSource(await new ProcessorHarness().RunAsync(), store);
 
         (await store.Build().PersistAsync(outcome, null)).Status.Should().Be(SubmissionPersistStatus.Committed);
+        store.CopyStatus.Should().Be(StoredFileStatus.Servable);
     }
 
-    // ── ebilling-r1 task 092: the upload's Stored File row in the transaction, and the flip right after the commit ──
+    [Fact(DisplayName = "094 step 5 (must fire): the source's secure roots not covered by the copy's (the invoice moved out from under Secure matter M after the commit) is undone source_check_failed")]
+    public async Task Gate_SourceRootsNotCoveredByTheCopy_IsUndone()
+    {
+        var store = new Store
+        {
+            // The source stays filed under M (the filing check passes); the copy's roots (its invoice's, until 086) no longer include M.
+            AfterCommit = s => s.Isolation
+                .OrdinaryRoot("sprk_matter", OtherMatter)
+                .OrdinaryChild("sprk_invoice", SourceInvoice, ("sprk_matter", "sprk_matter", OtherMatter)),
+        };
+        store.Isolation
+            .SecureRoot("sprk_matter", Matter)
+            .SecureChild("sprk_document", Document, ("sprk_matter", "sprk_matter", Matter));
+        var outcome = AsSource(await new ProcessorHarness().RunAsync(), store);
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Undone);
+        result.ReasonCode.Should().Be(SubmissionReasonCodes.SourceCheckFailed);
+        store.TotalsCalls.Should().BeEmpty();
+        ShouldBeUndone(store, SubmissionReasonCodes.SourceCheckFailed, store.SourceCopy!.Spec.FileId);
+    }
+
+    [Fact(DisplayName = "094 (caller errors): a source outcome with no staged copy, or a copy of another document, or a file source that disagrees with the document, is thrown before anything is read")]
+    public async Task Source_InconsistentOutcome_Throws()
+    {
+        var store = new Store();
+        var accepted = await new ProcessorHarness().RunAsync();
+        var noCopy = AsSource(accepted, store) with { StagedFiles = [] };
+        var otherCopy = AsSource(accepted, store);
+        otherCopy = otherCopy with { StagedFiles = [otherCopy.StagedFiles[0] with { Spec = otherCopy.StagedFiles[0].Spec with { SourceDocumentId = Guid.NewGuid() } }] };
+        var uploadNamingADocument = accepted with { Submission = accepted.Submission! with { DocumentId = Document } };
+        var sut = store.Build();
+
+        foreach (var outcome in new[] { noCopy, otherCopy, uploadNamingADocument })
+        {
+            await FluentActions.Invoking(() => sut.PersistAsync(outcome, null)).Should().ThrowAsync<ArgumentException>();
+        }
+
+        store.DocumentReads.Should().BeEmpty();
+        store.Transactions.Should().BeEmpty();
+    }
+
+    // ── ebilling-r1 tasks 092 / 094: the upload's Stored File row in the transaction, and the commit gate right after the commit ──
 
     [Fact(DisplayName = "092: an upload reads no document and links none; the transaction holds exactly one Stored File create")]
     public async Task Upload_ReadsNoDocument_LinksNone_OneStoredFileCreate()
@@ -1208,7 +1430,7 @@ public class InvoiceSubmissionPersisterTests
         var result = await store.Build().PersistAsync(outcome, null);
 
         result.Status.Should().Be(SubmissionPersistStatus.Committed);
-        store.DocumentReads.Should().BeEmpty();
+        store.DocumentReads.Should().BeEmpty("an upload has no source: the gate runs no re-run");
         var described = store.Transactions.Single().Select(Describe).ToList();
         described.Should().NotContain(d => d.EndsWith(" sprk_document", StringComparison.Ordinal));
         described.Count(d => d == "Create sprk_storedfile").Should().Be(1);
@@ -1246,8 +1468,8 @@ public class InvoiceSubmissionPersisterTests
         store.TotalsCalls.Should().BeEmpty();
     }
 
-    [Fact(DisplayName = "092 must-fire: a definitive flip failure after the commit (bytes changed) is Refused file_unservable WITH the invoice; no totals; the row stays Not yet servable")]
-    public async Task DefinitiveFlipFailure_IsRefusedWithTheInvoice_NoTotals()
+    [Fact(DisplayName = "094 (092 review item 2, must fire): a definitive flip failure after an upload's commit (bytes changed) is UNDONE - blob and row, approval, lines, invoice deleted; the four columns cleared; Failed; no totals")]
+    public async Task Upload_DefinitiveFlipFailure_IsUndone_NoTotals()
     {
         var outcome = await new ProcessorHarness().RunAsync();
         var store = new Store
@@ -1258,12 +1480,40 @@ public class InvoiceSubmissionPersisterTests
 
         var result = await store.Build().PersistAsync(outcome, null);
 
-        result.Status.Should().Be(SubmissionPersistStatus.Refused);
+        result.Status.Should().Be(SubmissionPersistStatus.Undone);
         result.ReasonCode.Should().Be(SubmissionReasonCodes.FileUnservable);
-        result.InvoiceId.Should().Be(InvoiceId, "the invoice is committed; the handler marks the submission Failed (the FileUnservable exception)");
+        result.InvoiceId.Should().Be(InvoiceId);
         store.TotalsCalls.Should().BeEmpty("nothing runs after a definitive flip failure");
-        store.FileStatus.Should().Be(StoredFileStatus.NotYetServable, "left for 090's detector");
-        store.Submission.GetAttributeValue<EntityReference>("sprk_invoice").Id.Should().Be(InvoiceId);
+        store.Files.Gateway.Get(store.StagedBlob!.Container, store.StagedBlob.BlobPath).Should().BeNull("the file's blob is deleted");
+        ShouldBeUndone(store, SubmissionReasonCodes.FileUnservable, FileId);
+    }
+
+    [Fact(DisplayName = "094 undo held (must fire): a delete fault in the undo leaves the submission Failed and the Stored File Not yet servable; a later compensation completes it")]
+    public async Task Upload_UndoHeld_ThenCompensationCompletes()
+    {
+        var outcome = await new ProcessorHarness().RunAsync();
+        var store = new Store
+        {
+            AfterCommit = s =>
+            {
+                s.Files.Gateway.Overwrite(s.StagedBlob!.Container, s.StagedBlob.BlobPath, "%PDF-tampered"u8.ToArray(), s.Files.Gateway.Now.AddMinutes(5));
+                s.Files.Gateway.FailOp["delete"] = new Azure.RequestFailedException(503, "storage unavailable");
+            },
+        };
+        var sut = store.Build();
+
+        var result = await sut.PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Undone);
+        result.UndoHeld.Should().BeTrue();
+        store.Submission.GetAttributeValue<OptionSetValue>(InvoiceSubmissionPersister.SubmissionStatus).Value.Should().Be((int)InvoiceSubmissionStatus.Failed);
+        store.FileStatus.Should().Be(StoredFileStatus.NotYetServable, "held: the file is never served");
+        store.Submission.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.SubmissionInvoice).Should().NotBeNull("held: the columns stay until the rows are gone");
+
+        store.Files.Gateway.FailOp.Clear();
+        (await store.Gate!.CompensateAsync(InvoiceSubmissionPersisterTests.Submission, CancellationToken.None)).Should().BeTrue();
+
+        ShouldBeUndone(store, SubmissionReasonCodes.FileUnservable, FileId);
     }
 
     [Fact(DisplayName = "092: a flip fault after the commit throws (the job retries) before the totals; the retry is a resume with nothing created again")]
@@ -1281,7 +1531,7 @@ public class InvoiceSubmissionPersisterTests
         store.Files.Gateway.FailEverything = null;
         var retry = await store.Build().PersistAsync(outcome, null);
 
-        retry.Status.Should().Be(SubmissionPersistStatus.Resumed, "the after-steps' resume flips before anything else (InvoiceSubmissionAfterStepsTests)");
+        retry.Status.Should().Be(SubmissionPersistStatus.Resumed, "the after-steps' resume runs the gate before anything else (InvoiceSubmissionAfterStepsTests)");
         store.Transactions.Should().ContainSingle("nothing is created twice");
     }
 
@@ -1296,34 +1546,6 @@ public class InvoiceSubmissionPersisterTests
         result.Status.Should().Be(SubmissionPersistStatus.Committed);
         store.FileStatus.Should().Be(StoredFileStatus.Servable);
         store.FileStatusAtTotals.Should().Equal([StoredFileStatus.Servable]);
-    }
-
-    [Fact(DisplayName = "092 must-fire: an outcome naming a document that is not its 050a confirm is Refused document_unavailable, nothing read or written")]
-    public async Task DocumentThatIsNotAConfirm_IsRefused_NothingWritten()
-    {
-        var outcome = await new ProcessorHarness().RunAsync();
-        outcome = outcome with { Submission = outcome.Submission! with { DocumentId = Document } };
-        var store = new Store();
-
-        var result = await store.Build().PersistAsync(outcome, null);
-
-        result.Status.Should().Be(SubmissionPersistStatus.Refused);
-        result.ReasonCode.Should().Be(SubmissionReasonCodes.DocumentUnavailable);
-        store.DocumentReads.Should().BeEmpty();
-        store.Transactions.Should().BeEmpty();
-        store.OwnerContexts.Should().BeEmpty();
-    }
-
-    [Fact(DisplayName = "092 must-not-fire: a confirm submission (050a) builds no Stored File row and reads no staged blob")]
-    public async Task ConfirmSubmission_HasNoStoredFile()
-    {
-        var outcome = AsConfirmSubmission(await new ProcessorHarness().RunAsync());
-        var store = new Store { Staged = false };
-
-        (await store.Build().PersistAsync(outcome, null)).Status.Should().Be(SubmissionPersistStatus.Committed);
-
-        store.Transactions.Single().Select(Describe).Should().NotContain("Create sprk_storedfile");
-        store.Files.Gateway.StorageCalls.Should().Be(0);
     }
 
     private sealed class Store
@@ -1399,6 +1621,50 @@ public class InvoiceSubmissionPersisterTests
         /// <summary>Runs after the transaction committed (before the flip): another writer's slot.</summary>
         public Action<Store>? AfterCommit { get; init; }
 
+        /// <summary>Task 094: every delete the commit gate's undo sent through Dataverse, with how many Stored File rows were left then.</summary>
+        public List<(string Table, Guid Id, int FilesLeft)> Deletes { get; } = [];
+
+        /// <summary>Task 094: the invoice and approval rows the committed transaction created (the undo deletes them).</summary>
+        private HashSet<(string Table, Guid Id)> CreatedRows { get; } = [];
+
+        /// <summary>Task 094: the REAL commit gate the last <see cref="Build"/> composed (over this store's Dataverse, file store and isolation world).</summary>
+        public SubmissionCommitGate? Gate { get; private set; }
+
+        /// <summary>Task 094: the copy <see cref="StageSourceCopy"/> staged.</summary>
+        public StagedSourceCopy? SourceCopy { get; private set; }
+
+        /// <summary>Task 094: the copy's Stored File status now (null: no row).</summary>
+        public StoredFileStatus? CopyStatus => SourceCopy is { } copy && Files.Dataverse.Rows.TryGetValue(copy.Spec.FileId, out var row)
+            ? (StoredFileStatus)row.GetAttributeValue<OptionSetValue>(StoredFileSchema.Status).Value
+            : null;
+
+        /// <summary>Task 094: whether the copy's staged blob is still there.</summary>
+        public bool CopyBlobExists => SourceCopy is { } copy && Files.Gateway.Get(copy.Blob.Container, copy.Blob.BlobPath) is not null;
+
+        /// <summary>
+        /// Task 094 (model 9.1 step 2): stages the job's copy of <see cref="Document"/> at <see cref="DocumentVersion"/> under
+        /// <see cref="StoredFileIds.ForSourceVersion"/>, with the spec the job builds (Invoice PDF, Firm-visible No, the source ids, version and SHA).
+        /// </summary>
+        public StagedSourceCopy StageSourceCopy()
+        {
+            var bytes = "%PDF-1.7 source copy"u8.ToArray();
+            var spec = new StoredFileRowSpec
+            {
+                FileId = StoredFileIds.ForSourceVersion(SourceSubmission, DocumentVersion),
+                Purpose = StoredFilePurpose.InvoicePdf,
+                Parent = new StoredFileParent(StoredFileParentKind.Invoice, SourceInvoice),
+                Name = "invoice.pdf",
+                ContentType = "application/pdf",
+                FirmVisible = false,
+                SourceDocumentId = Document,
+                SourceVersion = DocumentVersion,
+                SourceSha256 = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes)),
+                SubmissionId = SourceSubmission,
+            };
+            var blob = Files.Service.StageAsync(spec, new MemoryStream(bytes), CancellationToken.None).GetAwaiter().GetResult().Blob!;
+            return SourceCopy = new StagedSourceCopy(spec, blob, DocumentVersion);
+        }
+
         private void StageOnce()
         {
             if (!Staged || StagedBlob is not null)
@@ -1424,8 +1690,42 @@ public class InvoiceSubmissionPersisterTests
                     "sprk_document" => ReadDocument(id, columns),
                     _ => new Entity(entity, id) { [RegardingRecordType.GetPrimaryNameField(entity)!] = "Acme v. Roe", ["sprk_matternumber"] = MatterNumber },
                 });
+            // The lines (the resume's read, the undo's delete loop); task 094: the gate's lineage read of the invoice goes to the isolation world.
             entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(() => new EntityCollection(StoredLines));
+                .ReturnsAsync((QueryExpression q, CancellationToken _) => q.EntityName == InvoiceSubmissionPersister.LineEntity
+                    ? new EntityCollection(StoredLines.ToList())
+                    : Isolation.Answer(q));
+
+            // Task 094: the commit gate's writes - the undo's Failed write and its column clear (DBNull.Value clears), and its deletes.
+            entities.Setup(e => e.UpdateAsync(FinanceBaseValues.SubmissionEntity, It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+                .Returns((string _, Guid _, Dictionary<string, object> fields, CancellationToken _) =>
+                {
+                    foreach (var (column, value) in fields)
+                    {
+                        if (value is DBNull)
+                        {
+                            Submission.Attributes.Remove(column);
+                        }
+                        else
+                        {
+                            Submission[column] = value;
+                        }
+                    }
+
+                    return Task.CompletedTask;
+                });
+            entities.Setup(e => e.DeleteAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .Returns((string table, Guid id, CancellationToken _) =>
+                {
+                    var existed = table == InvoiceSubmissionPersister.LineEntity ? StoredLines.RemoveAll(l => l.Id == id) > 0 : CreatedRows.Remove((table, id));
+                    if (!existed)
+                    {
+                        return Task.FromException(new System.ServiceModel.FaultException<OrganizationServiceFault>(new OrganizationServiceFault { ErrorCode = -2147220969 }, "Does Not Exist"));
+                    }
+
+                    Deletes.Add((table, id, Files.Dataverse.Rows.Count));
+                    return Task.CompletedTask;
+                });
             entities.Setup(e => e.ExecuteTransactionAsync(It.IsAny<IReadOnlyList<OrganizationRequest>>(), It.IsAny<CancellationToken>()))
                 .Returns((IReadOnlyList<OrganizationRequest> requests, CancellationToken _) =>
                 {
@@ -1474,6 +1774,21 @@ public class InvoiceSubmissionPersisterTests
                         : Task.FromResult(new InvoiceTotalsCalculation(0m, 0m, 0m, 0m, 0m, new Dictionary<Guid, decimal>(), null));
                 });
 
+            // Task 094: the core record exists in the isolation world (an ordinary matter unless a test made it Secure), so the gate can walk
+            // the committed invoice's roots.
+            if (!Isolation.Has("sprk_matter", Matter))
+            {
+                Isolation.OrdinaryRoot("sprk_matter", Matter);
+            }
+
+            Gate = new SubmissionCommitGate(
+                entities.Object,
+                Files.Service,
+                InvoiceSubmissionServiceTests.IsolationOver(() => Isolation),
+                Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.SynchronizerOver(
+                    () => Isolation, new Sprk.Bff.Api.Tests.AccessControl.FakeRecordShareTable()),
+                NullLogger<SubmissionCommitGate>.Instance);
+
             return new InvoiceSubmissionPersister(
                 entities.Object,
                 recordTypes.Object,
@@ -1482,6 +1797,7 @@ public class InvoiceSubmissionPersisterTests
                 totals.Object,
                 InvoiceSubmissionServiceTests.IsolationOver(() => Isolation),
                 Files.Service,
+                Gate,
                 Logger);
         }
 
@@ -1494,6 +1810,35 @@ public class InvoiceSubmissionPersisterTests
             foreach (var create in requests.OfType<CreateRequest>().Where(c => c.Target.LogicalName == StoredFileSchema.Entity))
             {
                 Files.Dataverse.AddRow(Copy(create.Target));
+            }
+
+            // Task 094: the rows the undo deletes, and the invoice in the isolation world (filed under its core record, as the transaction files it).
+            foreach (var create in requests.OfType<CreateRequest>())
+            {
+                switch (create.Target.LogicalName)
+                {
+                    case InvoiceSubmissionPersister.LineEntity:
+                        StoredLines.Add(Copy(create.Target));
+                        break;
+                    case "sprk_invoice":
+                        CreatedRows.Add(("sprk_invoice", create.Target.Id));
+                        if (create.Target.GetAttributeValue<EntityReference>("sprk_matter") is { } matter)
+                        {
+                            if (Isolation.ValueOf<bool>("sprk_matter", matter.Id, "sprk_issecure"))
+                            {
+                                Isolation.SecureChild("sprk_invoice", create.Target.Id, ("sprk_matter", "sprk_matter", matter.Id));
+                            }
+                            else
+                            {
+                                Isolation.OrdinaryChild("sprk_invoice", create.Target.Id, ("sprk_matter", "sprk_matter", matter.Id));
+                            }
+                        }
+
+                        break;
+                    case InvoiceSubmissionPersister.ApprovalEntity:
+                        CreatedRows.Add((InvoiceSubmissionPersister.ApprovalEntity, create.Target.Id));
+                        break;
+                }
             }
 
             foreach (var update in requests.OfType<UpdateRequest>().Where(u => u.Target.LogicalName == "sprk_invoicesubmission"))

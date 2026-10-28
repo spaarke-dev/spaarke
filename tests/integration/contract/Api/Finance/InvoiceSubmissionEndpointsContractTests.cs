@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Net.Http.Json;
 using System.Text.Json;
 using System.Threading.RateLimiting;
 using Azure.Core;
@@ -53,6 +54,9 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
     private readonly Participations _participations = new();
     private readonly StubResolver _resolver = new();
     private readonly RecordingAccessDataSource _access = new();
+
+    /// <summary>Task 094: the caller's own rights the from-document route's step 1 asks (gate variant) on the source document and communication.</summary>
+    private readonly Sprk.Bff.Api.Tests.Finance.Files.RecordingRightsProbe _sourceRights = new();
     private WebApplication _app = null!;
     private Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceHidingStub _invoiceHiding =
         Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceHidingStub.NoneHidden();
@@ -95,6 +99,9 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         builder.Services.AddSingleton(_h.Build());
         builder.Services.AddSingleton<ExternalParticipationService>(_participations);
         builder.Services.AddSingleton<ICallerPrincipalResolver>(_resolver);
+        // Task 094: Submit Invoice step 1 (from-document route): the caller's rights probe and the app-only reader (the harness's Dataverse).
+        builder.Services.AddSingleton<CallerRecordAccessProbe>(_sourceRights);
+        builder.Services.AddSingleton(_h.Entities.Object);
         // ebilling-r1 task 098: the (a') invoice predicate, as AddExternalAccess registers it; hides nothing unless a test says so.
         if (_registerInvoiceHiding)
             builder.Services.AddScoped<ExternalInvoiceHiding>(_ => (caller, ids, ct) => _invoiceHiding.Seam(caller, ids, ct));
@@ -1535,5 +1542,181 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         }
 
         public int MembershipReads { get; private set; }
+    }
+
+    // ── ebilling-r1 task 094: POST /api/finance/invoice-submissions/from-document (Submit Invoice; model 9.1 step 1) ──
+
+    private static readonly Guid SourceDocumentId = Guid.Parse("09400000-0000-4000-8000-0000000000d7");
+    private static readonly Guid SourceCommunicationId = Guid.Parse("09400000-0000-4000-8000-0000000000c7");
+
+    private Task<HttpResponseMessage> PostFromDocumentAsync(object body) =>
+        SendAsync(HttpMethod.Post, "/api/finance/invoice-submissions/from-document", JsonContent.Create(body));
+
+    private static object FromDocumentBody(Guid? documentId = null, string kind = "matter", string? number = "INV-94") => new
+    {
+        communicationId = SourceCommunicationId,
+        documentId = documentId ?? SourceDocumentId,
+        coreRecord = new { kind, id = MatterId },
+        firmId = FirmId,
+        firmInvoiceNumber = number,
+    };
+
+    /// <summary>The source: a document of a communication already filed under the matter (so step A files nothing), both readable.</summary>
+    private void SourceDocumentExists(bool readable = true)
+    {
+        _h.ExistingDocument = new Entity("sprk_document", SourceDocumentId)
+        {
+            ["sprk_graphdriveid"] = "b!drive",
+            ["sprk_graphitemid"] = "item-94",
+            ["sprk_relatedcommunication"] = new EntityReference("sprk_communication", SourceCommunicationId),
+        };
+        _h.Communications[SourceCommunicationId] = new Entity("sprk_communication", SourceCommunicationId)
+        {
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId),
+        };
+        if (readable)
+        {
+            _sourceRights.Grant(FinanceAuthorizationFilter.DocumentEntitySet, SourceDocumentId, AccessRights.Read);
+            _sourceRights.Grant("sprk_communications", SourceCommunicationId, AccessRights.Read);
+        }
+    }
+
+    [Fact(DisplayName = "094: a Submit Invoice from a document is 202 with the receipt: one Internal submission naming the source, its job queued, nothing uploaded")]
+    public async Task FromDocument_received_is_202_with_one_internal_submission_and_its_job()
+    {
+        GrantInternalSubmit();
+        SourceDocumentExists();
+
+        var response = await PostFromDocumentAsync(FromDocumentBody());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted, await response.Content.ReadAsStringAsync());
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        body.RootElement.GetProperty("submissionId").GetGuid().Should().Be(InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(SourceDocumentId));
+        var allocation = _h.Allocations.Should().ContainSingle().Subject;
+        ((OptionSetValue)allocation.Fields!["sprk_channel"]).Value.Should().Be((int)InvoiceSubmissionChannel.Internal);
+        allocation.Fields["sprk_document"].Should().Be(new EntityReference("sprk_document", SourceDocumentId));
+        _h.JobsSent.Should().ContainSingle();
+        _h.Stages.Should().BeEmpty("the job copies the source; the route uploads nothing");
+        _sourceRights.Calls.Should().Contain(c => c.Set == FinanceAuthorizationFilter.DocumentEntitySet && c.Id == SourceDocumentId && c.Token != null);
+    }
+
+    [Theory(DisplayName = "094 (must fire): without Read AND AppendTo on the core record (finance.submit_invoice) the route is 403 before step 1; nothing read or written")]
+    [InlineData(AccessRights.Read)]
+    [InlineData(AccessRights.AppendTo)]
+    public async Task FromDocument_without_submit_invoice_on_the_core_record_is_403(AccessRights rights)
+    {
+        _access.Grant(FinanceAuthorizationFilter.MatterEntitySet, MatterId, rights);
+        _access.Grant(FinanceAuthorizationFilter.VendorOrganizationEntitySet, FirmId, AccessRights.AppendTo);
+        SourceDocumentExists();
+
+        var response = await PostFromDocumentAsync(FromDocumentBody());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        _sourceRights.Calls.Should().BeEmpty("the filter refuses before step 1 asks anything");
+        NothingWritten();
+    }
+
+    [Fact(DisplayName = "094 (must fire): without AppendTo on the firm (finance.attach_invoice) the route is 403; nothing written")]
+    public async Task FromDocument_without_attach_on_the_firm_is_403()
+    {
+        _access.Grant(FinanceAuthorizationFilter.MatterEntitySet, MatterId, AccessRights.Read | AccessRights.AppendTo);
+        SourceDocumentExists();
+
+        var response = await PostFromDocumentAsync(FromDocumentBody());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        NothingWritten();
+    }
+
+    [Fact(DisplayName = "094 step 1 (must fire): without Read on the source document the route is 403 source_forbidden, the same answer as an unknown document; nothing written")]
+    public async Task FromDocument_without_read_on_the_document_is_403_source_forbidden()
+    {
+        GrantInternalSubmit();
+        SourceDocumentExists(readable: false);
+
+        var unreadable = await PostFromDocumentAsync(FromDocumentBody());
+        var unknown = await PostFromDocumentAsync(FromDocumentBody(documentId: Guid.NewGuid()));
+
+        unreadable.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await ErrorCodeAsync(unreadable)).Should().Be(InvoiceSubmissionErrors.SourceForbidden);
+        unknown.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await ErrorCodeAsync(unknown)).Should().Be(InvoiceSubmissionErrors.SourceForbidden);
+        NothingWritten();
+    }
+
+    [Theory(DisplayName = "094: a body without a document, a core record of a known kind or an invoice number is 400; nothing written")]
+    [InlineData("document")]
+    [InlineData("kind")]
+    [InlineData("number")]
+    public async Task FromDocument_invalid_body_is_400(string missing)
+    {
+        GrantInternalSubmit();
+        SourceDocumentExists();
+
+        var response = await PostFromDocumentAsync(missing switch
+        {
+            "document" => FromDocumentBody(documentId: Guid.Empty),
+            "kind" => FromDocumentBody(kind: "invoice"),
+            _ => FromDocumentBody(number: " "),
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        NothingWritten();
+    }
+
+    [Fact(DisplayName = "094 step 1 (must fire): without Read on the source communication the route is 403 source_forbidden; nothing written")]
+    public async Task FromDocument_without_read_on_the_communication_is_403_source_forbidden()
+    {
+        GrantInternalSubmit();
+        SourceDocumentExists(readable: false);
+        _sourceRights.Grant(FinanceAuthorizationFilter.DocumentEntitySet, SourceDocumentId, AccessRights.Read);
+
+        var response = await PostFromDocumentAsync(FromDocumentBody());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await ErrorCodeAsync(response)).Should().Be(InvoiceSubmissionErrors.SourceForbidden);
+        NothingWritten();
+    }
+
+    [Theory(DisplayName = "094 (Task 099 step 0, must fire): a flagged-external, row-less or unreadable caller is refused before any rights call, record read or write")]
+    [MemberData(nameof(RefusedKinds))]
+    public async Task FromDocument_step_zero_refuses_before_any_record_read(StepZeroCallerKind kind)
+    {
+        GrantInternalSubmit();
+        SourceDocumentExists();
+        StepZero.Kind = kind;
+
+        var response = await PostFromDocumentAsync(FromDocumentBody());
+
+        await StepZero.AssertRefusedAsync(response, kind, uniformNotFound: false);
+        _access.Calls.Should().BeEmpty();
+        _sourceRights.Calls.Should().BeEmpty();
+        NothingWritten();
+    }
+
+    [Fact(DisplayName = "094: an unauthenticated Submit Invoice is 401; nothing read or written")]
+    public async Task FromDocument_unauthenticated_is_401()
+    {
+        SourceDocumentExists();
+
+        var response = await SendAsync(HttpMethod.Post, "/api/finance/invoice-submissions/from-document", JsonContent.Create(FromDocumentBody()), authenticated: false);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        _sourceRights.Calls.Should().BeEmpty();
+        NothingWritten();
+    }
+
+    [Fact(DisplayName = "094: with eBilling off an authorized Submit Invoice is 503 and nothing is read or written")]
+    public async Task FromDocument_with_ebilling_off_is_503()
+    {
+        GrantInternalSubmit();
+        SourceDocumentExists();
+        _h.Options.Enabled = false;
+
+        var response = await PostFromDocumentAsync(FromDocumentBody());
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        _sourceRights.Calls.Should().BeEmpty();
+        NothingWritten();
     }
 }

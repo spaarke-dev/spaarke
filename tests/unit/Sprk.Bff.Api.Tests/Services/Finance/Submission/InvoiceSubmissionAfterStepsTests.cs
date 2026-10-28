@@ -105,7 +105,6 @@ public class InvoiceSubmissionAfterStepsTests
         public Dictionary<string, Entity> Signals { get; } = new(StringComparer.Ordinal);
         public List<SignalWriteRequest> Writes { get; } = [];
         public List<Guid> Superseded { get; } = [];
-        public List<JobContract> Jobs { get; } = [];
         public List<SubmissionDecidedNotification> Notified { get; } = [];
         public HashSet<string> Markers { get; } = new(StringComparer.Ordinal);
         /// <summary>Every write of <c>sprk_processingstatus</c>, conditional or not (an unconditional one is also in <see cref="UnconditionalStatusWrites"/>).</summary>
@@ -165,7 +164,6 @@ public class InvoiceSubmissionAfterStepsTests
         /// <summary>Called at the start of every record call, after the decision is noted (another writer acting between two record calls).</summary>
         public Action<BillingDecision>? OnRecordCall { get; set; }
         public bool CrashAtRecord { get; set; }
-        public Exception? JobFault { get; set; }
         public bool CrashAtNotifyRead { get; set; }
         public Exception? SinkFault { get; set; }
         public bool CrashAtTerminal { get; set; }
@@ -358,26 +356,12 @@ public class InvoiceSubmissionAfterStepsTests
                     Preflighted.Add(decision);
                     Recorder.Preflight(decision);
                 },
-                (job, _) =>
-                {
-                    if (JobFault is { } fault)
-                    {
-                        throw fault;
-                    }
-
-                    Jobs.Add(job);
-                    return Task.CompletedTask;
-                },
                 Clock,
-                refileDocument: Refile,
-                makeUploadServable: MakeUploadServable);
+                commitGate: CommitGate);
         }
 
-        /// <summary>Task 092: the resume's flip gate for an upload (null: the test seam's default, "servable").</summary>
-        public Func<Guid, CancellationToken, Task<string?>>? MakeUploadServable { get; set; }
-
-        /// <summary>050a: the re-file step (null: the production default for a test seam, "no existing document").</summary>
-        public Func<Guid, Guid?, Guid, CancellationToken, Task<InvoiceDocumentRefileResult>>? Refile { get; set; }
+        /// <summary>Task 094: the resume's commit gate (model 9.1 steps 5-6; null: the test seam's default, Passed).</summary>
+        public Func<Guid, CancellationToken, Task<SubmissionCommitGateResult>>? CommitGate { get; set; }
 
         /// <summary>The writer's rule (SignalWriter.CloseActedByDecisionAsync), over the in-memory table.</summary>
         private Task<SignalAutomatedCloseOutcome> CloseActedAsync(Guid id, Guid recordId, DateTime setReadAt, string policyCode, CancellationToken _)
@@ -619,99 +603,6 @@ public class InvoiceSubmissionAfterStepsTests
         SignalWriter.BuildDedupeKey(policyCode, "sprk_invoice", InvoiceId.ToString("D"), episode);
 
 
-    // ── 050a (D-134 item 3): the re-file of a confirmed existing document runs first, on every run and resume ──
-
-    private static (World World, List<(Guid Submission, Guid? Document, Guid Invoice, int WritesBefore, int TerminalBefore)> Calls) WithRefile(
-        SubmissionEvaluationOutcome outcome, Func<InvoiceDocumentRefileResult> answer)
-    {
-        var world = new World(outcome);
-        var calls = new List<(Guid, Guid?, Guid, int, int)>();
-        world.Refile = (submission, document, invoice, _) =>
-        {
-            calls.Add((submission, document, invoice, world.Writes.Count, world.TerminalWrites.Count));
-            return Task.FromResult(answer());
-        };
-        return (world, calls);
-    }
-
-    [Fact(DisplayName = "050a: the re-file runs FIRST with the stored document and the invoice, then the steps complete")]
-    public async Task Refile_RunsFirst_WithTheStoredDocumentAndInvoice()
-    {
-        var outcome = await AutoRejected();
-        var (world, calls) = WithRefile(outcome, () => new InvoiceDocumentRefileResult(InvoiceDocumentRefileStatus.Refiled));
-
-        var result = await world.Build().RunAsync(Persisted(outcome), "corr-1");
-
-        result.Status.Should().Be(SubmissionAfterStepsStatus.Completed, result.ReasonCode);
-        calls.Should().ContainSingle().Which.Should().Be((Submission, (Guid?)Document, InvoiceId, 0, 0),
-            "the re-file runs before any Signal and before the terminal status");
-        world.TerminalWrites.Should().ContainSingle();
-    }
-
-    public static TheoryData<InvoiceDocumentRefileStatus, SubmissionAfterStepsStatus, string> RefileStops => new()
-    {
-        { InvoiceDocumentRefileStatus.IsolationUnreadable, SubmissionAfterStepsStatus.Retry, InvoiceDocumentRefile.IsolationUnreadableCode },
-        { InvoiceDocumentRefileStatus.Refused, SubmissionAfterStepsStatus.Refused, "record_owner_parent_unresolved" },
-    };
-
-    [Theory(DisplayName = "050a: a re-file that cannot read isolation (Retry) or is refused (Refused) stops BEFORE any Signal, record, job, notification or terminal")]
-    [MemberData(nameof(RefileStops))]
-    public async Task Refile_Stop_WritesNoLaterStep(InvoiceDocumentRefileStatus refile, SubmissionAfterStepsStatus expected, string code)
-    {
-        var outcome = await AutoRejected();
-        var reason = refile == InvoiceDocumentRefileStatus.Refused ? code : InvoiceDocumentRefile.IsolationUnreadableCode;
-        var (world, _) = WithRefile(outcome, () => new InvoiceDocumentRefileResult(refile, reason));
-
-        var result = await world.Build().RunAsync(Persisted(outcome), "corr-1");
-
-        result.Status.Should().Be(expected);
-        result.ReasonCode.Should().Be(code);
-        result.DocumentNotFiled.Should().BeTrue(
-            "review round 2, 2(b) and round 3 (uac-r2 F2): a refused re-file AND a re-file Retry are flagged, so the administrator is told the " +
-            "invoice has no document whether the job stops now or its retries run out");
-        world.Writes.Should().BeEmpty();
-        world.RecordCreates.Should().Be(0);
-        world.Jobs.Should().BeEmpty();
-        world.Notified.Should().BeEmpty();
-        world.TerminalWrites.Should().BeEmpty();
-        world.Status.Should().Be(InvoiceSubmissionStatus.Processing, "the submission stays Processing for the retry or the administrator");
-    }
-
-    [Fact(DisplayName = "050a: a re-file that throws (the reparent's Dataverse fault) is a Retry with document_refile_failed and writes no later step")]
-    public async Task Refile_Throws_IsRetry_WritesNoLaterStep()
-    {
-        var outcome = await Accepted();
-        var world = new World(outcome) { Refile = (_, _, _, _) => throw new HttpRequestException("dataverse down") };
-
-        var result = await world.Build().RunAsync(Persisted(outcome), "corr-1");
-
-        result.Status.Should().Be(SubmissionAfterStepsStatus.Retry);
-        result.ReasonCode.Should().Be(InvoiceSubmissionAfterSteps.DocumentRefileFailedCode);
-        result.DocumentNotFiled.Should().BeTrue("review round 3 (uac-r2 F2): the document is not filed under the committed invoice");
-        world.Jobs.Should().BeEmpty();
-        world.TerminalWrites.Should().BeEmpty();
-    }
-
-    [Fact(DisplayName = "050a: a resume runs the re-file again (idempotent), so a Retry is completed by the redelivery")]
-    public async Task Refile_RunsAgainOnResume()
-    {
-        var outcome = await Accepted();
-        var answers = new Queue<InvoiceDocumentRefileResult>(new[]
-        {
-            new InvoiceDocumentRefileResult(InvoiceDocumentRefileStatus.IsolationUnreadable, InvoiceDocumentRefile.IsolationUnreadableCode),
-            new InvoiceDocumentRefileResult(InvoiceDocumentRefileStatus.Refiled),
-        });
-        var (world, calls) = WithRefile(outcome, answers.Dequeue);
-
-        var first = await world.Build().RunAsync(Persisted(outcome), "corr-1");
-        var resumed = await world.Build().ResumeAsync(Submission, "corr-1");
-
-        first.Status.Should().Be(SubmissionAfterStepsStatus.Retry);
-        resumed.Status.Should().Be(SubmissionAfterStepsStatus.Completed, resumed.ReasonCode);
-        calls.Should().HaveCount(2);
-        world.TerminalWrites.Should().ContainSingle();
-    }
-
     // ── Each kind ──
 
     [Fact(DisplayName = "049 D: AutoRejected - rule Signal from the stored plan, ONE Decision Record, no indexing, notify Rejected, terminal LAST")]
@@ -733,7 +624,6 @@ public class InvoiceSubmissionAfterStepsTests
         world.KeysFor("BILL-AGE").Should().Equal(LineKey("BILL-AGE", 1));
         world.RecordCreates.Should().Be(1);
         result.DecisionRecordId.Should().NotBeNull();
-        world.Jobs.Should().BeEmpty("a rejected invoice is not indexed");
         world.Notified.Should().ContainSingle().Which.Should().Be(new SubmissionDecidedNotification(
             Submission, SubmissionDecisionOutcome.Rejected, InvoiceSubmissionChannel.Spa, InvoiceId, outcome.ReasonCode));
         world.TerminalWrites.Should().ContainSingle();
@@ -745,8 +635,8 @@ public class InvoiceSubmissionAfterStepsTests
         world.PolicyQueries.Should().BeEmpty("no system finding: the system policy is not read");
     }
 
-    [Fact(DisplayName = "049 D: Accepted - no Signals, no record, indexing enqueued with the deterministic id and key, notify Accepted, terminal Accepted")]
-    public async Task Accepted_IndexesAndNotifies()
+    [Fact(DisplayName = "049 D / 094: Accepted - no Signals, no record, no indexing job (owner K), notify Accepted, terminal Accepted")]
+    public async Task Accepted_Notifies()
     {
         var outcome = await Accepted();
         var world = new World(outcome);
@@ -756,21 +646,14 @@ public class InvoiceSubmissionAfterStepsTests
         result.Status.Should().Be(SubmissionAfterStepsStatus.Completed);
         world.Writes.Should().BeEmpty();
         world.RecordCreates.Should().Be(0);
-        var job = world.Jobs.Should().ContainSingle().Subject;
-        job.JobType.Should().Be(InvoiceIndexingJobHandler.JobTypeName);
-        job.JobId.Should().Be(InvoiceSubmissionAfterSteps.IndexingJobIdFor(InvoiceId));
-        job.IdempotencyKey.Should().Be($"invoice-index-{InvoiceId}");
-        job.CorrelationId.Should().Be("corr-1");
-        job.Payload!.RootElement.GetProperty("InvoiceId").GetGuid().Should().Be(InvoiceId);
-        job.Payload!.RootElement.GetProperty("DocumentId").GetGuid().Should().Be(Document);
         world.Notified.Should().ContainSingle().Which.Should().Be(new SubmissionDecidedNotification(
             Submission, SubmissionDecisionOutcome.Accepted, InvoiceSubmissionChannel.Spa, InvoiceId, null));
         world.TerminalWrites.Should().ContainSingle().Which[InvoiceSubmissionPersister.SubmissionStatus]
             .Should().Be(new OptionSetValue((int)InvoiceSubmissionStatus.Accepted));
     }
 
-    [Fact(DisplayName = "049 D: AcceptedUncoded - the hold system Signal (policy present), indexing, notify Accepted")]
-    public async Task AcceptedUncoded_WritesTheHoldSignal_AndIndexes()
+    [Fact(DisplayName = "049 D: AcceptedUncoded - the hold system Signal (policy present), notify Accepted")]
+    public async Task AcceptedUncoded_WritesTheHoldSignal()
     {
         var outcome = await AcceptedUncoded();
         outcome.Kind.Should().Be(SubmissionEvaluationKind.AcceptedUncoded);
@@ -785,12 +668,11 @@ public class InvoiceSubmissionAfterStepsTests
         system.PolicyVersionId.Should().Be(SystemVersionId);
         system.SubjectId.Should().Be(InvoiceId);
         world.PolicyQueries.Should().ContainSingle("one app-only read per run");
-        world.Jobs.Should().ContainSingle().Which.CorrelationId.Should().Be("corr-stored", "null correlation id uses the submission's");
         world.Notified.Should().ContainSingle().Which.Outcome.Should().Be(SubmissionDecisionOutcome.Accepted);
         world.RecordCreates.Should().Be(0);
     }
 
-    [Fact(DisplayName = "049 D: Blocked - the rule Signal as planned (presented as held for review: the stored plan is written as it is), no record, indexed, notified Rejected + blocked code")]
+    [Fact(DisplayName = "049 D: Blocked - the rule Signal as planned (presented as held for review: the stored plan is written as it is), no record, notified Rejected + blocked code")]
     public async Task Blocked_HeldSignal_Indexed_NotifiedRejectedBlocked()
     {
         var outcome = await Blocked();
@@ -806,7 +688,6 @@ public class InvoiceSubmissionAfterStepsTests
         signal.ShortHeadline.Should().Be(BillingFindingSignalMapper.HeldHeadline);
         signal.EvidenceRefs!.Should().ContainSingle(e => e.Kind == BillingFindingSignalMapper.DecisionEvidenceKind).Which.Text.Should().Be(SubmissionReasonCodes.Blocked);
         world.RecordCreates.Should().Be(0, "a held invoice is not decided; 105's Override / Return records it");
-        world.Jobs.Should().ContainSingle();
         world.Notified.Should().ContainSingle().Which.Should().Be(new SubmissionDecidedNotification(
             Submission, SubmissionDecisionOutcome.Rejected, InvoiceSubmissionChannel.Internal, InvoiceId, SubmissionReasonCodes.Blocked));
         world.TerminalWrites.Should().ContainSingle().Which[InvoiceSubmissionPersister.SubmissionReasonCode].Should().Be(SubmissionReasonCodes.Blocked);
@@ -991,7 +872,6 @@ public class InvoiceSubmissionAfterStepsTests
 
         result.Status.Should().Be(SubmissionAfterStepsStatus.Retry);
         result.ReasonCode.Should().Be(InvoiceSubmissionAfterSteps.SignalChangedCode);
-        result.DocumentNotFiled.Should().BeFalse("review round 3 (F2), must not fire: a Retry after the re-file is not a document left unfiled");
         world.Writes.Should().BeEmpty();
         world.RecordCreates.Should().Be(0);
         world.TerminalWrites.Should().BeEmpty();
@@ -1159,25 +1039,9 @@ public class InvoiceSubmissionAfterStepsTests
             .And.NotContain(e => e.Message.Contains("sink down"));
     }
 
-    // ── Indexing ──
-
-    [Fact(DisplayName = "049 D: an indexing enqueue fault -> Retry before the notification and the terminal status")]
-    public async Task IndexingFault_Retries()
-    {
-        var outcome = await Accepted();
-        var world = new World(outcome) { JobFault = new InvalidOperationException("bus down") };
-
-        var result = await world.Build().RunAsync(Persisted(outcome), null);
-
-        result.Status.Should().Be(SubmissionAfterStepsStatus.Retry);
-        result.ReasonCode.Should().Be(InvoiceSubmissionAfterSteps.IndexingEnqueueFailedCode);
-        world.Notified.Should().BeEmpty();
-        world.TerminalWrites.Should().BeEmpty();
-    }
-
     // ── Resume after a crash at each step ──
 
-    public enum CrashPoint { MidSignals, Record, Indexing, BeforeNotify, Terminal }
+    public enum CrashPoint { MidSignals, Record, BeforeNotify, Terminal }
 
     [Theory(DisplayName = "049 D resume: a crash at each step leaves the submission Processing; the redelivery completes with no duplicate episode, one record, one notify, one terminal write")]
     [InlineData(CrashPoint.MidSignals)]
@@ -1208,8 +1072,7 @@ public class InvoiceSubmissionAfterStepsTests
         world.TerminalWrites.Should().ContainSingle();
     }
 
-    [Theory(DisplayName = "049 D resume (Accepted): a crash at indexing, before notify or at the terminal write - re-enqueued with the same id and key, one notify, one terminal write")]
-    [InlineData(CrashPoint.Indexing)]
+    [Theory(DisplayName = "049 D resume (Accepted): a crash before notify or at the terminal write - one notify, one terminal write")]
     [InlineData(CrashPoint.BeforeNotify)]
     [InlineData(CrashPoint.Terminal)]
     public async Task Resume_AfterACrash_Accepted(CrashPoint point)
@@ -1224,7 +1087,6 @@ public class InvoiceSubmissionAfterStepsTests
         Disarm(world);
         (await sut.RunAsync(Persisted(outcome, SubmissionPersistStatus.Resumed), null)).Status.Should().Be(SubmissionAfterStepsStatus.Completed);
 
-        world.Jobs.Select(j => (j.JobId, j.IdempotencyKey)).Distinct().Should().ContainSingle("a resend is the same message (Service Bus duplicate detection)");
         world.Notified.Should().ContainSingle();
         world.TerminalWrites.Should().ContainSingle();
     }
@@ -1235,7 +1097,6 @@ public class InvoiceSubmissionAfterStepsTests
         {
             case CrashPoint.MidSignals: world.CrashAtWrite = 1; break;
             case CrashPoint.Record: world.CrashAtRecord = true; break;
-            case CrashPoint.Indexing: world.JobFault = new Crash(); break;
             case CrashPoint.BeforeNotify: world.CrashAtNotifyRead = true; break;
             case CrashPoint.Terminal: world.CrashAtTerminal = true; break;
         }
@@ -1245,7 +1106,6 @@ public class InvoiceSubmissionAfterStepsTests
     {
         world.CrashAtWrite = -1;
         world.CrashAtRecord = false;
-        world.JobFault = null;
         world.CrashAtNotifyRead = false;
         world.CrashAtTerminal = false;
     }
@@ -1264,7 +1124,7 @@ public class InvoiceSubmissionAfterStepsTests
 
     // ── Totals Retry, missing, mismatched, unreadable ──
 
-    [Fact(DisplayName = "049 D: a totals Retry writes the Signals and the record, then returns Retry with the persister's code; no indexing, notify or terminal")]
+    [Fact(DisplayName = "049 D: a totals Retry writes the Signals and the record, then returns Retry with the persister's code; no notify or terminal")]
     public async Task TotalsRetry_RunsSignalsAndRecordOnly()
     {
         var outcome = await AutoRejected();
@@ -1276,7 +1136,6 @@ public class InvoiceSubmissionAfterStepsTests
         result.ReasonCode.Should().Be(InvoiceSubmissionPersister.TotalsFailedCode);
         world.Writes.Should().ContainSingle();
         world.RecordCreates.Should().Be(1);
-        world.Jobs.Should().BeEmpty();
         world.Notified.Should().BeEmpty();
         world.TerminalWrites.Should().BeEmpty();
     }
@@ -1304,7 +1163,6 @@ public class InvoiceSubmissionAfterStepsTests
         foreach (var world in new[] { missing, mismatched, unreadable })
         {
             world.Writes.Should().BeEmpty();
-            world.Jobs.Should().BeEmpty();
             world.Notified.Should().BeEmpty();
             world.TerminalWrites.Should().BeEmpty();
         }
@@ -1368,11 +1226,9 @@ public class InvoiceSubmissionAfterStepsTests
         world.RecordCreates.Should().Be(1);
         world.Writes.Should().OnlyContain(w => w.Episode == 1);
         world.Totals.Verify(t => t.RecalculateAsync(InvoiceId, It.IsAny<CancellationToken>()), Times.Once, "the resume re-runs the totals once; the first run took the persister's");
-        world.Jobs.Should().BeEmpty();
     }
 
-    [Theory(DisplayName = "049 13a A resume (Accepted): a crash at indexing, before notify or at the terminal write, then ResumeAsync completes Accepted with the same indexing job")]
-    [InlineData(CrashPoint.Indexing)]
+    [Theory(DisplayName = "049 13a A resume (Accepted): a crash before notify or at the terminal write, then ResumeAsync completes Accepted")]
     [InlineData(CrashPoint.BeforeNotify)]
     [InlineData(CrashPoint.Terminal)]
     public async Task ResumeAsync_AfterACrash_Accepted_CompletesFromTheStoredState(CrashPoint point)
@@ -1390,7 +1246,6 @@ public class InvoiceSubmissionAfterStepsTests
         world.Status.Should().Be(InvoiceSubmissionStatus.Accepted);
         world.TerminalWrites.Should().ContainSingle();
         world.Notified.Should().ContainSingle().Which.Outcome.Should().Be(SubmissionDecisionOutcome.Accepted);
-        world.Jobs.Select(j => (j.JobId, j.IdempotencyKey)).Distinct().Should().ContainSingle();
     }
 
     [Fact(DisplayName = "049 13a A resume: a totals fault on resume writes the Signals and the record, returns Retry (totals_failed); the next resume completes")]
@@ -1455,17 +1310,21 @@ public class InvoiceSubmissionAfterStepsTests
         unlinked.Totals.Verify(t => t.RecalculateAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
-    // ── ebilling-r1 task 092: an upload's resume runs the Stored File flip before anything else ──
+    // ── ebilling-r1 task 094 (model 9.1 step 6; 092 review items 1-2): every resume runs the commit gate before anything else ──
 
-    /// <summary>A world whose submission is an upload (no document), with the gate and the totals recorded in <paramref name="order"/>.</summary>
-    private static World UploadWorld(SubmissionEvaluationOutcome outcome, List<string> order, Func<Task<string?>> gate)
+    /// <summary>A world whose resume gate answers <paramref name="gate"/>; the gate and the totals are recorded in <paramref name="order"/>.</summary>
+    private static World GateWorld(SubmissionEvaluationOutcome outcome, List<string> order, Func<Task<SubmissionCommitGateResult>> gate, bool withDocument = true)
     {
         var world = new World(outcome);
-        world.Row.Attributes.Remove("sprk_document");
-        world.MakeUploadServable = (id, _) =>
+        if (!withDocument)
+        {
+            world.Row.Attributes.Remove("sprk_document");
+        }
+
+        world.CommitGate = (id, _) =>
         {
             id.Should().Be(Submission);
-            order.Add("flip");
+            order.Add("gate");
             return gate();
         };
         world.Totals.Setup(t => t.RecalculateAsync(InvoiceId, It.IsAny<CancellationToken>()))
@@ -1477,62 +1336,75 @@ public class InvoiceSubmissionAfterStepsTests
         return world;
     }
 
-    [Fact(DisplayName = "092 (model 9.1 step 5): an upload's resume flips its Stored File FIRST, before the totals and every after-step, then completes")]
-    public async Task ResumeAsync_Upload_FlipsFirst_ThenCompletes()
+    [Theory(DisplayName = "094 (model 9.1 step 6): a resume runs the commit gate FIRST on every channel (source document or upload), before the totals and every after-step, then completes")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ResumeAsync_RunsTheCommitGateFirst_OnEveryChannel(bool withDocument)
     {
         var order = new List<string>();
-        var world = UploadWorld(await Accepted(), order, () => Task.FromResult<string?>(null));
+        var world = GateWorld(await Accepted(), order, () => Task.FromResult(SubmissionCommitGateResult.Passed), withDocument);
 
         var resumed = await world.Build().ResumeAsync(Submission, null);
 
-        resumed.Status.Should().Be(SubmissionAfterStepsStatus.Completed);
-        order.Should().StartWith(["flip", "totals"]);
-        order.Count(o => o == "flip").Should().Be(1);
+        resumed.Status.Should().Be(SubmissionAfterStepsStatus.Completed, resumed.ReasonCode);
+        order.Should().StartWith(["gate", "totals"]);
+        order.Count(o => o == "gate").Should().Be(1);
         world.TerminalWrites.Should().ContainSingle();
     }
 
-    [Fact(DisplayName = "092 must-fire: an upload's resume whose flip is definitively refused stops with FileUnservable: no totals, Signals, record, job, notification or terminal write")]
-    public async Task ResumeAsync_Upload_Unservable_RunsNothing()
+    [Theory(DisplayName = "094 must-fire: a resume whose gate undid the commit (complete or held) stops Undone: no totals, Signals, record, notification or terminal write")]
+    [InlineData(SubmissionCommitGateStatus.Undone, SubmissionReasonCodes.SourceCheckFailed, false)]
+    [InlineData(SubmissionCommitGateStatus.UndoHeld, SubmissionReasonCodes.FileUnservable, true)]
+    public async Task ResumeAsync_GateUndone_RunsNothing(SubmissionCommitGateStatus status, string code, bool held)
     {
         var order = new List<string>();
-        var world = UploadWorld(await AutoRejected(), order, () => Task.FromResult<string?>(SubmissionReasonCodes.FileUnservable));
+        var world = GateWorld(await AutoRejected(), order, () => Task.FromResult(new SubmissionCommitGateResult(status, code)));
 
         var resumed = await world.Build().ResumeAsync(Submission, null);
 
-        resumed.Status.Should().Be(SubmissionAfterStepsStatus.Refused);
-        resumed.ReasonCode.Should().Be(SubmissionReasonCodes.FileUnservable);
+        resumed.Status.Should().Be(SubmissionAfterStepsStatus.Undone);
+        resumed.ReasonCode.Should().Be(code);
+        resumed.UndoHeld.Should().Be(held);
         resumed.InvoiceId.Should().Be(InvoiceId);
-        order.Should().Equal("flip");
+        order.Should().Equal("gate");
         world.Writes.Should().BeEmpty();
         world.RecordCreates.Should().Be(0);
-        world.Jobs.Should().BeEmpty();
         world.Notified.Should().BeEmpty();
         world.TerminalWrites.Should().BeEmpty();
     }
 
-    [Fact(DisplayName = "092: a flip fault on resume throws (the job retries) and nothing after it runs")]
-    public async Task ResumeAsync_Upload_FlipFault_Throws()
+    [Fact(DisplayName = "094: a gate fault on resume throws (the job retries) and nothing after it runs")]
+    public async Task ResumeAsync_GateFault_Throws()
     {
         var order = new List<string>();
-        var world = UploadWorld(await Accepted(), order, () => Task.FromException<string?>(new TimeoutException("storage")));
+        var world = GateWorld(await Accepted(), order, () => Task.FromException<SubmissionCommitGateResult>(new TimeoutException("storage")));
 
         await FluentActions.Invoking(() => world.Build().ResumeAsync(Submission, null)).Should().ThrowAsync<TimeoutException>();
 
-        order.Should().Equal("flip");
+        order.Should().Equal("gate");
         world.TerminalWrites.Should().BeEmpty();
     }
 
-    [Fact(DisplayName = "092 must-not-fire: a submission with a document (050a) runs no flip gate on resume; RunAsync after a commit runs none either (the persister flipped)")]
-    public async Task NoFlipGate_ForADocument_OrOnRunAsync()
+    [Fact(DisplayName = "094 must-not-fire: RunAsync after a commit runs no gate (the persister ran it before handing over)")]
+    public async Task RunAsync_RunsNoGate()
     {
         var outcome = await Accepted();
-        var withDocument = new World(outcome) { MakeUploadServable = (_, _) => throw new InvalidOperationException("no gate for a document") };
-        (await withDocument.Build().ResumeAsync(Submission, null)).Status.Should().Be(SubmissionAfterStepsStatus.Completed);
-
         var order = new List<string>();
-        var upload = UploadWorld(outcome, order, () => throw new InvalidOperationException("RunAsync must not flip"));
-        (await upload.Build().RunAsync(Persisted(outcome), null)).Status.Should().Be(SubmissionAfterStepsStatus.Completed);
-        order.Should().NotContain("flip");
+        var world = GateWorld(outcome, order, () => throw new InvalidOperationException("RunAsync must not run the gate"));
+
+        (await world.Build().RunAsync(Persisted(outcome), null)).Status.Should().Be(SubmissionAfterStepsStatus.Completed);
+
+        order.Should().NotContain("gate");
+    }
+
+    [Fact(DisplayName = "094 (owner K): the after-steps enqueue no indexing job - no constructor takes the job submitter")]
+    public void NoIndexingJob_IsEnqueued()
+    {
+        typeof(InvoiceSubmissionAfterSteps)
+            .GetConstructors(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+            .SelectMany(c => c.GetParameters())
+            .Should().NotContain(p => p.ParameterType == typeof(JobSubmissionService) || p.ParameterType == typeof(Func<JobContract, CancellationToken, Task>),
+                "the invoice index is document-keyed and a Submit Invoice copy stays out of indexing (DEF-047)");
     }
 
     // ── 13a B: the terminal is written only while Processing, on the row version (F4-2) ──
@@ -1567,7 +1439,6 @@ public class InvoiceSubmissionAfterStepsTests
         world.TerminalWrites.Should().ContainSingle("only the first run's Rejected");
         world.Notified.Should().ContainSingle();
         world.Writes.Count.Should().Be(writesBefore, "no step runs on a terminal submission");
-        world.Jobs.Should().ContainSingle();
     }
 
     [Fact(DisplayName = "049 13a B: the row changes (still Processing) between the read and the terminal write -> re-read once, the write is retried on the new version")]
@@ -2753,7 +2624,6 @@ public class InvoiceSubmissionAfterStepsTests
 
         result.Status.Should().Be(SubmissionAfterStepsStatus.Completed, result.ReasonCode);
         result.SignalsRefused.Should().Be(1);
-        world.Jobs.Should().ContainSingle();
         world.TerminalWrites.Should().ContainSingle();
     }
 
@@ -2856,10 +2726,9 @@ public class InvoiceSubmissionAfterStepsTests
         evidence.Should().Contain(e => e["kind"]!.GetValue<string>() == "billing.reason" && e["text"]!.GetValue<string>() == reason,
             "the sentence's reason is the deciding finding's own rendered reason");
 
-        // The Blocked routing is unchanged: no record, no closes, indexed, notified, terminal Rejected.
+        // The Blocked routing is unchanged: no record, no closes, notified, terminal Rejected.
         world.RecordCreates.Should().Be(0);
         world.Closes.Should().BeEmpty();
-        world.Jobs.Should().ContainSingle();
         world.Status.Should().Be(InvoiceSubmissionStatus.Rejected);
     }
 

@@ -1091,10 +1091,7 @@ public class ExternalDocumentNarrowingGuardTests
     /// </summary>
     private static readonly IReadOnlyDictionary<string, string> GenericWritersThatUpdateNoDocument = new Dictionary<string, string>
     {
-        // ebilling-r1 050a (D-134): the confirmed document's link moved from InvoiceReviewService into the job's re-file.
-        ["Sprk.Bff.Api.Services.Finance.Submission.InvoiceDocumentRefile::RefileAsync"] =
-            "Writes only sprk_Invoice@odata.bind (DocInvoiceLinkBind) on sprk_document, inside ReparentAsync: a literal key, not a D7 " +
-            "link or access column.",
+        // ebilling-r1 task 094: 050a's InvoiceDocumentRefile is retired - a Submit Invoice source is copied, never linked or re-filed.
         ["Sprk.Bff.Api.Services.Finance.InvoiceReviewService::MarkDocumentConfirmedAsync"] =
             "Writes BuildReviewStatusFields on sprk_document: the invoice review status, reviewed-on and notes (literal keys).",
         ["Sprk.Bff.Api.Services.Finance.InvoiceReviewService::RejectInvoiceAsync"] =

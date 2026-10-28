@@ -325,6 +325,7 @@ public static class DataverseDocumentsEndpoints
         documentsGroup.MapDelete("/{id}", async (
             string id,
             IDocumentDataverseService dataverseService,
+            Spaarke.Dataverse.IGenericEntityService entities,
             ILogger<Program> logger,
             HttpContext context) =>
         {
@@ -356,7 +357,11 @@ public static class DataverseDocumentsEndpoints
                 // Task 188 slice D (owner round 111 item 3): sprk_document_ParentDocument is Delete = Restrict, so a
                 // document other documents name as their parent is refused here with the one 409 shape, never a raw
                 // Dataverse refusal as a 500. A failed read throws before the delete (the 500 below; nothing deleted).
-                var childCount = (await dataverseService.GetDocumentsByParentAsync(Guid.Parse(id), context.RequestAborted)).Count();
+                // ebilling-r1 task 094 (ontology-r1 088 gate F1): a Stored File copied from the document (sprk_sourcedocument,
+                // Delete = Restrict) refuses the row the same way, so it counts too: the same 409.
+                var childCount = (await dataverseService.GetDocumentsByParentAsync(Guid.Parse(id), context.RequestAborted)).Count()
+                    + await Sprk.Bff.Api.Services.Finance.Files.StoredFileService.CountCopiesOfDocumentAsync(
+                        entities, Guid.Parse(id), context.RequestAborted);
                 if (childCount > 0)
                 {
                     logger.LogInformation(

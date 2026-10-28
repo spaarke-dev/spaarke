@@ -317,12 +317,10 @@ public class RecordOwnerAssignmentCensusTests
 
     private static readonly IReadOnlyList<UnscannedWriter> UnscannedWriters = new[]
     {
-        new UnscannedWriter("InvoiceDocumentRefile.cs", "re-file of a confirmed document under the invoice the submission job created",
-            "ebilling-r1 050a (D-134, moved from InvoiceReviewService with its calls): a reparent (task 146) with the invoice as the "
-            + "inherited parent, after the persister's transaction linked the document; a refusal writes nothing."),
         new UnscannedWriter("InvoiceSubmissionPersister.cs",
             "transaction CreateRequests of sprk_invoice (via 014's BuildCreateRequest), sprk_billingevent and sprk_invoiceapproval rows built with deterministic ids, "
-            + "and (task 092) an upload's sprk_storedfile row (via StoredFileService.BuildRow, deterministic id StoredFileIds.ForUpload)",
+            + "and (task 092) an upload's sprk_storedfile row (via StoredFileService.BuildRow, deterministic id StoredFileIds.ForUpload), "
+            + "and (task 094) a Submit Invoice source's copy row (via StoredFileService.BuildRow, deterministic id StoredFileIds.ForSourceVersion)",
             "ebilling-r1 task 049 part C: ResolveOwnerAsync ForParents over the submission's one core record (secure-if-any), applied with "
             + "RecordOwnerResolution.ApplyTo to every row (BuildRow applies the same owner to the Stored File); an unresolved owner refuses "
             + "before the transaction, so nothing is created."),
@@ -2443,7 +2441,7 @@ public class RecordOwnerAssignmentCensusTests
         new PersonBearingWriter("UploadFinalizationWorker.cs", "ProcessSingleAttachmentAsync", "the carried saving user"),
         new PersonBearingWriter("FinanceEndpoints.cs", "ConfirmInvoiceReview",
             "hands the HTTP caller to the confirm's submission (ebilling-r1 050a: InvoiceReviewService passes its oid to the intake)"),
-        new PersonBearingWriter("InvoiceSubmissionPersister.cs", "PersistAsync", "the submitter the submission recorded at intake, stamped on the invoice, lines and approval (ebilling-r1 D-130 3)"),
+        new PersonBearingWriter("InvoiceSubmissionPersister.cs", "PersistCoreAsync", "the submitter the submission recorded at intake, stamped on the invoice, lines and approval (ebilling-r1 D-130 3; task 094: PersistAsync wraps it to delete a staged copy no commit wrote)"),
         new PersonBearingWriter("UpdateRecordActionCore.cs", "UpdateAsync", "the impersonated user, for F3 (owner round 13 item 8)"),
         new PersonBearingWriter("DataverseUpdateHandler.cs", "UpdateAsync", "the impersonated user, for F3 (#2257)"),
         new PersonBearingWriter("DecisionActionExecutors.cs", "PlanAsync", "the caller whose decision commit revises the budget (ontology task 147, #1777)"),

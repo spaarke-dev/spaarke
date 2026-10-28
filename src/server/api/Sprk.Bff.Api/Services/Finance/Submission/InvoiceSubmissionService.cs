@@ -51,10 +51,12 @@ namespace Sprk.Bff.Api.Services.Finance.Submission;
 /// <para><b>Only creator of submissions.</b> The row is created by <see cref="ITrackingNumberAllocator"/> with its number already set (D-87); the
 /// submission id is minted here once per request and is also the job's idempotency key. This service never creates <c>sprk_invoice</c> (task 049
 /// does).</para>
-/// <para><b>The existing-document entry (ebilling-r1 050a, D-134).</b> The review-confirm route calls <see cref="SubmitExistingDocumentAsync"/>:
-/// the same field, firm, core-record, firm-link and owner checks (<see cref="DecideAsync"/>), no file checks, no upload and no document create;
-/// the submission points at the confirmed document, its id is derived from the document (idempotent by document), and the job re-files the
-/// document under the invoice it creates (<see cref="InvoiceDocumentRefile"/>).</para>
+/// <para><b>Submit Invoice from a source document (ebilling-r1 050a, D-134; task 094, procedure-and-file-model 9.1).</b> The review-confirm
+/// route and the from-document route call <see cref="SubmitExistingDocumentAsync"/>: the same field, firm, core-record, firm-link and owner
+/// checks (<see cref="DecideAsync"/>), no file checks, no upload and no document create; the submission names the SOURCE document, its id
+/// is derived from the document (idempotent by document), and the job COPIES the document's bytes into the invoice's Stored File (9.1
+/// steps 2-6). The source document never moves: nothing here or in the job writes its owner, its shares or its <c>sprk_invoice</c> link
+/// (the 050a re-file is retired).</para>
 /// <para><b>Logging (ADR-015).</b> Ids and outcomes only; the firm invoice number, the tracking number and the file name are business data and are
 /// not logged above Debug.</para>
 /// </remarks>
@@ -178,8 +180,7 @@ public class InvoiceSubmissionService
 
     /// <summary>
     /// The submission id of the confirm of <paramref name="documentId"/>: deterministic, so the document has exactly one confirm submission.
-    /// It is the dedupe key of <see cref="SubmitExistingDocumentAsync"/> (D-134 "idempotent by document") and the marker by which the job knows
-    /// the submission's document was not created by intake and must be re-filed under the invoice (<see cref="InvoiceDocumentRefile"/>).
+    /// It is the dedupe key of <see cref="SubmitExistingDocumentAsync"/> (D-134 "idempotent by document"; kept by task 094).
     /// </summary>
     public static Guid ExistingDocumentSubmissionIdFor(Guid documentId) => InvoiceSubmissionPersister.IdOf($"ebilling-confirm-submission-{documentId:D}");
 
@@ -255,11 +256,23 @@ public class InvoiceSubmissionService
     /// </summary>
     internal const int MaxFilingChainDocuments = 4;
 
-    private static readonly string[] FilingChainColumns =
+    /// <summary>D-140: the columns a document of the filing chain is read with (task 094: shared by step 1, step 3 and step 5).</summary>
+    internal static readonly string[] FilingChainColumns =
         [.. DocumentCoreColumns.Select(c => c.Column), DocumentRelatedCommunication, DocumentParentDocument];
 
+    /// <summary>Task 094: the source document's own Restricted state (9.1 step 3: read, never a refusal ground, never stored).</summary>
+    private const string DocumentAccessPermission = InheritedAccessPermission.Column;
+
+    /// <summary>Task 094: the source's communication flags 9.1 step 3 reads (internal-only; the thread's privacy).</summary>
+    private const string CommunicationInternalOnly = Sprk.Bff.Api.Services.Communication.CommunicationInternalOnlyFloor.InternalOnlyField;
+
+    private const string ThreadPrivacy = Sprk.Bff.Api.Services.Communication.CommunicationInternalOnlyFloor.ThreadPrivacyField;
+
     private static readonly string[] ExistingDocumentColumns =
-        ["sprk_invoice", "sprk_graphdriveid", "sprk_graphitemid", .. FilingChainColumns];
+        ["sprk_invoice", "sprk_graphdriveid", "sprk_graphitemid", InvoiceReviewService.DocInvoiceReviewStatus, .. FilingChainColumns];
+
+    /// <summary>Task 094: the source document as steps 3 and 5 read it: the filing chain and its own Restricted state.</summary>
+    private static readonly string[] SourceCheckColumns = [.. FilingChainColumns, DocumentAccessPermission];
 
     /// <summary>
     /// The existing-document entry (D-134): a reviewer confirms that a document already stored (an email attachment) is an invoice. It runs the
@@ -321,8 +334,9 @@ public class InvoiceSubmissionService
             return await AnswerWithEarlierAsync(request, number, earlier, documentId, jobId, ct);
         }
 
-        // ── 3. The document: present, holding a file, not already an invoice's, not filed under another core record ──
-        if (await CheckExistingDocumentAsync(documentId, request.CoreRecord, ct) is { } documentRefusal)
+        // ── 3. The document: present, holding a file, not already an invoice's, not rejected, linking the route's communication, not filed
+        //       under another core record (D-140) and not isolated elsewhere ──
+        if (await CheckExistingDocumentAsync(documentId, request.CoreRecord, request.SourceCommunicationId, ct) is { } documentRefusal)
         {
             return documentRefusal;
         }
@@ -435,10 +449,13 @@ public class InvoiceSubmissionService
     private async Task<InvoiceSubmissionOutcome> AnswerWithEarlierAsync(
         InvoiceSubmissionRequest request, string number, InvoiceSubmissionView earlier, Guid documentId, Guid jobId, CancellationToken ct)
     {
+        // Task 094: an undone submission (9.1 step 5) has its firm invoice number cleared, so for a terminal one an empty number matches.
+        var ended = earlier.Status is nameof(InvoiceSubmissionStatus.Failed) or nameof(InvoiceSubmissionStatus.Rejected);
         var same = earlier.FirmId == request.FirmId
             && earlier.CoreRecord == request.CoreRecord
             && earlier.DocumentId == documentId
-            && string.Equals(earlier.FirmInvoiceNumber?.Trim(), number, StringComparison.OrdinalIgnoreCase)
+            && (string.Equals(earlier.FirmInvoiceNumber?.Trim(), number, StringComparison.OrdinalIgnoreCase)
+                || (ended && string.IsNullOrWhiteSpace(earlier.FirmInvoiceNumber)))
             && !string.IsNullOrEmpty(earlier.TrackingNumber);
         if (!same)
         {
@@ -476,7 +493,8 @@ public class InvoiceSubmissionService
     /// "filed under" is the EFFECTIVE core record through the filing chain (<see cref="ResolveFilingAsync"/>, D-140: an email attachment
     /// follows its communication's matter); an UNFILED document (nothing in the chain names a core record) is allowed (owner 2026-10-20, D-139).
     /// </summary>
-    private async Task<InvoiceSubmissionOutcome?> CheckExistingDocumentAsync(Guid documentId, InvoiceCoreRecord core, CancellationToken ct)
+    private async Task<InvoiceSubmissionOutcome?> CheckExistingDocumentAsync(
+        Guid documentId, InvoiceCoreRecord core, Guid? sourceCommunicationId, CancellationToken ct)
     {
         Entity? document;
         try
@@ -515,11 +533,28 @@ public class InvoiceSubmissionService
                 "The document has no stored file, so it cannot be submitted as an invoice.");
         }
 
+        // Task 094: a document rejected as not an invoice is refused up front on every route (the confirm route also refuses it itself);
+        // the job refuses a reject that lands later (InvoiceSubmissionPersister.DocumentRejectedCode).
+        if (document.GetAttributeValue<OptionSetValue>(InvoiceReviewService.DocInvoiceReviewStatus)?.Value == InvoiceReviewService.ReviewStatusRejectedNotInvoice)
+        {
+            return InvoiceSubmissionOutcome.Refused(StatusCodes.Status409Conflict, InvoiceSubmissionErrors.DocumentRejected,
+                "The document was rejected as not an invoice, so it cannot be submitted. Nothing was saved.");
+        }
+
+        // Task 094: the from-document route is keyed on (communication, document): the document must link exactly that communication.
+        if (sourceCommunicationId is { } named
+            && document.GetAttributeValue<EntityReference>(DocumentRelatedCommunication)?.Id != named)
+        {
+            _logger.LogInformation("Invoice submission refused: document {DocumentId} does not link communication {CommunicationId}", documentId, named);
+            return InvoiceSubmissionOutcome.Refused(StatusCodes.Status422UnprocessableEntity, InvoiceSubmissionErrors.SourceCommunicationMismatch,
+                "The document does not belong to the communication named, so it cannot be submitted from it. Nothing was saved.");
+        }
+
         // D-140 (owner 2026-10-20, "follow the email's matter"): the document's EFFECTIVE core record, through its filing chain.
         IReadOnlyList<(string Column, InvoiceCoreRecordKind Kind, Guid Id)>? filed;
         try
         {
-            filed = await ResolveFilingAsync(documentId, document, ct);
+            filed = await ResolveFilingAsync(_entities, documentId, document, ct);
         }
         catch (Exception ex) when (!IsCallerCancellation(ex, ct))
         {
@@ -584,8 +619,10 @@ public class InvoiceSubmissionService
     /// Null: the chain is longer than <see cref="MaxFilingChainDocuments"/> documents or loops, so the record is unknown (the caller refuses).
     /// A read fault propagates.
     /// </summary>
-    private async Task<IReadOnlyList<(string Column, InvoiceCoreRecordKind Kind, Guid Id)>?> ResolveFilingAsync(
-        Guid documentId, Entity document, CancellationToken ct)
+    /// <remarks>Task 094: static over the caller's reader, so step 1 (here), step 3 (the persister) and step 5 (<see cref="SubmissionCommitGate"/>)
+    /// run the one chain (uac-r2 F1-f).</remarks>
+    internal static async Task<IReadOnlyList<(string Column, InvoiceCoreRecordKind Kind, Guid Id)>?> ResolveFilingAsync(
+        IGenericEntityService entities, Guid documentId, Entity document, CancellationToken ct)
     {
         var visited = new HashSet<Guid> { documentId };
         var current = document;
@@ -594,7 +631,7 @@ public class InvoiceSubmissionService
             var filed = CoreRecordsOf(current, DocumentCoreColumns, DocumentEntity);
             if (filed.Count == 0
                 && current.GetAttributeValue<EntityReference>(DocumentRelatedCommunication) is { Id: var communicationId } && communicationId != Guid.Empty
-                && await ReadChainRowAsync(CommunicationEntity, communicationId, CommunicationHopColumns, ct) is { } communication)
+                && await ReadChainRowAsync(entities, CommunicationEntity, communicationId, CommunicationHopColumns, ct) is { } communication)
             {
                 filed = CoreRecordsOf(communication, CommunicationCoreColumns, CommunicationEntity);
 
@@ -609,7 +646,7 @@ public class InvoiceSubmissionService
                 // assignment) is compared here; any other ownership parent is the isolation check's. A thread that is gone files
                 // nothing; a read fault propagates (503).
                 if (communication.GetAttributeValue<EntityReference>(CommunicationThread) is { Id: var threadId } && threadId != Guid.Empty
-                    && await ReadChainRowAsync(ThreadEntity, threadId, ThreadHopColumns, ct) is { } thread)
+                    && await ReadChainRowAsync(entities, ThreadEntity, threadId, ThreadHopColumns, ct) is { } thread)
                 {
                     foreach (var threadParent in RecordThreadFiling.ParentsOf(thread))
                     {
@@ -636,7 +673,7 @@ public class InvoiceSubmissionService
                 return null;
             }
 
-            if (await ReadChainRowAsync(DocumentEntity, parentId, FilingChainColumns, ct) is not { } parent)
+            if (await ReadChainRowAsync(entities, DocumentEntity, parentId, FilingChainColumns, ct) is not { } parent)
             {
                 return filed; // the parent is gone: nothing files the document through it
             }
@@ -653,17 +690,85 @@ public class InvoiceSubmissionService
             .ToList();
 
     /// <summary>A row of the filing chain, or null when it no longer exists. A read fault propagates.</summary>
-    private async Task<Entity?> ReadChainRowAsync(string table, Guid id, string[] columns, CancellationToken ct)
+    private static async Task<Entity?> ReadChainRowAsync(IGenericEntityService entities, string table, Guid id, string[] columns, CancellationToken ct)
     {
         try
         {
-            return await _entities.RetrieveAsync(table, id, columns, ct);
+            return await entities.RetrieveAsync(table, id, columns, ct);
         }
         catch (Exception ex) when (IsNotFound(ex))
         {
             return null;
         }
     }
+
+    /// <summary>
+    /// Task 094 (procedure-and-file-model 9.1 steps 3 and 5): whether the Submit Invoice source <paramref name="documentId"/> is still filed
+    /// under <paramref name="core"/> only, read again. In order: the document (gone is <see cref="SourceFilingVerdict.Gone"/>); the D-140
+    /// filing chain (<see cref="ResolveFilingAsync"/>; another record, or a chain that cannot be placed, is
+    /// <see cref="SourceFilingVerdict.Mismatch"/>); the source's Restricted, internal-only and privacy state (owner K: never a refusal ground
+    /// and never stored, but read, so a source whose state cannot be read is never passed, uac-r2 conditions 1 and 2); then
+    /// <see cref="ExistingDocumentIsolationCheck.CheckAsync"/> (another or an undetermined secure root is Mismatch, unreadable is
+    /// <see cref="SourceFilingVerdict.Unavailable"/>). A Dataverse fault propagates; the caller decides what a fault means (step 3: a retry,
+    /// nothing committed; step 5: a failure).
+    /// </summary>
+    internal static async Task<SourceFilingCheck> CheckSourceFilingAsync(
+        IGenericEntityService entities, ExistingDocumentIsolationCheck isolation, Guid documentId, InvoiceCoreRecord core, CancellationToken ct)
+    {
+        var document = await ReadChainRowAsync(entities, DocumentEntity, documentId, SourceCheckColumns, ct).ConfigureAwait(false);
+        if (document is null)
+        {
+            return new SourceFilingCheck(SourceFilingVerdict.Gone, "the source document no longer exists");
+        }
+
+        var filed = await ResolveFilingAsync(entities, documentId, document, ct).ConfigureAwait(false);
+        if (filed is null)
+        {
+            return new SourceFilingCheck(SourceFilingVerdict.Mismatch, "the filing chain is too long or loops");
+        }
+
+        if (filed.FirstOrDefault(f => f.Kind != core.Kind || f.Id != core.RecordId) is { Column: not null } other)
+        {
+            return new SourceFilingCheck(SourceFilingVerdict.Mismatch, $"filed under {other.Column} {other.Id}");
+        }
+
+        var flags = await ReadSourceFlagsAsync(entities, document, ct).ConfigureAwait(false);
+
+        var isolated = await isolation.CheckAsync(documentId, core, ct).ConfigureAwait(false);
+        return isolated.Verdict switch
+        {
+            ExistingDocumentIsolationVerdict.Allowed => new SourceFilingCheck(SourceFilingVerdict.Allowed, null, isolated.Roots, flags),
+            ExistingDocumentIsolationVerdict.Unavailable => new SourceFilingCheck(SourceFilingVerdict.Unavailable, isolated.Detail),
+            _ => new SourceFilingCheck(SourceFilingVerdict.Mismatch, $"{isolated.Verdict}: {isolated.Detail}"),
+        };
+    }
+
+    /// <summary>
+    /// Task 094 (9.1 step 3, uac-r2 condition 2): reads the source's Restricted state (its own Access Permission, already on
+    /// <paramref name="document"/>), its communication's internal-only flag and that communication's thread's privacy state. Under owner K
+    /// none of them refuses and none is stored ((a′) derives them at read time, task 098), so the values are returned for the log and the
+    /// tests only. A row that is gone has no flag; a read fault propagates (an unreadable flag is never a pass).
+    /// </summary>
+    internal static async Task<SourceIsolationFlags> ReadSourceFlagsAsync(IGenericEntityService entities, Entity document, CancellationToken ct)
+    {
+        var restricted = document.GetAttributeValue<OptionSetValue>(DocumentAccessPermission)?.Value == InheritedAccessPermission.Restricted;
+        bool? internalOnly = null;
+        int? privacy = null;
+        if (document.GetAttributeValue<EntityReference>(DocumentRelatedCommunication) is { Id: var communicationId } && communicationId != Guid.Empty
+            && await ReadChainRowAsync(entities, CommunicationEntity, communicationId, [CommunicationInternalOnly, CommunicationThread], ct)
+                .ConfigureAwait(false) is { } communication)
+        {
+            internalOnly = communication.GetAttributeValue<bool?>(CommunicationInternalOnly);
+            if (communication.GetAttributeValue<EntityReference>(CommunicationThread) is { Id: var threadId } && threadId != Guid.Empty
+                && await ReadChainRowAsync(entities, ThreadEntity, threadId, [ThreadPrivacy], ct).ConfigureAwait(false) is { } thread)
+            {
+                privacy = thread.GetAttributeValue<OptionSetValue>(ThreadPrivacy)?.Value;
+            }
+        }
+
+        return new SourceIsolationFlags(restricted, internalOnly, privacy);
+    }
+
 
     /// <summary>Submits the job (ADR-004, the submission id as idempotency key); false when the queue refused it (logged).</summary>
     private async Task<bool> TrySubmitJobAsync(Guid jobId, Guid submissionId, string? correlationId)

@@ -827,8 +827,10 @@ public class DocumentCheckoutService
         // 1b. A document that still has child documents is refused BEFORE anything is deleted (unified-access-control-r2
         // task 188 slice D, owner round 111 item 3). sprk_document_ParentDocument is Delete = Restrict, so Dataverse would
         // refuse the row anyway, but only AFTER step 2 had deleted the file. A failed read throws here, before any delete
-        // (fail closed), exactly as the document read above does.
-        var childCount = await CountChildDocumentsAsync(documentId, ct);
+        // (fail closed), exactly as the document read above does. ebilling-r1 task 094 (ontology-r1 088 gate F1; procedure-and-file-
+        // model 5.2): a Stored File copied from this document (sprk_storedfile.sprk_sourcedocument, Delete = Restrict) refuses the
+        // row the same way, so it counts here too and gets the same 409 before the file is touched.
+        var childCount = await CountChildDocumentsAsync(documentId, ct) + await CountStoredFileCopiesAsync(documentId, ct);
         if (childCount > 0)
         {
             _logger.LogInformation(
@@ -1043,7 +1045,8 @@ public class DocumentCheckoutService
     /// another object and cannot be deleted"), the Restrict cascade's refusal of a delete: the Web API's
     /// <c>error.code</c> string. Source: Microsoft Learn, "Web service error codes (Microsoft Dataverse)". For
     /// <c>sprk_document</c> the only Restrict relationship it is the parent of is <c>sprk_document_ParentDocument</c>
-    /// (solution XML), so on a document delete this code means "child documents exist" (task 188 slice D).
+    /// (solution XML), so on a document delete this code means "child documents exist" (task 188 slice D). Since ebilling-r1 task 094
+    /// the Stored File's <c>sprk_sourcedocument</c> lookup (Delete = Restrict) is a second one: a Submit Invoice copy refuses it too.
     /// </summary>
     public const string CannotDeleteDueToAssociationCode = "0x80040227";
 
@@ -1099,6 +1102,32 @@ public class DocumentCheckoutService
         return data.TryGetProperty("value", out var rows) && rows.ValueKind == JsonValueKind.Array
             ? rows.GetArrayLength()
             : throw new HttpRequestException($"Dataverse answered the child documents of document {documentId} without rows.");
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 094 (ontology-r1 088 gate F1): how many Stored Files name <paramref name="documentId"/> as their
+    /// <c>sprk_sourcedocument</c> (a Submit Invoice copy; the lookup is Delete = Restrict), active or not, up to
+    /// <see cref="ChildDocumentCountCap"/>. App-only, ids never returned. A failed read throws (fail closed, like
+    /// <see cref="CountChildDocumentsAsync"/>).
+    /// </summary>
+    private async Task<int> CountStoredFileCopiesAsync(Guid documentId, CancellationToken ct)
+    {
+        var url = $"{Finance.Files.StoredFileSchema.EntitySet}?$select={Finance.Files.StoredFileSchema.IdColumn}" +
+                  $"&$filter=_{Finance.Files.StoredFileSchema.SourceDocument}_value eq {documentId}&$top={ChildDocumentCountCap}";
+        var response = await _httpClient.GetAsync(url, ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            _logger.LogError(
+                "Dataverse returned {StatusCode} for the Stored File copies of document {DocumentId}",
+                response.StatusCode, documentId);
+            throw new HttpRequestException(
+                $"Dataverse error ({response.StatusCode}) reading the Stored File copies of document {documentId}.");
+        }
+
+        var data = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: ct);
+        return data.TryGetProperty("value", out var rows) && rows.ValueKind == JsonValueKind.Array
+            ? rows.GetArrayLength()
+            : throw new HttpRequestException($"Dataverse answered the Stored File copies of document {documentId} without rows.");
     }
 
     /// <summary>

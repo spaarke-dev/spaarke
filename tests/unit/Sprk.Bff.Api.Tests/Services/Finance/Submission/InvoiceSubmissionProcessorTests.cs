@@ -356,10 +356,33 @@ public class InvoiceSubmissionProcessorTests
         h.Reads.Should().Be(1);
     }
 
-    [Fact(DisplayName = "092 must-fire: a submission naming a document that is not its 050a confirm (the retired SPE intake shape) fails closed DocumentUnavailable before the read")]
-    public async Task OtherDocument_FailsClosed_DocumentUnavailable()
+    // ── 094 (092 review item 1): the file source is decided by channel and document, once, never by "no document" alone ──
+
+    [Theory(DisplayName = "094 (092 review item 1): the file source per channel - Internal with a document is a SourceDocument (copied by the job); any channel without one is an Upload")]
+    [InlineData(InvoiceSubmissionChannel.Internal, true, SubmissionFileSource.SourceDocument)]
+    [InlineData(InvoiceSubmissionChannel.Internal, false, SubmissionFileSource.Upload)]
+    [InlineData(InvoiceSubmissionChannel.Spa, false, SubmissionFileSource.Upload)]
+    public async Task FileSource_PerChannel(InvoiceSubmissionChannel channel, bool withDocument, SubmissionFileSource expected)
     {
-        var h = new Harness();
+        var h = new Harness { Channel = channel };
+        if (withDocument)
+        {
+            h.Row["sprk_document"] = new EntityReference("sprk_document", Document);
+        }
+
+        var outcome = await h.RunAsync();
+
+        outcome.Kind.Should().NotBe(SubmissionEvaluationKind.Failed);
+        outcome.Submission!.FileSource.Should().Be(expected);
+        outcome.Submission.DocumentId.Should().Be(withDocument ? Document : null);
+        outcome.Submission.IsUpload.Should().Be(expected == SubmissionFileSource.Upload);
+        h.DocumentLoads.Should().Be(1);
+    }
+
+    [Fact(DisplayName = "094 must-fire (092 review item 1): a firm-channel (SPA) submission naming a document fails closed DocumentUnavailable before any load or read - a document is a source only on the internal channel")]
+    public async Task SpaWithADocument_FailsClosed_DocumentUnavailable()
+    {
+        var h = new Harness { Channel = InvoiceSubmissionChannel.Spa };
         h.Row["sprk_document"] = new EntityReference("sprk_document", Document);
 
         var outcome = await h.RunAsync();
@@ -368,21 +391,6 @@ public class InvoiceSubmissionProcessorTests
         outcome.ReasonCode.Should().Be(SubmissionReasonCodes.DocumentUnavailable);
         h.DocumentLoads.Should().Be(0);
         h.Reads.Should().Be(0);
-    }
-
-    [Fact(DisplayName = "092 must-not-fire: the 050a confirm of a document keeps its document (read from SPE by the job)")]
-    public async Task ConfirmedDocument_IsKept()
-    {
-        var h = new Harness();
-        h.Row.Id = InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(Document);
-        h.Row["sprk_document"] = new EntityReference("sprk_document", Document);
-
-        var outcome = await h.RunAsync();
-
-        outcome.Kind.Should().NotBe(SubmissionEvaluationKind.Failed);
-        outcome.Submission!.DocumentId.Should().Be(Document);
-        outcome.Submission.IsUpload.Should().BeFalse();
-        h.DocumentLoads.Should().Be(1);
     }
 
     [Fact(DisplayName = "049 B: a createdon late in the UTC day stays on that UTC day")]

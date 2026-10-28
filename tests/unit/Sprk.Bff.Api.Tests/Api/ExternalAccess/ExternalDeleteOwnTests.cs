@@ -634,6 +634,75 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
     }
 
     // =====================================================================
+    // ebilling-r1 task 094 (ontology-r1 088 gate F1; procedure-and-file-model 5.2): a Stored File copied from a document
+    // names it as sprk_sourcedocument (Delete = Restrict). The document is refused with the same 409 BEFORE its file is
+    // touched, never a Restrict refusal after the file is gone.
+    // =====================================================================
+
+    [Fact(DisplayName = "094 (must fire): a document a Stored File was copied from is 409 has-children on the external route; no file or row is deleted")]
+    public async Task Document_WithAStoredFileCopy_Is409_AndNothingIsDeleted()
+    {
+        var id = _fixture.Seed(DeletableKind.Document, contact: CallerContact, parents: Project(RecordA));
+        _fixture.Dataverse.StoredFileCopies[id] = 1;
+        _fixture.Principal = ContactOn(RecordA, ExternalAccessLevel.Collaborate);
+
+        using var response = await Delete("documents", id);
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, body);
+        ProblemCode(body).Should().Be(DocumentCheckoutService.HasChildDocumentsCode);
+        body.Should().NotContain("childCount", "the external plane never counts what refuses the delete");
+        _fixture.Steps.Should().BeEmpty("the SPE file is untouched");
+        _fixture.Exists(DeletableKind.Document, id).Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "094 (must fire): the internal delete counts Stored File copies with child documents, before the file")]
+    public async Task InternalDelete_WithStoredFileCopies_IsRefused_WithTheCount_BeforeTheFile()
+    {
+        var id = _fixture.Seed(DeletableKind.Document, contact: CallerContact, parents: Project(RecordA));
+        _fixture.Dataverse.AddChild(id);
+        _fixture.Dataverse.StoredFileCopies[id] = 2;
+        var service = _fixture.Services.GetRequiredService<DocumentCheckoutService>();
+
+        var result = await service.DeleteAsync(id, "corr-094");
+
+        var refused = result.Should().BeOfType<HasChildDocumentsDeleteResult>().Subject;
+        refused.ChildCount.Should().Be(3, "one child document and two Stored File copies");
+        refused.FileGone.Should().BeFalse();
+        _fixture.Steps.Should().BeEmpty();
+        _fixture.Exists(DeletableKind.Document, id).Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "094 (must not fire): a document no Stored File names is asked about and deletes as before, file then row")]
+    public async Task InternalDelete_WithoutStoredFileCopies_Deletes()
+    {
+        var id = _fixture.Seed(DeletableKind.Document, contact: CallerContact, parents: Project(RecordA));
+        _fixture.Dataverse.StoredFileCopies[Guid.NewGuid()] = 1;
+        var service = _fixture.Services.GetRequiredService<DocumentCheckoutService>();
+
+        var result = await service.DeleteAsync(id, "corr-094");
+
+        result.Should().BeOfType<SuccessDeleteResult>();
+        _fixture.Dataverse.StoredFileQueries.Should().Contain(id);
+        _fixture.Steps.Should().Equal($"file-delete:drive-{id:N}/item-{id:N}", $"row-delete:{id}");
+        _fixture.Exists(DeletableKind.Document, id).Should().BeFalse();
+    }
+
+    [Fact(DisplayName = "094 (fail closed): when the Stored File copies cannot be read the delete is 503 and nothing is deleted")]
+    public async Task Document_WhenTheStoredFileCopyReadFails_Is503_AndNothingIsDeleted()
+    {
+        var id = _fixture.Seed(DeletableKind.Document, contact: CallerContact, parents: Project(RecordA));
+        _fixture.Principal = ContactOn(RecordA, ExternalAccessLevel.Collaborate);
+        _fixture.Dataverse.StoredFileReadStatus = HttpStatusCode.ServiceUnavailable;
+
+        using var response = await Delete("documents", id);
+
+        await ShouldBeDeleteOwnUnavailable(response);
+        _fixture.Steps.Should().BeEmpty();
+        _fixture.Exists(DeletableKind.Document, id).Should().BeTrue();
+    }
+
+    // =====================================================================
     // Task 188 slice D, security pass 2: a child created AFTER the count (the email pipeline writing attachments) makes
     // Dataverse's Restrict refuse the row once the file is gone. The refusal maps to the same 409, never a 500.
     // =====================================================================
@@ -1780,6 +1849,18 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
         /// <summary>Set to make the child-document query (task 188 slice D) fail with this status.</summary>
         public HttpStatusCode? ChildReadStatus { get; set; }
 
+        /// <summary>
+        /// ebilling-r1 task 094 (ontology-r1 088 gate F1): how many Stored Files name a document as their source
+        /// (<c>sprk_sourcedocument</c>, Delete = Restrict). Absent = none.
+        /// </summary>
+        public ConcurrentDictionary<Guid, int> StoredFileCopies { get; } = new();
+
+        /// <summary>Task 094: set to make the Stored File copy query fail with this status.</summary>
+        public HttpStatusCode? StoredFileReadStatus { get; set; }
+
+        /// <summary>Task 094: every Stored File copy query asked (the source document id).</summary>
+        public ConcurrentQueue<Guid> StoredFileQueries { get; } = new();
+
         public void Reset()
         {
             _rows.Clear();
@@ -1788,6 +1869,9 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
             RestrictStatus = HttpStatusCode.BadRequest;
             ReadFault = null;
             ChildReadStatus = null;
+            StoredFileCopies.Clear();
+            StoredFileReadStatus = null;
+            StoredFileQueries.Clear();
         }
 
         /// <summary>Removes a row (a child document deleted elsewhere).</summary>
@@ -1850,6 +1934,27 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
                 {
                     Content = new StringContent(JsonSerializer.Serialize(new { value = children }),
+                        System.Text.Encoding.UTF8, "application/json"),
+                });
+            }
+
+            // Task 094: the Stored File copy query: sprk_storedfiles?$filter=_sprk_sourcedocument_value eq {id}.
+            if (request.Method == HttpMethod.Get && path.EndsWith("/sprk_storedfiles", StringComparison.Ordinal))
+            {
+                if (StoredFileReadStatus is { } fileStatus)
+                    return Task.FromResult(new HttpResponseMessage(fileStatus));
+                var query = Uri.UnescapeDataString(request.RequestUri.Query);
+                var match = System.Text.RegularExpressions.Regex.Match(query, @"_sprk_sourcedocument_value eq ([0-9a-fA-F-]{36})");
+                if (!match.Success)
+                    return Task.FromResult(new HttpResponseMessage(HttpStatusCode.BadRequest));
+                var source = Guid.Parse(match.Groups[1].Value);
+                StoredFileQueries.Enqueue(source);
+                var copies = Enumerable.Range(0, StoredFileCopies.TryGetValue(source, out var n) ? n : 0)
+                    .Select(_ => new Dictionary<string, object?> { ["sprk_storedfileid"] = Guid.NewGuid().ToString() })
+                    .ToList();
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(JsonSerializer.Serialize(new { value = copies }),
                         System.Text.Encoding.UTF8, "application/json"),
                 });
             }

@@ -52,14 +52,27 @@ public enum SubmissionPersistStatus
 
     /// <summary>
     /// A retry will not change the result (<see cref="SubmissionPersistResult.ReasonCode"/>): the job marks the submission Failed. Nothing was
-    /// written, except in one case (ebilling-r1 task 092): <see cref="SubmissionReasonCodes.FileUnservable"/> with
-    /// <see cref="SubmissionPersistResult.InvoiceId"/> set means the transaction committed but the upload's Stored File could not be flipped to
-    /// Servable (definitively), so no totals and no after-step ran and the submission is Failed although it links its invoice.
+    /// written.
     /// </summary>
     Refused,
 
     /// <summary>The submission row no longer exists (044 K4): nothing was written.</summary>
     SubmissionMissing,
+
+    /// <summary>
+    /// ebilling-r1 task 094 (procedure-and-file-model 9.1 step 4): the Submit Invoice source changed since the job staged its copy (its live
+    /// row version is not the staged one, or the commit's guard on it failed). Nothing was committed and the staged copy was deleted; the
+    /// caller stages the new version and persists once more (<see cref="SubmissionEvaluationOutcome.StagedFiles"/>).
+    /// </summary>
+    SourceChanged,
+
+    /// <summary>
+    /// ebilling-r1 task 094 (9.1 step 5): the transaction committed but the commit gate (<see cref="SubmissionCommitGate"/>) failed, so the
+    /// commit was undone and the submission is Failed with <see cref="SubmissionPersistResult.ReasonCode"/>
+    /// (<see cref="SubmissionReasonCodes.SourceCheckFailed"/> or <see cref="SubmissionReasonCodes.FileUnservable"/>). No totals and no
+    /// after-step ran. <see cref="SubmissionPersistResult.UndoHeld"/> says a delete of the undo faulted (a later delivery finishes it).
+    /// </summary>
+    Undone,
 }
 
 /// <summary>The outcome of persisting one submission (task 049 part C), as part D consumes it.</summary>
@@ -105,4 +118,7 @@ public sealed record SubmissionPersistResult
 
     /// <summary>The submission as re-read, for <see cref="SubmissionPersistStatus.ReEvaluate"/> (pass it to the processor).</summary>
     public Entity? CurrentSubmission { get; init; }
+
+    /// <summary>Task 094: on <see cref="SubmissionPersistStatus.Undone"/>, true when the undo is held (not every row of the commit is gone yet).</summary>
+    public bool UndoHeld { get; init; }
 }

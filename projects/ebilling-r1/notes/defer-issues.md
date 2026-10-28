@@ -1221,7 +1221,7 @@ K1 (ontology): a D-96 re-file across core records withholds line Duplicates perm
 
 *(ID is provisional: other worktrees may allocate DEF-047 in parallel; renumber on merge.)*
 
-**Description**: since 092 an upload (SPA or internal) is a Stored File, not a `sprk_document`. The `InvoiceIndexing` job is keyed by a document (`InvoiceIndexingJobHandler`), so `InvoiceSubmissionAfterSteps` skips it for uploads (logged). 050a confirms are still indexed until 094. Per D-44 (second half) indexing takes no bytes from a Stored File. Fix: key the job on the invoice id and index the structured record for every invoice In Review.
+**Description**: since 092 an upload (SPA or internal) is a Stored File, not a `sprk_document`. The `InvoiceIndexing` job is keyed by a document (`InvoiceIndexingJobHandler`), so `InvoiceSubmissionAfterSteps` skips it for uploads (logged). Since task 094 (owner K) no submission is indexed: a confirm or a Submit Invoice copies its source into a Stored File too, and the after-steps no longer take the job submitter. Per D-44 (second half) indexing takes no bytes from a Stored File. Fix: key the job on the invoice id and index the structured record for every invoice In Review.
 
 **Fails without it**: invoice search and AI retrieval over invoices miss every uploaded invoice.
 

@@ -179,8 +179,9 @@ public static class FinanceModule
         // Invoice submission processing (ebilling-r1 task 049 parts B-E, FR-20 / FR-21, D-101; Processing Pipeline steps 1-9). The pipeline is
         // three scoped components behind the seams the handler tests fake, plus the ADR-004 job handler that composes them:
         //   * IInvoiceSubmissionProcessor  - read (043), resolve (046), code (047), evaluate (072), decide (073); writes nothing.
-        //   * IInvoiceSubmissionPersister  - the one all-or-nothing transaction (invoice, lines, approval, document link, submission link).
-        //   * IInvoiceSubmissionAfterSteps - Signals, the automatic rejection's Decision Record, indexing, notification, terminal status last.
+        //   * IInvoiceSubmissionPersister  - the one all-or-nothing transaction (invoice, its Stored File row, lines, approval, the source
+        //     guard, submission link), then the commit gate.
+        //   * IInvoiceSubmissionAfterSteps - Signals, the automatic rejection's Decision Record, notification, terminal status last.
         //   * InvoiceSubmissionProcessingJobHandler - payload, the eBilling flag (read by the handler itself), the per-submission lock, the
         //     step-0 re-read, the document download, and the mapping of every result to a JobOutcome.
         // Scoped like their scoped dependencies (IGenericEntityService, IInvoiceAi, the evaluator, the lifecycle and totals services). Every
@@ -189,12 +190,11 @@ public static class FinanceModule
         services.AddScoped<IInvoiceSubmissionProcessor, InvoiceSubmissionProcessor>();
         services.AddScoped<IInvoiceSubmissionPersister, InvoiceSubmissionPersister>();
         services.AddScoped<IInvoiceSubmissionAfterSteps, InvoiceSubmissionAfterSteps>();
-        //   * InvoiceDocumentRefile - the after-steps' first step for a confirmed EXISTING document (050a, D-134 item 3; review #1: the one
-        //     writer of its sprk_invoice link): live-row check, isolation read,
-        //     ReparentAsync under the invoice (its conditional write sets the link), SecureChildReconciler.AfterRefileAsync. Scoped like its
-        //     dependencies (IRecordOwnershipResolver, IFieldMappingDataverseService,
-        //     SecureChildReconciler, ExternalAccessModule).
-        services.AddScoped<InvoiceDocumentRefile>();
+        //   * SubmissionCommitGate (ebilling-r1 task 094; procedure-and-file-model 9.1 steps 5-6) - the post-commit gate of every channel,
+        //     shared by the persister (after its commit), the after-steps' resume (first) and the handler (a held undo): the source re-run,
+        //     the flip of every file, and the undo. Concrete (ADR-010: one implementation). Scoped like the isolation check and the share
+        //     synchronizer it composes. It replaces 050a's InvoiceDocumentRefile (retired: a Submit Invoice source is copied, never re-filed).
+        services.AddScoped<SubmissionCommitGate>();
         services.AddScoped<IJobHandler, InvoiceSubmissionProcessingJobHandler>();
 
         // ============================================================================

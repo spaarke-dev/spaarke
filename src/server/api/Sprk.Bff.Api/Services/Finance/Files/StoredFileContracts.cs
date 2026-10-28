@@ -500,6 +500,16 @@ public enum StoredFileFlipOutcome
 /// <summary>The answer of a flip with its refusal code on <see cref="StoredFileFlipOutcome.Definitive"/>.</summary>
 public sealed record StoredFileFlipResult(StoredFileFlipOutcome Outcome, string? RefusalCode = null);
 
+/// <summary>What <see cref="StoredFileService.DeleteForUndoAsync"/> did (ebilling-r1 task 094, the submission undo).</summary>
+public enum StoredFileCompensation
+{
+    /// <summary>The blob (when its path was the row's own) and then the row were deleted.</summary>
+    Deleted,
+
+    /// <summary>No row with that id: nothing to delete (a row is deleted after its blob, so its blob is gone too).</summary>
+    AlreadyGone,
+}
+
 /// <summary>The answer of a create (caller upload or app create): the Servable file, or a refusal.</summary>
 public sealed record StoredFileCreateResult(Guid? FileId, string? RefusalCode)
 {

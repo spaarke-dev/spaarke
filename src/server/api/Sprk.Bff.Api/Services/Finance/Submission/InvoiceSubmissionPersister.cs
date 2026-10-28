@@ -38,14 +38,17 @@ namespace Sprk.Bff.Api.Services.Finance.Submission;
 /// <see cref="IInvoiceSubmissionPersister"/>: step 6 of the Processing Pipeline, all-or-nothing.
 /// </summary>
 /// <remarks>
-/// <para><b>One transaction</b> (FR-20), in this order: the invoice create(s) from 014, for an upload the invoice PDF's Stored File row
-/// (ebilling-r1 task 092: <see cref="StoredFileService.BuildRow"/>, Not yet servable, built from the blob the intake staged; ADR-002: this
-/// transaction is the row's one writer), one create per line, the approval portion (not for an automatic rejection), for a confirmed
-/// EXISTING document (050a) a guard on its live row, an update conditional on the row version read (<see cref="BuildExistingDocumentGuard"/>,
-/// no link; it is linked after the commit by its re-file, <see cref="InvoiceDocumentRefile"/>, the link's one writer), and the submission
-/// update (<c>sprk_invoice</c>, the reason code, <c>sprk_findingsjson</c>). <b>Right after the commit, before the totals and every
-/// after-step</b>, the upload's row is flipped to Servable (<see cref="FlipUploadFileAsync"/>; model 9.1 steps 5-6). A linked <c>sprk_invoice</c> therefore proves the commit; it is the resume marker. <b>The status is not
-/// written here (D-130 a):</b> the submission stays Processing, and part D writes <see cref="SubmissionPersistResult.TerminalStatus"/> last.
+/// <para><b>One transaction</b> (FR-20), in this order: the invoice create(s) from 014, the invoice PDF's Stored File row(s), Not yet
+/// servable (<see cref="StoredFileService.BuildRow"/>; ADR-002: this transaction is the row's one writer): for an upload (task 092) built
+/// from the blob the intake staged, for a Submit Invoice source (task 094, procedure-and-file-model 9.1 step 4) from the copy the job staged
+/// (<see cref="SubmissionEvaluationOutcome.StagedFiles"/>; Firm-visible No, the source ids, version and SHA), then one create per line, the
+/// approval portion (not for an automatic rejection), for a source document a guard on its live row at the STAGED version
+/// (<see cref="BuildExistingDocumentGuard"/>; it writes no link, no owner and no share: the source never moves, the 050a re-file is
+/// retired), and the submission update (<c>sprk_invoice</c>, the reason code, <c>sprk_findingsjson</c>). <b>Right after the commit, before
+/// the totals and every after-step</b>, the commit gate runs (<see cref="SubmissionCommitGate"/>; model 9.1 steps 5-6: the source re-run,
+/// then the flip of every file; on a failure the commit is undone). A linked <c>sprk_invoice</c> therefore proves the commit; it is the
+/// resume marker. <b>The status is not written here (D-130 a)</b>, except by the gate's undo (Failed): the submission stays Processing,
+/// and part D writes <see cref="SubmissionPersistResult.TerminalStatus"/> last.
 /// Every created row carries the submitter as <c>sprk_createdbyperson</c> (D-130 3), read from the submission's own stamp, and the invoice
 /// also carries the external submitter's contact as <c>sprk_submittedby</c> (D-131), read from the submission's <c>sprk_submitter</c>.
 /// A submission that records a contact but no linked user persists without <c>sprk_createdbyperson</c> (the rule for every BFF-created
@@ -166,7 +169,14 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
     private readonly IInvoiceTotalsService _totals;
     private readonly ExistingDocumentIsolationCheck _isolation;
     private readonly StoredFileService _files;
+    private readonly SubmissionCommitGate _gate;
     private readonly ILogger<InvoiceSubmissionPersister> _logger;
+
+    /// <summary>
+    /// Task 094: the step-3 source check could not read the source's isolation or flags (nothing committed; the job retries). The string
+    /// 050a's re-file used for the same condition, kept so stored reason codes and dashboards stay comparable.
+    /// </summary>
+    internal const string IsolationUnreadableCode = "ebilling.submission.document_isolation_unreadable";
 
     public InvoiceSubmissionPersister(
         IGenericEntityService entities,
@@ -176,6 +186,7 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         IInvoiceTotalsService totals,
         ExistingDocumentIsolationCheck isolation,
         StoredFileService files,
+        SubmissionCommitGate gate,
         ILogger<InvoiceSubmissionPersister> logger)
     {
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
@@ -185,38 +196,8 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         _totals = totals ?? throw new ArgumentNullException(nameof(totals));
         _isolation = isolation ?? throw new ArgumentNullException(nameof(isolation));
         _files = files ?? throw new ArgumentNullException(nameof(files));
+        _gate = gate ?? throw new ArgumentNullException(nameof(gate));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
-
-    /// <summary>
-    /// ebilling-r1 task 092 (procedure-and-file-model 9.1 steps 5-6): flips the upload's Stored File row (<see cref="StoredFileIds.ForUpload"/>
-    /// of <paramref name="submissionId"/>) to Servable. Returns <c>null</c> when it is Servable (flipped now or already), or
-    /// <see cref="SubmissionReasonCodes.FileUnservable"/> on a definitive failure (blob missing, hash mismatch, row not flippable), which
-    /// leaves the row Not yet servable for 090's detector. A row changed under the flip is flipped once more; a second change, or a fault,
-    /// throws (the job retries, and its resume flips before any after-step). Shared by the persister (after its commit) and the after-steps'
-    /// resume, so both run the same gate before anything else.
-    /// </summary>
-    internal static async Task<string?> FlipUploadFileAsync(StoredFileService files, Guid submissionId, ILogger logger, CancellationToken ct)
-    {
-        var fileId = StoredFileIds.ForUpload(submissionId);
-        var flip = await files.FlipToServableAsync(fileId, ct).ConfigureAwait(false);
-        if (flip.Outcome == StoredFileFlipOutcome.Concurrency)
-        {
-            flip = await files.FlipToServableAsync(fileId, ct).ConfigureAwait(false);
-        }
-
-        switch (flip.Outcome)
-        {
-            case StoredFileFlipOutcome.Flipped or StoredFileFlipOutcome.AlreadyServable:
-                return null;
-            case StoredFileFlipOutcome.Definitive:
-                logger.LogWarning("Invoice submission {SubmissionId}: its Stored File {FileId} cannot be made servable ({Code}); no after-step runs",
-                    submissionId, fileId, flip.RefusalCode);
-                return SubmissionReasonCodes.FileUnservable;
-            default:
-                throw new InvalidOperationException(
-                    $"The Stored File {fileId} of submission {submissionId} changed twice during its flip ({flip.Outcome}); retry.");
-        }
     }
 
     /// <summary>The submission columns the persister re-reads: the snapshot's (core record, link, status), the correlation id and the submitters.</summary>
@@ -262,6 +243,39 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
     public async Task<SubmissionPersistResult> PersistAsync(SubmissionEvaluationOutcome outcome, string? correlationId, CancellationToken ct = default)
     {
         Validate(outcome);
+        var result = await PersistCoreAsync(outcome, correlationId, ct).ConfigureAwait(false);
+
+        // Task 094 (9.1 step 4): a source copy the job staged that no commit wrote a row for is deleted (never the upload's blob, which is the
+        // intake's and stays for the retry). Not after an outcome-unknown Retry: the commit may yet be proved by the link on the next read.
+        if (outcome.StagedFiles.Count > 0 && result.InvoiceId is null
+            && result.Status is not (SubmissionPersistStatus.Committed or SubmissionPersistStatus.Resumed or SubmissionPersistStatus.Undone)
+            && result.ReasonCode != TransactionOutcomeUnknownCode)
+        {
+            await DiscardStagedAsync(outcome, ct).ConfigureAwait(false);
+        }
+
+        return result;
+    }
+
+    /// <summary>Deletes the staged source copies (only those with no row: <see cref="StoredFileService.DeleteStagedAsync"/>). Best effort.</summary>
+    private async Task DiscardStagedAsync(SubmissionEvaluationOutcome outcome, CancellationToken ct)
+    {
+        foreach (var copy in outcome.StagedFiles)
+        {
+            try
+            {
+                await _files.DeleteStagedAsync(copy.Spec, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogWarning("Invoice submission {SubmissionId}: its staged copy {FileId} could not be deleted ({Fault}); the file store's detector finds it",
+                    outcome.SubmissionId, copy.Spec.FileId, ex.GetType().Name);
+            }
+        }
+    }
+
+    private async Task<SubmissionPersistResult> PersistCoreAsync(SubmissionEvaluationOutcome outcome, string? correlationId, CancellationToken ct)
+    {
         var submissionId = outcome.SubmissionId;
 
         // ── Re-read: the resume marker and the core record the invoice is filed under ──
@@ -291,33 +305,41 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             };
         }
 
-        // 050a review #1 / #2: a confirm submission (D-134) points at an EXISTING document that other writers can file or decide while the job
-        // runs. Its live row is checked here, before anything is built or written: linked to an invoice other than the one this submission
-        // creates, or rejected as not an invoice, is a refusal (the submission is Failed, no invoice). The link itself is NOT written by this
-        // transaction for such a document: the re-file (InvoiceDocumentRefile, after the commit) is its one writer, through ReparentAsync, so
-        // the reparent reads the document's TRUE prior parents and its own conditional write catches a filing that lands after this check.
-        // 050a review round 2, item 2(a): the transaction carries a guard on the document, conditional on the row version this check read
-        // (BuildExistingDocumentGuard), so a filing, a reject or a delete that lands between this check and the commit rolls the whole
-        // transaction back instead of committing an invoice whose document the re-file must then refuse.
-        // ebilling-r1 task 092: a submission names a document only for the existing-document entry. Any other document is the retired intake
-        // shape (SubmissionSnapshot.Read refuses it before the job gets here); refused here too, so no caller can link one.
+        // Task 094 (procedure-and-file-model 9.1 steps 3-4): a Submit Invoice submission names its SOURCE document, which other writers can
+        // file, decide or change while the job runs. Step 3, here, before anything is built or written: the source is read again (linked to
+        // another invoice, rejected as not an invoice, gone, filed under another core record by the D-140 chain, or isolated elsewhere is a
+        // refusal; its flags or isolation unreadable is a Retry), and its live row version must still be the one the job staged its copy
+        // from (else SourceChanged: the job stages the new version). Step 4: the transaction carries a guard on the source at that version
+        // (BuildExistingDocumentGuard), so a change between this check and the commit rolls the whole transaction back. Nothing in this
+        // transaction, or after it, writes the source's link, owner or shares (the 050a re-file is retired).
         var documentId = outcome.Submission!.DocumentId;
-        if (documentId is { } namedDocument && !InvoiceDocumentRefile.AppliesTo(submissionId, namedDocument))
+        var sourceDocument = outcome.Submission.FileSource == SubmissionFileSource.SourceDocument;
+        if (sourceDocument != (documentId is not null))
         {
-            _logger.LogWarning("Invoice submission {SubmissionId}: it names document {DocumentId}, which is not an existing-document confirm; nothing persisted",
-                submissionId, namedDocument);
-            return Result(SubmissionPersistStatus.Refused, submissionId, SubmissionReasonCodes.DocumentUnavailable);
+            throw new ArgumentException("A source-document submission names its document, and only it does.", nameof(outcome));
         }
 
-        var existingDocument = documentId is not null;
         Entity? checkedDocument = null;
-        if (existingDocument)
+        if (sourceDocument)
         {
+            if (outcome.StagedFiles.Count == 0 || outcome.StagedFiles.Any(c => c.Spec.SourceDocumentId != documentId))
+            {
+                throw new ArgumentException("A source-document submission is persisted with the copies the job staged from that document.", nameof(outcome));
+            }
+
             var (documentRefusal, document) = await CheckExistingDocumentAsync(
                 submissionId, documentId!.Value, InvoiceIdFor(submissionId), outcome.CoreRecord!, ct).ConfigureAwait(false);
             if (documentRefusal is not null)
             {
                 return documentRefusal;
+            }
+
+            var live = VersionOf(document!);
+            if (outcome.StagedFiles.Any(c => c.SourceVersion != live))
+            {
+                _logger.LogInformation("Invoice submission {SubmissionId}: its source {DocumentId} is at version {Live}, not the staged one; nothing persisted, re-stage",
+                    submissionId, documentId, live);
+                return Result(SubmissionPersistStatus.SourceChanged, submissionId, SubmissionReasonCodes.SourceChanged);
             }
 
             checkedDocument = document;
@@ -378,7 +400,7 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         // the flip after the commit recomputes the hash by streaming). No usable blob: no invoice (nothing written yet).
         StoredFileRowSpec? fileSpec = null;
         StagedBlob? stagedFile = null;
-        if (!existingDocument)
+        if (!sourceDocument)
         {
             fileSpec = InvoiceSubmissionService.UploadFileSpec(
                 submissionId, clientFileName: null, outcome.Submission.Channel, outcome.Submission.TrackingNumber);
@@ -450,15 +472,24 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             requests.Add(_files.BuildRow(fileSpec, stagedFile!, owner, submitter));
         }
 
+        foreach (var copy in outcome.StagedFiles)
+        {
+            // Task 094 (9.1 step 4): the source copy's row, the same rules (Not yet servable, owned like the invoice), Firm-visible No.
+            requests.Add(_files.BuildRow(copy.Spec, copy.Blob, owner, submitter));
+        }
+
         requests.AddRange(lines.Select(line => new CreateRequest { Target = line }));
         if (approval is not null)
         {
             requests.Add(new CreateRequest { Target = approval });
         }
 
-        if (existingDocument)
+        var guardIndex = -1;
+        if (sourceDocument)
         {
-            // The guard: no link, only the version check (see BuildExistingDocumentGuard). The confirmed document is linked by its re-file.
+            // The guard: no link, only the version check at the staged version (see BuildExistingDocumentGuard; the check above proved the
+            // version read is the staged one).
+            guardIndex = requests.Count;
             requests.Add(BuildExistingDocumentGuard(checkedDocument!));
         }
 
@@ -512,12 +543,21 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             _logger.LogWarning("Invoice submission {SubmissionId}: transaction failed at request {Index} of {Count}; nothing persisted, retry",
                 submissionId, ex.FailedRequestIndex, requests.Count);
 
-            // 050a review round 2, item 2(a): the transaction rolled back. For a confirm submission the likely cause is the document guard (a
-            // filing, a reject or a delete since the check), so the live row is checked again now: a refusal is answered in this delivery
-            // (the submission is Failed, no invoice), anything else is the transaction's own Retry, as for every other fault.
-            if (existingDocument && await RecheckExistingDocumentAsync(submissionId, documentId!.Value, invoiceId, core, ct).ConfigureAwait(false) is { } refusedNow)
+            // 050a review round 2, item 2(a): the transaction rolled back. For a source document the likely cause is the guard (a filing, a
+            // reject, a delete or any other change since the check), so the live row is checked again now: a refusal is answered in this
+            // delivery (the submission is Failed, no invoice). Task 094 (9.1 step 4): a guard fault otherwise means the source changed, so the
+            // job re-stages it under the new version and commits once more (SourceChanged); any other fault is the transaction's own Retry.
+            // Either way the staged copy is deleted (PersistAsync); the upload's blob never is.
+            if (sourceDocument && await RecheckExistingDocumentAsync(submissionId, documentId!.Value, invoiceId, core, ct).ConfigureAwait(false) is { } refusedNow)
             {
                 return refusedNow;
+            }
+
+            if (sourceDocument && ex.FailedRequestIndex == guardIndex)
+            {
+                _logger.LogInformation("Invoice submission {SubmissionId}: the guard on its source {DocumentId} failed; nothing persisted, re-stage",
+                    submissionId, documentId);
+                return Result(SubmissionPersistStatus.SourceChanged, submissionId, SubmissionReasonCodes.SourceChanged);
             }
 
             return Result(SubmissionPersistStatus.Retry, submissionId, TransactionFailedCode);
@@ -526,17 +566,19 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         _logger.LogInformation("Invoice submission {SubmissionId}: committed invoice {InvoiceId} ({Kind}) with {LineCount} lines in {RequestCount} requests",
             submissionId, invoiceId, outcome.Kind, lines.Count, requests.Count);
 
-        // Task 092 (model 9.1 steps 5-6): the flip, immediately after the commit and before the totals and every after-step. A fault throws
-        // (the job retries; the submission now links its invoice, so the retry is a resume, which flips first). A definitive failure ends the
-        // submission Failed with FileUnservable (the handler's one exception to "a linked submission is never Failed") and nothing else runs.
-        if (fileSpec is not null && await FlipUploadFileAsync(_files, submissionId, _logger, ct).ConfigureAwait(false) is { } unservable)
+        // Model 9.1 steps 5-6 (tasks 092, 094): the commit gate, immediately after the commit and before the totals and every after-step, on
+        // every channel: the source re-run, then the flip. A fault throws (the job retries; the submission now links its invoice, so the retry
+        // is a resume, which runs the gate first). A failure undoes the commit (the submission is Failed) and nothing else runs.
+        var gate = await _gate.RunAsync(submissionId, ct).ConfigureAwait(false);
+        if (gate.Status != SubmissionCommitGateStatus.Passed)
         {
             return new SubmissionPersistResult
             {
-                Status = SubmissionPersistStatus.Refused,
+                Status = SubmissionPersistStatus.Undone,
                 SubmissionId = submissionId,
                 InvoiceId = invoiceId,
-                ReasonCode = unservable,
+                ReasonCode = gate.ReasonCode,
+                UndoHeld = gate.Status == SubmissionCommitGateStatus.UndoHeld,
             };
         }
 
@@ -569,11 +611,7 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
     /// </summary>
     internal static UpdateRequest BuildExistingDocumentGuard(Entity checkedDocument)
     {
-        var version = checkedDocument.GetAttributeValue<long?>(InvoiceReviewService.VersionNumber)
-            ?? (long.TryParse(checkedDocument.RowVersion, NumberStyles.Integer, CultureInfo.InvariantCulture, out var rowVersion) ? rowVersion : (long?)null)
-            ?? throw new InvalidOperationException(
-                "The confirmed document's versionnumber could not be read, so the invoice cannot be committed against it safely. Nothing was written.");
-
+        var version = VersionOf(checkedDocument);
         return new UpdateRequest
         {
             Target = new Entity(DocumentEntity, checkedDocument.Id)
@@ -584,6 +622,16 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             ConcurrencyBehavior = ConcurrencyBehavior.IfRowVersionMatches,
         };
     }
+
+    /// <summary>
+    /// The row version of a source document as read (<c>versionnumber</c>, else the entity's <c>RowVersion</c>); throws when neither is there,
+    /// so nothing is committed against a version that was not read.
+    /// </summary>
+    internal static long VersionOf(Entity document) =>
+        document.GetAttributeValue<long?>(InvoiceReviewService.VersionNumber)
+        ?? (StoredFileSourceVersion.TryParseRowVersion(document.RowVersion, out var rowVersion) ? rowVersion : (long?)null)
+        ?? throw new InvalidOperationException(
+            "The source document's versionnumber could not be read, so the invoice cannot be committed against it safely. Nothing was written.");
 
     /// <summary>
     /// 050a review round 2, item 2(a): after a failed transaction, whether the confirm submission's document now refuses the submission (the
@@ -642,21 +690,29 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             return (Result(SubmissionPersistStatus.Refused, submissionId, DocumentRejectedCode), document);
         }
 
-        // 050a review round 3 (uac-r2 F1-b): the confirm's isolation rule (ExistingDocumentIsolationCheck, F1-a) is decided again at commit,
-        // and again after a rolled-back transaction: a document filed or isolated under another secure record since the confirm is refused
-        // (the submission is Failed, no invoice); one whose isolation cannot be read now is retried, never committed.
-        var isolation = await _isolation.CheckAsync(documentId, core, ct).ConfigureAwait(false);
-        switch (isolation.Verdict)
+        // 050a review round 3 (uac-r2 F1-b) and task 094 (9.1 step 3): the step-1 source check runs again here, at commit, and again after a
+        // rolled-back transaction (InvoiceSubmissionService.CheckSourceFilingAsync: the D-140 filing chain, the source's Restricted,
+        // internal-only and privacy flags, its isolation). Filed or isolated under another record, or gone, is refused (the submission is
+        // Failed, no invoice); isolation that cannot be read now is retried, never committed. A fault reading the chain or a flag propagates
+        // (a Retry: an unreadable flag never passes). The flags are logged, never stored, never a refusal ground (owner K).
+        var source = await InvoiceSubmissionService.CheckSourceFilingAsync(_entities, _isolation, documentId, core, ct).ConfigureAwait(false);
+        switch (source.Verdict)
         {
-            case ExistingDocumentIsolationVerdict.Allowed:
+            case SourceFilingVerdict.Allowed:
+                _logger.LogInformation(
+                    "Invoice submission {SubmissionId}: source {DocumentId} checked (restricted {Restricted}, internal-only {InternalOnly}, privacy {Privacy}; not stored)",
+                    submissionId, documentId, source.Flags?.Restricted, source.Flags?.InternalOnly, source.Flags?.Privacy);
                 return (null, document);
-            case ExistingDocumentIsolationVerdict.Unavailable:
+            case SourceFilingVerdict.Unavailable:
                 _logger.LogWarning("Invoice submission {SubmissionId}: the isolation of its document {DocumentId} could not be read; nothing persisted, retry",
                     submissionId, documentId);
-                return (Result(SubmissionPersistStatus.Retry, submissionId, InvoiceDocumentRefile.IsolationUnreadableCode), document);
+                return (Result(SubmissionPersistStatus.Retry, submissionId, IsolationUnreadableCode), document);
+            case SourceFilingVerdict.Gone:
+                _logger.LogWarning("Invoice submission {SubmissionId}: its document {DocumentId} no longer exists; nothing persisted", submissionId, documentId);
+                return (Result(SubmissionPersistStatus.Refused, submissionId, InvoiceSubmissionErrors.DocumentNotFound), null);
             default:
-                _logger.LogWarning("Invoice submission {SubmissionId}: its document {DocumentId} is restricted to another record ({Verdict}); nothing persisted",
-                    submissionId, documentId, isolation.Verdict);
+                _logger.LogWarning("Invoice submission {SubmissionId}: its document {DocumentId} is filed or restricted elsewhere ({Detail}); nothing persisted",
+                    submissionId, documentId, source.Detail);
                 return (Result(SubmissionPersistStatus.Refused, submissionId, InvoiceSubmissionErrors.DocumentCoreRecordMismatch), document);
         }
     }
@@ -754,11 +810,9 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         invoice[InvoiceReviewService.InvInvoiceNumber] = snapshot.FirmInvoiceNumber;
         invoice[InvoiceReviewService.InvTrackingNumber] = snapshot.TrackingNumber;
         invoice[InvoiceVendorOrg] = new EntityReference("sprk_organization", snapshot.FirmId);
-        if (snapshot.DocumentId is { } document)
-        {
-            // The confirmed existing document (050a). An upload (task 092) has no document: its PDF is the invoice's Stored File.
-            invoice[InvoiceDocument] = new EntityReference(DocumentEntity, document);
-        }
+
+        // Task 094: the invoice never names a document (sprk_document): its PDF is the invoice's Stored File on every channel (an upload, a
+        // Submit Invoice copy), and the source stays where it is filed (the copy rule; owner K keeps the copy out of indexing).
         if (header.InvoiceDate.Value is { } invoiceDate)
         {
             invoice[InvoiceReviewService.InvInvoiceDate] = Utc(invoiceDate);

@@ -4,6 +4,7 @@ using System.Security.Claims;
 using Azure;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
+using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
@@ -509,6 +510,82 @@ public sealed class StoredFileService
         var deleted = await _blobs.DeleteAsync(StoredFileSchema.ContainerOf(spec.Purpose), name, ct).ConfigureAwait(false);
         _logger.LogInformation("Stored file {FileId}: staged blob {BlobName} removed by compensation (deleted={Deleted})", spec.FileId, name, deleted);
         return deleted;
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 094 (procedure-and-file-model 9.1 step 5, undo): the compensation delete of a file the submission's commit wrote.
+    /// Its blob first (only when the row's path is its own; a path that is not cannot name this file's blob, so no blob is touched), then
+    /// the row, so a row that is still there always means "compensation not finished" and a row that is gone means its blob is gone too.
+    /// A row that is already gone is <see cref="StoredFileCompensation.AlreadyGone"/>. A storage or Dataverse fault throws (the undo is
+    /// then held and retried). Only <see cref="Submission.SubmissionCommitGate"/> calls it, for the files of an invoice it is undoing; a
+    /// row of that invoice that is already Servable (an invoice with several files, one flipped before another failed) is deleted too,
+    /// with a warning: no after-step ran on it, and an invoice that is undone keeps no file.
+    /// </summary>
+    /// <exception cref="RequestFailedException">A storage fault.</exception>
+    public async Task<StoredFileCompensation> DeleteForUndoAsync(Guid fileId, CancellationToken ct)
+    {
+        var row = await ReadRowAsync(fileId, ct).ConfigureAwait(false);
+        if (row is null)
+        {
+            return StoredFileCompensation.AlreadyGone;
+        }
+
+        if (row.Status == StoredFileStatus.Servable)
+        {
+            _logger.LogWarning("Stored file {FileId}: Servable, deleted by the undo of its invoice's commit", fileId);
+        }
+
+        if (PathIsOwn(row))
+        {
+            if (!_blobs.IsConfigured)
+            {
+                throw new InvalidOperationException("The Finance file store is not configured; a committed file's blob cannot be deleted.");
+            }
+
+            await _blobs.DeleteAsync(row.Container!, row.BlobPath!, ct).ConfigureAwait(false);
+        }
+
+        try
+        {
+            await _entities.DeleteAsync(StoredFileSchema.Entity, fileId, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (StoredFileNotFound.Is(ex))
+        {
+            return StoredFileCompensation.AlreadyGone;
+        }
+
+        _logger.LogInformation("Stored file {FileId}: removed by the submission undo (row and blob)", fileId);
+        return StoredFileCompensation.Deleted;
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 094: every Stored File row whose parent is the invoice <paramref name="invoiceId"/>, as the store's rules read them
+    /// (whatever their channel: an upload, a Submit Invoice copy or a from-email part). At most <paramref name="max"/>; a fault throws.
+    /// </summary>
+    internal async Task<IReadOnlyList<StoredFileRow>> ReadRowsForInvoiceAsync(Guid invoiceId, int max, CancellationToken ct)
+    {
+        var query = new QueryExpression(StoredFileSchema.Entity) { ColumnSet = new ColumnSet(StoredFileSchema.ReadColumns), TopCount = max };
+        query.Criteria.AddCondition(StoredFileSchema.InvoiceTable, ConditionOperator.Equal, invoiceId);
+        var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+        return rows.Entities.Select(e => StoredFileRow.From(e, _blobs.TenantId)).ToList();
+    }
+
+    /// <summary>The most copies <see cref="CountCopiesOfDocumentAsync"/> counts; any count above zero refuses a delete.</summary>
+    internal const int CopyCountCap = 5000;
+
+    /// <summary>
+    /// ebilling-r1 task 094 (ontology-r1 088 gate F1; procedure-and-file-model 5.2): how many Stored Files, active or not, name
+    /// <paramref name="documentId"/> as their source document (<c>sprk_sourcedocument</c>, Delete = Restrict), up to
+    /// <see cref="CopyCountCap"/>. App-only, ids never returned. Static: the Dataverse document delete route calls it without a
+    /// request's store. A fault throws (the caller refuses the delete; fail closed).
+    /// </summary>
+    internal static async Task<int> CountCopiesOfDocumentAsync(IGenericEntityService entities, Guid documentId, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(entities);
+        var query = new QueryExpression(StoredFileSchema.Entity) { ColumnSet = new ColumnSet(StoredFileSchema.IdColumn), TopCount = CopyCountCap };
+        query.Criteria.AddCondition(StoredFileSchema.SourceDocument, ConditionOperator.Equal, documentId);
+        var rows = await entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+        return rows.Entities.Count;
     }
 
     /// <summary>The SHA-256 the stage wrote to the blob's metadata, when it is 64 lower-case hex characters.</summary>

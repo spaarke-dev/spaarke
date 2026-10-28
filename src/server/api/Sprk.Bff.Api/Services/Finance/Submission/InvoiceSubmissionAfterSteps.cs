@@ -44,7 +44,9 @@ namespace Sprk.Bff.Api.Services.Finance.Submission;
 /// <item><b>Decision Record</b>, AutoRejected only, after the Signals (D-122 moved it there). It resolves every open Signal on the invoice
 /// and its lines: the set is read once and stored in the findings JSON before the record, and each Signal in it is closed as Acted by the
 /// record after it (D-122, notes 13c).</item>
-/// <item><b>Indexing</b> (Accepted, AcceptedUncoded, Blocked).</item>
+/// <item><b>No indexing</b> (ebilling-r1 task 094): an invoice's PDF is its Stored File on every channel (an upload since task 092, a
+/// Submit Invoice copy since task 094), and the copy stays out of indexing, search and chat grounding (owner K, model 9.2); the
+/// document-keyed invoice index is not fed from a submission.</item>
 /// <item><b>Notification</b>, once per submission (an idempotency marker).</item>
 /// <item><b>Terminal status</b>, last: derived from the STORED kind and root reason (<see cref="InvoiceSubmissionPersister.TerminalFor(SubmissionEvaluationKind, string?)"/>),
 /// written only while the submission is Processing and conditional on its row version (notes section 13a).</item>
@@ -59,12 +61,10 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
     internal const string InvoiceLinkMismatchCode = "ebilling.submission.invoice_link_mismatch";
     internal const string SignalWriteSkippedCode = "ebilling.submission.signal_write_skipped";
     internal const string SignalChangedCode = "ebilling.submission.signal_changed";
-    internal const string IndexingEnqueueFailedCode = "ebilling.submission.indexing_enqueue_failed";
     internal const string SignalPlanMissingCode = "ebilling.submission.signal_plan_missing";
     internal const string NotProcessingCode = "ebilling.submission.not_processing";
     internal const string TerminalWriteConflictCode = "ebilling.submission.terminal_write_conflict";
     internal const string RowVersionMissingCode = "ebilling.submission.row_version_missing";
-    internal const string DocumentRefileFailedCode = "ebilling.submission.document_refile_failed";
 
     /// <summary>The automatic rejection's action code (074's billing catalog).</summary>
     internal const string RejectActionCode = "reject-invoice";
@@ -97,9 +97,6 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
     internal static readonly string[] StateColumns =
         [InvoiceSubmissionPersister.SubmissionStatus, RowVersionColumn, InvoiceSubmissionPersister.SubmissionAdminAttention];
 
-    // The "indexing needs DocumentIntelligence:Enabled" note (map row 9) is logged once per process.
-    private static int _indexingNoteLogged;
-
     private readonly IGenericEntityService _entities;
     private readonly IIdempotencyService _idempotency;
     private readonly IInvoiceTotalsService _totals;
@@ -111,20 +108,16 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
     private readonly TimeProvider _time;
     private readonly Func<BillingDecision, CancellationToken, Task<BillingDecisionRecordResult>> _record;
     private readonly Action<BillingDecision> _preflight;
-    private readonly Func<JobContract, CancellationToken, Task> _submitJob;
-    private readonly Func<Guid, Guid?, Guid, CancellationToken, Task<InvoiceDocumentRefileResult>> _refileDocument;
-    private readonly Func<Guid, CancellationToken, Task<string?>> _makeUploadServable;
+    private readonly Func<Guid, CancellationToken, Task<SubmissionCommitGateResult>> _commitGate;
 
     public InvoiceSubmissionAfterSteps(
         IGenericEntityService entities,
         SignalWriter signals,
         BillingDecisionRecorder recorder,
-        JobSubmissionService jobs,
         IIdempotencyService idempotency,
         IInvoiceTotalsService totals,
         IEbillingNotificationSink sink,
-        InvoiceDocumentRefile refile,
-        Files.StoredFileService files,
+        SubmissionCommitGate gate,
         ILogger<InvoiceSubmissionAfterSteps> logger)
         : this(
             entities,
@@ -138,11 +131,7 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
             (id, recordId, setReadAtUtc, policyCode, ct) => signals.CloseActedByDecisionAsync(id, recordId, setReadAtUtc, policyCode, decidedByUserId: null, ct),
             (recorder ?? throw new ArgumentNullException(nameof(recorder))).RecordAsync,
             recorder.Preflight,
-            (jobs ?? throw new ArgumentNullException(nameof(jobs))).SubmitJobAsync,
-            refileDocument: (refile ?? throw new ArgumentNullException(nameof(refile))).RefileAsync,
-            makeUploadServable: files is null
-                ? throw new ArgumentNullException(nameof(files))
-                : (submissionId, ct) => InvoiceSubmissionPersister.FlipUploadFileAsync(files, submissionId, logger, ct))
+            commitGate: (gate ?? throw new ArgumentNullException(nameof(gate))).RunAsync)
     {
     }
 
@@ -158,10 +147,8 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         Func<Guid, Guid, DateTime, string, CancellationToken, Task<SignalAutomatedCloseOutcome>> closeActed,
         Func<BillingDecision, CancellationToken, Task<BillingDecisionRecordResult>> record,
         Action<BillingDecision> preflight,
-        Func<JobContract, CancellationToken, Task> submitJob,
         TimeProvider? time = null,
-        Func<Guid, Guid?, Guid, CancellationToken, Task<InvoiceDocumentRefileResult>>? refileDocument = null,
-        Func<Guid, CancellationToken, Task<string?>>? makeUploadServable = null)
+        Func<Guid, CancellationToken, Task<SubmissionCommitGateResult>>? commitGate = null)
     {
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _idempotency = idempotency ?? throw new ArgumentNullException(nameof(idempotency));
@@ -174,21 +161,13 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         _time = time ?? TimeProvider.System;
         _record = record ?? throw new ArgumentNullException(nameof(record));
         _preflight = preflight ?? throw new ArgumentNullException(nameof(preflight));
-        _submitJob = submitJob ?? throw new ArgumentNullException(nameof(submitJob));
 
-        // The unit-test seam defaults to "no existing document" (every 049 test submission was created by intake with an upload).
-        _refileDocument = refileDocument
-            ?? ((_, _, _, _) => Task.FromResult(new InvoiceDocumentRefileResult(InvoiceDocumentRefileStatus.NotApplicable)));
-
-        // Task 092: the resume's flip gate (InvoiceSubmissionPersister.FlipUploadFileAsync). The seam defaults to "servable".
-        _makeUploadServable = makeUploadServable ?? ((_, _) => Task.FromResult<string?>(null));
+        // Tasks 092 / 094: the resume's commit gate (SubmissionCommitGate.RunAsync). The unit-test seam defaults to "passed".
+        _commitGate = commitGate ?? ((_, _) => Task.FromResult(SubmissionCommitGateResult.Passed));
     }
 
     /// <summary>The automatic rejection's decision id: deterministic from the submission id, so a retry or a resume reuses it (notes section 7).</summary>
     public static Guid RejectionDecisionIdFor(Guid submissionId) => InvoiceSubmissionPersister.IdOf($"ebilling-auto-reject-{submissionId:D}");
-
-    /// <summary>The indexing job's id: deterministic from the invoice id (its idempotency key is the extraction handler's <c>invoice-index-{id}</c>).</summary>
-    public static Guid IndexingJobIdFor(Guid invoiceId) => InvoiceSubmissionPersister.IdOf($"ebilling-index-{invoiceId:D}");
 
     /// <summary>The idempotency marker of the one notification per submission.</summary>
     internal static string NotifyMarkerFor(Guid submissionId) => $"ebilling-submission-notified:{submissionId:N}";
@@ -261,13 +240,15 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
             };
         }
 
-        // Task 092 (model 9.1 steps 5-6): an upload (no document) flips its Stored File FIRST, before the totals and every after-step: the
-        // commit that linked the invoice may have been followed by a flip fault. A fault throws (the job retries); a definitive failure is a
-        // FileUnservable refusal (the handler marks the submission Failed) and nothing else runs.
-        if (submission.GetAttributeValue<EntityReference>("sprk_document") is null
-            && await _makeUploadServable(submissionId, ct).ConfigureAwait(false) is { } unservable)
+        // Model 9.1 step 6 (tasks 092, 094; 092 review items 1-2): the commit gate FIRST, on every channel, before the totals and every
+        // after-step: the commit that linked the invoice may have been followed by a fault before the gate finished. The gate finds the
+        // invoice's files by their parent, never by the channel, skips the source re-run when a file is already Servable (never twice), and
+        // flips the rest. A fault throws (the job retries); a failure undoes the commit (the submission is Failed) and nothing else runs.
+        var gate = await _commitGate(submissionId, ct).ConfigureAwait(false);
+        if (gate.Status != SubmissionCommitGateStatus.Passed)
         {
-            return Stop(SubmissionAfterStepsStatus.Refused, submissionId, invoiceId, unservable);
+            return Stop(SubmissionAfterStepsStatus.Undone, submissionId, invoiceId, gate.ReasonCode ?? SubmissionReasonCodes.FileUnservable)
+                with { UndoHeld = gate.Status == SubmissionCommitGateStatus.UndoHeld };
         }
 
         // 016 again (idempotent; the persister's Resumed path re-runs it too). A fault is a totals Retry after the Signals and the record.
@@ -340,37 +321,8 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
             return Stop(SubmissionAfterStepsStatus.Refused, submissionId, invoiceId, SubmissionReasonCodes.StoredStateMismatch);
         }
 
-        // ── The re-file (050a, D-134 item 3): a confirmed EXISTING document is linked to the invoice and re-filed under it by this step, the
-        //    link's one writer (live-row check → isolation read → ReparentAsync, whose conditional write sets the link → AfterRefileAsync;
-        //    InvoiceDocumentRefile; 050a review #1). Before every other after-step, on
-        //    the first run and on every resume: a Retry or a refusal here leaves the submission Processing and writes no Signal or terminal. ──
-        var existingDocumentId = submission.GetAttributeValue<EntityReference>("sprk_document")?.Id;
-        InvoiceDocumentRefileResult refiled;
-        try
-        {
-            refiled = await _refileDocument(submissionId, existingDocumentId, invoiceId, ct).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-        {
-            _logger.LogWarning("Invoice submission {SubmissionId}: re-filing document {DocumentId} under invoice {InvoiceId} failed ({Fault}); retry resumes",
-                submissionId, existingDocumentId, invoiceId, ex.GetType().Name);
-            // Review round 3 (uac-r2 F2): the invoice is committed and its document is not filed under it yet. Flagged, so that if the
-            // retries run out the administrator is told the document is NOT filed (the handler's final-delivery note).
-            return Stop(SubmissionAfterStepsStatus.Retry, submissionId, invoiceId, DocumentRefileFailedCode) with { DocumentNotFiled = true };
-        }
-
-        switch (refiled.Status)
-        {
-            case InvoiceDocumentRefileStatus.IsolationUnreadable:
-                return Stop(SubmissionAfterStepsStatus.Retry, submissionId, invoiceId, refiled.ReasonCode ?? InvoiceDocumentRefile.IsolationUnreadableCode)
-                    with { DocumentNotFiled = true };
-            case InvoiceDocumentRefileStatus.Refused:
-                // Review round 2, 2(b): the invoice is committed and its document is not filed under it. Stopped here (no Signal, record or
-                // terminal), flagged for the handler, which names it in the administrator's attention text.
-                return Stop(SubmissionAfterStepsStatus.Refused, submissionId, invoiceId, refiled.ReasonCode ?? InvoiceDocumentRefile.RefileRefusedCode)
-                    with { DocumentNotFiled = true };
-        }
-
+        // Task 094: the 050a re-file is retired. A Submit Invoice source is never linked to the invoice, re-owned or re-shared: the invoice's
+        // PDF is the Stored File the job copied it into, and the commit gate (before the totals) has already re-checked the source.
         var rowVersion = RowVersionOf(submission);
 
         // ── The totals refusal (map row 6c): recorded in the findings JSON, once; the invoice stands ──
@@ -503,39 +455,11 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
                 with { SignalsWritten = written, DecisionRecordId = recordId };
         }
 
-        // ── 3. Indexing: an invoice In Review (Accepted, AcceptedUncoded, Blocked); a rejected invoice is not indexed ──
+        // ── 3. No indexing (tasks 092, 094; model 9.2, owner K): the invoice's PDF is a Stored File on every channel and the document-keyed
+        //    invoice index takes no bytes from one; a Submit Invoice copy stays out of indexing, search and chat grounding. ──
         if (stored.Kind != SubmissionEvaluationKind.AutoRejected)
         {
-            var documentId = submission.GetAttributeValue<EntityReference>("sprk_document")?.Id;
-            var correlation = correlationId ?? submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionCorrelationId) ?? submissionId.ToString("D");
-            if (documentId is not { } document || document == Guid.Empty)
-            {
-                // Task 092 (model 9.2, D-44 second half): an upload's PDF is a Stored File, not a document, and the indexing job is keyed by a
-                // document (InvoiceIndexingJobHandler). No bytes are taken from a Stored File; the invoice is not indexed (recorded in the task
-                // notes as a known gap of the document-keyed invoice index).
-                _logger.LogInformation("Invoice submission {SubmissionId}: invoice {InvoiceId} has no document (an uploaded PDF is a Stored File); indexing skipped",
-                    submissionId, invoiceId);
-            }
-            else
-            {
-                try
-                {
-                    await _submitJob(IndexingJob(invoiceId, document, correlation), ct).ConfigureAwait(false);
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-                {
-                    _logger.LogWarning("Invoice submission {SubmissionId}: the indexing job for invoice {InvoiceId} could not be enqueued ({Fault}); it stays Processing for a retry",
-                        submissionId, invoiceId, ex.GetType().Name);
-                    return Stop(SubmissionAfterStepsStatus.Retry, submissionId, invoiceId, IndexingEnqueueFailedCode)
-                        with { SignalsWritten = written, DecisionRecordId = recordId };
-                }
-
-                if (Interlocked.Exchange(ref _indexingNoteLogged, 1) == 0)
-                {
-                    _logger.LogInformation(
-                        "InvoiceIndexing jobs are handled only when DocumentIntelligence:Enabled is true; otherwise the message dead-letters (task 049 map row 9)");
-                }
-            }
+            _logger.LogInformation("Invoice submission {SubmissionId}: invoice {InvoiceId}'s PDF is a Stored File; not indexed", submissionId, invoiceId);
         }
 
         // ── 4. Notification: once per submission (the marker). The sink's contract: a failure is logged and never retries the pipeline ──
@@ -1472,21 +1396,6 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
             ResolvedSignalIds: resolvedSignalIds,
             Written: [new DecisionRecordRef(InvoiceReviewService.InvoiceEntity, invoiceId)]);
     }
-
-    // ── Indexing ──
-
-    private static JobContract IndexingJob(Guid invoiceId, Guid documentId, string correlationId) => new()
-    {
-        JobId = IndexingJobIdFor(invoiceId),
-        JobType = InvoiceIndexingJobHandler.JobTypeName,
-        SubjectId = invoiceId.ToString(),
-        CorrelationId = correlationId,
-        // The extraction handler's key: Service Bus duplicate detection (MessageId) drops a resend in its window.
-        IdempotencyKey = $"invoice-index-{invoiceId}",
-        Attempt = 1,
-        MaxAttempts = 3,
-        Payload = JsonDocument.Parse(JsonSerializer.Serialize(new { InvoiceId = invoiceId, DocumentId = documentId })),
-    };
 
     // ── Helpers ──
 
