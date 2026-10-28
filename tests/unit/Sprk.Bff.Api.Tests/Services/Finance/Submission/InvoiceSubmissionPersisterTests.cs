@@ -1887,12 +1887,42 @@ public class InvoiceSubmissionPersisterTests
         }
     }
 
-    /// <summary>A from-email store: the submission is Channel Internal and names no document; nothing but the email's parts is staged.</summary>
+    /// <summary>
+    /// A from-email store: the submission is Channel Internal and names no document; nothing but the email's parts is staged. The
+    /// <c>.eml</c> row names <see cref="EmailCommunication"/>, the communication its parts are staged from.
+    /// </summary>
     private static Store FromEmailStore(Action<Store>? beforeTransaction = null)
     {
         var store = new Store { Staged = false, BeforeTransaction = beforeTransaction };
         store.Submission["sprk_channel"] = new OptionSetValue((int)InvoiceSubmissionChannel.Internal);
+        store.DocumentRow = new Entity("sprk_document", Document)
+        {
+            [InvoiceSubmissionPersister.DocumentRelatedCommunication] = new EntityReference("sprk_communication", EmailCommunication),
+        };
         return store;
+    }
+
+    [Theory(DisplayName = "094 round 5 (pass-2 K5, must fire): step 3 answers SourceChanged when the live .eml names another communication than the one its parts were staged from, or none; nothing is built")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task FromEmail_TheEmlNamesAnotherCommunication_IsSourceChanged_NoTransaction(bool another)
+    {
+        var outcome = await new ProcessorHarness { Channel = InvoiceSubmissionChannel.Internal }.RunAsync();
+        var store = FromEmailStore();
+        store.DocumentRow = new Entity("sprk_document", Document);
+        if (another)
+        {
+            store.DocumentRow[InvoiceSubmissionPersister.DocumentRelatedCommunication] = new EntityReference("sprk_communication", Guid.NewGuid());
+        }
+
+        StageFromEmail(store, version: store.DocumentVersion);
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.SourceChanged);
+        result.ReasonCode.Should().Be(SubmissionReasonCodes.SourceChanged);
+        store.Transactions.Should().BeEmpty();
+        store.Files.Dataverse.Rows.Should().BeEmpty();
     }
 
     private static Entity FileCreate(Store store, Guid fileId) =>
