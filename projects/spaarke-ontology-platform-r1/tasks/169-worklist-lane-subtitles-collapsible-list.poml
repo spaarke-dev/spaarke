@@ -4,7 +4,7 @@
     <title>Worklist lanes: subtitles and a card list that starts collapsed and is remembered per device (D-195, UAT round 2 item 4)</title>
     <phase>11 UAT</phase>
     <gate>startable (D-195, owner 2026-10-28)</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Client-only change to one shared component (.tsx) and its tests; modifies tests, so code-review and adr-check run.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -94,4 +94,7 @@
       <file>docs/adr/ADR-038-testing-strategy.md</file>
     </files>
   </knowledge>
+  <completion date="2026-10-28">
+    The lanes keep their short titles (Decide, Do) and gain the D-195 subtitles. The card list collapses by default and its open state is remembered per device under localStorage key `spaarke.worklist.laneOpen`, one JSON object for both lanes. Every storage access is wrapped in try/catch, so the in-memory toggle still works when storage is blocked. The title, the start button and the metric cards stay pinned, and a metric-card click opens the lane. Review: the Opus pass found tests clicking lines hidden by the collapsed list (F3, 11 + 44 tests). The lane fixed them and proved it with a forced-hidden run (61 fail, then reverted, 256 pass). Client lint flagged the best-effort empty catch, which now has a justified eslint-disable (`be2cd34d0b`). PR #2402 merged to docs (`67313ad46d`); all checks green, none pending. It reaches dev with the next docs-to-master merge (the Console auto-deploys).
+  </completion>
 </task>
