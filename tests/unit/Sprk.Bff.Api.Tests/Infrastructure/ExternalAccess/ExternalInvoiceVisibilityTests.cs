@@ -3,8 +3,11 @@ using System.Net;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using FluentAssertions;
+using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
@@ -481,16 +484,29 @@ public sealed class ExternalInvoiceVisibilityTests
     [InlineData(null)]
     public async Task AnInternalSystemuser_IsNeverHiddenByThisRule_AndNothingIsRead(bool? flag)
     {
-        // The identity resolver answers "not external" for a flag that reads false AND for a blank one (owner round 67).
+        // Review round 1, F4: the REAL resolver reads systemuser.sprk_isexternal as false, or finds it blank (owner round 67).
         var user = Guid.NewGuid();
-        _identity.Setup(i => i.IsExternalAsync(user, It.IsAny<CancellationToken>())).ReturnsAsync(false);
+        var row = new Entity("systemuser", user);
+        if (flag is { } stored)
+            row["sprk_isexternal"] = stored;
+        var flagReads = new List<QueryExpression>();
+        var dataverse = new Mock<IDataverseService>(MockBehavior.Strict);
+        dataverse.Setup(d => d.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .Callback<QueryExpression, CancellationToken>((q, _) => flagReads.Add(q))
+            .ReturnsAsync(new EntityCollection(new List<Entity> { row }));
+        var resolver = new SystemUserIdentityResolver(
+            dataverse.Object,
+            new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions())),
+            NullLogger<SystemUserIdentityResolver>.Instance);
         var invoice = Guid.NewGuid();
         _world.Source(invoice, permission: Restricted);
 
-        var decision = await _world.NewService(_identity.Object)
+        var decision = await _world.NewService(resolver)
             .HideInvoicesForAsync(SystemUser(user), new[] { invoice }, _world.RootFlags);
 
         decision.IsVisible(invoice).Should().BeTrue($"an internal systemuser (flag {flag?.ToString() ?? "blank"}) is never hidden");
+        flagReads.Should().ContainSingle(q => q.EntityName == "systemuser" && q.ColumnSet.Columns.Contains("sprk_isexternal"),
+            "the flag itself decides, read by the real resolver");
         _world.Urls.Should().BeEmpty("an internal caller costs no read");
     }
 
