@@ -249,6 +249,7 @@ Contract: `git show origin/work/unified-access-control-r2:projects/unified-acces
 | 🔲 168 | [Assign Task: "Send email notification" (ticked) emails the assignee and raises a bell notification](168-assign-task-email-and-bell-notification.poml) | FULL | **opus**/high | 159, 167 | M | UAT round 2 item 2, **D-194**. Delegated send first, system mailbox as fallback; never fails the decision. Starts after 167 merges (same files) |
 | 🔲 169 | [Worklist lanes: subtitles; card list collapsed by default, remembered per device](169-worklist-lane-subtitles-collapsible-list.poml) | STANDARD | sonnet/high | — | M | UAT round 2 item 4, **D-195**. Client only |
 | 🔲 170 | [Faster decision commit: per-request caller identity, cached entity metadata](170-decision-commit-latency-caches.poml) | FULL | **opus**/high | — | M | UAT round 2 item 3, **D-196** (24 s commit: 35 WhoAmI, about 30 metadata lookups). uac-r2 reviews if `CallerRecordAccessProbe` changes · **[auth]** |
+| 🔲 171 | [Seed script owns created policy/version rows to the customer BU restricted-content team](171-seeded-policies-owned-by-customer-bu-team.poml) | STANDARD | sonnet/high | uac-r2 R4b-2c | N | **D-197** (UAC round 137). Dev unchanged; customer environments only. Release wiring stays DI-124 (#2300). Blocked until R4b-2c is on master |
 
 ### Phase 5 — The worklist surface
 

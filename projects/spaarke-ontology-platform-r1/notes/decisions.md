@@ -372,3 +372,13 @@ Sources: **design** = [`design.md`](../design.md) §8 (D-1..D-12, §8.0c) and §
   - A process-wide cache of entity-set names and `sprk_recordtype_ref` reads, since that metadata is immutable.
   - Neither changes D-17 (the Decision Record written last by the single route), fail-closed access or append-only.
 - **Later:** memoising access probes, parallel reads, and moving work after the response touch correctness and uac-r2's code. They are proposed separately and need uac-r2's review.
+
+## D-197 — Seeded policies belong to the customer's business unit; admin-tab rules stay with their author (owner, UAC round 137, relayed by uac-r2 2026-10-28)
+
+- **Context:** UAC round 136. Customer records, configured or working, live under the customer's top business unit (the root's direct child that provisioning H10 creates), never under the Spaarke root.
+- **Seeded rules:** in a customer environment, the seed script (`scripts/Apply-DoLanePolicies.ps1`, or whatever provisioning runs) owns every policy and version row it **creates** to the memberless restricted-content owner team in the customer's top business unit. That team is defined by uac-r2 R4b-2c.
+  - **Dev: no change.** The existing root-owned rows stay. The owner wants the customer behaviour known and built.
+  - Task 171. It depends on R4b-2c's team.
+  - The operator must hold Assign on `sprk_policy` and `sprk_policyversion`, or create the rows with `ownerid`.
+- **Admin-tab authoring: the author wins.** A policy written in the admin tab stays owned by its author, wherever the author is homed, including the root business unit. `SavePolicyAsync` is unchanged.
+- **Release wiring:** running the script in the customer release or provisioning path is DI-124 (#2300), which stays separate.
