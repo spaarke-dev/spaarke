@@ -885,6 +885,7 @@
   <EntityRelationship Name="sprk_systemuser_sprk_emailreviewlog_createdbyperson" />
   <EntityRelationship Name="sprk_systemuser_sprk_event_createdbyperson" />
   <EntityRelationship Name="sprk_systemuser_sprk_eventlog_createdbyperson" />
+  <EntityRelationship Name="sprk_systemuser_sprk_externalrecordaccess_pairedsystemuser" />
   <EntityRelationship Name="sprk_systemuser_sprk_fileversion_createdbyperson" />
   <EntityRelationship Name="sprk_systemuser_sprk_invoice_createdbyperson" />
   <EntityRelationship Name="sprk_systemuser_sprk_kpiassessment_createdbyperson" />
