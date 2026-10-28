@@ -339,6 +339,56 @@ public class RecordTableRulesTests
             "FR-36 is declared once, on the work assignment's rule, and no other table copies a column");
     }
 
+    /// <summary>
+    /// Task 037 fix round 2 (UAC-r2 K3): the declaration rule a copied default must keep — its TARGET is never a filing lookup.
+    /// A copy of a server-set source is server-set (no AppendTo), but RecordCreationService's "a server-set lookup is never a
+    /// filing lookup" refusal runs BEFORE step 3½ extends the server-set set, and OwnedChildWrite has no such refusal: a copy
+    /// onto a filing lookup would file the row under a record nobody asked about. Filing = the create paths' own predicate
+    /// (<see cref="RecordCreationService.IsFilingLookup(string, string)"/>: lineage, ownership-parent and secure-root filing
+    /// columns), or a column whose referenced table is an ownership parent
+    /// (<see cref="RecordReparent.FilingParentOf"/> → <see cref="RecordOwnershipResolver.IsOwnershipParent"/>).
+    /// </summary>
+    private static string? CopiedOntoAFilingLookup(string table, ServerDefault copied)
+    {
+        if (copied.CopiedFrom is null)
+            return null;
+        var target = copied.Column;
+        return RecordCreationService.IsFilingLookup(table, target)
+               || RecordOwnershipResolver.IsOwnershipParent(RecordReparent.FilingParentOf(table, target))
+            ? target
+            : null;
+    }
+
+    [Fact]
+    public void CopiedDefault_NoDeclaredCopyTargetsAFilingLookup()
+    {
+        RecordTableRules.All
+            .SelectMany(r => r.ServerDefaults.Select(d => (r.Table, Target: CopiedOntoAFilingLookup(r.Table, d))))
+            .Where(c => c.Target is not null)
+            .Should().BeEmpty("a copied default (server-set when its source is) must never be a lookup that files the row");
+    }
+
+    [Fact]
+    public void CopiedDefault_FilingTargetGuard_MustNotFire_OnTheRealAssignedToRule()
+    {
+        var real = RecordTableRules.Get("sprk_workassignment").ServerDefaults.Single(d => d.CopiedFrom is not null);
+
+        CopiedOntoAFilingLookup("sprk_workassignment", real).Should().BeNull("sprk_assignedto is a person, not a filing lookup");
+    }
+
+    [Theory]
+    [InlineData("sprk_workassignment", "sprk_regardingmatter")] // a secure root's filing column
+    [InlineData("sprk_todo", "sprk_regardingmatter")]           // a child's lineage lookup to an ownership parent
+    public void CopiedDefault_FilingTargetGuard_MustFire_OnASyntheticCopyOntoAFilingLookup(string table, string target)
+    {
+        var synthetic = new ServerDefault(target, "a synthetic control", "copied onto a filing lookup")
+        {
+            CopiedFrom = "sprk_assignedtointernal",
+        };
+
+        CopiedOntoAFilingLookup(table, synthetic).Should().Be(target);
+    }
+
     [Fact]
     public void CopiedDefaultsFor_AssignedToUnset_FillsItWithTheBoundAssignedToInternal_AsIs()
     {

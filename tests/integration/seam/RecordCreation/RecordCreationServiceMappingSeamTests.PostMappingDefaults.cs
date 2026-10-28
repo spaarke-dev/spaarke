@@ -596,6 +596,38 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         outcome.MappingWarnings.Should().NotContain(w => w.Code == RecordCreationWarning.DefaultValueDroppedCode);
     }
 
+    /// <summary>
+    /// Fix round 2 (must not fire): an ADAPTER's own post-mapping default for Assigned To is the adapter's, not a copy — it is
+    /// never made server-set, even when it names the very contact a server-set Assigned To Internal names. It is checked like
+    /// any default: a caller with no AppendTo on that contact has it dropped (fails closed on an access-conferring column).
+    /// </summary>
+    [Fact]
+    public async Task CopiedDefault_AnAdaptersOwnAssignedToDefault_IsNeverMadeServerSet_ItIsCheckedAndDropped()
+    {
+        WorkAssignmentColumnsAndProfile();
+        _scripted.NoAppendToIn.Add(("contacts", CallersContact));
+        var request = Request("sprk_workassignment", new Dictionary<string, object?>
+        {
+            ["sprk_name"] = "Review the lease",
+            ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({OrdinaryMatter:D})",
+            ["sprk_AssignedToInternal@odata.bind"] = $"/contacts({CallersContact:D})",
+        }, mapping: false) with
+        {
+            ServerSetLookupColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_assignedtointernal" },
+            PostMappingDefaults = MakersContactDefault(),
+        };
+
+        var outcome = await Service().CreateAsync(request, AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        var fields = _creates.Should().ContainSingle().Subject.Fields;
+        StringOf(fields, "sprk_AssignedToInternal@odata.bind").Should().Be($"/contacts({CallersContact:D})");
+        fields.Should().NotContainKey(WaAssignedToBind,
+            "the adapter's default is checked as the caller's (no AppendTo on the contact), never treated as a server-set copy");
+        outcome.MappingWarnings.Should().Contain(w =>
+            w.Code == RecordCreationWarning.DefaultValueDroppedCode && w.Column == "sprk_assignedto");
+    }
+
     [Fact]
     public async Task CopiedDefault_AssignedToInternalUnsetToo_LeavesAssignedToBlank_AndLogsAStructuredWarning()
     {

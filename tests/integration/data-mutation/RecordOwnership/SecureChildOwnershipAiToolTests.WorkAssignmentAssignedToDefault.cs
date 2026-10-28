@@ -199,10 +199,15 @@ public sealed partial class SecureChildOwnershipAiToolTests
     /// <summary>
     /// The chat create names the caller's own contact in Assigned To Internal as a SERVER-set lookup (it costs no AppendTo).
     /// Its copy into Assigned To names the same record, so it costs none either: a caller who may not append to contacts
-    /// still creates the work assignment, as before this task. A contact the caller CHOSE is still asked (the twin).
+    /// still creates the work assignment, as before this task.
     /// </summary>
+    /// <remarks>
+    /// The twin (<c>chosen</c>) proves only that a caller-CHOSEN Assigned To Internal is still AppendTo-checked: it is refused
+    /// on that source lookup itself, before its copy is classified. It does not test how a copy of a chosen source is
+    /// classified (that copy is not server-set by construction: only a source in the server-set set makes its copy one).
+    /// </remarks>
     [Fact]
-    public async Task CreateRecord_AWorkAssignment_TheCopyOfTheServerSetForPerson_CostsNoAppendTo_AChosenContactStillDoes()
+    public async Task CreateRecord_AWorkAssignment_TheCopyOfTheServerSetForPerson_CostsNoAppendTo_AChosenSourceIsStillChecked()
     {
         _user.NoAppendToIn.Add(("contacts", CallerContact));
         _user.NoAppendToIn.Add(("contacts", WaChosen));
@@ -215,7 +220,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
         var fields = _appCreates.Should().ContainSingle().Subject.Fields;
         Bind(fields, "sprk_AssignedToInternal@odata.bind").Should().Be($"/contacts({CallerContact:D})");
         Bind(fields, AssignedToBind).Should().Be($"/contacts({CallerContact:D})");
-        chosen.Success.Should().BeFalse("a contact the caller chose costs AppendTo on it, as before");
+        chosen.Success.Should().BeFalse("a source contact the caller chose costs AppendTo on it, as before (refused on the source)");
     }
 
     /// <summary>

@@ -97,12 +97,37 @@ Red proof for the fix round: the four pre-fix sources (`OwnedChildWrite.cs`, `Re
 `RecordCreationService.Mapping.cs`, `DataverseCreateRecordHandler.cs` at `a2eeec771d`) with the new tests: **3 red / 0 green**;
 fixed sources restored: 3/3 green.
 
+## Fix round 2 (UAC-r2's review of `3638ec0dd8`, plus the main session's scoped re-check of `1f4f8ceb90`)
+
+rework: fix-round-2 task 037
+
+Tests and the declaration guard only; no production code changed, so the publish delta and CVE result above stand
+(`verify-suites.sh` not re-run, per the coordinator's rule).
+
+| # | Finding | Class | Resolution |
+|---|---|---|---|
+| UAC 1 | AC6 untested: no test ran the isolated (Secure-parent) create with a copied default; UAC's mutant (the isolated branch writes the pre-default item) gave 0 failures | F3 | `SecureRootInheritanceWriterTests.ChildRecordRoute_AWorkAssignmentUnderASecureMatter_IsCreatedIntoIsolationWithTheCopiedAssignedTo_AndItIsOnlySuggested`: the REAL gate isolates; the isolated create body carries `sprk_issecure = true`, the Secure team owner and `sprk_AssignedTo@odata.bind` = the Assigned To Internal contact; the REAL materializer's row is PendingConfirmation, nothing granted or shared. **Perturbation (isolated branch fed the pre-default item): 1 red / 974.** |
+| UAC 2 | No declaration guard against a copy onto a FILING lookup (server-set by copy, while RecordCreationService's server-set-filing refusal runs before step 3½ and OwnedChildWrite has none) | K3 taken | `RecordTableRulesTests.CopiedDefault_NoDeclaredCopyTargetsAFilingLookup` (filing = `RecordCreationService.IsFilingLookup(table, column)` or `RecordOwnershipResolver.IsOwnershipParent(RecordReparent.FilingParentOf(table, column))`); must-fire `CopiedDefault_FilingTargetGuard_MustFire_OnASyntheticCopyOntoAFilingLookup` (WA `sprk_regardingmatter`, to-do `sprk_regardingmatter`); must-not-fire `CopiedDefault_FilingTargetGuard_MustNotFire_OnTheRealAssignedToRule`. |
+| UAC 3 / re-check gap | The chat "chosen contact" twin is refused on the caller-chosen source before the copy is classified | K1 | Renamed `CreateRecord_AWorkAssignment_TheCopyOfTheServerSetForPerson_CostsNoAppendTo_AChosenSourceIsStillChecked`, with a remark saying it proves only that a chosen source is checked. |
+| Re-check | Nothing pinned "an adapter's own default never becomes server-set" (the `&& merged.TryAdd(...)` condition) — fail-open on an access-conferring column if lost | F3 | `RecordCreationServiceMappingSeamTests.CopiedDefault_AnAdaptersOwnAssignedToDefault_IsNeverMadeServerSet_ItIsCheckedAndDropped`: server-set Assigned To Internal = X (no AppendTo on X), adapter default Assigned To = X → created, `DefaultValueDroppedCode` on `sprk_assignedto`, no Assigned To bind. **Perturbation (`copied.Add` unconditional): 1 red / 974.** |
+
+Suites after fix round 2: targeted filters (fix round 1's set plus `SecureRootInheritanceWriterTests`) **974/974 passed**;
+ArchTests (rebuilt) RecordTable* **6/6 passed**; test project build 0 warnings / 0 errors.
+
 ## Known limits
 
 - K #6: a work-assignment create makes up to two extra metadata reads (the copied default mapped as the caller). One create,
   not a loop; accepted by the coordinator without a fix.
 - K #7: the negative controls (supplied value kept, explicit null kept, update/Repair never back-fill) pass both before and
   after the change by design: they pin that the change does not over-reach. The must-fire tests carry the red proof.
+- K2 (UAC fix round 2): on RecordCreationService the copy reads the row as mapped, BEFORE the adapter's
+  `PostMappingDefaults` merge, so an Office-style "for" person supplied as an adapter default is not copied (warning,
+  Assigned To blank). Task 017 decides this (the main session adds it to 017's POML).
+- K4 (UAC fix round 2): on RecordCreationService one cause produces two warnings; a test-only path today.
+- K4 (re-check): the rebuilt server-set set is `OrdinalIgnoreCase` even when the adapter passed an ordinal set; no
+  production caller sets it today.
+- Gap (re-check): no test pins that the chat path passes its logger to `OwnedChildWrite.CreateAsync` (logging plumbing only;
+  the warning itself is pinned on the child route).
 - K2: a system principal's `RecordCreationService` create takes no copied default (post-mapping defaults are caller-only,
   task 018a). No system creator of a work assignment exists.
 - K4: field security on `sprk_assignedto`: on the child route a secured column would refuse the create (a supplied value
