@@ -492,6 +492,60 @@ clears `sprk_canonicaldocument` with a plain update, which is no re-file and ask
 canonical therefore stays in the Secure team after its content diverges, until a re-file asks again without the link (the
 same outcome as an authorized user copying content out of a Secure record) or the root is unsecured.
 
+### R4b-2: the hard-deny tables' restricted-content owner team (owner round 131, the 086 ruling; as built)
+
+**The set.** `RecordOwnershipResolver.RestrictedContentTableSet`: `sprk_storedfile`, `sprk_procedureassignment`, `sprk_ruleset`,
+`sprk_policy`, `sprk_policyversion`, read through `IsRestrictedContentTable`. The question names its row's table in
+`RecordOwnershipContext.ChildEntityLogicalName`, filled by `ForRow` (so `ForChild`), `ForExistingRowAsync`, the re-file
+(`ResolveReparentOwnerAsync`) and the reconciler's `ContextFor`. The builder guard flags a hand-set value.
+
+**The answer.** One ordinary exit (`OrdinaryExitAsync`) wraps both default-team answers: the primary's business unit and the
+acting user's. For a hard-deny row it answers the restricted-content owner team, recording the default team it replaced
+(`RecordOwnerResolution.InPlaceOfDefaultTeamId`). It is a normal team answer, so the census and the writers' team-only
+contracts are unchanged. Secure-if-any, the not-isolated refusal and the Secure-team answer are unchanged, and so is any
+answer that keeps the creator (`KeepCreator`: the reconciler's unfiled rows).
+
+**The team.** `Infrastructure/Dataverse/RestrictedContentOwnerTeam`, matched by name like `SecureRecordOwnerTeam.IdentifyAsync`
+but on the SDK seam the resolver reads through:
+- `RestrictedContent:OwnerTeamName`, default "Spaarke Restricted Content Owners";
+- an Owner team (`teamtype = 0`), `isdefault = false`, exactly one;
+- in the ROOT business unit (`parentbusinessunitid` null, exactly one root);
+- no `teammembership` row.
+
+It fails closed: `record_owner_restricted_content_team_unresolved`, logged as an Error with the status and member count (no
+names), never the default team. A Dataverse fault propagates. It is identified once per pass through `RecordOwnerLookupCache`,
+and the reconcile report carries it (`SecureChildReconcileReport.RestrictedContentOwnerTeam`: status and `MembersFound`).
+
+**Rule 1: the creator is kept where the writer keeps it.**
+- *Ontology save* (`SavePolicyAsync`): asks no question, binds no owner (unchanged; existing test
+  `Save_IsUnchanged_ItNeverAsksTheResolver_AndBindsNoOwner`).
+- *Ontology publish* (`PublishVersionAsync`): its question is hand-built, names no table and binds no owner on an ordinary
+  answer. So it is never answered with, or refused for, the restricted-content team (`RestrictedContentOwnerTests`).
+- *The ordinary pass today, for a user-owned (author-owned) `sprk_policy` / `sprk_policyversion` row:* never written.
+  - It is not reported when the author's business unit is the business unit of the rule's answer (the matter's).
+  - Otherwise it is reported Untouched with the I-6 detail ("owned by a user, and the rule gives it a team in another
+    business unit").
+  - A row owned by a non-default team is treated the same way.
+
+  Kept: those comparisons now use the business unit of the default team the restricted-content team replaced, not the root
+  business unit.
+
+**The reconciler.**
+- An Unsecure moves an isolated hard-deny row to the restricted-content team. The move is read back and counted Changed.
+- The ordinary pass expects that team: a row it owns is AlreadyCorrect (no I-6 report), and a row still on a business unit's
+  default team moves to it.
+- Make Secure (provisioning, the sweep) is unchanged.
+- An unusable team refuses the row: it stays isolated and the report carries the member check.
+
+**For R4b-3 / 191.** These rows sit in the ROOT business unit. A Deep or Global Read on these tables would therefore reach every
+one of them, so task 191 must never grant BU-depth or Deep Read on them.
+
+**Noticed, not changed.**
+- `SecureChildReconciler.AfterRefileAsync` re-owns a USER-owned row to the resolver's team after a re-file. For a hard-deny
+  row that is now the restricted-content team (before: the default team). No writer re-files these tables on this branch.
+- `TodoAssigneeOwnerReconciliationJob.IsConfigurationRefusal` does not list the new code. That job never asks about these
+  tables.
+
 ### Issues to file (issue-ready text; the coordinator files them)
 
 **K-a: Undetermined rows from bad data block their own root's Unsecure.**
