@@ -4,7 +4,7 @@
     <title>Create budget: autonumber budget number, currency from the business unit, and the budget fields in the step (D-193, UAT round 2 items 5-6)</title>
     <phase>11 UAT</phase>
     <gate>startable (D-193, owner 2026-10-28; the autonumber schema change is approved; the main session applies it to dev)</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes a decision action's catalog entry, plan route and executor in Sprk.Bff.Api (.cs), the wizard's parameter rendering (.tsx), and solution XML; modifies tests.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -103,4 +103,7 @@
       <file>.claude/constraints/bff-extensions.md</file>
     </files>
   </knowledge>
+  <completion date="2026-10-28">
+    The create-budget step reads category and period from metadata, plus year (at most 4 characters, checked in the wizard and on the server), start and end dates (Date Only; end before start blocks Next), and currency. The currency is prefilled from the matter owning business unit's currency, with the organization base currency as fallback, and is re-validated on the server against active currencies. The commit binds `transactioncurrencyid` and writes the same row's ISO code to `sprk_currency`. `RecordTableRules` declares `sprk_budgetnumber` as the autonumber column; `sprk_budgetnumber` is never written, and the Decision Record stays the last write. Review: the Opus pass found no F1 or F3. Its four F4s (currency resolved three times per commit, a misleading inactive-default message, the year length not checked in the wizard, a PR-body placeholder) were fixed in `520dab325e`, and the Sonnet re-check was clean. K1 (a secure matter's owning business unit has no currency, so it falls back to the base currency) awaits the owner's ruling. K2 (option labels in the first caller's language) and K3/K4 are recorded in the PR. Tests: 2272 filtered BFF, 1593 ArchTests, 173 DecisionWizard jest. PR #2403 merged to docs (`4f52d3641f`). Live: `sprk_budgetnumber` AutoNumberFormat `BUD-{SEQNUM:6}` set and published (entity only) on spaarkedev1, read back (deploy-log).
+  </completion>
 </task>
