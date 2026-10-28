@@ -220,6 +220,15 @@ public sealed class DataverseUserClient : IDataverseUserClient
                 "No usable confidential credential is available for the On-Behalf-Of exchange.");
         }
 
+        // Ontology task 170 (D-196): the caller's WhoAmI under this exact credential was already answered in this request —
+        // the same answer, not another round trip (CallerWhoAmIMemo: per request, per credential, successes only).
+        var isWhoAmI = CallerWhoAmIMemo.IsWhoAmI(method, apiPath);
+        if (isWhoAmI && CallerWhoAmIMemo.TryGetBody(httpContext, dataverseToken, out var knownCaller))
+        {
+            _logger.LogDebug("[dataverse.*] WhoAmI answered from this request's memo (userObo=true)");
+            return DataverseUserResponse.Ok(200, knownCaller);
+        }
+
         using var request = new HttpRequestMessage(method, $"{_environmentUrl}{apiPath}");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", dataverseToken);
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
@@ -287,7 +296,10 @@ public sealed class DataverseUserClient : IDataverseUserClient
                 try
                 {
                     using var doc = JsonDocument.Parse(text);
-                    return DataverseUserResponse.Ok((int)response.StatusCode, doc.RootElement.Clone());
+                    var body = doc.RootElement.Clone();
+                    if (isWhoAmI)
+                        CallerWhoAmIMemo.Remember(httpContext, dataverseToken, body);
+                    return DataverseUserResponse.Ok((int)response.StatusCode, body);
                 }
                 catch (JsonException)
                 {
