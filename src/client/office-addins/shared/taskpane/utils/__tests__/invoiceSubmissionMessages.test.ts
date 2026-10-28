@@ -80,6 +80,7 @@ const PINNED_OUTCOME_CODES = [
   'ebilling.submission.file_unservable',
   'ebilling.submission.source_check_failed',
   'ebilling.submission.processing_failed',
+  'ebilling.submission.file_scan_timeout', // added to the contract at f1ae28290e (task 092; Failed, re-attempt allowed)
   'ebilling.submission.blocked',
   'ebilling.submission.returned',
 ];
