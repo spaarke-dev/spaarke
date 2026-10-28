@@ -2135,12 +2135,21 @@ public class InvoiceSubmissionPersisterTests
     public async Task FromEmail_TheEmlIsFiledElsewhereBetweenTheCommitAndTheGate_IsUndone_BothPartsRemoved()
     {
         var outcome = await new ProcessorHarness { Channel = InvoiceSubmissionChannel.Internal }.RunAsync();
+        // The .eml names the communication its parts were staged from (FromEmailStore's row), before and after the commit: only its filing moves.
         var store = new Store
         {
             Staged = false,
-            AfterCommit = s => s.DocumentRow = new Entity("sprk_document", Document) { ["sprk_matter"] = new EntityReference("sprk_matter", OtherMatter) },
+            AfterCommit = s => s.DocumentRow = new Entity("sprk_document", Document)
+            {
+                ["sprk_matter"] = new EntityReference("sprk_matter", OtherMatter),
+                [InvoiceSubmissionPersister.DocumentRelatedCommunication] = new EntityReference("sprk_communication", EmailCommunication),
+            },
         };
         store.Submission["sprk_channel"] = new OptionSetValue((int)InvoiceSubmissionChannel.Internal);
+        store.DocumentRow = new Entity("sprk_document", Document)
+        {
+            [InvoiceSubmissionPersister.DocumentRelatedCommunication] = new EntityReference("sprk_communication", EmailCommunication),
+        };
         StageFromEmail(store, version: store.DocumentVersion);
 
         var result = await store.Build().PersistAsync(outcome, null);
