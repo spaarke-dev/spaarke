@@ -385,14 +385,14 @@ public sealed record RecordOwnershipContext
     }
 
     /// <summary>Every lookup <paramref name="row"/> holds, column → the record it names (any table; the core filters).</summary>
-    private static IEnumerable<KeyValuePair<string, RecordOwnershipParent?>> LookupsOf(Entity row) =>
+    internal static IEnumerable<KeyValuePair<string, RecordOwnershipParent?>> LookupsOf(Entity row) =>
         row.Attributes
             .Where(a => a.Value is EntityReference)
             .Select(a => new KeyValuePair<string, RecordOwnershipParent?>(
                 a.Key, new RecordOwnershipParent(((EntityReference)a.Value).LogicalName, ((EntityReference)a.Value).Id)));
 
     /// <summary>The row's regarding pair id (<c>sprk_regardingrecordid</c>), as written.</summary>
-    private static string? PairIdOf(Entity row) =>
+    internal static string? PairIdOf(Entity row) =>
         row.Attributes.TryGetValue(CoreAncestorResolver.RegardingRecordIdColumn, out var pair) ? pair as string : null;
 
     /// <summary>
@@ -439,7 +439,10 @@ public sealed record RecordOwnershipContext
         Sprk.Bff.Api.Services.Access.SecureChildLineage.Table? lineage = null;
         if (table is not null)
             Sprk.Bff.Api.Services.Access.SecureChildLineage.Children.TryGetValue(table, out lineage);
-        var order = lineage?.LookupOrder ?? Array.Empty<string>();
+        var order = lineage?.LookupOrder
+                    ?? (table is not null && Sprk.Bff.Api.Services.Access.SecureChildLineage.RootLookupOrder.TryGetValue(table, out var rootOrder)
+                        ? rootOrder
+                        : Array.Empty<string>());
         var regarding = table is not null
                         && Sprk.Bff.Api.Services.Workspace.TodoRegardingBuilder.RegardingLookupsByHostTable.TryGetValue(table, out var map)
             ? new HashSet<string>(map.Values, StringComparer.OrdinalIgnoreCase)

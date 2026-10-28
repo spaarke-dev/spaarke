@@ -113,7 +113,17 @@ internal static class SecureChildLineage
         T("sprk_communication", "sprk_communications",
             new[] { ("sprk_communicationthread", "sprk_communicationthread") }
                 .Concat(Regarding("sprk_analysis", "sprk_budget", "sprk_event", "sprk_invoice", Matter, Project, "sprk_reportcard", WorkAssignment))
-                .ToArray()),
+                .ToArray()) with
+        {
+            // UAC task 194b R4: the thread's filing ranks AFTER the message's own lookups — the parents a record thread is
+            // filed under are asked under the column that files the message there (RecordThreadFiling.FilingLookupsOf), after
+            // what the message names itself (the reconciler's question, the re-file's and Repair's). The thread lookup itself
+            // targets no ownership parent, so its rank decides nothing else.
+            LookupOrder = Regarding("sprk_analysis", "sprk_budget", "sprk_event", "sprk_invoice", Matter, Project, "sprk_reportcard", WorkAssignment)
+                .Select(l => l.Item1)
+                .Append("sprk_communicationthread")
+                .ToArray(),
+        },
         T("sprk_communicationattachment", "sprk_communicationattachments",
             ("sprk_communication", "sprk_communication"), ("sprk_document", "sprk_document")),
         T("sprk_communicationparticipant", "sprk_communicationparticipants",
@@ -196,6 +206,18 @@ internal static class SecureChildLineage
             Regarding("sprk_agreement", "sprk_analysis", "sprk_budget", "sprk_communication", "sprk_document", "sprk_event",
                 "sprk_invoice", Matter, Project, "sprk_reportcard", WorkAssignment)),
     }.ToDictionary(t => t.LogicalName, StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// UAC task 194b R4: the primary order of a ROOT table whose rows are filed under a parent (a root is not a
+    /// <see cref="Children"/> entry, so it has no <see cref="Table.LookupOrder"/> there). A project's primary is the record its
+    /// ADR-024 pair names (<c>sprk_regardingrecordid</c>, <c>SecureRootInheritance.PairNamesAParentOnItsOwn</c>; the
+    /// field-mapping 070 registry's project→pair edge), asked under that column.
+    /// </summary>
+    internal static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> RootLookupOrder =
+        new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
+        {
+            [Project] = ["sprk_regardingrecordid"],
+        };
 
     /// <summary>True for a table whose rows the synchronizer mirrors (a child, never a root).</summary>
     internal static bool IsChild(string? logicalName) =>

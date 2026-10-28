@@ -70,6 +70,26 @@ internal static class RecordThreadFiling
     /// release a message from a secure thread. A Dataverse fault propagates.
     /// </summary>
     /// <exception cref="InvalidOperationException">The thread does not exist (or cannot be seen).</exception>
+    /// <summary>
+    /// UAC task 194b R4: a message's thread filing (<see cref="ParentsOf"/>) as lookups of the MESSAGE — each parent keyed under
+    /// <see cref="ThreadColumn"/>, the column that files the message under it — for <c>RecordOwnershipContext.ForRow</c>, which
+    /// ranks that column after the message's own lookups (<c>SecureChildLineage</c>). Two parents under the one column keep
+    /// their order (the ordering is a stable sort). A Direct thread's filing is empty, so it adds nothing.
+    /// </summary>
+    internal static IEnumerable<KeyValuePair<string, RecordOwnershipParent?>> FilingLookupsOf(IEnumerable<RecordOwnershipParent> threadParents) =>
+        threadParents.Select(p => KeyValuePair.Create(ThreadColumn, (RecordOwnershipParent?)p));
+
+    /// <summary>
+    /// UAC task 194b R4: THE ownership question for an existing message and its thread's filing — the row's own lookups, then
+    /// <paramref name="threadParents"/> under <see cref="ThreadColumn"/>, through the one builder. The secure-child reconciler
+    /// and <c>RecordCreationService</c>'s Repair both ask it, so they cannot drift.
+    /// </summary>
+    internal static RecordOwnershipContext QuestionWithThreadFiling(Entity row, IEnumerable<RecordOwnershipParent> threadParents) =>
+        RecordOwnershipContext.ForRow(
+            row.LogicalName,
+            RecordOwnershipContext.LookupsOf(row).Concat(FilingLookupsOf(threadParents)),
+            RecordOwnershipContext.PairIdOf(row));
+
     internal static async Task<Entity> ReadThreadAsync(IGenericEntityService dataverse, Guid threadId, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(dataverse);

@@ -109,12 +109,11 @@ internal static class OwnedChildWrite
     /// builder (<see cref="RecordOwnershipContext.ForRow"/>) over the lookups the item writes and its regarding pair id.</summary>
     internal static RecordOwnershipContext OwnershipOf(
         string table, DataverseWriteItemMapper.MappedItem item, Guid? callerObjectId = null, Guid? callerSystemUserId = null) =>
-        RecordOwnershipContext.ForRow(
-            table,
-            item.Lookups.Select(l => KeyValuePair.Create(l.Column, (RecordOwnershipParent?)new RecordOwnershipParent(l.RelatedTable, l.RecordId))),
-            PairIdOf(item.JsonBody),
-            callerObjectId,
-            callerSystemUserId);
+        RecordOwnershipContext.ForRow(table, LookupsOf(item), PairIdOf(item.JsonBody), callerObjectId, callerSystemUserId);
+
+    /// <summary>UAC task 194b R4: every lookup the mapped item writes, column → the record it names (the builder filters).</summary>
+    internal static IEnumerable<KeyValuePair<string, RecordOwnershipParent?>> LookupsOf(DataverseWriteItemMapper.MappedItem item) =>
+        item.Lookups.Select(l => KeyValuePair.Create(l.Column, (RecordOwnershipParent?)new RecordOwnershipParent(l.RelatedTable, l.RecordId)));
 
     /// <summary>The body's <c>sprk_regardingrecordid</c> (the regarding pair's id, a text column), or <c>null</c>.</summary>
     private static string? PairIdOf(string jsonBody)

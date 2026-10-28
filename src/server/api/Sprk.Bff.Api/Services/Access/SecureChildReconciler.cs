@@ -2628,11 +2628,14 @@ public sealed class SecureChildReconciler
             // Direct thread adding nothing), from the pass's preloaded row or,
             // for a thread outside the pass, the one LoadThreadsOutsidePassAsync read (a faulted read decides nothing here:
             // DecideRowAsync never resolves such a row).
-            if (RecordThreadFiling.ThreadOf(row) is { } threadId
+            // UAC task 194b R4: keyed under the column that files the message there (sprk_communicationthread), through the one
+            // builder — the question RecordCreationService's Repair asks, ranked after the message's own lookups.
+            if (!IsGrant(row.LogicalName)
+                && RecordThreadFiling.ThreadOf(row) is { } threadId
                 && (_byRef.TryGetValue((RecordThreadFiling.ThreadTable, threadId), out var thread)
                     || _threadsOutsidePass.TryGetValue(threadId, out thread)))
             {
-                parents.AddRange(RecordThreadFiling.ParentsOf(thread));
+                parents = RecordThreadFiling.QuestionWithThreadFiling(row, RecordThreadFiling.ParentsOf(thread)).Parents.ToList();
             }
 
             return new RecordOwnershipContext
