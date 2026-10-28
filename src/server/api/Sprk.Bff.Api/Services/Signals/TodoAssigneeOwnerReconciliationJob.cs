@@ -5,6 +5,7 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Spaarke.Scheduling;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.ExternalAccess;
@@ -919,14 +920,14 @@ public sealed class TodoAssigneeOwnerReconciliationJob : IScheduledJob
     /// unit"), asked BEFORE a row is listed stale, so report-only never lists a re-own the reconciler would refuse: the row's
     /// own business unit, or its owning team's, is the Secure Record unit (ANY team there, a per-family team included, not
     /// only the named owner team), with the unit identified exactly as the reconciler identifies it
-    /// (<see cref="SecureChildShareSynchronizer.ResolveSecureBusinessUnitAsync"/>). The named owner team is also checked, as
+    /// (<see cref="SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync"/>). The named owner team is also checked, as
     /// before. More than one unit carrying the Secure Record name, or a fault, throws: the row is not decided.
     /// </summary>
     private async Task<bool> IsOwnedInSecureBusinessUnitAsync(Run run, Entity row, Guid owningTeamId, CancellationToken ct)
     {
         if (!run.SecureBuRead)
         {
-            var bu = await SecureChildShareSynchronizer.ResolveSecureBusinessUnitAsync(run.Entities, _configuration, ct)
+            var bu = await SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync(run.Entities, _configuration, ct)
                 .ConfigureAwait(false);
             if (bu.Ambiguous)
                 throw new InvalidOperationException("more than one business unit carries the Secure Record name, so whether the row is "

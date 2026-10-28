@@ -692,7 +692,7 @@ public class RecordOwnerAssignmentCensusTests
         // Negative control: the seeded member loses one guard at a time.
         const string write = "fields[\"ownerid\"] = new EntityReference(\"team\", teamId);";
         var guarded = "{ if (!OrdinaryReownTables.Contains(name)) throw new ArgumentException(); "
-                      + "var bu = await SecureChildShareSynchronizer.ResolveSecureBusinessUnitAsync(d, c, ct); "
+                      + "var bu = await SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync(d, c, ct); "
                       + "if (bu.Id == x) return Result(OrdinaryRowReownOutcome.RefusedSecure); " + write + " }";
         Assert.True(OrdinaryReownGuardsComeFirst(guarded));
         foreach (var guard in OrdinaryReownGuards)

@@ -2574,7 +2574,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             return SecureWriteRelease.Held;
         }
 
-        var secureBu = await ResolveSecureBusinessUnitAsync(ct).ConfigureAwait(false);
+        var secureBu = await SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync(_dataverse, _configuration, ct, _logger).ConfigureAwait(false);
         if (secureBu.Ambiguous || secureBu.Id is not { } secureBuId
             || lastRead.OwningBusinessUnit is not { } lastBu || lastBu == secureBuId)
         {
@@ -2617,7 +2617,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     private async Task<bool> WouldLeaveSecureBusinessUnitAsync(
         RowOwnership state, bool parentsAsResolved, RowBeforeChange before, CancellationToken ct)
     {
-        var secureBu = await ResolveSecureBusinessUnitAsync(ct).ConfigureAwait(false);
+        var secureBu = await SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync(_dataverse, _configuration, ct, _logger).ConfigureAwait(false);
         if (secureBu.Ambiguous)
             return true;
         if (secureBu.Id is not { } secureBuId)
@@ -2727,7 +2727,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             return (null, false, null);
         }
 
-        var secureBu = await ResolveSecureBusinessUnitAsync(ct).ConfigureAwait(false);
+        var secureBu = await SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync(_dataverse, _configuration, ct, _logger).ConfigureAwait(false);
         if (secureBu.Ambiguous)
         {
             return (RecordOwnerResolution.Refused(
@@ -3475,7 +3475,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
 
         var decisive = facts.Concat(lineage.Facts).ToList();
 
-        var secureBu = await ResolveSecureBusinessUnitAsync(ct).ConfigureAwait(false);
+        var secureBu = await SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync(_dataverse, _configuration, ct, _logger).ConfigureAwait(false);
         if (secureBu.Ambiguous)
         {
             return RecordOwnerResolution.Refused(
@@ -3752,7 +3752,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         // The user path should never meet the Secure Record BU (it holds no users; provisioning and the census job
         // refuse and report otherwise), but if it does, the answer is still the named team or a refusal — never the
         // default team task 144 retired.
-        var secureBu = await ResolveSecureBusinessUnitAsync(ct).ConfigureAwait(false);
+        var secureBu = await SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync(_dataverse, _configuration, ct, _logger).ConfigureAwait(false);
         if (secureBu.Ambiguous)
         {
             return RecordOwnerResolution.Refused(
@@ -3763,52 +3763,6 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         return secureBu.Id == businessUnitId
             ? await ResolveNamedSecureOwnerTeamAsync(businessUnitId.Value, ct).ConfigureAwait(false)
             : await ResolveDefaultOwnerTeamAsync(businessUnitId.Value, ct).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// Which business unit is the Secure Record BU, decided by ID: the BU named by
-    /// <c>SecureRecord:BusinessUnitName</c> (default <c>Secure Record</c>), looked up with TOP 2. Two matches are
-    /// <c>Ambiguous</c> (refuse). No match means this environment has no Secure Record BU, so no BU can be it.
-    /// </summary>
-    /// <remarks>
-    /// <para>No Secure Record BU is the right answer for an environment without secure records, and for a
-    /// misconfigured name it is still not silent: provisioning refuses with <c>secure_bu_not_found</c>, the census
-    /// job reports the BU missing, and once the setup-guide cutover has removed the role from the default team,
-    /// Dataverse refuses any assignment to it. (A root FLAGGED secure in such an environment refuses here as not
-    /// isolated — task 146.)</para>
-    /// <para><b>Documented fail-open edge — until the live cutover.</b> With a misconfigured
-    /// <c>SecureRecord:BusinessUnitName</c>, a child filed to a secure record resolves to the Secure Record BU's
-    /// DEFAULT team. Of the mitigations above, only the last makes Dataverse refuse that assignment, and it exists
-    /// only after guide §4.3 step 4 (the <c>Secure Record Owner</c> role removed from the default team). Before that
-    /// step, the assignment succeeds and is visible only through the provisioning refusal and the census job's inert
-    /// warning. Accepted by the task-144 verifier (round 2) on that condition; the PR names it.</para>
-    /// </remarks>
-    private async Task<(Guid? Id, bool Ambiguous)> ResolveSecureBusinessUnitAsync(CancellationToken ct)
-    {
-        var secureBuName = SecureRecordOwnerTeam.BusinessUnitName(_configuration);
-
-        var buQuery = new QueryExpression(BusinessUnitEntity)
-        {
-            ColumnSet = new ColumnSet(BusinessUnitColumn),
-            TopCount = 2,
-            NoLock = true
-        };
-        buQuery.Criteria.AddCondition("name", ConditionOperator.Equal, secureBuName);
-
-        var secureBus = await _dataverse.RetrieveMultipleAsync(buQuery, ct).ConfigureAwait(false);
-        if (secureBus.Entities.Count > 1)
-        {
-            _logger.LogError(
-                "Cannot resolve an owning team: more than one business unit is named '{SecureBuName}' "
-                + "(SecureRecord:BusinessUnitName), so whether a business unit is the Secure Record business unit "
-                + "cannot be decided. Refusing rather than guessing (task 144).",
-                secureBuName);
-            return (null, true);
-        }
-
-        return secureBus.Entities.Count == 1 && secureBus.Entities[0].Id != Guid.Empty
-            ? (secureBus.Entities[0].Id, false)
-            : (null, false);
     }
 
     /// <summary>

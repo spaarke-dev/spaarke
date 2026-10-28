@@ -618,7 +618,7 @@ public sealed class SecureChildReconciler
             // No Secure Record owner team: no row is isolated, and the ordinary rule still holds (Guid.Empty owns nothing).
             secureTeamId = team.TeamId ?? Guid.Empty;
 
-            var bu = await SecureChildShareSynchronizer.ResolveSecureBusinessUnitAsync(_dataverse, _configuration, ct)
+            var bu = await SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync(_dataverse, _configuration, ct)
                 .ConfigureAwait(false);
             if (bu.Ambiguous)
                 return SecureChildReconcileReport.Ended(SecureChildReconcileStatus.Failed, mode, rootTable, rootId,
@@ -771,7 +771,7 @@ public sealed class SecureChildReconciler
         Guid? ownerTeamBu = null;
         try
         {
-            var bu = await SecureChildShareSynchronizer.ResolveSecureBusinessUnitAsync(_dataverse, _configuration, ct)
+            var bu = await SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync(_dataverse, _configuration, ct)
                 .ConfigureAwait(false);
             if (bu.Ambiguous)
             {
