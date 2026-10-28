@@ -63,6 +63,7 @@ import {
 import { cleanGuid } from '@spaarke/ui-components/guid';
 import { describeFetchFailure } from '../utils/errorMessages';
 import { authenticatedJsonFetch } from '@shared/services/authenticatedJsonFetch';
+import { searchOfficeEntities } from '../services/officeEntitySearch';
 import type { AttachmentInfo, HostType } from '@shared/adapters/types';
 // Task 020 (FR-06) default-name rule; task 089 moved it to utils so the ribbon's Quick Save names files the same way.
 import { stripDocumentExtension } from '../utils/documentFileName';
@@ -1435,51 +1436,12 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   // save demands AppendTo on the chosen record. So it asks the server for filing access (`access=file`,
   // opt-in — the To Do Contact search in App.tsx deliberately does NOT send it) and carries each row's
   // `canFile` into the picker, which shows a `canFile === false` row disabled with the reason.
+  //
+  // Task 133: the search body moved to `services/officeEntitySearch.ts`, unchanged, so the Invoice view runs the same
+  // search; this call keeps `access=file`.
   const relatedSearch = useCallback(
-    async (query: string, type: EntityType): Promise<EntitySearchResult[]> => {
-      if (!apiBaseUrl || !getAccessToken) {
-        throw new Error("Couldn't search: the pane isn't fully configured. Reload and try again.");
-      }
-
-      let res: Response;
-      try {
-        const token = await getAccessToken();
-        res = await authenticatedJsonFetch(
-          `${apiBaseUrl}/api/office/search/entities?q=${encodeURIComponent(query)}&type=${type}&top=10&access=file`,
-          { headers: { 'Content-Type': 'application/json' } },
-          token,
-          { getRetryToken: getAccessToken }
-        );
-      } catch {
-        // Network/token failure before any response existed — never silently "no matches".
-        throw new Error("Couldn't reach Spaarke to search. Check your connection and try again.");
-      }
-
-      if (!res.ok) {
-        const errorMsg = await describeFetchFailure(res);
-        throw new Error(errorMsg.message);
-      }
-
-      const data = await res.json();
-      const rows = (data.results ?? []) as Array<{
-        id: string;
-        entityType: string;
-        logicalName: string;
-        name: string;
-        displayInfo?: string;
-        canFile?: boolean | null;
-      }>;
-      // An EXPLICIT field map: any field not listed here is dropped. `canFile` must stay listed, or a
-      // record the save would refuse renders as selectable again (task 084 pins this with a test).
-      return rows.map(item => ({
-        id: item.id,
-        entityType: item.entityType as EntityType,
-        logicalName: item.logicalName,
-        name: item.name,
-        ...(item.displayInfo ? { displayInfo: item.displayInfo } : {}),
-        ...(item.canFile !== undefined ? { canFile: item.canFile } : {}),
-      }));
-    },
+    (query: string, type: EntityType): Promise<EntitySearchResult[]> =>
+      searchOfficeEntities(query, type, { apiBaseUrl, getAccessToken, access: 'file' }),
     [apiBaseUrl, getAccessToken]
   );
 

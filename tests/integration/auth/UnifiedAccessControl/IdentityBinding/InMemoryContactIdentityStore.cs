@@ -24,6 +24,13 @@ namespace Sprk.Bff.Api.Tests.AccessControl.IdentityBinding;
 ///   <item><see cref="MaskBindingColumn"/> reproduces field-level-security masking of the BINDING only: the oid
 ///     comes back null in rows AND is treated as null in filters (Dataverse substitutes null — documented). The
 ///     mirror is not secured, so it is never masked and the unique index still applies.</item>
+///   <item><see cref="MaskIdentityColumns"/> reproduces masking of the PLANE and the COLLISION FLAG (field-secured since
+///     the contact security schema step): both come back null in rows, and the plane is null in filters. With
+///     <see cref="IdentityColumnsProof"/> (the outcome of the real <see cref="SecuredColumnReadProof"/>, Proven by default)
+///     (or, per column set, <see cref="BindingColumnsProof"/> and <see cref="CollisionColumnsProof"/>) every read applies
+///     the production marking (<see cref="DataverseContactIdentityStore.WithIdentityColumnsProof(ContactLookup, ColumnReadProofOutcome, ColumnReadProofOutcome)"/>)
+///     and the probe the production verdict (<see cref="DataverseContactIdentityStore.ClassifyProbe(ContactLookup, ColumnReadProofOutcome)"/>),
+///     as the Dataverse store does.</item>
 /// </list>
 /// Failures are injected per operation. Every write is recorded in <see cref="Writes"/>, every read in
 /// <see cref="Reads"/>, so a test asserts what the code DID, not only what it returned.
@@ -57,11 +64,29 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
         /// </summary>
         public string? InviteCodeHash { get; set; }
 
+        /// <summary>
+        /// <c>sprk_externalinvitedemailhash</c> — the invite stamp's salted hash of the invited address (field-secured).
+        /// Written with the marker, cleared by every consuming bind.
+        /// </summary>
+        public string? InvitedEmailHash { get; set; }
+
+        /// <summary><c>sprk_externalinvitedtenantid</c> — the tenant the invite named, as stored text (field-secured).</summary>
+        public string? InvitedTenantId { get; set; }
+
         /// <summary>A9 (r3 task 046): <c>sprk_externaltenantid</c> — the home directory of a WorkforceHome contact.</summary>
         public string? ExternalTenantId { get; set; }
 
         /// <summary>A9 (r3 task 047): the registration form's department.</summary>
         public string? Department { get; set; }
+
+        /// <summary>Slice C: <c>sprk_externalaccessremovedon</c> — an administrator removed the person's external access.</summary>
+        public DateTimeOffset? RemovedOn { get; set; }
+
+        /// <summary>Slice C3: <c>sprk_accesspermissiongrant</c> — the contact's access permission baseline (cleared by a removal).</summary>
+        public int? AccessPermissionGrant { get; set; }
+
+        /// <summary>Slice C3: <c>sprk_standinggrant</c> — the contact's standing grant (cleared by a removal).</summary>
+        public int? StandingGrant { get; set; }
 
         /// <summary>A9 (r3 task 047): <c>ownerid</c> when a team owns the row (the registration create).</summary>
         public Guid? OwnerTeamId { get; set; }
@@ -122,6 +147,18 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
     /// <summary>Task 185: every bind (plain or consuming) that the <c>If-Match</c> version refused with 412.</summary>
     public int BindPreconditionFailures { get; private set; }
 
+    /// <summary>
+    /// The invite stamp columns' readability proof outcome: an email hash read empty is marked unproven unless this is
+    /// <see cref="ColumnReadProofOutcome.Proven"/> (the Dataverse store's third proof).
+    /// </summary>
+    internal ColumnReadProofOutcome InviteStampColumnsProof { get; set; } = ColumnReadProofOutcome.Proven;
+
+    /// <summary>The stamp columns read null (a profile that cannot read them) while the rows still hold values.</summary>
+    public bool MaskInviteStampColumns { get; set; }
+
+    /// <summary>Every invite stamp the marker write received (the stored hash and the tenant), in order.</summary>
+    public List<InviteStamp> InviteStampWrites { get; } = new();
+
     /// <summary>Task 184: the intent read throws (a transport fault the store did not convert into a status).</summary>
     public bool ThrowOnIntentRead { get; set; }
 
@@ -134,8 +171,47 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
     /// <summary>Every read, by operation name.</summary>
     public List<string> Reads { get; } = new();
 
+    /// <summary>
+    /// ISS-005 (#1673): the production <c>DataverseContactIdentityStore.CreatePayload</c> body of every create request that
+    /// reached the store (the real builder, so a test asserts the <c>ownerid@odata.bind</c> the platform would receive).
+    /// </summary>
+    public List<Dictionary<string, object?>> CreatePayloads { get; } = new();
+
     public bool KeyDefined { get; set; } = true;
     public bool MaskBindingColumn { get; set; }
+
+    /// <summary>The plane and the collision flag read null, in rows and (the plane) in filters.</summary>
+    public bool MaskIdentityColumns { get; set; }
+
+    /// <summary>Only the collision flag reads null in rows (a profile granting the plane but not the collision columns).</summary>
+    public bool MaskCollisionColumns { get; set; }
+
+    /// <summary>The binding columns' readability proof outcome every read is marked by (the Dataverse store's proof).</summary>
+    internal ColumnReadProofOutcome BindingColumnsProof { get; set; } = ColumnReadProofOutcome.Proven;
+
+    /// <summary>The collision columns' readability proof outcome every read is marked by (the Dataverse store's proof).</summary>
+    internal ColumnReadProofOutcome CollisionColumnsProof { get; set; } = ColumnReadProofOutcome.Proven;
+
+    /// <summary>Slice C: the removed marker's readability proof outcome every read is marked by (the Dataverse store's proof).</summary>
+    internal ColumnReadProofOutcome RemovedMarkerProof { get; set; } = ColumnReadProofOutcome.Proven;
+
+    /// <summary>
+    /// Both column sets' outcome: setting it sets both proofs; reading it gives the weaker of the two (Proven only when both
+    /// are, a fault before an unproven read). The masking probe is decided on it, as the Dataverse store's probe is.
+    /// </summary>
+    internal ColumnReadProofOutcome IdentityColumnsProof
+    {
+        get => BindingColumnsProof == ColumnReadProofOutcome.Faulted || CollisionColumnsProof == ColumnReadProofOutcome.Faulted
+            ? ColumnReadProofOutcome.Faulted
+            : BindingColumnsProof == ColumnReadProofOutcome.Proven && CollisionColumnsProof == ColumnReadProofOutcome.Proven
+                ? ColumnReadProofOutcome.Proven
+                : ColumnReadProofOutcome.Unproven;
+        set
+        {
+            BindingColumnsProof = value;
+            CollisionColumnsProof = value;
+        }
+    }
     public LookupStatus OidLookupStatus { get; set; } = LookupStatus.Read;
     public LookupStatus EmailLookupStatus { get; set; } = LookupStatus.Read;
 
@@ -155,6 +231,8 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
     public LookupStatus HomeContactLookupStatus { get; set; } = LookupStatus.Read;
     public bool FailReferences { get; set; }
     public bool FailGetContact { get; set; }
+    /// <summary>Reinstate option (b): <c>GetContactAsync</c> answers the row with an empty statecode (a statecode not read).</summary>
+    public bool MaskStateCode { get; set; }
     /// <summary>Task 181: <see cref="LookupStatus.ColumnMissing"/> makes <c>GetContactAsync</c> answer that a binding column is not provisioned.</summary>
     public LookupStatus GetContactStatus { get; set; } = LookupStatus.Read;
     public bool FailBind { get; set; }
@@ -242,8 +320,12 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
             SystemUsers.Clear();
             Writes.Clear();
             Reads.Clear();
+            CreatePayloads.Clear();
             KeyDefined = true;
             MaskBindingColumn = false;
+            MaskIdentityColumns = false;
+            MaskCollisionColumns = false;
+            IdentityColumnsProof = ColumnReadProofOutcome.Proven;
             OidLookupStatus = LookupStatus.Read;
             EmailLookupStatus = LookupStatus.Read;
             HomeLinkLookupStatus = LookupStatus.Read;
@@ -267,6 +349,9 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
             BindPreconditionFailures = 0;
             ThrowOnIntentRead = false;
             MarkerWriteFailure = null;
+            InviteStampColumnsProof = ColumnReadProofOutcome.Proven;
+            MaskInviteStampColumns = false;
+            InviteStampWrites.Clear();
             FailOidLookupOnceFor.Clear();
             BeforeCreate = null;
             BeforeBind = null;
@@ -298,6 +383,24 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
         };
         Contacts[id] = c;
         return c;
+    }
+
+    /// <summary>
+    /// Seeds the invite stamp an invite to <paramref name="email"/> writes (the real <see cref="InviteEmailStamp"/>), with
+    /// the marker at <paramref name="invitedOn"/> (default: the existing marker, else <see cref="IdentityBindingTestKit.Now"/>,
+    /// the test binders' clock) and the tenant the invite named. The row's version moves.
+    /// </summary>
+    public Contact StampInvite(Guid contactId, string email, Guid? invitedTenantId = null, DateTimeOffset? invitedOn = null)
+    {
+        lock (_gate)
+        {
+            var c = Contacts[contactId];
+            c.InvitedOn = invitedOn ?? c.InvitedOn ?? IdentityBindingTestKit.Now;
+            c.InvitedEmailHash = InviteEmailStamp.Create(email);
+            c.InvitedTenantId = invitedTenantId?.ToString("D");
+            c.Version = NextVersion();
+            return c;
+        }
     }
 
     public SystemUser AddSystemUser(Guid id, Guid? oid, string? email, Guid? primaryContactId = null,
@@ -380,6 +483,8 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
             if (FailInactiveEmailLookup) return Task.FromResult(Failed(LookupStatus.Failed));
             var rows = Contacts.Values
                 .Where(c => c.StateCode == 1 && string.Equals(c.Email, email, StringComparison.OrdinalIgnoreCase))
+                // As the production read: removed contacts first (the marker descending), then two rows.
+                .OrderByDescending(c => c.RemovedOn.HasValue)
                 .Take(2).Select(Row).ToArray();
             return Task.FromResult(ContactLookup.Of(rows));
         }
@@ -394,6 +499,134 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
             if (FailGetContact) return Task.FromResult(ContactLookup.Failed);
             if (GetContactStatus == LookupStatus.ColumnMissing) return Task.FromResult(ContactLookup.ColumnMissing);
             return Task.FromResult(Contacts.TryGetValue(contactId, out var c) ? ContactLookup.Of(Row(c)) : ContactLookup.Of());
+        }
+    }
+
+    /// <summary>Slice C: the live marker read, as the Dataverse store answers it (<see cref="RemovedMarkerProof"/>).</summary>
+    public Task<RemovedMarkerRead> ReadRemovedMarkerAsync(Guid contactId, CancellationToken ct)
+    {
+        lock (_gate)
+        {
+            Reads.Add("removed-marker");
+            BeforeRemovedMarkerRead?.Invoke(contactId);
+            if (LiveRemovedMarkerOverride is { } live)
+                return Task.FromResult(live);
+            if (FailGetContact || !Contacts.TryGetValue(contactId, out var c))
+                return Task.FromResult(RemovedMarkerRead.Unreadable);
+            return Task.FromResult(c.RemovedOn is not null
+                ? RemovedMarkerRead.Removed
+                : DataverseContactIdentityStore.RemovedMarkerFrom(null, RemovedMarkerProof));
+        }
+    }
+
+    /// <summary>
+    /// Slice C3: when set, the LIVE marker read (<see cref="ReadRemovedMarkerAsync"/>) answers this whatever the rows hold — an
+    /// administrator's removal landing between a binding read and the grant core's own live read.
+    /// </summary>
+    public RemovedMarkerRead? LiveRemovedMarkerOverride { get; set; }
+
+    /// <summary>
+    /// Slice C2c: runs at the start of every LIVE marker read (<see cref="ReadRemovedMarkerAsync"/>) with its contact id, so a
+    /// test can land an administrator's removal between two of a request's reads.
+    /// </summary>
+    public Action<Guid>? BeforeRemovedMarkerRead { get; set; }
+
+    /// <summary>Slice C3: a removed-marker write answers this instead of writing.</summary>
+    public StoreWriteStatus? RemovedMarkerWriteFailure { get; set; }
+
+    /// <summary>Slice C3: the invite-state and access-permission clear answers this instead of writing.</summary>
+    public StoreWriteStatus? AccessStateClearFailure { get; set; }
+
+    /// <summary>
+    /// Slice C3: the standing-grant clear answers this instead of writing — <see cref="StoreWriteStatus.Forbidden"/> is how
+    /// Dataverse answers an application user that may not update the column.
+    /// </summary>
+    public StoreWriteStatus? StandingGrantClearFailure { get; set; }
+
+    public Task<StoreWriteResult> WriteRemovedMarkerAsync(Guid contactId, DateTimeOffset? removedOn, CancellationToken ct)
+    {
+        lock (_gate)
+        {
+            if (RemovedMarkerWriteFailure is { } failure) return Task.FromResult(new StoreWriteResult(failure, Error: "simulated"));
+            if (!Contacts.TryGetValue(contactId, out var c)) return Task.FromResult(new StoreWriteResult(StoreWriteStatus.NotFound));
+            c.RemovedOn = removedOn;
+            c.Version = NextVersion();
+            Writes.Add((removedOn is null ? "removed-marker-clear" : "removed-marker", contactId, string.Empty));
+            return Task.FromResult(StoreWriteResult.Written);
+        }
+    }
+
+    /// <summary>Slice C5: the conditional marker write, honouring the row version as Dataverse does (a mismatch is 412).</summary>
+    public Task<StoreWriteResult> WriteRemovedMarkerIfUnchangedAsync(
+        Guid contactId, string? etag, DateTimeOffset? removedOn, CancellationToken ct)
+    {
+        lock (_gate)
+        {
+            if (RemovedMarkerWriteFailure is { } failure) return Task.FromResult(new StoreWriteResult(failure, Error: "simulated"));
+            if (DataverseContactIdentityStore.RowVersionPrecondition(etag) is null)
+            {
+                return Task.FromResult(new StoreWriteResult(StoreWriteStatus.Failed, Error: "no row version for the removed marker"));
+            }
+
+            if (!Contacts.TryGetValue(contactId, out var c)) return Task.FromResult(new StoreWriteResult(StoreWriteStatus.NotFound));
+            if (!VersionMatches(etag, c.Version)) return Task.FromResult(new StoreWriteResult(StoreWriteStatus.PreconditionFailed));
+            c.RemovedOn = removedOn;
+            c.Version = NextVersion();
+            Writes.Add((removedOn is null ? "removed-marker-clear" : "removed-marker", contactId, string.Empty));
+            AfterConditionalRemovedMarkerWrite?.Invoke(contactId);
+            return Task.FromResult(StoreWriteResult.Written);
+        }
+    }
+
+    /// <summary>
+    /// Runs once a conditional marker write (<see cref="WriteRemovedMarkerIfUnchangedAsync"/>) has been applied, so a test can
+    /// end the call with an exception after Dataverse committed the write (a request cancelled while the write was in flight).
+    /// </summary>
+    public Action<Guid>? AfterConditionalRemovedMarkerWrite { get; set; }
+
+    public Task<StoreWriteResult> ClearRemovedPersonAccessStateAsync(Guid contactId, CancellationToken ct)
+    {
+        lock (_gate)
+        {
+            if (AccessStateClearFailure is { } failure) return Task.FromResult(new StoreWriteResult(failure, Error: "simulated"));
+            if (!Contacts.TryGetValue(contactId, out var c)) return Task.FromResult(new StoreWriteResult(StoreWriteStatus.NotFound));
+
+            // The PRODUCTION payload, column by column, so a column added to (or dropped from) it changes this double too.
+            foreach (var column in DataverseContactIdentityStore.RemovedPersonAccessStatePayload().Keys)
+            {
+                switch (column)
+                {
+                    case ContactBindingDecision.ExternalInvitedOnColumn: c.InvitedOn = null; break;
+                    case ContactBindingDecision.ExternalInviteCodeHashColumn: c.InviteCodeHash = null; break;
+                    case ContactBindingDecision.ExternalInvitedEmailHashColumn: c.InvitedEmailHash = null; break;
+                    case ContactBindingDecision.ExternalInvitedTenantIdColumn: c.InvitedTenantId = null; break;
+                    case "sprk_accesspermissiongrant": c.AccessPermissionGrant = null; break;
+                    case "sprk_standinggrant": c.StandingGrant = null; break;
+                    case ContactBindingDecision.ExternalObjectIdColumn: c.Oid = null; break;
+                    case ContactBindingDecision.IdentityPlaneColumn: c.Plane = null; break;
+                    case "sprk_externalobjectidkey": c.KeyMirror = null; break;
+                    case ContactBindingDecision.ExternalAccessRemovedOnColumn: c.RemovedOn = null; break;
+                    case "statecode": c.StateCode = 0; break;
+                    default: throw new InvalidOperationException($"The in-memory store does not model the column {column}.");
+                }
+            }
+
+            c.Version = NextVersion();
+            Writes.Add(("removed-person-access-state-clear", contactId, string.Empty));
+            return Task.FromResult(StoreWriteResult.Written);
+        }
+    }
+
+    public Task<StoreWriteResult> ClearStandingGrantAsync(Guid contactId, CancellationToken ct)
+    {
+        lock (_gate)
+        {
+            if (StandingGrantClearFailure is { } failure) return Task.FromResult(new StoreWriteResult(failure, Error: "simulated"));
+            if (!Contacts.TryGetValue(contactId, out var c)) return Task.FromResult(new StoreWriteResult(StoreWriteStatus.NotFound));
+            c.StandingGrant = null;
+            c.Version = NextVersion();
+            Writes.Add(("standing-grant-clear", contactId, string.Empty));
+            return Task.FromResult(StoreWriteResult.Written);
         }
     }
 
@@ -431,8 +664,8 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
             Reads.Add("probe");
             AfterRead?.Invoke("probe");
             if (FailProbe) return Task.FromResult(BindingReadability.Failed);
-            var marked = Contacts.Values.Where(c => c.Plane is not null).Take(50).Select(Row).ToArray();
-            return Task.FromResult(DataverseContactIdentityStore.ClassifyProbe(ContactLookup.Of(marked)));
+            var marked = Contacts.Values.Where(c => !MaskIdentityColumns && c.Plane is not null).Take(50).Select(Row).ToArray();
+            return Task.FromResult(DataverseContactIdentityStore.ClassifyProbe(ContactLookup.Of(marked), IdentityColumnsProof));
         }
     }
 
@@ -637,9 +870,16 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
             if (ThrowOnIntentRead) throw new HttpRequestException("injected intent-read fault");
             var status = InviteCodeHashColumnMissing ? LookupStatus.ColumnMissing : InviteMarkerStatus;
             var row = status == LookupStatus.Read && Contacts.TryGetValue(contactId, out var c) ? c : null;
+            var emailHash = MaskInviteStampColumns ? null : row?.InvitedEmailHash;
             return Task.FromResult(new BindIntentLookup(contactId, status, row?.InvitedOn)
             {
                 InviteCodeHash = row?.InviteCodeHash,
+                InvitedEmailHash = emailHash,
+                RawInvitedTenantId = MaskInviteStampColumns ? null : row?.InvitedTenantId,
+                CurrentEmail = row?.Email,
+                ETag = row is null ? null : $"W/\"{row.Version}\"",
+                StampColumnsUnproven = row is not null && string.IsNullOrWhiteSpace(emailHash)
+                                       && InviteStampColumnsProof != ColumnReadProofOutcome.Proven,
             });
         }
     }
@@ -647,10 +887,12 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
     // ── Writes ─────────────────────────────────────────────────────────────────────────────────────
 
     public Task<StoreWriteResult> MarkInvitedAsync(
-        Guid contactId, string? etag, DateTimeOffset invitedOn, string inviteCodeHash, CancellationToken ct)
+        Guid contactId, string? etag, DateTimeOffset invitedOn, string? inviteCodeHash, InviteStamp stamp, CancellationToken ct)
     {
         lock (_gate)
         {
+            // The real payload builder's argument checks (a blank hash or an empty tenant never reaches the platform).
+            _ = DataverseContactIdentityStore.InviteMarkerPayload(invitedOn, inviteCodeHash, stamp);
             if (MarkerWriteFailure is { } failure) return Task.FromResult(new StoreWriteResult(failure, Error: "injected"));
             if (InviteMarkerStatus == LookupStatus.ColumnMissing)
             {
@@ -675,11 +917,53 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
                 return Task.FromResult(new StoreWriteResult(StoreWriteStatus.PreconditionFailed));
             }
 
-            // ONE write: the marker and the new code's hash together (a re-invite replaces both).
+            // ONE write: the marker, the new code's hash and the invite stamp together (a re-invite replaces all four).
             c.InvitedOn = invitedOn;
             c.InviteCodeHash = inviteCodeHash;
+            c.InvitedEmailHash = stamp.InvitedEmailHash;
+            c.InvitedTenantId = stamp.InvitedTenantId?.ToString("D");
+            InviteStampWrites.Add(stamp);
             c.Version = NextVersion();
             Writes.Add(("invite-marker", contactId, invitedOn.UtcDateTime.ToString("O") + "|code-hash"));
+            return Task.FromResult(StoreWriteResult.Written);
+        }
+    }
+
+    /// <summary>Slice C2b: when set, every invite retract (<see cref="ClearPendingInviteAsync"/>) answers this.</summary>
+    public StoreWriteStatus? PendingInviteClearFailure { get; set; }
+
+    /// <summary>Slice C2b: runs inside <see cref="ClearPendingInviteAsync"/> before its version check (a concurrent writer).</summary>
+    public Action<Contact>? BeforePendingInviteClear { get; set; }
+
+    public Task<StoreWriteResult> ClearPendingInviteAsync(Guid contactId, string? etag, CancellationToken ct)
+    {
+        lock (_gate)
+        {
+            if (PendingInviteClearFailure is { } failure) return Task.FromResult(new StoreWriteResult(failure, Error: "injected"));
+            if (DataverseContactIdentityStore.RowVersionPrecondition(etag) is null)
+            {
+                return Task.FromResult(new StoreWriteResult(StoreWriteStatus.Failed, Error: "no row version for the invite retract"));
+            }
+
+            if (!Contacts.TryGetValue(contactId, out var c)) return Task.FromResult(new StoreWriteResult(StoreWriteStatus.NotFound));
+            BeforePendingInviteClear?.Invoke(c);
+            if (!VersionMatches(etag, c.Version)) return Task.FromResult(new StoreWriteResult(StoreWriteStatus.PreconditionFailed));
+
+            // The PRODUCTION payload, column by column.
+            foreach (var column in DataverseContactIdentityStore.PendingInviteClearPayload().Keys)
+            {
+                switch (column)
+                {
+                    case ContactBindingDecision.ExternalInvitedOnColumn: c.InvitedOn = null; break;
+                    case ContactBindingDecision.ExternalInviteCodeHashColumn: c.InviteCodeHash = null; break;
+                    case ContactBindingDecision.ExternalInvitedEmailHashColumn: c.InvitedEmailHash = null; break;
+                    case ContactBindingDecision.ExternalInvitedTenantIdColumn: c.InvitedTenantId = null; break;
+                    default: throw new InvalidOperationException($"The in-memory store does not model the column {column}.");
+                }
+            }
+
+            c.Version = NextVersion();
+            Writes.Add(("invite-retract", contactId, string.Empty));
             return Task.FromResult(StoreWriteResult.Written);
         }
     }
@@ -740,7 +1024,10 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
             c.Plane = (int)plane;
             if (consumeInvite)
             {
+                // The consuming bind clears the code hash AND the invite stamp in the same write.
                 c.InviteCodeHash = null;
+                c.InvitedEmailHash = null;
+                c.InvitedTenantId = null;
             }
 
             if (homeTenantId is { } tenant)
@@ -760,11 +1047,13 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
 
     public async Task<StoreWriteResult> CreateContactForOidAsync(Guid oid, IdentityPlaneMarker plane, NewContactDetails details, CancellationToken ct)
     {
-        // The production payload's own argument checks (a WorkforceHome create needs tenant + owner; no other plane may).
-        _ = DataverseContactIdentityStore.CreatePayload(oid, plane, details);
+        // The production payload's own argument checks (a WorkforceHome create needs tenant + owner; the Workforce plane may
+        // carry an owner (ISS-005); no other plane may carry either).
+        var payload = DataverseContactIdentityStore.CreatePayload(oid, plane, details);
 
         lock (_gate)
         {
+            CreatePayloads.Add(payload);
             if (FailCreate) return new StoreWriteResult(StoreWriteStatus.Failed, Error: "injected");
             if (CreateStatusOverride is { } overridden) return new StoreWriteResult(overridden, Error: "injected");
             if (!KeyDefined) return new StoreWriteResult(StoreWriteStatus.KeyMissing);
@@ -900,8 +1189,16 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
     }
 
     private ContactBindingRow Row(Contact c)
-        => new(c.Id, c.StateCode, MaskBindingColumn ? null : c.Oid, c.Plane, $"W/\"{c.Version}\"", c.Email, c.Flag,
-            c.KeyMirror, MaskHomeColumns ? null : c.ExternalTenantId);
+    {
+        var row = new ContactBindingRow(c.Id, MaskStateCode ? null : c.StateCode, MaskBindingColumn ? null : c.Oid,
+            MaskIdentityColumns ? null : c.Plane, $"W/\"{c.Version}\"", c.Email,
+            MaskIdentityColumns || MaskCollisionColumns ? null : c.Flag,
+            c.KeyMirror, MaskHomeColumns ? null : c.ExternalTenantId) { RemovedOn = c.RemovedOn };
+        return DataverseContactIdentityStore.WithRemovedMarkerProof(
+            DataverseContactIdentityStore.WithIdentityColumnsProof(
+                ContactLookup.Of(row), BindingColumnsProof, CollisionColumnsProof),
+            RemovedMarkerProof).Rows[0];
+    }
 
     private SystemUserIdentityRow UserRow(SystemUser u)
         => new(u.Id, u.Oid, u.Email, u.DomainName, u.PrimaryContactId, $"W/\"{u.Version}\"",

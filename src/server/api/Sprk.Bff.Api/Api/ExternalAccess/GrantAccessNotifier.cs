@@ -765,12 +765,20 @@ public sealed class GrantAccessNotifier
     /// The record's display name, read app-only AFTER the write gave the recipient access to it. <c>null</c> when it is
     /// empty or cannot be read; the notification then says "a matter" and still links to it.
     /// </summary>
-    private async Task<string?> ReadRecordNameAsync(ExternalGrantRootType rootType, Guid rootId)
+    private Task<string?> ReadRecordNameAsync(ExternalGrantRootType rootType, Guid rootId)
+        => ReadRecordNameAsync(_dataverse, _logger, rootType, rootId);
+
+    /// <summary>
+    /// The record's display name (trimmed, at most <see cref="MaxNameLength"/> characters), or <c>null</c> (logged) when it
+    /// has none or could not be read. Shared with the work-account invite notice (slice B3). Never throws.
+    /// </summary>
+    internal static async Task<string?> ReadRecordNameAsync(
+        DataverseWebApiClient dataverse, ILogger logger, ExternalGrantRootType rootType, Guid rootId)
     {
         var column = ExternalGrantRoot.NameColumnFor(rootType);
         try
         {
-            var row = await _dataverse.RetrieveAsync<Dictionary<string, JsonElement>>(
+            var row = await dataverse.RetrieveAsync<Dictionary<string, JsonElement>>(
                 ExternalGrantRoot.BindFor(rootType).EntitySet, rootId, column, CancellationToken.None);
             if (row is not null && row.TryGetValue(column, out var value) && value.ValueKind == JsonValueKind.String)
             {
@@ -781,7 +789,7 @@ public sealed class GrantAccessNotifier
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex,
+            logger.LogWarning(ex,
                 "[GRANT-NOTIFY] Could not read the name of {RootType} {RootId}; the notification names the record type only.",
                 rootType, rootId);
         }

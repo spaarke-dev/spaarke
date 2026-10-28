@@ -8,7 +8,9 @@
 // the standing-grant environment (S19 the Standing Grant Administrators profile and its lock on contact.sprk_standinggrant,
 // S20 the BFF's application users as its members, S21 the sprk_noaccessentry role split unified-access-control-r2 task 154
 // ships) — plus S22 (ISS-025 / #1803): the locks on contact.sprk_externalinvitedon and, once it ships,
-// contact.sprk_externalinvitecodehash, VERIFIED ONLY. Every step READS first
+// contact.sprk_externalinvitecodehash, VERIFIED ONLY — and (#2317) S19 also verifies the lock on the access level
+// contact.sprk_accesspermissiongrant, and S22 the locks on the BFF-only columns sprk_externalinvitedemailhash,
+// sprk_externalinvitedtenantid and sprk_externalaccessremovedon once they ship. Every step READS first
 // and writes only what is missing, so a second run against a configured environment performs no write at all.
 //
 // THREE PHASES
@@ -93,8 +95,15 @@ public sealed class SecureRecordSetupProcedure
     /// <summary>The named, non-default, memberless owner team (owner decision F9) — the BFF's <c>SecureRecordOwnerTeam.DefaultOwnerTeamName</c>.</summary>
     public const string OwnerTeamName = "Secure Record Owners";
 
-    /// <summary>The platform role S8 removes from both teams of the unit.</summary>
+    /// <summary>The platform role S8 removes from both teams of the unit — its display name, used in messages only.</summary>
     public const string SystemAdministratorRoleName = "System Administrator";
+
+    /// <summary>
+    /// The platform's role template id of the System Administrator role: the same in every environment and carried by each
+    /// business unit's copy of the role. S8 and S9 match the role by this id, never by its display name, which an
+    /// administrator can change or give to another role.
+    /// </summary>
+    public static readonly Guid SystemAdministratorRoleTemplateId = Guid.Parse("627090ff-40a3-4053-8790-584edc5be201");
 
     /// <summary>S10/S11: Read on the columns only the BFF writes; every business unit's default team is a member.</summary>
     public const string ReaderProfileName = "Spaarke BFF-Managed Field Readers";
@@ -124,7 +133,9 @@ public sealed class SecureRecordSetupProcedure
     /// S18: the field-secured binding columns, as (table, column). The uniqueness mirrors
     /// <c>contact.sprk_externalobjectidkey</c>, <c>systemuser.sprk_hometenantidkey</c> and
     /// <c>systemuser.sprk_homeobjectidkey</c> are deliberately NOT secured (Dataverse cannot key a secured column).
-    /// The last three entries are the ADR-028 A9 home-identity columns (spaarke-SPA-external-access-platform-r3 task 044).
+    /// Entries three to five are the ADR-028 A9 home-identity columns (spaarke-SPA-external-access-platform-r3 task 044);
+    /// the last six are the identity plane and identity collision bookkeeping columns, which only the BFF writes
+    /// (scripts/Set-ExternalAccessContactSecuritySchema.ps1).
     /// </summary>
     public static readonly IReadOnlyList<(string Table, string Column)> IdentityLinkColumns =
     [
@@ -133,6 +144,12 @@ public sealed class SecureRecordSetupProcedure
         ("contact", "sprk_externaltenantid"),
         ("systemuser", "sprk_hometenantid"),
         ("systemuser", "sprk_homeobjectid"),
+        ("contact", "sprk_identityplane"),
+        ("contact", "sprk_identitycollisionon"),
+        ("contact", "sprk_identitycollisionoid"),
+        ("contact", "sprk_identitycollisionplane"),
+        ("contact", "sprk_identitycollisionreason"),
+        ("contact", "sprk_identitycollisionparties"),
     ];
 
     /// <summary>
@@ -174,6 +191,73 @@ public sealed class SecureRecordSetupProcedure
     /// (<c>scripts/Set-ExternalInviteCodeHashSchema.ps1 -Verify</c>).
     /// </summary>
     public const string InviteCodeHashColumn = "sprk_externalinvitecodehash";
+
+    /// <summary>
+    /// S19 (#2317): the access level on the standing-grant table. Secured with the standing-grant lock: Standing Grant
+    /// Administrators 4/4/4, BFF-Managed Field Readers 4/0/0, BFF-Managed Field Writers 4/0/4; nobody else may create or
+    /// update it (<c>scripts/Set-ExternalAccessContactSecuritySchema.ps1 -Verify</c>).
+    /// </summary>
+    public const string AccessLevelColumn = "sprk_accesspermissiongrant";
+
+    /// <summary>
+    /// S22 (#2317): a BFF-only column — the invited email's hash. Absent is the expected state until the SpaarkeMaster release
+    /// that carries it (recorded, not failed). Present: secured; Writers 4/4/4; no other profile may read, create or update it.
+    /// </summary>
+    public const string InvitedEmailHashColumn = "sprk_externalinvitedemailhash";
+
+    /// <summary>S22 (#2317): a BFF-only column — the invited tenant id. Same lock and absence rule as <see cref="InvitedEmailHashColumn"/>.</summary>
+    public const string InvitedTenantIdColumn = "sprk_externalinvitedtenantid";
+
+    /// <summary>
+    /// S22 (#2317): when a person's external access was removed. Absent is the expected state until the SpaarkeMaster release
+    /// that carries it. Present: secured; Readers 4/0/0; Writers 4/4/4; nobody else may create or update it.
+    /// </summary>
+    public const string AccessRemovedOnColumn = "sprk_externalaccessremovedon";
+
+    /// <summary>
+    /// S18/S19 (#2317): the first SpaarkeMaster release that secures the identity plane, collision and access-level columns
+    /// with the locks S18 and S19 verify. An environment on an earlier release is refused until it carries them.
+    /// </summary>
+    public const string ContactLocksMinimumSpaarkeMasterVersion = "1.2.4.0";
+
+    /// <summary>S18/S19 (#2317): the script that applies those locks to an existing environment (<c>-Apply</c>, then <c>-Verify</c>).</summary>
+    public const string ContactSecuritySchemaScript = "scripts/Set-ExternalAccessContactSecuritySchema.ps1";
+
+    /// <summary>S19 (ISS-020): the first SpaarkeMaster release that ships the standing-grant field and its profile.</summary>
+    public const string StandingGrantMinimumSpaarkeMasterVersion = "1.2.0.0";
+
+    /// <summary>
+    /// The remedy an incomplete contact lock names. A new run imports the release at H6; a resume does not re-run a
+    /// completed H6, so an environment already past it applies the locks with the script, then resumes. C5: -Verify is not
+    /// run before the resume: its standing-grant step needs the BFF's direct Standing Grant Administrators membership, which
+    /// H7b itself adds (S20) after it re-checks the locks. -Verify runs after H7b completes, before the BFF deploy.
+    /// </summary>
+    internal static string LocksRemedy(string minimumVersion) =>
+        "It requires SpaarkeMaster " + minimumVersion + " or later: a new run imports it at H6 once it is published; in an " +
+        "environment already past H6 (a resume does not re-run a completed H6) run " + ContactSecuritySchemaScript +
+        " -Apply, then resume. H7b re-checks the locks itself and adds the BFF to Standing Grant Administrators. Run " +
+        "-Verify (exit 0) after H7b completes, before the BFF deploy. Nothing was written.";
+
+    /// <summary>S18/S19: the remedy an incomplete contact lock names.</summary>
+    private static readonly string ContactLocksRemedy = LocksRemedy(ContactLocksMinimumSpaarkeMasterVersion);
+
+    /// <summary>
+    /// S19: the script that imports a SpaarkeMaster release by hand. The standing-grant field and its profile ship only in
+    /// the package; <see cref="ContactSecuritySchemaScript"/> never writes either, so it is not this lock's remedy.
+    /// </summary>
+    public const string SpaarkeMasterImportScript = "scripts/solution-authoring/Import-SpaarkeMasterPackage.ps1";
+
+    /// <summary>
+    /// S19: the remedy an incomplete standing-grant lock names. A new run imports the release at H6; an environment already
+    /// past H6 imports it by hand with <see cref="SpaarkeMasterImportScript"/>, then resumes.
+    /// </summary>
+    private static readonly string StandingGrantLocksRemedy =
+        "It requires SpaarkeMaster " + StandingGrantMinimumSpaarkeMasterVersion + " or later: a new run imports it at H6; in " +
+        "an environment already past H6 (a resume does not re-run a completed H6), import it by hand with " +
+        SpaarkeMasterImportScript + " -EnvironmentUrl <org> -PackageType managed, then resume. Nothing was written.";
+
+    /// <summary>S22 (#2317): the BFF-only columns, checked as <see cref="InviteCodeHashColumn"/> is.</summary>
+    public static readonly IReadOnlyList<string> BffOnlyColumns = [InvitedEmailHashColumn, InvitedTenantIdColumn];
 
     /// <summary>The depth the codified set grants.</summary>
     public const string BasicDepth = "Basic";
@@ -537,8 +621,8 @@ public sealed class SecureRecordSetupProcedure
                     $"'{IdentityLinkReaderProfileName}' read={reader?.CanRead.ToString() ?? "(none)"}, " +
                     $"'{IdentityLinkWriterProfileName}' read/create/update=" +
                     $"{(writer is null ? "(none)" : $"{writer.CanRead}/{writer.CanCreate}/{writer.CanUpdate}")} " +
-                    "(expected secured, 4, 4/4/4). The package's identity-binding lock (task 141) is incomplete: import " +
-                    "SpaarkeMaster (H6), then resume. Nothing was written.");
+                    "(expected secured, 4, 4/4/4). The package's identity-binding lock (task 141) is incomplete. " +
+                    ContactLocksRemedy);
             }
             var otherLinkWriters = columnPermissions
                 .Where(p => p.ProfileId != linkWriterProfileId
@@ -554,7 +638,9 @@ public sealed class SecureRecordSetupProcedure
             }
         }
 
-        // S19 — the standing-grant profile ships in SpaarkeMaster: exactly one, and the shipped lock on the flag is whole.
+        // S19 — the standing-grant profile ships in SpaarkeMaster: exactly one, and the shipped lock on the flag is whole:
+        // secured, Standing Grant Administrators 4/4/4. No other profile may create or update the flag — the Readers profile
+        // included (every default team is its member). System Administrator is the platform's own profile (owner decision F4).
         var standingProfile = await ResolveProfileAsync(dv, t, StandingGrantProfileName, ct).ConfigureAwait(false);
         if (standingProfile.Refusal is not null)
         {
@@ -562,16 +648,71 @@ public sealed class SecureRecordSetupProcedure
         }
         var standingProfileId = standingProfile.Id!.Value;
         var standingSecured = await dv.IsAttributeSecuredAsync(t, StandingGrantTable, StandingGrantColumn, ct).ConfigureAwait(false);
-        var standingGrant = (await dv.ListFieldPermissionsAsync(t, StandingGrantColumn, ct).ConfigureAwait(false))
-            .FirstOrDefault(p => p.ProfileId == standingProfileId && Same(p.EntityName, StandingGrantTable));
-        if (standingSecured != true || standingGrant is null || standingGrant.CanRead != FieldPermissionAllowed)
+        var standingPermissions = (await dv.ListFieldPermissionsAsync(t, StandingGrantColumn, ct).ConfigureAwait(false))
+            .Where(p => Same(p.EntityName, StandingGrantTable))
+            .ToArray();
+        var standingGrant = standingPermissions.FirstOrDefault(p => p.ProfileId == standingProfileId);
+        if (standingSecured != true
+            || standingGrant is null || standingGrant.CanRead != FieldPermissionAllowed
+            || standingGrant.CanCreate != FieldPermissionAllowed || standingGrant.CanUpdate != FieldPermissionAllowed)
         {
             return Refuse(FailureClass.Resumable, SecureRecordSetupRejectionCodes.StandingGrantLockIncomplete,
                 $"{StandingGrantTable}.{StandingGrantColumn}: IsSecured={standingSecured?.ToString() ?? "(no such column)"}, " +
-                $"'{StandingGrantProfileName}' read={standingGrant?.CanRead.ToString() ?? "(none)"} (expected secured, 4). The " +
-                "package's standing-grant field and profile (teams-app-r1 task 050) are incomplete: import SpaarkeMaster " +
-                "(H6), then resume. Nothing was written.");
+                $"'{StandingGrantProfileName}' read/create/update={Rights(standingGrant)} (expected secured, 4/4/4). The " +
+                "package's standing-grant field and profile (teams-app-r1 task 050) are incomplete. " + StandingGrantLocksRemedy);
         }
+        var standingOtherWriters = standingPermissions
+            .Where(p => p.ProfileId != standingProfileId
+                        && !systemAdministratorProfiles.Contains(p.ProfileId)
+                        && (p.CanCreate == FieldPermissionAllowed || p.CanUpdate == FieldPermissionAllowed))
+            .ToArray();
+        if (standingOtherWriters.Length > 0)
+        {
+            return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.StandingGrantLockOtherWriter,
+                $"Profiles other than '{StandingGrantProfileName}' may create or update {StandingGrantTable}.{StandingGrantColumn}: " +
+                $"{Ids(standingOtherWriters.Select(p => p.ProfileId))} (the Readers profile included — every default team is its " +
+                "member). Only Standing Grant Administrators and System Administrator may create or update the standing grant; " +
+                "who was granted more is an operator decision. Nothing was written.");
+        }
+
+        // S19 (#2317) — the access level ships secured with the same lock: Standing Grant Administrators 4/4/4, Readers 4/0/0,
+        // Writers 4/0/4 (the BFF updates it). No other profile may create or update it — the Readers profile included (every
+        // default team is its member; it may only read). System Administrator is the platform's own profile (owner decision F4).
+        var levelSecured = await dv.IsAttributeSecuredAsync(t, StandingGrantTable, AccessLevelColumn, ct).ConfigureAwait(false);
+        var levelPermissions = (await dv.ListFieldPermissionsAsync(t, AccessLevelColumn, ct).ConfigureAwait(false))
+            .Where(p => Same(p.EntityName, StandingGrantTable))
+            .ToArray();
+        var levelStanding = levelPermissions.FirstOrDefault(p => p.ProfileId == standingProfileId);
+        var levelReader = levelPermissions.FirstOrDefault(p => p.ProfileId == readerProfileId);
+        var levelWriter = levelPermissions.FirstOrDefault(p => p.ProfileId == writerProfileId);
+        if (levelSecured != true
+            || levelStanding is null || levelStanding.CanRead != FieldPermissionAllowed
+            || levelStanding.CanCreate != FieldPermissionAllowed || levelStanding.CanUpdate != FieldPermissionAllowed
+            || levelReader is null || levelReader.CanRead != FieldPermissionAllowed
+            || levelWriter is null || levelWriter.CanRead != FieldPermissionAllowed || levelWriter.CanUpdate != FieldPermissionAllowed)
+        {
+            return Refuse(FailureClass.Resumable, SecureRecordSetupRejectionCodes.AccessLevelLockIncomplete,
+                $"{StandingGrantTable}.{AccessLevelColumn}: IsSecured={levelSecured?.ToString() ?? "(no such column)"}, " +
+                $"'{StandingGrantProfileName}' read/create/update={Rights(levelStanding)}, " +
+                $"'{ReaderProfileName}' read={levelReader?.CanRead.ToString() ?? "(none)"}, " +
+                $"'{WriterProfileName}' read/update={(levelWriter is null ? "(none)" : $"{levelWriter.CanRead}/{levelWriter.CanUpdate}")} " +
+                "(expected secured, 4/4/4, 4, 4/4). The package's access-level lock is incomplete. " + ContactLocksRemedy);
+        }
+        var levelOtherWriters = levelPermissions
+            .Where(p => p.ProfileId != standingProfileId
+                        && p.ProfileId != writerProfileId
+                        && !systemAdministratorProfiles.Contains(p.ProfileId)
+                        && (p.CanCreate == FieldPermissionAllowed || p.CanUpdate == FieldPermissionAllowed))
+            .ToArray();
+        if (levelOtherWriters.Length > 0)
+        {
+            return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.AccessLevelLockOtherWriter,
+                $"Profiles other than '{StandingGrantProfileName}' and '{WriterProfileName}' may create or update " +
+                $"{StandingGrantTable}.{AccessLevelColumn}: {Ids(levelOtherWriters.Select(p => p.ProfileId))} (the Readers profile " +
+                "included — every default team is its member). Only the standing-grant administrators and the BFF set an " +
+                "access level; who was granted more is an operator decision. Nothing was written.");
+        }
+
         var standingUsers = await dv.ListProfileUsersAsync(t, standingProfileId, ct).ConfigureAwait(false);
 
         // S21 — task 154 (owner decision O2) ships in SpaarkeMaster: the Access Administrator role holds Read on No Access
@@ -686,6 +827,92 @@ public sealed class SecureRecordSetupProcedure
                     "touch the invite-code hash; who was granted access is an operator decision. Nothing was written.");
             }
             notes.Add($"{InviteTable}.{InviteCodeHashColumn}: present, secured, Writers 4/4/4, no other access.");
+        }
+
+        // S22 (#2317) — the BFF-only columns, as the invite-code hash: ABSENT is expected until the SpaarkeMaster release that
+        // carries them (recorded, not failed). Present: secured; Writers 4/4/4; NO other profile may read, create or update.
+        foreach (var column in BffOnlyColumns)
+        {
+            var secured = await dv.IsAttributeSecuredAsync(t, InviteTable, column, ct).ConfigureAwait(false);
+            if (secured is null)
+            {
+                var note = $"{InviteTable}.{column}: absent — ships in a later SpaarkeMaster release; its lock is not " +
+                           "verified in this environment yet.";
+                notes.Add(note);
+                _logger.LogInformation("H7b S22: {Note}", note);
+                continue;
+            }
+
+            var columnPermissions = (await dv.ListFieldPermissionsAsync(t, column, ct).ConfigureAwait(false))
+                .Where(p => Same(p.EntityName, InviteTable))
+                .ToArray();
+            var columnWriter = columnPermissions.FirstOrDefault(p => p.ProfileId == writerProfileId);
+            if (secured != true
+                || columnWriter is null || columnWriter.CanRead != FieldPermissionAllowed
+                || columnWriter.CanCreate != FieldPermissionAllowed || columnWriter.CanUpdate != FieldPermissionAllowed)
+            {
+                return Refuse(FailureClass.Resumable, SecureRecordSetupRejectionCodes.BffOnlyColumnLockIncomplete,
+                    $"{InviteTable}.{column}: IsSecured={secured}, '{WriterProfileName}' read/create/update={Rights(columnWriter)} " +
+                    "(expected secured, 4/4/4). The package's lock on this BFF-only column is incomplete: import " +
+                    "SpaarkeMaster (H6), then resume. Nothing was written.");
+            }
+            var columnOtherAccess = columnPermissions
+                .Where(p => p.ProfileId != writerProfileId
+                            && !systemAdministratorProfiles.Contains(p.ProfileId)
+                            && (p.CanRead > 0 || p.CanCreate > 0 || p.CanUpdate > 0))
+                .ToArray();
+            if (columnOtherAccess.Length > 0)
+            {
+                return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.BffOnlyColumnLockOtherAccess,
+                    $"Profiles other than '{WriterProfileName}' can read, create or update {InviteTable}.{column}: " +
+                    $"{string.Join(", ", columnOtherAccess.Take(NamedPrincipalLimit).Select(p => $"{p.ProfileId} read/create/update={Rights(p)}"))}" +
+                    " (the Readers profile must hold no row or 0/0/0 — every default team is its member). Only the BFF may " +
+                    "touch this column; who was granted access is an operator decision. Nothing was written.");
+            }
+            notes.Add($"{InviteTable}.{column}: present, secured, Writers 4/4/4, no other access.");
+        }
+
+        // S22 (#2317) — the removed-on marker: ABSENT is expected until the SpaarkeMaster release that carries it. Present:
+        // secured; Readers 4/0/0; Writers 4/4/4; nobody else may create or update it (the Readers profile included).
+        var removedSecured = await dv.IsAttributeSecuredAsync(t, InviteTable, AccessRemovedOnColumn, ct).ConfigureAwait(false);
+        if (removedSecured is null)
+        {
+            var note = $"{InviteTable}.{AccessRemovedOnColumn}: absent — ships in a later SpaarkeMaster release; its lock is " +
+                       "not verified in this environment yet.";
+            notes.Add(note);
+            _logger.LogInformation("H7b S22: {Note}", note);
+        }
+        else
+        {
+            var removedPermissions = (await dv.ListFieldPermissionsAsync(t, AccessRemovedOnColumn, ct).ConfigureAwait(false))
+                .Where(p => Same(p.EntityName, InviteTable))
+                .ToArray();
+            var removedReader = removedPermissions.FirstOrDefault(p => p.ProfileId == readerProfileId);
+            var removedWriter = removedPermissions.FirstOrDefault(p => p.ProfileId == writerProfileId);
+            if (removedSecured != true
+                || removedReader is null || removedReader.CanRead != FieldPermissionAllowed
+                || removedWriter is null || removedWriter.CanRead != FieldPermissionAllowed
+                || removedWriter.CanCreate != FieldPermissionAllowed || removedWriter.CanUpdate != FieldPermissionAllowed)
+            {
+                return Refuse(FailureClass.Resumable, SecureRecordSetupRejectionCodes.AccessRemovedOnLockIncomplete,
+                    $"{InviteTable}.{AccessRemovedOnColumn}: IsSecured={removedSecured}, " +
+                    $"'{ReaderProfileName}' read={removedReader?.CanRead.ToString() ?? "(none)"}, " +
+                    $"'{WriterProfileName}' read/create/update={Rights(removedWriter)} (expected secured, 4, 4/4/4). The " +
+                    "package's lock is incomplete: import SpaarkeMaster (H6), then resume. Nothing was written.");
+            }
+            var removedOtherWriters = removedPermissions
+                .Where(p => p.ProfileId != writerProfileId
+                            && !systemAdministratorProfiles.Contains(p.ProfileId)
+                            && (p.CanCreate == FieldPermissionAllowed || p.CanUpdate == FieldPermissionAllowed))
+                .ToArray();
+            if (removedOtherWriters.Length > 0)
+            {
+                return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.AccessRemovedOnLockOtherWriter,
+                    $"Profiles other than '{WriterProfileName}' may create or update {InviteTable}.{AccessRemovedOnColumn}: " +
+                    $"{Ids(removedOtherWriters.Select(p => p.ProfileId))} (the Readers profile included — every default team " +
+                    "is its member). Only the BFF records that a person's external access was removed. Nothing was written.");
+            }
+            notes.Add($"{InviteTable}.{AccessRemovedOnColumn}: present, secured, Readers 4/0/0, Writers 4/4/4, no other writer.");
         }
 
         // §6 T4 — the ROOT unit's default team must not reach the secure unit by depth.
@@ -804,7 +1031,7 @@ public sealed class SecureRecordSetupProcedure
             defaultTeamId = defaultTeams[0].Id;
             foreach (var teamRole in await dv.ListTeamRolesAsync(t, defaultTeamId.Value, ct).ConfigureAwait(false))
             {
-                if (teamRole.Id == roleId || Same(teamRole.Name, SystemAdministratorRoleName))
+                if (teamRole.Id == roleId || IsSystemAdministrator(teamRole))
                 {
                     var defaultTeam = defaultTeamId.Value;
                     await Write($"remove '{teamRole.Name}' from the unit's default team",
@@ -815,7 +1042,7 @@ public sealed class SecureRecordSetupProcedure
             {
                 foreach (var teamRole in await dv.ListTeamRolesAsync(t, namedTeamForAdmin, ct).ConfigureAwait(false))
                 {
-                    if (Same(teamRole.Name, SystemAdministratorRoleName))
+                    if (IsSystemAdministrator(teamRole))
                     {
                         await Write($"remove '{teamRole.Name}' from '{OwnerTeamName}'",
                             () => dv.DisassociateTeamRoleAsync(t, namedTeamForAdmin, teamRole.Id, ct)).ConfigureAwait(false);
@@ -986,7 +1213,7 @@ public sealed class SecureRecordSetupProcedure
         foreach (var (teamLabel, id) in new[] { ("the unit's default team", defaultTeamId), ($"'{OwnerTeamName}'", teamId) })
         {
             var admin = (await dv.ListTeamRolesAsync(t, id, ct).ConfigureAwait(false))
-                .Where(r => Same(r.Name, SystemAdministratorRoleName)).ToArray();
+                .Where(IsSystemAdministrator).ToArray();
             if (admin.Length > 0)
             {
                 problems.Add($"{teamLabel} still holds '{SystemAdministratorRoleName}'");
@@ -1051,7 +1278,13 @@ public sealed class SecureRecordSetupProcedure
 
     private static bool IsDeepOrGlobal(string depth) => Same(depth, "Deep") || Same(depth, "Global");
 
+    private static bool IsSystemAdministrator(SecureSetupRole role) => role.RoleTemplateId == SystemAdministratorRoleTemplateId;
+
     private static bool Same(string? a, string? b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>A field permission's read/create/update, or "(none)" when there is no row.</summary>
+    private static string Rights(SecureSetupFieldPermission? p)
+        => p is null ? "(none)" : $"{p.CanRead}/{p.CanCreate}/{p.CanUpdate}";
 
     private static string Ids(IEnumerable<Guid> ids)
     {

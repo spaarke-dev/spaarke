@@ -23,6 +23,16 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// <paramref name="ProjectId"/> is ignored for the grant. Unused by <c>/invite</c> (which only onboards).
 /// </param>
 /// <param name="RecordId">The GUID of the root record identified by <paramref name="RecordType"/>.</param>
+/// <param name="InvitedTenantId">
+/// Not accepted: any non-blank value is refused (400). The person's organisation is resolved by the server from the email's
+/// domain at invite time, and staff never supply a tenant. Kept on the contract so a client that sends one is told, rather
+/// than having it silently ignored.
+/// </param>
+/// <param name="SendAsPortalAccount">
+/// Not accepted: any supplied value, <c>false</c> included, is refused (400). The kind of sign-in an invite is for (a work
+/// account or a portal account) is decided by the server from the email's domain, never chosen by the request. Kept on the
+/// contract so a client that sends one is told, rather than having it silently ignored.
+/// </param>
 public record InviteExternalUserRequest(
     string Email,
     Guid ProjectId,
@@ -32,4 +42,6 @@ public record InviteExternalUserRequest(
     DateOnly? ExpiryDate,
     Guid? OrganizationId,
     string? RecordType = null,
-    Guid? RecordId = null);
+    Guid? RecordId = null,
+    string? InvitedTenantId = null,
+    bool? SendAsPortalAccount = null);

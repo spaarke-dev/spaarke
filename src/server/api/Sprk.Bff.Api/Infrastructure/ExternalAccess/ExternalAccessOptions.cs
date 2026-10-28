@@ -8,6 +8,8 @@
 // Bound from the existing "ExternalAccess" section, which already carries PortalUrl, Reconciliation:WritesEnabled and
 // AssignedAccess:JobRevokeOnChangeEnabled (read by key elsewhere); this class binds only the keys it declares.
 
+using Microsoft.Extensions.Options;
+
 namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 
 /// <summary>
@@ -42,8 +44,12 @@ public sealed class ExternalAccessOptions
     /// <summary>
     /// ADR-028 A9 (r3 task 047): the business unit whose DEFAULT team owns every contact the registration route
     /// (<c>POST /api/v1/external/registration</c>) creates. Absent means no registration create: the route answers 500
-    /// <c>registration_owner_unconfigured</c> and creates nothing (binding an existing contact needs no owner). App Service
-    /// form: <c>ExternalAccess__CustomerBusinessUnitId</c>. A value that is not a GUID fails startup.
+    /// <c>registration_owner_unconfigured</c> and creates nothing (binding an existing contact needs no owner). ISS-005
+    /// (#1673): the same unit's default team owns the contact a workforce user's first sign-in creates and the contact a
+    /// licensed user's link creates, and absent refuses those creates the same way (the sign-in answers 500 with the same
+    /// reason code; the link is not made; an invite that would create a contact answers 500 with the same code). A startup warning
+    /// names an unset value. App Service form: <c>ExternalAccess__CustomerBusinessUnitId</c>. A value that is
+    /// not a GUID fails startup.
     /// </summary>
     public Guid? CustomerBusinessUnitId { get; set; }
 
@@ -76,4 +82,44 @@ public sealed class ImpersonatedRootSetsOptions
 {
     /// <summary>When <c>true</c>, Dataverse decides a systemuser's access on this plane. Default <c>false</c>.</summary>
     public bool Enabled { get; set; }
+}
+
+/// <summary>
+/// ISS-005 (#1673 review K3): a startup WARNING, never a failure, when <c>ExternalAccess:CustomerBusinessUnitId</c> is unset,
+/// empty or the all-zero GUID. Every contact this BFF creates in its own environment (registration, first sign-in, the
+/// licensed-user link, the invite) is refused with <c>sdap.access.registration_owner_unconfigured</c> while it is, so an
+/// operator should learn that at deploy time, not from the first person who is turned away. Startup does not fail: a
+/// deployment that creates no contacts, or that only binds existing ones, runs without it.
+/// </summary>
+/// <remarks>
+/// Follows <see cref="WorkforceIdentityOptionsValidator"/>: a singleton validator whose constructor logs once, built when
+/// <c>ValidateOnStart</c> first resolves the options. It reads the raw configuration value, not the bound options: the
+/// binder turns an empty string into <c>null</c> and a malformed value fails startup on its own.
+/// </remarks>
+public sealed class ExternalAccessOptionsValidator : IValidateOptions<ExternalAccessOptions>
+{
+    /// <summary>The configuration key, as <c>ExternalAccess__CustomerBusinessUnitId</c> on an App Service.</summary>
+    internal const string CustomerBusinessUnitKey = ExternalAccessOptions.SectionName + ":CustomerBusinessUnitId";
+
+    public ExternalAccessOptionsValidator(IConfiguration configuration, ILogger<ExternalAccessOptionsValidator> logger)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+        ArgumentNullException.ThrowIfNull(logger);
+
+        if (!IsCustomerBusinessUnitConfigured(configuration[CustomerBusinessUnitKey]))
+        {
+            logger.LogWarning(
+                "[EXT-ACCESS] {Key} is not set to a non-zero GUID: every contact this BFF creates (registration, first sign-in, "
+                + "the licensed-user link, an invite) is refused with sdap.access.registration_owner_unconfigured until it is. "
+                + "Set it to the customer's top-level business unit on every slot.",
+                CustomerBusinessUnitKey);
+        }
+    }
+
+    /// <summary>True when the value is a non-zero GUID (the precondition of any contact create). Pure.</summary>
+    internal static bool IsCustomerBusinessUnitConfigured(string? value)
+        => Guid.TryParse(value?.Trim(), out var id) && id != Guid.Empty;
+
+    /// <inheritdoc />
+    public ValidateOptionsResult Validate(string? name, ExternalAccessOptions options) => ValidateOptionsResult.Success;
 }

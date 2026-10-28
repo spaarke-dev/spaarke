@@ -1,3 +1,4 @@
+using System.Net;
 using System.Reflection;
 using System.Security.Claims;
 using System.Text.Json;
@@ -86,32 +87,45 @@ public class ExistingCiamAccountInviteTests
         .AddInMemoryCollection(new Dictionary<string, string?> { ["ExternalAccess:PortalUrl"] = PortalUrl })
         .Build();
 
-    private Task<IResult> InviteAndGrant(ILogger<Program>? logger = null, ContactIdentityBinder? binder = null) =>
+    private Task<IResult> InviteAndGrant(
+        ILogger<Program>? logger = null, ContactIdentityBinder? binder = null, string? invitedTenantId = null,
+        InviteOrganizationResolver? organizations = null, string email = Email, bool? sendAsPortalAccount = null,
+        CiamUserProvisioningService? ciam = null) =>
         InviteAndGrantExternalUserEndpoint.InviteAndGrantAsync(
-            Request() with { RecordId = _matter },
+            Request() with
+            {
+                RecordId = _matter, InvitedTenantId = invitedTenantId, Email = email, SendAsPortalAccount = sendAsPortalAccount,
+            },
             _h.Grants, _h.Participations, _h.AccessibleRecords, new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), new EverythingProbe(),
-            _ciam, _h.Emails, binder ?? IdentityBindingTestKit.Binder(_h.Identities),
+            ciam ?? _ciam, _h.Emails, binder ?? IdentityBindingTestKit.Binder(_h.Identities), organizations ?? InviteOrganizationTestKit.PortalOnly(),
             PortalConfig(), Sprk.Bff.Api.Tests.TestInfrastructure.TestSpeOwnership.Customer(CustomerKey),
             _h.Materializer, _h.Notifier, Context(), logger ?? NullLogger<Program>.Instance, _h.Time, CancellationToken.None);
 
     /// <summary>The /invite core, as the route runs it.</summary>
-    private Task<InviteExternalUserEndpoint.ProvisionOutcome> Invite(ContactIdentityBinder? binder = null, ILogger? logger = null) =>
+    private Task<InviteExternalUserEndpoint.ProvisionOutcome> Invite(
+        ContactIdentityBinder? binder = null, ILogger? logger = null, Guid? workAccountTenantId = null) =>
         InviteExternalUserEndpoint.ProvisionAsync(
             Request(), _h.Grants, _ciam, _h.Emails, binder ?? IdentityBindingTestKit.Binder(_h.Identities), PortalUrl,
-            CustomerKey, logger ?? NullLogger<Program>.Instance, resolution: null, CancellationToken.None);
+            CustomerKey, logger ?? NullLogger<Program>.Instance, resolution: null, CancellationToken.None, workAccountTenantId);
 
     /// <summary>
     /// The /invite ROUTE handler itself (private; reached by reflection so the test reads the response the route returns,
     /// not one it rebuilt).
     /// </summary>
-    private async Task<IResult> InviteRoute(ILogger<Program>? logger = null)
+    private async Task<IResult> InviteRoute(
+        ILogger<Program>? logger = null, string? invitedTenantId = null, InviteOrganizationResolver? organizations = null,
+        string email = Email, bool? sendAsPortalAccount = null, CiamUserProvisioningService? ciam = null)
     {
         var handler = typeof(InviteExternalUserEndpoint).GetMethod("InviteExternalUserAsync", BindingFlags.NonPublic | BindingFlags.Static)
             ?? throw new InvalidOperationException("The /invite handler was not found.");
         var task = (Task<IResult>)handler.Invoke(null, new object[]
         {
-            Request() with { RecordId = _matter }, _h.Grants, _h.Participations, _ciam, _h.Emails,
-            IdentityBindingTestKit.Binder(_h.Identities), PortalConfig(),
+            Request() with
+            {
+                RecordId = _matter, InvitedTenantId = invitedTenantId, Email = email, SendAsPortalAccount = sendAsPortalAccount,
+            },
+            _h.Grants, _h.Participations, ciam ?? _ciam, _h.Emails,
+            IdentityBindingTestKit.Binder(_h.Identities), organizations ?? InviteOrganizationTestKit.PortalOnly(), PortalConfig(),
             Sprk.Bff.Api.Tests.TestInfrastructure.TestSpeOwnership.Customer(CustomerKey), Context(),
             logger ?? NullLogger<Program>.Instance, CancellationToken.None,
         })!;
@@ -408,7 +422,9 @@ public class ExistingCiamAccountInviteTests
     /// nobody holds a code and the first sign-in is denied <c>contact_not_invited</c>; a RETRIED invite answers
     /// ExistingAccount (the CIAM account exists) with a NEW code, and that code repairs the binding. Before 185 this test was
     /// <c>AFailedOidWrite_WithTheMarker_KeepsThe500_AndTheFirstSignInRepairsIt</c>. Slice D: the 500's logged reason says
-    /// "retry the invite" (it said "The first CIAM sign-in repairs the binding").
+    /// "retry the invite" (it said "The first CIAM sign-in repairs the binding"). C5: a pending invite exists only if its
+    /// email went out, so the throw after the marker retracts the invite this call wrote (it was kept before, and a grant
+    /// then answered AlreadyPending for 30 days).
     /// </summary>
     [Fact]
     public async Task AFailedOidWrite_WithTheMarker_KeepsThe500_AndARetriedInviteWithANewCodeRepairsIt()
@@ -419,7 +435,7 @@ public class ExistingCiamAccountInviteTests
         var result = await InviteAndGrant();
 
         result.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(StatusCodes.Status500InternalServerError);
-        _h.Identities.Contacts[contact].InvitedOn.Should().NotBeNull();
+        ShouldHaveNoPendingInvite(contact);
         _h.Emails.Onboarding.Should().BeEmpty("no email was sent, so no code is in anyone's hands");
         _h.Identities.FailBind = false;
         var created = _ciam.Created.Single().Oid;
@@ -449,7 +465,7 @@ public class ExistingCiamAccountInviteTests
         _ciam.Failure = ObjectConflictOnProxyAddresses();
         var clock = new FakeTimeProvider(IdentityBindingTestKit.Now);
         var binder = new ContactIdentityBinder(_h.Identities, IdentityBindingTestKit.Tenants(IdentityBindingTestKit.CustomerTenant),
-            clock, NullLogger<ContactIdentityBinder>.Instance);
+            clock, NullLogger<ContactIdentityBinder>.Instance, IdentityBindingTestKit.NoOwnerUnderTest);
 
         await Invite(binder);
         var firstHash = _h.Identities.Contacts[contact].InviteCodeHash;
@@ -849,6 +865,1025 @@ public class ExistingCiamAccountInviteTests
             .Should().BeTrue("the emailed code is the one marked");
     }
 
+    // ── The invite stamp: written by /invite and /invite-and-grant, independent of the CIAM account branch ──────────
+
+    private static readonly Guid PartnerTenant = IdentityBindingTestKit.CustomerTenant;
+
+    /// <summary>
+    /// A portal-account invite writes the invite stamp in the marker's write: the invited address, hashed (never the address),
+    /// and NO tenant (only a work-account invite names one). With the CIAM account already existing the contact stays
+    /// unbound and keeps its code and stamp, and a CIAM sign-in presenting the code then binds it.
+    /// </summary>
+    [Fact]
+    public async Task APortalAccountInvite_WritesTheStamp_WithANullTenant_AndTheCode()
+    {
+        var contact = UnboundContact();
+        _ciam.Failure = ObjectConflictOnProxyAddresses();
+
+        var outcome = await Invite();
+
+        outcome.Status.Should().Be(InviteExternalUserEndpoint.ExistingAccountStatus);
+        var row = _h.Identities.Contacts[contact];
+        InviteEmailStamp.Matches(row.InvitedEmailHash, Email).Should().BeTrue("the stamp records the invited address");
+        row.InvitedEmailHash.Should().NotContain(Email, "only the salted hash is stored");
+        row.InvitedTenantId.Should().BeNull("a portal-account invite names no tenant");
+        row.InviteCodeHash.Should().NotBeNullOrEmpty("a portal-account invite carries its code");
+        _h.Identities.InviteStampWrites.Should().ContainSingle().Which.InvitedTenantId.Should().BeNull();
+    }
+
+    /// <summary>/invite-and-grant writes the same portal-account stamp: no tenant.</summary>
+    [Fact]
+    public async Task InviteAndGrant_APortalAccountInvite_WritesTheStamp_WithANullTenant()
+    {
+        var contact = UnboundContact();
+        _ciam.Failure = ObjectConflictOnProxyAddresses();
+
+        (await InviteAndGrant()).Should().BeOfType<Ok<InviteAndGrantResponse>>();
+
+        var row = _h.Identities.Contacts[contact];
+        InviteEmailStamp.Matches(row.InvitedEmailHash, Email).Should().BeTrue();
+        row.InvitedTenantId.Should().BeNull();
+    }
+
+    /// <summary>
+    /// The stamp write does not depend on the CIAM account branch: a new-account invite writes it with the marker BEFORE the
+    /// account is created, and the invite's own bind of the new oid then clears it.
+    /// </summary>
+    [Fact]
+    public async Task ANewAccountInvite_WritesTheStampBeforeTheAccount_AndItsOwnBindClearsIt()
+    {
+        var contact = UnboundContact();
+        string? stampAtCreate = null;
+        _ciam.OnCreate = () => stampAtCreate = _h.Identities.Contacts[contact].InvitedEmailHash;
+
+        var outcome = await Invite();
+
+        outcome.Status.Should().Be(InviteExternalUserEndpoint.ProvisionedStatus);
+        InviteEmailStamp.Matches(stampAtCreate, Email).Should().BeTrue("the stamp landed with the marker, before the account");
+        _h.Identities.InviteStampWrites.Should().ContainSingle();
+        var row = _h.Identities.Contacts[contact];
+        row.Oid.Should().NotBeNull();
+        (row.InvitedEmailHash, row.InvitedTenantId).Should().Be(((string?)null, (string?)null), "the bind clears the stamp");
+    }
+
+    /// <summary>
+    /// A request never supplies the tenant: any non-blank InvitedTenantId is a 400 in each route's validation shape, before
+    /// any read, write or lookup (a GUID included). MUST-NOT-FIRE: blank is accepted.
+    /// </summary>
+    [Theory]
+    [InlineData("11111111-aaaa-4aaa-8aaa-111111111111", true)]
+    [InlineData(" 11111111-AAAA-4AAA-8AAA-111111111111 ", true)]
+    [InlineData("not-a-guid", true)]
+    [InlineData("tenant.onmicrosoft.com", true)]
+    [InlineData("", false)]
+    [InlineData("   ", false)]
+    public async Task ARequestSuppliedTenant_IsRefused400(string raw, bool refused)
+    {
+        UnboundContact();
+        _ciam.Failure = ObjectConflictOnProxyAddresses();
+        var handler = new InviteOrganizationTestKit.DiscoveryHandler();
+        var organizations = InviteOrganizationTestKit.Resolver(handler, new InviteOrganizationTestKit.RecordingTenantCache(),
+            new[] { PartnerTenant });
+        if (!refused)
+        {
+            handler.Answer(HttpStatusCode.BadRequest, InviteOrganizationTestKit.TenantNotFoundBody)
+                .Answer(HttpStatusCode.BadRequest, InviteOrganizationTestKit.TenantNotFoundBody);
+        }
+
+        foreach (var result in new[]
+                 {
+                     await InviteRoute(invitedTenantId: raw, organizations: organizations),
+                     await InviteAndGrant(invitedTenantId: raw, organizations: organizations),
+                 })
+        {
+            if (refused)
+            {
+                var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
+                problem.StatusCode.Should().Be(400);
+                problem.ProblemDetails.Detail.Should().Contain("InvitedTenantId");
+            }
+            else
+            {
+                result.Should().NotBeOfType<ProblemHttpResult>();
+            }
+        }
+
+        if (refused)
+        {
+            _h.Identities.Writes.Should().BeEmpty("a refused request writes nothing");
+            _h.Identities.Reads.Should().BeEmpty("a refused request reads nothing");
+            handler.Requests.Should().BeEmpty("a refused request looks nothing up");
+        }
+    }
+
+    // ── Slice B2: the server decides work account vs portal account from the email's domain ─────────────────────
+
+    private readonly InviteOrganizationTestKit.RecordingTenantCache _orgCache = new();
+
+    private InviteOrganizationResolver Organizations(InviteOrganizationTestKit.DiscoveryHandler handler, params Guid[] customers)
+        => InviteOrganizationTestKit.Resolver(handler, _orgCache, customers.Length == 0 ? new[] { PartnerTenant } : customers,
+            timeout: TimeSpan.FromMilliseconds(200));
+
+    /// <summary>
+    /// MUST FIRE: the invited email's domain belongs to a configured customer tenant, so /invite is a work-account invite:
+    /// the stamp names that tenant and carries no code; no CIAM account, no oid, no plane, no email. The lookup is one GET of
+    /// the fixed discovery URL with no credentials. A Workforce sign-in from that tenant with that email then binds the
+    /// contact once (plane Workforce) and clears the stamp, so a second identity cannot use it.
+    /// </summary>
+    [Fact]
+    public async Task Invite_ACustomerTenantDomain_IsAWorkAccountInvite_AndAWorkforceSignInBindsItOnce()
+    {
+        var contact = UnboundContact();
+        var handler = new InviteOrganizationTestKit.DiscoveryHandler()
+            .Answer(HttpStatusCode.OK, InviteOrganizationTestKit.DiscoveryBody(PartnerTenant));
+        var creates = 0;
+        _ciam.OnCreate = () => creates++;
+
+        var result = await InviteRoute(organizations: Organizations(handler));
+
+        var body = result.Should().BeOfType<Ok<InviteExternalUserResponse>>().Subject.Value!;
+        body.Status.Should().Be(InviteExternalUserEndpoint.WorkAccountInvitedStatus);
+        (body.ContactId, body.EmailSent, body.EmailErrorCode).Should().Be((contact, (bool?)true, (string?)null),
+            "slice B3: the work-account notice was sent");
+        var row = _h.Identities.Contacts[contact];
+        row.InvitedTenantId.Should().Be(PartnerTenant.ToString("D"));
+        InviteEmailStamp.Matches(row.InvitedEmailHash, Email).Should().BeTrue();
+        row.InviteCodeHash.Should().BeNull("a work-account invite carries no code");
+        (row.Oid, row.Plane).Should().Be(((string?)null, (int?)null), "no account is bound");
+        creates.Should().Be(0, "no CIAM account is created");
+        _h.Emails.InviteUrls.Should().BeEmpty("no CIAM invite email is sent");
+
+        var call = handler.Requests.Should().ContainSingle().Subject;
+        call.Method.Should().Be(HttpMethod.Get);
+        call.RequestUri.Should().Be(new Uri("https://login.microsoftonline.com/outside.test/v2.0/.well-known/openid-configuration"));
+        call.Headers.Authorization.Should().BeNull();
+        call.Headers.Contains("Cookie").Should().BeFalse();
+
+        // A CIAM sign-in never meets a work-account invite, even for the same address.
+        var ciamCaller = Guid.NewGuid();
+        (await IdentityBindingTestKit.Binder(_h.Identities).ResolveCiamCallerAsync(ciamCaller.ToString("D"), Email, inviteCode: null, CancellationToken.None))
+            .DenyCode.Should().Be(ContactBindingDecision.DenyContactNotInvited);
+
+        var oid = Guid.NewGuid();
+        var signIn = await IdentityBindingTestKit.Binder(_h.Identities).ResolveWorkforceCallerAsync(
+            IdentityBindingTestKit.WorkforceUser(oid, tid: PartnerTenant, email: Email), oid, stampTenantId: null,
+            CancellationToken.None);
+
+        signIn.ContactId.Should().Be(contact);
+        (row.Oid, row.Plane, row.InvitedEmailHash, row.InvitedTenantId)
+            .Should().Be((oid.ToString("D"), (int?)(int)IdentityPlaneMarker.Workforce, (string?)null, (string?)null));
+    }
+
+    /// <summary>
+    /// MUST FIRE: /invite-and-grant to a customer-tenant domain is a work-account invite AND the grant is written; no CIAM
+    /// account and no CIAM email.
+    /// </summary>
+    [Fact]
+    public async Task InviteAndGrant_ACustomerTenantDomain_IsAWorkAccountInvite_AndTheGrantIsWritten()
+    {
+        var contact = UnboundContact();
+        var handler = new InviteOrganizationTestKit.DiscoveryHandler()
+            .Answer(HttpStatusCode.OK, InviteOrganizationTestKit.DiscoveryBody(PartnerTenant));
+
+        var body = (await InviteAndGrant(organizations: Organizations(handler)))
+            .Should().BeOfType<Ok<InviteAndGrantResponse>>().Subject.Value!;
+
+        body.OnboardStatus.Should().Be(InviteExternalUserEndpoint.WorkAccountInvitedStatus);
+        (body.EmailSent, body.EmailErrorCode).Should().Be(((bool?)true, (string?)null), "slice B3: the notice was sent");
+        _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle();
+        _h.Identities.Contacts[contact].InvitedTenantId.Should().Be(PartnerTenant.ToString("D"));
+        _ciam.Created.Should().BeEmpty();
+        _h.Emails.InviteUrls.Should().BeEmpty();
+    }
+
+    // ── Slice B3: the work-account notice ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// MUST FIRE: /invite to a customer-tenant domain sends ONE notice to the stamped address, after the stamp landed: fixed
+    /// text (no grant exists, so no record), and one link — the portal with the customer key. No code, no contact id, no
+    /// tenant id anywhere in it.
+    /// </summary>
+    [Fact]
+    public async Task Invite_WorkAccount_SendsTheFixedNotice_ToTheStampedAddress_WithNoCodeOrIds()
+    {
+        var contact = UnboundContact();
+        var handler = new InviteOrganizationTestKit.DiscoveryHandler()
+            .Answer(HttpStatusCode.OK, InviteOrganizationTestKit.DiscoveryBody(PartnerTenant));
+
+        (await InviteRoute(organizations: Organizations(handler))).Should().BeOfType<Ok<InviteExternalUserResponse>>();
+
+        var sent = _h.Emails.Sent.Should().ContainSingle("one notice").Subject;
+        sent.To.Should().Be(Email);
+        sent.Subject.Should().Be("You've been invited to Spaarke");
+        sent.LinkUrl.Should().Be($"{PortalUrl}/?customer={CustomerKey}", "the portal and the customer key only");
+        var message = _h.Emails.Messages.Single();
+        message.Should().Contain("work account");
+        foreach (var text in new[] { sent.Subject, sent.LinkUrl, message })
+        {
+            text.Should().NotContain(contact.ToString("D")).And.NotContain(contact.ToString("N"))
+                .And.NotContain(PartnerTenant.ToString("D")).And.NotContain("#").And.NotContain("invite=");
+        }
+
+        _h.Identities.Contacts[contact].InvitedEmailHash.Should().NotBeNull("the notice follows a stamp that landed");
+        _h.Emails.InviteUrls.Should().BeEmpty("no portal-account invite email");
+    }
+
+    /// <summary>
+    /// MUST FIRE: the response says "email not sent" in its existing emailSent / emailErrorCode fields when the notice fails
+    /// to send. Slice C2b: a pending invite exists only if its email went out, so the stamp is cleared. C5: an invite is
+    /// reported as made only when its email went out, so the status is the not-sent one, never WorkAccountInvited.
+    /// </summary>
+    [Fact]
+    public async Task Invite_WorkAccount_ANoticeThatFails_ClearsTheStamp_AndIsReportedEmailNotSent()
+    {
+        var contact = UnboundContact();
+        _h.Emails.Failure = new InvalidOperationException("mailbox refused");
+        var handler = new InviteOrganizationTestKit.DiscoveryHandler()
+            .Answer(HttpStatusCode.OK, InviteOrganizationTestKit.DiscoveryBody(PartnerTenant));
+
+        var body = (await InviteRoute(organizations: Organizations(handler)))
+            .Should().BeOfType<Ok<InviteExternalUserResponse>>().Subject.Value!;
+
+        body.Status.Should().Be(InviteExternalUserEndpoint.InviteNotSentStatus)
+            .And.NotBe(InviteExternalUserEndpoint.WorkAccountInvitedStatus);
+        (body.EmailSent, body.EmailErrorCode).Should().Be(((bool?)false, (string?)GrantInviteStatus.EmailNotSentReasonCode));
+        _h.Identities.Contacts[contact].InvitedTenantId.Should().BeNull("the stamp of an invite whose notice did not send is cleared");
+        _h.Identities.Contacts[contact].InvitedEmailHash.Should().BeNull();
+    }
+
+    /// <summary>
+    /// MUST FIRE (C5): /invite-and-grant whose work-account notice fails to send writes the grant, clears the stamp and answers
+    /// the not-sent status with emailSent false, never WorkAccountInvited: an invite is reported as made only when its email
+    /// went out.
+    /// </summary>
+    [Fact]
+    public async Task InviteAndGrant_WorkAccount_ANoticeThatFails_IsAnsweredNotSent_NeverWorkAccountInvited()
+    {
+        var contact = UnboundContact();
+        _h.Emails.Failure = new InvalidOperationException("mailbox refused");
+        var handler = new InviteOrganizationTestKit.DiscoveryHandler()
+            .Answer(HttpStatusCode.OK, InviteOrganizationTestKit.DiscoveryBody(PartnerTenant));
+
+        var body = (await InviteAndGrant(organizations: Organizations(handler)))
+            .Should().BeOfType<Ok<InviteAndGrantResponse>>().Subject.Value!;
+
+        body.OnboardStatus.Should().Be(InviteExternalUserEndpoint.InviteNotSentStatus)
+            .And.NotBe(InviteExternalUserEndpoint.WorkAccountInvitedStatus);
+        (body.EmailSent, body.EmailErrorCode).Should().Be(((bool?)false, (string?)GrantInviteStatus.EmailNotSentReasonCode));
+        _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle("the grant stands");
+        _h.Identities.Contacts[contact].InvitedEmailHash.Should().BeNull("the stamp of an invite whose notice did not send is cleared");
+    }
+
+    /// <summary>MUST FIRE: /invite-and-grant's notice is sent after the grant is written and names the granted record.</summary>
+    [Fact]
+    public async Task InviteAndGrant_WorkAccount_SendsTheNotice_NamingTheGrantedRecord()
+    {
+        UnboundContact();
+        var handler = new InviteOrganizationTestKit.DiscoveryHandler()
+            .Answer(HttpStatusCode.OK, InviteOrganizationTestKit.DiscoveryBody(PartnerTenant));
+
+        (await InviteAndGrant(organizations: Organizations(handler))).Should().BeOfType<Ok<InviteAndGrantResponse>>();
+
+        var sent = _h.Emails.Sent.Should().ContainSingle().Subject;
+        sent.To.Should().Be(Email);
+        sent.Subject.Should().Be("You've been given access to the matter \"Smith v. Smith\" in Spaarke");
+        sent.LinkUrl.Should().Be($"{PortalUrl}/?customer={CustomerKey}");
+    }
+
+    /// <summary>
+    /// MUST NOT FIRE: when the grant fails after the work-account stamp, /invite-and-grant sends no notice: never a record
+    /// name the person cannot open.
+    /// </summary>
+    [Fact]
+    public async Task InviteAndGrant_WorkAccount_AGrantThatFails_SendsNoNotice()
+    {
+        UnboundContact();
+        _h.Grants.GrantCreateFailure = new HttpRequestException("grant write refused");
+        var handler = new InviteOrganizationTestKit.DiscoveryHandler()
+            .Answer(HttpStatusCode.OK, InviteOrganizationTestKit.DiscoveryBody(PartnerTenant));
+
+        var result = await InviteAndGrant(organizations: Organizations(handler));
+
+        result.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(500);
+        _h.Emails.Sent.Should().BeEmpty();
+    }
+
+    // ── Slice C2c: a grant that does not land after the stamp leaves no pending invite ────────────────────────────────
+
+    /// <summary>
+    /// The grant core's own removed-marker read answers "removed" once the invite has written its stamp or code (an
+    /// administrator's removal landing between the onboarding and the grant).
+    /// </summary>
+    private void TheGrantCoreRefusesAfterTheStamp(Guid contact)
+        => _h.Identities.BeforeRemovedMarkerRead = _ =>
+        {
+            var row = _h.Identities.Contacts[contact];
+            if (row.InvitedEmailHash is not null || row.InviteCodeHash is not null)
+                _h.Identities.LiveRemovedMarkerOverride = RemovedMarkerRead.Removed;
+        };
+
+    private static string? PendingInvite(IResult result)
+        => result.Should().BeOfType<ProblemHttpResult>().Subject.ProblemDetails.Extensions
+            .TryGetValue(InviteAndGrantExternalUserEndpoint.PendingInviteExtension, out var value) ? value as string : null;
+
+    /// <summary>
+    /// MUST FIRE: the grant core refuses after the work-account stamp landed, so no notice is sent and the stamp this request
+    /// wrote is cleared (reported "retracted"). The next invite stamps again and sends the notice.
+    /// </summary>
+    [Fact]
+    public async Task InviteAndGrant_WorkAccount_AGrantRefusedAfterTheStamp_ClearsTheStamp_AndTheNextInviteSends()
+    {
+        var contact = UnboundContact();
+        var handler = new InviteOrganizationTestKit.DiscoveryHandler()
+            .Answer(HttpStatusCode.OK, InviteOrganizationTestKit.DiscoveryBody(PartnerTenant))
+            .Answer(HttpStatusCode.OK, InviteOrganizationTestKit.DiscoveryBody(PartnerTenant));
+        var organizations = Organizations(handler);
+        TheGrantCoreRefusesAfterTheStamp(contact);
+
+        var refused = await InviteAndGrant(organizations: organizations);
+
+        refused.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(409);
+        PendingInvite(refused).Should().Be("retracted");
+        _h.Emails.Sent.Should().BeEmpty();
+        var row = _h.Identities.Contacts[contact];
+        (row.InvitedOn, row.InvitedEmailHash, row.InvitedTenantId).Should().Be(((DateTimeOffset?)null, (string?)null, (string?)null));
+
+        _h.Identities.BeforeRemovedMarkerRead = null;
+        _h.Identities.LiveRemovedMarkerOverride = null;
+        var next = await InviteAndGrant(organizations: organizations);
+
+        var body = next.Should().BeOfType<Ok<InviteAndGrantResponse>>().Subject.Value!;
+        (body.EmailSent, body.EmailErrorCode).Should().Be(((bool?)true, (string?)null));
+        _h.Emails.Sent.Should().ContainSingle("the next invite stamps again and sends the notice");
+        _h.Identities.Contacts[contact].InvitedTenantId.Should().Be(PartnerTenant.ToString("D"));
+    }
+
+    /// <summary>MUST FIRE: a grant that FAILS after the stamp clears the stamp too (reported "retracted").</summary>
+    [Fact]
+    public async Task InviteAndGrant_WorkAccount_AGrantThatFailsAfterTheStamp_ClearsTheStamp()
+    {
+        var contact = UnboundContact();
+        _h.Grants.GrantCreateFailure = new HttpRequestException("grant write refused");
+        var handler = new InviteOrganizationTestKit.DiscoveryHandler()
+            .Answer(HttpStatusCode.OK, InviteOrganizationTestKit.DiscoveryBody(PartnerTenant));
+
+        var result = await InviteAndGrant(organizations: Organizations(handler));
+
+        PendingInvite(result).Should().Be("retracted");
+        _h.Identities.Contacts[contact].InvitedEmailHash.Should().BeNull();
+        _h.Identities.Contacts[contact].InvitedTenantId.Should().BeNull();
+    }
+
+    /// <summary>
+    /// MUST NOT FIRE: a newer invite written between the refusal and the clear is never cleared (the clear is conditional on
+    /// the row version read with THIS request's stamp); reported "superseded".
+    /// </summary>
+    [Fact]
+    public async Task InviteAndGrant_WorkAccount_ANewerInviteWrittenBeforeTheClear_Survives()
+    {
+        var contact = UnboundContact();
+        var handler = new InviteOrganizationTestKit.DiscoveryHandler()
+            .Answer(HttpStatusCode.OK, InviteOrganizationTestKit.DiscoveryBody(PartnerTenant));
+        TheGrantCoreRefusesAfterTheStamp(contact);
+        _h.Identities.BeforePendingInviteClear = c =>
+        {
+            c.InvitedEmailHash = "a-newer-invite";
+            c.Version++;
+        };
+
+        var result = await InviteAndGrant(organizations: Organizations(handler));
+
+        PendingInvite(result).Should().Be("superseded");
+        var row = _h.Identities.Contacts[contact];
+        row.InvitedEmailHash.Should().Be("a-newer-invite", "a newer invite is never cleared");
+        row.InvitedOn.Should().NotBeNull();
+    }
+
+    /// <summary>
+    /// MUST NOT FIRE: a portal-account invite's email is sent before the grant, so a grant refused afterwards keeps that
+    /// invite pending and reports nothing to retract.
+    /// </summary>
+    [Fact]
+    public async Task InviteAndGrant_PortalAccount_AGrantRefusedAfterTheSentEmail_KeepsThePendingInvite()
+    {
+        var contact = UnboundContact();
+        _ciam.Failure = ObjectConflictOnProxyAddresses();
+        TheGrantCoreRefusesAfterTheStamp(contact);
+
+        var result = await InviteAndGrant();
+
+        result.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(409);
+        PendingInvite(result).Should().BeNull();
+        _h.Identities.Contacts[contact].InviteCodeHash.Should().NotBeNull("its email went out");
+        _h.Identities.Writes.Should().NotContain(w => w.Op == "invite-retract");
+    }
+
+    /// <summary>
+    /// MUST NOT FIRE: a portal-account invite sends no work-account notice (it keeps its own CIAM email), on both routes.
+    /// </summary>
+    [Fact]
+    public async Task APortalAccountInvite_SendsNoWorkAccountNotice()
+    {
+        UnboundContact();
+        var handler = new InviteOrganizationTestKit.DiscoveryHandler()
+            .Answer(HttpStatusCode.BadRequest, InviteOrganizationTestKit.TenantNotFoundBody);
+
+        (await InviteRoute(organizations: Organizations(handler))).Should().BeOfType<Ok<InviteExternalUserResponse>>();
+
+        _h.Emails.Onboarding.Should().ContainSingle("the portal-account invite keeps its CIAM email");
+        _h.Emails.Sent.Should().BeEmpty("no work-account notice");
+    }
+
+    // ── Slice B3: a host without Ciam:* ─────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// MUST NOT FIRE: a work-account invite creates no CIAM account, so a host without <c>Ciam:*</c> still sends it on both
+    /// routes: the stamp is written and the notice sent.
+    /// </summary>
+    [Fact]
+    public async Task NoCiamHost_AWorkAccountInvite_IsSent_OnBothRoutes()
+    {
+        var contact = UnboundContact();
+        var handler = new InviteOrganizationTestKit.DiscoveryHandler()
+            .Answer(HttpStatusCode.OK, InviteOrganizationTestKit.DiscoveryBody(PartnerTenant))
+            .Answer(HttpStatusCode.OK, InviteOrganizationTestKit.DiscoveryBody(PartnerTenant));
+        var organizations = Organizations(handler);
+        var noCiam = NoCiamProvisioner();
+
+        (await InviteRoute(organizations: organizations, ciam: noCiam)).Should().BeOfType<Ok<InviteExternalUserResponse>>()
+            .Which.Value!.Status.Should().Be(InviteExternalUserEndpoint.WorkAccountInvitedStatus);
+        (await InviteAndGrant(organizations: organizations, ciam: noCiam)).Should().BeOfType<Ok<InviteAndGrantResponse>>()
+            .Which.Value!.OnboardStatus.Should().Be(InviteExternalUserEndpoint.WorkAccountInvitedStatus);
+
+        _h.Identities.Contacts[contact].InvitedTenantId.Should().Be(PartnerTenant.ToString("D"));
+        _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle();
+        _h.Emails.Sent.Should().HaveCount(2, "one notice per invite");
+    }
+
+    /// <summary>
+    /// MUST FIRE (C5): on a host without <c>Ciam:*</c>, a malformed request is the same 400 as on any host (a blank email, a
+    /// supplied tenant, a supplied SendAsPortalAccount), on both routes, before any organisation lookup, read or write.
+    /// </summary>
+    [Theory]
+    [InlineData("blank-email")]
+    [InlineData("supplied-tenant")]
+    [InlineData("supplied-kind")]
+    public async Task NoCiamHost_AMalformedRequest_Is400_BeforeAnyLookup(string shape)
+    {
+        UnboundContact();
+        var handler = new InviteOrganizationTestKit.DiscoveryHandler();
+        var organizations = Organizations(handler);
+        var noCiam = NoCiamProvisioner();
+        var (email, tenant, kind, field) = shape switch
+        {
+            "blank-email" => ("  ", (string?)null, (bool?)null, "Email"),
+            "supplied-tenant" => (Email, "11111111-aaaa-4aaa-8aaa-111111111111", (bool?)null, "InvitedTenantId"),
+            _ => (Email, (string?)null, (bool?)false, "SendAsPortalAccount"),
+        };
+
+        foreach (var result in new[]
+                 {
+                     await InviteRoute(organizations: organizations, ciam: noCiam, email: email, invitedTenantId: tenant,
+                         sendAsPortalAccount: kind),
+                     await InviteAndGrant(organizations: organizations, ciam: noCiam, email: email, invitedTenantId: tenant,
+                         sendAsPortalAccount: kind),
+                 })
+        {
+            var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
+            problem.StatusCode.Should().Be(400, "the request's shape is validated before the host's CIAM configuration");
+            problem.ProblemDetails.Detail.Should().Contain(field);
+        }
+
+        handler.Requests.Should().BeEmpty("a malformed request looks nothing up");
+        _h.Identities.Writes.Should().BeEmpty();
+        _h.Identities.Reads.Should().BeEmpty();
+        _h.Grants.Rows.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// MUST FIRE: on a host without <c>Ciam:*</c>, a portal-account invite is still refused on both routes with 503
+    /// ciam_not_configured, and nothing is read, written or granted.
+    /// </summary>
+    [Fact]
+    public async Task NoCiamHost_APortalAccountInvite_IsStill503CiamNotConfigured()
+    {
+        var contact = UnboundContact();
+        var handler = new InviteOrganizationTestKit.DiscoveryHandler()
+            .Answer(HttpStatusCode.BadRequest, InviteOrganizationTestKit.TenantNotFoundBody)
+            .Answer(HttpStatusCode.BadRequest, InviteOrganizationTestKit.TenantNotFoundBody);
+        var organizations = Organizations(handler);
+        var noCiam = NoCiamProvisioner();
+
+        foreach (var result in new[]
+                 {
+                     await InviteRoute(organizations: organizations, ciam: noCiam),
+                     await InviteAndGrant(organizations: organizations, ciam: noCiam),
+                 })
+        {
+            var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
+            problem.StatusCode.Should().Be(503);
+            problem.ProblemDetails.Extensions["reasonCode"].Should().Be(GrantInviteStatus.CiamNotConfiguredReasonCode);
+        }
+
+        _h.Identities.Writes.Should().BeEmpty();
+        _h.Identities.Reads.Should().BeEmpty();
+        _h.Grants.Rows.Should().BeEmpty();
+        _h.Identities.Contacts[contact].InvitedOn.Should().BeNull();
+    }
+
+    /// <summary>
+    /// MUST NOT FIRE: every definite answer that is not a configured customer tenant is a portal-account invite, exactly as
+    /// before: another Entra tenant, a domain no tenant owns (AADSTS90002), the Microsoft account (consumer) tenant, and this
+    /// deployment's CIAM tenant (the last two refused even if a misconfigured list named them). Not found is never an error.
+    /// </summary>
+    [Theory]
+    [InlineData("another-tenant")]
+    [InlineData("not-found")]
+    [InlineData("consumer")]
+    [InlineData("ciam")]
+    public async Task EveryOtherDefiniteAnswer_IsAPortalAccountInvite(string answer)
+    {
+        var contact = UnboundContact();
+        _ciam.Failure = ObjectConflictOnProxyAddresses();
+        var handler = new InviteOrganizationTestKit.DiscoveryHandler();
+        _ = answer switch
+        {
+            "another-tenant" => handler.Answer(HttpStatusCode.OK, InviteOrganizationTestKit.DiscoveryBody(Guid.NewGuid())),
+            "not-found" => handler.Answer(HttpStatusCode.BadRequest, InviteOrganizationTestKit.TenantNotFoundBody),
+            "consumer" => handler.Answer(HttpStatusCode.OK,
+                InviteOrganizationTestKit.DiscoveryBody(InviteOrganizationResolver.ConsumerTenantId)),
+            _ => handler.Answer(HttpStatusCode.OK, InviteOrganizationTestKit.DiscoveryBody(InviteOrganizationTestKit.CiamTenant)),
+        };
+
+        var result = await InviteRoute(organizations: Organizations(handler,
+            PartnerTenant, InviteOrganizationResolver.ConsumerTenantId, InviteOrganizationTestKit.CiamTenant));
+
+        result.Should().BeOfType<Ok<InviteExternalUserResponse>>()
+            .Which.Value!.Status.Should().Be(InviteExternalUserEndpoint.ProvisionedStatus, answer);
+        var row = _h.Identities.Contacts[contact];
+        row.InvitedTenantId.Should().BeNull(answer);
+        row.InviteCodeHash.Should().NotBeNullOrEmpty(answer);
+        _h.Emails.InviteUrls.Should().ContainSingle(answer);
+    }
+
+    /// <summary>
+    /// MUST FIRE: a lookup with no definite answer is a 503 tenant_lookup_unavailable on both routes, whose message offers a
+    /// retry only. Nothing is read about the contact, nothing is written or granted, no account, no email —
+    /// and nothing is cached, so the retry looks up again.
+    /// </summary>
+    [Theory]
+    [InlineData("timeout")]
+    [InlineData("http-500")]
+    [InlineData("http-429")]
+    [InlineData("redirect")]
+    [InlineData("unparsable-200")]
+    [InlineData("issuer-without-tenant")]
+    [InlineData("other-400")]
+    [InlineData("network")]
+    public async Task ALookupWithNoDefiniteAnswer_Is503_AndNothingIsWritten(string fault)
+    {
+        UnboundContact();
+        var handler = new InviteOrganizationTestKit.DiscoveryHandler();
+        for (var i = 0; i < 2; i++)
+        {
+            _ = fault switch
+            {
+                "timeout" => handler.Hang(),
+                "http-500" => handler.Answer(HttpStatusCode.InternalServerError, "{}"),
+                "http-429" => handler.Answer(HttpStatusCode.TooManyRequests, "{}"),
+                "redirect" => handler.Answer(() => new HttpResponseMessage(HttpStatusCode.Found)
+                {
+                    Headers = { Location = new Uri("https://elsewhere.test/") },
+                    Content = new StringContent(string.Empty),
+                }),
+                "unparsable-200" => handler.Answer(HttpStatusCode.OK, "<html>not json</html>"),
+                "issuer-without-tenant" => handler.Answer(HttpStatusCode.OK,
+                    "{\"issuer\":\"https://login.microsoftonline.com/{tenantid}/v2.0\"}"),
+                "other-400" => handler.Answer(HttpStatusCode.BadRequest, "{\"error\":\"invalid_request\",\"error_codes\":[900144]}"),
+                _ => handler.Throw(new HttpRequestException("connection refused")),
+            };
+        }
+
+        var organizations = Organizations(handler);
+        var creates = 0;
+        _ciam.OnCreate = () => creates++;
+
+        foreach (var result in new[] { await InviteRoute(organizations: organizations), await InviteAndGrant(organizations: organizations) })
+        {
+            var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
+            problem.StatusCode.Should().Be(503, fault);
+            problem.ProblemDetails.Extensions["reasonCode"].Should().Be(ContactBindingDecision.InviteTenantLookupUnavailable);
+            problem.ProblemDetails.Detail.Should().Contain("Try again").And.NotContain("portal account",
+                "the only remedy is a retry: the kind of sign-in is never chosen by staff");
+        }
+
+        handler.Requests.Should().HaveCount(2, "a fault is never cached: the second request looks up again");
+        _orgCache.Writes.Should().BeEmpty("a fault is never cached");
+        _h.Identities.Writes.Should().BeEmpty();
+        _h.Identities.Reads.Should().BeEmpty("the lookup runs before the contact is read");
+        _h.Grants.Rows.Should().BeEmpty();
+        creates.Should().Be(0);
+        _h.Emails.InviteUrls.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// An email whose domain is not a host name is a 400 at invite time on both routes; it never reaches the network and
+    /// nothing is read or written.
+    /// </summary>
+    [Theory]
+    [InlineData("partner@")]
+    [InlineData("partner@localhost")]
+    [InlineData("partner@-outside.test")]
+    [InlineData("partner@outside..test")]
+    [InlineData("partner@out side.test")]
+    [InlineData("partner@outside.test/v2.0")]
+    [InlineData("partner@outside.test?x=1")]
+    [InlineData("partner@outside.test#x")]
+    [InlineData("partner@out%2fside.test")]
+    [InlineData("partner@out\\side.test")]
+    [InlineData("a@b@outside.test")]
+    public async Task AMalformedDomain_Is400_AndNeverReachesTheNetwork(string email)
+    {
+        var handler = new InviteOrganizationTestKit.DiscoveryHandler();
+        var organizations = Organizations(handler);
+
+        foreach (var result in new[]
+                 {
+                     await InviteRoute(organizations: organizations, email: email),
+                     await InviteAndGrant(organizations: organizations, email: email),
+                 })
+        {
+            result.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(400, email);
+        }
+
+        handler.Requests.Should().BeEmpty();
+        _h.Identities.Writes.Should().BeEmpty();
+        _h.Identities.Reads.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// MUST FIRE: the request never chooses the kind of sign-in. Any supplied SendAsPortalAccount, false included, is a 400 on
+    /// both routes, before any read, write or lookup.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ASuppliedSendAsPortalAccount_IsRefused400_WhateverItsValue(bool value)
+    {
+        UnboundContact();
+        var handler = new InviteOrganizationTestKit.DiscoveryHandler();
+
+        foreach (var result in new[]
+                 {
+                     await InviteRoute(organizations: Organizations(handler), sendAsPortalAccount: value),
+                     await InviteAndGrant(organizations: Organizations(handler), sendAsPortalAccount: value),
+                 })
+        {
+            var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
+            problem.StatusCode.Should().Be(400);
+            problem.ProblemDetails.Detail.Should().Contain("SendAsPortalAccount");
+        }
+
+        handler.Requests.Should().BeEmpty("a refused request looks nothing up");
+        _h.Identities.Writes.Should().BeEmpty("a refused request writes nothing");
+        _h.Identities.Reads.Should().BeEmpty("a refused request reads nothing");
+        _h.Grants.Rows.Should().BeEmpty();
+    }
+
+    /// <summary>MUST NOT FIRE: a deployment with no customer tenants never calls the discovery endpoint; the invite is as before.</summary>
+    [Fact]
+    public async Task NoCustomerTenantsConfigured_MakesNoLookup_AndInvitesAPortalAccount()
+    {
+        var contact = UnboundContact();
+        _ciam.Failure = ObjectConflictOnProxyAddresses();
+        var handler = new InviteOrganizationTestKit.DiscoveryHandler();
+        var organizations = InviteOrganizationTestKit.Resolver(handler, _orgCache, Array.Empty<Guid>());
+
+        (await InviteRoute(organizations: organizations)).Should().BeOfType<Ok<InviteExternalUserResponse>>();
+        (await InviteAndGrant(organizations: organizations)).Should().BeOfType<Ok<InviteAndGrantResponse>>();
+
+        handler.Requests.Should().BeEmpty();
+        _h.Identities.Contacts[contact].InvitedTenantId.Should().BeNull();
+    }
+
+    /// <summary>
+    /// MUST FIRE: a work-account invite to a contact that already carries a portal-account sign-in is refused 409
+    /// contact_already_bound on both routes; nothing is written or granted.
+    /// </summary>
+    [Fact]
+    public async Task AWorkAccountInvite_ToAContactBoundToAPortalAccount_IsRefused409()
+    {
+        var contact = Guid.NewGuid();
+        _h.Identities.AddContact(contact, email: Email, oid: Guid.NewGuid().ToString("D"), plane: IdentityPlaneMarker.External);
+        var handler = new InviteOrganizationTestKit.DiscoveryHandler()
+            .Answer(HttpStatusCode.OK, InviteOrganizationTestKit.DiscoveryBody(PartnerTenant))
+            .Answer(HttpStatusCode.OK, InviteOrganizationTestKit.DiscoveryBody(PartnerTenant));
+        var organizations = Organizations(handler);
+        _orgCache.Fault = new InvalidOperationException("cache down"); // a cache outage is skipped, never a fault
+
+        foreach (var result in new[] { await InviteRoute(organizations: organizations), await InviteAndGrant(organizations: organizations) })
+        {
+            var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
+            problem.StatusCode.Should().Be(409);
+            problem.ProblemDetails.Extensions["reasonCode"].Should().Be(ContactBindingDecision.InviteContactAlreadyBound);
+            problem.ProblemDetails.Title.Should().Be("Identity collision", "C5: every refusal other than a removal keeps its title");
+        }
+
+        _h.Emails.Sent.Should().BeEmpty("a bound contact gets no work-account notice");
+        _h.Identities.Writes.Should().BeEmpty();
+        _h.Grants.Rows.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Slice C, MUST FIRE: an ordinary invite (/invite and /invite-and-grant) to a contact whose external access an
+    /// administrator removed is refused with the endpoint's existing refusal shape (409 + reason code), active or inactive,
+    /// and an unreadable marker refuses too. Nothing is created, written, granted or sent. MUST NOT FIRE: the unmarked twin
+    /// is invited as before.
+    /// </summary>
+    /// <remarks>Slice C2c: an unproven marker is not a removal: 503 <c>contact_removed_state_unavailable</c> (retryable),
+    /// with nothing written either.</remarks>
+    [Theory]
+    [InlineData("active-removed", 409, ContactBindingDecision.InviteContactRemovedAdminReinstate, "External access removed")]
+    [InlineData("inactive-removed", 409, ContactBindingDecision.InviteContactRemovedAdminReinstate, "External access removed")]
+    [InlineData("active-unreadable", 503, ContactBindingDecision.InviteContactRemovedStateUnavailable, null)]
+    public async Task AnInvite_ToARemovedContact_IsRefused_SetMarker409_UnprovenMarker503(
+        string how, int status, string code, string? title)
+    {
+        var contact = Guid.NewGuid();
+        _h.Identities.AddContact(contact, email: Email, stateCode: how.StartsWith("inactive", StringComparison.Ordinal) ? 1 : 0);
+        if (how.EndsWith("removed", StringComparison.Ordinal))
+        {
+            _h.Identities.Contacts[contact].RemovedOn = DateTimeOffset.UtcNow;
+        }
+        else
+        {
+            _h.Identities.RemovedMarkerProof = ColumnReadProofOutcome.Unproven;
+        }
+
+        foreach (var result in new[] { await InviteRoute(), await InviteAndGrant() })
+        {
+            var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
+            problem.StatusCode.Should().Be(status);
+            problem.ProblemDetails.Extensions["reasonCode"].Should().Be(code);
+            // C5: the removed refusal is titled by its reason code, never "Identity collision".
+            problem.ProblemDetails.Title.Should().NotBe("Identity collision");
+            if (title is not null)
+            {
+                problem.ProblemDetails.Title.Should().Be(title);
+            }
+        }
+
+        _h.Identities.Contacts.Should().ContainSingle("no contact is created around a removal");
+        _h.Identities.Writes.Should().BeEmpty();
+        _h.Grants.Rows.Should().BeEmpty();
+        _ciam.Created.Should().BeEmpty();
+        _h.Emails.InviteUrls.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// C5, MUST FIRE: an invite (/invite and /invite-and-grant) to an unbound active contact is refused 409 while an inactive
+    /// contact for the same email is one whose external access an administrator removed, and a read of the inactive contacts
+    /// that fails is the retryable 503. Nothing is created, written, granted or sent. MUST NOT FIRE: an unmarked inactive
+    /// contact for the email does not stop the invite.
+    /// </summary>
+    [Theory]
+    [InlineData("removed", 409, ContactBindingDecision.InviteContactRemovedAdminReinstate)]
+    [InlineData("read-fails", 503, ContactBindingDecision.InviteContactLookupFailed)]
+    [InlineData("unmarked", 200, null)]
+    public async Task AnInvite_ToAnUnboundContact_WhoseEmailARemovedInactiveContactCarries_IsRefused(
+        string how, int status, string? code)
+    {
+        var active = UnboundContact();
+        var inactive = Guid.NewGuid();
+        _h.Identities.AddContact(inactive, email: Email, stateCode: 1);
+        if (how == "removed")
+            _h.Identities.Contacts[inactive].RemovedOn = DateTimeOffset.UtcNow;
+        _h.Identities.FailInactiveEmailLookup = how == "read-fails";
+
+        if (status == 200)
+        {
+            (await InviteRoute()).Should().BeOfType<Ok<InviteExternalUserResponse>>();
+            _h.Identities.Contacts[active].InvitedOn.Should().NotBeNull();
+            return;
+        }
+
+        foreach (var result in new[] { await InviteRoute(), await InviteAndGrant() })
+        {
+            var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
+            problem.StatusCode.Should().Be(status);
+            problem.ProblemDetails.Extensions["reasonCode"].Should().Be(code);
+        }
+
+        _h.Identities.Contacts[active].InvitedOn.Should().BeNull();
+        _h.Identities.Contacts[active].Oid.Should().BeNull();
+        _h.Identities.Writes.Should().BeEmpty();
+        _h.Grants.Rows.Should().BeEmpty();
+        _ciam.Created.Should().BeEmpty();
+        _h.Emails.InviteUrls.Should().BeEmpty();
+    }
+
+    /// <summary>Slice C, MUST NOT FIRE: the unmarked twin of the test above is invited exactly as before.</summary>
+    [Fact]
+    public async Task AnInvite_ToAnUnmarkedContact_IsNotRefused()
+    {
+        UnboundContact();
+
+        (await InviteRoute()).Should().BeOfType<Ok<InviteExternalUserResponse>>();
+    }
+
+    /// <summary>MUST FIRE: a work-account invite to a contact bound on a workforce plane is refused with the existing code.</summary>
+    [Fact]
+    public async Task AWorkAccountInvite_ToAWorkforceBoundContact_IsRefused_WithTheExistingCode()
+    {
+        var contact = Guid.NewGuid();
+        _h.Identities.AddContact(contact, email: Email, oid: Guid.NewGuid().ToString("D"), plane: IdentityPlaneMarker.Workforce);
+        var handler = new InviteOrganizationTestKit.DiscoveryHandler()
+            .Answer(HttpStatusCode.OK, InviteOrganizationTestKit.DiscoveryBody(PartnerTenant));
+
+        var problem = (await InviteRoute(organizations: Organizations(handler))).Should().BeOfType<ProblemHttpResult>().Subject;
+
+        problem.StatusCode.Should().Be(409);
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(ContactBindingDecision.InviteWorkforceBoundContact);
+        _h.Identities.Contacts[contact].InvitedEmailHash.Should().BeNull();
+    }
+
+    /// <summary>A work-account invite whose stamp cannot land is the retryable 503 invite_marker_not_written; nothing else.</summary>
+    [Fact]
+    public async Task AWorkAccountInvite_WhoseStampDoesNotLand_Is503_AndCreatesNoAccount()
+    {
+        UnboundContact();
+        _h.Identities.MarkerWriteFailure = StoreWriteStatus.Failed;
+        var creates = 0;
+        _ciam.OnCreate = () => creates++;
+
+        var outcome = await Invite(workAccountTenantId: PartnerTenant);
+
+        outcome.Failure!.ReasonCode.Should().Be(ContactBindingDecision.InviteMarkerNotWritten);
+        creates.Should().Be(0);
+        _h.Emails.InviteUrls.Should().BeEmpty();
+    }
+
+    // ── Slice C2c: /invite-and-grant to a person who already has an account ──────────────────────────────────────────
+
+    /// <summary>
+    /// MUST FIRE: /invite-and-grant on a contact already bound to a portal account writes the grant and sends no invite
+    /// email: emailSent is false (never null) with the already-has-account code, alongside the grant result and its
+    /// notification status (the grant email is the person's notice).
+    /// </summary>
+    [Fact]
+    public async Task InviteAndGrant_ToAPersonWhoAlreadyHasAnAccount_IsGranted_WithEmailSentFalse_AndItsCode()
+    {
+        var contact = Guid.NewGuid();
+        _h.Identities.AddContact(contact, email: Email, oid: Guid.NewGuid().ToString("D"), plane: IdentityPlaneMarker.External);
+
+        var body = (await InviteAndGrant()).Should().BeOfType<Ok<InviteAndGrantResponse>>().Subject.Value!;
+
+        body.OnboardStatus.Should().Be(InviteExternalUserEndpoint.AlreadyProvisionedStatus);
+        body.EmailSent.Should().Be(false, "emailSent is never null for a person who already has an account");
+        body.EmailErrorCode.Should().Be(ContactBindingDecision.InviteContactAlreadyHasAccount);
+        body.GrantedAccessLevel.Should().Be(ExternalAccessLevel.Collaborate);
+        body.NotificationFailed.Should().BeFalse("the grant email, the person's notice, was sent");
+        _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle();
+        _h.Emails.InviteUrls.Should().BeEmpty("no invite email");
+        _ciam.Created.Should().BeEmpty();
+    }
+
+    /// <summary>MUST NOT FIRE: an unbound contact on /invite-and-grant is invited as before (no already-has-account code).</summary>
+    [Fact]
+    public async Task InviteAndGrant_ToAnUnboundContact_IsInvitedAsBefore()
+    {
+        UnboundContact();
+
+        var body = (await InviteAndGrant()).Should().BeOfType<Ok<InviteAndGrantResponse>>().Subject.Value!;
+
+        (body.EmailSent, body.EmailErrorCode).Should().Be(((bool?)true, (string?)null));
+    }
+
+    // ── C5: a failure after the marker leaves no pending invite ──────────────────────────────────────────────────────
+
+    private void ShouldHaveNoPendingInvite(Guid contact)
+    {
+        var row = _h.Identities.Contacts[contact];
+        (row.InvitedOn, row.InviteCodeHash, row.InvitedEmailHash, row.InvitedTenantId)
+            .Should().Be(((DateTimeOffset?)null, (string?)null, (string?)null, (string?)null),
+                "a pending invite exists only if its email went out");
+    }
+
+    /// <summary>
+    /// MUST FIRE: the CIAM create throws after the marker landed (a Graph fault that is not "the account already exists", or
+    /// a cancellation): the invite this call wrote is retracted and the failure propagates unchanged. The next invite then
+    /// writes a new one and sends it.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Invite_TheCiamCreateThrowsAfterTheMarker_TheInviteIsRetracted(bool cancelled)
+    {
+        var contact = UnboundContact();
+        _ciam.Failure = cancelled
+            ? new OperationCanceledException("the request was cancelled")
+            : GraphError(503, "ServiceUnavailable", "The service is temporarily unavailable.");
+
+        var act = () => Invite();
+
+        if (cancelled)
+            await act.Should().ThrowAsync<OperationCanceledException>();
+        else
+            await act.Should().ThrowAsync<ODataError>();
+        ShouldHaveNoPendingInvite(contact);
+        _h.Emails.InviteUrls.Should().BeEmpty();
+
+        _ciam.Failure = null;
+        (await Invite()).Status.Should().Be(InviteExternalUserEndpoint.ProvisionedStatus);
+        _h.Emails.Onboarding.Should().ContainSingle("the next invite writes a new code and sends it");
+    }
+
+    /// <summary>MUST FIRE: the oid bind throws after the marker landed: the invite this call wrote is retracted.</summary>
+    [Fact]
+    public async Task Invite_TheBindThrowsAfterTheMarker_TheInviteIsRetracted()
+    {
+        var contact = UnboundContact();
+        _h.Identities.BeforeBind = _ => throw new HttpRequestException("the bind could not be written");
+
+        var act = () => Invite();
+
+        await act.Should().ThrowAsync<HttpRequestException>();
+        ShouldHaveNoPendingInvite(contact);
+        _h.Emails.InviteUrls.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// MUST NOT FIRE: a newer invite written while this one was failing is never cleared; only this call's own stamp is.
+    /// </summary>
+    [Fact]
+    public async Task Invite_TheCiamCreateThrows_AfterANewerInviteWasWritten_TheNewerInviteSurvives()
+    {
+        var contact = UnboundContact();
+        _ciam.OnCreate = () =>
+        {
+            var row = _h.Identities.Contacts[contact];
+            row.InvitedEmailHash = "v1:newer-invite";
+            row.Version += 1000;
+        };
+        _ciam.Failure = GraphError(503, "ServiceUnavailable", "The service is temporarily unavailable.");
+
+        var act = () => Invite();
+
+        await act.Should().ThrowAsync<ODataError>();
+        _h.Identities.Contacts[contact].InvitedEmailHash.Should().Be("v1:newer-invite");
+    }
+
+    // ── C5: an invite in progress never binds a person removed meanwhile ─────────────────────────────────────────────
+
+    /// <summary>
+    /// MUST FIRE: an administrator removes the person while the invite is in progress (between the marker and the bind):
+    /// the bind's re-read refuses the removed contact, nothing is bound, no email is sent, the invite this call wrote is
+    /// retracted, and /invite answers the removed refusal (409). A marker whose empty read is not proven is the retryable
+    /// 503 instead.
+    /// </summary>
+    [Theory]
+    [InlineData(true, 409, nameof(ContactBindingDecision.InviteContactRemovedAdminReinstate))]
+    [InlineData(false, 503, nameof(ContactBindingDecision.InviteContactRemovedStateUnavailable))]
+    public async Task Invite_ThePersonIsRemovedWhileTheInviteIsInProgress_IsNotBound_AndNothingIsSent(
+        bool markerSet, int status, string reasonCodeName)
+    {
+        var contact = UnboundContact();
+        _ciam.OnCreate = () =>
+        {
+            var row = _h.Identities.Contacts[contact];
+            if (markerSet)
+                row.RemovedOn = IdentityBindingTestKit.Now;
+            else
+                _h.Identities.RemovedMarkerProof = ColumnReadProofOutcome.Unproven;
+            row.Version += 1000;
+        };
+        var expectedCode = (string)typeof(ContactBindingDecision).GetField(reasonCodeName)!.GetValue(null)!;
+
+        var result = await InviteRoute();
+
+        var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
+        problem.StatusCode.Should().Be(status);
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(expectedCode);
+        var row = _h.Identities.Contacts[contact];
+        (row.Oid, row.Plane).Should().Be(((string?)null, (int?)null), "a removed person is never bound by the invite");
+        _h.Emails.Onboarding.Should().BeEmpty();
+        _h.Emails.InviteUrls.Should().BeEmpty();
+        (row.InvitedOn, row.InviteCodeHash, row.InvitedEmailHash).Should().Be(
+            ((DateTimeOffset?)null, (string?)null, (string?)null), "the invite this call wrote is retracted");
+    }
+
+    /// <summary>MUST NOT FIRE: a person not removed meanwhile is bound and emailed as before.</summary>
+    [Fact]
+    public async Task Invite_ThePersonIsNotRemoved_IsBoundAndEmailed()
+    {
+        var contact = UnboundContact();
+
+        (await InviteRoute()).Should().BeOfType<Ok<InviteExternalUserResponse>>();
+
+        _h.Identities.Contacts[contact].Oid.Should().NotBeNull();
+        _h.Emails.Onboarding.Should().ContainSingle();
+    }
+
     // ── Doubles ─────────────────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>A caller who holds every right on the record, so the grant ceiling passes.</summary>
@@ -868,6 +1903,46 @@ public class ExistingCiamAccountInviteTests
 
     /// <summary>The CIAM provisioner seam: answers a fresh oid, or throws <see cref="Failure"/> translated as the real service
     /// translates it. No Graph, no Key Vault.</summary>
+    // ── Slice C2b: /invite to a person who already has an account ───────────────────────────────────────────────
+
+    /// <summary>
+    /// MUST FIRE: /invite on a contact already bound to a portal account sends nothing and writes nothing. emailSent is false
+    /// (never null) with its own code, the staff text, and the portal sign-in link the work-account notice carries (no code).
+    /// </summary>
+    [Fact]
+    public async Task InviteRoute_ToAPersonWhoAlreadyHasAnAccount_SendsNothing_WritesNothing_AndSaysSo()
+    {
+        var contact = Guid.NewGuid();
+        _h.Identities.AddContact(contact, email: Email, oid: Guid.NewGuid().ToString("D"), plane: IdentityPlaneMarker.External);
+
+        var body = (await InviteRoute()).Should().BeOfType<Ok<InviteExternalUserResponse>>().Subject.Value!;
+
+        body.Status.Should().Be(InviteExternalUserEndpoint.AlreadyProvisionedStatus);
+        body.EmailSent.Should().Be(false, "emailSent is never null on /invite");
+        body.EmailErrorCode.Should().Be(ContactBindingDecision.InviteContactAlreadyHasAccount);
+        body.StaffMessage.Should().Contain("already has an account");
+        body.SignInUrl.Should().Be($"{PortalUrl}/?customer={CustomerKey}");
+        body.SignInUrl.Should().NotContain("invite=", "the sign-in link carries no code");
+        _h.Identities.Writes.Should().BeEmpty("nothing is written");
+        _h.Emails.InviteUrls.Should().BeEmpty("no invite email");
+        _h.Emails.Sent.Should().BeEmpty("no notice");
+        _ciam.Created.Should().BeEmpty();
+    }
+
+    /// <summary>MUST NOT FIRE: an unbound contact is invited as before (no already-has-account answer).</summary>
+    [Fact]
+    public async Task InviteRoute_ToAnUnboundContact_IsInvitedAsBefore()
+    {
+        UnboundContact();
+
+        var body = (await InviteRoute()).Should().BeOfType<Ok<InviteExternalUserResponse>>().Subject.Value!;
+
+        body.EmailSent.Should().Be(true);
+        body.EmailErrorCode.Should().BeNull();
+        body.StaffMessage.Should().BeNull();
+        body.SignInUrl.Should().BeNull();
+    }
+
     private sealed class StubCiamProvisioner : CiamUserProvisioningService
     {
         public StubCiamProvisioner()

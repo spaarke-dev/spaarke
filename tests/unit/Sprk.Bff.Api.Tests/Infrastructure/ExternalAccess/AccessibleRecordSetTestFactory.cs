@@ -62,6 +62,10 @@ internal static class AccessibleRecordSetTestFactory
             .Setup(s => s.GetSystemUserAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Guid id, CancellationToken _) =>
                 new SystemUserLookup(LookupStatus.Read, new SystemUserIdentityRow(id, null, null, null, null, null)));
+        // Slice C: the composition's live removed-marker read. No contact here was removed.
+        store
+            .Setup(s => s.ReadRemovedMarkerAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RemovedMarkerRead.NotRemoved);
         return store.Object;
     }
 

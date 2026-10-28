@@ -189,7 +189,10 @@ public class DataverseWebApiClient : IDisposable
             HttpMethod.Post, DataverseIdentifier.RequireTableName(entitySetName, nameof(entitySetName)), cancellationToken);
         request.Content = JsonContent.Create(entity);
         var response = await _httpClient.SendAsync(request, cancellationToken);
-        response.EnsureSuccessStatusCode();
+        if (!response.IsSuccessStatusCode)
+        {
+            throw await CreateFailureAsync(response, cancellationToken);
+        }
 
         // Extract ID from OData-EntityId header
         var entityIdHeader = response.Headers.GetValues("OData-EntityId").FirstOrDefault();
@@ -200,6 +203,75 @@ public class DataverseWebApiClient : IDisposable
         }
 
         throw new InvalidOperationException("Failed to extract entity ID from response");
+    }
+
+    /// <summary>
+    /// The <see cref="Exception.Data"/> key under which a failed <see cref="CreateAsync"/> carries the Dataverse
+    /// <c>error.code</c> of the response (for example <c>0x80040299</c>). The value is the CODE ONLY, never the message.
+    /// </summary>
+    public const string ErrorCodeDataKey = "DataverseErrorCode";
+
+    /// <summary>
+    /// The Dataverse <c>error.code</c> a failed <see cref="CreateAsync"/> recorded on <paramref name="ex"/> (or on an inner
+    /// exception), or null when there is none. Pure.
+    /// </summary>
+    public static string? ErrorCodeOf(Exception? ex)
+    {
+        for (var e = ex; e is not null; e = e.InnerException)
+        {
+            if (e.Data[ErrorCodeDataKey] is string code && code.Length > 0)
+            {
+                return code;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The exception <see cref="CreateAsync"/> throws for a non-success response: what <c>EnsureSuccessStatusCode</c> throws
+    /// (an <see cref="HttpRequestException"/> with the same message and the status code), plus the Dataverse <c>error.code</c>
+    /// in <see cref="Exception.Data"/>[<see cref="ErrorCodeDataKey"/>]. ONLY the code is read from the body: the message
+    /// is never read, kept or logged, because a duplicate-key message carries the values that collided.
+    /// </summary>
+    private static async Task<HttpRequestException> CreateFailureAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    {
+        string? code = null;
+        try
+        {
+            await using var body = await response.Content.ReadAsStreamAsync(cancellationToken);
+            using var doc = await JsonDocument.ParseAsync(body, cancellationToken: cancellationToken);
+            if (doc.RootElement.ValueKind == JsonValueKind.Object
+                && doc.RootElement.TryGetProperty("error", out var error)
+                && error.ValueKind == JsonValueKind.Object
+                && error.TryGetProperty("code", out var codeElement)
+                && codeElement.ValueKind == JsonValueKind.String)
+            {
+                var raw = codeElement.GetString();
+                // Only a Dataverse HRESULT-style code is kept (0x + 8 hex digits): arbitrary text never reaches Data.
+                if (raw is { Length: 10 } && raw.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+                    && raw.AsSpan(2).IndexOfAnyExcept("0123456789abcdefABCDEF") < 0)
+                {
+                    code = raw;
+                }
+            }
+        }
+        catch (Exception ex) when (ex is JsonException or HttpRequestException or IOException or InvalidOperationException
+                                       or NotSupportedException)
+        {
+            // An unreadable or non-JSON body leaves the code null; the status code still identifies the failure.
+        }
+
+        var failure = new HttpRequestException(
+            $"Response status code does not indicate success: {(int)response.StatusCode} ({response.ReasonPhrase}).",
+            inner: null,
+            statusCode: response.StatusCode);
+        if (code is not null)
+        {
+            failure.Data[ErrorCodeDataKey] = code;
+        }
+
+        return failure;
     }
 
     public virtual async Task UpdateAsync(string entitySetName, Guid id, object entity, CancellationToken cancellationToken = default)

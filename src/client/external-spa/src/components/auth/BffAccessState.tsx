@@ -88,9 +88,19 @@ export interface BffAccessStateProps {
   teamsHost?: boolean;
   /** Denied-state sentence naming what the caller cannot do (defaults to a generic one). */
   deniedMessage?: string;
+  /**
+   * Denied-state title (defaults to "Access denied"). For a refusal that is not a permission problem, so the title and the
+   * sentence agree - e.g. "Sign-in is not set up yet" above the organization's "sign-in is not configured" message.
+   */
+  deniedTitle?: string;
 }
 
-export const BffAccessState: React.FC<BffAccessStateProps> = ({ failure, teamsHost: teamsHostProp, deniedMessage }) => {
+export const BffAccessState: React.FC<BffAccessStateProps> = ({
+  failure,
+  teamsHost: teamsHostProp,
+  deniedMessage,
+  deniedTitle,
+}) => {
   const { instance } = useMsal();
   const hostFromContext = useTeamsHost();
   // An explicit prop wins; otherwise the host App provided; otherwise the browser (redirect) behaviour.
@@ -142,7 +152,7 @@ export const BffAccessState: React.FC<BffAccessStateProps> = ({ failure, teamsHo
   return (
     <MessageBar intent="warning" data-testid="bff-access-denied">
       <MessageBarBody>
-        <MessageBarTitle>Access denied</MessageBarTitle>
+        <MessageBarTitle>{deniedTitle ?? 'Access denied'}</MessageBarTitle>
         {deniedMessage ??
           'You do not have permission to do this. If you believe this is an error, please contact the record team.'}
       </MessageBarBody>

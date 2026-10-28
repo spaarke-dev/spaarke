@@ -57,6 +57,9 @@ module.exports = {
     // or pulling the React-bearing components barrel.
     '^@spaarke/communication-components/logic/connections/provenance$':
       '<rootDir>/../shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts',
+    // Task 133: the Invoice view's REAL shared attachment marking (ebilling 118a, #2342), same exact alias as webpack.
+    '^@spaarke/communication-components/invoice-attachment-marking$':
+      '<rootDir>/../shared/Spaarke.Communication.Components/src/components/InvoiceAttachmentMarking/index.ts',
     // Task 096: the Email tab renders the REAL shared compose engine through its `SendEmailPane` wrapper (same
     // exact alias as webpack.config.js) — tests exercise the shared component itself, never a copy. Its bare
     // imports (react, Fluent, lexical) resolve from this package's node_modules via `modulePaths` below.

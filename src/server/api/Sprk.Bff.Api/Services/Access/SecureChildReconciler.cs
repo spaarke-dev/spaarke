@@ -28,6 +28,7 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Documents;
 
@@ -198,6 +199,20 @@ public sealed record SecureChildReconcileReport(
     /// pass. A document the pass leaves ordinary is not listed: its derived container is not the record's.
     /// </summary>
     public IReadOnlyList<Guid> IsolatedDocumentIds { get; init; } = [];
+
+    /// <summary>
+    /// UAC task 194: the owner writes an ordinary-parent-move pass ATTEMPTED (<see cref="SecureChildReconciler.ReconcileOrdinaryParentMoveAsync"/>,
+    /// Apply only) — what the job counts against its per-run cap. Zero for every other pass.
+    /// </summary>
+    public int OrdinaryWritesAttempted { get; init; }
+
+    /// <summary>
+    /// UAC task 194 F1-a: the documents of an ordinary-parent-move pass's walk whose FILE the job may hand to its re-file pass
+    /// (any owner): every <c>sprk_document</c> of the walk except one owned in isolation or in the Secure Record business unit,
+    /// one the rule gives the Secure team (it is also filed under a Secure record, so its container answer is a Secure
+    /// record's), and one whose owner could not be decided or the rule refused. Empty for every other pass.
+    /// </summary>
+    public IReadOnlyList<Guid> OrdinaryHandOffDocumentIds { get; init; } = Array.Empty<Guid>();
 
     /// <summary>Rows re-owned by this pass.</summary>
     public int ChildrenReowned => Tables.Sum(t => t.Changed);
@@ -522,6 +537,139 @@ public sealed class SecureChildReconciler
         return await pass.RunAsync().ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// UAC task 194 (#2339, owner round 128 item 3; rule I-6) — the ORDINARY-PARENT-MOVE pass: an ordinary (not secure)
+    /// project, matter or work assignment was reassigned to another owner (an MDA Assign, a direct write), so every child
+    /// filed under it that a business unit's DEFAULT team owns is re-owned to the team <see cref="IRecordOwnershipResolver"/>
+    /// answers now (the primary parent's business unit's default team). Called by <see cref="SecureChildReconciliationJob"/>'s
+    /// recent-changes pass for the ordinary roots modified since its watermark.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>The same engine.</b> The same descendant walk (lineage lookups, FR-26 stamps, every further hop), the same
+    /// resolver input per row (<c>ContextFor</c>) and the same fixpoint rounds, so a grandchild is decided again after the
+    /// child it rests on moves (report-only: against the planned owner). Each move is a conditional re-own through the
+    /// guarded entry point's own member (<see cref="ReownOrdinaryRowCoreAsync"/>: If-Match on the version read, the previous
+    /// owner logged first, evicted, read back).</para>
+    /// <para><b>Never isolation.</b> A row owned by the Secure Record owner team or by ANY team in the Secure Record business
+    /// unit (or whose own business unit is that one) is never decided or written here; a row the rule gives the Secure team
+    /// is left to the secure pass (reported). Nothing is ever moved INTO or OUT OF isolation by this pass, and the write
+    /// re-checks both sides against the Secure Record business unit, fresh. A root that is secure, isolated, or whose flag
+    /// cannot be read is <see cref="SecureChildReconcileStatus.NotApplicable"/>.</para>
+    /// <para><b>Reported, not moved.</b> A user-owned row, and a row owned by a team that is not a business unit's default
+    /// team, whose rule answer is in another business unit (I-6 interim: a create outside the product keeps its creator); a
+    /// refusal of the rule (<see cref="SecureChildRowOutcome.Refused"/>). The grant rows and the platform-cascade rows of
+    /// the root are not this pass's.</para>
+    /// <para><b>Service requests (F4-b).</b> A <c>sprk_servicerequest</c> is an ordinary root here too (it carries no
+    /// <c>sprk_issecure</c> and is never secure; one owned in the Secure Record business unit is still left alone). Its walk
+    /// also follows each row's service-request lookup (<see cref="OrdinaryOnlyServiceRequestLookups"/>); the secure pass's
+    /// walk never does, and the secure pass still refuses a service request as its root.</para>
+    /// <para><b>Capped.</b> At most <paramref name="maxWrites"/> owner writes (Apply only); a row past the cap is
+    /// <see cref="SecureChildRowOutcome.Failed"/> ("carried"), so the pass is Incomplete and the job carries the root.</para>
+    /// <para>A re-owned document's FILE follows by the job's existing re-file pass (#2159, <see cref="RelocationPurpose.Refile"/>):
+    /// the re-own changes the row's <c>modifiedon</c>, which puts it in that pass's window in the same run.</para>
+    /// </remarks>
+    public async Task<SecureChildReconcileReport> ReconcileOrdinaryParentMoveAsync(
+        string rootLogicalName, Guid rootId, SecureChildReconcileMode mode, int maxWrites, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(rootLogicalName);
+        ArgumentOutOfRangeException.ThrowIfNegative(maxWrites);
+        var rootTable = rootLogicalName.Trim().ToLowerInvariant();
+        // F4-b: a service request is an ordinary root too (it can never be secure: it carries no sprk_issecure).
+        var serviceRequest = string.Equals(rootTable, ServiceRequestTable, StringComparison.Ordinal);
+        if (!SecureChildLineage.IsRoot(rootTable) && !serviceRequest)
+            throw new ArgumentOutOfRangeException(nameof(rootLogicalName), rootLogicalName, "Not a core-record table.");
+
+        Guid secureTeamId;
+        Guid? secureBu;
+        Entity? root;
+        try
+        {
+            var team = await SecureChildShareSynchronizer.ResolveSecureOwnerTeamAsync(_dataverse, _configuration, ct)
+                .ConfigureAwait(false);
+            if (team.Refusal is { } refusal)
+                return SecureChildReconcileReport.Ended(SecureChildReconcileStatus.Failed, mode, rootTable, rootId, refusal);
+            // No Secure Record owner team: no row is isolated, and the ordinary rule still holds (Guid.Empty owns nothing).
+            secureTeamId = team.TeamId ?? Guid.Empty;
+
+            var bu = await SecureChildShareSynchronizer.ResolveSecureBusinessUnitAsync(_dataverse, _configuration, ct)
+                .ConfigureAwait(false);
+            if (bu.Ambiguous)
+                return SecureChildReconcileReport.Ended(SecureChildReconcileStatus.Failed, mode, rootTable, rootId,
+                    "more than one business unit carries the Secure Record name, so whether a team is in it cannot be told");
+            secureBu = bu.Id;
+
+            var query = new QueryExpression(rootTable)
+            {
+                ColumnSet = serviceRequest
+                    ? new ColumnSet(OwningTeamColumn, OwningUserColumn, OwningBusinessUnitColumn)
+                    : new ColumnSet(OwningTeamColumn, OwningUserColumn, OwningBusinessUnitColumn, IsSecureColumn),
+                TopCount = 1,
+                NoLock = true,
+            };
+            query.Criteria.AddCondition(rootTable + "id", ConditionOperator.Equal, rootId);
+            root = (await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
+            if (root is null)
+                return SecureChildReconcileReport.Ended(SecureChildReconcileStatus.Failed, mode, rootTable, rootId,
+                    "the record does not exist");
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex, "[SECURE-CHILD-RECONCILE] ordinary move {Table} {RootId}: the record or the Secure Record " +
+                "owner team or business unit could not be read; nothing was decided.", rootTable, rootId);
+            return SecureChildReconcileReport.Ended(SecureChildReconcileStatus.Failed, mode, rootTable, rootId,
+                "the record or the Secure Record owner team or business unit could not be read");
+        }
+
+        // A secure record's children are the secure pass's alone. An EMPTY flag fails closed (task 150): read as secure.
+        // A service request has no flag; one owned in the Secure Record business unit is still left alone.
+        var rootTeam = root.GetAttributeValue<EntityReference>(OwningTeamColumn)?.Id;
+        var rootBu = root.GetAttributeValue<EntityReference>(OwningBusinessUnitColumn)?.Id;
+        if (!serviceRequest && root.GetAttributeValue<bool?>(IsSecureColumn) != false
+            || rootTeam is { } owningTeam && owningTeam == secureTeamId
+            || secureBu is { } secure && rootBu == secure)
+        {
+            return SecureChildReconcileReport.Ended(SecureChildReconcileStatus.NotApplicable, mode, rootTable, rootId,
+                "the record is secure, isolated, or its secure flag cannot be read: its children are the secure pass's");
+        }
+
+        var pass = new Pass(this, mode, new RecordOwnershipParent(rootTable, rootId), rootIsolated: false, unsecuring: false,
+            mayRelease: false, secureTeamId, ct, new OrdinaryMove(secureBu, maxWrites));
+        try
+        {
+            await pass.LoadDescendantsAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex, "[SECURE-CHILD-RECONCILE] ordinary move {Table} {RootId}: its related records could not be " +
+                "read; nothing was written.", rootTable, rootId);
+            return SecureChildReconcileReport.Ended(SecureChildReconcileStatus.Failed, mode, rootTable, rootId,
+                "the record's related records could not be read");
+        }
+
+        return await pass.RunAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>UAC task 194: the detail of a row the ordinary-parent-move pass did not move because its write cap was spent.</summary>
+    internal const string OrdinaryMoveCapDetail =
+        "the per-run cap on ordinary parent moves was reached; it is carried to the next run";
+
+    /// <summary>UAC task 194: the ordinary-parent-move pass's settings — the Secure Record business unit, and its write cap.</summary>
+    private sealed record OrdinaryMove(Guid? SecureBusinessUnit, int MaxWrites);
+
+    private const string ServiceRequestTable = "sprk_servicerequest";
+
+    /// <summary>
+    /// UAC task 194 F4-b: the lookups that file a row of <paramref name="table"/> under a service request — the solution's
+    /// 1:N relationships from <c>sprk_servicerequest</c> (<see cref="ExternalDataService.ServiceRequestRelations"/>, the one
+    /// declaration, which <c>RecordOwnershipResolver.FilingParentOf</c> reads too). Walked by the ORDINARY-parent-move pass
+    /// only: a service request is deliberately not in the secure family (<see cref="SecureChildLineage"/> remarks), so the
+    /// secure pass's walk never follows them.
+    /// </summary>
+    internal static IEnumerable<KeyValuePair<string, string>> OrdinaryOnlyServiceRequestLookups(string table) =>
+        ExternalDataService.ServiceRequestRelations
+            .Where(r => string.Equals(r.EntityLogicalName, table, StringComparison.OrdinalIgnoreCase))
+            .Select(r => new KeyValuePair<string, string>(r.LookupAttribute, ServiceRequestTable));
+
     /// <summary>How many times the child pass after a re-file runs before it reports (every pass is idempotent).</summary>
     internal const int RefileChildPassAttempts = 2;
 
@@ -568,10 +716,20 @@ public sealed class SecureChildReconciler
     /// <param name="teamId">The ordinary team to own it (not <see cref="Guid.Empty"/>).</param>
     /// <param name="ct">Cancellation.</param>
     /// <exception cref="ArgumentException">Another table, or an empty id or team.</exception>
-    public async Task<OrdinaryRowReownResult> ReownOrdinaryRowAsync(string table, Guid id, Guid teamId, CancellationToken ct)
+    public Task<OrdinaryRowReownResult> ReownOrdinaryRowAsync(string table, Guid id, Guid teamId, CancellationToken ct) =>
+        ReownOrdinaryRowCoreAsync(table, id, teamId, anyLineageChild: false, ct);
+
+    /// <summary>
+    /// The guarded conditional re-own behind <see cref="ReownOrdinaryRowAsync"/> (UAC task 183) — every guard and the write in
+    /// one member. UAC task 194 (#2339): the ordinary-parent-move pass (<see cref="ReconcileOrdinaryParentMoveAsync"/>) re-owns
+    /// a row of ANY lineage child table through it (<paramref name="anyLineageChild"/>), so its moves take exactly the same
+    /// Secure refusals, user-owned refusal and If-Match write. The public entry point keeps its two-table contract.
+    /// </summary>
+    private async Task<OrdinaryRowReownResult> ReownOrdinaryRowCoreAsync(
+        string? table, Guid id, Guid teamId, bool anyLineageChild, CancellationToken ct)
     {
         var name = table?.Trim().ToLowerInvariant();
-        if (name is null || !OrdinaryReownTables.Contains(name))
+        if (name is null || !(OrdinaryReownTables.Contains(name) || anyLineageChild && SecureChildLineage.IsChild(name)))
             throw new ArgumentException("Only a Decision Record or a Signal is re-owned here.", nameof(table));
         if (id == Guid.Empty)
             throw new ArgumentException("The row id is empty.", nameof(id));
@@ -1275,10 +1433,20 @@ public sealed class SecureChildReconciler
         // shared cache: it lives exactly as long as one decision over one root's rows.
         private readonly Dictionary<Guid, string?> _grantOwnerAnswers = new();
 
+        // UAC task 194: set for the ordinary-parent-move pass (ReconcileOrdinaryParentMoveAsync) only; null for every
+        // secure transition, whose behaviour it never changes. Its team facts (business unit, default) are read once per team.
+        private readonly OrdinaryMove? _ordinary;
+        private readonly Dictionary<Guid, (Guid? BusinessUnit, bool IsDefault)> _teamFacts = new();
+        private int _ordinaryWritesAttempted;
+
+        // UAC task 194 F1-a: each document's latest ordinary decision — whether its file may be handed to the re-file pass.
+        private readonly Dictionary<Guid, bool> _documentHandOff = new();
+
         public Pass(
             SecureChildReconciler owner, SecureChildReconcileMode mode, RecordOwnershipParent root, bool rootIsolated,
-            bool unsecuring, bool mayRelease, Guid secureTeamId, CancellationToken ct)
+            bool unsecuring, bool mayRelease, Guid secureTeamId, CancellationToken ct, OrdinaryMove? ordinary = null)
         {
+            _ordinary = ordinary;
             _owner = owner;
             _mode = mode;
             _root = root;
@@ -1326,7 +1494,11 @@ public sealed class SecureChildReconciler
 
                 foreach (var table in SecureChildLineage.Children.Values.OrderBy(t => t.LogicalName, StringComparer.Ordinal))
                 {
-                    var pairs = table.Lookups
+                    // F4-b: the ordinary pass also follows a row's service-request lookup; the secure walk never does.
+                    var lookups = _ordinary is null
+                        ? table.Lookups
+                        : table.Lookups.Concat(OrdinaryOnlyServiceRequestLookups(table.LogicalName));
+                    var pairs = lookups
                         .Where(l => idsByTable.ContainsKey(l.Value))
                         .SelectMany(l => idsByTable[l.Value].Select(id => (Column: l.Key, Id: id)))
                         .ToArray();
@@ -1354,7 +1526,10 @@ public sealed class SecureChildReconciler
                 frontier = next;
             }
 
-            await LoadGrantRowsAsync().ConfigureAwait(false);
+            // UAC task 194: a grant row is not a lineage child and follows its root only across the isolation boundary here;
+            // the ordinary-parent-move pass leaves it (a known limit, notes/task-194-ordinary-parent-move.md).
+            if (_ordinary is null)
+                await LoadGrantRowsAsync().ConfigureAwait(false);
             await LoadThreadsOutsidePassAsync().ConfigureAwait(false);
         }
 
@@ -1504,7 +1679,8 @@ public sealed class SecureChildReconciler
         {
             // 1. The rows the root's own Assign cascades to: the rule's owner for a child of the root (owner round 13 item 1).
             //    Only a root has them (a pass below a re-filed child row has none).
-            if (_anchorIsRoot)
+            //    UAC task 194: not in the ordinary-parent-move pass — the root's own Assign already cascaded them.
+            if (_anchorIsRoot && _ordinary is null)
                 await PlaceCascadeRowsAsync().ConfigureAwait(false);
 
             // 2. Every descendant, decided by the rule against the owners its parents have NOW (report-only: would have) —
@@ -1558,23 +1734,43 @@ public sealed class SecureChildReconciler
                 bool Open((string Table, Guid Id) k) => !failures.ContainsKey(k);
                 var ins = keys.Where(k => Open(k) && decisions[k].Move == RowMove.In).ToHashSet();
                 var outs = keys.Where(k => Open(k) && decisions[k].Move == RowMove.Out).ToList();
-                if (ins.Count == 0 && outs.Count == 0)
+                // UAC task 194: ordinary-to-ordinary moves — proposed only by the ordinary-parent-move pass, never with an
+                // In or Out (that pass decides no isolation move), so a secure pass's rounds are unchanged.
+                var ordinaries = keys.Where(k => Open(k) && decisions[k].Move == RowMove.Ordinary).ToList();
+                if (ins.Count == 0 && outs.Count == 0 && ordinaries.Count == 0)
                     break;
 
                 if (round > maxRounds)
                 {
-                    foreach (var k in ins.Concat(outs))
+                    foreach (var k in ins.Concat(outs).Concat(ordinaries))
                         failures[k] = "its owner did not settle within this pass; it is left as it is for the next pass";
                     break;
                 }
 
                 var certainOuts = outs.Where(k => !ancestors[k].Overlaps(ins)).ToList();
-                var batch = certainOuts.Count > 0 ? certainOuts : ins.Count > 0 ? keys.Where(ins.Contains).ToList() : outs;
+                var batch = certainOuts.Count > 0 ? certainOuts
+                    : ins.Count > 0 ? keys.Where(ins.Contains).ToList()
+                    : outs.Count > 0 ? outs
+                    : ordinaries;
 
                 foreach (var key in batch)
                 {
                     var decision = decisions[key];
                     var target = decision.Target!.Value;
+                    if (decision.Move == RowMove.Ordinary)
+                    {
+                        if (await MoveOrdinaryAsync(key, target, current[key]).ConfigureAwait(false) is { } refused)
+                        {
+                            failures[key] = refused;
+                            continue;
+                        }
+
+                        current[key] = DataversePrincipalRef.Team(target);
+                        decisions[key] = decision with { Move = RowMove.Stay };
+                        written.Add(key);
+                        continue;
+                    }
+
                     if (restored.Contains(key))
                     {
                         // Already put back once in this pass and asked to move again: it does not settle — left as it is.
@@ -1746,7 +1942,9 @@ public sealed class SecureChildReconciler
                     SecureChildRowOutcome.NeedsF3 => NeedsF3,
                     _ => Failed,
                 });
-                if (d.Outcome is not (SecureChildRowOutcome.AlreadyCorrect or SecureChildRowOutcome.Untouched))
+                // UAC task 194: an untouched row WITH a detail is one the ordinary-parent-move pass reports and does not move
+                // (user-owned, a non-default owner team, a Secure answer); a secure pass never gives an untouched row one.
+                if (d.Outcome is not (SecureChildRowOutcome.AlreadyCorrect or SecureChildRowOutcome.Untouched) || d.Detail is not null)
                     _changes.Add(new(row.LogicalName, row.Id, d.Previous, d.Target, d.Outcome, d.Detail));
             }
 
@@ -1779,6 +1977,8 @@ public sealed class SecureChildReconciler
                 status, _mode, _root.EntityLogicalName, _root.RecordId, _rootIsolated, tables, _changes, shares,
                 mirrorRevoked, mirrorIncomplete, null)
             {
+                OrdinaryWritesAttempted = _ordinaryWritesAttempted,
+                OrdinaryHandOffDocumentIds = _documentHandOff.Where(d => d.Value).Select(d => d.Key).OrderBy(id => id).ToList(),
                 IsolatedDocumentIds = ordered
                     .Where(r => string.Equals(r.LogicalName, DocumentTable, StringComparison.OrdinalIgnoreCase)
                                 && IsIsolated(current[(r.LogicalName, r.Id)]))
@@ -1890,6 +2090,9 @@ public sealed class SecureChildReconciler
                 return new(RowMove.None, SecureChildRowOutcome.Failed, null, threadFault);
             }
 
+            if (_ordinary is { } ordinary)
+                return await DecideOrdinaryRowAsync(row, current, ordinary).ConfigureAwait(false);
+
             RecordOwnerResolution resolution;
             try
             {
@@ -1957,7 +2160,7 @@ public sealed class SecureChildReconciler
                 return new(SecureChildRowOutcome.Failed, start, decision.Target, "its move was not made in this pass", false);
             }
 
-            return new(decision.Kind, start, decision.Target, null, false);
+            return new(decision.Kind, start, decision.Target, decision.Detail, false);
         }
 
         private bool IsIsolated(DataversePrincipalRef? owner) =>
@@ -1977,6 +2180,178 @@ public sealed class SecureChildReconciler
 
             /// <summary>Out of the Secure Record owner team, to the team the rule gives it.</summary>
             Out,
+
+            /// <summary>
+            /// UAC task 194: from one business unit's default team to another's — the ordinary-parent-move pass only, never
+            /// across the isolation boundary.
+            /// </summary>
+            Ordinary,
+        }
+
+        /// <summary>
+        /// UAC task 194 — the ordinary-parent-move pass's decision for one row against the owner it has NOW (report-only: would
+        /// have). It proposes <see cref="RowMove.Ordinary"/> only for a row owned by a business unit's DEFAULT team that is not
+        /// in the Secure Record business unit, whose rule answer is another default team that is not in it either. A row owned
+        /// in the Secure Record business unit is never decided (untouched, unreported: the secure pass owns it); a row the
+        /// rule gives the Secure team is reported and left to the secure pass; a user-owned row, or one owned by a team that is
+        /// not a business unit's default team, is reported when its answer is in another business unit, and never moved.
+        /// </summary>
+        private async Task<RowDecision> DecideOrdinaryRowAsync(Entity row, DataversePrincipalRef? current, OrdinaryMove ordinary)
+        {
+            var decision = await DecideOrdinaryRowCoreAsync(row, current, ordinary).ConfigureAwait(false);
+            if (string.Equals(row.LogicalName, DocumentTable, StringComparison.OrdinalIgnoreCase))
+                _documentHandOff[row.Id] = MayHandOffFile(decision, ordinary);
+            return decision;
+        }
+
+        /// <summary>
+        /// F1-a: whether a document's file may go to the re-file pass — never one held in isolation or in the Secure Record
+        /// business unit (decided Stay with no rule answer), never one the rule gives the Secure team (its container answer
+        /// is a Secure record's), never one whose owner could not be decided or the rule refused. The relocator's own
+        /// refusals still hold for every file handed on.
+        /// </summary>
+        private bool MayHandOffFile(RowDecision decision, OrdinaryMove ordinary)
+        {
+            if (decision.Kind is SecureChildRowOutcome.Failed or SecureChildRowOutcome.Refused)
+                return false;
+            if (decision.Move == RowMove.Stay && decision.Resolution is null)
+                return false;
+            return decision.Resolution?.OwningTeamId is not { } target
+                   || target != _secureTeamId
+                   && !(ordinary.SecureBusinessUnit is { } secureBu
+                        && _teamFacts.TryGetValue(target, out var facts) && facts.BusinessUnit == secureBu);
+        }
+
+        private async Task<RowDecision> DecideOrdinaryRowCoreAsync(Entity row, DataversePrincipalRef? current, OrdinaryMove ordinary)
+        {
+            var table = row.LogicalName;
+            var secureBu = ordinary.SecureBusinessUnit;
+            var rowBu = row.GetAttributeValue<EntityReference>(OwningBusinessUnitColumn)?.Id;
+            if (IsIsolated(current) || secureBu is { } securedRow && rowBu == securedRow)
+                return new(RowMove.Stay, SecureChildRowOutcome.Untouched, null, null);
+            if (current is null)
+                return new(RowMove.None, SecureChildRowOutcome.Failed, null, "its owner could not be read");
+
+            (Guid? BusinessUnit, bool IsDefault)? owningTeam = null;
+            RecordOwnerResolution resolution;
+            Guid? targetBu;
+            try
+            {
+                if (current is { Kind: DataversePrincipalKind.Team } team)
+                {
+                    owningTeam = await TeamFactsAsync(team.Id).ConfigureAwait(false);
+                    if (owningTeam.Value.BusinessUnit is null)
+                        return new(RowMove.None, SecureChildRowOutcome.Failed, null,
+                            $"its owning team {team.Id:D} does not exist or has no business unit");
+                    if (secureBu is { } securedTeam && owningTeam.Value.BusinessUnit == securedTeam)
+                        return new(RowMove.Stay, SecureChildRowOutcome.Untouched, null, null);
+                }
+
+                resolution = await _owner._ownership.ResolveOwnerAsync(ContextFor(row), _ct).ConfigureAwait(false);
+                if (resolution.IsRefused)
+                {
+                    Log.LogWarning("[SECURE-CHILD-RECONCILE] ordinary move {Table} {Id}: the ownership rule refused ({Code}: " +
+                        "{Reason}); it is left as it is.", table, row.Id, resolution.RefusalCode, resolution.Reason);
+                    return new(RowMove.None, SecureChildRowOutcome.Refused, null, $"{resolution.RefusalCode}: {resolution.Reason}");
+                }
+
+                if (!resolution.IsOwned)
+                    return new(RowMove.None, SecureChildRowOutcome.Untouched, null, null); // names no parent the rule reads
+
+                targetBu = (await TeamFactsAsync(resolution.OwningTeamId!.Value).ConfigureAwait(false)).BusinessUnit;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !_ct.IsCancellationRequested)
+            {
+                Log.LogWarning(ex, "[SECURE-CHILD-RECONCILE] ordinary move {Table} {Id}: its owner could not be decided (a read " +
+                    "failed); it is left as it is.", table, row.Id);
+                return new(RowMove.None, SecureChildRowOutcome.Failed, null, "its owner could not be decided");
+            }
+
+            var target = resolution.OwningTeamId!.Value;
+            if (target == _secureTeamId || secureBu is { } securedTarget && targetBu == securedTarget)
+            {
+                return new(RowMove.Stay, SecureChildRowOutcome.Untouched, resolution,
+                    "the rule gives it the Secure Record owner team: only the secure pass moves a row into isolation");
+            }
+
+            if (current == DataversePrincipalRef.Team(target))
+                return new(RowMove.Stay, SecureChildRowOutcome.AlreadyCorrect, resolution, null);
+            if (targetBu is null)
+            {
+                return new(RowMove.None, SecureChildRowOutcome.Failed, null,
+                    $"the team the rule gives it ({target:D}) does not exist or has no business unit");
+            }
+
+            if (current.Value.Kind != DataversePrincipalKind.Team)
+            {
+                return new(RowMove.Stay, SecureChildRowOutcome.Untouched, resolution, rowBu == targetBu
+                    ? null
+                    : "owned by a user, and the rule gives it a team in another business unit: reported, not moved (I-6 " +
+                      "interim — a row created outside the product keeps its creator)");
+            }
+
+            if (!owningTeam!.Value.IsDefault)
+            {
+                return new(RowMove.Stay, SecureChildRowOutcome.Untouched, resolution, owningTeam.Value.BusinessUnit == targetBu
+                    ? null
+                    : "owned by a team that is not a business unit's default team, and the rule gives it a team in another " +
+                      "business unit: reported, not moved");
+            }
+
+            return new(RowMove.Ordinary, SecureChildRowOutcome.Untouched, resolution, null);
+        }
+
+        /// <summary>A team's business unit (<c>null</c> when it does not exist or names none) and whether it is a default team.</summary>
+        private async Task<(Guid? BusinessUnit, bool IsDefault)> TeamFactsAsync(Guid teamId)
+        {
+            if (_teamFacts.TryGetValue(teamId, out var known))
+                return known;
+            var query = new QueryExpression("team") { ColumnSet = new ColumnSet("businessunitid", "isdefault"), TopCount = 1, NoLock = true };
+            query.Criteria.AddCondition("teamid", ConditionOperator.Equal, teamId);
+            var team = (await _owner._dataverse.RetrieveMultipleAsync(query, _ct).ConfigureAwait(false)).Entities.FirstOrDefault();
+            var bu = team?.GetAttributeValue<EntityReference>("businessunitid")?.Id is { } id && id != Guid.Empty ? id : (Guid?)null;
+            var facts = (bu, team?.GetAttributeValue<bool?>("isdefault") == true);
+            _teamFacts[teamId] = facts;
+            return facts;
+        }
+
+        /// <summary>
+        /// UAC task 194 — one ordinary move: written through the guarded conditional re-own
+        /// (<see cref="SecureChildReconciler.ReownOrdinaryRowCoreAsync"/>, which logs the previous owner first, refuses a Secure
+        /// owner or target fresh, writes If-Match, evicts and reads back), or, report-only, planned. <c>null</c> on success,
+        /// else why the row was not moved (it is then reported failed and the root carried). Past the pass's write cap
+        /// nothing is written.
+        /// </summary>
+        private async Task<string?> MoveOrdinaryAsync((string Table, Guid Id) key, Guid target, DataversePrincipalRef? previous)
+        {
+            if (_mode == SecureChildReconcileMode.ReportOnly)
+            {
+                Log.LogInformation(
+                    "[SECURE-CHILD-RECONCILE] plan: {Table} {Id} owner {Previous} -> team {Target} (ordinary parent move, report-only).",
+                    key.Table, key.Id, Describe(previous), target);
+                _planned[PlannedKey(key)] = target;
+                return null;
+            }
+
+            if (_ordinaryWritesAttempted >= _ordinary!.MaxWrites)
+                return OrdinaryMoveCapDetail;
+            _ordinaryWritesAttempted++;
+
+            Log.LogInformation("[SECURE-CHILD-RECONCILE] reassign: {Table} {Id} owner {Previous} -> team {Target} (ordinary parent move).",
+                key.Table, key.Id, Describe(previous), target);
+            OrdinaryRowReownResult result;
+            try
+            {
+                result = await _owner.ReownOrdinaryRowCoreAsync(key.Table, key.Id, target, anyLineageChild: true, _ct)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !_ct.IsCancellationRequested)
+            {
+                Log.LogError(ex, "[SECURE-CHILD-RECONCILE] ordinary move {Table} {Id} faulted; it is left as it is.", key.Table, key.Id);
+                return "its ordinary move faulted";
+            }
+
+            return result.IsOwnedByTeam ? null : $"{result.Outcome}: {result.Detail}";
         }
 
         /// <summary>One round's decision for one row: the move, and the resolution the rule answered (when it gave an owner).</summary>

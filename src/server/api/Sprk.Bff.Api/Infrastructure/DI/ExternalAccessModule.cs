@@ -125,10 +125,13 @@ public static class ExternalAccessModule
         // their own requests and adds legal-front-door to their default modules. Read by the entitlement resolver
         // below and by the "service-requests" descriptor. ValidateOnStart so an invalid value fails startup rather
         // than the first external module read: ANY non-boolean value, INCLUDING EMPTY (""), fails startup - remove
-        // the setting to turn it off. No custom validator (a bound bool has no other invalid value).
+        // the setting to turn it off. The validator registered below (ExternalAccessOptionsValidator) never fails startup: it
+        // only logs a warning when CustomerBusinessUnitId is unset; a bound bool has no other invalid value.
         services.AddOptions<ExternalAccessOptions>()
             .BindConfiguration(ExternalAccessOptions.SectionName)
             .ValidateOnStart();
+        // ISS-005 (#1673 review K3): warns at startup, once, when CustomerBusinessUnitId is unset (never fails startup).
+        services.AddSingleton<IValidateOptions<ExternalAccessOptions>, ExternalAccessOptionsValidator>();
 
         // Module entitlement resolver (task 072; defaults by principal kind, r3 task 011 / A8) — resolves the
         // Tier-1 module-code set the external-spa widget registry gates tabs on (/api/v1/external/me/entitlements):
@@ -202,8 +205,36 @@ public static class ExternalAccessModule
         // The one binding writer, shared by the workforce resolver, the CIAM strategy, the invite endpoints and
         // the reconciliation job. Concrete (ADR-010). Its factory builds a binder over ANOTHER environment for
         // RegistrationDataverseService (a new systemuser's link goes to the environment it was created in).
-        services.AddSingleton<ContactIdentityBinder>();
+        // ISS-005 (#1673): this is the binder over THIS BFF's own environment, so its contacts are owned by the default
+        // owner team of ExternalAccess:CustomerBusinessUnitId (or not created). The owner policy is a required constructor
+        // argument, hence the explicit factory: the container cannot build a ContactCreateOwner on its own, and nothing but
+        // ContactIdentityBinderFactory may choose "no owner" (ContactCreateOwnerPolicyGuardTests).
+        services.AddSingleton(sp => new ContactIdentityBinder(
+            sp.GetRequiredService<IContactIdentityStore>(),
+            sp.GetRequiredService<IOptionsMonitor<WorkforceIdentityOptions>>(),
+            sp.GetRequiredService<TimeProvider>(),
+            sp.GetRequiredService<ILogger<ContactIdentityBinder>>(),
+            ContactCreateOwner.FromCustomerBusinessUnit(
+                sp.GetRequiredService<IOptionsMonitor<ExternalAccessOptions>>(),
+                sp.GetRequiredService<IConfiguration>())));
         services.AddSingleton<ContactIdentityBinderFactory>();
+
+        // Slice B2: the invite's organisation lookup (a work-account invite for a configured customer tenant, else a portal
+        // account). Its named client calls one public, unauthenticated host: no auth handler, no default headers, no cookies,
+        // no redirects followed, 5-second timeout. Singleton: its dependencies are singletons (IHttpClientFactory,
+        // ITenantCache, the options monitor, configuration).
+        services.AddHttpClient(InviteOrganizationResolver.HttpClientName, client =>
+            {
+                client.Timeout = InviteOrganizationResolver.DefaultLookupTimeout;
+            })
+            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+            {
+                AllowAutoRedirect = false,
+                UseCookies = false,
+                Credentials = null,
+                PreAuthenticate = false,
+            });
+        services.AddSingleton<InviteOrganizationResolver>();
 
         // Workforce-token → principal resolver (ADR-028 Amendment A2 · teams-app-r1 FR-04, task 020).
         // Composes the existing AAD-oid→systemuser conversion (MembershipEndpoints.ResolveSystemUserIdAsync)
