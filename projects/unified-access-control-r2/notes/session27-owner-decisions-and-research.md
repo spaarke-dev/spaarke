@@ -2086,3 +2086,7 @@ Related review (field-mapping #2399): Core User Global Read + AppendTo on `sprk_
 
 ## Round 138 (2026-10-28): child shares follow the record after an Unsecure
 When a now-ordinary record (formerly Secure) has a person removed, what they got on its documents, events, to-dos and filed work assignments and projects through that share is removed too. Child access tracks the record's share list. Design: `notes/task-196-unsecure-keeps-access.md`.
+
+**Round 136 follow-up (2026-10-28, #2399):** the owner chose shape A for the AI search index catalog: re-own the 11 `sprk_aisearchindex` rows into the customer BU, with no Global role change. (B), the server applying the index itself, goes to field-mapping as a task.
+
+UAC design for the owning principal: a memberless "Spaarke Customer Configuration Owners" team per customer top BU, with a "Customer Configuration Owner" role (Read at Basic on the declared config tables only). It is built as a second declared team in the 194b R4b machinery (R4b-3b). Rejected: the BU default team (it hands the role to every member) and an app user (ties ownership to one credential).
