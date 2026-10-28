@@ -995,6 +995,11 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     /// The readability proof's profile legs: the field permissions granting Read on <paramref name="columns"/> of
     /// <paramref name="table"/> through a profile of <paramref name="user"/> — its own (<c>systemuserprofiles</c>) or, with
     /// <paramref name="throughTeam"/>, a team's it is a member of (<c>teamprofiles</c> to <c>teammembership</c>).
+    /// The read has no condition on the table: Dataverse refuses a FetchXML condition on <c>fieldpermission.entityname</c>
+    /// given a table's logical name (observed live: the read answers 400). It selects <c>entityname</c> instead, and
+    /// <see cref="ParseGrantedColumns"/> checks the table in code. One page of
+    /// <see cref="SdkColumnReadPermissionSource.FieldPermissionPageSize"/> rows is asked for explicitly (<c>count</c>), so a
+    /// fuller answer is recognised as possibly cut short.
     /// </summary>
     public static string BuildFieldPermissionReadPath(Guid user, string table, IEnumerable<string> columns, bool throughTeam)
     {
@@ -1008,11 +1013,47 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
             : "<link-entity name=\"systemuserprofiles\" from=\"fieldsecurityprofileid\" to=\"fieldsecurityprofileid\" link-type=\"inner\">"
               + member + "</link-entity>";
         return "fieldpermissions?fetchXml=" + Uri.EscapeDataString(
-            "<fetch><entity name=\"fieldpermission\"><attribute name=\"attributelogicalname\" /><filter>"
-            + $"<condition attribute=\"entityname\" operator=\"eq\" value=\"{Xml(table)}\" />"
+            $"<fetch count=\"{SdkColumnReadPermissionSource.FieldPermissionPageSize}\"><entity name=\"fieldpermission\">"
+            + "<attribute name=\"attributelogicalname\" /><attribute name=\"entityname\" /><filter>"
             + $"<condition attribute=\"canread\" operator=\"eq\" value=\"{SecuredColumnReadProof.FieldPermissionAllowed}\" />"
             + $"<condition attribute=\"attributelogicalname\" operator=\"in\">{values}</condition>"
             + "</filter>" + link + "</entity></fetch>");
+    }
+
+    /// <summary>
+    /// The columns of <paramref name="table"/> a field-permission read (<see cref="BuildFieldPermissionReadPath"/>) answered.
+    /// Pure. A row counts only when its <c>entityname</c> is a string equal to <paramref name="table"/> (ignoring case); a row
+    /// whose table is missing or not a string never counts (fail closed). This check is what keeps a grant on a same-named
+    /// column of another table (for example <c>sprk_accesspermissiongrant</c>, on both <c>contact</c> and
+    /// <c>sprk_organization</c>) from proving this table's column.
+    /// <para>The answer must be complete: one page. The rows are bounded by the asked columns times the user's profiles, far
+    /// below a page, so an answer without a <c>value</c> array, one that says more rows exist (<c>@odata.nextLink</c> or
+    /// <c>@Microsoft.Dynamics.CRM.morerecords</c>), or one that fills the page throws; the proof is then Faulted, never
+    /// "no grant".</para>
+    /// </summary>
+    internal static IReadOnlyCollection<string> ParseGrantedColumns(JsonElement root, string table)
+    {
+        if (root.ValueKind != JsonValueKind.Object
+            || !root.TryGetProperty("value", out var value) || value.ValueKind != JsonValueKind.Array)
+        {
+            throw new InvalidOperationException("A field-permission read did not answer a value array.");
+        }
+
+        if (root.TryGetProperty("@odata.nextLink", out _)
+            || (root.TryGetProperty("@Microsoft.Dynamics.CRM.morerecords", out var more) && more.ValueKind == JsonValueKind.True)
+            || value.GetArrayLength() >= SdkColumnReadPermissionSource.FieldPermissionPageSize)
+        {
+            throw new InvalidOperationException(
+                "A field-permission read answered more than one page; a partial answer is not taken as an answer.");
+        }
+
+        return value.EnumerateArray()
+            .Where(r => r.ValueKind == JsonValueKind.Object
+                && StringOf(r, "entityname") is { } rowTable && string.Equals(rowTable, table, StringComparison.OrdinalIgnoreCase))
+            .Select(r => StringOf(r, "attributelogicalname"))
+            .Where(c => !string.IsNullOrWhiteSpace(c))
+            .Select(c => c!)
+            .ToArray();
     }
 
     private static string Xml(string value) => System.Security.SecurityElement.Escape(value) ?? string.Empty;
@@ -2171,11 +2212,7 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
         {
             using var doc = await store.ReadProofAsync(BuildFieldPermissionReadPath(user, table, columns, throughTeam), ct)
                 .ConfigureAwait(false);
-            return Values(doc.RootElement)
-                .Select(r => StringOf(r, "attributelogicalname"))
-                .Where(c => !string.IsNullOrWhiteSpace(c))
-                .Select(c => c!)
-                .ToArray();
+            return ParseGrantedColumns(doc.RootElement, table);
         }
     }
 
