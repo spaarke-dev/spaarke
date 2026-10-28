@@ -15,7 +15,7 @@ import '@testing-library/jest-dom';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as React from 'react';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FluentProvider, webDarkTheme, webLightTheme } from '@fluentui/react-components';
 
@@ -83,6 +83,17 @@ const cardNames = (el: HTMLElement) =>
   within(el)
     .getAllByTestId('matter-card')
     .map(c => c.getAttribute('aria-label')?.replace(/, \d+ items?$/, ''));
+/**
+ * A line inside a lane. The lane's card list starts collapsed (task 169, D-195) and user-event fires on `display: none` content, so
+ * a click on a collapsed line would prove nothing: expand the lane first (when its toggle says collapsed) and require the line visible.
+ */
+const openedLine = (name: 'Decide' | 'Do', index: number): HTMLElement => {
+  const toggle = within(lane(name)).getByTestId(`lane-toggle-${name}`);
+  if (toggle.getAttribute('aria-expanded') === 'false') fireEvent.click(toggle);
+  const el = within(lane(name)).getAllByTestId('issue-line')[index];
+  expect(el).toBeVisible();
+  return el;
+};
 const countCard = (el: HTMLElement, label: RegExp) => within(el).getByRole('button', { name: label });
 
 describe('lanes', () => {
@@ -377,7 +388,7 @@ describe('opening the wizard (D-26: in-app, on the list the user is looking at)'
   it('a line opens the wizard with the lane list in the route order', async () => {
     const { launchWizard } = renderWidget();
     await ready();
-    await userEvent.click(within(lane('Do')).getAllByTestId('issue-line')[1]);
+    await userEvent.click(openedLine('Do', 1));
     expect(launchWizard).toHaveBeenCalledTimes(1);
     const request = launchWizard.mock.calls[0][0];
     expect(request.itemId).toBe(D3);
@@ -389,7 +400,7 @@ describe('opening the wizard (D-26: in-app, on the list the user is looking at)'
     const { launchWizard } = renderWidget();
     await ready();
     await userEvent.click(countCard(lane('Do'), /^Coming due/));
-    await userEvent.click(within(lane('Do')).getAllByTestId('issue-line')[0]);
+    await userEvent.click(openedLine('Do', 0));
     expect(launchWizard.mock.calls[0][0].visibleList).toEqual([D3, D2]);
     expect(launchWizard.mock.calls[0][0].itemId).toBe(D3);
   });
@@ -416,14 +427,14 @@ describe('opening the wizard (D-26: in-app, on the list the user is looking at)'
   it('a Not filed line opens with no core record (D-35)', async () => {
     const { launchWizard } = renderWidget();
     await ready();
-    await userEvent.click(within(lane('Do')).getAllByTestId('issue-line')[4]); // Not filed is the last group
+    await userEvent.click(openedLine('Do', 4)); // Not filed is the last group
     expect(launchWizard.mock.calls[0][0]).toMatchObject({ itemId: D5, core: null });
   });
 
   it('gives the wizard an item reader built from the rows it already holds (no second read)', async () => {
     const { launchWizard, service } = renderWidget();
     await ready();
-    await userEvent.click(within(lane('Decide')).getAllByTestId('issue-line')[0]);
+    await userEvent.click(openedLine('Decide', 0));
     const callsBefore = (service.read as jest.Mock).mock.calls.length;
     const item = await launchWizard.mock.calls[0][0].loadItem!(A1);
     expect(item.row.signalId).toBe(A1);
@@ -440,7 +451,7 @@ describe('opening the wizard (D-26: in-app, on the list the user is looking at)'
   it('a Not filed item has no other open items to show', async () => {
     const { launchWizard } = renderWidget();
     await ready();
-    await userEvent.click(within(lane('Do')).getAllByTestId('issue-line')[4]); // Not filed is the last group
+    await userEvent.click(openedLine('Do', 4)); // Not filed is the last group
     const item = await launchWizard.mock.calls[0][0].loadItem!(D5);
     expect(item.core).toBeNull();
     expect(item.otherOpenItems).toEqual([]);
@@ -450,7 +461,7 @@ describe('opening the wizard (D-26: in-app, on the list the user is looking at)'
     const lookup = jest.fn(async () => []);
     const { launchWizard } = renderWidget({ lookup });
     await ready();
-    await userEvent.click(within(lane('Do')).getAllByTestId('issue-line')[0]);
+    await userEvent.click(openedLine('Do', 0));
     expect(launchWizard.mock.calls[0][0].lookup).toBe(lookup);
   });
 
@@ -462,7 +473,7 @@ describe('opening the wizard (D-26: in-app, on the list the user is looking at)'
     const { service } = renderWidget({ launchWizard });
     await ready();
     await waitFor(() => expect(service.read).toHaveBeenCalledTimes(2));
-    await userEvent.click(within(lane('Do')).getAllByTestId('issue-line')[0]);
+    await userEvent.click(openedLine('Do', 0));
     await waitFor(() => expect(service.read).toHaveBeenCalledTimes(4));
     expect(
       (service.read as jest.Mock).mock.calls
@@ -476,7 +487,7 @@ describe('opening the wizard (D-26: in-app, on the list the user is looking at)'
     const { service, launchWizard } = renderWidget();
     await ready();
     await waitFor(() => expect(service.read).toHaveBeenCalledTimes(2));
-    await userEvent.click(within(lane('Do')).getAllByTestId('issue-line')[0]);
+    await userEvent.click(openedLine('Do', 0));
     await waitFor(() => expect(launchWizard).toHaveBeenCalled());
     expect(service.read).toHaveBeenCalledTimes(2);
   });
@@ -485,7 +496,7 @@ describe('opening the wizard (D-26: in-app, on the list the user is looking at)'
     const launchWizard: Launch = jest.fn(async () => ({ opened: false, reason: 'no-host' as const }));
     renderWidget({ launchWizard });
     await ready();
-    await userEvent.click(within(lane('Do')).getAllByTestId('issue-line')[0]);
+    await userEvent.click(openedLine('Do', 0));
     expect(await screen.findByTestId('worklist-notice')).toHaveTextContent(
       'The decision wizard is not available in this view.'
     );
@@ -562,7 +573,7 @@ describe('Closed today, Suppressed and Closed earlier', () => {
     expect(fromClosed.row.status).toBe('Resolved');
 
     // The same Signal launched from the lanes is still the open item ("To decide").
-    await userEvent.click(within(lane('Decide')).getAllByTestId('issue-line')[0]);
+    await userEvent.click(openedLine('Decide', 0));
     const fromLanes = await launchWizard.mock.calls[1][0].loadItem!(C1);
     expect(fromLanes.resolution).toBeNull();
   });
@@ -570,7 +581,7 @@ describe('Closed today, Suppressed and Closed earlier', () => {
   it('a lane line never opens a closed copy, and a disclosure line never opens an open one', async () => {
     const { launchWizard } = renderWidget();
     await ready();
-    await userEvent.click(within(lane('Do')).getAllByTestId('issue-line')[0]);
+    await userEvent.click(openedLine('Do', 0));
     const lanes = launchWizard.mock.calls[0][0].loadItem!;
     await expect(lanes(C2)).rejects.toThrow(/no longer on the list/);
     const today = await open('closedToday');
@@ -729,7 +740,7 @@ describe('loading and failure', () => {
       if (set === 'lanes') throw new Error('The worklist could not be read (503).');
       return real(set);
     });
-    await userEvent.click(within(lane('Do')).getAllByTestId('issue-line')[0]);
+    await userEvent.click(openedLine('Do', 0));
     await screen.findByText('The worklist could not be refreshed. This is the last list that was read.');
     expect(lineIds(lane('Do'))).toEqual([D4, D3, D1, D2, D5]);
   });
@@ -755,7 +766,7 @@ describe('loading and failure', () => {
           }))
         : real(set)
     );
-    await userEvent.click(within(lane('Do')).getAllByTestId('issue-line')[0]);
+    await userEvent.click(openedLine('Do', 0));
     await waitFor(() => expect(lineIds(lane('Do'))).toEqual([D4, D1, D5]));
     expect(within(lane('Do')).queryByTestId('lane-showing-Do')).not.toBeInTheDocument();
   });
@@ -774,7 +785,7 @@ describe('the route is the only source (D-15)', () => {
     expect(data.Decide.map(g => g.items.map(i => i.signalId))).toEqual([[A1, A2], [A3]]);
   });
 
-  it('component sources read no sprk_signal, use no Xrm and no browser storage, and name no table', () => {
+  it('component sources read no sprk_signal, use no Xrm and no browser storage (except useLaneOpen.ts, the sole exemption, outside this list), and name no table', () => {
     const dir = path.join(__dirname, '..');
     const own = fs
       .readdirSync(dir)

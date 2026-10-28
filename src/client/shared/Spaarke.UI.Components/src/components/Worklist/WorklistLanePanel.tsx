@@ -158,7 +158,12 @@ export const WorklistLanePanel: React.FC<WorklistLanePanelProps> = ({
 
       {/* Kept mounted while collapsed (`hidden`): the view model and the start button's list never depend on the DOM.
           The flex class applies only while open: author `display: flex` would override the hidden attribute. */}
-      <div id={regionId} className={open ? styles.region : undefined} hidden={!open} data-testid={`lane-region-${lane}`}>
+      <div
+        id={regionId}
+        className={open ? styles.region : undefined}
+        hidden={!open}
+        data-testid={`lane-region-${lane}`}
+      >
         {filtered && (
           <div className={styles.showing} role="status" data-testid={`lane-showing-${lane}`}>
             <Text size={200} className={styles.muted}>

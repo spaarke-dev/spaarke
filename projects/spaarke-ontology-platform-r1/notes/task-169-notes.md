@@ -36,4 +36,13 @@ Worklist jest: before 8 suites / 245 pass; after 9 suites / 253 pass (245 + 8 ne
 - Existing tests that click an `issue-line` while a lane is still collapsed (e.g. WorklistWidget.test.tsx ~lines 392-395, 425) pass because userEvent ignores `display: none`; they do not prove the line is reachable by a user. Not edited (they do not fail).
 - AI.Widgets has no installed node_modules in the worktree, so its jest was not run (it mocks `@spaarke/ui-components`).
 
-rework: none task 169
+## Fix round 1 (review of bc4a478a72)
+- F3-1: `WorklistWidget.test.tsx` has an `openedLine(lane, index)` helper (toggle the lane when `aria-expanded="false"`, then `expect(line).toBeVisible()`); all 13 lane-line clicks use it (the 11 reported plus the two that already followed a count card). Edited lines: every `userEvent.click(within(lane(..)).getAllByTestId('issue-line')[n])` became `userEvent.click(openedLine(.., n))`.
+- F3-2: `InquiryDispositionPicker.test.tsx` `line()` expands the line's lane (toggle when collapsed) and asserts the line visible; `openPicker` goes through `line()`.
+- F3-3: two tests: an empty Decide lane has no toggle and shows `lane-empty-Decide`; an empty Do lane with an aggregate row has a toggle, `agg` hidden until opened, `lane-empty-Do` ("No other items to do.") always visible.
+- F4-4: a test that `worklist-aggregate-row` and `lane-showing-Do` sit inside the hidden region (not visible collapsed, visible open).
+- F4-5: the source-scan test is retitled to name `useLaneOpen.ts` as the sole storage exemption.
+- Proof (region forced `hidden={true}` always, then reverted): 61 tests fail: InquiryDispositionPicker 40 of 44, WorklistWidget 14 of 48, WorklistLaneCollapse 6 of 11, worklistNarrative 1 of 27 (it clicks "Show all" in a lane). Real code: 256 pass in 9 suites (253 + 3 new).
+- Known limit (accepted, K): a filtered, collapsed lane hides "Show all" (it sits in the region). The filter is still cleared from the metric card (selecting the selected card returns to All).
+
+rework: fix-round-1 task 169

@@ -20,17 +20,17 @@ import { WorklistWidget } from '..';
 import type { WorklistService } from '..';
 import type { DecisionWizardLaunchRequest } from '../../DecisionWizard';
 import { LANE_OPEN_STORAGE_KEY } from '../useLaneOpen';
-import { A1, fakeService } from '../__fixtures__/worklistRouteFixtures';
+import { A1, body, fakeService } from '../__fixtures__/worklistRouteFixtures';
 
 const TODAY = new Date(2026, 9, 9, 10, 30);
 
 type Launch = jest.Mock<Promise<{ opened: boolean }>, [DecisionWizardLaunchRequest]>;
 
-function renderWidget(service: WorklistService = fakeService()) {
+function renderWidget(service: WorklistService = fakeService(), aggregateRow?: React.ReactNode) {
   const launchWizard: Launch = jest.fn(async () => ({ opened: true }));
   const utils = render(
     <FluentProvider theme={webLightTheme}>
-      <WorklistWidget service={service} today={TODAY} launchWizard={launchWizard} />
+      <WorklistWidget service={service} today={TODAY} launchWizard={launchWizard} aggregateRow={aggregateRow} />
     </FluentProvider>
   );
   return { ...utils, launchWizard };
@@ -166,5 +166,51 @@ describe('collapsible card list', () => {
     expect(launchWizard.mock.calls[0][0].itemId).toBe(A1);
     expect(launchWizard.mock.calls[0][0].visibleList.length).toBeGreaterThan(1);
     expect(region('Decide')).not.toBeVisible();
+  });
+
+  it('the aggregate row and the "Showing n of m" line sit inside the collapsed region (D-195)', async () => {
+    renderWidget(fakeService(), <div data-testid="agg">8 emails await a match confirmation</div>);
+    await ready();
+    // Collapsed: the aggregate row is mounted but not visible, and it is inside the Do lane's region.
+    expect(within(region('Do')).getByTestId('worklist-aggregate-row')).not.toBeVisible();
+    await userEvent.click(toggle('Do'));
+    expect(within(region('Do')).getByTestId('worklist-aggregate-row')).toBeVisible();
+
+    // A filter shows "Showing n of m" in the region (and hides the aggregate row); closing the lane hides the line, opening restores it.
+    const card = within(lane('Do')).getByRole('button', { name: /^Coming due/ });
+    await userEvent.click(card);
+    expect(within(region('Do')).getByTestId('lane-showing-Do')).toBeVisible();
+    await userEvent.click(toggle('Do'));
+    expect(within(region('Do')).getByTestId('lane-showing-Do')).not.toBeVisible();
+    await userEvent.click(toggle('Do'));
+    expect(within(region('Do')).getByTestId('lane-showing-Do')).toBeVisible();
+  });
+
+  it('an empty Decide lane has no toggle and shows its empty message', async () => {
+    renderWidget(fakeService({ lanes: body('lanes', [], []) }));
+    await ready();
+    expect(within(lane('Decide')).queryByTestId('lane-toggle-Decide')).not.toBeInTheDocument();
+    expect(within(lane('Decide')).getByTestId('lane-empty-Decide')).toBeVisible();
+    expect(within(lane('Decide')).getByTestId('lane-empty-Decide')).toHaveTextContent('Nothing to decide.');
+    // The empty message is outside the (collapsed) region.
+    expect(region('Decide')).not.toContainElement(screen.getByTestId('lane-empty-Decide'));
+  });
+
+  it('an empty Do lane with an aggregate row has a toggle: the row is hidden until opened, the empty message always shows', async () => {
+    renderWidget(
+      fakeService({ lanes: body('lanes', [], []) }),
+      <div data-testid="agg">8 emails await a match confirmation</div>
+    );
+    await ready();
+    expect(toggle('Do')).toHaveAttribute('aria-expanded', 'false');
+    expect(within(lane('Do')).getByTestId('lane-empty-Do')).toBeVisible();
+    expect(within(lane('Do')).getByTestId('lane-empty-Do')).toHaveTextContent('No other items to do.');
+    expect(screen.getByTestId('agg')).not.toBeVisible();
+
+    await userEvent.click(toggle('Do'));
+    expect(screen.getByTestId('agg')).toBeVisible();
+    expect(within(lane('Do')).getByTestId('lane-empty-Do')).toBeVisible();
+    // Decide has nothing and no aggregate row: still no toggle.
+    expect(within(lane('Decide')).queryByTestId('lane-toggle-Decide')).not.toBeInTheDocument();
   });
 });
