@@ -667,6 +667,27 @@ public sealed class SubmitInvoiceFromEmailOperationTests
         source.Should().Be(new FromEmailAttemptSource(W.EmlId, EmlMimeParts.Sha256Hex(W.PdfBytes)));
     }
 
+    /// <summary>
+    /// Review round 5: a stage that records a source it cannot read is neither "no source" nor this attempt's source: the read fails closed
+    /// (it throws, as a read fault does; the replay answers 503 record_unavailable), never a source the replay would accept.
+    /// </summary>
+    [Theory]
+    [InlineData(StoredFileBlobs.MetadataSourceCommunication, "not-a-guid")]
+    [InlineData(StoredFileBlobs.MetadataSourceVersion, "seven")]
+    [InlineData(StoredFileBlobs.MetadataEmlParts, "1,x")]
+    [InlineData(StoredFileBlobs.MetadataSourceDocument, "not-a-guid")]
+    public async Task ReadAttemptSource_AStageWithAnUnreadableSourceKey_FailsClosed(string key, string value)
+    {
+        var input = Input();
+        var operation = Build();
+        (await operation.SubmitAsync(input, CancellationToken.None)).Outcome.Should().Be(FromEmailSubmitOutcome.Received);
+        StagedOf(input.SubmissionId, StoredFilePurpose.InvoicePdf, StoredFileIds.ForUpload(input.SubmissionId)).Metadata[key] = value;
+
+        var act = () => operation.ReadAttemptSourceAsync(input.SubmissionId, CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
     [Fact]
     public async Task ReadAttemptSource_AnUploadOrNothingStaged_IsNull()
     {

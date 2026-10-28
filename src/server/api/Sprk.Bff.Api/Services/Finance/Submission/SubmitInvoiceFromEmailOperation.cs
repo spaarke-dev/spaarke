@@ -297,12 +297,21 @@ internal class SubmitInvoiceFromEmailOperation : ISubmitInvoiceFromEmail
 
     /// <inheritdoc />
     /// <remarks>From the Invoice part's stage (its blob stays after the commit: the row names the same blob): the <c>.eml</c> it was read out
-    /// of and its SHA-256. An upload's stage records no source, so it answers null.</remarks>
+    /// of and its SHA-256. An upload's stage records no source, so it answers null. A stage whose recorded source cannot be read throws, as
+    /// a read fault does (review round 5: fail closed).</remarks>
     public async Task<FromEmailAttemptSource?> ReadAttemptSourceAsync(Guid submissionId, CancellationToken ct)
     {
         var staged = await _files.ReadStagedSourceAsync(
             StoredFilePurpose.InvoicePdf, new StoredFileParent(StoredFileParentKind.Invoice, InvoiceSubmissionPersister.InvoiceIdFor(submissionId)),
             StoredFileIds.ForUpload(submissionId), ct);
+        if (staged is { SourceUnreadable: true })
+        {
+            // Review round 5: a stage that records a source it cannot read is neither "no source" nor this attempt's source. It fails closed as
+            // a read fault (the replay answers 503 record_unavailable); the job refuses the same stage (document_unavailable), and after that
+            // Failed the same request makes a new attempt.
+            throw new InvalidOperationException($"The staged Invoice part of submission {submissionId} records a source that cannot be read.");
+        }
+
         return staged is { SourceDocumentId: { } eml } ? new FromEmailAttemptSource(eml, staged.Blob.Sha256) : null;
     }
 
