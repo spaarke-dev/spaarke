@@ -2,7 +2,7 @@
 
 > **Last updated**: 2026-10-28 (W7-C: 074 and 075 built, reviewed, fixed; both PRs draft/held)
 > **Phase**: Wave 2 + W7. Done on master: 001–006, 010–016, 018, 037 #2370, 038 #2376, 070 #2367, 073 #2366.
-> **Live on dev: de38296499** (R3, 2026-10-27 19:42Z; rollback deploy/rollback/wwwroot-20261027T193805Z = 3ff2c04bf5). Filed from the owner's click checks: #2352 (push 409 Matter→Project; answered by UAC 195 pair edge), #2353 (WA autonumber, owner OK needed), #2354 (Assigned To — resolved by 037/038).
+> **Live on dev: e56a3a51d4** (R3, 2026-10-28 14:11:58Z; DLL 1.0.0+e56a3a51d4; UAC's server gate passed with no new 5xx; rollback = de38296499 snapshot). Carries 037 (fill-only Assigned To from Assigned To Internal, live), 070 (inert registry), #2358 (WRK- autonumber, already on dev). 038/073 are client-only, not deployed yet (076). Owner check pending: WA from a matter with Assigned To blank → Assigned To = Assigned To Internal + WRK-nnnnnn. Filed earlier: #2352 (push 409 Matter→Project; UAC 195), #2353 (autonumber, done #2358), #2354 (Assigned To, done 037/038).
 > **Owner 2026-10-28:** 075 merges and deploys ONLY with 040 (Push Updates keeps working until then); 076 deploys 074 + 038 only. 017 still blocked on ebilling #1911.
 
 ## Quick Recovery
