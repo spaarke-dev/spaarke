@@ -120,6 +120,14 @@ public sealed class StoredFileService
         value.Length is > 0 and <= 200 && value.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.');
 
     /// <summary>
+    /// ebilling-r1 task 094 (review round 5): whether a stage can be made now: the store is configured and its name segment is confirmed as
+    /// this environment's OrganizationId (the two checks a stage answers <see cref="StoredFileRefusal.NotConfigured"/> on). Read-only (the
+    /// environment read is cached for the process), so a caller can refuse before its first write. A fault of the environment read throws.
+    /// </summary>
+    internal async Task<bool> CanStageAsync(CancellationToken ct) =>
+        _blobs.IsConfigured && await _blobs.EnvironmentConfirmedAsync(ct).ConfigureAwait(false);
+
+    /// <summary>
     /// ebilling-r1 task 094 (from-email): the blob staged under <paramref name="fileId"/> and the source facts its stage recorded
     /// (<see cref="StageAsync(StoredFileRowSpec, Stream, StagedSourceManifest?, CancellationToken)"/>), read back by its name (built from
     /// the typed purpose, parent and id). <c>null</c> when no usable blob is there (as <see cref="GetStagedAsync"/>). A fault throws.

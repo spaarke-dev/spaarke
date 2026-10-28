@@ -189,7 +189,7 @@ public sealed class StoredFileBlobs
     /// True when the segment is this environment's OrganizationId (or no check is configured). One read per process: the answer is
     /// shared by concurrent callers and cached unless the read faulted (a fault throws to this caller and the next call asks again).
     /// </summary>
-    private Task<bool> EnvironmentConfirmedAsync(CancellationToken ct)
+    internal Task<bool> EnvironmentConfirmedAsync(CancellationToken ct)
     {
         if (_organizationId is null)
         {

@@ -602,17 +602,32 @@ public sealed class SubmitInvoiceFromEmailOperationTests
             .Should().Be(earlier.SourceEmlDocumentId.ToString("D"), "the earlier stage is left unchanged");
     }
 
-    [Fact]
-    public async Task Submit_TheStoreIsNotConfigured_Is422StorageNotConfigured()
+    /// <summary>
+    /// Review round 5: "storage not configured" is a read-only check, so it refuses before step A and leaves no filing behind (before, the
+    /// first stage found it after step A had filed the communication). Both of the stage's NotConfigured checks: no store, and a store whose
+    /// segment is not this environment's.
+    /// </summary>
+    [Theory]
+    [InlineData("no store")]
+    [InlineData("another environment")]
+    public async Task Submit_TheStoreIsNotConfigured_Is422StorageNotConfigured_BeforeStepA_NothingFiledOrWritten(string fault)
     {
-        H.Files = new StoredFileRig(configured: false);
+        H.Files = fault == "no store"
+            ? new StoredFileRig(configured: false)
+            : new StoredFileRig(organizationId: _ => Task.FromResult(Guid.NewGuid()));
+        var stepA = 0;
+        var operation = Build();
+        operation.StepA = _ => { stepA++; return Task.FromResult(true); };
 
-        var result = await Build().SubmitAsync(Input(), CancellationToken.None);
+        var result = await operation.SubmitAsync(Input(), CancellationToken.None);
 
         result.Outcome.Should().Be(FromEmailSubmitOutcome.Refused);
-        result.Status.Should().Be(StatusCodes.Status422UnprocessableEntity);
-        result.ErrorCode.Should().Be(InvoiceSubmissionErrors.StorageNotConfigured);
+        (result.Status, result.ErrorCode).Should().Be((StatusCodes.Status422UnprocessableEntity, InvoiceSubmissionErrors.StorageNotConfigured));
+        result.Detail.Should().NotContain(InvoiceSubmissionService.FilingKeptSentence);
+        stepA.Should().Be(0, "a refused submission never leaves a filing behind");
+        H.Stages.Should().BeEmpty();
         H.Allocations.Should().BeEmpty();
+        H.Writes.Should().Be(0);
     }
 
     [Fact]

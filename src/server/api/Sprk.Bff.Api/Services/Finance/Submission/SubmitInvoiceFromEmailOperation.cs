@@ -35,6 +35,8 @@ namespace Sprk.Bff.Api.Services.Finance.Submission;
 /// <item>The intake's checks (<see cref="InvoiceSubmissionService.DecideForFromEmailAsync"/>): the number, the firm active and linked
 /// (D-106), the core record's fields and the owner, with the caller's own systemuser as the creator person on EVERY generation (OP-5,
 /// EB-D-165: whoever made an earlier attempt).</item>
+/// <item>The file store's configuration (<see cref="StoredFileService.CanStageAsync"/>), read-only, so a store that is not configured is
+/// a 422 that files nothing (review round 5).</item>
 /// <item>The marked parts, read out of the saved <c>.eml</c> (<see cref="EmlMarkedPartReader"/>: ordinal, name and SHA-256 must match;
 /// its <c>versionnumber</c> is the source version). Read-only, so before step A (review round 5): a <c>.eml</c> that is gone, holds no
 /// file or no longer carries a part as marked is a permanent 422, a read fault a 503, and neither leaves a filing behind.</item>
@@ -110,6 +112,25 @@ internal class SubmitInvoiceFromEmailOperation : ISubmitInvoiceFromEmail
         if (refusal is not null)
         {
             return Answer(refusal, filed: false, input);
+        }
+
+        // ── 2b. The file store, read-only (review round 5): configured, and its segment confirmed for this environment, the two checks the
+        //        stage refuses NotConfigured on. Checked before step A, so this refusal never leaves a filing behind. ──
+        bool storeReady;
+        try
+        {
+            storeReady = await _files.CanStageAsync(ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("From-email submission {SubmissionId}: the file store's environment could not be confirmed ({Fault})", submissionId, ex.GetType().Name);
+            return NotQueued(filed: false);
+        }
+
+        if (!storeReady)
+        {
+            return Refused(StatusCodes.Status422UnprocessableEntity, InvoiceSubmissionErrors.StorageNotConfigured,
+                "Invoice file storage is not configured, so the invoice cannot be stored. Nothing was submitted.", filed: false);
         }
 
         // ── 3. The marked parts, out of the saved .eml: read-only, so before step A (review round 5, pass-2 F1-2 / uac-r2 K2-b: a refused
