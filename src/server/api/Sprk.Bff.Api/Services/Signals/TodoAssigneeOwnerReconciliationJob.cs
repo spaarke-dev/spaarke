@@ -106,7 +106,8 @@ public sealed class TodoAssigneeOwnerReconciliationJob : IScheduledJob
     private const string OwningTeamColumn = "owningteam";
     private const string OwningUserColumn = "owninguser";
     private const string OwningBusinessUnitColumn = "owningbusinessunit";
-    private const string SignalDecisionRecordColumn = "sprk_decisionrecord";
+    /// <summary>The Decision Record's step envelope: the Signals it resolved (<c>resolvedSignalIds</c>), as its writer asked them.</summary>
+    private const string DecisionRecordStepsColumn = "sprk_steps";
 
     /// <summary>How many would-be / done re-owns <see cref="JobRunResult.ResultJson"/> lists; every one is in the log.</summary>
     internal const int MaxSampledIds = 200;
@@ -553,7 +554,9 @@ public sealed class TodoAssigneeOwnerReconciliationJob : IScheduledJob
         var query = new QueryExpression(table)
         {
             ColumnSet = new ColumnSet(new[] { table + "id", RegardingTodoColumn, OwningTeamColumn, OwningUserColumn, OwningBusinessUnitColumn }
-                .Concat(host.Parents).Concat(host.Stamps).Distinct(StringComparer.Ordinal).ToArray()),
+                .Concat(host.Parents).Concat(host.Stamps)
+                .Concat(string.Equals(table, DecisionRecordTable, StringComparison.Ordinal) ? [DecisionRecordStepsColumn] : [])
+                .Distinct(StringComparer.Ordinal).ToArray()),
             NoLock = true,
         };
         query.AddOrder(table + "id", OrderType.Ascending);
@@ -797,11 +800,29 @@ public sealed class TodoAssigneeOwnerReconciliationJob : IScheduledJob
             {
                 // The Decision Record writer also asks about the subject of every Signal the record resolved (uac-r2 F1): one
                 // of them under a secure record makes the record secure. Read before any write; only for a row about to move.
-                var subjects = await ResolvedSignalSubjectsAsync(run, row.Id, ct).ConfigureAwait(false);
-                var widened = parents.Concat(subjects).Distinct().ToList();
+                // UAC task 194b fix round R (A6): from the ids its sprk_steps lists, each Signal read by id — the resolver's one
+                // source (DecisionCommitService.ResolvedSignalSubjectsOfRecordAsync), never the Signals' sprk_decisionrecord
+                // link, which a Signal closed during the review does not carry.
+                var (resolved, incomplete) = await DecisionCommitService.ResolvedSignalSubjectsOfRecordAsync(
+                    row.GetAttributeValue<string>(DecisionRecordStepsColumn), run.Entities, ct).ConfigureAwait(false);
+                var widened = parents.Concat(resolved.Select(s => new RecordOwnershipParent(s.Entity, s.Id))).Distinct().ToList();
+                if (widened.Count > parents.Count)
+                    answer = await ParentsAnswerAsync(run, widened, ct).ConfigureAwait(false);
+
+                // The resolver's rule for an incomplete question: decided over what is known, never released. A secure answer
+                // from the known part is secure (SkippedSecure below: the secure pass moves it in); an ORDINARY owner is never
+                // written on part of the question — not decided, the run partial.
+                if (incomplete is not null && answer is { IsOwned: true, IsSecureOwner: false })
+                {
+                    counts.Unverified++;
+                    run.Unsettled.Add(todo.TodoId);
+                    _logger.LogWarning("{Prefix} {Table} {Id}: the Signals it resolved cannot all be known ({Why}); no ordinary owner "
+                        + "is written on part of its question.", LogPrefix, table, row.Id, incomplete);
+                    return null;
+                }
+
                 if (widened.Count > parents.Count)
                 {
-                    answer = await ParentsAnswerAsync(run, widened, ct).ConfigureAwait(false);
                     if (Expected(run, todo, answer, table, row.Id) is not { } narrowed)
                         return null;
                     expected = narrowed;
@@ -945,27 +966,6 @@ public sealed class TodoAssigneeOwnerReconciliationJob : IScheduledJob
         }
 
         return secure;
-    }
-
-    /// <summary>The subjects of every Signal a Decision Record resolved (each Signal's ownership-parent lookups).</summary>
-    private static async Task<List<RecordOwnershipParent>> ResolvedSignalSubjectsAsync(Run run, Guid recordId, CancellationToken ct)
-    {
-        // Without the Signal table's columns the subjects cannot be asked about, and a record with none would read as ordinary:
-        // not decided (Unverified), never written past an unchecked secure subject.
-        if (!run.HostMap.ContainsKey(SignalTable))
-            throw new InvalidOperationException("the Signal columns were not probed, so the record's resolved subjects cannot be read");
-        var lineage = SecureChildLineage.Children[SignalTable].Lookups;
-        var columns = run.Hosts(SignalTable).Parents;
-        var query = new QueryExpression(SignalTable) { ColumnSet = new ColumnSet(columns.ToArray()), NoLock = true };
-        query.Criteria.AddCondition(SignalDecisionRecordColumn, ConditionOperator.Equal, recordId);
-        var signals = await run.Entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
-        return signals.Entities
-            .SelectMany(s => columns
-                .Select(c => s.GetAttributeValue<EntityReference>(c) is { } r && r.Id != Guid.Empty
-                    ? new RecordOwnershipParent(lineage[c], r.Id)
-                    : null))
-            .OfType<RecordOwnershipParent>()
-            .ToList();
     }
 
     // ── Writing ─────────────────────────────────────────────────────────────────────────────────────────────────────
