@@ -155,7 +155,9 @@ internal static class RecordTableRules
                 // Assigned To Internal. Both are CONTACT lookups (live metadata, spaarkedev1, 2026-10-27), so the reference
                 // is copied as-is: no contact/user conversion, never a name or email match. The ONE declaration: the
                 // owned create (OwnedChildWrite.CreateAsync) and RecordCreationService read it through CopiedDefaultsFor.
-                new ServerDefault(AssignedToDefaults.AssignedToAttribute, "every server create of a work assignment",
+                new ServerDefault(AssignedToDefaults.AssignedToAttribute,
+                    "every user-initiated server create of a work assignment (the child-records route, the chat create, " +
+                    "the record-creation service with a calling user)",
                     "The new row's own sprk_assignedtointernal (after mapping), copied as-is, when the request leaves " +
                     "sprk_assignedto unset (absent, no bind); a supplied value or an explicit null wins. Create only.")
                 {

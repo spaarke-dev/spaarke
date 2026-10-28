@@ -193,6 +193,51 @@ public sealed partial class SecureChildOwnershipAiToolTests
     }
 
     // =====================================================================================
+    // The chat create on the same core: a copy of the server-set "for" person is server-set too
+    // =====================================================================================
+
+    /// <summary>
+    /// The chat create names the caller's own contact in Assigned To Internal as a SERVER-set lookup (it costs no AppendTo).
+    /// Its copy into Assigned To names the same record, so it costs none either: a caller who may not append to contacts
+    /// still creates the work assignment, as before this task. A contact the caller CHOSE is still asked (the twin).
+    /// </summary>
+    [Fact]
+    public async Task CreateRecord_AWorkAssignment_TheCopyOfTheServerSetForPerson_CostsNoAppendTo_AChosenContactStillDoes()
+    {
+        _user.NoAppendToIn.Add(("contacts", CallerContact));
+        _user.NoAppendToIn.Add(("contacts", WaChosen));
+
+        var forPerson = await CreateRecord("sprk_workassignment", Lookup("sprk_regardingmatter", "sprk_matter", OrdinaryMatter));
+        var chosen = await CreateRecord("sprk_workassignment",
+            Lookup("sprk_regardingmatter", "sprk_matter", OrdinaryMatter), Lookup("sprk_assignedtointernal", "contact", WaChosen));
+
+        forPerson.Success.Should().BeTrue(forPerson.ErrorMessage);
+        var fields = _appCreates.Should().ContainSingle().Subject.Fields;
+        Bind(fields, "sprk_AssignedToInternal@odata.bind").Should().Be($"/contacts({CallerContact:D})");
+        Bind(fields, AssignedToBind).Should().Be($"/contacts({CallerContact:D})");
+        chosen.Success.Should().BeFalse("a contact the caller chose costs AppendTo on it, as before");
+    }
+
+    /// <summary>
+    /// Fix round 1: the tool result reports what the row was WRITTEN with — the copied Assigned To included — so the model is
+    /// never told Assigned To was left blank when the create set it.
+    /// </summary>
+    [Fact]
+    public async Task CreateRecord_AWorkAssignment_TheToolResultReportsTheCopiedAssignedToAsSet()
+    {
+        var result = await CreateRecord("sprk_workassignment", Lookup("sprk_regardingmatter", "sprk_matter", OrdinaryMatter));
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        Bind(_appCreates.Should().ContainSingle().Subject.Fields, AssignedToBind).Should().Be($"/contacts({CallerContact:D})");
+        result.Data.Should().NotBeNull();
+        var data = result.Data!.Value;
+        var columns = data.GetProperty("columnsSet").EnumerateArray().Select(c => c.GetString()).ToArray();
+        columns.Should().Contain("sprk_assignedto", "the copied default is a column the create set");
+        data.GetProperty("columnCount").GetInt32().Should().Be(columns.Length);
+        result.Summary.Should().Contain($"({columns.Length} columns set)");
+    }
+
+    // =====================================================================================
     // Must not fire: an update never back-fills it (create only)
     // =====================================================================================
 

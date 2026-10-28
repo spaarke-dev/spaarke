@@ -566,6 +566,36 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         outcome.Steps.Single(s => s.Step == RecordCreationStep.MapPayload).Note.Should().NotContain("default");
     }
 
+    /// <summary>
+    /// Fix round 1 (path parity with the owned create): a copy of a SERVER-set source names the same server-chosen record,
+    /// so it is server-set too — it costs no AppendTo its source did not. Without that, a caller with no AppendTo on the
+    /// contact the server named would see the copied Assigned To dropped at step 5.
+    /// </summary>
+    [Fact]
+    public async Task CopiedDefault_TheCopyOfAServerSetAssignedToInternal_CostsNoAppendTo_AndIsWritten()
+    {
+        WorkAssignmentColumnsAndProfile();
+        _scripted.NoAppendToIn.Add(("contacts", CallersContact));
+        var request = Request("sprk_workassignment", new Dictionary<string, object?>
+        {
+            ["sprk_name"] = "Review the lease",
+            ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({OrdinaryMatter:D})",
+            ["sprk_AssignedToInternal@odata.bind"] = $"/contacts({CallersContact:D})",
+        }, mapping: false) with
+        {
+            ServerSetLookupColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_assignedtointernal" },
+        };
+
+        var outcome = await Service().CreateAsync(request, AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        var fields = _creates.Should().ContainSingle().Subject.Fields;
+        StringOf(fields, "sprk_AssignedToInternal@odata.bind").Should().Be($"/contacts({CallersContact:D})");
+        StringOf(fields, WaAssignedToBind).Should().Be($"/contacts({CallersContact:D})",
+            "the copy of a server-set source is server-set: it is written, not dropped for an AppendTo its source never cost");
+        outcome.MappingWarnings.Should().NotContain(w => w.Code == RecordCreationWarning.DefaultValueDroppedCode);
+    }
+
     [Fact]
     public async Task CopiedDefault_AssignedToInternalUnsetToo_LeavesAssignedToBlank_AndLogsAStructuredWarning()
     {

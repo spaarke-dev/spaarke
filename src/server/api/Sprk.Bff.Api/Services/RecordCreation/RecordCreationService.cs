@@ -470,9 +470,25 @@ internal sealed partial class RecordCreationService
         // supplied, merged with the mapped values so step 5 checks them the same way ─────────────────────────────────────
         // Task 037 (FR-36): with the table's copied defaults (RecordTableRules.CopiedDefaultsFor), read off the row AS MAPPED,
         // so they take this same path — filled only where the row leaves the column unset, checked at step 5 like any
-        // default, written in the create (step 11) and so read back by the "Assigned *" materialisation (step 12).
+        // default, written in the create (step 11) and so read back by the "Assigned *" materialisation (step 12). A copy of a
+        // SERVER-set source names the same server-chosen record, so it is server-set too (steps 5 and 6 read the request's
+        // set), exactly as on the owned create (OwnedChildWrite.CreateAsync).
         if (user is not null)
-            defaults = WithCopiedDefaults(table, rule, item, defaults);
+        {
+            (defaults, var copied) = WithCopiedDefaults(table, rule, item, defaults);
+            var serverSetCopies = copied
+                .Where(c => request.ServerSetLookupColumns?.Contains(c.Source) == true)
+                .Select(c => c.Column)
+                .ToArray();
+            if (serverSetCopies.Length > 0)
+            {
+                request = request with
+                {
+                    ServerSetLookupColumns = new HashSet<string>(
+                        request.ServerSetLookupColumns!.Concat(serverSetCopies), StringComparer.OrdinalIgnoreCase),
+                };
+            }
+        }
 
         IReadOnlySet<string> defaultColumns = NoDefaultColumns;
         if (defaults.Count > 0 && user is not null)

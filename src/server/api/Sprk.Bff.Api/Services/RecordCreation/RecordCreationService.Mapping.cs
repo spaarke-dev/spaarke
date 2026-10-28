@@ -703,14 +703,17 @@ internal sealed partial class RecordCreationService
     /// request already names for that column is the adapter's and is kept. A source the row leaves unset adds nothing and
     /// is reported as a structured warning: the column stays blank.
     /// </summary>
-    private IReadOnlyDictionary<string, PostMappingDefault> WithCopiedDefaults(
+    /// <returns>The defaults, and each (column, source column) pair a copied default was added for — so a copy of a
+    /// SERVER-set source can be server-set too (the owned create's rule, <c>OwnedChildWrite.CreateAsync</c>).</returns>
+    private (IReadOnlyDictionary<string, PostMappingDefault> Defaults, IReadOnlyList<(string Column, string Source)> Copied) WithCopiedDefaults(
         string table, RecordTableRule rule, DataverseWriteItemMapper.MappedItem item,
         IReadOnlyDictionary<string, PostMappingDefault> defaults)
     {
         var fills = RecordTableRules.CopiedDefaultsFor(rule, item);
         if (fills.Count == 0)
-            return defaults;
+            return (defaults, []);
 
+        var copied = new List<(string Column, string Source)>();
         var merged = new Dictionary<string, PostMappingDefault>(defaults, StringComparer.Ordinal);
         foreach (var fill in fills)
         {
@@ -725,11 +728,12 @@ internal sealed partial class RecordCreationService
             }
 
             var value = new EntityReference(source.RelatedTable, source.RecordId);
-            if (ToItemValue(value, dateBehaviour: null) is { } itemValue)
-                merged.TryAdd(column, new PostMappingDefault(value, itemValue));
+            // A default the request names for the column is the adapter's: it is kept, and is never made server-set.
+            if (ToItemValue(value, dateBehaviour: null) is { } itemValue && merged.TryAdd(column, new PostMappingDefault(value, itemValue)))
+                copied.Add((column, source.Column));
         }
 
-        return merged;
+        return (merged, copied);
     }
 
     /// <summary>

@@ -235,6 +235,13 @@ internal static class OwnedChildWrite
     {
         public Guid? CreatedId { get; init; }
 
+        /// <summary>
+        /// Task 037 (fix round 1): with <see cref="CreatedId"/>, the columns the created row was written with — the
+        /// caller's own plus any copied default this create filled (a work assignment's Assigned To), so a caller reports
+        /// what was actually set rather than what it sent. <c>null</c> when nothing was created.
+        /// </summary>
+        public IReadOnlyList<string>? WrittenColumns { get; init; }
+
         /// <summary>Refused by the caller's own rights — surfaced as the user's access error.</summary>
         public string? Denied { get; init; }
 
@@ -331,11 +338,21 @@ internal static class OwnedChildWrite
 
         // Task 037 (FR-36): the table's copied defaults (a work assignment's Assigned To from its own Assigned To Internal),
         // fill-only, on the row BEFORE anything is checked or written — so the value is checked as the caller exactly like
-        // a supplied one, written in the create itself, and read back by the "Assigned *" materialisation after it.
+        // a supplied one, written in the create itself, and read back by the "Assigned *" materialisation after it. A copy of
+        // a SERVER-set source (the chat create's "for" person, the caller's own contact) names the same server-chosen record,
+        // so it is server-set too: it costs no more AppendTo than its source did.
         var defaulted = await WithCopiedDefaultsAsync(user, table, item, logger, ct).ConfigureAwait(false);
         if (defaulted.ClientFailure is { } defaultFailure)
             return new Outcome { ClientFailure = defaultFailure };
         item = defaulted.Item;
+        var serverSetCopies = defaulted.Copied
+            .Where(c => serverSetLookupColumns?.Contains(c.Source) == true)
+            .Select(c => c.Column)
+            .ToArray();
+        if (serverSetCopies.Length > 0)
+        {
+            serverSetLookupColumns = new HashSet<string>(serverSetLookupColumns!.Concat(serverSetCopies), StringComparer.OrdinalIgnoreCase);
+        }
 
         var check = await CheckCallerMayCreateAsync(user, me.SystemUserId, table, item, serverSetLookupColumns, ct)
             .ConfigureAwait(false);
@@ -422,7 +439,7 @@ internal static class OwnedChildWrite
 
         var id = Guid.NewGuid();
         await appOnly.UpdateRecordFieldsAsync(table, id, fields, ct).ConfigureAwait(false);
-        return new Outcome { CreatedId = id };
+        return new Outcome { CreatedId = id, WrittenColumns = item.Columns };
     }
 
     /// <summary>
@@ -446,7 +463,7 @@ internal static class OwnedChildWrite
 
         var id = Guid.NewGuid();
         await appOnly.UpdateRecordFieldsAsync(table, id, fields, ct).ConfigureAwait(false);
-        return new Outcome { CreatedId = id };
+        return new Outcome { CreatedId = id, WrittenColumns = item.Columns };
     }
 
     /// <summary>
@@ -458,20 +475,24 @@ internal static class OwnedChildWrite
     /// metadata cannot bind is left out with a warning (the create goes on); the caller's own failure reading that
     /// metadata is returned, and nothing is written. A table with no copied default costs nothing.
     /// </summary>
-    private static async Task<(DataverseWriteItemMapper.MappedItem Item, DataverseUserResponse? ClientFailure)> WithCopiedDefaultsAsync(
+    /// <returns>The item to check and write, each (column, source column) pair it filled, or the caller's own failure.</returns>
+    private static async Task<(DataverseWriteItemMapper.MappedItem Item, IReadOnlyList<(string Column, string Source)> Copied,
+        DataverseUserResponse? ClientFailure)> WithCopiedDefaultsAsync(
         IDataverseUserClient user, string table, DataverseWriteItemMapper.MappedItem item, ILogger? logger, CancellationToken ct)
     {
         var fills = Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.CopiedDefaultsFor(
             Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.Find(table), item);
         if (fills.Count == 0)
-            return (item, null);
+            return (item, [], null);
 
         var extra = new Dictionary<string, object?>(StringComparer.Ordinal);
+        var copied = new List<(string Column, string Source)>();
         foreach (var fill in fills)
         {
             if (fill.Source is { } source)
             {
                 extra[fill.Default.Column] = new { relatedTable = source.RelatedTable, recordId = source.RecordId };
+                copied.Add((fill.Default.Column, source.Column));
                 continue;
             }
 
@@ -482,22 +503,22 @@ internal static class OwnedChildWrite
         }
 
         if (extra.Count == 0)
-            return (item, null);
+            return (item, [], null);
 
         var mapped = await DataverseWriteItemMapper.MapAsync(user, table, JsonSerializer.SerializeToElement(extra), ct)
             .ConfigureAwait(false);
         if (mapped.ClientFailure is { } mapFailure)
-            return (item, mapFailure);
+            return (item, [], mapFailure);
         if (mapped.Item is not { } added)
         {
             logger?.LogWarning(
                 "copied_default_not_bound: entity={Entity} columns={Columns} — the table's metadata cannot bind them, so they " +
                 "are left blank: {Reason} (task 037, FR-36)",
                 table, string.Join(",", extra.Keys), mapped.ValidationError);
-            return (item, null);
+            return (item, [], null);
         }
 
-        return (Merge(item, added), null);
+        return (Merge(item, added), copied, null);
     }
 
     // ── The ADR-024 regarding pair (sprk_regardingrecordid + sprk_regardingrecordtype) ─────────────────────────────
