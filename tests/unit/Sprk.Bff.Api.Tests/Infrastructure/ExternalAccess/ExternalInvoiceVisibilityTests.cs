@@ -318,6 +318,93 @@ public sealed class ExternalInvoiceVisibilityTests
         decision.HiddenSummary().Should().Contain("sources_truncated");
     }
 
+    // Review round 1, F1: the confirm route (InvoiceSubmissionService.SubmitExistingDocumentAsync) records its source only on
+    // sprk_invoicesubmission.sprk_document, with no Stored File.
+
+    [Theory, MemberData(nameof(ExternalCallers))]
+    public async Task ConfirmRoute_AnInvoiceWhoseOnlySourceIsASubmissionsRestrictedDocument_IsHidden(string caller)
+    {
+        var invoice = Guid.NewGuid();
+        _world.SubmissionSource(invoice, permission: Restricted);
+
+        await ShouldBeHidden(caller, invoice, InvoiceHiddenReason.SourceHidden);
+    }
+
+    [Theory, MemberData(nameof(ExternalCallers))]
+    public async Task ConfirmRoute_ASubmissionsDocumentUnderARestrictedRoot_HidesTheInvoice(string caller)
+    {
+        var invoice = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        _world.Flags[matter] = new RootRecordFlags(IsSecure: true, IsRestricted: true);
+        _world.SubmissionSource(invoice, matter: matter);
+
+        await ShouldBeHidden(caller, invoice, InvoiceHiddenReason.RootRestricted);
+    }
+
+    [Theory, MemberData(nameof(ExternalCallers))]
+    public async Task ConfirmRoute_ASubmissionsReadableDocument_LeavesTheInvoiceVisible(string caller)
+    {
+        var invoice = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        _world.Flags[matter] = RootRecordFlags.None;
+        _world.SubmissionSource(invoice, permission: Standard, matter: matter);
+        _world.Submission(invoice, document: null); // a submission naming no document is not a source
+
+        await ShouldBeVisible(caller, invoice);
+    }
+
+    [Theory, MemberData(nameof(ExternalCallers))]
+    public async Task ConfirmRoute_ASubmissionReadThatFaults_HidesEveryAskedInvoice(string caller)
+    {
+        var invoice = Guid.NewGuid();
+        var clean = Guid.NewGuid();
+        _world.SubmissionSource(invoice, permission: Standard);
+        _world.Source(clean);
+        _world.Faults["sprk_invoicesubmissions"] = HttpStatusCode.ServiceUnavailable;
+
+        var decision = await Decide(caller, invoice, clean);
+
+        decision.IsVisible(invoice).Should().BeFalse();
+        decision.IsVisible(clean).Should().BeFalse();
+        decision.Faulted.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ConfirmRoute_MoreSubmissionsThanOneReadMayReturn_HidesTheWholeChunk()
+    {
+        var busy = Guid.NewGuid();
+        var neighbour = Guid.NewGuid();
+        var clean = _world.Document(Guid.NewGuid());
+        for (var i = 0; i <= ExternalInvoiceVisibility.MaxSourceFilesPerChunk; i++)
+            _world.Submission(busy, clean);
+        _world.Source(neighbour);
+
+        var decision = await Decide("contact", busy, neighbour);
+
+        decision.IsVisible(busy).Should().BeFalse();
+        decision.IsVisible(neighbour).Should().BeFalse("the read of its chunk may have been cut short");
+        decision.HiddenSummary().Should().Contain("sources_truncated");
+    }
+
+    // Review round 1, K1: a Stored File whose source is a communication or an attachment but no document has a source this
+    // rule cannot check (090's file route refuses the same shape).
+
+    [Theory]
+    [InlineData("contact", "communication")]
+    [InlineData("contact", "attachment")]
+    [InlineData("flagged-systemuser", "communication")]
+    [InlineData("flagged-systemuser", "attachment")]
+    public async Task AStoredFileWithASourceCommunicationOrAttachment_ButNoDocument_HidesTheInvoice(string caller, string kind)
+    {
+        var invoice = Guid.NewGuid();
+        if (kind == "communication")
+            _world.StoredFileRaw(invoice, rawSource: null, sourceCommunication: Guid.NewGuid());
+        else
+            _world.StoredFileRaw(invoice, rawSource: null, attachmentIdentity: "AAMkAD-attachment-1");
+
+        await ShouldBeHidden(caller, invoice, InvoiceHiddenReason.SourceLinkUnreadable);
+    }
+
     [Fact]
     public async Task UnknownIsNotInternal_ASystemuserWhoseLookupFails_IsDecidedAsExternal()
     {
@@ -444,9 +531,11 @@ public sealed class ExternalInvoiceVisibilityTests
 
         invoices.Should().OnlyContain(i => decision.IsVisible(i));
         _world.Reads("sprk_storedfiles").Should().HaveCount(1);
+        _world.Reads("sprk_invoicesubmissions").Should().HaveCount(1);
         _world.Reads("sprk_communications").Should().HaveCount(1);
         _world.Reads("sprk_communicationthreads").Should().HaveCount(1);
         decision.Cost.StoredFileReads.Should().Be(1);
+        decision.Cost.SubmissionReads.Should().Be(1);
         decision.Cost.SourceReads.Should().Be(1);
     }
 
@@ -709,14 +798,35 @@ internal sealed class InvoiceWorld : HttpMessageHandler
 
     public void StoredFile(Guid invoice, Guid? source) => StoredFileRaw(invoice, source?.ToString());
 
-    public void StoredFileRaw(Guid invoice, object? rawSource) =>
+    public void StoredFileRaw(Guid invoice, object? rawSource, Guid? sourceCommunication = null, string? attachmentIdentity = null) =>
         Seed("sprk_storedfiles", new Dictionary<string, object?>
         {
             ["sprk_storedfileid"] = Guid.NewGuid().ToString(),
             ["_sprk_invoice_value"] = invoice.ToString(),
             ["_sprk_sourcedocument_value"] = rawSource,
+            ["_sprk_sourcecommunication_value"] = sourceCommunication?.ToString(),
+            ["sprk_sourceattachmentidentity"] = attachmentIdentity,
             ["sprk_name"] = "file.pdf",
         });
+
+    /// <summary>A submission of <paramref name="invoice"/> naming <paramref name="document"/> (the confirm route's only record
+    /// of its source: <c>sprk_invoicesubmission.sprk_document</c>).</summary>
+    public void Submission(Guid invoice, Guid? document) =>
+        Seed("sprk_invoicesubmissions", new Dictionary<string, object?>
+        {
+            ["sprk_invoicesubmissionid"] = Guid.NewGuid().ToString(),
+            ["_sprk_invoice_value"] = invoice.ToString(),
+            ["_sprk_document_value"] = document?.ToString(),
+            ["sprk_name"] = "SUB-0001",
+        });
+
+    /// <summary>A document recorded as <paramref name="invoice"/>'s source ONLY on a submission (no Stored File).</summary>
+    public Guid SubmissionSource(Guid invoice, object? permission = null, Guid? matter = null)
+    {
+        var document = Document(Guid.NewGuid(), permission, matter: matter);
+        Submission(invoice, document);
+        return document;
+    }
 
     public Guid Communication(bool? internalOnly, Guid? thread)
     {
@@ -788,9 +898,17 @@ internal sealed class InvoiceWorld : HttpMessageHandler
         var equals = filter.Success
             ? Regex.Matches(filter.Groups[1].Value, @"(\w+) eq ([0-9a-fA-F-]{36})").Select(m => (m.Groups[1].Value, m.Groups[2].Value)).ToList()
             : new List<(string, string)>();
-        var notNull = filter.Success
-            ? Regex.Matches(filter.Groups[1].Value, @"(\w+) ne null").Select(m => m.Groups[1].Value).ToList()
-            : new List<string>();
+        // "col ne null" conditions: a parenthesised "(a ne null or b ne null)" group is OR-ed; the groups are AND-ed.
+        var notNull = new List<List<string>>();
+        if (filter.Success)
+        {
+            var rest = filter.Groups[1].Value;
+            foreach (System.Text.RegularExpressions.Match group in Regex.Matches(rest, @"\((\w+ ne null(?: or \w+ ne null)*)\)"))
+                notNull.Add(Regex.Matches(group.Groups[1].Value, @"(\w+) ne null").Select(m => m.Groups[1].Value).ToList());
+            rest = Regex.Replace(rest, @"\((\w+ ne null(?: or \w+ ne null)*)\)", string.Empty);
+            notNull.AddRange(Regex.Matches(rest, @"(\w+) ne null").Select(m => new List<string> { m.Groups[1].Value }));
+        }
+
         var top = Regex.Match(query, @"\$top=(\d+)");
 
         List<Dictionary<string, object?>> rows;
@@ -799,7 +917,7 @@ internal sealed class InvoiceWorld : HttpMessageHandler
             rows = (_sets.TryGetValue(set, out var seeded) ? seeded : new())
                 .Where(r => equals.Count == 0 || equals.Any(e =>
                     r.TryGetValue(e.Item1, out var v) && v is string s && string.Equals(s, e.Item2, StringComparison.OrdinalIgnoreCase)))
-                .Where(r => notNull.All(c => r.TryGetValue(c, out var v) && v is not null))
+                .Where(r => notNull.All(any => any.Any(c => r.TryGetValue(c, out var v) && v is not null)))
                 .Select(r => r.Where(kv => columns is null || columns.Contains(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value))
                 .ToList();
         }
