@@ -219,7 +219,15 @@ internal static class RecordTableRules
             // skips it too, task 040). sprk_accesspermission is NOT here: it stays fill-only at create.
             MappingProtectedColumns = Columns(Sprk.Bff.Api.Services.Access.AccessInheritance.Column),
         },
-        new RecordTableRule { Table = "sprk_budget", Kind = RecordTableKind.Child },
+        new RecordTableRule
+        {
+            Table = "sprk_budget",
+            Kind = RecordTableKind.Child,
+            // Task 167 (D-193): BUD-{SEQNUM:6}, set on the attribute in SpaarkeMaster Entities/sprk_Budget/Entity.xml. The platform fills
+            // it; no code sets it, and a field-mapping rule may not either.
+            MappingProtectedColumns = Columns("sprk_budgetnumber"),
+            AutonumberColumn = "sprk_budgetnumber",
+        },
         new RecordTableRule { Table = "sprk_kpiassessment", Kind = RecordTableKind.Child },
         new RecordTableRule
         {
