@@ -45,6 +45,8 @@ const PINNED_REFUSAL_CODES = [
   'OFFICE_022',
   'OFFICE_012',
   'OFFICE_INTERNAL',
+  'ebilling.submission.attachment_not_preserved', // added 2026-10-28 at cc7bb5eeee (422)
+  'OFFICE_AUTH_ERROR', // added 2026-10-28 at cc7bb5eeee (500, the access probe faulted)
   // §2 firm fields
   'ebilling.submission.firm_invalid',
   'ebilling.submission.firm_not_linked',
@@ -184,6 +186,8 @@ describe('invoice submission messages — specifics', () => {
     expect(isRetryableSubmissionRefusal(503, 'ebilling.submission.email_unavailable')).toBe(true);
     expect(isRetryableSubmissionRefusal(429, 'OFFICE_015')).toBe(true);
     expect(isRetryableSubmissionRefusal(403, 'sdap.access.error.system_failure')).toBe(true);
+    expect(isRetryableSubmissionRefusal(500, 'OFFICE_AUTH_ERROR')).toBe(true);
+    expect(isRetryableSubmissionRefusal(422, 'ebilling.submission.attachment_not_preserved')).toBe(false);
     expect(isRetryableSubmissionRefusal(409, 'OFFICE_IDEMPOTENCY_CONFLICT')).toBe(true);
     expect(isRetryableSubmissionRefusal(503, 'ebilling.disabled')).toBe(false);
     expect(isRetryableSubmissionRefusal(409, 'ebilling.submission.submission_already_ended')).toBe(false);
