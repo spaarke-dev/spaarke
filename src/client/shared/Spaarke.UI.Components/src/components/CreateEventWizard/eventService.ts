@@ -8,6 +8,7 @@
  * @see IDataService — high-level data access abstraction (no IWebApi dependency)
  */
 
+import { describeWebApiCreateError } from '../../utils/webApiCreateError';
 import { withBffChildWrites } from '../../utils/adapters/bffChildWriteAdapter';
 import type { ICreateEventFormState } from './formTypes';
 import type { ILookupItem } from '../../types/LookupTypes';
@@ -380,12 +381,12 @@ export class EventService {
       };
     } catch (err) {
       console.error('[EventService] createRecord error:', err);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const errObj = err as any;
-      const message = errObj?.message || (err instanceof Error ? err.message : 'Unknown error');
+      // #2382: a privilege refusal becomes one plain sentence; the full error is logged above.
+      const described = describeWebApiCreateError(err, 'event');
+      const message = described.message;
       return {
         success: false,
-        errorMessage: `Failed to create event record: ${message}`,
+        errorMessage: described.isAccessDenied ? message : `Failed to create event record: ${message}`,
         warnings,
       };
     }
