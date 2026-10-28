@@ -172,6 +172,7 @@ Field names and codes in this file are binding once word-add-in-r1 agrees (095 P
 | Failed | `ebilling.submission.email_save_failed` | NEW (095/094): the .eml save did not finish |
 | Failed | `ebilling.submission.document_unavailable` | The marked parts could not be read from the saved .eml |
 | Failed | `ebilling.submission.file_malicious` | A marked file failed the malware scan (task 092) |
+| Failed | `ebilling.submission.file_scan_timeout` | The malware scan of a marked file did not finish in time (about 19 minutes across retries; task 092). A re-attempt is allowed (EB-D-160). Added 2026-10-27, agreed by word-add-in-r1 |
 | Failed | `ebilling.submission.file_unservable` | A marked file could not be stored or verified (task 092) |
 | Failed | `ebilling.submission.source_check_failed` | NEW (094 step 5): the source's filing or isolation re-check failed at commit |
 | Failed | `ebilling.submission.processing_failed` | Any other processing failure |
