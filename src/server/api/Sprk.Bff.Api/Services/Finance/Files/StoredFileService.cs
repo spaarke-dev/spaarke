@@ -279,6 +279,16 @@ public sealed class StoredFileService
     private async Task<StoredFileCreateResult> StageCreateFlipAsync(
         StoredFileRowSpec spec, Stream content, RecordRequester? requester, Guid? creatorPersonId, CancellationToken ct)
     {
+        // ebilling-r1 task 094 (uac-r2, the InvoicePdf writer guard): an invoice PDF is created ONLY in the commit that creates its
+        // invoice (InvoiceSubmissionPersister). The external invoice predicate (task 098) reads a sourceless InvoicePdf as the
+        // upload's own PDF, so no route may add one onto an existing invoice. Refused before any read or write.
+        if (spec.Purpose == StoredFilePurpose.InvoicePdf)
+        {
+            _logger.LogWarning("Stored file {FileId} refused: an invoice PDF is created only with its invoice ({Code})",
+                spec.FileId, StoredFileRefusal.InvalidRequest);
+            return StoredFileCreateResult.Refused(StoredFileRefusal.InvalidRequest);
+        }
+
         var owner = await _owners.ResolveOwnerAsync(
             RecordOwnershipContext.ContentOf(spec.Parent.Table, spec.Parent.Id) with { RequestedBy = requester }, ct).ConfigureAwait(false);
         if (owner.IsRefused)

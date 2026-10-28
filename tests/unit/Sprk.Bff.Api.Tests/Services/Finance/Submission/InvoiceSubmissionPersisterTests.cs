@@ -1483,6 +1483,77 @@ public class InvoiceSubmissionPersisterTests
         file.GetAttributeValue<bool>(StoredFileSchema.FirmVisible).Should().Be(firmVisible);
     }
 
+    // ── 094 x 092 x 098 end to end: an upload invoice the REAL persister commits stays visible to the firm (098's predicate) ──
+
+    [Theory(DisplayName = "094 x 098 end to end (must not fire): an SPA upload and an internal upload, committed by 092's real persister path, stay visible to the firm through ExternalInvoiceVisibility")]
+    [InlineData(InvoiceSubmissionChannel.Spa)]
+    [InlineData(InvoiceSubmissionChannel.Internal)]
+    public async Task UploadInvoice_CommittedByThePersister_IsVisibleToTheFirm(InvoiceSubmissionChannel channel)
+    {
+        var outcome = await new ProcessorHarness { Channel = channel }.RunAsync();
+        var store = new Store();
+        store.Submission["sprk_channel"] = new OptionSetValue((int)channel);
+        (await store.Build().PersistAsync(outcome, null)).Status.Should().Be(SubmissionPersistStatus.Committed);
+        var world = new Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld();
+        ProjectForTheFirm(store, world, withStoredFiles: true);
+
+        var decision = await world.NewService(identity: null)
+            .HideInvoicesForAsync(FirmContact(), [InvoiceId], world.RootFlags);
+
+        decision.IsVisible(InvoiceId).Should().BeTrue(decision.HiddenSummary());
+        decision.Faulted.Should().BeFalse();
+    }
+
+    [Fact(DisplayName = "094 x 098 end to end (control, must fire): the same internal upload WITHOUT its committed Stored File row is hidden - the persister's sourceless InvoicePdf row is what keeps it visible")]
+    public async Task InternalUpload_WithoutItsStoredFileRow_IsHidden()
+    {
+        var outcome = await new ProcessorHarness { Channel = InvoiceSubmissionChannel.Internal }.RunAsync();
+        var store = new Store();
+        store.Submission["sprk_channel"] = new OptionSetValue((int)InvoiceSubmissionChannel.Internal);
+        (await store.Build().PersistAsync(outcome, null)).Status.Should().Be(SubmissionPersistStatus.Committed);
+        var world = new Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld();
+        ProjectForTheFirm(store, world, withStoredFiles: false);
+
+        var decision = await world.NewService(identity: null)
+            .HideInvoicesForAsync(FirmContact(), [InvoiceId], world.RootFlags);
+
+        decision.IsVisible(InvoiceId).Should().BeFalse();
+    }
+
+    /// <summary>The rows the persister committed, as the predicate reads them over the Web API: the submission (its invoice, document
+    /// link and channel) and, when asked, every Stored File (its invoice, source ids and purpose).</summary>
+    private static void ProjectForTheFirm(Store store, Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld world, bool withStoredFiles)
+    {
+        var submission = store.Submission;
+        submission.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.SubmissionInvoice)?.Id.Should().Be(InvoiceId);
+        world.Submission(InvoiceId, submission.GetAttributeValue<EntityReference>("sprk_document")?.Id,
+            submission.GetAttributeValue<OptionSetValue>("sprk_channel")?.Value);
+        if (!withStoredFiles)
+        {
+            return;
+        }
+
+        store.Files.Dataverse.Rows.Values.Should().NotBeEmpty();
+        foreach (var row in store.Files.Dataverse.Rows.Values)
+        {
+            row.GetAttributeValue<EntityReference>(StoredFileSchema.InvoiceTable)?.Id.Should().Be(InvoiceId);
+            world.StoredFileRaw(
+                InvoiceId,
+                row.GetAttributeValue<EntityReference>(StoredFileSchema.SourceDocument)?.Id.ToString(),
+                row.GetAttributeValue<OptionSetValue>(StoredFileSchema.Purpose)?.Value,
+                row.GetAttributeValue<EntityReference>(StoredFileSchema.SourceCommunication)?.Id,
+                row.GetAttributeValue<string>(StoredFileSchema.SourceAttachmentIdentity));
+        }
+    }
+
+    private static Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerPrincipal FirmContact() => new()
+    {
+        Plane = Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerPrincipalPlane.CiamContact,
+        ContactId = Guid.NewGuid(),
+        Email = "partner@firm.test",
+        ProjectAccess = Array.Empty<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerProjectAccess>(),
+    };
+
     [Fact(DisplayName = "092 must-fire: no staged blob is Refused file_unservable before anything is written (no invoice)")]
     public async Task NoStagedBlob_IsRefused_BeforeAnyWrite()
     {

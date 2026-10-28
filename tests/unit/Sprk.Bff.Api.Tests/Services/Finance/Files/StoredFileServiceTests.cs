@@ -92,7 +92,7 @@ public sealed class StoredFileServiceTests
     {
         var rig = new StoredFileRig();
 
-        var result = await rig.Service.CreateForAppAsync(Spec(), new FakeLengthStream((long)int.MaxValue + 1), requestedBy: null, CancellationToken.None);
+        var result = await rig.Service.CreateForAppAsync(Spec(purpose: StoredFilePurpose.InvoiceSupportingFile), new FakeLengthStream((long)int.MaxValue + 1), requestedBy: null, CancellationToken.None);
 
         result.RefusalCode.Should().Be(StoredFileRefusal.SizeOutOfRange);
         rig.Gateway.Names.Should().BeEmpty();
@@ -657,6 +657,33 @@ public sealed class StoredFileServiceTests
         rig.Dataverse.Calls.Should().BeEmpty();
     }
 
+    [Fact(DisplayName = "094 InvoicePdf writer guard (must fire): the caller upload and the app create refuse an InvoicePdf onto an existing invoice - no blob, no row")]
+    public async Task InvoicePdf_OutsideTheCommit_IsRefused_NothingWritten()
+    {
+        var rig = new StoredFileRig();
+        rig.Probe.Grant("sprk_invoices", InvoiceId, Spaarke.Dataverse.AccessRights.Read | Spaarke.Dataverse.AccessRights.Write);
+
+        var upload = await rig.Service.UploadForCallerAsync(StoredFileRig.Caller(), "token", StoredFilePurpose.InvoicePdf, Invoice, "a.pdf", "application/pdf", new MemoryStream(Pdf), CancellationToken.None);
+        var app = await rig.Service.CreateForAppAsync(Spec(), new MemoryStream(Pdf), requestedBy: null, CancellationToken.None);
+
+        upload.RefusalCode.Should().Be(StoredFileRefusal.InvalidRequest);
+        app.RefusalCode.Should().Be(StoredFileRefusal.InvalidRequest);
+        rig.Gateway.StorageCalls.Should().Be(0);
+        rig.Dataverse.Writes.Should().Be(0);
+        rig.Owners.Verify(o => o.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()), Moq.Times.Never);
+    }
+
+    [Fact(DisplayName = "094 InvoicePdf writer guard (must not fire): the caller upload of a supporting file onto the invoice is created")]
+    public async Task SupportingFile_OntoTheInvoice_IsCreated()
+    {
+        var rig = new StoredFileRig();
+        rig.Probe.Grant("sprk_invoices", InvoiceId, Spaarke.Dataverse.AccessRights.Write);
+
+        var upload = await rig.Service.UploadForCallerAsync(StoredFileRig.Caller(), "token", StoredFilePurpose.InvoiceSupportingFile, Invoice, "a.pdf", "application/pdf", new MemoryStream(Pdf), CancellationToken.None);
+
+        upload.IsCreated.Should().BeTrue();
+    }
+
     [Fact(DisplayName = "Upload must-fire: no Write on the parent → refused, no blob, no row")]
     public async Task Upload_NoWrite_Refused()
     {
@@ -705,7 +732,7 @@ public sealed class StoredFileServiceTests
     public async Task CreateForApp_RetryIsIdempotent()
     {
         var rig = new StoredFileRig();
-        var spec = Spec(StoredFileIds.ForUpload(Submission)) with { SubmissionId = Submission };
+        var spec = Spec(StoredFileIds.ForUpload(Submission), StoredFilePurpose.InvoiceSupportingFile) with { SubmissionId = Submission };
 
         (await rig.Service.CreateForAppAsync(spec, new MemoryStream(Pdf), requestedBy: null, CancellationToken.None)).IsCreated.Should().BeTrue();
 
@@ -722,7 +749,7 @@ public sealed class StoredFileServiceTests
         var rig = new StoredFileRig();
         rig.Dataverse.CreateFault = new TimeoutException("response lost");
         rig.Dataverse.RetrieveFault = new TimeoutException("Dataverse slow");
-        var spec = Spec();
+        var spec = Spec(purpose: StoredFilePurpose.InvoiceSupportingFile);
 
         var act = () => rig.Service.CreateForAppAsync(spec, new MemoryStream(Pdf), requestedBy: null, CancellationToken.None);
 
@@ -735,7 +762,7 @@ public sealed class StoredFileServiceTests
     public async Task CreateFails_ReusedBlob_Kept()
     {
         var rig = new StoredFileRig();
-        var spec = Spec(StoredFileIds.ForUpload(Submission)) with { SubmissionId = Submission };
+        var spec = Spec(StoredFileIds.ForUpload(Submission), StoredFilePurpose.InvoiceSupportingFile) with { SubmissionId = Submission };
         (await rig.Service.StageAsync(spec, new MemoryStream(Pdf), CancellationToken.None)).IsStaged.Should().BeTrue(); // the other attempt
         rig.Dataverse.CreateFault = new TimeoutException("transient");
 
@@ -750,7 +777,7 @@ public sealed class StoredFileServiceTests
     {
         var rig = new StoredFileRig { OwnerAnswer = RecordOwnerResolution.Refused("record_owner_no_source", "none") };
 
-        var result = await rig.Service.CreateForAppAsync(Spec(), new MemoryStream(Pdf), requestedBy: null, CancellationToken.None);
+        var result = await rig.Service.CreateForAppAsync(Spec(purpose: StoredFilePurpose.InvoiceSupportingFile), new MemoryStream(Pdf), requestedBy: null, CancellationToken.None);
 
         result.RefusalCode.Should().Be(StoredFileRefusal.OwnerUnresolved);
         rig.Gateway.StorageCalls.Should().Be(0);
