@@ -730,7 +730,7 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
                 return null;
             }
 
-            var name = $"{submission.TrackingNumber.Trim()}-{ordinal.ToString(CultureInfo.InvariantCulture)}";
+            var name = $"{StoredFileSchema.NameSegmentOf(submission.TrackingNumber) ?? "invoice"}-{ordinal.ToString(CultureInfo.InvariantCulture)}";
             var spec = FromEmailPartSpec(new StoredFileRowSpec
             {
                 FileId = fileId,

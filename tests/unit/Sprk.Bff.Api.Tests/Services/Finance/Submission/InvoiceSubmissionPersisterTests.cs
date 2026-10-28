@@ -1971,6 +1971,20 @@ public class InvoiceSubmissionPersisterTests
         store.Files.Gateway.Calls.Should().NotContain(c => c.StartsWith("delete ", StringComparison.Ordinal), "the parts are the caller's bytes: nothing re-stages them");
     }
 
+    [Fact(DisplayName = "094 round 5 (uac K1-a): stored file names carry the tracking number without path separators or control characters")]
+    public async Task FromEmail_FileNames_StripPathAndControlCharactersFromTheTrackingNumber()
+    {
+        var outcome = await new ProcessorHarness { Channel = InvoiceSubmissionChannel.Internal }.RunAsync();
+        outcome = outcome with { Submission = outcome.Submission! with { TrackingNumber = "INV/100\\\u0007.2" } };
+        var store = FromEmailStore();
+        StageFromEmail(store, version: store.DocumentVersion);
+
+        (await store.Build().PersistAsync(outcome, null)).Status.Should().Be(SubmissionPersistStatus.Committed);
+
+        FileCreate(store, FileId).GetAttributeValue<string>(StoredFileSchema.Name).Should().Be("INV100.2.pdf");
+        FileCreate(store, EmailSupportingFile).GetAttributeValue<string>(StoredFileSchema.Name).Should().Be("INV100.2-1.xlsx");
+    }
+
     [Fact(DisplayName = "094 from-email (must fire): the .eml linked to another invoice is refused at step 3, before anything is built")]
     public async Task FromEmail_TheEmlIsLinkedToAnotherInvoice_IsRefused_NoTransaction()
     {

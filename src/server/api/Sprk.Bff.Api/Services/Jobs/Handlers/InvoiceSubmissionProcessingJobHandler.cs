@@ -780,9 +780,9 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
     /// The copy's display name: the submission's tracking number, else <c>invoice</c>; cut to the column. Fix round (uac K1): never the source
     /// document's file name - the copy row is read by the invoice's readers, who need not be able to read the source document.
     /// </summary>
-    private static string SourceCopyName(string? trackingNumber)
+    internal static string SourceCopyName(string? trackingNumber)
     {
-        var name = !string.IsNullOrWhiteSpace(trackingNumber) ? trackingNumber.Trim() + ".pdf" : "invoice.pdf";
+        var name = (StoredFileSchema.NameSegmentOf(trackingNumber) ?? "invoice") + ".pdf";
         return name.Length <= StoredFileSchema.NameMaxLength ? name : name[..StoredFileSchema.NameMaxLength];
     }
 

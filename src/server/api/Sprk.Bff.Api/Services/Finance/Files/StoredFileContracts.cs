@@ -87,6 +87,21 @@ public static class StoredFileSchema
     /// <summary>Length limits of the text columns (088).</summary>
     public const int NameMaxLength = 400, ContentTypeMaxLength = 255, AttachmentIdentityMaxLength = 1000, BlobPathMaxLength = 1024;
 
+    /// <summary>
+    /// ebilling-r1 task 094 (review round 5, uac K1-a): a value (a tracking number) made safe to stand in a stored file's display name:
+    /// path separators (<c>/</c>, <c>\</c>) and control characters removed, then trimmed. <c>null</c> when nothing is left.
+    /// </summary>
+    internal static string? NameSegmentOf(string? value)
+    {
+        if (value is null)
+        {
+            return null;
+        }
+
+        var kept = new string(value.Where(c => c is not ('/' or '\\') && !char.IsControl(c)).ToArray()).Trim();
+        return kept.Length > 0 ? kept : null;
+    }
+
     public const string ProcedureVersionTable = "sprk_procedureversion";
     public const string InvoiceTable = "sprk_invoice";
     public const string BillingExportTable = "sprk_billingexport";
