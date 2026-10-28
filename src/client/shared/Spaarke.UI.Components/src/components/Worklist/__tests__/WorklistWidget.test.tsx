@@ -299,7 +299,10 @@ describe('count filters', () => {
     renderWidget({ narrative: <span>Seven things to do.</span>, aggregateRow: <div data-testid="agg">8 emails</div> });
     await ready();
     await userEvent.click(countCard(lane('Do'), /^Coming due/));
-    await userEvent.click(within(lane('Do')).getByRole('button', { name: 'Show all' }));
+    // The count card opened the lane (D-195), so Show all, inside the collapsible region, is reachable.
+    const showAll = within(lane('Do')).getByRole('button', { name: 'Show all' });
+    expect(showAll).toBeVisible();
+    await userEvent.click(showAll);
     expect(within(lane('Do')).queryByTestId('lane-showing-Do')).not.toBeInTheDocument();
     expect(lineIds(lane('Do'))).toEqual([D4, D3, D1, D2, D5]);
     expect(screen.getByTestId('worklist-narrative')).toBeInTheDocument();
