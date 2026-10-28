@@ -34,3 +34,10 @@
 ## 4. `removeUnverifiedEmailClaim` (read 2026-10-28)
 
 - Already `true` on the dev BFF app `1e40baad` and on the multitenant SPA client `5859e812` (set 2026-10-19, task 059 stage B and C2). Read back 2026-10-28: both `true`. No write needed on dev.
+
+## 5. Removal sweep, report-only (read 2026-10-28 ~20:20Z)
+
+- Switches on `spaarke-bff-dev`: `IdentityLink__Reconciliation__WritesEnabled` = true, and `RemovalSweepWritesEnabled` is **unset**. The sweep needs both, so it is **report-only**. No change was made.
+- App Insights since 14:11Z: no `removal-sweep` lines. The dev environment's heartbeat shows `readability=Readable`, so the sweep was not skipped, and no failure line was logged.
+- Direct count of the sweep's candidate queries on spaarkedev1 (filters from the code at `e56a3a51d4`): inactive, bound, unmarked contacts **0**; active grants of inactive or marked contacts **0**; contacts already marked removed **0**. The sweep has nothing to mark on dev.
+- Gap found: a pass with no candidates leaves no telemetry. Filed as ISS-020, #2415.
