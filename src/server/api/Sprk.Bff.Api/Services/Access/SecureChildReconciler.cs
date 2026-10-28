@@ -2453,6 +2453,17 @@ public sealed class SecureChildReconciler
                     "the rule gives it the Secure Record owner team: only the secure pass moves a row into isolation");
             }
 
+            // 194b V-fix (verifier A F1): an ordinary owner is never written on PART of a question (a Decision Record whose
+            // resolved Signals cannot all be read): an unread Signal's subject could be the secure parent. Not decided: the
+            // row fails, so the root is carried and asked again — the rule TodoAssigneeOwnerReconciliationJob applies too.
+            if (question.Incomplete is { } incomplete)
+            {
+                Log.LogWarning("[SECURE-CHILD-RECONCILE] ordinary move {Table} {Id}: its question is incomplete ({Why}); no " +
+                    "ordinary owner is written on part of it.", table, row.Id, incomplete);
+                return new(RowMove.None, SecureChildRowOutcome.Failed, null,
+                    $"its question is incomplete ({incomplete}): no ordinary owner is written on part of it");
+            }
+
             if (current == DataversePrincipalRef.Team(target))
                 return new(RowMove.Stay, SecureChildRowOutcome.AlreadyCorrect, resolution, null);
             if (targetBu is null)

@@ -571,6 +571,84 @@ public class SecureChildOrdinaryParentMoveTests
             .Which.Should().Match<SecureChildRowChange>(c => c.Outcome == SecureChildRowOutcome.Untouched && c.Detail!.Contains("F1-d"));
     }
 
+    /// <summary>A Signal about <paramref name="eventId"/>, owned by the general team (its subject lookup repeats its pair id).</summary>
+    private void SignalAbout(Guid signal, Guid eventId)
+    {
+        Row("sprk_signal", signal, TeamRef(GeneralTeam), ("sprk_regardingevent", "sprk_event", eventId));
+        _world.Set("sprk_signal", signal, "sprk_regardingrecordid", eventId.ToString("D"));
+    }
+
+    private static string StepsListing(params Guid[] resolved) =>
+        "{\"reviewId\":\"" + Guid.NewGuid().ToString("D") + "\",\"resolvedSignalIds\":["
+        + string.Join(",", resolved.Select(s => "\"" + s.ToString("D") + "\"")) + "],\"steps\":[]}";
+
+    /// <summary>An ORDINARY Decision Record (the general team) whose core is the moved matter, listing <paramref name="signals"/>.</summary>
+    private Guid OrdinaryDecisionRecordResolving(params Guid[] signals)
+    {
+        var record = Guid.NewGuid();
+        OntologyRow("sprk_decisionrecord", record, TeamRef(GeneralTeam), core: MatterId, subject: MatterId,
+            ("sprk_matter", Matter, MatterId), ("sprk_regardingmatter", Matter, MatterId));
+        _world.Set("sprk_decisionrecord", record, "sprk_steps", StepsListing(signals));
+        return record;
+    }
+
+    [Fact(DisplayName = "194b V-fix must fire (verifier A): an ordinary Decision Record whose listed Signal cannot be read is FAILED by the ordinary pass — no ordinary owner on part of its question")]
+    public async Task AnOrdinaryDecisionRecordWithAFaultedSignalRead_Fails_NotChanged()
+    {
+        MatterMovedToB();
+        var otherEvent = Guid.NewGuid();
+        Row("sprk_event", otherEvent, TeamRef(GeneralTeam)); // the unread Signal's subject (could have been secure)
+        var signal = Guid.NewGuid();
+        SignalAbout(signal, otherEvent);
+        var record = OrdinaryDecisionRecordResolving(signal);
+        _world.FailingIdListReadsOf("sprk_signal", signal);
+
+        var report = await Reconciler().ReconcileOrdinaryParentMoveAsync(
+            Matter, MatterId, SecureChildReconcileMode.Apply, maxWrites: 200, CancellationToken.None);
+
+        _world.OwnerOf("sprk_decisionrecord", record).Should().Be(DataversePrincipalRef.Team(GeneralTeam), "not moved to B on part of its question");
+        _world.OwnerWrites.Should().NotContain(w => w.Id == record);
+        report.Changes.Should().ContainSingle(c => c.Id == record)
+            .Which.Should().Match<SecureChildRowChange>(c => c.Outcome == SecureChildRowOutcome.Failed && c.Detail!.Contains("incomplete"));
+        report.Status.Should().Be(SecureChildReconcileStatus.Incomplete, "the root is carried and asked again");
+    }
+
+    [Fact(DisplayName = "194b V-fix must not fire: the same Decision Record with its whole question naming a SECURE subject is reported for the secure pass, not failed and not moved")]
+    public async Task AnOrdinaryDecisionRecordWhoseWholeQuestionIsSecure_IsReported_ForTheSecurePass()
+    {
+        MatterMovedToB();
+        var secureMatter = Guid.NewGuid();
+        var secureEvent = Guid.NewGuid();
+        _world.SecureRoot(Matter, secureMatter).SecureChild("sprk_event", secureEvent, ("sprk_regardingmatter", Matter, secureMatter));
+        var signal = Guid.NewGuid();
+        SignalAbout(signal, secureEvent);
+        var record = OrdinaryDecisionRecordResolving(signal);
+
+        var report = await Reconciler().ReconcileOrdinaryParentMoveAsync(
+            Matter, MatterId, SecureChildReconcileMode.Apply, maxWrites: 200, CancellationToken.None);
+
+        _world.OwnerWrites.Should().NotContain(w => w.Id == record);
+        report.Changes.Should().ContainSingle(c => c.Id == record)
+            .Which.Should().Match<SecureChildRowChange>(c => c.Outcome == SecureChildRowOutcome.Untouched
+                                                             && c.Detail!.Contains("only the secure pass"));
+    }
+
+    [Fact(DisplayName = "194b V-fix must not fire: the same Decision Record with its whole question ordinary follows its matter to B")]
+    public async Task AnOrdinaryDecisionRecordWhoseWholeQuestionIsOrdinary_FollowsItsMatter()
+    {
+        MatterMovedToB();
+        var signal = Guid.NewGuid();
+        Row("sprk_event", EventId, TeamRef(GeneralTeam), ("sprk_regardingmatter", Matter, MatterId));
+        SignalAbout(signal, EventId);
+        var record = OrdinaryDecisionRecordResolving(signal);
+
+        var report = await Reconciler().ReconcileOrdinaryParentMoveAsync(
+            Matter, MatterId, SecureChildReconcileMode.Apply, maxWrites: 200, CancellationToken.None);
+
+        _world.OwnerOf("sprk_decisionrecord", record).Should().Be(DataversePrincipalRef.Team(TeamB));
+        report.Changes.Should().ContainSingle(c => c.Id == record).Which.Outcome.Should().Be(SecureChildRowOutcome.Changed);
+    }
+
     [Fact(DisplayName = "194b F1-d must fire: an Unsecure HOLDS a Decision Record whose question is incomplete in isolation, takes its mirror off and reports it held, while the Signal beside it is released")]
     public async Task AnUnsecure_HoldsADecisionRecord_AndReleasesTheSignal()
     {
