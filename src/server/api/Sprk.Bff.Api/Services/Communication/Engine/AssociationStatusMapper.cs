@@ -20,7 +20,9 @@ namespace Sprk.Bff.Api.Services.Communication.Engine;
 ///   </item>
 ///   <item>Reinforced in [0.50, threshold), OR any AI rung (4–5) involved, OR kill-switch off → <b>Suggested</b>.</item>
 ///   <item>Reinforced &lt; 0.50, or no writable match → <b>Pending Review</b>.</item>
-///   <item>Two+ distinct targets on the SAME field each ≥ threshold → <b>Ambiguous</b> (never guess).</item>
+///   <item>Two+ distinct targets on the SAME field each ≥ threshold → <b>Ambiguous</b> (never guess) — unless exactly
+///   one of them is caller-supplied (<see cref="RungMatch.CallerSupplied"/>): the caller's choice is not a guess, so it
+///   wins the field and the others stay review candidates (#2412).</item>
 /// </list>
 ///
 /// <para>
@@ -190,6 +192,10 @@ public sealed class AssociationStatusMapper
             AddWrites(writes, fieldWinners, coreEntities, useDeterministic: false);
         }
 
+        var callerDecided = fieldWinners.Where(f => f.CallerOverrodeConflict).Select(f => f.Field).ToList();
+        if (callerDecided.Count > 0)
+            reason += $" The caller's choice decided field(s) {string.Join(", ", callerDecided)} over other high-confidence match(es), kept as review candidates.";
+
         var candidates = BuildCandidateTraces(fieldWinners, writes);
 
         var provenance = new AssociationProvenance
@@ -268,10 +274,14 @@ public sealed class AssociationStatusMapper
                     DeterministicConfidence: detConf,
                     WriteConfidence: writeConf,
                     AiInvolved: aiInvolved,
+                    CallerSupplied: contributors.Any(m => m.CallerSupplied),
                     Contributors: perKindMax));
             }
 
-            targets.Sort((a, b) => b.FullConfidence.CompareTo(a.FullConfidence));
+            // The caller's choice leads its field whatever the other targets score (#2412); then by confidence.
+            targets.Sort((a, b) => a.CallerSupplied != b.CallerSupplied
+                ? b.CallerSupplied.CompareTo(a.CallerSupplied)
+                : b.FullConfidence.CompareTo(a.FullConfidence));
 
             winners.Add(new FieldWinner(
                 field: fieldGroup.Key,
@@ -479,6 +489,7 @@ public sealed class AssociationStatusMapper
         double DeterministicConfidence,
         double WriteConfidence,
         bool AiInvolved,
+        bool CallerSupplied,
         IReadOnlyList<RungMatch> Contributors);
 
     private sealed class FieldWinner
@@ -506,14 +517,26 @@ public sealed class AssociationStatusMapper
         /// <summary>
         /// True when 2+ distinct targets on this field are each high-confidence (≥ the auto-file threshold);
         /// evaluated lazily against the threshold the ladder resolved. The mapper sets this via
-        /// <see cref="EvaluateConflict"/>.
+        /// <see cref="EvaluateConflict"/>. Exactly one caller-supplied target settles the field (it is the winner,
+        /// the rest are candidates); two caller-supplied targets on one field are a conflict (#2412).
         /// </summary>
         public bool Conflict { get; private set; }
+
+        /// <summary>True when the caller's own choice won this field over another high-confidence target (#2412).</summary>
+        public bool CallerOverrodeConflict { get; private set; }
 
         internal bool EvaluateConflict(double threshold)
         {
             ConflictFloor = threshold;
-            Conflict = Targets.Count(t => t.FullConfidence >= threshold) >= 2;
+            var highConfidence = Targets.Count(t => t.FullConfidence >= threshold);
+            var callerSupplied = Targets.Count(t => t.CallerSupplied);
+            Conflict = callerSupplied switch
+            {
+                1 => false,
+                > 1 => true,
+                _ => highConfidence >= 2,
+            };
+            CallerOverrodeConflict = callerSupplied == 1 && Targets.Count(t => !t.CallerSupplied && t.FullConfidence >= threshold) >= 1;
             return Conflict;
         }
     }

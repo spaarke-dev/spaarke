@@ -64,6 +64,7 @@ public sealed class ExplicitReferenceRung : IAssociationRung
                 Confidence = 1.0,
                 Provenance = $"explicit:caller-supplied:{assoc.EntityType}",
                 Rung = RungKind.ExplicitReference,
+                CallerSupplied = true,
             });
         }
 
