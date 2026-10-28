@@ -1,0 +1,175 @@
+{
+  "schemaVersion": 1,
+  "description": "What the 'Spaarke Core User' role must hold so the client create wizards can save (issue #2382). A wizard creates its record as the user (Xrm.WebApi, or the BFF child-record route, which checks the same rights as the caller) and binds lookups in the same create. Dataverse then needs Append on the created table and AppendTo on every bound target. The rule: Core User can link wizard lookups at its Read depth, so AppendTo on each target is at least the role's Read depth on that table, and Append on each created table is at least the role's Create depth. This file is the ONE declared list. tests/Spaarke.ArchTests/CoreUserWizardLinkingGuardTests.cs checks the role XML against it and fails when a wizard binds an entity set it does not list; scripts/Set-WizardLinkingAndMembershipPrivileges.ps1 applies it to an environment.",
+  "howToExtend": [
+    "A wizard that binds a new lookup target fails the guard's source scan until the target is listed in 'bindTargets'. Add it with the wizard that binds it and where the bind comes from.",
+    "'appendToPrivilege', 'readPrivilege', 'appendPrivilege' and 'createPrivilege' are the privilege names from metadata (EntityDefinitions(LogicalName='x')/Privileges). The casing follows the schema name.",
+    "Never raise Read, Create, Write, Delete, Share or Assign to satisfy this file. It only adds or raises AppendTo and Append."
+  ],
+  "roleName": "Spaarke Core User",
+  "bindTargets": [
+    {
+      "logicalName": "contact",
+      "entitySet": "contacts",
+      "readPrivilege": "prvReadContact",
+      "appendToPrivilege": "prvAppendToContact",
+      "boundBy": "Project, Matter, Event, Report Card, To Do and Work Assignment wizards (assigned people); field mappings from a matter"
+    },
+    {
+      "logicalName": "sprk_organization",
+      "entitySet": "sprk_organizations",
+      "readPrivilege": "prvReadsprk_Organization",
+      "appendToPrivilege": "prvAppendTosprk_Organization",
+      "boundBy": "Project and Matter (outside counsel), Invoice (vendor), Report Card; field mappings from a matter"
+    },
+    {
+      "logicalName": "account",
+      "entitySet": "accounts",
+      "readPrivilege": "prvReadAccount",
+      "appendToPrivilege": "prvAppendToAccount",
+      "boundBy": "Project and Matter wizards launched from an account; regarding parent"
+    },
+    {
+      "logicalName": "sprk_aisearchindex",
+      "entitySet": "sprk_aisearchindexes",
+      "readPrivilege": "prvReadsprk_AISearchIndex",
+      "appendToPrivilege": "prvAppendTosprk_AISearchIndex",
+      "boundBy": "Business-unit default cascade (Project, Matter, Event, Invoice)"
+    },
+    {
+      "logicalName": "sprk_mattertype_ref",
+      "entitySet": "sprk_mattertype_refs",
+      "readPrivilege": "prvReadsprk_MatterType_Ref",
+      "appendToPrivilege": "prvAppendTosprk_MatterType_Ref",
+      "boundBy": "Matter wizard"
+    },
+    {
+      "logicalName": "sprk_practicearea_ref",
+      "entitySet": "sprk_practicearea_refs",
+      "readPrivilege": "prvReadsprk_PracticeArea_Ref",
+      "appendToPrivilege": "prvAppendTosprk_PracticeArea_Ref",
+      "boundBy": "Project and Matter wizards"
+    },
+    {
+      "logicalName": "sprk_projecttype_ref",
+      "entitySet": "sprk_projecttype_refs",
+      "readPrivilege": "prvReadsprk_ProjectType_Ref",
+      "appendToPrivilege": "prvAppendTosprk_ProjectType_Ref",
+      "boundBy": "Project wizard"
+    },
+    {
+      "logicalName": "sprk_recordtype_ref",
+      "entitySet": "sprk_recordtype_refs",
+      "readPrivilege": "prvReadsprk_RecordType_Ref",
+      "appendToPrivilege": "prvAppendTosprk_RecordType_Ref",
+      "boundBy": "Regarding resolver fields (Event, Invoice, Report Card, To Do, Work Assignment)"
+    },
+    {
+      "logicalName": "sprk_eventtype_ref",
+      "entitySet": "sprk_eventtype_refs",
+      "readPrivilege": "prvReadsprk_EventType_Ref",
+      "appendToPrivilege": "prvAppendTosprk_EventType_Ref",
+      "boundBy": "Event wizard"
+    },
+    {
+      "logicalName": "sprk_matter",
+      "entitySet": "sprk_matters",
+      "readPrivilege": "prvReadsprk_Matter",
+      "appendToPrivilege": "prvAppendTosprk_Matter",
+      "boundBy": "Regarding parent; Matter wizard follow-on invoice update"
+    },
+    {
+      "logicalName": "sprk_project",
+      "entitySet": "sprk_projects",
+      "readPrivilege": "prvReadsprk_Project",
+      "appendToPrivilege": "prvAppendTosprk_Project",
+      "boundBy": "Regarding parent"
+    },
+    {
+      "logicalName": "sprk_invoice",
+      "entitySet": "sprk_invoices",
+      "readPrivilege": "prvReadsprk_Invoice",
+      "appendToPrivilege": "prvAppendTosprk_Invoice",
+      "boundBy": "Regarding parent"
+    },
+    {
+      "logicalName": "sprk_workassignment",
+      "entitySet": "sprk_workassignments",
+      "readPrivilege": "prvReadsprk_WorkAssignment",
+      "appendToPrivilege": "prvAppendTosprk_WorkAssignment",
+      "boundBy": "Regarding parent; Work Assignment follow-on event"
+    },
+    {
+      "logicalName": "sprk_event",
+      "entitySet": "sprk_events",
+      "readPrivilege": "prvReadsprk_Event",
+      "appendToPrivilege": "prvAppendTosprk_Event",
+      "boundBy": "Regarding parent (Work Assignment)"
+    },
+    {
+      "logicalName": "sprk_servicerequest",
+      "entitySet": "sprk_servicerequests",
+      "readPrivilege": "prvReadsprk_ServiceRequest",
+      "appendToPrivilege": "prvAppendTosprk_ServiceRequest",
+      "boundBy": "Regarding parent (shared regarding resolver)"
+    },
+    {
+      "logicalName": "sprk_budget",
+      "entitySet": "sprk_budgets",
+      "readPrivilege": "prvReadsprk_Budget",
+      "appendToPrivilege": "prvAppendTosprk_Budget",
+      "boundBy": "Regarding parent (Event)"
+    },
+    {
+      "logicalName": "sprk_analysis",
+      "entitySet": "sprk_analyses",
+      "readPrivilege": "prvReadsprk_analysis",
+      "appendToPrivilege": "prvAppendTosprk_analysis",
+      "boundBy": "Regarding parent (Event)"
+    }
+  ],
+  "createdTables": [
+    {
+      "logicalName": "sprk_project",
+      "createPrivilege": "prvCreatesprk_Project",
+      "appendPrivilege": "prvAppendsprk_Project",
+      "createdBy": "Project wizard (Xrm.WebApi)"
+    },
+    {
+      "logicalName": "sprk_matter",
+      "createPrivilege": "prvCreatesprk_Matter",
+      "appendPrivilege": "prvAppendsprk_Matter",
+      "createdBy": "Matter wizard (Xrm.WebApi)"
+    },
+    {
+      "logicalName": "sprk_event",
+      "createPrivilege": "prvCreatesprk_Event",
+      "appendPrivilege": "prvAppendsprk_Event",
+      "createdBy": "Event and Work Assignment wizards (BFF child-record route)"
+    },
+    {
+      "logicalName": "sprk_invoice",
+      "createPrivilege": "prvCreatesprk_Invoice",
+      "appendPrivilege": "prvAppendsprk_Invoice",
+      "createdBy": "Invoice wizard (BFF child-record route); Matter wizard follow-on update"
+    },
+    {
+      "logicalName": "sprk_reportcard",
+      "createPrivilege": "prvCreatesprk_ReportCard",
+      "appendPrivilege": "prvAppendsprk_ReportCard",
+      "createdBy": "Report Card wizard (BFF child-record route)"
+    },
+    {
+      "logicalName": "sprk_todo",
+      "createPrivilege": "prvCreatesprk_Todo",
+      "appendPrivilege": "prvAppendsprk_Todo",
+      "createdBy": "To Do wizard (BFF child-record route)"
+    },
+    {
+      "logicalName": "sprk_workassignment",
+      "createPrivilege": "prvCreatesprk_WorkAssignment",
+      "appendPrivilege": "prvAppendsprk_WorkAssignment",
+      "createdBy": "Work Assignment wizard (BFF child-record route)"
+    }
+  ]
+}

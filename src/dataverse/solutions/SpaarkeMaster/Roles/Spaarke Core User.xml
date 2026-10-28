@@ -76,7 +76,7 @@
     <RolePrivilege name="prvAppendsprk_Todo" level="Deep" />
     <RolePrivilege name="prvAppendsprk_WorkAssignment" level="Deep" />
     <RolePrivilege name="prvAppendSyncError" level="Basic" />
-    <RolePrivilege name="prvAppendToAccount" level="Basic" />
+    <RolePrivilege name="prvAppendToAccount" level="Deep" />
     <RolePrivilege name="prvAppendToActionCard" level="Global" />
     <RolePrivilege name="prvAppendToActivity" level="Basic" />
     <RolePrivilege name="prvAppendToArticleTemplate" level="Global" />
@@ -85,7 +85,7 @@
     <RolePrivilege name="prvAppendtoCategory" level="Global" />
     <RolePrivilege name="prvAppendToChannelPropertyGroup" level="Global" />
     <RolePrivilege name="prvAppendToConnection" level="Global" />
-    <RolePrivilege name="prvAppendToContact" level="Basic" />
+    <RolePrivilege name="prvAppendToContact" level="Deep" />
     <RolePrivilege name="prvAppendToConvertRule" level="Global" />
     <RolePrivilege name="prvAppendToCustomerRelationship" level="Basic" />
     <RolePrivilege name="prvAppendToEmailServerProfile" level="Global" />
@@ -138,10 +138,15 @@
     <RolePrivilege name="prvAppendTosprk_InvoiceLineItem" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_KPIAssessment" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_Matter" level="Deep" />
+    <RolePrivilege name="prvAppendTosprk_MatterType_Ref" level="Global" />
     <RolePrivilege name="prvAppendTosprk_Memo" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_NavItem" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_notificationoutbox" level="Deep" />
+    <RolePrivilege name="prvAppendTosprk_Organization" level="Deep" />
+    <RolePrivilege name="prvAppendTosprk_PracticeArea_Ref" level="Global" />
     <RolePrivilege name="prvAppendTosprk_Project" level="Deep" />
+    <RolePrivilege name="prvAppendTosprk_ProjectType_Ref" level="Global" />
+    <RolePrivilege name="prvAppendTosprk_RecordType_Ref" level="Global" />
     <RolePrivilege name="prvAppendTosprk_Report" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_ServiceRequest" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_Todo" level="Deep" />
