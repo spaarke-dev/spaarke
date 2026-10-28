@@ -72,3 +72,87 @@ Each batch ran in a fresh write with a `--no-incremental` build over the filter 
 | AR2 | `IsSecured` 0 in Entity.xml | 1 of 5 (field-secured) |
 | AR3 | A second writer of the bind, in another file | 1 of 5 (only the grant core) |
 | AR4 | The script's `$Column` changed | 1 of 5 (names agree) |
+
+## G2: paired revoke and `pairedWith`
+
+### Revoke paths (every BFF call that removes a user's share on a matter, project or work assignment)
+
+| Path | What removes the share | Ends the paired grant in G2? |
+|---|---|---|
+| `POST /unshare-user` (`InternalShareEndpoints.UnshareAsync`): Manage Access "remove" on a person row, which is Current Access's remove for an internal user | The operator | **Yes.** The share is removed first, then the grant. |
+| `UnsecureProjectEndpoint.RevokeAllSharesAsync` (making a record not secure) | The record leaves secure isolation; every explicit share is swept and the user keeps business-unit access | **No.** R5 ends it within a day. Owner question below. |
+| `NoAccessShareEnforcer` (a No Access user's share on a secure record) | Enforcement | **No.** R5 ends it within a day. Owner question below. |
+| `RestrictedExternalShareRemover` (a flagged-external user's share on a Restricted record) | Enforcement | **No.** R5 ends it within a day. Owner question below. |
+| `SecureRootInheritance` (an inherited share withdrawn when the parent's share goes) | The parent's change | **No.** R5 ends it within a day. Owner question below. |
+| `AssignedAccessMaterializer` (an Assigned-To auto share withdrawn) | The assignment changed | **No.** R5 ends it within a day. Owner question below. |
+| `ProvisionProjectEndpoint.RestoreCreatorShareAsync` (undoing provisioning's creator share) | An undo of the BFF's own share; never an "Add person" share | Not applicable |
+| `SecureChildShareSynchronizer` / `GateDecisionRecordSharing` / `PlaybookSharingService` | Child rows, gate decisions, playbooks: never a record a grant is paired on | Not applicable |
+
+Grant-side revokes never remove the share:
+- `/revoke` (Current Access remove on a grant row);
+- the contact-side `/contact-grants/revoke`, which can't reach a paired grant anyway, since a paired row is issued by an internal user;
+- person removal;
+- project closure.
+
+This is what the cleanup ruling implies ("grant gone, share stays: do nothing"), and it is pinned by `G2_RevokingOnlyThePairedGrant_LeavesTheShare`.
+
+### Behaviour
+
+- **Order:** the share first, then the grant. `/unshare-user` ends the paired grants only once the user's share on the record is confirmed gone. That covers the 200 (removed, or held none, so a repeat completes an earlier half-done revoke) and `children_incomplete`, which is sent only after the record's own share is removed.
+- **If the share revoke fails or is refused,** nothing is changed.
+- **Each paired grant goes through the one grant revoke** (`ExternalGrantRevocationService.RevokeAsync`): the rows, the SPE cleanup, the cache and the ledger marking. They are found by `sprk_pairedsystemuser` plus the record (`ReadPairingsOnRecordAsync`), with the user checked again in memory. A deliberate grant, or a grant paired with someone else, is never ended.
+- **Response:** `pairedGrantEnded` is `true` when the grant was ended. It is `false` when the pairing couldn't be read, a row wasn't deactivated, or the SPE cleanup failed. In that case the share stays removed, the failure is logged at Error with ids only, and R5 ends the grant on its next run. It is absent when no grant is paired or the column is missing (missing column logged as a Warning). It also appears in the `children_incomplete` extensions.
+- **`pairedWith`** (`RecordAccessPairing {id, kind}`):
+  - A share row (`/user-shares`) carries the paired grant's `accessRecordId`, kind `grant`. If two contacts' grants are paired with the same user, the lowest id is shown.
+  - A grant row (`/record-grants`) carries the paired user's `systemUserId`, kind `share`.
+  - Ids and kind only, never a name, email or UPN. Both lists already require Write and Share on the record, so a caller who can see one can see the other.
+  - **It fails quiet:** a missing or unreadable column means no `pairedWith` (Warning) and the list still answers. This is acceptable because no access decision reads it; it is display only.
+
+### Owner question (not decided in G2)
+
+Should the five system share-removal paths (unsecure, the No Access enforcer, the Restricted remover, secure-root inheritance, Assigned-To) also end the paired grant right away? Today R5 ends it within a day.
+
+The unsecure path in particular removes the share while the user keeps access through the business unit, so ending their workforce-app grant there may not be wanted.
+
+### §11 (G2)
+
+| New surface | Existing | Extension | Cost of doing nothing |
+|---|---|---|---|
+| `ExternalGrantRevocationService.RevokePairedWithAsync` | `RevokeAsync`, the one grant revoke | A method on that service that calls `RevokeAsync` per paired row; only the find-by-pairing read is new | A removed share leaves a live workforce-app grant for up to a day |
+| `ExternalGrantLifecycle.ReadPairingsOnRecordAsync` | `ReadPairingsAsync` (by grant key) | It shares the same private reader; only the filter differs | Neither the revoke nor the lists can find a user's paired rows on a record |
+| `UnshareRecordWithUserResponse.PairedGrantEnded`, `RecordAccessPairing` / `PairedWith` | `removed`; `inheritedFrom` | Additive optional fields | The caller can't tell a half-done revoke, and Current Access can't tie the two rows together |
+
+### Tests
+
+- `ContactGrantSharesInternalUserTests` G2_* (15):
+  - unshare ends the paired grant;
+  - grant end fails → `false`, share stays removed;
+  - share revoke fails → nothing changed;
+  - column missing → share only;
+  - pairing unreadable → `false`;
+  - only the user's paired grant is ended;
+  - a repeat with no share still ends it;
+  - no pairing → as before;
+  - `children_incomplete` carries the flag;
+  - grant revoke leaves the share;
+  - `pairedWith` both ways with no email or name;
+  - no pairing on deliberate rows;
+  - unreadable or missing column → lists unpaired (two cases).
+- Not covered by a test: the `SpeOutcome == Failed` branch. It would need a secure record with a container. That branch is perturbation O's sibling and is reviewed by reading.
+
+### Perturbations (G2)
+
+Each batch ran in a fresh write with a `--no-incremental` build over the filter `ContactGrantSharesInternalUserTests | InternalUserShareTests | AssignedAccessMarkerTests | RecordGrants` (226 tests). The restored tree passed 226/226.
+
+| Batch | Perturbation | Red |
+|---|---|---|
+| H | Paired end runs whether or not the share was removed | 1: …WhenTheShareRemovalFails_ChangesNothing… |
+| I | `pairedGrantEnded` not added to `children_incomplete` | 1: …WhenRelatedRecordsAreIncomplete… |
+| J | The 200 never carries `pairedGrantEnded` | 4: RemovesTheShare_ThenEnds…, PairedGrantCannotBeEnded…, PairingCannotBeRead…, UserHoldsNoShare… |
+| K | Column missing reported as Failed | 1: …PairingColumnIsNotProvisioned… |
+| L | Unreadable pairing reported as none paired | 1: …PairingCannotBeRead… |
+| M | The user filter dropped (in the read and in memory) | 1: …EndsOnlyTheGrantPairedWithThatUser |
+| O | A failed grant revoke counted as ended | 1: …PairedGrantCannotBeEnded… |
+| P | Grant row `pairedWith` dropped | 1: …EachNameTheOther… |
+| Q | Share row `pairedWith` dropped | 1: …EachNameTheOther… |
+| R | Display pairing read fails loud | 14 results (11 tests): the G2 unreadable-pairing Theory plus 10 existing `/user-shares` and `/record-grants` tests whose fakes don't answer the pairing read |
