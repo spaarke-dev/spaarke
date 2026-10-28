@@ -152,6 +152,9 @@ Full rationale for each decision is in `notes/decisions-log.md`.
 
 - 2026-10-21 — **"Matter" is shorthand for any core record.** e-billing applies to `sprk_matter`, `sprk_project` and `sprk_workassignment`, and will extend to `sprk_agreement` in e-billing R2 (owner 2026-10-21: an agreement is a core record that can stand alone or sit under a matter or project). Every new table, lookup, field, control and rule is built to the core-record set (one list, like `InvoiceFamilyCoreRecordGuard.FilingCores`), never to `sprk_matter` alone. A test or a design that names only `sprk_matter` needs a reason.
 
+- 2026-10-28 — **UAC round 130 (#2362): no secure-family entity.** Invoice-family children stay secure through the existing mechanism (SecureChildLineage rows, RecordOwnershipResolver, the reconciler); no family key, column or table. Binding: membership stays computable from stored data (primary-parent rule, one filing root); every ownership write goes through the resolver; new isolation tests use the shared predicate keyed on the Secure Record business unit, never a hard-coded team id; "everything in this family" reads go through field-mapping W7's `RecordFamilyReader`, never raw lookups.
+- 2026-10-28 — EB-D-164 (malware scanning required on production stamps, off allowed on dev/staging; provisioning keys it on `environmentName`) and EB-D-165 (another user may re-attempt after a Failed submission); see notes/decisions-log.md.
+
 ### Open owner questions
 
 None open from the prototype (F-2, F-7, F-8, F-9 decided as D-72 to D-75). Remaining owner gates sit in the tasks themselves (005 go / no-go).
