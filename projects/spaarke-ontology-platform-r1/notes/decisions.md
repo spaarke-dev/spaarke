@@ -313,7 +313,7 @@ Sources: **design** = [`design.md`](../design.md) §8 (D-1..D-12, §8.0c) and §
   - **Existing ontology code, checked 2026-10-28:**
     - No team id is hard-coded.
     - `TodoAssigneeOwnerReconciliationJob` is already keyed on the Secure BU.
-    - `SignalSuppressionService.IsSecureOwned` (:285) compares the owner with the one resolved Secure owner team. It is correct today and would miss per-family teams. Logged as DI-129 (#2364), to be done when the shared predicate exists or a #2362 trigger fires.
+    - `SignalSuppressionService.IsSecureOwned` (:285) compares the owner with the one resolved Secure owner team. It is correct today and would miss per-family teams. Logged as DI-129 (#2364). The shared predicate, named by uac-r2 and on master: `SecureRecordOwnerTeam.IsInSecureBusinessUnit` with `ResolveSecureBusinessUnitAsync`. The job's local check switches to the same pair when it is next touched.
   - **Revisit triggers (#2362):**
     - mirror-share growth near Dataverse limits;
     - a feature that needs one deterministic family key across Secure records that the stamps and W7 cannot serve;
