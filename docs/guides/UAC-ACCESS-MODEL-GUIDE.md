@@ -1,6 +1,6 @@
 # Unified Access Control (UAC) — How Access Works Guide
 
-> **Last Updated**: 2026-10-28 (verified against master `bafe310ca4` plus task 193's "Add person" branch, run G3c)
+> **Last Updated**: 2026-10-28 (verified against master `bafe310ca4` plus task 193's "Add person" branch, runs G3c and G3d)
 > **Purpose**: Explain, end to end, how Spaarke decides who can see and change a record — for every kind of user, every
 > access setting, and every family of related records — so that people understand the behaviour and every new feature is
 > built to the same model.
@@ -281,8 +281,12 @@ else, is never ended.
 
 **When the grant cannot be ended.** Sometimes the share is removed but the paired grant cannot be ended: the pairing
 could not be read, a row was not deactivated, or the file-container clean-up failed. Then the share stays removed,
-`pairedGrantEnded` is `false`, the failure is logged at Error with ids only, and the modal adds "Workforce-app access will
-be removed within a day." A system path reports itself not complete. The daily clean-up is rule **R5** of the
+`pairedGrantEnded` is `false`, the failure is logged at Error with ids only, and the modal promises no timing. It says
+"Removed {name}'s share. Their workforce app access could not be removed just now; it is still listed under Current
+Access, where you can revoke it." When related records are still pending, the server's sentence comes first, then "Their
+workforce app access could not be removed just now; you can revoke it under Current Access." The modal reloads Current
+Access, and the grant stays listed as its own row with Revoke after its share is gone. A system path reports itself not
+complete. The daily clean-up is rule **R5** of the
 external-access reconciliation job (05:00 UTC). It ends every active paired grant whose user no longer holds a direct
 share on the record, and keeps the pairing on the row; a share it cannot read leaves the row for the next run. R5 writes
 only when `ExternalAccess:Reconciliation:WritesEnabled` is `true`. In report-only mode (the default) it lists the grant
