@@ -948,12 +948,9 @@ interface IGrantBatchOutcome {
   relatedRecordsPending?: string[];
   /** Slice B3: the people granted whose invite is for a work account (`WorkAccountInvited`). */
   workAccountInvited?: string[];
-  /** Slice B3: the people whose organisation could not be checked (503 tenant_lookup_unavailable): nothing was
-   * written for them; they stay selected and the notice offers Retry. */
-  lookupUnavailable?: string[];
   /** The people granted by `/grant` whose automatic invite did not complete (`invite.status` Failed): the grant
    * stands but they cannot sign in yet. `organisationUnchecked` is the part whose organisation could not be checked.
-   * They stay selected and the notice offers Retry, as for {@link lookupUnavailable}. */
+   * They stay selected and the notice offers Retry. */
   inviteNotSent?: { names: string[]; organisationUnchecked: string[] };
   /** Slice C2b: the people whose invite was not sent because they already have an account (`/invite` answered
    * {@link INVITE_CONTACT_ALREADY_HAS_ACCOUNT_REASON_CODE}). They stay selected; the notice shows the server's text and
@@ -1025,11 +1022,6 @@ const WORK_ACCOUNT_INVITED_STATUS = 'WorkAccountInvited';
 /** Slice B3: added to the batch notice after the names of people invited for a work-account sign-in. */
 export const WORK_ACCOUNT_INVITED_SENTENCE = 'invited — will sign in with their work account.';
 
-/** Slice B3: the batch notice's sentence for people whose organisation could not be checked; the notice offers Retry. */
-export function tenantLookupRetrySentence(names: string[]): string {
-  return `Couldn't check the organisation of ${names.join(', ')}, so nothing was granted or sent for them. Retry.`;
-}
-
 /** `/grant`'s `invite.status` when the automatic invite did not complete (the grant stands). */
 const GRANT_INVITE_FAILED_STATUS = 'Failed';
 
@@ -1091,7 +1083,6 @@ function noticeContent(text: string, links: string[] | undefined): React.ReactNo
 function buildGrantBatchNotice(outcome: IGrantBatchOutcome): IModalNotice {
   const { granted, selectedCount, failures, denied, anyNotificationFailed, anyNarrowed } = outcome;
   const policyRefusals = outcome.policyRefusals ?? [];
-  const lookupUnavailable = outcome.lookupUnavailable ?? [];
   const inviteNotSent = outcome.inviteNotSent ?? { names: [], organisationUnchecked: [] };
   const alreadyHasAccount = outcome.alreadyHasAccount ?? [];
   // Slice B3: who was invited for a work-account sign-in, named once, before the other suffixes.
@@ -1116,18 +1107,16 @@ function buildGrantBatchNotice(outcome: IGrantBatchOutcome): IModalNotice {
       text: `Granted access to ${granted} of ${selectedCount} before access was denied; the message above says why.${relatedSuffix}`,
     };
   }
-  const needsRetry = lookupUnavailable.length > 0 || inviteNotSent.names.length > 0;
+  const needsRetry = inviteNotSent.names.length > 0;
   if (needsRetry || alreadyHasAccount.length > 0) {
-    // Slice B3: nothing was written for the lookup-unavailable people; they stay selected, and Retry adds them again.
-    // A `/grant` whose invite did not complete gets the same notice and Retry (the grant stands; Retry re-sends it).
+    // A `/grant` whose invite did not complete gets the notice and Retry (the grant stands; Retry re-sends it).
     // Slice C2b: a person who already has an account was sent nothing; they stay selected and the notice shows the
     // server's text and sign-in link. Retrying would answer the same, so that alone offers no Retry.
-    const lookupSentence = lookupUnavailable.length > 0 ? ` ${tenantLookupRetrySentence(lookupUnavailable)}` : '';
     const inviteSentence = inviteNotSent.names.length > 0 ? ` ${inviteNotSentRetrySentence(inviteNotSent)}` : '';
     const accountSentence = alreadyHasAccount.map(entry => ` ${alreadyHasAccountSentence(entry)}`).join('');
     const reasons = policyRefusals.length > 0 ? ` ${Array.from(new Set(policyRefusals)).join(' ')}` : '';
     const others = failures > 0 ? ` ${failures} other item(s) failed; please try those again.` : '';
-    const text = `Granted access to ${granted} of ${selectedCount}.${lookupSentence}${inviteSentence}${accountSentence}${reasons}${others}${relatedSuffix}`;
+    const text = `Granted access to ${granted} of ${selectedCount}.${inviteSentence}${accountSentence}${reasons}${others}${relatedSuffix}`;
     // Slice C2c: a sign-in link is a link only when it is an absolute https URL; any other value stays text.
     const links = alreadyHasAccount.flatMap(entry => safeSignInHref(entry.signInUrl) ?? []);
     if (!needsRetry) return { intent: policyRefusals.length > 0 || failures > 0 ? 'error' : 'warning', text, links };
@@ -2055,7 +2044,6 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     const policyRefusals: string[] = [];
     const relatedRecordsPending: string[] = [];
     const workAccountInvited: string[] = [];
-    const lookupUnavailable: IAvailableItem[] = [];
     // `/grant` wrote the grant but its automatic invite did not complete: reported with Retry, kept selected.
     const inviteNotSent: IAvailableItem[] = [];
     const organisationUnchecked: string[] = [];
@@ -2127,16 +2115,6 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
           }
           continue;
         }
-        // Slice B3: the person's organisation could not be checked, so nothing was written for them. Kept selected for
-        // Retry; never counted as an ordinary failure.
-        if (
-          err instanceof AccessGrantModalApiError &&
-          err.status === 503 &&
-          err.reasonCode === INVITE_TENANT_LOOKUP_UNAVAILABLE_REASON_CODE
-        ) {
-          lookupUnavailable.push(it);
-          continue;
-        }
         // Task 149: the share on the record WAS written; only some related records of the secure record are not yet
         // updated. Counted as granted, with the server's sentence kept for the notice.
         const pendingDetail = childrenIncompleteDetail(err);
@@ -2166,13 +2144,11 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     setApproving(false);
     // Rebound to another record meanwhile: its staged picks, list and notice are not this batch's to touch.
     if (!showsThisRecord()) return false;
-    // Slice B3: the rows whose organisation could not be checked stay staged (selection, level, looked-up contact), so
-    // the notice's Retry adds exactly them again.
     // A granted person whose invite was not sent is no longer a candidate once Current Access lists them, so they are
     // kept as a looked-up contact for Retry.
     // Slice C2b: a person who already has an account stays staged the same way, with the notice's text and link.
     const keptInvitees = [...inviteNotSent, ...alreadyHasAccount.map(a => a.item)];
-    const retryIds = new Set([...lookupUnavailable, ...keptInvitees].map(it => it.id));
+    const retryIds = new Set(keptInvitees.map(it => it.id));
     setInviteRetryContactIds(new Set(keptInvitees.flatMap(it => (it.contact?.email ? [it.contact.contactId] : []))));
     setSelectedCandidateIds(new Set(retryIds));
     setRowLevels(Object.fromEntries(Object.entries(rowLevels).filter(([id]) => retryIds.has(id))));
@@ -2199,7 +2175,6 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         policyRefusals,
         relatedRecordsPending,
         workAccountInvited,
-        lookupUnavailable: lookupUnavailable.map(it => it.name),
         inviteNotSent: { names: inviteNotSent.map(it => it.name), organisationUnchecked },
         alreadyHasAccount: alreadyHasAccount.map(a => ({
           name: a.item.name,
@@ -2221,7 +2196,6 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       failures === 0 &&
       policyRefusals.length === 0 &&
       relatedRecordsPending.length === 0 &&
-      lookupUnavailable.length === 0 &&
       inviteNotSent.length === 0 &&
       alreadyHasAccount.length === 0 &&
       !anyNotificationFailed
