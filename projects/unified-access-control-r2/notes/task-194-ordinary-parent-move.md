@@ -453,6 +453,45 @@ Ratchet (single-parent sites, so order decides nothing; move to `ForRow` when to
 (`DecisionActionExecutors` revise-budget) is asked through `ForRow` and owned by the team the rule names. To clean it up,
 assign the row to BU 1's default team by hand. It is the same class as the 69 user-owned analyses above.
 
+### V-fix 3: a copy's canonical is a Secure-only parent (coordinator ruling 2026-10-28, as built)
+
+**The rule.** An editable copy's link to the byte-identical canonical it was saved as (`sprk_document.sprk_canonicaldocument`)
+counts for secure-if-any only: a copy of Secure content is Secure, and an ordinary canonical never decides the copy's
+business unit. It is never the primary and never in `OrderedParentsOf`.
+
+**One definition.** `RecordOwnershipResolver.SecureOnlyLookups` sits beside `CitationLookups` with the opposite rule (a
+citation counts for nothing; a Secure-only parent counts for secure-if-any). It is read through `IsSecureOnlyParent` by:
+- the writers' question (`RecordOwnershipContext.ForRow`; `RecordOwnershipContext.SecureOnlyParents`);
+- the reconciler's question (`ForExistingRowAsync`, through `SecureOnlyParentsOf(row)`; `SecureChildReconciler.ContextFor`);
+- the re-file (`ReparentAsync`: the Secure-only columns leave the primary order and go to `SecureOnlyParents`; the F3
+  after-set includes them, so keeping a Secure canonical is never read as leaving its secure root).
+
+**The answer.** `SecureDecisionAsync` (the one secure-if-any block, now shared) reads the Secure-only parents' facts with the
+ordered ones. An unreadable one is refused (`ParentUnresolved`), as any named parent is. With no other parent, a Secure
+canonical answers the Secure team; otherwise the row takes the unfiled answer (the caller's team, or KeepCreator in the
+reconciler), never the canonical's business unit. The look-through of a primary parent follows ordered parents only
+(`withSecureOnly: false`); the lineage walks read the Secure-only parents too.
+
+**What it removes.** The reconciler's "unfiled copy takes the canonical's business unit" path (task 146's case): the link
+was a lineage parent at the lowest rank, so on an unfiled copy it became the primary.
+
+**Writers.**
+- *Compose* (`ComposeCreateOnSavePromoter`): the canonical is added to the question under its own column; the upsert is
+  owned as that answer says.
+- *Office* (option a; `OfficeDocumentPersistence.ResolveEditableContentIdentityAsync`, `DocumentOwnershipOf(...,
+  canonicalDocumentId)`): no new DI dependency and no re-own after create. **Deviation from "before its owner question":**
+  the identity (quickXorHash) can only be read from the uploaded item, and the owner question runs before the upload so a
+  refusal writes nothing. So the first question stays where it is, and a SECOND question, with the canonical, is asked after
+  the upload and before the create. Its answer owns the create, which links exactly the canonical that question named (the
+  identity is passed into the create, not re-resolved). A refusal of the second question writes no document, removes the
+  upload when nothing references it, records the job Failed (`OwnerUnresolved`) and answers `OFFICE_022`. Word `.docx`
+  saves are stamped with their own record id, so they never link; only unstampable bytes can.
+
+**Known limit (recorded; no mechanism built, per the ruling).** A diverged copy stays isolated. Graduate-on-divergence
+clears `sprk_canonicaldocument` with a plain update, which is no re-file and asks no owner. A copy made Secure by its Secure
+canonical therefore stays in the Secure team after its content diverges, until a re-file asks again without the link (the
+same outcome as an authorized user copying content out of a Secure record) or the root is unsecured.
+
 ### Issues to file (issue-ready text; the coordinator files them)
 
 **K-a: Undetermined rows from bad data block their own root's Unsecure.**
