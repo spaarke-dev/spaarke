@@ -3,7 +3,7 @@
   <metadata>
     <title>Children follow an ordinary parent reassigned to another business unit (I-6 drift, #2339)</title>
     <phase>Session 28: UAC (owner round 128, 2026-10-27)</phase>
-    <status>pending</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes record ownership (MDA access) and file containers in a scheduled writer; .cs; access-control.</rigor-reason>
     <model-tier>opus</model-tier>
