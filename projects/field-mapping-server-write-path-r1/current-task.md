@@ -1,44 +1,21 @@
 # Current Task — field-mapping-server-write-path-r1
 
-> **Last updated**: 2026-10-28 (W7-C: 074 and 075 built, reviewed, fixed; both PRs draft/held)
-> **Phase**: Wave 2 + W7. Done on master: 001–006, 010–016, 018, 037 #2370, 038 #2376, 070 #2367, 073 #2366.
-> **Live on dev: e56a3a51d4** (R3, 2026-10-28 14:11:58Z; DLL 1.0.0+e56a3a51d4; UAC's server gate passed with no new 5xx; rollback = de38296499 snapshot). Carries 037 (fill-only Assigned To from Assigned To Internal, live), 070 (inert registry), #2358 (WRK- autonumber, already on dev). 038/073 are client-only, not deployed yet (076). Owner check pending: WA from a matter with Assigned To blank → Assigned To = Assigned To Internal + WRK-nnnnnn. Filed earlier: #2352 (push 409 Matter→Project; UAC 195), #2353 (autonumber, done #2358), #2354 (Assigned To, done 037/038).
-> **Owner 2026-10-28:** 075 merges and deploys ONLY with 040 (Push Updates keeps working until then); 076 deploys 074 + 038 only. 017 still blocked on ebilling #1911.
+> **Last updated**: 2026-10-28 ~17:00Z (by context-handoff). Recovery: read Quick Recovery first.
+> **Done on master**: 001–006, 010–016, 018, 037, 038, 070, 073. Work branch merged to master as #2392 (14b9335a6c); later doc commits are on the work branch (e2771ff315, 86dc5c1f92 and this one).
+> **Live on dev: e56a3a51d4** (R3, 2026-10-28 14:11:58Z; rollback = de38296499). 037 live. 038/073 are client-only and not deployed (076).
 
 ## Quick Recovery
 
 | Field | Value |
 |---|---|
-| **Active task** | W7-C. **074** (Family icon on TrackingFieldTrio; PCF 1.0.55; forms Matter {4fa382f2…}, Project {5aa00242…}, WA {7e578eef…}, Event {eaf22dcb…}, To Do {eca59df4…}) task/fm-074 @ f7d21dafc8, reviewed + fixed, **draft PR #2383 — HOLD until 072 merges** (it calls the family endpoint). **075** (Push Updates opens `sprk_recordfamily` code page; RecordFamilyModal `embedded` prop; save-before-open; familyParams validation; LEGACY push helpers kept for 040 to delete) task/fm-075 @ ed1cf9b5d1, opus review F1/F3/K1–K3 fixed + scoped re-check F4×2/K1/K4 fixed (round 2), **draft PR #2387 — HOLD, merges + deploys with 040**. 040's POML carries the 075 ship-with-040 list |
-| **HEAD** | work branch 20da6b7927 + this checkpoint |
-| **Running** | Nothing. 075 review cycle closed; its only open item (K2 duplicate save-error dialog) is a live check in 040's POML |
-| **Next Action** | 1) —. 2) When #2383 and #2387 meet (at 040): run the TrackingFieldTrio suite against the embedded-mode RecordFamilyModal. 3) Owner to drop stash d5d17bcc7f (074 agent's lint-staged backup; `git stash drop` needs human OK). 4) Wait for UAC 194b sha → 071 (opus/xhigh) from master; then 072; then mark #2383 ready. 040 needs 019 (→017→ebilling #1911), 071, UAC 195; 076 needs 072, 074, 038. R3 contact-security deploy hold. /devops-project-sync not yet run |
-| **018 progress** | COMPLETE. 018c deleted `OfficeRecordCreationService` + `CreateTimeFieldMapping.Apply`; `ResolveDefaultAssigneeAsync` moved to `IOfficeService`; guards updated (KnownCallSites 2, owner allow-list empty, census). Opus review: F3 fixed, K4 fixed, K2 known limit (cancellation seam test timing). Publish −21,556 B (37.73 MB). #2253 (UAC) carries `WriteIdentity.AppOnly` in `DropAppOnlyRefusedRules` + must-fire/must-not-fire tests (`RecordCreationServiceMappingSeamTests.AppOnlyAccessSets.cs`); nothing for this project |
-| **#2281 (out-of-task defect, fixed)** | PR #2282, merge **1fa0cf5cb8**. `sprk_targetfieldtype` uses the global set `sprk_fieldmappingtypes` (100000000+n, Currency 100000007); legacy rows and `sprk_sourcefieldtype` hold bare n. `FieldMappingColumns.NormalizeFieldType` reads both at the single rule read (`MapToFieldMappingRuleEntity`); Currency → Number. Client `describeError` shows the Xrm message. Ontology reviewed (no findings); dev check after the BFF deploy that carries it: Create Work Assignment from a matter with `sprk_assignedattorney1` copies it. Known limit: one bad column still voids the profile's client `$select` (task 035 deletes the engine). Seeder writing `1` = #2283, already fixed on the provisioning branch |
-| **CI note** | #2252 raised the Tier 1 arch job timeout to 10 min (merged). The Tier 2 ADR job (#2224) may still be cancelled by its timeout; read the log |
-| **Cleanup left for the owner** | Empty, unregistered folders (Remove-WorktreeSafe partial delete, "Permission denied"): `C:\code_files\spaarke\.claude\worktrees\agent-a10e5fe383a4dfcd2`, `...\agent-a80d401ebbcfb9d3e`, `...\agent-a1ced7a9c67154b2b` (018c, merged) |
-
-## 018 — what is decided (all in the 018 POML and notes/decisions.md)
-
-- **Office mapping becomes fill-only** (owner Q6/Q10; NFR-07 pins only error codes). Four Office contract assertions
-  that pin overwrite are rewritten. Release note.
-- **Contract fixtures follow the new write** (one Web API dictionary via `UpdateRecordFieldsAsync`, 412 retry). What
-  each test asserts stays the same; changed assertions are listed.
-- **UAC-r2 condition (b) for 018b:**
-  - an Assigned To contact the caller names is REFUSED without AppendTo, and the code names `assignedTo`;
-  - no token gives 500 `caller_rights_unverifiable`;
-  - the membership event fires exactly once (the endpoint publish is removed);
-  - a project under a secure matter is owned by Secure Record Owners and is secure;
-  - a table-driven refusal map keeps every Office status (OwnerUnresolved 403).
-- **The maker's-contact Assigned To default is DROPPED, not refused** (UAC-r2 concurs): the adapter shows
-  `default_value_dropped`, and nothing writes Assigned To app-only afterwards.
-- **018a new surface:** `ReferenceLookupColumns` (registry allow-list `RecordTableRule.OptionalReferenceLookups`:
-  matter type, practice area, project type; `IsNeverAReference` throws for the for-person column, protected, pair,
-  filing, access-conferring and assigned* columns), `PostMappingDefaults` (fill-only, step 3½, checked at step 5),
-  K1 test, K3 fix.
-- **Optional for 018b:** #2238 (DI-006), case-insensitive de-dup of step-9 server binds.
-- **018c:** delete `OfficeRecordCreationService`; re-point or retire 9 test files; census; owner-guard allow-list;
-  the #2188 guard `KnownCallSites` 3 → 2; remove the legacy `CreateTimeFieldMapping.Apply`; close #1614/#1617.
+| **Active** | **#2399 (live defect)**: a child-BU user's WA create returns 404, because the wizard binds BU1's AI search index and Core User's Deep Read and AppendTo can't reach root-owned `sprk_aisearchindex` rows. Not caused by the deploy. Owner chose re-ownership; UAC-r2 rejected Global. Mapping profiles and rules have the same defect (root-owned). |
+| **Plan (design §13, accepted by UAC-r2 at 86dc5c1f92)** | (a) UAC builds the memberless team "Spaarke Customer Configuration Owners" and the role "Customer Configuration Owner" (Read at Basic on sprk_aisearchindex, sprk_fieldmappingprofile, sprk_fieldmappingrule) in 194b R4b-3b. **Wait for their sha.** (b) After the owner's go: create the team and role in BU1 (cb15f587-baa0-f111-aaac-000d3a99d1d7) on dev, then re-own 10 index rows + 7 profiles + 40 rules with a read-back (nothing cascades; checked). (c) FR-38: the server drops a client index on every BFF write path and applies the FINAL owning BU's index (empty and logged if none). (d) FR-39: provisioning owns it (one PR, H10 team + H12b owner bind; I review). (e) W3 wizards stop binding the index. |
+| **Next Action** | 1) Answer the owner: "what is a client-sent search index" (explain) and #2410 (Basic User has no profile read; who reads profiles as the user: client mapping engine until 035, Push Updates `hasSourceProfile`). 2) Coordinate with provisioning on search-index rows per customer env (§13.5 Q2; UAC also asking the owner). 3) On UAC's R4b-3b sha: forward to provisioning, then ask the owner's go for the dev re-own. 4) Scope procedure for FR-38/FR-39: spec amendment → task-create → TASK-INDEX → owner approval. |
+| **Open PRs** | #2383 (074, draft, HOLD until 072). #2387 (075, draft, HOLD, ships with 040; head ed1cf9b5d1). #2408 (#2400 error icon, auto-merge). |
+| **Issues filed today** | #2399 (above), #2400 (icon; PR #2408), #2410 (Basic User profile read; owner decision), #2411 (CLOSED: duplicate inactive index row deleted on dev with the owner's OK), #2413 (known limit: index not recomputed on a BU move; discoverability only). |
+| **Running** | Nothing. |
+| **Waiting on** | UAC 194b sha → 071 → 072 (then mark #2383 ready). UAC 195 → 040, 076. UAC R4b-3b sha → #2399 re-own. 017 blocked on ebilling #1911. |
+| **Owner to do** | Drop stash d5d17bcc7f (074 agent's lint-staged backup). Leftover agent worktree `C:\code_files\spaarke\.claude\worktrees\agent-aec6d06ca99a5a9f6` (locked by a claude.exe; contents on origin) and C:\wt2400 (fix/2400 worktree) to remove with Remove-WorktreeSafe at the end. |
 
 ## Blocked: 017
 
