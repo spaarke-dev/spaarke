@@ -697,6 +697,46 @@ internal sealed partial class RecordCreationService
     }
 
     /// <summary>
+    /// Task 037 (FR-36): <paramref name="defaults"/> plus the table's copied defaults on the row as mapped
+    /// (<see cref="RecordTableRules.CopiedDefaultsFor"/>): each lookup the row binds in the source column, as-is, for a target
+    /// the row leaves UNSET — so an explicit null the caller sent is never filled (it is in the row's columns). A default the
+    /// request already names for that column is the adapter's and is kept. A source the row leaves unset adds nothing and
+    /// is reported as a structured warning: the column stays blank.
+    /// </summary>
+    /// <returns>The defaults, and each (column, source column) pair a copied default was added for — so a copy of a
+    /// SERVER-set source can be server-set too (the owned create's rule, <c>OwnedChildWrite.CreateAsync</c>).</returns>
+    private (IReadOnlyDictionary<string, PostMappingDefault> Defaults, IReadOnlyList<(string Column, string Source)> Copied) WithCopiedDefaults(
+        string table, RecordTableRule rule, DataverseWriteItemMapper.MappedItem item,
+        IReadOnlyDictionary<string, PostMappingDefault> defaults)
+    {
+        var fills = RecordTableRules.CopiedDefaultsFor(rule, item);
+        if (fills.Count == 0)
+            return (defaults, []);
+
+        var copied = new List<(string Column, string Source)>();
+        var merged = new Dictionary<string, PostMappingDefault>(defaults, StringComparer.Ordinal);
+        foreach (var fill in fills)
+        {
+            var column = fill.Default.Column.Trim().ToLowerInvariant();
+            if (fill.Source is not { } source)
+            {
+                _logger.LogWarning(
+                    "copied_default_source_unset: entity={Entity} column={Column} source={Source} — the create leaves both " +
+                    "unset, so the column stays blank (task 037, FR-36)",
+                    table, column, fill.Default.CopiedFrom);
+                continue;
+            }
+
+            var value = new EntityReference(source.RelatedTable, source.RecordId);
+            // A default the request names for the column is the adapter's: it is kept, and is never made server-set.
+            if (ToItemValue(value, dateBehaviour: null) is { } itemValue && merged.TryAdd(column, new PostMappingDefault(value, itemValue)))
+                copied.Add((column, source.Column));
+        }
+
+        return (merged, copied);
+    }
+
+    /// <summary>
     /// The defaults the row still lacks after step 3 — FR-02's "not supplied", as <see cref="CreateTimeFieldMapping.ApplyFillOnly"/>
     /// tests it: a flag or a choice (single or multi-select) is supplied whenever its key is present, an explicit null
     /// included; any other column is supplied unless absent, null, blank text, or a lookup with no id. A caller's value or a
