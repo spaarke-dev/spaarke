@@ -11,7 +11,7 @@ import '@testing-library/jest-dom';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as React from 'react';
-import { act, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FluentProvider, webDarkTheme, webLightTheme } from '@fluentui/react-components';
 
@@ -57,9 +57,16 @@ function renderWidget(service: WorklistService, dark = false) {
 }
 
 const ready = () => screen.findByTestId('worklist-widget');
+/**
+ * A line in a lane. Each lane's card list starts collapsed (task 169, D-195) and user-event fires on `display: none` content, so the
+ * line's lane is expanded first (when its toggle says collapsed) and the line must be visible before a test clicks it.
+ */
 const line = (signalId: string) => {
   const el = document.querySelector(`[data-testid="issue-line"][data-signal-id="${signalId}"]`);
   if (!el) throw new Error(`no line for ${signalId}`);
+  const toggle = el.closest('[data-testid^="worklist-lane-"]')?.querySelector('[data-testid^="lane-toggle-"]');
+  if (toggle?.getAttribute('aria-expanded') === 'false') fireEvent.click(toggle);
+  expect(el).toBeVisible();
   return el as HTMLElement;
 };
 const radio = (name: RegExp | string) => screen.getByRole('radio', { name });

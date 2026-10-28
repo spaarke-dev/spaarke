@@ -169,6 +169,18 @@ public sealed record WorkforceCallerClaims(
     public const string IdpClaimUri = "http://schemas.microsoft.com/identity/claims/identityprovider";
 
     /// <summary>
+    /// The <c>xms_edov</c> optional claim: the email's domain is verified by the tenant that owns it. Only a boolean
+    /// <c>true</c> counts (<see cref="EmailDomainOwnerVerifiedOf"/>).
+    /// </summary>
+    public const string EmailDomainOwnerVerifiedClaim = "xms_edov";
+
+    /// <summary>
+    /// The token's <c>xms_edov</c> (<see cref="EmailDomainOwnerVerifiedOf"/>): true only for a single boolean <c>true</c>
+    /// claim. Null or false is "not verified" — an email bind on the Workforce planes then needs the invited tenant.
+    /// </summary>
+    public bool? EmailDomainOwnerVerified { get; init; }
+
+    /// <summary>
     /// Reads the claims from a validated workforce principal. The caller kind comes from
     /// <see cref="CallerIdentity.FromPrincipal"/> — the repo's one classifier — never from <c>idtyp</c> alone,
     /// which is optional and expected absent.
@@ -186,7 +198,28 @@ public sealed record WorkforceCallerClaims(
             First(user, "given_name", ClaimTypes.GivenName),
             First(user, "family_name", ClaimTypes.Surname),
             First(user, "name"),
-            Single(user, IdpClaim, IdpClaimUri));
+            Single(user, IdpClaim, IdpClaimUri))
+        {
+            EmailDomainOwnerVerified = EmailDomainOwnerVerifiedOf(user),
+        };
+    }
+
+    /// <summary>
+    /// The <c>xms_edov</c> claim as the email bind reads it: <c>true</c> ONLY when the principal carries exactly one
+    /// <c>xms_edov</c> claim whose value type is <see cref="ClaimValueTypes.Boolean"/> and whose value is true (a JSON
+    /// boolean in the token). A string <c>"true"</c>, any other value, a repeated claim or no claim is <c>null</c> (not
+    /// verified, fail closed). Pure.
+    /// </summary>
+    public static bool? EmailDomainOwnerVerifiedOf(ClaimsPrincipal user)
+    {
+        ArgumentNullException.ThrowIfNull(user);
+        var claims = user.FindAll(EmailDomainOwnerVerifiedClaim).ToList();
+        return claims.Count == 1
+               && claims[0].ValueType == ClaimValueTypes.Boolean
+               && bool.TryParse(claims[0].Value?.Trim(), out var verified)
+               && verified
+            ? true
+            : null;
     }
 
     /// <summary>

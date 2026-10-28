@@ -12,6 +12,7 @@ using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Tests.AccessControl.IdentityBinding;
 using Xunit;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
 
@@ -252,14 +253,20 @@ public class SpeRevokeMatcherTests
         Mock<SpeContainerMembershipService> spe,
         Guid? contactId = null,
         ExternalParticipationService? participations = null,
-        RecordContainerResolver? resolver = null) =>
+        RecordContainerResolver? resolver = null,
+        IContactIdentityStore? identityStore = null,
+        bool withoutIdentityStore = false) =>
         RevokeExternalAccessEndpoint.RevokeAccessAsync(
             new RevokeAccessRequest(AccessRecordId, contactId ?? ContactId, ProjectId),
             dataverse.Object, spe.Object,
             participations ?? new GrantPolicyTestDoubles.FlagStubParticipationService(RootRecordFlags.None),
             AssignedAccessTestDoubles.InertMaterializer(),
             resolver ?? SecureProjectOwning(ContainerId),
-            AuthenticatedContext(), NullLogger<Program>.Instance, CancellationToken.None);
+            AuthenticatedContext(), NullLogger<Program>.Instance, CancellationToken.None,
+            identityStore: withoutIdentityStore ? null : identityStore ?? ProvenIdentityStore());
+
+    /// <summary>An identity store whose identity columns' read is proven (no marked rows): an empty binding is "no binding".</summary>
+    private static InMemoryContactIdentityStore ProvenIdentityStore() => new();
 
     private static RevokeAccessResponse Body(IResult result) =>
         result.Should().BeOfType<Ok<RevokeAccessResponse>>().Subject.Value!;
@@ -514,6 +521,31 @@ public class SpeRevokeMatcherTests
     /// signature) is not "no object id". With no email either, the contact may hold a permission under an object id
     /// this read cannot see, so "nothing to clear" would be a guess: Failed, a 500, and no SPE call.
     /// </summary>
+    /// <summary>
+    /// The binding and its plane are field-secured, so a hidden binding reads EMPTY, like none. With no email either,
+    /// "nothing to clear" is answered only while the identity columns' read is proven: unproven (the probe reads Masked),
+    /// or no identity store to prove it with, is Failed — a 500 and no SPE call, as an unreadable binding is.
+    /// </summary>
+    [Theory]
+    [InlineData(ColumnReadProofOutcome.Unproven, false)]
+    [InlineData(ColumnReadProofOutcome.Faulted, false)]
+    [InlineData(ColumnReadProofOutcome.Proven, true)]   // no identity store
+    public async Task Revoke_WhenTheBindingReadEmptyWithoutProofAndThereIsNoEmail_FailsClosedRatherThanNothingToClear(
+        ColumnReadProofOutcome proof, bool withoutIdentityStore)
+    {
+        var stub = new SpeServiceStub();
+        var spe = stub.Build(Removed);
+        var identityStore = new InMemoryContactIdentityStore { IdentityColumnsProof = proof };
+
+        var result = await Revoke(DataverseFor(ContactId, contactEmail: null), spe,
+            identityStore: identityStore, withoutIdentityStore: withoutIdentityStore);
+
+        var problem = ProblemBody(result);
+        problem.StatusCode.Should().Be(StatusCodes.Status500InternalServerError);
+        problem.ProblemDetails.Extensions["speContainerOutcome"].Should().Be(SpeContainerRevokeOutcome.Failed);
+        stub.CallCount.Should().Be(0);
+    }
+
     [Fact]
     public async Task Revoke_WhenTheBindingIsUnreadableAndThereIsNoEmail_FailsClosedRatherThanNothingToClear()
     {
@@ -922,7 +954,8 @@ public class SpeRevokeMatcherTests
                 Dataverse.Object, spe.Object, new GrantPolicyTestDoubles.FlagStubParticipationService(RootRecordFlags.None),
                 AssignedAccessTestDoubles.InertMaterializer(),
                 SecureProjectOwning(ContainerId),
-                AuthenticatedContext(), NullLogger<Program>.Instance, CancellationToken.None);
+                AuthenticatedContext(), NullLogger<Program>.Instance, CancellationToken.None,
+                identityStore: ProvenIdentityStore());
     }
 
     /// <summary>

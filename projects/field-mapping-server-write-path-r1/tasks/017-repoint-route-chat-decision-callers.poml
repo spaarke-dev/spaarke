@@ -43,6 +43,7 @@
   </context>
 
   <constraints>
+    <constraint source="UAC-r2 037 review K2 (2026-10-28)">FR-36 copied default on RecordCreationService: the copy (sprk_assignedtointernal → sprk_assignedto) reads the mapped `item` BEFORE the adapter's PostMappingDefaults merge, so a "for" person supplied Office-style is not copied (warning; Assigned To blank). When the child route and chat move onto the service, decide explicitly whether the copy runs after that merge, keep server-set status only for a genuinely server-set source (037 fix round 1), and add a test either way.</constraint>
     <constraint source="ADR-008 (path A, spec ADR Tensions)">Scope: authorization. Route filters and `RequireAuthorization` on the child-records route stay exactly as they are. Payload-dependent checks run only in `CallerWriteAuthorization` via the service; do not copy them into the handlers or the route.</constraint>
     <constraint source="ADR-019">Scope: error mapping. The route, chat handlers and decision cores use the ONE shared refusal map from task 013; the route's existing status codes and `errorCode` values for existing refusals do not change (NFR-07). Chat handlers keep their existing tool-error shape and take the code and text from the shared map.</constraint>
     <constraint source="ADR-028">Scope: identity. Callers pass the caller principal (WhoAmI on the caller token inside the service). The handlers must not resolve WhoAmI separately and must not create with the user token. The create stays app-only.</constraint>

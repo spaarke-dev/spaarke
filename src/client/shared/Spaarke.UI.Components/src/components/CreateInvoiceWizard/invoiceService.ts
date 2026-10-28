@@ -21,6 +21,7 @@
  * @see projects/visual-host-create-button-r1/notes/field-manifests/invoice.md
  */
 
+import { describeWebApiCreateError } from '../../utils/webApiCreateError';
 import { withBffChildWrites } from '../../utils/adapters/bffChildWriteAdapter';
 import type { ICreateInvoiceFormState } from './formTypes';
 import type { IDataService } from '../../types/serviceInterfaces';
@@ -271,12 +272,12 @@ export class InvoiceService {
       console.info('[InvoiceService] createRecord success, invoiceId:', invoiceId);
     } catch (err) {
       console.error('[InvoiceService] createRecord error:', err);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const errObj = err as any;
-      const message = errObj?.message || (err instanceof Error ? err.message : 'Unknown error');
+      // #2382: a privilege refusal becomes one plain sentence; the full error is logged above.
+      const described = describeWebApiCreateError(err, 'invoice');
+      const message = described.message;
       return {
         status: 'error',
-        errorMessage: `Failed to create invoice record: ${message}`,
+        errorMessage: described.isAccessDenied ? message : `Failed to create invoice record: ${message}`,
         warnings: [],
       };
     }

@@ -25,13 +25,15 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// </param>
 /// <param name="EmailSent">
 /// Task 185 (adversarial pass 2, F2): whether the invite email carrying the code was sent — <c>true</c> sent, <c>false</c>
-/// attempted and not sent (the grant stands, but nobody holds the code: a re-invite sends a new one), <c>null</c> when no
-/// invite email was due ("AlreadyProvisioned"; its grant email is <paramref name="NotificationFailed"/>). §12 I-10: the same on
-/// the new-account and the existing-account branch. Additive.
+/// attempted and not sent (the grant stands, but nobody holds the code: a re-invite sends a new one). Slice C2c: never
+/// <c>null</c> for a contact that already has an account ("AlreadyProvisioned"): no invite email was due, so <c>false</c>
+/// with <see cref="ContactBindingDecision.InviteContactAlreadyHasAccount"/>; its grant email is
+/// <paramref name="NotificationFailed"/>, and the grant stands. §12 I-10: the same on the new-account and the
+/// existing-account branch. Additive.
 /// </param>
 /// <param name="EmailErrorCode">
-/// <see cref="GrantInviteStatus.EmailNotSentReasonCode"/> when <paramref name="EmailSent"/> is <c>false</c>; otherwise
-/// <c>null</c>. Additive.
+/// Why <paramref name="EmailSent"/> is <c>false</c>: <see cref="GrantInviteStatus.EmailNotSentReasonCode"/> (attempted, not
+/// sent) or <see cref="ContactBindingDecision.InviteContactAlreadyHasAccount"/> (none due); otherwise <c>null</c>. Additive.
 /// </param>
 public record InviteAndGrantResponse(
     Guid ContactId,

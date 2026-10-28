@@ -742,6 +742,10 @@ Client startup validates no hardcoded URL fallbacks (per task 024).
   settings file (`ImpersonationNegativeCanaryTests` fails the build unless every checked-in value is literally `false`).
 - `PowerBi__AllowedWorkspaces__{n}__WorkspaceId` (+ optional `__CustomerBusinessUnitId`) when the Reporting module is
   enabled — the workspaces the catalog may act on; empty refuses every report ([reporting-admin.md](reporting-admin.md#environment-variables)).
+- `ExternalAccess__CustomerBusinessUnitId` — **REQUIRED on every stamp** ([§6.5.5](#655-customer-contact-owner-externalaccess__customerbusinessunitid--required-per-stamp),
+  ISS-005 / #1673). The customer's own business unit: a child of the root with exactly one default Owner team, never the Secure
+  Record business unit. When it is absent the BFF creates no customer contact and registration and first sign-in answer 500
+  `sdap.access.registration_owner_unconfigured`.
 
 #### 6.5.1 Customer identity (`Customer__Id`) — required per stamp
 
@@ -858,12 +862,13 @@ It is checked in two places:
    (`WorkforcePrincipalResolver.cs:190`): an enabled systemuser is resolved and admitted there, before any member test
    — a licensed B2B guest and a Model 1 Spaarke staff member included (`WorkforcePrincipalResolver.cs:207-251`); a
    disabled one is denied (`:257`). Only the contact-only branch runs `WorkforceMembershipTest`, on every sign-in and
-   before any contact lookup — an existing binding does not override it (`ContactIdentityBinder.cs:327-332`). On that
+   before any contact lookup — an existing binding does not override it (`ContactIdentityBinder.ResolveWorkforceCallerAsync`,
+   `ContactIdentityBinder.cs:337-345`). On that
    branch only a direct member of a listed tenant (`tid` ∈ list, `acct = 0`) passes: the Model 2 / dev path. No guest
    is admitted on that branch (ADR-028 A9): customer workforce users sign in at their home directory and register (2.
    below). A Spaarke-tenant B2B guest whose home tenant (from `idp`) is listed still answers `Member` from the member
    test, and the binder refuses it `sdap.access.deny.workforce_guest_use_home_signin` before any store call
-   (`ContactIdentityBinder.cs:303-317`; #2128 retired the R3 FR-15 guest admission). A guest from any other home tenant
+   (`ContactIdentityBinder.cs:313-328`; #2128 retired the R3 FR-15 guest admission). A guest from any other home tenant
    gets its member-test deny: `sdap.access.deny.workforce_tenant_not_customer`, or `sdap.access.deny.workforce_guest`
    where the stamp lists its own tenant (dev).
 2. ~~**Workforce self-registration** (R3 FR-14, task 060)~~ — **superseded by ADR-028 A9.** FR-14 invited the person
@@ -874,7 +879,7 @@ It is checked in two places:
    for a caller who already resolves; otherwise, for the token's email, it refuses a licensed user's email
    (`licensed_user_link_required`), answers 409 `existing_record_found` for one bindable existing contact and binds it
    on the confirmed resubmit, refuses contacts it cannot bind (`registration_contact_conflict`), or creates one
-   WorkforceHome contact (`ContactIdentityBinder.RegisterHomeContactAsync`, `ContactIdentityBinder.cs:673`). Nothing
+   WorkforceHome contact (`ContactIdentityBinder.RegisterHomeContactAsync`, `ContactIdentityBinder.cs:686`). Nothing
    is invited into Spaarke's tenant.
 
 **Without the list**, anyone with any Microsoft work account could register as that customer's staff, and a guest
@@ -1001,6 +1006,70 @@ the stamp's `-OntologyWriterApplicationId` — dry run, then `-Apply`, then `-Ve
 ArchTest `CreatorPersonColumnSecuredGuardTests` fails a build where a stamped table's `Entity.xml` does not declare
 the column `<IsSecured>1</IsSecured>`; it cannot see the environment, so the `-Verify` run is the deploy gate.
 
+**Dataverse prerequisite — contact access-level and identity bookkeeping columns are field-secured.** Only the BFF and
+Standing Grant Administrators write them; every user keeps reading the ones a person needs to see.
+`scripts/Set-ExternalAccessContactSecuritySchema.ps1` secures `sprk_accesspermissiongrant`, `sprk_identityplane` and the
+five `sprk_identitycollision*` columns, and creates three BFF-only columns secured at creation:
+`sprk_externalinvitedemailhash`, `sprk_externalinvitedtenantid` and `sprk_externalaccessremovedon`.
+
+| Column | Read | Create / update |
+|---|---|---|
+| `sprk_accesspermissiongrant` | every user (BFF-Managed Field Readers) | Standing Grant Administrators (create, update); the BFF (update) |
+| `sprk_identityplane`, `sprk_identitycollision*` | every user (Identity Link Readers) | the BFF (Identity Link Writers) |
+| `sprk_externalaccessremovedon` | every user (BFF-Managed Field Readers) | the BFF (BFF-Managed Field Writers) |
+| `sprk_externalinvitedemailhash`, `sprk_externalinvitedtenantid` | the BFF only | the BFF only |
+
+No other profile (System Administrator excepted) may read, create or update these columns. Run it with the same
+`-BffApplicationIds` as above — dry run, then `-Apply`, then `-Verify`, which checks every column is secured and every
+profile x column pair, and **must exit 0** before a BFF that writes the new columns is deployed. `-Verify` also checks
+that each BFF application user is a direct member of Standing Grant Administrators, which H7b adds (§7.11), so run it
+after H7b completes. In an environment no provisioning run reaches (for example spaarkedev1), the operator adds each
+BFF application user to Standing Grant Administrators directly, with the owner's OK — the same association H7b's S20
+writes: `POST {org}/api/data/v9.2/fieldsecurityprofiles({Standing Grant Administrators id})/systemuserprofiles_association/$ref`
+with body `{"@odata.id": "{org}/api/data/v9.2/systemusers({BFF application user id})"}` — then runs `-Verify`. A new stamp receives
+the columns, the field security and the profile permissions through the SpaarkeMaster import (H6) — that path applies
+only once SpaarkeMaster 1.2.4.0 is published (1.2.3.1 and earlier do not secure these columns; until then run the
+script on a new stamp too). H7b's identity-link check (S18) covers the plane and collision columns, and its
+standing-grant check (S19) the access level (§7.11). The BFF trusts an EMPTY value of `sprk_accesspermissiongrant`, the
+binding, the plane or a collision column only after it has proven it can read the column (the System Administrator role,
+matched by its role template id, or a field security profile granting Read, directly or through a team; re-proven every
+10 minutes). Until then the standing grant confers no access, no contact is bound or created, no collision flag is
+written over, and a revoke of a grantee with no email and an empty
+binding is reported as not cleared. `-Verify` therefore also runs the proof's reads (systemuser, role, systemuserroles,
+fieldpermission, systemuserprofiles, teamprofiles, teammembership) as each BFF application user; the operator running
+it needs the act-on-behalf-of-another-user privilege.
+
+```powershell
+.\scripts\Set-ExternalAccessContactSecuritySchema.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com `
+  -BffApplicationIds <bff-uami-client-id>[,<bff-app-registration-id>]            # dry run: read-only
+.\scripts\Set-ExternalAccessContactSecuritySchema.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com `
+  -BffApplicationIds <bff-uami-client-id>[,<bff-app-registration-id>] -Apply
+.\scripts\Set-ExternalAccessContactSecuritySchema.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com `
+  -BffApplicationIds <bff-uami-client-id>[,<bff-app-registration-id>] -Verify   # must exit 0
+```
+
+**Rollout order — schema first, on every environment.** Apply this script and pass `-Verify` (exit 0: the two stamp
+columns, their field security, and the proof reads) BEFORE deploying a BFF build that requires the invite stamp. An
+environment without the stamp columns refuses EVERY email bind, on the external (CIAM) plane as well as the Workforce
+plane and WorkforceHome registration, with `contact_not_invited`: the stamp is read in the same query as the invite
+marker, so a column that is not provisioned leaves no stamp to meet, and no bind is made without one. Nothing is bound
+or created while the columns are missing; contacts already bound by oid are not affected.
+
+**Rollout — an email bind needs a current invite stamp.** From the release that writes these two columns, every invite
+(`/invite` and `/invite-and-grant`) records the invited address (hashed) and, when the inviter names it, the person's
+Entra tenant id (`invitedTenantId`, a GUID; anything else is refused with 400). An unbound contact is bound to a sign-in
+by its email only when that stamp is current (the invite marker's 30-day window), records the sign-in's email and the
+contact's current `emailaddress1`, and — for a work account (the Workforce plane and WorkforceHome registration) —
+names the sign-in's tenant, unless the token carries `xms_edov` as boolean `true`. A successful bind clears the stamp.
+Otherwise the sign-in is refused with `contact_not_invited` ("invite again"); nothing is bound or created. Contacts
+already bound by oid are not affected. Plan for:
+
+- **Workforce contacts never invited through the BFF, or invited before this release, need a re-invite that names
+  their tenant** (unless their tokens carry `xms_edov`). Their first work-account sign-in is refused until then.
+- A pending invite from before this release has no stamp, so a grant to that contact sends a new invite instead of
+  answering "already pending".
+- The systemuser plane (licensed users) is unchanged: no stamp is needed there.
+
 #### 6.5.3 Identity collisions — the operator procedure
 
 A **collision** is any of: an email match on a contact bound to a different oid; an oid carried by more than one
@@ -1042,8 +1111,12 @@ A repeated collision by the same identity does not write again; a different iden
    mirror and let that person's next sign-in, or the next reconciliation run, bind them again). Deactivating the
    contact does NOT free the slot — the unique index counts inactive rows — so the flag stays until the mirror is
    cleared.
-   Deactivating is how a person is removed: an oid on an inactive contact is denied, and no replacement is
-   created.
+   A person is removed by an administrator's **Remove person** (the contact stays as it is: its access is revoked and
+   it is marked removed). An oid on an inactive contact is also denied and no replacement is created; with the
+   removal sweep's write switch on, the reconciliation job marks such a contact removed and revokes its access the
+   same way. **Reinstate** applies only to an active contact: reactivate the contact first, then reinstate. It also
+   applies only once the removal has finished: while the person still holds an active grant, Reinstate is refused
+   (`sdap.access.person.grants_pending_revoke`); run **Remove person** again first, then reinstate.
    **Several identities on one contact** — read `sprk_identitycollisionparties` and resolve each party; the
    summary columns name only the first.
 3. **Do not clear the flag by hand.** The next `identity-link-reconciliation` run re-evaluates every recorded
@@ -1088,6 +1161,58 @@ that stands it up). It is a deployment setting, not a Dataverse column, because 
   marker.
 - A customer root-unit admin calling those routes gets `403 spe.admin.deny.platform_operator_required` — the same answer as
   a leaf admin anywhere.
+
+#### 6.5.5 Customer contact owner (`ExternalAccess__CustomerBusinessUnitId`) — required per stamp
+
+> Added 2026-10-22 by `spaarke-SPA-external-access-platform-r3` ISS-005 (#1673; owner wording of the rule pending). The write
+> rule it serves is invariant I-6 in [`DATAVERSE-WRITE-PATH-ARCHITECTURE.md`](../architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md).
+
+**Every contact the BFF creates for a customer's people is owned at creation by the default Owner team of one business unit —
+the customer's own.** A contact created with no owner team is owned by the BFF's own application user, in whatever
+business unit that user sits (the root business unit on dev), not by the customer's team. The BFF creates an **identity contact** (the contact a person signs in as) in four places, and all four read this one
+setting: **registration** (`POST /api/v1/external/registration`, a WorkforceHome contact), a Type-2 workforce user's **first
+sign-in** (a contact keyed by their `oid`; §6.5.2), and the **licensed-user link** (a contact for a licensed systemuser who has
+none — registration approval, the first resolution of a licensed user, and the identity-link reconciliation job), and the **invite** (`/invite`, `/invite-and-grant`): an email that matches no contact creates one, owned by the same team; an invite of an
+existing contact never re-owns it.
+The rule is plane-independent: every **identity** contact the BFF creates in its own environment gets this team.
+
+> **A fifth contact create is outside this rule.** The chat tool `dataverse.create_record` can create a `contact` row (a user asks the assistant to "add a person"). That create is app-only, runs after an as-the-caller check, and is owned by the **caller's own business-unit default team, record-first**, through the general record-ownership resolver (`OwnedChildWrite`); it does **not** read `ExternalAccess__CustomerBusinessUnitId`. It creates no sign-in identity (no `oid`, no plane) and is not refused when this setting is unset.
+
+| | |
+|---|---|
+| **Setting** | `ExternalAccess__CustomerBusinessUnitId` (configuration key `ExternalAccess:CustomerBusinessUnitId`) — **REQUIRED on every stamp**, on both slots |
+| **Value** | the GUID of the customer's own business unit: a **child of the root** business unit, with **exactly one default Owner team** (Dataverse creates one with the unit) **whose roles give it Read on `contact`: the BU's default team must hold a security role with contact Read (and Create/Append as needed)** (Dataverse refuses a contact owned by a team that cannot read it), and **never the Secure Record business unit** (the unit named by `SecureRecord__BusinessUnitName`). A value that is not a GUID **fails startup** |
+| **Absent, empty or the all-zero GUID** | **REFUSE, create nothing.** Registration answers `500 sdap.access.registration_owner_unconfigured`; a first sign-in that would create a contact answers `500` with the same code; an invite that would create a contact answers `500` with the same code and creates no contact, marker, CIAM account or email; the licensed-user link is not made (the reconciliation job reports the user `Denied` with the same code, report-only runs included, and the run is recorded **Partial**, never Ok). The job does **not** switch to a dry run: with the setting unset every create is refused while binds and links still write. Binding an **existing** contact (by `oid` or by email) and inviting an existing contact need no owner and still work. At startup the BFF logs one **Warning** (`[EXT-ACCESS] ExternalAccess:CustomerBusinessUnitId is not set to a non-zero GUID ...`); startup does not fail |
+| **Also refused with the same code** | the unit is the Secure Record business unit (decided by id) or the Secure Record name is ambiguous; the unit has no default Owner team, or more than one; **or Dataverse refuses the create itself because the default team cannot own a contact** (`0x80040299`, "Read Privilege Check For
+| **Unreadable owner lookup** | the owner lookup could not be answered (a failed read): nothing is created and the answer is **retryable**; each route answers with its own code, not one shared one. Registration: `503 sdap.access.registration_unavailable`. First sign-in: `sdap.access.deny.contact_lookup_failed` (its HTTP status is tracked in #2269). Invite and invite-and-grant: `503 sdap.access.invite.contact_lookup_failed`. Licensed-user link (registration approval, the reconciliation job): the user is `Denied` with `sdap.access.deny.contact_lookup_failed`, and the reconciliation run is recorded **Partial**, never Ok. The BFF logs a Warning naming the business unit (no email) | Owner failed": no role of the team holds Read on `contact`). That last case is mapped to the same `500 sdap.access.registration_owner_unconfigured` on **all four** creates (registration, first sign-in, licensed-user link, invite), with no id in the answer; the BFF log names the missing role at Error. On the invite the shared Web API client drops the error body, so any `403` on the owned create is read as this fault. A privilege fault of the BFF identity itself (`0x80040220`, e.g. no Create on contact) keeps its existing answer |
+| **Not checked today** | that the unit is a child of the root. The BFF accepts the root unit; refusing it is an open owner decision, so the operator must not set it |
+| **Written by** | provisioning — **H4b** writes it on both slots from the unit H10 creates, and **H13 trap T7** reads it back (T265), once `customer-provisioning-orchestration-r1` merges (issue #2265). Until then, and for Spaarke's own environments (dev), set it by hand on **both** slots |
+
+```bash
+az webapp config appsettings set --resource-group <rg> --name <app-service-name> \
+  --settings ExternalAccess__CustomerBusinessUnitId=<customer-business-unit-guid>
+az webapp config appsettings set --resource-group <rg> --name <app-service-name> --slot staging \
+  --settings ExternalAccess__CustomerBusinessUnitId=<customer-business-unit-guid>
+```
+
+⚠️ **Behaviour change for an existing stamp (ISS-005).** Before ISS-005 a first sign-in on a stamp without this setting created an
+**unowned** contact; it now **refuses** (a Type-2 user with no existing contact cannot sign in until the setting is set), and a
+licensed user with no contact is no longer given one, and an invite of an email with no contact (which created an unowned
+contact) now answers `500`. **The setting must be present on every slot (production and staging) BEFORE this build is deployed
+to it**; otherwise the first sign-in, registration or invite that needs a new contact returns `500
+sdap.access.registration_owner_unconfigured`. Check for the startup Warning above after the deploy.
+
+**Contacts created before this build stay app-owned in the root business unit.** Nothing re-owns them; a backfill is out of
+scope here and is tracked as #2278. **Who can read a new contact changes with it:** a contact owned by the
+customer business unit's team is readable by users with business-unit-scoped Read on contact in that unit, where an
+app-user-owned contact in the root unit was readable only by root-scoped readers.
+
+**Known limit — contacts created in a FOREIGN environment are ownerless (#2270).** The setting names a business unit of **this**
+BFF's Dataverse environment. When registration approval links a new systemuser's contact in a *different* environment (a demo or
+customer target environment the BFF provisions users into, built by `ContactIdentityBinderFactory`), that unit does not exist
+there, so the contact is created with no owner by design (`ContactCreateOwner.NoneForForeignEnvironment`, used by the factory
+alone). The BFF's own environment is never treated that way: `RegistrationDataverseService.ContactBinderFor` returns the
+owner-aware binder for it, however its URL is spelled (`IsSameEnvironment`).
 
 ---
 
@@ -1704,7 +1829,37 @@ no solution import can create. Since T256, **H7b creates it on every run**, afte
   `secure_setup.invite_code_hash_lock_other_access` (QuarantineRequired). While the column is absent that is the expected
   state: H7b does not fail, and records an "absent — ships in a later SpaarkeMaster release" note in the `notes` of gate
   `h7b-secure-record-setup`. Neither check writes a field-security row; auditing and Advanced Find on the hash column are
-  not verified by H7b.
+  not verified by H7b;
+- the identity-link lock check (S18) covers `contact.sprk_identityplane` and the five `sprk_identitycollision*` columns
+  as well as the binding columns: secured, `Identity Link Readers` 4/0/0, `Writers` 4/4/4, nobody else may create or
+  update (`secure_setup.identity_link_*`);
+- the standing-grant lock check (S19) covers two columns:
+  - `contact.sprk_standinggrant`: secured, `Standing Grant Administrators` 4/4/4, and no other profile (System
+    Administrator excepted; the Readers profile is not) may create or update it, else
+    `secure_setup.standing_grant_lock_incomplete` (Resumable: import SpaarkeMaster) or
+    `secure_setup.standing_grant_lock_other_writer` (QuarantineRequired);
+  - `contact.sprk_accesspermissiongrant` (#2317): secured, `Standing Grant Administrators` 4/4/4,
+    `BFF-Managed Field Readers` Read (4/0/0), `BFF-Managed Field Writers` Read and Update (4/0/4), and no other profile
+    (System Administrator excepted; the Readers profile is not) may create or update it, else
+    `secure_setup.access_level_lock_incomplete` (Resumable) or `secure_setup.access_level_lock_other_writer`
+    (QuarantineRequired);
+- read-only checks (S22, #2317) for the columns a later SpaarkeMaster release carries. `contact.sprk_externalinvitedemailhash`
+  and `contact.sprk_externalinvitedtenantid` follow the code-hash rule (secured, `Writers` 4/4/4, no access for anyone
+  else), else `secure_setup.bff_only_column_lock_incomplete` (Resumable) or
+  `secure_setup.bff_only_column_lock_other_access` (QuarantineRequired). `contact.sprk_externalaccessremovedon` follows
+  the invite-marker rule (secured, `Readers` Read, `Writers` 4/4/4, no other writer), else
+  `secure_setup.access_removed_on_lock_incomplete` (Resumable) or `secure_setup.access_removed_on_lock_other_writer`
+  (QuarantineRequired). While a column is absent that is the expected state: H7b records the same "absent" note and
+  does not fail. `scripts/Set-ExternalAccessContactSecuritySchema.ps1 -Verify` (exit 0, §6.5.2) remains the gate for
+  these columns before that release.
+
+**Release ordering (#2317).** An H7b carrying these checks requires SpaarkeMaster >= 1.2.4.0 published before the
+control plane is deployed. SpaarkeMaster 1.2.3.1 and earlier do not secure the identity plane, collision and access-level
+columns, so against such an environment S18 refuses `secure_setup.identity_link_lock_incomplete` and S19
+`secure_setup.access_level_lock_incomplete`, each naming 1.2.4.0. A new stamp imports 1.2.4.0 or later (H6) and the run
+is resumed; in an existing environment run `scripts/Set-ExternalAccessContactSecuritySchema.ps1 -Apply`, then resume.
+H7b re-checks the locks itself and adds the BFF to Standing Grant Administrators. Run `-Verify` (exit 0, §6.5.2) after
+H7b completes, before the BFF deploy.
 
 An intake `secureRecordSetupDryRun: true` makes H7b read only. It records its plan in gate `h7b-secure-setup-plan` and
 stops the run.
@@ -2554,6 +2709,8 @@ These are **module-scoped** deployment / build workflows — NOT customer-provis
 | 2026-10-22 | §6.5.2: `scripts/Set-ChildRecordCreatorPersonSchema.ps1 -Verify` must exit 0 before deploying a BFF that stamps a new table — the BFF trusts `sprk_createdbyperson` only on stamped tables, and only a field-secured column makes that safe; source guard `CreatorPersonColumnSecuredGuardTests` | #2273 fix round 1 (PR #2277) |
 | 2026-10-22 | §5 H3 row + §7.3 + §9 T7 + §12.3: `authenticationBehaviors.removeUnverifiedEmailClaim = true` set by H3 on every BFF registration (`appreg-unverified-email-claim-failed`) and verified by H13 trap T7 | `customer-provisioning-orchestration-r1` task 264 (#2001 from SPA-r3 ISS-013) |
 | 2026-10-22 | §9 T7 + §12.3 + H4b external-registration owner note: H13 trap T7 reads back `ExternalAccess__CustomerBusinessUnitId` on both slots (equal to H10's customer business unit) | `customer-provisioning-orchestration-r1` task 265 (#2265) |
+| 2026-10-23 | §6.5.2: contact access-level and identity bookkeeping columns are field-secured — `scripts/Set-ExternalAccessContactSecuritySchema.ps1` (dry run, `-Apply`, `-Verify` exit 0) secures `sprk_accesspermissiongrant`, `sprk_identityplane` and the `sprk_identitycollision*` columns and adds three BFF-only columns; the H6 path for a new stamp applies once SpaarkeMaster 1.2.4.0 is published; §7.11: H7b S18 covers the plane and collision columns, S19 verifies the access-level lock and the whole standing-grant lock (Standing Grant Administrators 4/4/4; no other writer but System Administrator — `secure_setup.standing_grant_lock_other_writer`), S22 verifies the three BFF-only columns' locks once a release carries them; an H7b carrying these checks requires SpaarkeMaster >= 1.2.4.0 published before the control plane is deployed | `spaarke-SPA-external-access-platform-r3` (contact identity hardening, slice A) |
+| 2026-10-23 | §6.5.2 rollout note: rollout order — the contact security schema is applied and `-Verify` passes (stamp columns and proof reads) on every environment BEFORE a BFF build that requires the invite stamp is deployed; without the stamp columns every email bind (CIAM and Workforce) is refused; an email bind needs a current invite stamp (invited address and, for work accounts, the invited tenant unless `xms_edov` is boolean true); invites take an optional `invitedTenantId` (GUID); Workforce contacts never invited through the BFF, or invited before this release, need a re-invite naming their tenant | `spaarke-SPA-external-access-platform-r3` (contact identity hardening, slice B) |
 
 ---
 

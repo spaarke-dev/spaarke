@@ -42,7 +42,8 @@ public class ContactIdentityBinderWorkforceGuestTests
     {
         var store = new Mock<IContactIdentityStore>();
         var binder = new ContactIdentityBinder(
-            store.Object, Tenants(CustomerTenant), new FakeTimeProvider(Now), new BindingLogCapture<ContactIdentityBinder>());
+            store.Object, Tenants(CustomerTenant), new FakeTimeProvider(Now), new BindingLogCapture<ContactIdentityBinder>(),
+            NoOwnerUnderTest);
 
         var result = await binder.ResolveWorkforceCallerAsync(Guest(CustomerTenant), GuestOid, Stamp, CancellationToken.None);
 
@@ -132,7 +133,7 @@ public class ContactIdentityBinderWorkforceGuestTests
             .ThrowsAsync(new InvalidOperationException("the oid lookup must not run for a non-member"));
         var tenants = listStillHasOthers ? Tenants(UnlistedTenant) : Tenants();
         var binder = new ContactIdentityBinder(
-            store.Object, tenants, new FakeTimeProvider(Now), new BindingLogCapture<ContactIdentityBinder>());
+            store.Object, tenants, new FakeTimeProvider(Now), new BindingLogCapture<ContactIdentityBinder>(), NoOwnerUnderTest);
 
         var result = await binder.ResolveWorkforceCallerAsync(
             WorkforceUser(oid, CustomerTenant, acct: "0", email: GuestEmail), oid, Stamp, CancellationToken.None);
@@ -176,6 +177,7 @@ public class ContactIdentityBinderWorkforceGuestTests
     {
         var oid = Guid.NewGuid();
         _store.AddContact(ContactA, email: GuestEmail);
+        _store.StampInvite(ContactA, GuestEmail, CustomerTenant);
 
         var result = await Binder(_store).ResolveWorkforceCallerAsync(
             WorkforceUser(oid, CustomerTenant, acct: "0", email: GuestEmail), oid, Stamp, CancellationToken.None);

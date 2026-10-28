@@ -18,6 +18,7 @@
  * authenticatedFetch and bffBaseUrl are passed at construction time.
  */
 
+import { describeWebApiCreateError } from '../../utils/webApiCreateError';
 import type { ICreateMatterFormState } from './formTypes';
 import type { IUploadedFile } from './wizardTypes';
 import type { IDataService } from '../../types/serviceInterfaces';
@@ -338,12 +339,12 @@ export class MatterService {
       console.info('[MatterService] createRecord success, matterId:', matterId);
     } catch (err) {
       console.error('[MatterService] createRecord error:', err);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const errObj = err as any;
-      const message = errObj?.message || (err instanceof Error ? err.message : 'Unknown error');
+      // #2382: a privilege refusal becomes one plain sentence; the full error is logged above.
+      const described = describeWebApiCreateError(err, 'matter');
+      const message = described.message;
       return {
         status: 'error',
-        errorMessage: `Failed to create matter record: ${message}`,
+        errorMessage: described.isAccessDenied ? message : `Failed to create matter record: ${message}`,
         warnings: [],
       };
     }

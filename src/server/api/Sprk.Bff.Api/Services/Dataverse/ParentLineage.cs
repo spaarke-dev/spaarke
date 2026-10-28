@@ -923,6 +923,13 @@ internal static class InheritedAccessPermission
     /// contact IS), its uniqueness mirror <c>sprk_externalobjectidkey</c> (a held mirror denies a bind),
     /// <c>sprk_identityplane</c>, <c>sprk_externaltenantid</c> (a WorkforceHome contact's directory), and the pending
     /// invite <c>sprk_externalinvitedon</c> / <c>sprk_externalinvitecodehash</c> (they open the email bind).</item>
+    /// <item><c>contact</c>, the removal and invite stamp (<c>ContactBindingDecision</c>; ISS-005): the removed marker
+    /// <c>sprk_externalaccessremovedon</c> (a removed contact neither binds nor is re-invited), and the latest invite's
+    /// <c>sprk_externalinvitedemailhash</c> / <c>sprk_externalinvitedtenantid</c> (they decide which sign-in the invite
+    /// binds). And the identity-collision record (<c>DataverseContactIdentityStore.CollisionColumns</c>,
+    /// <c>sprk_identitycollisionon</c>, <c>…oid</c>, <c>…plane</c>, <c>…reason</c>, <c>…parties</c>): field-secured, written
+    /// only by the binder's collision flagging, and trusted empty only after a proven read. Every contact column the typed
+    /// identity writers send is classified here or as ordinary data (<c>ContactAccessColumnGuardTests</c>).</item>
     /// <item><c>contact</c> and <c>sprk_organization</c>, the standing grant (<c>SubjectStandingGrantReader</c>):
     /// <c>sprk_standinggrant</c> and <c>sprk_accesspermissiongrant</c>, the standing term of the accessible set.</item>
     /// <item><c>systemuser</c>: the A9 home link <c>sprk_hometenantid</c> / <c>sprk_homeobjectid</c> (which user a home
@@ -1029,6 +1036,14 @@ internal static class InheritedAccessPermission
                 Sprk.Bff.Api.Infrastructure.ExternalAccess.ContactBindingDecision.ExternalTenantIdColumn,
                 Sprk.Bff.Api.Infrastructure.ExternalAccess.ContactBindingDecision.ExternalInvitedOnColumn,
                 Sprk.Bff.Api.Infrastructure.ExternalAccess.ContactBindingDecision.ExternalInviteCodeHashColumn,
+                Sprk.Bff.Api.Infrastructure.ExternalAccess.ContactBindingDecision.ExternalAccessRemovedOnColumn,
+                Sprk.Bff.Api.Infrastructure.ExternalAccess.ContactBindingDecision.ExternalInvitedEmailHashColumn,
+                Sprk.Bff.Api.Infrastructure.ExternalAccess.ContactBindingDecision.ExternalInvitedTenantIdColumn,
+                Sprk.Bff.Api.Infrastructure.ExternalAccess.DataverseContactIdentityStore.FlagOnColumn,
+                Sprk.Bff.Api.Infrastructure.ExternalAccess.DataverseContactIdentityStore.FlagOidColumn,
+                Sprk.Bff.Api.Infrastructure.ExternalAccess.DataverseContactIdentityStore.FlagPlaneColumn,
+                Sprk.Bff.Api.Infrastructure.ExternalAccess.DataverseContactIdentityStore.FlagReasonColumn,
+                Sprk.Bff.Api.Infrastructure.ExternalAccess.DataverseContactIdentityStore.FlagPartiesColumn,
                 Sprk.Bff.Api.Infrastructure.ExternalAccess.SubjectStandingGrantReader.StandingGrantAttribute,
                 Sprk.Bff.Api.Infrastructure.ExternalAccess.SubjectStandingGrantReader.BaselineAttribute,
             },
@@ -1161,7 +1176,8 @@ internal static class InheritedAccessPermission
     /// playbook run that writes AS that person is not out of scope: its Update Record node and its output mapping ask as
     /// <see cref="WriteIdentity.AppOnly"/> (#2257).</para>
     /// <para>#2253 fix round 1: nor, on a table that is not a secure root, a column an access decision reads
-    /// (<see cref="AccessColumns"/>: a contact's identity binding and standing grant, an organisation's standing grant, a
+    /// (<see cref="AccessColumns"/>: a contact's identity binding, removal and invite stamp, collision record and standing
+    /// grant, an organisation's standing grant, a
     /// user's home link, task-141 link, external flag, business unit, identity and eligibility, a team's owner-team
     /// predicates, a business unit's container, name and parent), refused with
     /// <see cref="AppOnlyAccessColumnWriteReasonCode"/>. Whatever the identity, a table that is not a bare identifier after

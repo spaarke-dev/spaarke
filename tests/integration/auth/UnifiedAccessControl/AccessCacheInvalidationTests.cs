@@ -623,7 +623,8 @@ public sealed partial class AccessCacheInvalidationTests : IClassFixture<Provisi
                 new ContactIdentityBinderFactory(
                     factory, NullLoggerFactory.Instance,
                     IdentityBinding.IdentityBindingTestKit.Tenants(IdentityBinding.IdentityBindingTestKit.CustomerTenant),
-                    TimeProvider.System),
+                    TimeProvider.System, IdentityBinding.IdentityBindingTestKit.FactoryConfiguration()),
+                IdentityBinding.IdentityBindingTestKit.InertOwnEnvironmentBinder(),
                 invalidator);
         }
 

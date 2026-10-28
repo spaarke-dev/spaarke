@@ -239,6 +239,11 @@ export function wizardShellReducer(state: IWizardShellState, action: WizardShell
       };
     }
 
+    // ----- RESET -------------------------------------------------------------
+    // The state a fresh mount would have for these steps (task 165: the shell is kept mounted and started over).
+    case 'RESET':
+      return buildInitialShellState(action.steps, action.initialStepId);
+
     default:
       return state;
   }

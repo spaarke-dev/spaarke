@@ -14,3 +14,4 @@ export * from './xrmContext';
 export * from './relationshipColors';
 export * from './adapters';
 export * from './todoScoreMappings';
+export * from './webApiCreateError';

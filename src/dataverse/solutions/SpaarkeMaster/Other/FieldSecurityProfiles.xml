@@ -442,6 +442,22 @@
         <CanCreate>0</CanCreate>
         <CanReadUnmasked>0</CanReadUnmasked>
       </FieldPermission>
+      <FieldPermission>
+        <EntityName>contact</EntityName>
+        <AttributeName>sprk_accesspermissiongrant</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>0</CanUpdate>
+        <CanCreate>0</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
+        <EntityName>contact</EntityName>
+        <AttributeName>sprk_externalaccessremovedon</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>0</CanUpdate>
+        <CanCreate>0</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
     </FieldPermissions>
   </FieldSecurityProfile>
   <FieldSecurityProfile name="Spaarke BFF-Managed Field Writers" description="Read/Create/Update on columns ONLY the BFF writes (sprk_createdbyperson; task 150 adds sprk_issecure). Members: the BFF application user(s) ONLY. unified-access-control-r2 task 133." fieldsecurityprofileid="{917b64c5-47bf-f111-a05b-3833c5e9614d}">
@@ -910,9 +926,41 @@
         <CanCreate>4</CanCreate>
         <CanReadUnmasked>0</CanReadUnmasked>
       </FieldPermission>
+      <FieldPermission>
+        <EntityName>contact</EntityName>
+        <AttributeName>sprk_accesspermissiongrant</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>4</CanUpdate>
+        <CanCreate>0</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
+        <EntityName>contact</EntityName>
+        <AttributeName>sprk_externalinvitedemailhash</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>4</CanUpdate>
+        <CanCreate>4</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
+        <EntityName>contact</EntityName>
+        <AttributeName>sprk_externalinvitedtenantid</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>4</CanUpdate>
+        <CanCreate>4</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
+        <EntityName>contact</EntityName>
+        <AttributeName>sprk_externalaccessremovedon</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>4</CanUpdate>
+        <CanCreate>4</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
     </FieldPermissions>
   </FieldSecurityProfile>
-  <FieldSecurityProfile name="Spaarke Identity Link Readers" description="Read on contact.sprk_externalobjectid and systemuser.sprk_primarycontact for every user (associated with every business unit default team). Without Read a secured column is HIDDEN. Task 141." fieldsecurityprofileid="{5d02ed7f-89be-f111-aaaf-0022482913fc}">
+  <FieldSecurityProfile name="Spaarke Identity Link Readers" description="Read on contact.sprk_externalobjectid, the identity plane and identity collision columns, and systemuser.sprk_primarycontact for every user (associated with every business unit default team). Without Read a secured column is HIDDEN. Task 141." fieldsecurityprofileid="{5d02ed7f-89be-f111-aaaf-0022482913fc}">
     <FieldPermissions>
       <FieldPermission>
         <EntityName>systemuser</EntityName>
@@ -954,9 +1002,57 @@
         <CanCreate>0</CanCreate>
         <CanReadUnmasked>0</CanReadUnmasked>
       </FieldPermission>
+      <FieldPermission>
+        <EntityName>contact</EntityName>
+        <AttributeName>sprk_identityplane</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>0</CanUpdate>
+        <CanCreate>0</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
+        <EntityName>contact</EntityName>
+        <AttributeName>sprk_identitycollisionon</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>0</CanUpdate>
+        <CanCreate>0</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
+        <EntityName>contact</EntityName>
+        <AttributeName>sprk_identitycollisionoid</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>0</CanUpdate>
+        <CanCreate>0</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
+        <EntityName>contact</EntityName>
+        <AttributeName>sprk_identitycollisionplane</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>0</CanUpdate>
+        <CanCreate>0</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
+        <EntityName>contact</EntityName>
+        <AttributeName>sprk_identitycollisionreason</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>0</CanUpdate>
+        <CanCreate>0</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
+        <EntityName>contact</EntityName>
+        <AttributeName>sprk_identitycollisionparties</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>0</CanUpdate>
+        <CanCreate>0</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
     </FieldPermissions>
   </FieldSecurityProfile>
-  <FieldSecurityProfile name="Spaarke Identity Link Writers" description="Read/Create/Update on contact.sprk_externalobjectid and systemuser.sprk_primarycontact. Members: the BFF application user(s) ONLY — every binding and link is written by the BFF. Task 141." fieldsecurityprofileid="{5f02ed7f-89be-f111-aaaf-0022482913fc}">
+  <FieldSecurityProfile name="Spaarke Identity Link Writers" description="Read/Create/Update on contact.sprk_externalobjectid, the identity plane and identity collision columns, and systemuser.sprk_primarycontact. Members: the BFF application user(s) ONLY — every binding and link is written by the BFF. Task 141." fieldsecurityprofileid="{5f02ed7f-89be-f111-aaaf-0022482913fc}">
     <FieldPermissions>
       <FieldPermission>
         <EntityName>contact</EntityName>
@@ -993,6 +1089,54 @@
       <FieldPermission>
         <EntityName>systemuser</EntityName>
         <AttributeName>sprk_homeobjectid</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>4</CanUpdate>
+        <CanCreate>4</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
+        <EntityName>contact</EntityName>
+        <AttributeName>sprk_identityplane</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>4</CanUpdate>
+        <CanCreate>4</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
+        <EntityName>contact</EntityName>
+        <AttributeName>sprk_identitycollisionon</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>4</CanUpdate>
+        <CanCreate>4</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
+        <EntityName>contact</EntityName>
+        <AttributeName>sprk_identitycollisionoid</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>4</CanUpdate>
+        <CanCreate>4</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
+        <EntityName>contact</EntityName>
+        <AttributeName>sprk_identitycollisionplane</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>4</CanUpdate>
+        <CanCreate>4</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
+        <EntityName>contact</EntityName>
+        <AttributeName>sprk_identitycollisionreason</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>4</CanUpdate>
+        <CanCreate>4</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
+        <EntityName>contact</EntityName>
+        <AttributeName>sprk_identitycollisionparties</AttributeName>
         <CanRead>4</CanRead>
         <CanUpdate>4</CanUpdate>
         <CanCreate>4</CanCreate>
@@ -1040,11 +1184,19 @@
       </FieldPermission>
     </FieldPermissions>
   </FieldSecurityProfile>
-  <FieldSecurityProfile name="Standing Grant Administrators" description="Grants Create/Read/Update on contact.sprk_standinggrant (the FR-12 subject-level standing-access policy flag). Membership in this profile is the sole authorization mechanism for setting standing grants -- add only grant-privileged systemusers/teams. Created by teams-app-r1 task 050." fieldsecurityprofileid="{f4be217b-b38f-f111-b8db-7ced8ddc4a05}">
+  <FieldSecurityProfile name="Standing Grant Administrators" description="Grants Create/Read/Update on contact.sprk_standinggrant (the FR-12 subject-level standing-access policy flag) and contact.sprk_accesspermissiongrant (its access level). Membership in this profile is the sole authorization mechanism for setting standing grants -- add only grant-privileged systemusers/teams. Created by teams-app-r1 task 050." fieldsecurityprofileid="{f4be217b-b38f-f111-b8db-7ced8ddc4a05}">
     <FieldPermissions>
       <FieldPermission>
         <EntityName>contact</EntityName>
         <AttributeName>sprk_standinggrant</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>4</CanUpdate>
+        <CanCreate>4</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
+        <EntityName>contact</EntityName>
+        <AttributeName>sprk_accesspermissiongrant</AttributeName>
         <CanRead>4</CanRead>
         <CanUpdate>4</CanUpdate>
         <CanCreate>4</CanCreate>

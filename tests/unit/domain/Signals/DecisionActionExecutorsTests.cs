@@ -914,7 +914,7 @@ public class DecisionActionExecutorsTests
         return
         [
             new ReviseBudgetExecutor(probe, user, new WriterHarness().Build(), Owner().Object, new FakeTimeProvider(Now), NullLogger<ReviseBudgetExecutor>.Instance),
-            new CreateBudgetExecutor(probe, cores, entities, new FakeTimeProvider(Now)),
+            new CreateBudgetExecutor(probe, cores, entities, new FakeTimeProvider(Now), Sources().Object),
             new ApproveVarianceExecutor(),
             new MarkCompleteExecutor(probe, user, cores, new FakeTimeProvider(Now)),
             new RescheduleExecutor(probe, OpenEventUser(), cores),
@@ -1156,6 +1156,25 @@ public class DecisionActionExecutorsTests
     // create-budget (task 161, D-180): a matter with no active budget; the child-records create core, as the caller
     // ---------------------------------------------------------------------------------------------------------------
 
+    private static readonly Guid EuroId = Guid.Parse("cccccccc-0000-0000-0000-0000000000e1");
+
+    /// <summary>Task 167 (D-193): the resolver of option lists and the budget currency. By default the live Category / Period lists hold
+    /// two options each and the matter's business-unit currency is the euro.</summary>
+    private static Mock<DecisionParameterSources> Sources(BudgetCurrency? currency = null, bool optionsUnreadable = false)
+    {
+        var sources = new Mock<DecisionParameterSources>(
+            new Mock<IDataverseUserClient>().Object, new Mock<IGenericEntityService>().Object, new Mock<Sprk.Bff.Api.Infrastructure.Cache.ITenantCache>().Object,
+            NullLogger<DecisionParameterSources>.Instance)
+        { CallBase = false };
+        sources.Setup(s => s.OptionsAsync(It.IsAny<HttpContext>(), "metadata:sprk_budget.sprk_budgetcategory", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(optionsUnreadable ? null : new List<DecisionParameterOption> { new("100000000", "Fees"), new("100000001", "Expenses") });
+        sources.Setup(s => s.OptionsAsync(It.IsAny<HttpContext>(), "metadata:sprk_budget.sprk_budgetperiod", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(optionsUnreadable ? null : new List<DecisionParameterOption> { new("0", "Annual"), new("1", "Quarter 1") });
+        sources.Setup(s => s.ResolveBudgetCurrencyAsync(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(currency ?? new BudgetCurrency(EuroId, "EUR", null));
+        return sources;
+    }
+
     private static Dictionary<string, string?> CreateBudgetParams() =>
         new() { ["amount"] = "250000.50", ["reason"] = "No budget was ever set; the estimate from counsel" };
 
@@ -1171,7 +1190,7 @@ public class DecisionActionExecutorsTests
             .ReturnsAsync(Reply(201, body: new { id = created }));
         var probe = Probe(CanCreate);
 
-        var outcome = await new CreateBudgetExecutor(probe.Object, cores.Object, Entities(), new FakeTimeProvider(Now)).ExecuteAsync(
+        var outcome = await new CreateBudgetExecutor(probe.Object, cores.Object, Entities(), new FakeTimeProvider(Now), Sources().Object).ExecuteAsync(
             Request(CreateBudgetParams(), null, MatterCore), CancellationToken.None);
 
         outcome.Status.Should().Be(DecisionActionStatus.Done);
@@ -1200,7 +1219,7 @@ public class DecisionActionExecutorsTests
     {
         var cores = Cores();
 
-        var outcome = await new CreateBudgetExecutor(Probe(CanCreate).Object, cores.Object, Entities(), new FakeTimeProvider(Now)).ExecuteAsync(
+        var outcome = await new CreateBudgetExecutor(Probe(CanCreate).Object, cores.Object, Entities(), new FakeTimeProvider(Now), Sources().Object).ExecuteAsync(
             Request(new() { ["amount"] = amount, ["reason"] = reason }, null, MatterCore), CancellationToken.None);
 
         outcome.Status.Should().Be(DecisionActionStatus.Refused);
@@ -1218,7 +1237,7 @@ public class DecisionActionExecutorsTests
         var cores = Cores();
         var core = coreEntity is null ? null : new DecisionCoreRecord(coreEntity, Guid.NewGuid(), Guid.NewGuid());
 
-        var outcome = await new CreateBudgetExecutor(Probe(CanCreate).Object, cores.Object, Entities(), new FakeTimeProvider(Now)).ExecuteAsync(
+        var outcome = await new CreateBudgetExecutor(Probe(CanCreate).Object, cores.Object, Entities(), new FakeTimeProvider(Now), Sources().Object).ExecuteAsync(
             Request(CreateBudgetParams(), null, core), CancellationToken.None);
 
         outcome.Status.Should().Be(DecisionActionStatus.Refused);
@@ -1231,12 +1250,12 @@ public class DecisionActionExecutorsTests
     {
         var noPrivilege = new Spy();
         await AssertPreflightRefusesWithoutWriting(
-            new CreateBudgetExecutor(Probe(CanCreate, createPrivilege: false).Object, noPrivilege.Cores.Object, Entities(), new FakeTimeProvider(Now)),
+            new CreateBudgetExecutor(Probe(CanCreate, createPrivilege: false).Object, noPrivilege.Cores.Object, Entities(), new FakeTimeProvider(Now), Sources().Object),
             Request(CreateBudgetParams(), null, MatterCore), noPrivilege, DecisionActionReasons.NotAuthorized);
 
         var noMatter = new Spy();
         await AssertPreflightRefusesWithoutWriting(
-            new CreateBudgetExecutor(Probe(CanCreate, bySet: set => set == "sprk_matters" ? ReadOnly : CanCreate).Object, noMatter.Cores.Object, Entities(), new FakeTimeProvider(Now)),
+            new CreateBudgetExecutor(Probe(CanCreate, bySet: set => set == "sprk_matters" ? ReadOnly : CanCreate).Object, noMatter.Cores.Object, Entities(), new FakeTimeProvider(Now), Sources().Object),
             Request(CreateBudgetParams(), null, MatterCore), noMatter, DecisionActionReasons.NotAuthorized);
     }
 
@@ -1249,7 +1268,7 @@ public class DecisionActionExecutorsTests
         cores.Setup(c => c.CreateChildAsync(It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<JsonElement>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Reply(status, "child_record.denied", "no"));
 
-        var outcome = await new CreateBudgetExecutor(Probe(CanCreate).Object, cores.Object, Entities(), new FakeTimeProvider(Now)).ExecuteAsync(
+        var outcome = await new CreateBudgetExecutor(Probe(CanCreate).Object, cores.Object, Entities(), new FakeTimeProvider(Now), Sources().Object).ExecuteAsync(
             Request(CreateBudgetParams(), null, MatterCore), CancellationToken.None);
 
         outcome.Status.Should().Be(DecisionActionStatus.Refused);
@@ -1264,7 +1283,7 @@ public class DecisionActionExecutorsTests
         cores.Setup(c => c.CreateChildAsync(It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<JsonElement>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Reply(503, null, "unavailable"));
 
-        var outcome = await new CreateBudgetExecutor(Probe(CanCreate).Object, cores.Object, Entities(), new FakeTimeProvider(Now)).ExecuteAsync(
+        var outcome = await new CreateBudgetExecutor(Probe(CanCreate).Object, cores.Object, Entities(), new FakeTimeProvider(Now), Sources().Object).ExecuteAsync(
             Request(CreateBudgetParams(), null, MatterCore), CancellationToken.None);
 
         outcome.Status.Should().Be(DecisionActionStatus.Failed);
@@ -1278,7 +1297,7 @@ public class DecisionActionExecutorsTests
         var entities = new Mock<IGenericEntityService>();
         entities.Setup(e => e.GetEntitySetNameAsync("sprk_matter", It.IsAny<CancellationToken>())).ThrowsAsync(new InvalidOperationException("metadata is down"));
 
-        var outcome = await new CreateBudgetExecutor(Probe(CanCreate).Object, cores.Object, entities.Object, new FakeTimeProvider(Now)).ExecuteAsync(
+        var outcome = await new CreateBudgetExecutor(Probe(CanCreate).Object, cores.Object, entities.Object, new FakeTimeProvider(Now), Sources().Object).ExecuteAsync(
             Request(CreateBudgetParams(), null, MatterCore), CancellationToken.None);
 
         outcome.Status.Should().Be(DecisionActionStatus.Failed);
@@ -1287,6 +1306,171 @@ public class DecisionActionExecutorsTests
         outcome.Written.Should().BeEmpty();
         cores.Verify(c => c.CreateChildAsync(It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<JsonElement>(), It.IsAny<CancellationToken>()), Times.Never,
             "a budget that cannot be filed under its matter is never created");
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // create-budget fields (task 167, D-193): category, year, dates, period, and the currency pair
+    // ---------------------------------------------------------------------------------------------------------------
+
+    private static async Task<(DecisionActionOutcome Outcome, JsonElement? Sent, Mock<DecisionRouteCores> Cores)> RunCreateBudgetAsync(
+        Dictionary<string, string?> parameters, Mock<DecisionParameterSources>? sources = null)
+    {
+        var cores = Cores();
+        JsonElement? sent = null;
+        cores.Setup(c => c.CreateChildAsync(It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<JsonElement>(), It.IsAny<CancellationToken>()))
+            .Callback<HttpContext, string, JsonElement, CancellationToken>((_, _, b, _) => sent = b)
+            .ReturnsAsync(Reply(201, body: new { id = Guid.NewGuid() }));
+        var outcome = await new CreateBudgetExecutor(Probe(CanCreate).Object, cores.Object, Entities(), new FakeTimeProvider(Now), (sources ?? Sources()).Object)
+            .ExecuteAsync(Request(parameters, null, MatterCore), CancellationToken.None);
+        return (outcome, sent, cores);
+    }
+
+    [Fact]
+    public async Task CreateBudget_WritesEverySuppliedField_AndTheCurrencyPair_NeverTheBudgetNumber_D193()
+    {
+        var parameters = CreateBudgetParams();
+        parameters["category"] = "100000001";
+        parameters["year"] = "2026";
+        parameters["startDate"] = "2026-01-01";
+        parameters["endDate"] = "2026-12-31";
+        parameters["period"] = "0";
+        parameters["currency"] = EuroId.ToString("D");
+        var sources = Sources();
+
+        var (outcome, sent, _) = await RunCreateBudgetAsync(parameters, sources);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Done);
+        var body = sent!.Value;
+        body.GetProperty("sprk_budgetcategory").GetInt32().Should().Be(100000001);
+        body.GetProperty("sprk_budgetyear").GetString().Should().Be("2026");
+        body.GetProperty("sprk_budgetstartdate").GetString().Should().Be("2026-01-01");
+        body.GetProperty("sprk_budgetenddate").GetString().Should().Be("2026-12-31");
+        body.GetProperty("sprk_budgetperiod").GetInt32().Should().Be(0);
+        body.GetProperty("transactioncurrencyid@odata.bind").GetString().Should().Be($"/transactioncurrencies({EuroId:D})");
+        body.GetProperty("sprk_currency").GetString().Should().Be("EUR", "the ISO code of the chosen currency, never blank");
+        var names = body.EnumerateObject().Select(p => p.Name).ToList();
+        names.Should().NotContain("sprk_budgetnumber", "the platform autonumber fills it");
+        names.Should().NotContain(n => n.Contains("reason", StringComparison.OrdinalIgnoreCase), "the reason goes to the Decision Record only");
+        sources.Verify(s => s.ResolveBudgetCurrencyAsync(MatterId, EuroId.ToString("D"), It.IsAny<CancellationToken>()), Times.AtLeastOnce);
+    }
+
+    [Fact]
+    public async Task CreateBudget_WithNoOptionalFields_StillWritesTheDefaultCurrencyPair_AndNoneOfTheOthers_D193()
+    {
+        var sources = Sources();
+
+        var (outcome, sent, _) = await RunCreateBudgetAsync(CreateBudgetParams(), sources);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Done);
+        var body = sent!.Value;
+        body.GetProperty("transactioncurrencyid@odata.bind").GetString().Should().Be($"/transactioncurrencies({EuroId:D})");
+        body.GetProperty("sprk_currency").GetString().Should().Be("EUR");
+        var names = body.EnumerateObject().Select(p => p.Name).ToList();
+        names.Should().NotContain(["sprk_budgetcategory", "sprk_budgetyear", "sprk_budgetstartdate", "sprk_budgetenddate", "sprk_budgetperiod", "sprk_budgetnumber"]);
+        sources.Verify(s => s.ResolveBudgetCurrencyAsync(MatterId, null, It.IsAny<CancellationToken>()), Times.AtLeastOnce,
+            "an omitted currency is resolved by the server to the business-unit default");
+        sources.Verify(s => s.OptionsAsync(It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never,
+            "no option list is read for a field that was not supplied");
+    }
+
+    [Fact]
+    public async Task CreateBudget_AnUnknownInactiveOrUndeterminedCurrency_IsRefused_NothingIsWritten_D193()
+    {
+        var parameters = CreateBudgetParams();
+        parameters["currency"] = Guid.NewGuid().ToString("D");
+
+        var (outcome, sent, cores) = await RunCreateBudgetAsync(parameters, Sources(new BudgetCurrency(null, null, "That is not an existing, active currency.")));
+
+        outcome.Status.Should().Be(DecisionActionStatus.Refused);
+        outcome.ReasonCode.Should().Be(DecisionActionReasons.InvalidParameter);
+        outcome.Detail.Should().Be("That is not an existing, active currency.");
+        outcome.Written.Should().BeEmpty();
+        sent.Should().BeNull();
+        cores.Verify(c => c.CreateChildAsync(It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<JsonElement>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData("category", "100000009")]  // a number that is not in the live option set
+    [InlineData("category", "Fees")]       // a label is not a value
+    [InlineData("period", "9")]
+    [InlineData("period", "Q1")]
+    [InlineData("year", "20267")]          // longer than the column's MaxLength (4)
+    [InlineData("startDate", "01/02/2026")]
+    [InlineData("startDate", "2026-13-01")]
+    [InlineData("endDate", "soon")]
+    public async Task CreateBudget_ABadOptionalField_IsRefused_NothingIsWritten_D193(string field, string value)
+    {
+        var parameters = CreateBudgetParams();
+        parameters[field] = value;
+
+        var (outcome, sent, cores) = await RunCreateBudgetAsync(parameters);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Refused);
+        outcome.ReasonCode.Should().Be(DecisionActionReasons.InvalidParameter);
+        outcome.Written.Should().BeEmpty();
+        sent.Should().BeNull();
+        cores.Verify(c => c.CreateChildAsync(It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<JsonElement>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task CreateBudget_AnEndDateBeforeTheStartDate_IsRefused_ButTheSameDayIsAccepted_D193()
+    {
+        var before = CreateBudgetParams();
+        before["startDate"] = "2026-06-02";
+        before["endDate"] = "2026-06-01";
+        var (refused, sentBefore, _) = await RunCreateBudgetAsync(before);
+
+        var sameDay = CreateBudgetParams();
+        sameDay["startDate"] = "2026-06-01";
+        sameDay["endDate"] = "2026-06-01";
+        var (accepted, sentSame, _) = await RunCreateBudgetAsync(sameDay);
+
+        refused.Status.Should().Be(DecisionActionStatus.Refused);
+        refused.ReasonCode.Should().Be(DecisionActionReasons.InvalidParameter);
+        sentBefore.Should().BeNull();
+        accepted.Status.Should().Be(DecisionActionStatus.Done, "must-not-fire: an end date equal to the start date is a one-day budget");
+        sentSame!.Value.GetProperty("sprk_budgetstartdate").GetString().Should().Be("2026-06-01");
+    }
+
+    [Fact]
+    public async Task CreateBudget_AnEndDateWithNoStartDate_IsAccepted_D193()
+    {
+        var parameters = CreateBudgetParams();
+        parameters["endDate"] = "2026-12-31";
+
+        var (outcome, sent, _) = await RunCreateBudgetAsync(parameters);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Done);
+        sent!.Value.TryGetProperty("sprk_budgetstartdate", out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Preflight_CreateBudget_RefusesABadCurrencyOrOption_WithZeroWrites_D193()
+    {
+        var parameters = CreateBudgetParams();
+        parameters["category"] = "100000009";
+        var spy = new Spy();
+
+        await AssertPreflightRefusesWithoutWriting(
+            new CreateBudgetExecutor(Probe(CanCreate).Object, spy.Cores.Object, Entities(), new FakeTimeProvider(Now), Sources().Object),
+            Request(parameters, null, MatterCore), spy, DecisionActionReasons.InvalidParameter);
+
+        var currency = new Spy();
+        await AssertPreflightRefusesWithoutWriting(
+            new CreateBudgetExecutor(Probe(CanCreate).Object, currency.Cores.Object, Entities(), new FakeTimeProvider(Now), Sources(new BudgetCurrency(null, null, "No currency.")).Object),
+            Request(CreateBudgetParams(), null, MatterCore), currency, DecisionActionReasons.InvalidParameter);
+    }
+
+    [Fact]
+    public async Task Preflight_CreateBudget_WhenTheLiveOptionsCannotBeRead_Throws_SoTheCommitIs503_NotAnAcceptedGuess_D193()
+    {
+        var parameters = CreateBudgetParams();
+        parameters["period"] = "0";
+        var executor = new CreateBudgetExecutor(Probe(CanCreate).Object, Cores().Object, Entities(), new FakeTimeProvider(Now), Sources(optionsUnreadable: true).Object);
+
+        var act = () => executor.PreflightAsync(Request(parameters, null, MatterCore), CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
     }
 
     // ---------------------------------------------------------------------------------------------------------------
@@ -1844,7 +2028,7 @@ public class DecisionActionExecutorsTests
             (new AddTodoExecutor(probe, cores, Entities()), Request(new() { ["title"] = "t", ["assignee"] = ContactId.ToString("D"), ["dueDate"] = "2026-10-20" }, null, MatterCore)),
             (new CreateEventExecutor(probe, cores, Entities()), Request(new() { ["title"] = "t", ["date"] = "2026-10-22" }, null, MatterCore)),
             (new AssignTaskExecutor(probe, cores, Entities()), Request(new() { ["assignee"] = ContactId.ToString("D"), ["description"] = "t" }, null, MatterCore)),
-            (new CreateBudgetExecutor(probe, cores, Entities(), new FakeTimeProvider(Now)), Request(CreateBudgetParams(), null, MatterCore)),
+            (new CreateBudgetExecutor(probe, cores, Entities(), new FakeTimeProvider(Now), Sources().Object), Request(CreateBudgetParams(), null, MatterCore)),
         };
 
         foreach (var (executor, request) in cases)

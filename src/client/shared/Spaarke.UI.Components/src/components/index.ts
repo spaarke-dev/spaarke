@@ -320,6 +320,11 @@ export * from './StatusBadge';
 // dependency in the shared core.
 export * from './AccessGrantModal';
 
+// RecordFamilyModal - lists a record's Family (GET /api/v1/records/{table}/{id}/family, FR-31) on the
+// BrowseModal preset and hands the rows the person ticked to a caller-supplied action handler
+// (field-mapping-server-write-path-r1 task 073, FR-32). Opened from TrackingFieldTrio's onOpenFamily (task 074).
+export * from './RecordFamilyModal';
+
 // StatusBadge - generic status/severity badge (label + tone), no domain
 // vocabulary. The ONE legitimately-new UI primitive added by
 // spaarke-ontology-platform-r1 task 012 (C-4, spec FR-28/FR-41); `success`

@@ -257,7 +257,7 @@ public static class ChildRecordEndpoints
         // nothing for a child.
         var owned = await OwnedChildWrite.CreateAsync(
             user, ownership, appOnly, entity, mapped.Item!, serverSetLookupColumns: null,
-            CallerObjectId(httpContext), ct, rootFiling).ConfigureAwait(false);
+            CallerObjectId(httpContext), ct, rootFiling, logger).ConfigureAwait(false);
 
         if (owned.CreatedId is not { } id)
         {

@@ -66,6 +66,9 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
     private readonly List<(string Table, Guid Id, Dictionary<string, object?> Fields)> _appCreates = new();
     private readonly Mock<IFieldMappingDataverseService> _appOnly = new(MockBehavior.Strict);
 
+    /// <summary>Task 037: called with every app-only create as it lands (before the route's post-create steps run).</summary>
+    private Action<string, Guid, Dictionary<string, object?>>? _onAppCreate;
+
     public SecureChildOwnershipAiToolTests()
     {
         // #2143: a PATCH Dataverse accepted is on the row when the resolver reads it after the change.
@@ -86,6 +89,7 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
 
                 _appCreates.Add((t, id, f));
                 MaterializeInShareWorld(t, id, f);
+                _onAppCreate?.Invoke(t, id, f); // task 037: a test's own view of the created row (the materializer's store)
                 _world.ApplyPatch(t, id, f); // #2143: an app-only PATCH to an existing row lands too
             })
             .Returns(Task.CompletedTask);
@@ -276,7 +280,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
     {
         // Owner round 7 item 3 ("record the person in the table's Assigned-To / 'for' column where one exists"), b2-r2
         // (verifier b2-r1 item 4): the third root follows the matter/project precedent (A7), the column task 152 reads as
-        // a work assignment's responsible internal person. Its separate sprk_assignedto is not defaulted.
+        // a work assignment's responsible internal person. Task 037 (FR-36, owner 2026-10-27): its separate sprk_assignedto
+        // is not a second "for" column but a copied default — the same contact, copied from sprk_assignedtointernal.
         var result = await CreateRecord("sprk_workassignment", Lookup("sprk_regardingmatter", "sprk_matter", OrdinaryMatter));
 
         result.Success.Should().BeTrue(result.ErrorMessage);
@@ -284,7 +289,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
         var fields = _appCreates.Should().ContainSingle(c => c.Table == "sprk_workassignment").Subject.Fields;
         Owner(fields).Should().Be(Directory.ChildTeam, "record-first: the parent matter's business-unit team");
         Bind(fields, "sprk_AssignedToInternal@odata.bind").Should().Be($"/contacts({CallerContact:D})");
-        fields.Keys.Should().NotContain("sprk_AssignedTo@odata.bind", "one 'for' column per table");
+        Bind(fields, "sprk_AssignedTo@odata.bind").Should().Be($"/contacts({CallerContact:D})",
+            "task 037: Assigned To defaults to the row's own Assigned To Internal (one 'for' column, one copied default)");
     }
 
     [Fact]

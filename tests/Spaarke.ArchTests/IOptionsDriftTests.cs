@@ -147,6 +147,7 @@ public class IOptionsDriftTests
                 "FinanceOptionsValidator (ebilling-r1 task 090): a GUID is required only when Finance:FileStore:BlobEndpoint is set, which no stamp channel writes yet (task 079 sets dev after 091). The value must equal the OrganizationId of the Dataverse environment the stamp serves (not the Entra tenant id, not a customer id): the validator checks only the GUID shape at boot, and StoredFileBlobs validates it against that environment's organization row before the first file-store operation (a mismatch refuses every operation). Whoever writes the endpoint for a stamp writes this value with it.",
                 Gate: "Finance:FileStore:BlobEndpoint"),
         },
+        ["ExternalAccessOptions"] = Array.Empty<Guard>(), // ExternalAccessOptionsValidator (ISS-005, #1673) only LOGS a Warning when CustomerBusinessUnitId is unset and always returns Success, so no key is demanded at startup (the setting is required by the create paths, not by the host).
     };
 
     // ───────────────────────────────────── channels ─────────────────────────────────────

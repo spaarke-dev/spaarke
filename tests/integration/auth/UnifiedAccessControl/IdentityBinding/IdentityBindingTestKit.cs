@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
@@ -23,10 +24,47 @@ public static class IdentityBindingTestKit
             CustomerTenantIds = tenants.Select(t => t.ToString("D")).ToList(),
         });
 
+    /// <summary>
+    /// The create-owner policy of a test binder whose test is not about who owns a created contact (the CIAM plane never creates;
+    /// the member-test, binding and invite tests assert the binding, not the owner). Named for what it is: a binder that binds
+    /// no owner. Tests of the owner use <see cref="OwnerAwareBinder"/> or the real DI registration.
+    /// </summary>
+    public static ContactCreateOwner NoOwnerUnderTest { get; } =
+        ContactCreateOwner.NoneForForeignEnvironment("test binder: contact ownership is not under test");
+
     public static ContactIdentityBinder Binder(
         InMemoryContactIdentityStore store, BindingLogCapture<ContactIdentityBinder>? log = null, params Guid[] tenants)
         => new(store, Tenants(tenants.Length == 0 ? new[] { CustomerTenant } : tenants), new FakeTimeProvider(Now),
-            log ?? new BindingLogCapture<ContactIdentityBinder>());
+            log ?? new BindingLogCapture<ContactIdentityBinder>(), NoOwnerUnderTest);
+
+    /// <summary>
+    /// The configuration a <c>ContactIdentityBinderFactory</c> reads for this BFF's own environment (<c>Dataverse:ServiceUrl</c>),
+    /// which <c>CreateBinder</c> refuses (ISS-005, #1673 review K2). Empty by default: a test that is not about that refusal
+    /// targets whatever environment it names.
+    /// </summary>
+    public static IConfiguration FactoryConfiguration(string? ownServiceUrl = null)
+        => new ConfigurationBuilder().AddInMemoryCollection(
+            ownServiceUrl is null
+                ? new Dictionary<string, string?>()
+                : new Dictionary<string, string?> { ["Dataverse:ServiceUrl"] = ownServiceUrl }).Build();
+
+    /// <summary>
+    /// The DI-registered (own-environment) binder of a <c>RegistrationDataverseService</c> whose test never links a contact
+    /// in the own environment: an empty in-memory store, so any use of it would show.
+    /// </summary>
+    public static ContactIdentityBinder InertOwnEnvironmentBinder() => Binder(new InMemoryContactIdentityStore());
+
+    /// <summary>
+    /// A binder over THIS BFF's own environment as DI builds it (ISS-005, #1673): its owner policy is
+    /// <c>ContactCreateOwner.FromCustomerBusinessUnit</c>, so a Workforce-plane create is owned by the default owner team of
+    /// <paramref name="customerBusinessUnitId"/>, or refused when that is unset.
+    /// </summary>
+    public static ContactIdentityBinder OwnerAwareBinder(
+        InMemoryContactIdentityStore store, Guid? customerBusinessUnitId, IDictionary<string, string?>? configuration = null)
+        => new(store, Tenants(CustomerTenant), new FakeTimeProvider(Now), new BindingLogCapture<ContactIdentityBinder>(),
+            ContactCreateOwner.FromCustomerBusinessUnit(
+                new StaticOptionsMonitor<ExternalAccessOptions>(new ExternalAccessOptions { CustomerBusinessUnitId = customerBusinessUnitId }),
+                new ConfigurationBuilder().AddInMemoryCollection(configuration ?? new Dictionary<string, string?>()).Build()));
 
     /// <summary>A delegated (user) workforce token. Every claim is optional so a test can drop exactly one.</summary>
     public static ClaimsPrincipal WorkforceUser(

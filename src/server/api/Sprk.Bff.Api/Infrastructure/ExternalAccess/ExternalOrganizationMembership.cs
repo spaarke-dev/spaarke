@@ -125,10 +125,53 @@ internal static class ExternalOrganizationMembership
         return new OrganizationMemberSet(contactIds, ExceededBound: false);
     }
 
+    /// <summary>
+    /// Slice C2c: the <c>$filter</c> selecting one CONTACT's active memberships (the contact → organizations direction). The
+    /// same <c>statecode</c>-only rule as <see cref="ActiveMembersFilter"/>, so a removal reaches every organization the
+    /// organization-grant sweep would count the person in (a superset of the read path's date-current set).
+    /// </summary>
+    internal static string ActiveOrganizationsOfContactFilter(Guid contactId)
+        => $"_sprk_contact_value eq {contactId} and statecode eq 0";
+
+    /// <summary>The column <see cref="QueryActiveOrganizationsOfContactAsync"/> selects.</summary>
+    internal const string OrganizationSelect = "_sprk_organization_value";
+
+    /// <summary>
+    /// Slice C2c: the distinct organizations <paramref name="contactId"/> is an ACTIVE member of, bounded like
+    /// <see cref="QueryActiveMembersAsync"/>: more than <see cref="MaxMembersPerSweep"/> rows is
+    /// <see cref="OrganizationMemberSet.ExceededBound"/> (the ids are then empty), never a silently truncated list. The ids
+    /// ride in <see cref="OrganizationMemberSet.ContactIds"/>'s slot and are ORGANIZATION ids here. Exceptions propagate.
+    /// </summary>
+    internal static async Task<OrganizationMemberSet> QueryActiveOrganizationsOfContactAsync(
+        DataverseWebApiClient dataverseClient, Guid contactId, CancellationToken ct)
+    {
+        var rows = await dataverseClient.QueryAsync<ContactOrganizationRow>(
+            EntitySet,
+            filter: ActiveOrganizationsOfContactFilter(contactId),
+            select: OrganizationSelect,
+            top: MaxMembersPerSweep + 1,
+            cancellationToken: ct);
+
+        if (rows.Count > MaxMembersPerSweep)
+            return new OrganizationMemberSet(Array.Empty<Guid>(), ExceededBound: true);
+
+        var organizationIds = rows
+            .Where(r => r.OrganizationId is { } id && id != Guid.Empty)
+            .Select(r => r.OrganizationId!.Value)
+            .Distinct()
+            .ToList();
+
+        return new OrganizationMemberSet(organizationIds, ExceededBound: false);
+    }
+
     /// <summary>Minimal projection of a <c>sprk_contactorganization</c> junction row.</summary>
     internal sealed class ContactOrganizationRow
     {
         [JsonPropertyName("_sprk_contact_value")]
         public Guid? ContactId { get; set; }
+
+        /// <summary>Slice C2c: read only by <see cref="QueryActiveOrganizationsOfContactAsync"/>.</summary>
+        [JsonPropertyName("_sprk_organization_value")]
+        public Guid? OrganizationId { get; set; }
     }
 }

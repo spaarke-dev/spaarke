@@ -48,7 +48,7 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.Signals;
 /// dismissal reasons; D-119; the gate tier; the server-derived core and owner; step 6 against a system closure.
 /// Option values are the live ones (SignalWriter constants; sprk_decisionrecord read 2026-10-10).
 /// </remarks>
-public sealed class DecisionCommitServiceTests
+public sealed partial class DecisionCommitServiceTests
 {
     private static readonly DateTimeOffset Now = new(2026, 10, 11, 12, 0, 0, TimeSpan.Zero);
     private static readonly Guid Caller = Guid.Parse("c0430000-0000-4000-8000-000000000001");
@@ -138,6 +138,9 @@ public sealed class DecisionCommitServiceTests
         public Mock<IGenericEntityService> Entities { get; } = new();
         public Mock<IDataverseUserClient> User { get; } = new();
         public Mock<CallerRecordAccessProbe> Probe { get; }
+
+        /// <summary>Task 170: when set, the commit asks THIS probe (the shipped one, wire seams counted) instead of <see cref="Probe"/>.</summary>
+        public CallerRecordAccessProbe? ProbeOverride { get; set; }
         public InMemoryTenantCache Ledger { get; } = new();
         public Mock<DecisionCommitFollowUps> FollowUps { get; }
         public FakeTimeProvider Clock { get; } = new(Now);
@@ -579,7 +582,7 @@ public sealed class DecisionCommitServiceTests
 
             var records = new DecisionRecordWriter(WriterClient(), resolver, CoreAncestors(), Entities.Object, RecordTypes, Clock, NullLogger<DecisionRecordWriter>.Instance, new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing);
             return new DecisionCommitService(access, plans, new DecisionActionExecutors(Executors.Values), records, WriterClient(),
-                Entities.Object, Probe.Object, Identity.Object, Links, LedgerStore ?? Ledger, FollowUps.Object, Lease, PlanReads, Clock, NullLogger<DecisionCommitService>.Instance);
+                Entities.Object, ProbeOverride ?? Probe.Object, Identity.Object, Links, LedgerStore ?? Ledger, FollowUps.Object, Lease, PlanReads, Clock, NullLogger<DecisionCommitService>.Instance);
         }
 
         public Task StampPlanRead(Guid signal, DateTimeOffset at) => PlanReads.StampAtAsync(Tenant, CallerOid.ToString("D"), signal, at, CancellationToken.None);

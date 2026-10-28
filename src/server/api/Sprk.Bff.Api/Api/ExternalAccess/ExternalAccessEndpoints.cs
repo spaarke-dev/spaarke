@@ -54,6 +54,11 @@ public static class ExternalAccessEndpoints
         // every route, and the form banner (task 153) must answer callers who hold only Read. Each route carries the
         // route-record Read gate itself; the entries are added for a caller who also holds Write (owner O2).
         app.MapRecordNoAccessEndpoint();
+
+        // POST /api/v1/external-access/remove-person · /reinstate-person — person-level administration (slice C3). NOT on the
+        // management group: its delegation filter needs a record, and these routes name a person. Their own group carries the
+        // external-access administrator filter instead.
+        app.MapPersonAccessAdministrationEndpoints();
     }
 
     // =========================================================================

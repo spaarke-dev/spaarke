@@ -1069,7 +1069,7 @@ public static class OfficeEndpoints
         search.MapGet("/entities", SearchEntitiesAsync)
             .WithName("SearchOfficeEntities")
             .WithSummary("Search for association target entities")
-            .WithDescription("Searches for Matters, Projects, Invoices, Accounts, and Contacts the CALLER may read (impersonated Dataverse read). Supports typeahead (min 2 chars). Returns results within 500ms.")
+            .WithDescription("Searches for Matters, Projects, Invoices, Accounts, and Contacts the CALLER may read (impersonated Dataverse read), and Work Assignments when type=WorkAssignment is asked for by name. Supports typeahead (min 2 chars). Returns results within 500ms.")
             .AddOfficeRateLimitFilter(OfficeRateLimitCategory.Search)
             .AddOfficeAuthFilter() // Task 073 - baseline Office-caller authentication
             .Produces<EntitySearchResponse>(StatusCodes.Status200OK)
@@ -1123,7 +1123,7 @@ public static class OfficeEndpoints
     /// </para>
     /// </remarks>
     /// <param name="q">Search query string (min 2 chars).</param>
-    /// <param name="type">Comma-separated entity types to filter (Matter, Project, Invoice, Account, Contact).</param>
+    /// <param name="type">Comma-separated entity types to filter (Matter, Project, Invoice, Account, Contact; WorkAssignment only when named, task 133).</param>
     /// <param name="skip">Number of results to skip for pagination (default: 0).</param>
     /// <param name="top">Maximum results to return (default: 20, max: 50).</param>
     /// <param name="access">

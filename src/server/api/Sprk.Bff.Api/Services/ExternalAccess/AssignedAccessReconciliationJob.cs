@@ -156,6 +156,7 @@ public sealed class AssignedAccessReconciliationJob : IScheduledJob
         var writes = 0;
         var wouldRevoke = 0;
         var denyListUnreadable = 0;
+        var inviteDeferred = 0;
         var candidates = 0;
         var truncated = false;
         var rotating = false;
@@ -316,6 +317,7 @@ public sealed class AssignedAccessReconciliationJob : IScheduledJob
                 writes += outcome.Writes;
                 wouldRevoke += outcome.Entries.Count(e => e.Action == AssignedAccessAction.WouldRevoke);
                 denyListUnreadable += outcome.Failures.Count(f => f.Kind == AssignedAccessMaterializer.DenyListUnreadableFailure);
+                inviteDeferred += outcome.Failures.Count(f => f.Kind == AssignedAccessMaterializer.InviteDeferredFailure);
 
                 // A deleted root (NotFound) and a root type with no registry are answers, not failures.
                 if (outcome.Status is AssignedAccessStatus.NotFound or AssignedAccessStatus.NoRegistry)
@@ -359,6 +361,14 @@ public sealed class AssignedAccessReconciliationJob : IScheduledJob
                          "so nothing was granted, shared, suggested, renewed or put back for them (fail closed).");
         }
 
+        if (inviteDeferred > 0)
+        {
+            // Slice B3: counted on its own. A job pass never invites (I-9), so this stays 0 unless that changes; it is here so
+            // an owed invite is never folded into a generic incomplete count.
+            problems.Add($"INVITE-DEFERRED: {inviteDeferred} invite(s) after a grant were not sent because the person's " +
+                         "organisation could not be looked up. The grants stand; staff send the invite again.");
+        }
+
         if (rootless.ScanFailed)
         {
             status = StatusError;
@@ -395,7 +405,7 @@ public sealed class AssignedAccessReconciliationJob : IScheduledJob
         _logger.LogInformation(
             "[ASSIGNED-ACCESS-RECON] heartbeat status={Status} candidates={Candidates} materialized={Materialized} " +
             "writes={Writes} wouldRevoke={WouldRevoke} revokeOnChange={RevokeOnChange} incomplete={Incomplete} " +
-            "denyListUnreadable={DenyListUnreadable} " +
+            "denyListUnreadable={DenyListUnreadable} inviteDeferred={InviteDeferred} " +
             "truncated={Truncated} rotating={Rotating} cacheTenantConfigured={CacheTenant} " +
             "rootlessFound={RootlessFound} rootlessRevoked={RootlessRevoked} rootlessRecordExists={RootlessRecordExists} " +
             "rootlessKeyUnparseable={RootlessKeyUnparseable} rootlessUnresolved={RootlessUnresolved} " +
@@ -404,6 +414,7 @@ public sealed class AssignedAccessReconciliationJob : IScheduledJob
             "noInternalReader={NoInternalReader} ownerIsExternal={OwnerIsExternal} durationMs={DurationMs} " +
             "attempt={Attempt} correlationId={CorrelationId}",
             status, candidates, materialized, writes, wouldRevoke, revokeOnChange, incompleteRoots.Count, denyListUnreadable,
+            inviteDeferred,
             truncated, rotating,
             tenant is not null,
             rootless.Found, rootless.Revoked, rootless.RecordExists, rootless.KeyUnparseable, rootless.Unresolved,
@@ -431,6 +442,7 @@ public sealed class AssignedAccessReconciliationJob : IScheduledJob
                     incompleteRoots = incompleteRoots.Take(MaxSampledRoots).ToArray(),
                     incompleteTotal = incompleteRoots.Count,
                     denyListUnreadable,
+                    inviteDeferred,
                     rootlessLedger = rootless.ToReport(),
                     restrictedCandidates,
                     externalSharesRemoved,
