@@ -180,7 +180,11 @@ public class SignalEvaluationService : ISignalEvaluationService
             {
                 if (rule.Evaluate(snapshot, _options, out var signal))
                 {
-                    owner ??= await _ownership.ResolveOwnerAsync(SpendSignalOwnershipOf(matterId, snapshotId), ct);
+                    if (owner is null)
+                    {
+                        owner = await _ownership.ResolveOwnerAsync(SpendSignalOwnershipOf(matterId, snapshotId), ct);
+                    }
+
                     if (!owner.IsOwned)
                     {
                         _logger.LogWarning(
