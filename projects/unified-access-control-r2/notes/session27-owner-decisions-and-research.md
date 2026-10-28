@@ -2024,3 +2024,10 @@ Reading:
 - Neither the share nor the grant has an end date, so the two can't drift.
 - Revoking removes both. No invite is sent.
 - A contact with no linked system user keeps today's behaviour: a plain contact grant.
+
+### Round 132 (2026-10-28): #2382, Core User may create projects with linked people and organizations
+- The owner said yes: raise the Spaarke Core User role to the level the create wizards require, in the repo and on dev.
+- Rule: AppendTo on each bound target table at that table's Read depth, so a user can link to what they can already see, plus Append on the created table. Nothing else is raised.
+- Expected: AppendTo on contact goes from Basic to Deep, and AppendTo on `sprk_organization` goes from none to Deep. A guard test with a ratchet over the wizards' bound tables enforces it.
+- A shared helper turns a Dataverse privilege error into a plain sentence (no ids, no unfilled template).
+- Order: dry-run diff, UAC review of the access consequences, then -Apply on dev.

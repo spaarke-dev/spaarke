@@ -31,7 +31,7 @@
    - **Owner round 131:** an internal colleague added either way (user or contact) gets a share AND a grant on their linked contact, with no end date on either; revoking removes both. Run G RUNNING (merge master first; the pair revokes together; record rules unchanged: Restricted or Secure → share only + `workforceAppVisible: false`). Two security verifier passes follow. The guide text follows the ruling.
    - Then: merge master into the branch → re-gate → publish delta → PR (owner behaviour table; no F1-b access-loss wording until the owner rules) → merge → deploy via R3 → TrackingFieldTrio import via Import-SolutionScoped.ps1 → gate.
 4. **Task 195 (#2352 (i)+(ii), owner round 129):** the server writes a project's regarding pair (one root); N:N stays association only (three N:N cases in the POML); backfill 7 dev projects (owner go). Starts after 194b merges. Field-mapping W7/040 depend on 194b + 195 shas.
-5. **#2382** (Core User can't create a project; ontology hand-off): decide role depth vs a BFF create path; fix the unfilled message template; confirm 194 didn't touch it. A role change on dev needs the owner's go.
+5. **#2382** (round 132, owner YES): Opus implementer in C:/wt2382 (`fix/uac-2382-core-user-appendto`): inventory, role XML (AppendTo at Read depth), guard + ratchet, shared error-text helper, dev DRY RUN only → I review the diff and access consequences → it runs -Apply on dev → PR. Then reply to ontology.
 6. **ebilling:** EB-D-162 merged into work/ebilling-r1 with EB-D-150 entry removed; live on dev (-Verify PASS). Its master PR carries both integration suites' counts.
 7. **#2292** (membership junction never populated): filed; fix when there is capacity.
 
