@@ -4,7 +4,7 @@
     <title>Decision wizard keeps ONE dialog open from launch to close (no close and reopen on load, item move or record) (UAT round 1 re-check)</title>
     <phase>11 UAT</phase>
     <gate>startable (owner UAT re-check 2026-10-28, check 2; "fix found defects now", 2026-10-05)</gate>
-    <status>pr-open-awaiting-review</status>
+    <status>deployed-to-dev (PR #2388 merged to docs 472d87b091; master b445886fed via #2391; Console run 40704903667 2026-10-28; owner re-check of check 2 pending)</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes a shared component (`WizardShell`, used by every Spaarke wizard) and the decision wizard (.tsx); modifies tests.</rigor-reason>
     <model-tier>sonnet</model-tier>

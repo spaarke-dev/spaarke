@@ -438,3 +438,11 @@ Criterion 89 (blank the writer client id, expect the writer-failure alert to fir
   - `POST /api/admin/jobs/signal-reevaluation/trigger` at 13:02:40Z → run `5414d2d6`, ManualAdmin; Succeeded at 13:04:02Z (82 s).
   - Result: policiesEvaluated 6, hits 149, supersededClosed 54, reraised 54, written 2, unchanged 86. Zero refused, policyFailures, accessDenied and anomalies.
   - Read-back, `sprk_signalstatus` (`statecode` stays Active by design): v2 has 56 Resolved (54 superseded, plus 2 Acted); v3 has 54 Open.
+
+## 2026-10-28 14:23Z — Console `b445886fed` on dev (task 165, docs→master #2391)
+- **What:** PR #2391 (docs→master, head `756aa0b866`) merged as `b445886fed`. All CI checks passed with none pending. Before merging, a merge-tree preview against master was clean, and master's 11 newer commits (field-mapping docs) overlap none of its files.
+- **Deploy:** `deploy-spaarke-ai.yml` run 40704903667, triggered by the push. It completed with success at 14:23:32Z. No BFF, external SPA or landing change.
+- **Contents:** an optional `WizardShell` `resetKey`; `DecisionWizard` stays one dialog (165). Also the POL-MATTER-NOBUDGET v3 config and tests (166, already applied) and notes.
+- **Notices:** before and after notices went to R3 and uac-r2. word-add-in had no objection and asked not to receive the after-notice.
+- **Dev BFF at the same time:** R3 deployed `e56a3a51d4`. R3's read-back at 14:11:58Z showed DLL `1.0.0+e56a3a51d4…` with `OrdinaryMovesWritesEnabled` off. Ontology gave its OK first. The decide-lane smoke runs after R3's after-notice.
+- **Owner:** reload with Ctrl+F5, then re-check check 2 (one dialog on open, on › and on record) and check 4 (Create budget on v3 items).
