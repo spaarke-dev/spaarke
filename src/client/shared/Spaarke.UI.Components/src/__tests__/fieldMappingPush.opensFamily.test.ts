@@ -276,6 +276,9 @@ describe('sprk_fieldmapping_push.js — unsaved form edits (task 075 fix round 1
     expect(f.saves.count).toBe(1);
     expect(h.pages).toHaveLength(1);
     expect(h.events.slice(0, 3)).toEqual(['save', 'navigateTo', 'refresh']);
+    // Refreshed exactly once, after the dialog closes (not once per step of the save-then-open sequence).
+    expect(f.refreshes.count).toBe(1);
+    expect(h.events.filter(e => e === 'refresh')).toHaveLength(1);
   });
 
   it('does not save a clean form', async () => {
@@ -308,6 +311,7 @@ describe('sprk_fieldmapping_push.js — unsaved form edits (task 075 fix round 1
     expect(h.pages).toHaveLength(0);
     expect(h.errorDialogs).toEqual([{ message: 'Required field missing' }]);
     expect(f.refreshes.count).toBe(0);
+    expect(h.events).not.toContain('refresh');
   });
 
   it('shows a fixed message when the failed save carries none', async () => {

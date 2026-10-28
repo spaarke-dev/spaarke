@@ -409,6 +409,35 @@ describe('RecordFamilyModal (FR-32)', () => {
       expect(screen.getByRole('table', { name: 'Family members' })).toBeInTheDocument();
       expect(screen.getByTestId('record-family-embedded')).toBeInTheDocument();
       expect(screen.getByText('4 records shown')).toBeInTheDocument();
+      // The root is a named landmark (aria-label alone on a plain div gives no accessible name).
+      expect(screen.getByRole('region', { name: 'Family' })).toBe(screen.getByTestId('record-family-embedded'));
+    });
+
+    it('Escape calls onClose once (the iframe swallows the key before the platform dialog sees it)', async () => {
+      const props = makeProps(() => ok(response()), { embedded: true });
+      renderModal(props);
+      await screen.findByText('Diligence Project');
+
+      fireEvent.keyDown(screen.getByRole('region', { name: 'Family' }), { key: 'Escape' });
+      expect(props.onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it('Escape from an inner control reaches onClose, but not when that control already handled it', async () => {
+      const props = makeProps(() => ok(response()), { embedded: true });
+      renderModal(props);
+      await screen.findByText('Diligence Project');
+
+      const checkbox = screen.getByRole('checkbox', { name: 'Select Diligence Project' });
+      fireEvent.keyDown(checkbox, { key: 'Escape' });
+      expect(props.onClose).toHaveBeenCalledTimes(1);
+
+      // An inner control that handled Escape (e.g. closing its own popover) marks the event defaultPrevented.
+      checkbox.addEventListener('keydown', e => e.preventDefault());
+      fireEvent.keyDown(checkbox, { key: 'Escape' });
+      expect(props.onClose).toHaveBeenCalledTimes(1);
+      // Other keys never close.
+      fireEvent.keyDown(checkbox, { key: 'Enter' });
+      expect(props.onClose).toHaveBeenCalledTimes(1);
     });
 
     it('Close calls onClose once', async () => {

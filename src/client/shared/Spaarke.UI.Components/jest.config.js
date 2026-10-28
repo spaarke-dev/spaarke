@@ -31,7 +31,16 @@ module.exports = {
   setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
   moduleNameMapper: {
     '\\.(css|less|scss|sass)$': 'identity-obj-proxy',
-    '^diff$': '<rootDir>/src/__mocks__/diff.js'
+    '^diff$': '<rootDir>/src/__mocks__/diff.js',
+    // Code pages under src/solutions/* import this package by its alias and have no node_modules of their own in
+    // CI; a test that renders one (recordFamilyPage.test.tsx) resolves the alias to the source, and the shared
+    // singletons to this package's copy so there is one React and one Fluent context.
+    '^@spaarke/ui-components/(.*)$': '<rootDir>/src/$1',
+    '^react$': '<rootDir>/node_modules/react',
+    '^react/(.*)$': '<rootDir>/node_modules/react/$1',
+    '^react-dom$': '<rootDir>/node_modules/react-dom',
+    '^react-dom/(.*)$': '<rootDir>/node_modules/react-dom/$1',
+    '^@fluentui/react-components$': '<rootDir>/node_modules/@fluentui/react-components'
   },
   transformIgnorePatterns: [
     'node_modules/(?!(d3-force|d3-dispatch|d3-quadtree|d3-timer|marked)/)'

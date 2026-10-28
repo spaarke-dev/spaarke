@@ -275,6 +275,8 @@ const useStyles = makeStyles({
     overflow: 'hidden',
     backgroundColor: tokens.colorNeutralBackground1,
     color: tokens.colorNeutralForeground1,
+    // Focusable only so the root can receive Escape (see the embedded branch); no focus ring on the container.
+    outlineStyle: 'none',
   },
   embeddedBody: {
     flexGrow: 1,
@@ -350,6 +352,12 @@ export const RecordFamilyModal: React.FC<RecordFamilyModalProps> = ({
   fetchRef.current = authenticatedFetch;
   // The number of the latest load. An older load's answer (another record, closed, unmounted) is dropped.
   const loadSeq = React.useRef(0);
+  // Embedded only: the root, focused on open so Escape works without a click first.
+  const embeddedRootRef = React.useRef<HTMLDivElement>(null);
+  const embeddedOpen = embedded && open;
+  React.useEffect(() => {
+    if (embeddedOpen) embeddedRootRef.current?.focus();
+  }, [embeddedOpen]);
 
   React.useEffect(() => {
     const seq = ++loadSeq.current;
@@ -578,7 +586,19 @@ export const RecordFamilyModal: React.FC<RecordFamilyModalProps> = ({
   if (embedded) {
     if (!open) return null;
     return (
-      <div className={styles.embeddedRoot} aria-label={title} data-testid="record-family-embedded">
+      <div
+        ref={embeddedRootRef}
+        className={styles.embeddedRoot}
+        role="region"
+        aria-label={title}
+        tabIndex={-1}
+        data-testid="record-family-embedded"
+        onKeyDown={e => {
+          // The iframe swallows the key before the platform dialog sees it. An inner control that already
+          // handled Escape (e.g. a closing popover) marks it defaultPrevented; leave that one alone.
+          if (e.key === 'Escape' && !e.defaultPrevented) onClose();
+        }}
+      >
         <div className={mergeClasses(styles.body, styles.embeddedBody)} data-testid="record-family-body">
           {renderBody()}
         </div>
