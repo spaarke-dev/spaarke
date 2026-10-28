@@ -204,6 +204,56 @@ public class SecureChildLineageTests
     }
 
     /// <summary>
+    /// ebilling-r1 task 086 (procedure model 5.2/9.1): an invoice Stored File is a leaf child filed under its invoice ONLY. The
+    /// Procedure-version, export and source lookups are not lineage lookups (a Procedure document or an export file is never reached from
+    /// a secure root, and no secure root's walk reaches a Stored File through its source). The invoice is the row's PRIMARY (must fire:
+    /// first in the order the writer and the reconciler ask in); the source document and communication stay in the row's question as
+    /// secure-if-any parents, not citations (uac-r2 194b re-check K: a Secure source still gives the Secure team; pinned by
+    /// StoredFileServiceOwnershipTests). sprk_storedfile is not an ownership parent: nothing is filed under a Stored File.
+    /// </summary>
+    [Fact]
+    public void AnInvoiceStoredFileIsFiledUnderItsInvoiceOnly_TheInvoiceIsItsPrimary()
+    {
+        var file = SecureChildLineage.Children["sprk_storedfile"];
+        file.EntitySet.Should().Be("sprk_storedfiles");
+        file.Lookups.Should().BeEquivalentTo(
+            new Dictionary<string, string> { ["sprk_invoice"] = "sprk_invoice" },
+            "the Procedure-version, export and source lookups do not file a Stored File under a secure root");
+        file.Lookups.Keys.First().Should().Be("sprk_invoice", "uac-r2 194b: declaration order is the primary-parent order");
+
+        RecordOwnershipResolver.OwnershipParentEntities.Should().NotContain("sprk_storedfile");
+        RecordOwnershipResolver.IsReparentableChild("sprk_storedfile").Should().BeFalse();
+
+        var (invoice, document, communication, version, billingExport) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        // The source lookups come first in the row, so the order below is the lineage's, not the attributes'.
+        var row = new Microsoft.Xrm.Sdk.Entity("sprk_storedfile", Guid.NewGuid())
+        {
+            ["sprk_sourcedocument"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_document", document),
+            ["sprk_sourcecommunication"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_communication", communication),
+            ["sprk_invoice"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_invoice", invoice),
+        };
+        var ordered = RecordOwnershipContext.OrderedParentsOf(row);
+        ordered.First().Should().Be(new RecordOwnershipParent("sprk_invoice", invoice), "the invoice decides an invoice file's business unit");
+        ordered.Should().BeEquivalentTo(new[]
+        {
+            new RecordOwnershipParent("sprk_invoice", invoice),
+            new RecordOwnershipParent("sprk_document", document),
+            new RecordOwnershipParent("sprk_communication", communication),
+        });
+        RecordOwnershipContext.ForChild(row).Parents.First().Should().Be(new RecordOwnershipParent("sprk_invoice", invoice),
+            "the writer's question has the reconciler's primary");
+        RecordOwnershipResolver.IsCitation("sprk_storedfile", "sprk_invoice").Should().BeFalse();
+        RecordOwnershipResolver.IsCitation("sprk_storedfile", "sprk_sourcedocument").Should().BeFalse("uac-r2 194b re-check K");
+
+        // A Procedure-source or export file names no ownership parent: nothing re-owns it.
+        RecordOwnershipContext.ParentsOf(new Microsoft.Xrm.Sdk.Entity("sprk_storedfile", Guid.NewGuid())
+        {
+            ["sprk_procedureversion"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_procedureversion", version),
+            ["sprk_billingexport"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_billingexport", billingExport),
+        }).Should().BeEmpty();
+    }
+
+    /// <summary>
     /// #2084: a Signal CITES the rule that raised it; it is not filed under it. Reading an existing row's parents drops the
     /// citation (must fire), and the same lookup on a version still files the version under its rule (must not fire).
     /// </summary>
