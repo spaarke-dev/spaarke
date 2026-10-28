@@ -94,12 +94,17 @@ export function mergeFamilyMembers(
 
 const str = (v: unknown): string | null => (typeof v === 'string' && v !== '' ? v : null);
 
-function asMember(raw: unknown): IFamilyMember | null {
-  if (typeof raw !== 'object' || raw === null) return null;
+/** A member must be complete: one that is not is a malformed body, never silently dropped or defaulted. */
+function asMember(raw: unknown): IFamilyMember {
+  if (typeof raw !== 'object' || raw === null)
+    throw new Error('The family response has a member that is not an object.');
   const r = raw as Record<string, unknown>;
   const id = str(r.id);
   const table = str(r.table);
-  if (!id || !table) return null;
+  if (!id || !table) throw new Error('The family response has a member without an id or table.');
+  if (typeof r.depth !== 'number' || !Number.isInteger(r.depth) || r.depth < 0) {
+    throw new Error('The family response has a member without a valid depth.');
+  }
   return {
     id,
     table,
@@ -111,7 +116,7 @@ function asMember(raw: unknown): IFamilyMember | null {
     kind: str(r.kind) ?? 'Filing',
     edgeKind: str(r.edgeKind) ?? '',
     parentId: str(r.parentId),
-    depth: typeof r.depth === 'number' && Number.isFinite(r.depth) ? r.depth : 0,
+    depth: r.depth,
   };
 }
 
@@ -125,16 +130,24 @@ function asRef(raw: unknown): IFamilyRef | null {
 
 /**
  * Reads the FR-31 body. The body is untrusted server JSON: a body that is not the documented shape is an
- * error (never an empty family), and a member without an id or table is dropped.
+ * error, never an empty or misgrouped family. It throws when `members` is not an array, a member lacks an id or
+ * table or has a depth that is not a non-negative integer, or there is no anchor.
+ *
+ * `requireAnchor` (default true) also throws when the anchor is not among the members: task 071 keeps the
+ * anchor in the view, so the FIRST page always carries it. A later page (a "load more") carries only the
+ * records beyond the first and is parsed with `requireAnchor: false`.
  */
-export function parseFamilyResponse(body: unknown): IFamilyResponse {
+export function parseFamilyResponse(body: unknown, requireAnchor = true): IFamilyResponse {
   if (typeof body !== 'object' || body === null || !Array.isArray((body as { members?: unknown }).members)) {
     throw new Error('The family response was not in the expected shape.');
   }
   const b = body as Record<string, unknown>;
   const anchor = asRef(b.anchor);
   if (!anchor) throw new Error('The family response has no anchor.');
-  const members = (b.members as unknown[]).map(asMember).filter((m): m is IFamilyMember => m !== null);
+  const members = (b.members as unknown[]).map(asMember);
+  if (requireAnchor && !members.some(m => familyKey(m) === familyKey(anchor))) {
+    throw new Error('The family response does not contain its anchor.');
+  }
   return {
     anchor,
     root: asRef(b.root),
@@ -156,5 +169,5 @@ export async function fetchRecordFamily(
 ): Promise<IFamilyResponse> {
   const res = await fetchFn(buildFamilyPath(table, recordId, continuation), { method: 'GET' });
   if (!res.ok) throw new Error(`The family request failed (${res.status}).`);
-  return parseFamilyResponse(await res.json());
+  return parseFamilyResponse(await res.json(), !continuation);
 }

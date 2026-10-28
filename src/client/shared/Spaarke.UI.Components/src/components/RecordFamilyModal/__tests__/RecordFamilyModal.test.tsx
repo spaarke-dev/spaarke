@@ -346,6 +346,50 @@ describe('RecordFamilyModal (FR-32)', () => {
       const textB = (await screen.findByText(/The family could not be loaded/i)).textContent;
       expect(textA).toBe(textB);
     });
+
+    const { table: _dropped, ...memberWithoutTable } = M_WA1;
+    it.each<[string, unknown]>([
+      ['a member without a table', response({ members: [M_MATTER, M_PROJECT, memberWithoutTable as IFamilyMember] })],
+      [
+        'a member whose depth is not a number',
+        response({ members: [M_PROJECT, { ...M_WA1, depth: '2' as unknown as number }] }),
+      ],
+      ['a member with a negative depth', response({ members: [M_PROJECT, { ...M_WA1, depth: -1 }] })],
+      ['a member with a fractional depth', response({ members: [M_PROJECT, { ...M_WA1, depth: 1.5 }] })],
+      ['a response that does not contain its anchor', response({ members: [M_MATTER, M_WA1] })],
+    ])('shows the error state, never a partial family, for %s', async (_label, body) => {
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      renderModal(makeProps(() => ok(body)));
+
+      expect(await screen.findByText(/The family could not be loaded/i)).toBeInTheDocument();
+      expect(screen.queryByRole('table')).not.toBeInTheDocument();
+      expect(screen.queryByText('Review contracts')).not.toBeInTheDocument();
+      warnSpy.mockRestore();
+    });
+
+    it('logs the cause with console.warn and does not render it', async () => {
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      renderModal(makeProps(() => Promise.reject(new TypeError('Failed to fetch')) as unknown as Response));
+
+      await screen.findByText(/The family could not be loaded/i);
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('RecordFamilyModal'), expect.any(TypeError));
+      expect(screen.getByRole('dialog').textContent).not.toMatch(/Failed to fetch/);
+      warnSpy.mockRestore();
+    });
+  });
+
+  describe('table labels', () => {
+    it('names child tables readably, and title-cases an unknown table without its sprk_ prefix', async () => {
+      const members = [
+        M_PROJECT,
+        member({ id: 'dddddddd-0000-0000-0000-000000000006', table: 'sprk_kpiassessment', depth: 2, name: 'Q3' }),
+        member({ id: 'dddddddd-0000-0000-0000-000000000007', table: 'sprk_widget_part', depth: 2, name: 'Part' }),
+      ];
+      renderModal(makeProps(() => ok(response({ members }))));
+      await screen.findByText('Q3');
+      expect(screen.getByText(/Level 2\b.*KPI Assessment/)).toBeInTheDocument();
+      expect(screen.getByText(/Level 2\b.*Widget Part/)).toBeInTheDocument();
+    });
   });
 
   describe('adr-021-dark-mode', () => {

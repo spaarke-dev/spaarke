@@ -77,6 +77,34 @@ task 074 when the modal is wired. The Table family may be new to that bundle, so
 
 ## Rework line
 
-Rework: 2 test-expectation fixes after the first run (a duplicate "Current record" meta item that repeated the name, now
-removed; the anchor badge in the name cell), 1 tooltip assertion loosened (two buttons share the tooltip text). No
-production rework.
+Rework: fix-round-1 (independent review of 1c3e3d7d7c): 2 F2 and 1 F1 fixed. Before that, 2 test-expectation fixes after
+the first run (a duplicate "Current record" meta item that repeated the name, now removed; the anchor badge in the name
+cell) and 1 tooltip assertion loosened (two buttons share the tooltip text).
+
+## Fix round 1 (review of 1c3e3d7d7c)
+
+- F2 `recordFamilyService.ts`: `parseFamilyResponse` now throws (so the modal shows its one fixed error state) when a
+  member is not an object, lacks an id or table, or has a depth that is not a non-negative integer (no default to 0),
+  and when the anchor ({table, normalised id}) is not among the members. The anchor check applies to the FIRST page
+  only (`requireAnchor`, off when a continuation was sent): a "load more" page carries only the records beyond the
+  first, and 071 guarantees the anchor in the first view, not in every page. Requiring it on a later page would break
+  load more.
+- F1 `RecordFamilyModal.tsx`: `TABLE_LABELS` now covers the three roots and every child table in
+  `SecureChildLineage.cs` (32 tables). The fallback strips `sprk_`, splits on `_` and title-cases each word.
+- F2 `RecordFamilyModal.tsx`: both rejection handlers (first load, load more) `console.warn` the cause and still render
+  only the fixed text; the header comment now says so.
+- Tests: 22 in the suite (was 15): 5 malformed-body cases (missing table, depth as a string, negative, fractional,
+  anchor absent), the console.warn case, and a label case. All 7 fail against 1c3e3d7d7c's sources. With the SprkModal
+  suites: 122 passed / 12 suites. ESLint clean.
+
+## Known limits (from the review; not fixed in task 073)
+
+- A refused or invalid continuation shows the inline error but offers no way to restart the load; the person closes and
+  reopens the modal.
+- The id-format reload: a change of `recordId` only in brace/case form (same record) still reloads the family.
+- Anchor and ancestors are selectable; deferred to task 040 (the server refuses ids outside the source's children).
+- Test gaps: no test for the highlight navigator, the meta column, a stale answer after a record change, or a failed
+  load more clearing on retry.
+- `selectCell` has a 40px `minWidth` literal instead of a spacing token.
+- Dates use the browser locale (`toLocaleDateString(undefined, ...)`).
+- The header navigator only moves a row highlight (BrowseModal requires `nav`); it does not open or act on a record.
