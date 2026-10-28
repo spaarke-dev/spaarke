@@ -79,7 +79,9 @@ describe('TrackingFieldTrio - Family tool (task 074, FR-33)', () => {
       const onOpenEmailMembers = jest.fn();
       const onOpenFamily = jest.fn();
       renderWithTheme(
-        <TrackingFieldTrio {...makeProps({ onOpenGrantModal, onOpenEmailMembers, onOpenFamily, canGrantAccess: true })} />
+        <TrackingFieldTrio
+          {...makeProps({ onOpenGrantModal, onOpenEmailMembers, onOpenFamily, canGrantAccess: true })}
+        />
       );
 
       fireEvent.click(screen.getByRole('button', { name: 'Family' }));
