@@ -159,6 +159,99 @@ public class PairedGrantFollowsShareRemovalTests
         Active(SecureProject, paired).Should().BeTrue("the share was not removed, so neither is its grant");
     }
 
+    /// <summary>
+    /// Task 193 G3a: an organization entry walls three users off three secure records (nine pairs) on a host without the
+    /// pairing column. The column is checked once and ONE Warning is logged for the pass; the shares are all removed.
+    /// </summary>
+    [Fact]
+    public async Task NoAccess_ManyUsersOnManyRecords_WithoutTheColumn_CheckTheColumnOnce_AndLogOneWarning()
+    {
+        var (h, users, records) = WalledFirm();
+        var log = new CapturingLogger();
+        h.PairedGrants = _grants.PairedGrantRevokeFor(Project, records[0], log);
+        _grants.Grants.PairingColumnMissing = true;
+
+        var report = await h.Enforcer.EnforceEntryAsync(
+            h.Store.AddEntry(subjectOrganization: Firm, objectOrganization: Firm, modifiedBy: Author), new[] { Tenant },
+            CancellationToken.None);
+
+        report.Complete.Should().BeTrue();
+        report.Removed.Should().HaveCount(users.Count * records.Count);
+        log.Warnings.Should().Be(1, "one Warning per pass, not one per user per record");
+        _grants.Grants.GrantQueryTops.Count(t => t == PairingReadTop).Should().Be(1, "the column is checked once");
+    }
+
+    /// <summary>The positive twin: with the column, every (record, user) pair is read for its pairing, and nothing is warned.</summary>
+    [Fact]
+    public async Task NoAccess_ManyUsersOnManyRecords_WithTheColumn_ReadEachPairsPairing_AndWarnNothing()
+    {
+        var (h, users, records) = WalledFirm();
+        var log = new CapturingLogger();
+        h.PairedGrants = _grants.PairedGrantRevokeFor(Project, records[0], log);
+
+        var report = await h.Enforcer.EnforceEntryAsync(
+            h.Store.AddEntry(subjectOrganization: Firm, objectOrganization: Firm, modifiedBy: Author), new[] { Tenant },
+            CancellationToken.None);
+
+        report.Complete.Should().BeTrue();
+        log.Warnings.Should().Be(0);
+        _grants.Grants.GrantQueryTops.Count(t => t == PairingReadTop).Should().Be(users.Count * records.Count);
+    }
+
+    private static readonly Guid Firm = Guid.Parse("19300000-0000-4000-8000-0000000000f1");
+
+    /// <summary>The pairing read's page size (the bound plus one).</summary>
+    private const int PairingReadTop = Sprk.Bff.Api.Api.ExternalAccess.ExternalGrantRevocationService.MaxPairedGrantsPerShare + 1;
+
+    /// <summary>A firm of three members, each linked to a user holding a share on each of three secure records it is on.</summary>
+    private static (NoAccessEnforcementTestDoubles.Harness H, IReadOnlyList<Guid> Users, IReadOnlyList<Guid> Records) WalledFirm()
+    {
+        var h = new NoAccessEnforcementTestDoubles.Harness();
+        h.Store.Person(Author);
+        h.Store.Person(Colleague);
+        var records = Enumerable.Range(0, 3).Select(_ => Guid.NewGuid()).ToList();
+        var contacts = Enumerable.Range(0, 3).Select(_ => Guid.NewGuid()).ToList();
+        var users = new List<Guid>();
+        foreach (var contact in contacts)
+        {
+            var user = Guid.NewGuid();
+            h.Store.Person(user);
+            h.Identities.AddContact(contact);
+            h.Identities.AddSystemUser(user, oid: null, email: null, primaryContactId: contact);
+            users.Add(user);
+        }
+
+        h.Participations.OrganizationMembers[Firm] = contacts.ToArray();
+        foreach (var record in records)
+        {
+            h.Participations.Flags[record] = new RootRecordFlags(IsSecure: true, IsRestricted: false);
+            h.Participations.RecordOrganizations[record] = new[] { Firm };
+            h.Store.Rights[(Author, record)] = AccessRights.Read | AccessRights.Write;
+            h.Shares.Seed(Project, record, User(Colleague), CollaborateMask);
+            foreach (var user in users)
+                h.Shares.Seed(Project, record, User(user), CollaborateMask);
+        }
+
+        return (h, users, records);
+    }
+
+    /// <summary>Counts the Warnings a logger was given.</summary>
+    private sealed class CapturingLogger : Microsoft.Extensions.Logging.ILogger
+    {
+        public int Warnings { get; private set; }
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId,
+            TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            if (logLevel == Microsoft.Extensions.Logging.LogLevel.Warning)
+                Warnings++;
+        }
+    }
+
     // ── The Restricted remover ──────────────────────────────────────────────────────────────────────────────────────
 
     private readonly Guid _matter = Guid.NewGuid();
@@ -206,11 +299,12 @@ public class PairedGrantFollowsShareRemovalTests
     // ── The Assigned-To materializer ────────────────────────────────────────────────────────────────────────────────
 
     private const string Attorney1 = "sprk_assignedattorney1";
+    private const string Paralegal1 = "sprk_assignedparalegal1";
 
     /// <summary>A linked contact assigned, so the materializer shares the root with the user; then "Add person" pairs a grant.</summary>
     private async Task<(Guid Contact, Guid User, Guid Grant)> AutoSharedThenPaired()
     {
-        _grants.ScopesResolvingPairedGrantRevoke(MatterTable, _matter);
+        _grants.HostResolvingPairedGrantRevoke(MatterTable, _matter);
         var (contact, user) = _grants.LinkedContact();
         _grants.Store.Assign(ExternalGrantRootType.Matter, _matter, Attorney1, contact);
         (await _grants.SyncAsync(ExternalGrantRootType.Matter, _matter)).Complete.Should().BeTrue();
@@ -244,6 +338,33 @@ public class PairedGrantFollowsShareRemovalTests
         outcome.Failures.Should().ContainSingle(f => f.Kind == AssignedAccessMaterializer.PairedGrantNotEndedKind);
         _grants.Shares.MaskOf(MatterTable, _matter, User(user)).Should().BeNull("the share removal stands");
         Active(_matter, paired).Should().BeTrue("left for the reconciliation job's R5");
+    }
+
+    /// <summary>
+    /// Task 193 G3a: two auto shares removed in one pass on a host without the pairing column. The materializer resolves the
+    /// revoke from its OWN scope, so the column is checked once and ONE Warning is logged, not one per removed share.
+    /// </summary>
+    [Fact]
+    public async Task Materializer_TwoSharesRemovedInOnePass_WithoutTheColumn_CheckTheColumnOnce_AndLogOneWarning()
+    {
+        var log = new CapturingLogger();
+        _grants.HostResolvingPairedGrantRevoke(MatterTable, _matter, log);
+        var (first, firstUser) = _grants.LinkedContact();
+        var (second, secondUser) = _grants.LinkedContact();
+        _grants.Store.Assign(ExternalGrantRootType.Matter, _matter, Attorney1, first);
+        _grants.Store.Assign(ExternalGrantRootType.Matter, _matter, Paralegal1, second);
+        (await _grants.SyncAsync(ExternalGrantRootType.Matter, _matter)).Complete.Should().BeTrue();
+        _grants.Grants.PairingColumnMissing = true;
+
+        _grants.Store.Assign(ExternalGrantRootType.Matter, _matter, Attorney1, null);
+        _grants.Store.Assign(ExternalGrantRootType.Matter, _matter, Paralegal1, null);
+        var outcome = await _grants.SyncAsync(ExternalGrantRootType.Matter, _matter);
+
+        outcome.Complete.Should().BeTrue("a missing column ends nothing and is not a failure");
+        _grants.Shares.MaskOf(MatterTable, _matter, User(firstUser)).Should().BeNull();
+        _grants.Shares.MaskOf(MatterTable, _matter, User(secondUser)).Should().BeNull();
+        log.Warnings.Should().Be(1);
+        _grants.Grants.GrantQueryTops.Count(t => t == PairingReadTop).Should().Be(1, "the column is checked once");
     }
 
     /// <summary>Re-assigning keeps the share, so nothing is removed and the paired grant stays.</summary>

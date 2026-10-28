@@ -1232,7 +1232,14 @@ internal static class AssignedAccessTestDoubles
 
         public AssignedAccessMaterializer Materializer => new(
             Store, Grants, Participations, NoAccessCheckOverride ?? AccessibleRecords, Identities, Guard, SharesOverride ?? Shares,
-            Children, Cache.Mock.Object, Standing, Registry, Configuration, Time, Logger, Invites, Notifier, Ownership, OwnerPrivileges, Scopes);
+            Children, Cache.Mock.Object, Standing, Registry, Configuration, Time, Logger, Invites, Notifier, Ownership, OwnerPrivileges, Scopes,
+            HostServices);
+
+        /// <summary>
+        /// Task 193 G3a: the host scope's provider the materializer resolves the grant revoke from (as production gives a scoped
+        /// service its scope's); <c>null</c> (no host) by default.
+        /// </summary>
+        public IServiceProvider? HostServices { get; set; }
 
         /// <summary>
         /// Task 193: the PRODUCTION share-or-grant decision /grant and /invite-and-grant take for a contact grantee, over this
@@ -1343,24 +1350,28 @@ internal static class AssignedAccessTestDoubles
         /// Task 193 G2b: the PRODUCTION grant revoke over this harness's grant table, flags and materializer, for a record on
         /// the shared business-unit container (no SPE permission of its own to remove).
         /// </summary>
-        public Sprk.Bff.Api.Api.ExternalAccess.ExternalGrantRevocationService PairedGrantRevokeFor(string logicalName, Guid rootId) => new(
+        public Sprk.Bff.Api.Api.ExternalAccess.ExternalGrantRevocationService PairedGrantRevokeFor(
+            string logicalName, Guid rootId, ILogger? logger = null) => new(
             Grants,
             new SpeContainerMembershipService(
                 TestInfrastructure.TestSpeOwnership.AllowAll(Moq.Mock.Of<Sprk.Bff.Api.Infrastructure.Graph.IGraphClientFactory>()),
                 NullLogger<SpeContainerMembershipService>.Instance),
             Participations, Materializer, TestRecordContainerResolver.ForNonSecureRecord(logicalName, rootId), Time, null,
-            NullLogger.Instance);
+            logger ?? NullLogger.Instance);
 
-        /// <summary>Task 193 G2b: host scopes that resolve <see cref="PairedGrantRevokeFor"/> (the materializer reaches the grant
-        /// revoke through a scope, as in production).</summary>
-        public void ScopesResolvingPairedGrantRevoke(string logicalName, Guid rootId)
+        /// <summary>
+        /// Task 193 G2b/G3a: a host scope whose provider resolves ONE <see cref="PairedGrantRevokeFor"/> for the pass (the
+        /// materializer reaches the grant revoke through its scope's provider, as in production); <paramref name="logger"/>
+        /// is the revoke's.
+        /// </summary>
+        public void HostResolvingPairedGrantRevoke(string logicalName, Guid rootId, ILogger? logger = null)
         {
             var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
             Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddScoped(
-                services, _ => PairedGrantRevokeFor(logicalName, rootId));
-            Scopes = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions
-                .GetRequiredService<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>(
-                    Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(services));
+                services, _ => PairedGrantRevokeFor(logicalName, rootId, logger));
+            var root = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(services);
+            HostServices = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions
+                .GetRequiredService<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>(root).CreateScope().ServiceProvider;
         }
 
         /// <summary>r3 task 048: the customer home directories the remover also clears root sets under (none by default).</summary>

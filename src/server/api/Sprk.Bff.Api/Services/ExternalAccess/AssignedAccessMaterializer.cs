@@ -229,6 +229,14 @@ public sealed class AssignedAccessMaterializer
     private readonly ILogger<AssignedAccessMaterializer> _logger;
     private readonly IServiceScopeFactory? _scopes;
 
+    /// <summary>
+    /// Task 193 G3a: THIS scope's provider (a scoped service is given its scope's), through which the grant revoke is
+    /// resolved when a removed share may carry a paired grant. Not a constructor dependency: the revoke depends on this class.
+    /// Resolved from the same scope, not a new one, so the request or job pass shares ONE revoke — one pairing-column check
+    /// and one Warning per pass (<see cref="Sprk.Bff.Api.Api.ExternalAccess.ExternalGrantRevocationService"/>).
+    /// </summary>
+    private readonly IServiceProvider? _services;
+
     /// <summary>Task 185 (§12 I-9): the ONE invite core the grant flows share — an internal assignment of an unbound
     /// contact with an email sends the invite, as <c>/grant</c> does.</summary>
     private readonly ExternalInviteService _invites;
@@ -267,9 +275,11 @@ public sealed class AssignedAccessMaterializer
         GrantAccessNotifier notifier,
         IRecordOwnershipResolver ownership,
         Sprk.Bff.Api.Services.Dataverse.Privileges.IDataversePrivilegeChecker ownerPrivileges,
-        IServiceScopeFactory? scopes = null)
+        IServiceScopeFactory? scopes = null,
+        IServiceProvider? services = null)
     {
         _scopes = scopes;
+        _services = services;
         // A singleton, registered unconditionally (DataverseServiceExtensions); it depends on nothing here.
         _ownerPrivileges = ownerPrivileges ?? throw new ArgumentNullException(nameof(ownerPrivileges));
         // A singleton, registered unconditionally (MetadataServiceExtensions); it depends on nothing here.
@@ -680,14 +690,14 @@ public sealed class AssignedAccessMaterializer
     /// Task 193 G2b (owner F1-b: the paired grant follows the share): this rule removed <paramref name="user"/>'s share on
     /// the root (confirmed by read-back, not put back to an earlier level). An "Add person" share at the level this rule
     /// wrote reads as this rule's, so the share removed may be the one a grant is PAIRED with: every such grant on the root
-    /// is ended through the one grant revoke, the same call <c>/unshare-user</c> makes, resolved in its own scope (the
+    /// is ended through the one grant revoke, the same call <c>/unshare-user</c> makes, resolved from this scope (the
     /// revoke depends on this class, so it cannot be a constructor dependency). The share first, then the grant. One that is
     /// not ended is a failure (<c>paired-grant-not-ended</c>), so the run is not complete; the revoke logs it at Error with
     /// ids only, and the reconciliation job's R5 ends it. A pairing column that is not provisioned is the revoke's Warning.
     /// </summary>
     private async Task EndPairedGrantsAsync(Run run, AssignedSubject subject, Guid user, CancellationToken ct)
     {
-        if (_scopes is null)
+        if (_services?.GetService<Sprk.Bff.Api.Api.ExternalAccess.ExternalGrantRevocationService>() is not { } pairedGrants)
         {
             _logger.LogWarning(
                 "[ASSIGNED-ACCESS] {Type} {RootId}: {User}'s share was removed; no host scope to end a grant paired with it now — " +
@@ -695,8 +705,7 @@ public sealed class AssignedAccessMaterializer
             return;
         }
 
-        using var scope = _scopes.CreateScope();
-        var paired = await scope.ServiceProvider.GetRequiredService<Sprk.Bff.Api.Api.ExternalAccess.ExternalGrantRevocationService>()
+        var paired = await pairedGrants
             .RevokePairedWithAsync(run.Request.RootType, run.RootId, user, ct).ConfigureAwait(false);
         if (paired.PairedGrantEnded is false)
         {

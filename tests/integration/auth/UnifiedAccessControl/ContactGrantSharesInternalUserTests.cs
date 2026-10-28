@@ -855,6 +855,79 @@ public class ContactGrantSharesInternalUserTests
 
     private int? ShareMask(Guid user) => _h.Shares.MaskOf(MatterTable, _matter, DataversePrincipalRef.User(user));
 
+    // ── Task 193 G3a: "Add person" and the Assigned-To rule, in either order ──────────────────────────────────────────
+
+    private const string Attorney1 = "sprk_assignedattorney1";
+
+    private async Task Assign(Guid? contact)
+    {
+        _h.Store.Assign(ExternalGrantRootType.Matter, _matter, Attorney1, contact);
+        (await _h.SyncAsync(ExternalGrantRootType.Matter, _matter)).Complete.Should().BeTrue();
+    }
+
+    private AssignedAccessLedgerRow AssignedRow(Guid contact) =>
+        _h.Store.RowsOf(_matter, contact).Single(r => r.SourceField == Attorney1);
+
+    /// <summary>Added first: the rule finds the person's share covering its target, so the clear has nothing of its own to remove.</summary>
+    [Fact]
+    public async Task G3a_AddedFirst_ThenAssigned_ThenUnassigned_TheShareAndItsPairedGrantStay()
+    {
+        _h.HostResolvingPairedGrantRevoke(MatterTable, _matter);
+        var (contact, user, grant) = await AddedColleague();
+
+        await Assign(contact);
+        AssignedRow(contact).State.Should().Be(AssignedAccessState.CoveredByExisting);
+        await Assign(null);
+
+        ShareMask(user).Should().Be(CollaborateMask, "the explicitly added access is not the rule's to remove");
+        _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle(r => r.Id == grant);
+    }
+
+    /// <summary>Assigned first: "Add person" at the same level writes no share, but the share becomes the operator's (Adopted).</summary>
+    [Fact]
+    public async Task G3a_AssignedFirst_ThenAddedAtTheSameLevel_ThenUnassigned_TheShareAndItsPairedGrantStay()
+    {
+        _h.HostResolvingPairedGrantRevoke(MatterTable, _matter);
+        var (contact, user) = Colleague();
+        await Assign(contact);
+        AssignedRow(contact).State.Should().Be(AssignedAccessState.Shared);
+        ShareMask(user).Should().Be(CollaborateMask);
+
+        (await Grant(contact)).Should().BeOfType<Ok<GrantAccessResponse>>();
+        var grant = _h.Grants.ActiveRowsOf(_matter, contact).Single();
+        _h.Grants.PairedUsers[grant.Id].Should().Be(user);
+        AssignedRow(contact).State.Should().Be(AssignedAccessState.Adopted, "the deliberate share is now the operator's");
+
+        await Assign(null);
+
+        ShareMask(user).Should().Be(CollaborateMask, "an Adopted share is kept when the assignment ends");
+        _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle(r => r.Id == grant.Id);
+    }
+
+    /// <summary>
+    /// Removed through /unshare-user while still assigned: the share and its paired grant go, the row is Declined, and the
+    /// rule does not put the share back while the assignment persists (the materializer's contract for an operator removal).
+    /// </summary>
+    [Fact]
+    public async Task G3a_AssignedAndAdded_ThenUnsharedWhileAssigned_TheRemovalStands_AndTheRuleDoesNotReshare()
+    {
+        _h.HostResolvingPairedGrantRevoke(MatterTable, _matter);
+        var (contact, user) = Colleague();
+        await Assign(contact);
+        (await Grant(contact)).Should().BeOfType<Ok<GrantAccessResponse>>();
+        var grant = _h.Grants.ActiveRowsOf(_matter, contact).Single();
+
+        (await Unshare(user)).Should().BeOfType<Ok<UnshareRecordWithUserResponse>>();
+        AssignedRow(contact).State.Should().Be(AssignedAccessState.Declined);
+
+        await Assign(contact); // the assignment persists; the rule runs again
+
+        ShareMask(user).Should().BeNull("the operator's removal stands while the assignment persists");
+        _h.Grants.ActiveRowsOf(_matter, contact).Should().NotContain(r => r.Id == grant.Id, "the paired grant followed the share");
+        AssignedRow(contact).State.Should().Be(AssignedAccessState.Declined);
+    }
+
+
     [Fact]
     public async Task G2_Unshare_RemovesTheShare_ThenEndsTheGrantPairedWithIt()
     {

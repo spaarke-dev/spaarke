@@ -122,6 +122,14 @@ public sealed class ExternalGrantRevocationService
     private readonly IContactIdentityStore? _identityStore;
     private readonly ILogger _logger;
 
+    /// <summary>
+    /// Task 193 G3a: set once a pairing read found the column not provisioned. This service is SCOPED (one instance per
+    /// request or job pass: /unshare-user's request, each enforcer job's run scope, the materializer resolving it from its
+    /// own scope), so the column is checked once and its Warning logged once per pass — not once per user per record. Only
+    /// the missing column is remembered: an unreadable read is transient and is read again.
+    /// </summary>
+    private bool _pairingColumnMissing;
+
     /// <param name="identityStore">
     /// The identity binding store for THIS environment: a contact whose binding read EMPTY and who has no email has
     /// "nothing to clear" only while the binding columns' read is proven. Without it that case fails closed.
@@ -276,14 +284,18 @@ public sealed class ExternalGrantRevocationService
     internal async Task<PairedGrantRevocation> RevokePairedWithAsync(
         ExternalGrantRootType rootType, Guid rootId, Guid systemUserId, CancellationToken ct)
     {
+        if (_pairingColumnMissing)
+            return new PairedGrantRevocation(PairedGrantRevocationStatus.ColumnMissing); // checked and logged once this pass
+
         var read = await ExternalGrantLifecycle.ReadPairingsOnRecordAsync(
             _dataverse, rootType, rootId, systemUserId, MaxPairedGrantsPerShare + 1, ct).ConfigureAwait(false);
 
         if (read.Status == GrantPairingReadStatus.ColumnMissing)
         {
+            _pairingColumnMissing = true;
             _logger.LogWarning(
-                "[EXT-REVOKE] {Table}.{Column} is not provisioned here, so no grant is paired with {SystemUserId} on {RootType} " +
-                "{RootId}; only the share was removed.",
+                "[EXT-REVOKE] {Table}.{Column} is not provisioned here, so no grant is paired with anyone; for the rest of this " +
+                "pass only shares are removed (first seen for {SystemUserId} on {RootType} {RootId}).",
                 ExternalGrantLifecycle.EntityLogicalName, ExternalGrantLifecycle.PairedSystemUserAttribute, systemUserId,
                 rootType, rootId);
             return new PairedGrantRevocation(PairedGrantRevocationStatus.ColumnMissing);
