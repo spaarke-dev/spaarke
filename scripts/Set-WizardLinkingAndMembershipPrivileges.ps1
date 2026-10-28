@@ -21,7 +21,9 @@
           listed privileges on the table; its Read and Share stay.
           Other writers: every live root role holding Create, Write, Delete, Assign or Append on the table (all pages)
           must be in 'allowedWriterRoles' (each with its reason) or be one of the planned removals; any other fails
-          -Verify. A failed read of that listing stops the script with exit 1 before any write (fail closed).
+          -Verify. An allowlist entry marked 'platformRole' (Service Writer, Service Deleter) passes only while no
+          non-application user and no team holds that role (any business-unit copy); a person or team holder fails
+          -Verify. A failed read of either listing stops the script with exit 1 before any write (fail closed).
 
     MODES
       (default)  Dry run. Prints every change as role, privilege, old depth -> new depth. Zero writes.
@@ -110,11 +112,14 @@ foreach ($t in $linking.bindTargets) {
     }
 }
 $allowedWriters = @{}
+$platformRoles = @()
 foreach ($a in @($membership.allowedWriterRoles)) {
     if (-not $a.roleName -or -not $a.reason) { throw 'Each allowedWriterRoles entry needs a roleName and a reason.' }
     $allowedWriters[[string]$a.roleName] = [string]$a.reason
+    if ($a.platformRole -eq $true) { $platformRoles += [string]$a.roleName }
 }
 if (-not $allowedWriters.ContainsKey([string]$membership.writerRole.roleName)) { throw 'allowedWriterRoles must list the writer role.' }
+if ($platformRoles -contains [string]$membership.writerRole.roleName) { throw 'The writer role cannot be marked platformRole.' }
 foreach ($ro in $membership.readOnlyRoles) { if ($allowedWriters.ContainsKey([string]$ro)) { throw "Read-only role '$ro' cannot also be an allowed writer." } }
 
 # ── Auth: the operator's own az CLI identity. No secrets in this script or the repo. ────────────────────────
@@ -302,6 +307,40 @@ Write-Host "Root roles that write $($membership.table), NOT in the allowlist and
 if ($unexpectedWriters.Count -eq 0) { Write-Host '  none' }
 foreach ($o in $unexpectedWriters) { Write-Host ("  {0,-44} {1}" -f $o.Role, $o.Privilege) -ForegroundColor Red }
 
+# The allowlist's platform roles pass only while no person and no team holds them (any business-unit copy). Read-only;
+# fail closed: a failed read stops the script before any write. Holders are named by id only.
+$humanHolders = [System.Collections.Generic.List[string]]::new()
+try {
+    foreach ($prn in $platformRoles) {
+        $escaped = $prn -replace "'", "''"
+        $copies = Invoke-DvGetAll "roles?`$select=roleid&`$filter=name eq '$escaped'"
+        if ($copies.Count -eq 0) { throw "Platform role '$prn' was not found." }
+        $users = 0; $apps = 0
+        $userCache = @{}
+        foreach ($c in $copies) {
+            $rid = ([string]$c.roleid).ToLowerInvariant()
+            foreach ($ur in (Invoke-DvGetAll "systemuserrolescollection?`$select=systemuserid&`$filter=roleid eq $rid")) {
+                $uid = ([string]$ur.systemuserid).ToLowerInvariant()
+                if (-not $userCache.ContainsKey($uid)) { $userCache[$uid] = Invoke-DvGet "systemusers($uid)?`$select=applicationid" }
+                $users++
+                if ($userCache[$uid].applicationid) { $apps++ } else { $humanHolders.Add("$prn : user $uid is not an application user") }
+            }
+            foreach ($tr in (Invoke-DvGetAll "teamrolescollection?`$select=teamid&`$filter=roleid eq $rid")) {
+                $humanHolders.Add("$prn : team $(([string]$tr.teamid).ToLowerInvariant()) holds it")
+            }
+        }
+        Write-Host ("Platform role {0,-30} {1} role row(s); {2} user holder(s), {3} of them application users" -f $prn, $copies.Count, $users, $apps)
+    }
+}
+catch {
+    Write-Host "`nFAIL: could not read the holders of the platform roles: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host 'Nothing was changed. Fix the read and re-run.' -ForegroundColor Red
+    exit 1
+}
+Write-Host "Platform-role holders that are a person or a team ($($humanHolders.Count)):"
+if ($humanHolders.Count -eq 0) { Write-Host '  none' }
+foreach ($hh in $humanHolders) { Write-Host "  $hh" -ForegroundColor Red }
+
 # XML/live drift on the in-scope privileges, after the planned changes (reported, never changed here).
 $scope = @()
 foreach ($t in $linking.bindTargets) { $scope += @{ T = $t.logicalName; N = $t.readPrivilege }, @{ T = $t.logicalName; N = $t.appendToPrivilege } }
@@ -334,6 +373,7 @@ if ($Verify) {
     if ($plan.Count -gt 0) { $reasons += "$($plan.Count) change(s) pending" }
     if ($depthDrift.Count -gt 0) { $reasons += "$($depthDrift.Count) depth drift finding(s)" }
     if ($unexpectedWriters.Count -gt 0) { $reasons += "$($unexpectedWriters.Count) membership writer(s) not in the allowlist" }
+    if ($humanHolders.Count -gt 0) { $reasons += "$($humanHolders.Count) person or team holder(s) of an allowlisted platform role" }
     if ($reasons.Count -eq 0) { Write-Host "`nVERIFY PASS: the live roles match both declared sets." -ForegroundColor Green; exit 0 }
     Write-Host "`nVERIFY FAIL: $($reasons -join '; ') (listed above)." -ForegroundColor Red
     exit 1

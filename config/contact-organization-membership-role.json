@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "description": "Who may write contact-organization memberships (sprk_contactorganization). Owner decision 2026-10-28 (issue #2382): contact-organization membership writes move to the Access Administrator role. The writer role holds Create, Read, Write and Append at Global; the listed read-only roles keep ONLY Read and Share (owner rounds 132 and 134). 'allowedWriterRoles' lists every live role expected to hold a membership write privilege (Create, Write, Delete, Assign or Append), each with its reason; the script's -Verify fails on any other. tests/Spaarke.ArchTests/ContactOrganizationMembershipWriterGuardTests.cs checks the role XML; scripts/Set-WizardLinkingAndMembershipPrivileges.ps1 applies it to an environment.",
+  "description": "Who may write contact-organization memberships (sprk_contactorganization). Owner decision 2026-10-28 (issue #2382): contact-organization membership writes move to the Access Administrator role. The writer role holds Create, Read, Write and Append at Global; the listed read-only roles keep ONLY Read and Share (owner rounds 132 and 134). 'allowedWriterRoles' lists every live role expected to hold a membership write privilege (Create, Write, Delete, Assign or Append), each with its reason; the script's -Verify fails on any other. An entry marked 'platformRole' is allowed only while no person (non-application user) and no team holds it, which -Verify reads. tests/Spaarke.ArchTests/ContactOrganizationMembershipWriterGuardTests.cs checks the role XML; scripts/Set-WizardLinkingAndMembershipPrivileges.ps1 applies it to an environment.",
   "table": "sprk_contactorganization",
   "writerRole": {
     "roleName": "Spaarke Access Administrator",
@@ -27,7 +27,13 @@
     },
     {
       "roleName": "Service Writer",
-      "reason": "Platform role for application (service) users, not assigned to people; not in the solution."
+      "platformRole": true,
+      "reason": "Microsoft platform role that Dataverse grants on every new table, held only by first-party app identities; not in the solution (projects/spaarke-ontology-platform-r1/CLAUDE.md:157, src/solutions/SpaarkeCore/entities/sprk_assignedaccess/entity-schema.md:136). -Verify fails if a person or a team holds it."
+    },
+    {
+      "roleName": "Service Deleter",
+      "platformRole": true,
+      "reason": "Microsoft platform role that Dataverse grants on every new table, held only by first-party app identities; not in the solution (projects/spaarke-ontology-platform-r1/CLAUDE.md:157, src/solutions/SpaarkeCore/entities/sprk_assignedaccess/entity-schema.md:136). -Verify fails if a person or a team holds it."
     }
   ],
   "readOnlyRoles": ["Spaarke Core User", "Spaarke Basic User", "Spaarke Internal Contact User (Workforce)"],
