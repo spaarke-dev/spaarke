@@ -1,6 +1,6 @@
 # Task 193: one "Add person" entry (#2338): notes
 
-Branch `fix/uac-193-add-person` (worktree C:/wt193), based on 078f62bcad (R3 #2360 merged). Runs A to F-final built the one entry (an internal colleague got a share only). Owner round 131 changed that: an internal colleague added either way gets a share **and** a paired, dated grant on their linked contact, and removing the share ends the grant. Runs G1 to G3c built round 131; G3d corrected the note after a share whose grant could not be ended. The detail of each G run is below the summary tables.
+Branch `fix/uac-193-add-person` (worktree C:/wt193), based on 078f62bcad (R3 #2360 merged). Runs A to F-final built the one entry (an internal colleague got a share only). Owner round 131 changed that: an internal colleague added either way gets a share **and** a paired, dated grant on their linked contact, and removing the share ends the grant. Runs G1 to G3c built round 131; G3d corrected the note after a share whose grant could not be ended; G3e words a grant whose share is not listed without a share. The detail of each G run is below the summary tables.
 
 ## Runs
 | Run | Head | What |
@@ -23,6 +23,7 @@ Branch `fix/uac-193-add-person` (worktree C:/wt193), based on 078f62bcad (R3 #23
 | G3b | bdb12c0f16, f6eb5acd3f | Modal says workforce-app access ("visible … until", or why not); Current Access lists the share and its paired grant together; revoke confirmations; TrackingFieldTrio 1.0.58. Owner accepted the three wording choices ("in this app"; `would_lower_existing` its own sentence; unknown codes → "could not be given") |
 | G3c | 8d0d0f078c (merge), 4ec9a1601a (guide), the notes commit | Master merged (8d0d0f078c, no conflicts); UAC guide describes round 131 as built; these notes; re-gate after the merge; publish delta |
 | G3d | 98d7864da1, 89894a9dbc, the docs commit | `pairedGrantEnded: false` no longer promises "within a day": the note says the grant could not be removed just now and where to revoke it; a paired grant whose share is gone stays listed with Revoke (tested); TrackingFieldTrio 1.0.59; guide and these notes. No server change |
+| G3e | c926422c38, 0466c7da76, the docs commit | A grant counts as paired only while its share is listed (`pairedWithShare: !!pairedShare`). A grant whose share is not listed: row "Workforce app access for {name} · granted {date}", confirmation "Remove {name}'s workforce app access? The record will no longer show in their workforce app.", notice "Removed {name}'s workforce app access." (G3b/G3d said "goes with a share" and "Their share stays", false once the share was removed). Listed pairs keep G3b's wording. TrackingFieldTrio 1.0.60; guide |
 
 ## Behaviour changes (owner sign-off table for the PR)
 | Case | Before | After |
@@ -54,7 +55,7 @@ Branch `fix/uac-193-add-person` (worktree C:/wt193), based on 078f62bcad (R3 #23
 | Remove Secure (`/unsecure-project`) | Sweeps the shares | Unchanged: no paired grant is ended (owner round 135; task 196 maps unsecure) |
 | `/revoke` on the paired grant (Current Access Revoke on the grant row) | (n/a) | Ends the grant only; the share stays, and the confirmation says so |
 | A share removed outside Spaarke | (n/a) | R5 in the daily reconciliation job (05:00 UTC) ends the paired grant, only while `ExternalAccess:Reconciliation:WritesEnabled` is on |
-| Current Access | Share and grant rows listed separately | The paired grant sits under its share (`pairedWith`, ids and kind only); the share row notes "(workforce app access until {date})"; one Revoke removes both |
+| Current Access | Share and grant rows listed separately | The paired grant sits under its share (`pairedWith`, ids and kind only); the share row notes "(workforce app access until {date})"; one Revoke removes both. A grant whose share is not listed is its own row, worded without a share (G3e) |
 | The notice after Add person | "Shared with X" | "Shared with X — visible in their workforce app until {date}", or "They can open the record in this app, but it won't show in their workforce app because …" (one sentence per reason group; `would_lower_existing` its own sentence) |
 | The notice after removing a share whose grant could not be ended | (n/a) | A neutral Notice: "Removed {name}'s share. Their workforce app access could not be removed just now; it is still listed under Current Access, where you can revoke it." With related records pending: the server's sentence, then "Their workforce app access could not be removed just now; you can revoke it under Current Access." (G3d; G3b said "within a day") |
 
@@ -82,6 +83,14 @@ Branch `fix/uac-193-add-person` (worktree C:/wt193), based on 078f62bcad (R3 #23
 - **Fixed in G3d (the UI no longer promises a timing).** G3c found that the modal said "Workforce-app access will be removed within a day." although R5 writes are off by default. The note now says the grant could not be removed just now and is still listed under Current Access, where it can be revoked. After the reload, a paired grant whose share is gone is listed as its own row with Revoke (`AccessGrantModal.workforceApp.test.tsx`). A source scan keeps "within a day" out of the modal.
 - Filed: #2371 (inactive contact: /grant writes a dormant row; the contact-side route refuses); #2377 (an internal user's email with no active contact still gets a CIAM invite).
 - Superseded by round 131: "re-adding a represented contact that already holds a contact grant shares and leaves the grant row as it was". The grant core now re-adds over it (raise, keep the live date, stamp the pairing).
+
+## Gates (G3e)
+Client and docs only; no server file changed, so no BFF gates.
+
+- jest `AccessGrantModal`: 19 suites, 338/338 (the unlisted-share grant's row, confirmation and notice; the G3d reload case now expects the unpaired wording; the paired confirmation checks the standalone sentence is absent; two pure checks).
+- Perturbations (each seen red, then restored): an unlisted-share grant still counted as paired (`pairedShare !== undefined`) → 2 red (the unlisted-share case, the G3d reload case); every paired grant worded as unlisted → 2 red (the paired row, the paired revoke); the whole pre-G3e modal → 4 red.
+- tsc: Spaarke.UI.Components 0 errors, TrackingFieldTrio 0 errors. `client-lint.mjs check --package ui-components`: ok.
+- PCF `Invoke-PcfBuildProd.ps1` TrackingFieldTrio: PASS ("[build] Succeeded"; bundle 1.03 MiB); the copied Solution bundle is 1.0.60 and holds the new row wording.
 
 ## Gates (G3d)
 Client and docs only; no server file changed, so no BFF gates.

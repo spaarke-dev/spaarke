@@ -1,6 +1,6 @@
 # Unified Access Control (UAC) — How Access Works Guide
 
-> **Last Updated**: 2026-10-28 (verified against master `bafe310ca4` plus task 193's "Add person" branch, runs G3c and G3d)
+> **Last Updated**: 2026-10-28 (verified against master `bafe310ca4` plus task 193's "Add person" branch, runs G3c to G3e)
 > **Purpose**: Explain, end to end, how Spaarke decides who can see and change a record — for every kind of user, every
 > access setting, and every family of related records — so that people understand the behaviour and every new feature is
 > built to the same model.
@@ -262,7 +262,10 @@ The modal never shows the codes. If the No Access flags cannot be read, the shar
 written.
 
 **Current Access** lists the share and its paired grant together: the grant row sits under its share, and the share row
-notes "(workforce app access until {date})". The share row has one Revoke, which removes both.
+notes "(workforce app access until {date})". The share row has one Revoke, which removes both. A grant counts as paired
+only while its share is listed. A grant whose share is not listed (removed, for example) is its own row, "Workforce app
+access for {name} · granted {date}"; its Revoke asks "Remove {name}'s workforce app access? The record will no longer
+show in their workforce app." and says "Removed {name}'s workforce app access." No share is mentioned.
 
 **What each removal ends.** The share is always removed first, then its paired grant. The grant is found by
 `sprk_pairedsystemuser` on that record; a grant the operator gave the contact on purpose, or one paired with someone
@@ -285,7 +288,7 @@ could not be read, a row was not deactivated, or the file-container clean-up fai
 "Removed {name}'s share. Their workforce app access could not be removed just now; it is still listed under Current
 Access, where you can revoke it." When related records are still pending, the server's sentence comes first, then "Their
 workforce app access could not be removed just now; you can revoke it under Current Access." The modal reloads Current
-Access, and the grant stays listed as its own row with Revoke after its share is gone. A system path reports itself not
+Access, and the grant stays listed as its own row with Revoke after its share is gone (worded without a share, above). A system path reports itself not
 complete. The daily clean-up is rule **R5** of the
 external-access reconciliation job (05:00 UTC). It ends every active paired grant whose user no longer holds a direct
 share on the record, and keeps the pairing on the row; a share it cannot read leaves the row for the next run. R5 writes
