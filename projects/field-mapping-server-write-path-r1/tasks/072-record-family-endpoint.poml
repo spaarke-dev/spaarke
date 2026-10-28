@@ -37,6 +37,7 @@
   <constraints>
     <constraint source="FR-31">Query: kind (default Filing; any other value → 400 before any probe), direction (default full; `down` accepted; anything else → 400), continuation (opaque).</constraint>
     <constraint source="FR-31">Response: anchor, optional root, truncated, continuation, members[] each with id, table, name, recordNumber, recordType, status, modifiedOn, kind, edgeKind, parentId, depth. No access metadata.</constraint>
+    <constraint source="FR-31 (contract pinned 2026-10-27 for task 073)">`anchor` and `root` are `{ id, table, name }` (name nullable). `depth` is a non-negative integer counted down from the top of the view the caller can read (the highest readable ancestor = 0; the anchor's own depth follows from that). The client `RecordFamilyModal` (073, `recordFamilyService.ts` `asRef`) already parses exactly this; keep property names camelCase as listed.</constraint>
     <constraint source="FR-31 / #2137">Unknown and unreadable anchor → the same 404 ProblemDetails, via the equalised gate probe (timing equalised).</constraint>
     <constraint source="ADR-008 / root §9">Auth required; route registered in RouteAuthorizationGuardTests.Ledger with its mechanism; census updated.</constraint>
     <constraint source="ADR-019">Errors are ProblemDetails with fixed text; detail to logs.</constraint>
