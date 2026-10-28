@@ -1164,6 +1164,8 @@ public class DecisionActionExecutorsTests
     {
         var sources = new Mock<DecisionParameterSources>(
             new Mock<IDataverseUserClient>().Object, new Mock<IGenericEntityService>().Object, new Mock<Sprk.Bff.Api.Infrastructure.Cache.ITenantCache>().Object,
+            new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
+            new Mock<Microsoft.Extensions.Options.IOptionsMonitor<Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalAccessOptions>>().Object,
             NullLogger<DecisionParameterSources>.Instance)
         { CallBase = false };
         sources.Setup(s => s.OptionsAsync(It.IsAny<HttpContext>(), "metadata:sprk_budget.sprk_budgetcategory", It.IsAny<CancellationToken>()))
