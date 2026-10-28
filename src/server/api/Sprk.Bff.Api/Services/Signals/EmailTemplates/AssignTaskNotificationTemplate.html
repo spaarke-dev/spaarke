@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Spaarke</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f4f6f8; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
+    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color: #f4f6f8;">
+        <tr>
+            <td style="padding: 40px 20px;">
+                <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="600" style="margin: 0 auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);">
+                    <!-- Header: Logo only, left-aligned, forced white background for dark mode -->
+                    <tr>
+                        <td style="padding: 24px 40px 16px; border-bottom: 1px solid #e8e8e8; background-color: #ffffff !important;">
+                            <img src="https://www.spaarke.com/images/email/logo-color.png" alt="Spaarke" width="140" style="display: block; height: auto;" />
+                        </td>
+                    </tr>
+                    <!-- Body: every value below is HTML-encoded by AssignTaskNotifier.BuildEmail -->
+                    <tr>
+                        <td style="padding: 32px 40px 40px;">
+                            <p style="margin: 0 0 24px; color: #242424; font-size: 18px; line-height: 1.5; font-weight: 600;">
+                                A task was assigned to you
+                            </p>
+                            <p style="margin: 0 0 4px; color: #616161; font-size: 13px; line-height: 1.4;">{{RecordNoun}}</p>
+                            <p style="margin: 0 0 20px; color: #242424; font-size: 16px; line-height: 1.6;">{{Record}}</p>
+                            <p style="margin: 0 0 4px; color: #616161; font-size: 13px; line-height: 1.4;">What to do</p>
+                            <p style="margin: 0 0 20px; color: #242424; font-size: 16px; line-height: 1.6;">{{WhatToDo}}</p>
+                            <p style="margin: 0 0 4px; color: #616161; font-size: 13px; line-height: 1.4;">Due</p>
+                            <p style="margin: 0; color: #242424; font-size: 16px; line-height: 1.6;">{{Due}}</p>
+                        </td>
+                    </tr>
+                    <!-- Footer -->
+                    <tr>
+                        <td style="background-color: #fafafa; padding: 20px 40px; border-top: 1px solid #e8e8e8; text-align: center;">
+                            <p style="margin: 0; color: #a0a0a0; font-size: 12px;">
+                                &copy; {{Year}} Spaarke. All rights reserved.
+                            </p>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>

@@ -272,8 +272,27 @@ public class DecisionActionCatalogTests
         action.Parameters.Select(p => (p.Code, p.Kind, p.Required)).Should().Equal(
             ("assignee", DecisionParameterKind.Person, true),
             ("description", DecisionParameterKind.TextArea, true),
-            ("dueDate", DecisionParameterKind.Date, false));
-        action.EffectLines.Should().Equal("Creates a task (an event of type Task) linked to the record, assigned to the person above, when the decision is recorded");
+            ("dueDate", DecisionParameterKind.Date, false),
+            ("notify", DecisionParameterKind.Boolean, false));
+        action.EffectLines.Should().Equal(
+            "Creates a task (an event of type Task) linked to the record, assigned to the person above, when the decision is recorded",
+            "With Send email notification on, emails the person the task and notifies them in Spaarke");
+    }
+
+    [Fact]
+    public void OnlyAssignTask_HasSendEmailNotification_AYesNoTickedByDefault_D194()
+    {
+        DecisionActionCatalog.TryGet("assign-task", out var action).Should().BeTrue();
+        var notify = action.Parameters.Single(p => p.Code == "notify");
+        notify.Label.Should().Be("Send email notification");
+        notify.Kind.Should().Be(DecisionParameterKind.Boolean);
+        notify.Required.Should().BeFalse();
+        notify.DefaultValue.Should().Be("true", "the box is ticked by default (D-194)");
+
+        DecisionActionCatalog.All.Where(a => a.Parameters.Any(p => p.Kind == DecisionParameterKind.Boolean || p.Code == "notify"))
+            .Select(a => a.Code).Should().Equal(["assign-task"], "no other action has the checkbox");
+        DecisionActionCatalog.All.SelectMany(a => a.Parameters).Where(p => p.DefaultValue is not null)
+            .Should().ContainSingle("a fixed default is only Send email notification's");
     }
 
     [Fact]
@@ -844,6 +863,19 @@ public class DecisionActionCatalogTests
     }
 
     [Fact]
+    public void AssignTask_ThePlanDtoSendsSendEmailNotificationTickedByDefault_AsABoolean_D194()
+    {
+        DecisionActionCatalog.TryGet("assign-task", out var assign).Should().BeTrue();
+
+        var dto = DecisionActionDto.From(assign, isRecommended: true);
+
+        var notify = dto.Parameters.Single(p => p.Code == "notify");
+        notify.Kind.Should().Be("Boolean");
+        notify.DefaultValue.Should().Be("true");
+        dto.Parameters.Where(p => p.Code != "notify").Should().OnlyContain(p => p.DefaultValue == null, "must not fire: no other parameter starts filled");
+    }
+
+    [Fact]
     public void NoOtherActionDeclaresADefaultSourceOrANotBefore_MustNotFire_D193()
     {
         DecisionActionCatalog.All.Where(a => a.Code != "create-budget")
@@ -1309,6 +1341,7 @@ public class DecisionActionCatalogTests
             {
                 return reasons.ToArray();
             }
-        });
+        }
+        );
     }
 }
