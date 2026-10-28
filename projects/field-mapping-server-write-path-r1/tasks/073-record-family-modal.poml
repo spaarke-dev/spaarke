@@ -4,7 +4,7 @@
     <title>RecordFamilyModal in Spaarke.UI.Components on BrowseModal — family list, selection, load more, action toolbar (FR-32)</title>
     <phase>7 W7 Record family service and Family tool</phase>
     <gate>startable (codes against the FR-31 contract; live wiring after 072)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New shared React component (.tsx) used by a PCF and a code page.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -94,6 +94,9 @@
       <expected>Fluent v9 semantic tokens only</expected>
     </test>
   </ui-tests>
+
+  <notes>Completed 2026-10-28: PR #2366, merge 364f4db997. RecordFamilyModal on BrowseModal; 22 tests. One adversarial pass: 2 F-class (malformed body rendered empty; table labels) + console logging fixed in fix round 1; client-lint no-unnecessary-condition fixed in the main session. Known limits in notes/task-073-notes.md. Not yet seen in a browser (072 not built; live check is task 076).
+rework: fix-round-1 task 073</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
