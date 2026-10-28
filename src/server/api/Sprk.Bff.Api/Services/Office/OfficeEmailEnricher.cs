@@ -571,7 +571,10 @@ public class OfficeEmailEnricher
     public static (string DocumentName, string StoredFileName) GenerateEmlNames(EmailMetadata metadata)
     {
         var documentName = GenerateEmlFileName(metadata);
-        if (!metadata.IsNameSystemDerived)
+        // #2416: a blank typed DocumentName falls back to the subject, so that name is system-derived too. An older
+        // client sends no DocumentName at all and may have typed its Subject, so it keeps the flag's meaning.
+        var blankTypedName = metadata.DocumentName is not null && string.IsNullOrWhiteSpace(metadata.DocumentName);
+        if (!metadata.IsNameSystemDerived && !blankTypedName)
             return (documentName, documentName);
 
         var stem = documentName[..^".eml".Length];
