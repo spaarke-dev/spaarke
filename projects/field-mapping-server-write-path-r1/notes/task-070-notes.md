@@ -304,7 +304,7 @@ Since `a38396afcf`, two tests were added to the guard file and two changed in th
       `sprk_analysis.sprk_documentid -> sprk_document`. That is the defect UAC change 1 fixed.
     - Must-not-fire: a citation, a non-parent target and a baselined lookup produce no gap. The main fact passes on
       the current registry.
-- Unit file: the Matter → Project test is reshaped, and the tautological record-number test is deleted.
+- Unit file: the Matter → Project test is reshaped, and the tautological record-number test is deleted. It was redundant: `Build()` sets every row's `RecordNumberColumn` from `RecordNumberColumns` by construction, so the test restated the code. The map's content was checked against every table's `Entity.xml` by the independent review (all record-number columns covered; version ordinals and `sprk_regardingrecordnumber` mirrors excluded on purpose). No unit test reads solution files. UAC-r2 review: OK for task 070 at 810c741e85 (2026-10-28).
 
 The guard tests:
 

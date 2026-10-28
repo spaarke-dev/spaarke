@@ -31,7 +31,7 @@ namespace Sprk.Bff.Api.Services.Dataverse;
 /// (SecureChildLineage keeps them only because an extra lookup can only narrow a mirror);
 /// <c>sprk_workassignment.sprk_regardingcommunication</c> (not a filing: <c>SecureRootInheritance.cs:426-427</c>, held by the
 /// storage resolver); a service request's own regarding lookups (it is a root). Isolation-only parents are not rows, because
-/// a family never decides isolation: a Decision Record's resolved-Signal subjects (<c>sprk_steps</c>), and a frozen core
+/// a family never decides isolation: a Decision Record's resolved-Signal subjects (<c>sprk_steps</c>, read by <c>DecisionCommitService.ResolvedSignalSubjectsOfRecordAsync</c>, UAC 194b), and a frozen core
 /// that no longer matches the live stamp. Never family (UAC-r2 canonical definition, design §12.2): N:N
 /// associations (incl. <c>sprk_Project_Matter_nn</c>), citations (<c>sprk_signal.sprk_policy</c>), people and organization
 /// lookups, grant rows, <c>sprk_procedureassignment</c> (owner, 2026-10-27), <c>sprk_policy.sprk_currentversion</c> (a
