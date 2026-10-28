@@ -148,24 +148,6 @@ public class SignalEvaluationService : ISignalEvaluationService
 
         _logger.LogDebug("Found {SnapshotCount} snapshots for matter {MatterId}", snapshotIds.Length, matterId);
 
-        // Task 146: every signal this pass upserts is owned by the matter's team. Resolved once, before any write. This
-        // is a background job with no acting user, so a REFUSAL writes no signal for this matter (logged with the reason
-        // and counted as zero signals — never an app-owned row, never a failed job); a Dataverse fault propagates.
-        var owner = await _ownership.ResolveOwnerAsync(
-            new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext
-            {
-                TargetEntityLogicalName = MatterEntity,
-                TargetRecordId = matterId,
-            },
-            ct);
-        if (!owner.IsOwned)
-        {
-            _logger.LogWarning(
-                "Signal evaluation SKIPPED for matter {MatterId}: no owner for its spend signals — {Reason} ({Code}) (task 146).",
-                matterId, owner.Reason, owner.RefusalCode);
-            return 0;
-        }
-
         // 2. Retrieve snapshot field values and evaluate rules
         var totalSignals = 0;
         var emptySnapshots = 0;
@@ -186,11 +168,27 @@ public class SignalEvaluationService : ISignalEvaluationService
 
             var snapshot = SpendSnapshotData.FromFieldDictionary(snapshotId, fields);
 
+            // Task 146: a signal is owned by the team the ONE resolver names over what it is filed under. UAC task 194b R4-2:
+            // over BOTH lookups the upsert writes (its matter and its snapshot), in sprk_spendsignal's order — the question the
+            // reconciler asks the written row. Asked once per snapshot, before its first write. This is a background job with no
+            // acting user, so a REFUSAL writes no signal for that snapshot (logged with the reason — never an app-owned row,
+            // never a failed job); a Dataverse fault propagates.
+            Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution? owner = null;
+
             // Evaluate each rule against the snapshot
             foreach (var rule in _rules)
             {
                 if (rule.Evaluate(snapshot, _options, out var signal))
                 {
+                    owner ??= await _ownership.ResolveOwnerAsync(SpendSignalOwnershipOf(matterId, snapshotId), ct);
+                    if (!owner.IsOwned)
+                    {
+                        _logger.LogWarning(
+                            "Signal evaluation SKIPPED for snapshot {SnapshotId} of matter {MatterId}: no owner for its spend signals — {Reason} ({Code}) (task 146).",
+                            snapshotId, matterId, owner.Reason, owner.RefusalCode);
+                        break;
+                    }
+
                     await UpsertSignalAsync(matterId, snapshotId, signal, owner.OwningTeamId!.Value, ct);
                     totalSignals++;
 
@@ -212,6 +210,21 @@ public class SignalEvaluationService : ISignalEvaluationService
 
         return totalSignals;
     }
+
+    /// <summary>
+    /// UAC task 194b R4-2: the ownership question for a spend signal — the two lookups <see cref="UpsertSignalAsync"/> writes
+    /// (<c>sprk_matter</c>, <c>sprk_snapshot</c>), through the one builder in <c>sprk_spendsignal</c>'s order (the matter first).
+    /// </summary>
+    internal static Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext SpendSignalOwnershipOf(Guid matterId, Guid snapshotId) =>
+        Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForRow(
+            SignalEntity,
+            new[]
+            {
+                KeyValuePair.Create(SignalMatterLookup,
+                    (Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent?)new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(MatterEntity, matterId)),
+                KeyValuePair.Create(SignalSnapshot,
+                    (Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent?)new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(SnapshotEntity, snapshotId)),
+            });
 
     // ═══════════════════════════════════════════════════════════════════════════
     // Dataverse Signal Upsert

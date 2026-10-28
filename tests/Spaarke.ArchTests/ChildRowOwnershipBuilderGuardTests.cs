@@ -52,29 +52,27 @@ public class ChildRowOwnershipBuilderGuardTests
             "A new service request is a root owned by its requester contact's business unit: no parent order."),
         new(Bff("Services.Dataverse.RecordOwnershipResolver"), "ResolveReparentOwnerAsync",
             "The resolver's own re-file: InPrimaryOrder over the row's columns after the change, then its thread filing and inherited parents."),
+        new(Bff("Services.Ontology.OntologyAdminAuthoringService"), "CheckVersionOwnerAsync",
+            "A secure-if-any gate over the policy and the matters its rule names (stored and requested): an ordinary answer binds no owner (the version stays the caller's), so no table order decides anything, and the version's own columns would drop the matters the gate needs (R4-2)."),
     ];
 
     /// <summary>The ratchet: child-row questions not on the builder yet, each with its reason (found by this guard, R3b-2).</summary>
     private static readonly IReadOnlyList<Entry> KnownViolations =
     [
         new(Bff("Api.ExternalAccess.ExternalProjectDataEndpoints"), "ResolveChildOwnerAsync",
-            "A child created on the external surface is asked about the route's root alone, not the columns it writes."),
+            "Single parent: the route's root (its payloads write only the root lookup), so order decides nothing (R4-2)."),
         new(Bff("Services.Ai.AnalysisResultPersistence"), "PersistReviewMemoAsync",
-            "The memo is asked about its analysis alone (one parent), not by column."),
+            "Single parent: the analysis (sprk_analysisoutput writes only sprk_analysisid as a parent; R4-2)."),
         new(Bff("Services.Ai.AnalysisResultPersistence"), "StoreDocumentProfileOutputsAsync",
-            "Outputs of an existing analysis are asked about the analysis alone (one parent), not by column."),
+            "Single parent: the analysis (sprk_analysisoutput writes only sprk_analysisid as a parent; R4-2)."),
         new(Bff("Services.Ai.AppOnlyAnalysisService"), "ExecutePlaybookAnalysisAsync",
-            "Outputs are asked about their analysis alone (one parent), not by column."),
+            "Single parent: the analysis (sprk_analysisoutput writes only sprk_analysisid as a parent; R4-2)."),
         new(Bff("Services.Finance.InvoiceReviewService"), "CreateInvoiceRecordAsync",
-            "The invoice is asked about its matter alone, not the columns it writes."),
-        new(Bff("Services.Finance.SignalEvaluationService"), "EvaluateAsync",
-            "Finance Signals are asked about their matter alone, outside SignalWriter's question."),
+            "Single parent: the matter (the vendor organisation it also writes is not an ownership parent; R4-2)."),
         new(Bff("Services.Finance.SpendSnapshotService"), "ResolveSnapshotOwnerAsync",
-            "A snapshot is asked about its parent alone, not by column."),
+            "Single parent: the matter OR the project, one per path, never both (R4-2)."),
         new(Bff("Services.Office.OfficeService"), "SaveAsync",
             "An Office-saved document is asked about the save target alone, not the columns it writes."),
-        new(Bff("Services.Ontology.OntologyAdminAuthoringService"), "CheckVersionOwnerAsync",
-            "A policy version is asked about a parent list, not by column."),
         new(Bff("Workers.Office.UploadFinalizationWorker"), "ResolveDocumentOwnerTeamAsync",
             "The document is asked about its association target (friendly spelling) alone, not by column."),
     ];
