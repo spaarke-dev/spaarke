@@ -1245,7 +1245,7 @@ public class RecordOwnershipResolverTests
         directory.Assignments.Should().ContainSingle().Which.Item3.Should().Be(ChildTeam);
     }
 
-    [Fact(DisplayName = "194b F1-d must fire: a Decision Record held in isolation is NEVER re-filed out on its stored parents — refused before any write, even with F3")]
+    [Fact(DisplayName = "194b F1-d must fire: a Decision Record held in isolation is NEVER re-filed out on its stored parents — refused before any write, even with F3 (since R A5: as every generic re-file of one)")]
     public async Task Reparent_WhenADecisionRecordHeldInIsolationWouldLeaveIt_RefusesBeforeAnyWrite()
     {
         var recordId = Guid.NewGuid();
@@ -1272,108 +1272,68 @@ public class RecordOwnershipResolverTests
 
         resolution.IsRefused.Should().BeTrue();
         resolution.RefusalCode.Should().Be(RecordOwnerRefusal.ParentUndetermined);
-        resolution.Reason.Should().Contain("F1-d");
+        resolution.Reason.Should().Be(RecordOwnershipContext.WriterOwnedFilingRefusal, "194b R (A5): refused before the F1-d check");
         applied.Should().BeFalse("the guard decides before anything is written");
         directory.Assignments.Should().BeEmpty();
     }
 
-    [Fact(DisplayName = "194b F1-d must not fire: a Decision Record re-filed INTO isolation still moves (only a move out is held)")]
-    public async Task Reparent_WhenADecisionRecordMovesIntoIsolation_AssignsTheNamedTeam()
+    [Theory(DisplayName = "194b R (A5) must fire: a Signal's or a Decision Record's filing is its writer's — a generic re-file (into isolation, or between ordinary records) is refused before anything is read or written")]
+    [InlineData("sprk_decisionrecord", "sprk_project", true)]
+    [InlineData("sprk_decisionrecord", "sprk_matter", false)]
+    [InlineData("sprk_signal", "sprk_matter", true)]
+    [InlineData("sprk_signal", "sprk_matter", false)]
+    public async Task Reparent_OfASignalOrADecisionRecord_IsRefused_BeforeAnyReadOrWrite(string table, string column, bool toSecure)
     {
-        var recordId = Guid.NewGuid();
+        var (recordId, target) = (Guid.NewGuid(), toSecure ? SecureProjectId : MatterId);
+        var targetTable = toSecure ? "sprk_project" : "sprk_matter";
+        if (toSecure && column == "sprk_matter")
+            (target, targetTable) = (MatterId, "sprk_matter");
         var directory = Directory()
             .WithRecord("sprk_project", SecureProjectId, SecureBu)
-            .WithRecord("sprk_matter", MatterId, ChildBu)
-            .WithRecord("sprk_decisionrecord", recordId, ChildBu, owningTeam: ChildTeam,
-                extra: new() { ["sprk_matter"] = new EntityReference("sprk_matter", MatterId) });
+            .WithRecord("sprk_matter", MatterId, toSecure ? SecureBu : ChildBu, isSecure: toSecure ? true : null,
+                owningTeam: toSecure ? SecureNamedTeam : ChildTeam)
+            .WithRecord(table, recordId, GeneralBu, owningTeam: GeneralTeam);
+        var applied = false;
         var request = new RecordReparent
         {
-            EntityLogicalName = "sprk_decisionrecord",
+            EntityLogicalName = table,
             RecordId = recordId,
+            ParentChanges = new Dictionary<string, EntityReference?> { [column] = new EntityReference(targetTable, target) },
+        };
+
+        var resolution = await Build(directory).ReparentAsync(
+            request, Applies(directory, request, () => applied = true), CancellationToken.None);
+
+        resolution.IsRefused.Should().BeTrue();
+        resolution.RefusalCode.Should().Be(RecordOwnerRefusal.ParentUndetermined);
+        resolution.Reason.Should().Be(RecordOwnershipContext.WriterOwnedFilingRefusal);
+        applied.Should().BeFalse("refused before the change is written");
+        directory.Assignments.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "194b R (A5) must not fire: a generic re-file of another child table (an event) still moves and settles its owner")]
+    public async Task Reparent_OfAnEvent_StillMoves()
+    {
+        var (eventId, otherMatter) = (Guid.NewGuid(), Guid.NewGuid());
+        var directory = Directory()
+            .WithRecord("sprk_matter", MatterId, ChildBu, owningTeam: ChildTeam)
+            .WithRecord("sprk_matter", otherMatter, GeneralBu, owningTeam: GeneralTeam)
+            .WithRecord("sprk_event", eventId, GeneralBu, owningTeam: GeneralTeam,
+                extra: new() { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", otherMatter) });
+        var request = new RecordReparent
+        {
+            EntityLogicalName = "sprk_event",
+            RecordId = eventId,
             ParentChanges = new Dictionary<string, EntityReference?>
             {
-                ["sprk_project"] = new EntityReference("sprk_project", SecureProjectId),
+                ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId),
             },
         };
 
         var resolution = await Build(directory).ReparentAsync(request, Applies(directory, request), CancellationToken.None);
 
-        resolution.OwningTeamId.Should().Be(SecureNamedTeam);
-        directory.Assignments.Should().ContainSingle().Which.Should().Be(("sprk_decisionrecord", recordId, SecureNamedTeam));
-    }
-
-    [Fact(DisplayName = "194b F1-d must not fire: an ORDINARY Decision Record re-filed between ordinary records still moves")]
-    public async Task Reparent_WhenAnOrdinaryDecisionRecordMovesBetweenOrdinaryRecords_AssignsTheNewTeam()
-    {
-        var (recordId, otherMatter) = (Guid.NewGuid(), Guid.NewGuid());
-        var directory = Directory()
-            .WithRecord("sprk_matter", MatterId, ChildBu)
-            .WithRecord("sprk_matter", otherMatter, GeneralBu)
-            .WithRecord("sprk_decisionrecord", recordId, GeneralBu, owningTeam: GeneralTeam,
-                extra: new() { ["sprk_matter"] = new EntityReference("sprk_matter", otherMatter) });
-        var request = new RecordReparent
-        {
-            EntityLogicalName = "sprk_decisionrecord",
-            RecordId = recordId,
-            ParentChanges = new Dictionary<string, EntityReference?> { ["sprk_matter"] = new EntityReference("sprk_matter", MatterId) },
-        };
-
-        var resolution = await Build(directory).ReparentAsync(request, Applies(directory, request), CancellationToken.None);
-
         resolution.OwningTeamId.Should().Be(ChildTeam);
-    }
-
-    /// <summary>194b fix round R (A4): an ORDINARY-owned Decision Record filed under a secure project (an under-share the
-    /// reconciler has not yet settled) re-filed to an ordinary matter, the caller holding F3 rights on the project it leaves.
-    /// With <paramref name="reconcilerMovesItIn"/>, a reconciler pass moves the record into isolation between the change and the
-    /// settle — after the pre-change never-out check, which saw it ordinary.</summary>
-    private static (FakeDirectory Directory, Guid RecordId, Func<Task<RecordOwnerResolution>> Act) DecisionRecordSettleRace(
-        bool reconcilerMovesItIn)
-    {
-        var recordId = Guid.NewGuid();
-        var directory = Directory()
-            .WithRecord("sprk_project", SecureProjectId, SecureBu)
-            .WithRecord("sprk_matter", MatterId, ChildBu)
-            .WithRecord("sprk_decisionrecord", recordId, GeneralBu, owningTeam: GeneralTeam,
-                extra: new() { ["sprk_project"] = new EntityReference("sprk_project", SecureProjectId) });
-        var request = new RecordReparent
-        {
-            EntityLogicalName = "sprk_decisionrecord",
-            RecordId = recordId,
-            ParentChanges = new Dictionary<string, EntityReference?>
-            {
-                ["sprk_project"] = null,
-                ["sprk_matter"] = new EntityReference("sprk_matter", MatterId),
-            },
-            SecureExitCaller = CallerHolding(FullAccess),
-        };
-        var apply = Applies(directory, request, reconcilerMovesItIn
-            ? () => directory.Write("sprk_decisionrecord", recordId, new() { ["ownerid"] = new EntityReference("team", SecureNamedTeam) })
-            : null);
-        return (directory, recordId, () => Build(directory).ReparentAsync(request, apply, CancellationToken.None));
-    }
-
-    [Fact(DisplayName = "194b R (A4) must fire: a Decision Record moved INTO isolation between a re-file's change and its settle is never written an ordinary owner — the settle throws and it keeps the Secure team")]
-    public async Task Reparent_WhenADecisionRecordIsMovedIntoIsolationBeforeTheSettle_ThrowsUnsettled_AndWritesNoOrdinaryOwner()
-    {
-        var (directory, recordId, act) = DecisionRecordSettleRace(reconcilerMovesItIn: true);
-
-        var thrown = await act.Should().ThrowAsync<RecordOwnerUnsettledException>();
-        thrown.Which.Message.Should().Contain("F1-d");
-        directory.Assignments.Should().BeEmpty("no ordinary owner is written to a Decision Record held in isolation");
-        directory.Row("sprk_decisionrecord", recordId).GetAttributeValue<EntityReference>("owningteam")?.Id
-            .Should().Be(SecureNamedTeam);
-    }
-
-    [Fact(DisplayName = "194b R (A4) must not fire: the same re-file with no concurrent move settles the ordinary owner")]
-    public async Task Reparent_WhenAnOrdinaryDecisionRecordLeavesASecureProjectWithF3_AndNothingMovesIt_AssignsTheNewTeam()
-    {
-        var (directory, recordId, act) = DecisionRecordSettleRace(reconcilerMovesItIn: false);
-
-        var resolution = await act();
-
-        resolution.OwningTeamId.Should().Be(ChildTeam);
-        directory.Assignments.Should().ContainSingle().Which.Should().Be(("sprk_decisionrecord", recordId, ChildTeam));
+        directory.Assignments.Should().ContainSingle().Which.Should().Be(("sprk_event", eventId, ChildTeam));
     }
 
     [Fact]

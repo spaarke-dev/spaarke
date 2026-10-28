@@ -503,10 +503,15 @@ public sealed record RecordOwnershipContext
 
     /// <summary>The tables whose rows name a CORE record in a pair (<c>sprk_corerecordtype</c> + <c>sprk_corerecordid</c>) and a
     /// subject (the regarding lookup carrying <c>sprk_regardingrecordid</c>): their writers ask about the core first.</summary>
-    private static readonly HashSet<string> CorePairTables = new(StringComparer.OrdinalIgnoreCase)
+    internal static readonly IReadOnlySet<string> CorePairTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
         "sprk_signal", "sprk_decisionrecord",
     };
+
+    /// <summary>UAC task 194b fix round R (A5): why <see cref="ReparentAsync"/> refuses a Signal or a Decision Record.</summary>
+    internal const string WriterOwnedFilingRefusal =
+        "a Signal's or a Decision Record's filing is written only by its own writer, whose ownership question covers the core "
+        + "record and the Signals it resolved; a generic re-file does not ask that question, so nothing was written (194b A5)";
 
     private const string CoreRecordTypeColumn = "sprk_corerecordtype";
     private const string CoreRecordIdColumn = "sprk_corerecordid";
@@ -1773,6 +1778,19 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                     + "does not: name it there with the row the change writes (#2143).",
                     nameof(request));
             }
+        }
+
+        // UAC task 194b fix round R (A5): a Signal's or a Decision Record's filing is its WRITER's (SignalWriter,
+        // DecisionCommitService), whose question names the core first and, for a Decision Record, the Signals it resolved
+        // (ForExistingRowAsync). No update path re-files them through here; the generic writers that could (an Update Record
+        // node, a playbook's output mapping, a field-mapping push) would ask only the lookups they write. Refused before
+        // anything is read or written (fail closed).
+        if (RecordOwnershipContext.CorePairTables.Contains(request.EntityLogicalName.Trim()))
+        {
+            _logger.LogWarning(
+                "Refusing to re-file {Entity} {RecordId}: its filing is written only by its own writer (194b A5). The change was "
+                + "NOT written.", request.EntityLogicalName, request.RecordId);
+            return RecordOwnerResolution.Refused(RecordOwnerRefusal.ParentUndetermined, RecordOwnershipContext.WriterOwnedFilingRefusal);
         }
 
         var current = await ReadWholeRowAsync(request, ct).ConfigureAwait(false);
