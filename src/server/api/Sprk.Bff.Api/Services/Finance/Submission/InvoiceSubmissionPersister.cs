@@ -98,6 +98,9 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
     internal const int MaxRequestsPerTransaction = 1000;
 
     internal const string DocumentInvoice = "sprk_invoice";
+
+    /// <summary>The communication a document was archived from (review round 5: step 3 compares it with a from-email part's staged one).</summary>
+    internal const string DocumentRelatedCommunication = "sprk_relatedcommunication";
     internal const string InvoiceDocument = "sprk_document";
     internal const string InvoiceVendorOrg = "sprk_vendororg";
     internal const string InvoiceCurrency = "sprk_currency";
@@ -153,7 +156,7 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
     /// <summary>The document's link, its review decision column (<see cref="InvoiceReviewService.DocInvoiceReviewStatus"/>) and its row
     /// version: the transaction's guard on the document (<see cref="BuildExistingDocumentGuard"/>) is conditional on the version read here.</summary>
     private static readonly string[] ConfirmedDocumentColumns =
-        [DocumentInvoice, InvoiceReviewService.DocInvoiceReviewStatus, InvoiceReviewService.VersionNumber];
+        [DocumentInvoice, InvoiceReviewService.DocInvoiceReviewStatus, InvoiceReviewService.VersionNumber, DocumentRelatedCommunication];
 
     internal const string ApprovalRecordNumber = "sprk_regardingrecordnumber";
 
@@ -366,6 +369,13 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             var staged = await _files.ReadStagedSourceAsync(
                 StoredFilePurpose.InvoicePdf, new StoredFileParent(StoredFileParentKind.Invoice, InvoiceIdFor(submissionId)),
                 StoredFileIds.ForUpload(submissionId), ct).ConfigureAwait(false);
+            if (staged is { SourceUnreadable: true })
+            {
+                // Review round 5: a source the stage recorded but that cannot be read is not an upload; refuse rather than persist as one.
+                _logger.LogWarning("Invoice submission {SubmissionId}: its staged file records a source that cannot be read; nothing persisted", submissionId);
+                return Result(SubmissionPersistStatus.Refused, submissionId, SubmissionReasonCodes.DocumentUnavailable);
+            }
+
             if (staged is { SourceDocumentId: { } emlId })
             {
                 if (outcome.Submission.Channel != InvoiceSubmissionChannel.Internal || staged.SourceVersion is null)
@@ -379,6 +389,14 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
                 if (emlRefusal is not null)
                 {
                     return emlRefusal;
+                }
+
+                // Review round 5 (pass-2 K5): the .eml must still belong to the communication its parts were staged from.
+                if (emlRow!.GetAttributeValue<EntityReference>(DocumentRelatedCommunication)?.Id != staged.SourceCommunicationId)
+                {
+                    _logger.LogInformation("Invoice submission {SubmissionId}: its .eml no longer names the communication its parts were staged from; nothing persisted",
+                        submissionId);
+                    return Result(SubmissionPersistStatus.SourceChanged, submissionId, SubmissionReasonCodes.SourceChanged);
                 }
 
                 checkedDocument = emlRow;
@@ -723,14 +741,15 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             var identity = EmlPartIdentity(ordinal);
             var fileId = StoredFileIds.ForAttachment(submission.SubmissionId, identity);
             var staged = await _files.ReadStagedSourceAsync(StoredFilePurpose.InvoiceSupportingFile, parent, fileId, ct).ConfigureAwait(false);
-            if (staged is null || staged.SourceDocumentId != invoicePart.SourceDocumentId || staged.SourceAttachmentIdentity != identity)
+            if (staged is null || staged.SourceUnreadable || staged.SourceDocumentId != invoicePart.SourceDocumentId
+                || staged.SourceAttachmentIdentity != identity)
             {
                 _logger.LogWarning("Invoice submission {SubmissionId}: its staged email part {Ordinal} is missing or records another source; nothing persisted",
                     submission.SubmissionId, ordinal);
                 return null;
             }
 
-            var name = $"{submission.TrackingNumber.Trim()}-{ordinal.ToString(CultureInfo.InvariantCulture)}";
+            var name = $"{StoredFileSchema.NameSegmentOf(submission.TrackingNumber) ?? "invoice"}-{ordinal.ToString(CultureInfo.InvariantCulture)}";
             var spec = FromEmailPartSpec(new StoredFileRowSpec
             {
                 FileId = fileId,

@@ -485,6 +485,22 @@ public sealed class InvoiceSubmissionServiceTests
     public void The_upload_name_is_the_tracking_number_else_the_client_stem_else_invoice(string? trackingNumber, string? clientFileName, string expected) =>
         InvoiceSubmissionService.UploadName(clientFileName, trackingNumber).Should().Be(expected);
 
+    [Theory]
+    [InlineData("INV/7.2", "INV7.2.pdf")]
+    [InlineData("..\\INV-7.2", "..INV-7.2.pdf")]
+    [InlineData("INV\r\n-7.2\t", "INV-7.2.pdf")]
+    [InlineData("/\\\u0001", "May invoice.pdf")]
+    public void The_upload_name_strips_path_and_control_characters_from_the_tracking_number(string trackingNumber, string expected) =>
+        InvoiceSubmissionService.UploadName("May invoice.pdf", trackingNumber).Should().Be(expected);
+
+    [Theory]
+    [InlineData("INV/7.2", "INV7.2.pdf")]
+    [InlineData("a\\b\u0000c", "abc.pdf")]
+    [InlineData("\u001f/", "invoice.pdf")]
+    [InlineData(" INV-7.2 ", "INV-7.2.pdf")]
+    public void The_source_copy_name_strips_path_and_control_characters_from_the_tracking_number(string trackingNumber, string expected) =>
+        Sprk.Bff.Api.Services.Jobs.Handlers.InvoiceSubmissionProcessingJobHandler.SourceCopyName(trackingNumber).Should().Be(expected);
+
     [Fact]
     public void A_long_upload_name_is_cut_to_100_characters_before_the_extension() =>
         InvoiceSubmissionService.UploadName(new string('a', 150) + ".pdf", null).Should().Be(new string('a', 100) + ".pdf");

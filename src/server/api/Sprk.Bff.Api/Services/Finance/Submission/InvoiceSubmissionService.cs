@@ -1394,9 +1394,8 @@ public class InvoiceSubmissionService
     /// </summary>
     internal static string UploadName(string? clientFileName, string? trackingNumber)
     {
-        var stem = !string.IsNullOrWhiteSpace(trackingNumber)
-            ? trackingNumber.Trim()
-            : Path.GetFileNameWithoutExtension(clientFileName ?? string.Empty);
+        var stem = StoredFileSchema.NameSegmentOf(trackingNumber)
+            ?? Path.GetFileNameWithoutExtension(clientFileName ?? string.Empty);
         if (string.IsNullOrWhiteSpace(stem))
         {
             stem = "invoice";

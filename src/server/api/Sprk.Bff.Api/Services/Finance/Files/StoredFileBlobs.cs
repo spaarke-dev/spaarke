@@ -244,8 +244,8 @@ public sealed class StoredFileBlobs
     /// <summary>
     /// Stages <paramref name="content"/> under <paramref name="fileId"/> (section 4.2): the length is checked FIRST (a length that
     /// does not fit <c>sprk_sizebytes</c> refuses before any storage call), then the SHA-256 is computed, then one write-once create
-    /// (<c>If-None-Match: *</c>) with the metadata. An existing blob with the same SHA-256 and length is reused (a retry); one with
-    /// different bytes refuses and is left unchanged. A non-seekable stream is buffered to a temporary file first (bounded by the
+    /// (<c>If-None-Match: *</c>) with the metadata. An existing blob with the same SHA-256, length and source (document, communication
+    /// and attachment identity, task 094) is reused (a retry); one with different bytes or another source refuses and is left unchanged. A non-seekable stream is buffered to a temporary file first (bounded by the
     /// same limit). The stream is read from its current position.
     /// </summary>
     /// <exception cref="RequestFailedException">A storage fault (the caller retries; nothing is half-written: the create is atomic).</exception>
@@ -342,7 +342,17 @@ public sealed class StoredFileBlobs
                 && string.Equals(existingSha, sha256, StringComparison.Ordinal)
                 && existing.ContentLength == length)
             {
-                return StageResult.Staged(new StagedBlob(container, name, sha256, length, Reused: true));
+                if (SameSource(existing.Metadata, metadata))
+                {
+                    return StageResult.Staged(new StagedBlob(container, name, sha256, length, Reused: true));
+                }
+
+                // Task 094 (review round 5): the same bytes staged from ANOTHER source (document, communication or eml part) are not
+                // this request's retry; reusing them would write a row whose source facts the blob does not carry.
+                _logger.LogWarning(
+                    "Stored file stage refused: blob {Container}/{BlobName} was staged from another source; left unchanged ({Code})",
+                    container, name, StoredFileRefusal.ContentConflict);
+                return StageResult.Refused(StoredFileRefusal.ContentConflict);
             }
 
             _logger.LogWarning(
@@ -358,6 +368,16 @@ public sealed class StoredFileBlobs
             }
         }
     }
+
+    /// <summary>The source keys a reused stage must carry exactly as the request does (absent on one side and present on the other differs).</summary>
+    private static readonly string[] SourceIdentityKeys = [MetadataSourceDocument, MetadataSourceCommunication, MetadataSourceAttachment];
+
+    /// <summary>True when the existing blob's source document, communication and attachment (eml part) identity equal the request's.</summary>
+    private static bool SameSource(IReadOnlyDictionary<string, string> existing, IReadOnlyDictionary<string, string> requested) =>
+        SourceIdentityKeys.All(key => string.Equals(
+            existing.TryGetValue(key, out var had) ? had : null,
+            requested.TryGetValue(key, out var wants) ? wants : null,
+            StringComparison.Ordinal));
 
     /// <summary>What a streamed verification found.</summary>
     internal enum Verification

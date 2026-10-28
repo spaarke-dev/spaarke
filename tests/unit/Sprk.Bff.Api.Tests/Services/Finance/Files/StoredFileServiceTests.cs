@@ -459,6 +459,36 @@ public sealed class StoredFileServiceTests
         rig.Gateway.Get("invoice-files", again.Blob.BlobPath)!.Content.Should().Equal(Pdf);
     }
 
+    [Theory(DisplayName = "Stage: the same bytes under the id from another source document, communication or eml part are refused; the same source is reused")]
+    [InlineData("document")]
+    [InlineData("communication")]
+    [InlineData("attachment")]
+    [InlineData("attachment-absent")]
+    public async Task Stage_SameBytesFromAnotherSource_IsRefused(string differs)
+    {
+        var rig = new StoredFileRig();
+        var spec = Spec() with
+        {
+            SourceDocumentId = Guid.NewGuid(), SourceCommunicationId = Guid.NewGuid(), SourceAttachmentIdentity = "eml-part-0", SourceVersion = 7,
+        };
+        var first = (await rig.Service.StageAsync(spec, new MemoryStream(Pdf), CancellationToken.None)).Blob!;
+        (await rig.Service.StageAsync(spec with { SourceVersion = 8 }, new MemoryStream(Pdf), CancellationToken.None)).Blob!.Reused
+            .Should().BeTrue("the same source at another version is a retry");
+
+        var other = differs switch
+        {
+            "document" => spec with { SourceDocumentId = Guid.NewGuid() },
+            "communication" => spec with { SourceCommunicationId = Guid.NewGuid() },
+            "attachment" => spec with { SourceAttachmentIdentity = "eml-part-1" },
+            _ => spec with { SourceAttachmentIdentity = null },
+        };
+        var refused = await rig.Service.StageAsync(other, new MemoryStream(Pdf), CancellationToken.None);
+
+        refused.RefusalCode.Should().Be(StoredFileRefusal.ContentConflict);
+        rig.Gateway.Get("invoice-files", first.BlobPath)!.Metadata[StoredFileBlobs.MetadataSourceDocument]
+            .Should().Be(spec.SourceDocumentId!.Value.ToString("D"), "the blob is left unchanged");
+    }
+
     [Fact(DisplayName = "Stage: a non-seekable stream is buffered and staged; not configured refuses with no call")]
     public async Task Stage_NonSeekable_AndNotConfigured()
     {
