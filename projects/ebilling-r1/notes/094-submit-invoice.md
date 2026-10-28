@@ -196,3 +196,12 @@ Tests: `SubmitInvoiceFromEmailOperationTests` (20): `Submit_StagesEveryPartWithI
 ### 10.7 Finding: from-email invoices and 098 at `f2446e638e`
 
 `InvoiceSubmissionPersisterTests.FromEmailInvoice_CommittedByThePersister_IsVisibleToTheFirm` commits a from-email invoice through the real persister and asks 098's predicate: at `f2446e638e` it is **hidden** from its own firm (`source_link_unreadable`). The coordinator has the shape (§10.5) and 098 round 4 reworks rule 3; the test is skipped with that reason and is unskipped when the round-4 head is merged. No 098 file was changed here.
+
+### 10.8 Gate (round 4 head, `c35493a1ec`)
+
+- Builds: Sprk.Bff.Api, Sprk.Bff.Api.Tests, Spaarke.ArchTests, Spaarke.Core.Tests, Sprk.Bff.Api.IntegrationTests, Spe.Integration.Tests: all succeed.
+- Unit broad filter (Finance, Billing, Signals, RuleSet, Invoice, Compliance, Rejection, Decision, AccessTable, ParentLineage, Ebilling, Procedure, SecureChild, Submission, Office, FromEmail, Idempotency, External): 15735 passed, 15 skipped, 0 failed.
+- Document delete suites: 1054 passed, 1 skipped. Access-control suites: 4108 passed.
+- ArchTests (full, InvoicePdfWriterGuard and ADR010 included): 1576 passed, 0 failed.
+- Sprk.Bff.Api.IntegrationTests: 199 passed, 8 skipped. Spe.Integration.Tests: 353 passed, 23 skipped.
+- Publish size (Compress-Archive, short paths, 192 files each): fresh master `b445886fed` (C:\wt094n) 39,732,663 bytes; this head (C:\wt094g) 40,625,990 bytes: cumulative ebilling-r1 +893,327; since the fix round (C:\wt094f, 40,561,899) +64,091, which includes the 095 and 098 merges. No package or csproj change against master, so no new CVE.
