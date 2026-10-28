@@ -82,7 +82,7 @@
       "appendToDepth": "Global",
       "appendToAboveRead": {
         "readDepth": "Deep",
-        "reason": "Held at Global before #2382: added to the role XML to match the dev grant (ontology D-110) by commit 4e9e295a30 (ontology task 159 fix round 1, 2026-10-22), while Read has been Deep since 65eb1cb2b2. #2382 does not change it.",
+        "reason": "Global because the reference rows are owned in the root BU and users sit in child and secure BUs; it matches Service Writer and Basic User's Global AppendTo on sprk_recordtype_ref (projects/spaarke-ontology-platform-r1/notes/security-roles.md section 18, D-110, task 159: the Assign Task step binds sprk_eventtype_ref as the caller). Added to the role XML by commit 4e9e295a30 (ontology task 159 fix round 1, 2026-10-22); Read has been Deep since 65eb1cb2b2. #2382 does not change it.",
         "since": "4e9e295a30"
       },
       "boundBy": "Event wizard"

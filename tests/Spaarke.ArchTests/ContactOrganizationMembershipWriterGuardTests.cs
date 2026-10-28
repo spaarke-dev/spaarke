@@ -31,12 +31,15 @@ public class ContactOrganizationMembershipWriterGuardTests
         Assert.Contains(writer, roles.Keys);
 
         var readOnly = ReadOnlyRoleNames();
-        var offenders = roles.Where(r => r.Key != writer)
-            .SelectMany(r => Offences(r.Key, r.Value, readOnly).Select(p => $"{r.Key}: {p}")).ToList();
+        var offenders = roles
+            .SelectMany(r => CoreUserWizardLinkingGuardTests.DuplicatePrivileges(r.Value).Select(d => $"{r.Key}: {d}"))
+            .Concat(roles.Where(r => r.Key != writer).SelectMany(r => Offences(r.Key, r.Value, readOnly).Select(p => $"{r.Key}: {p}")))
+            .ToList();
 
         Assert.True(offenders.Count == 0,
             "A role other than Spaarke Access Administrator holds a membership privilege it may not hold (a read-only role "
-            + "keeps only Read and Share). Remove the privilege (config/contact-organization-membership-role.json):\n  "
+            + "keeps only Read and Share), or a role file names a privilege twice. Remove the privilege or the duplicate "
+            + "(config/contact-organization-membership-role.json):\n  "
             + string.Join("\n  ", offenders));
     }
 
@@ -94,6 +97,20 @@ public class ContactOrganizationMembershipWriterGuardTests
         Assert.Equal(["prvAppendTosprk_ContactOrganization"], Offences(coreName, readOnly, readOnlyRoles));
         // Any other non-writer role: only the write privileges are checked (AppendTo alone confers no membership write).
         Assert.Empty(Offences("Spaarke Some Other Role", readOnly, readOnlyRoles));
+    }
+
+    [Fact(DisplayName = "Membership writer guard control: a duplicate privilege entry in a role file is reported")]
+    public void DuplicatePrivilegeEntryIsReported()
+    {
+        var core = File.ReadAllText(Path.Combine(RolesDir, "Spaarke Core User.xml"));
+        Assert.Empty(CoreUserWizardLinkingGuardTests.DuplicatePrivileges(core));
+
+        var doc = XDocument.Parse(core);
+        doc.Descendants().First(e => e.Name.LocalName == "RolePrivileges")
+            .Add(new XElement("RolePrivilege", new XAttribute("name", "prvWriteContact"), new XAttribute("level", "Global")));
+
+        var finding = Assert.Single(CoreUserWizardLinkingGuardTests.DuplicatePrivileges(doc.ToString()));
+        Assert.Contains("prvWriteContact appears 2 times", finding, StringComparison.Ordinal);
     }
 
     /// <summary>

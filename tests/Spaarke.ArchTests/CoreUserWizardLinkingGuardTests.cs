@@ -113,6 +113,24 @@ public class CoreUserWizardLinkingGuardTests
         Assert.Contains("prvAppendTosprk_Organization is Global; the config declares Deep", gap, StringComparison.Ordinal);
     }
 
+    [Fact(DisplayName = "Core User linking guard control: a duplicate entry that raises Write on contact is reported by the guard and the pin")]
+    public void DuplicatePrivilegeEntryIsReported()
+    {
+        var config = LoadConfig();
+        var role = File.ReadAllText(RolePath(config.RoleName));
+        Assert.Empty(DuplicatePrivileges(role));
+
+        var duplicated = XDocument.Parse(role);
+        Assert.Equal("Basic", (string?)Privilege(duplicated, "prvWriteContact").Attribute("level"));
+        RolePrivileges(duplicated).Add(new XElement("RolePrivilege", new XAttribute("name", "prvWriteContact"), new XAttribute("level", "Global")));
+        var xml = duplicated.ToString();
+
+        var gap = Assert.Single(Gaps(xml, config));
+        Assert.Contains("duplicate privilege entry: prvWriteContact appears 2 times (Basic, Global)", gap, StringComparison.Ordinal);
+        gap = Assert.Single(PinGaps(xml, config));
+        Assert.Contains("duplicate privilege entry: prvWriteContact appears 2 times (Basic, Global)", gap, StringComparison.Ordinal);
+    }
+
     [Fact(DisplayName = "Core User linking pin control: a privilege added or changed on an owned table is reported; one on another table is not")]
     public void PinFiresOnOwnedTablesOnly()
     {
@@ -216,6 +234,19 @@ public class CoreUserWizardLinkingGuardTests
 
     // ── Core ─────────────────────────────────────────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// A privilege named more than once in a role file is a finding of its own: which entry the import keeps is not
+    /// something either guard should guess (Gaps read the highest, the pin read the first).
+    /// </summary>
+    internal static List<string> DuplicatePrivileges(string roleXml) =>
+        XDocument.Parse(roleXml).Descendants()
+            .Where(e => e.Name.LocalName == "RolePrivilege")
+            .GroupBy(e => (string?)e.Attribute("name") ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+            .Where(g => g.Count() > 1)
+            .Select(g => $"duplicate privilege entry: {g.Key} appears {g.Count()} times "
+                         + $"({string.Join(", ", g.Select(e => (string?)e.Attribute("level") ?? "None"))}); keep one")
+            .ToList();
+
     internal static List<string> Gaps(string roleXml, LinkingConfig config)
     {
         var held = XDocument.Parse(roleXml).Descendants()
@@ -225,7 +256,7 @@ public class CoreUserWizardLinkingGuardTests
                 StringComparer.OrdinalIgnoreCase);
         string Level(string name) => held.TryGetValue(name, out var level) ? level : "None";
 
-        var gaps = new List<string>();
+        var gaps = DuplicatePrivileges(roleXml);
         foreach (var t in config.BindTargets)
         {
             var read = Level(t.ReadPrivilege);
@@ -297,7 +328,7 @@ public class CoreUserWizardLinkingGuardTests
             .Concat(config.CreatedTables.Select(c => SchemaNameOf(c.CreatePrivilege, "prvCreate")))
             .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
-        var gaps = new List<string>();
+        var gaps = DuplicatePrivileges(roleXml);
         foreach (var table in owned)
         {
             if (!PinnedCoreUserPrivileges.TryGetValue(table, out var pinnedText))
