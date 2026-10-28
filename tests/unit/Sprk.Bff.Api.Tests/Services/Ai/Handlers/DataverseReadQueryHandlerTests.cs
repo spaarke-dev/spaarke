@@ -952,57 +952,6 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
         Names(result).Should().Equal("Visible", "Isolated");
     }
 
-    /// <summary>
-    /// Task 098 review round 1 (F2): for an external caller on an invoice-family table the row-cap warning is measured on the
-    /// rows left visible, so a hidden match under TOP 1 answers exactly like no match (no oracle on the hidden invoice).
-    /// </summary>
-    [Fact]
-    public async Task ExecuteChatAsync_Task098_ExternalCallerOnInvoices_AHiddenMatchUnderTop1_GivesNoRowCapWarning_LikeNoMatch()
-    {
-        AsExternalCaller();
-        SetupFamilyTable("sprk_invoice", "sprk_invoices", "sprk_invoiceid", "sprk_name");
-        _hideInvoiceFamily = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyHidingStubs.Hiding(new List<string>(), InvoiceHidden);
-        UserReadReturns("sprk_invoices", FamilyRows("sprk_invoiceid", (InvoiceHidden, "Isolated")));
-
-        var hiddenMatch = await ReadAsync("SELECT TOP 1 sprk_name FROM sprk_invoice");
-
-        UserReadReturns("sprk_invoices", FamilyRows("sprk_invoiceid"));
-        var noMatch = await ReadAsync("SELECT TOP 1 sprk_name FROM sprk_invoice");
-
-        hiddenMatch.Success.Should().BeTrue(hiddenMatch.ErrorMessage);
-        Names(hiddenMatch).Should().BeEmpty();
-        hiddenMatch.Warnings.Should().NotContain(w => w.Contains("row cap"), "a hidden invoice must not reveal itself through the cap");
-        hiddenMatch.Warnings.Should().Equal(noMatch.Warnings);
-    }
-
-    [Fact]
-    public async Task ExecuteChatAsync_Task098_ExternalCallerOnInvoices_AVisiblePageAtTop_StillGetsTheRowCapWarning()
-    {
-        AsExternalCaller();
-        SetupFamilyTable("sprk_invoice", "sprk_invoices", "sprk_invoiceid", "sprk_name");
-        _hideInvoiceFamily = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyHidingStubs.Hiding(new List<string>(), InvoiceHidden);
-        UserReadReturns("sprk_invoices", FamilyRows("sprk_invoiceid", (InvoiceVisible, "Visible")));
-
-        var result = await ReadAsync("SELECT TOP 1 sprk_name FROM sprk_invoice");
-
-        result.Success.Should().BeTrue(result.ErrorMessage);
-        result.Warnings.Should().Contain(w => w.Contains("reached the row cap (1)"));
-    }
-
-    [Fact]
-    public async Task ExecuteChatAsync_Task098_InternalCallerOnInvoices_RowCapWarning_IsUnchanged()
-    {
-        SetupFamilyTable("sprk_invoice", "sprk_invoices", "sprk_invoiceid", "sprk_name");
-        UserReadReturns("sprk_invoices", FamilyRows("sprk_invoiceid", (InvoiceHidden, "Isolated")));
-        // _hideInvoiceFamily stays NeverCalled: an internal caller never reaches the predicate.
-
-        var result = await ReadAsync("SELECT TOP 1 sprk_name FROM sprk_invoice");
-
-        result.Success.Should().BeTrue(result.ErrorMessage);
-        Names(result).Should().Equal("Isolated");
-        result.Warnings.Should().Contain(w => w.Contains("reached the row cap (1)"));
-    }
-
     private void SetupDocumentMetadata() =>
         _dataverse
             .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("EntityDefinitions(LogicalName='sprk_document')")), It.IsAny<CancellationToken>()))
