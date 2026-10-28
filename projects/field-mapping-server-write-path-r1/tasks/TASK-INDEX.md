@@ -51,6 +51,7 @@
 | 035 | [Delete client mapping engine + guard](035-delete-client-mapping-engine.poml) | FR-22 | sonnet / high | FULL | none | 029 | 🔲 |
 | 036 | [W3 server paths deploy + live check](036-w3-server-paths-deploy-and-live-check.poml) | FR-18–FR-21 | sonnet / high | FULL | none | 030–034 | 🔲 |
 | 037 | [Work Assignment Assigned To default (#2354)](037-work-assignment-assignedto-default.poml) | FR-36 | opus / high | FULL | W7-A | none (UAC-r2 diff review) | 🔲 [open] |
+| 038 | [WA wizard: optional Assigned To picker](038-wa-wizard-assignedto-field.poml) | FR-37 | sonnet / high | FULL | none | 037 | 🔲 [open] |
 
 ## Phase 4 — W4 `/push`
 
@@ -92,7 +93,7 @@
 
 | ID | Task | FRs | Tier / effort | Rigor | Group | Deps | Status |
 |---|---|---|---|---|---|---|---|
-| 090 | [Project wrap-up (test diet, lessons, sync)](090-project-wrap-up.poml) | — | sonnet / medium | MINIMAL | none | 061, 062, 063, 076, 037 | 🔲 |
+| 090 | [Project wrap-up (test diet, lessons, sync)](090-project-wrap-up.poml) | — | sonnet / medium | MINIMAL | none | 061, 062, 063, 076, 037, 038 | 🔲 |
 
 ## Parallel Execution Groups
 

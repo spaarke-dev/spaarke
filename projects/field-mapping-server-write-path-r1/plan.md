@@ -153,6 +153,7 @@ Detail: design.md §12; spec FR-29…FR-36.
 - 076 deploy + live check (BFF via R3 batch).
 - FR-34 (preview, includeAssignedTo, childIds, pair edges) folds into 040, which now also depends on 070, 071 and UAC 195.
 - 037 (FR-36): Work Assignment `sprk_assignedto` defaults to its own Assigned To Internal (UAC-r2 review gate). Startable now.
+- 038 (FR-37): optional Assigned To contact picker on the Create Work Assignment wizard; blank omits the key so FR-36 applies. After 037; deployed in 076.
 - Out of band: #2353 Work Assignment Number autonumber `WRK-{SEQNUM:6}` (dev applied 2026-10-27; PR #2358).
 
 ### Wrap-up (090)
