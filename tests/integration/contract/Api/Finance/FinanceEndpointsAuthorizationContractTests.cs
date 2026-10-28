@@ -351,13 +351,13 @@ public class FinanceEndpointsAuthorizationContractTests
         await using var host = await FinanceAuthHost.StartAsync();
         var matterId = Guid.NewGuid();
         host.Access.Grant(Matters, matterId, AccessRights.Read);
-        host.Search.Setup(s => s.SearchAsync("fees", matterId, 10, It.IsAny<CancellationToken>()))
+        host.Search.Setup(s => s.SearchAsync("fees", FinanceAuthzTestAuthHandler.CallerObjectId, matterId, 10, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new InvoiceSearchResponse());
 
         var response = await host.SendAsync(BuildRequest("search", matterId));
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        host.Search.Verify(s => s.SearchAsync("fees", matterId, 10, It.IsAny<CancellationToken>()), Times.Once);
+        host.Search.Verify(s => s.SearchAsync("fees", FinanceAuthzTestAuthHandler.CallerObjectId, matterId, 10, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     // =========================================================================================

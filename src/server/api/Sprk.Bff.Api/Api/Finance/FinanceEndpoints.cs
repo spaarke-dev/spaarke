@@ -1,5 +1,6 @@
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Services.Finance;
 
@@ -512,7 +513,8 @@ public static class FinanceEndpoints
 
         try
         {
-            var result = await searchService.SearchAsync(query, matterId, topValue, cancellationToken);
+            var result = await searchService.SearchAsync(
+                query, CallerResolution.ResolveObjectId(httpContext.User), matterId, topValue, cancellationToken);
 
             logger.LogInformation(
                 "Invoice search completed. ResultCount={ResultCount}, TotalCount={TotalCount}, " +

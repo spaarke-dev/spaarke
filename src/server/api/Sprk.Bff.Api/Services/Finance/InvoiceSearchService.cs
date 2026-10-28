@@ -18,15 +18,19 @@ namespace Sprk.Bff.Api.Services.Finance;
 public interface IInvoiceSearchService
 {
     /// <summary>
-    /// Search invoices using semantic search with optional matter filtering.
+    /// Search invoices using semantic search with optional matter filtering. Returns only invoices the caller can
+    /// Read whose source document the caller can also Read (<see cref="IRetrievalAccessTrim"/>, fail closed).
     /// </summary>
     /// <param name="query">Search query text (required).</param>
+    /// <param name="callerObjectId">The Entra <c>oid</c> of the signed-in caller the results are for; it must be the
+    /// current request's principal. Null or unverifiable withholds every result.</param>
     /// <param name="matterId">Optional matter ID filter.</param>
     /// <param name="top">Maximum number of results (default 10, max 50).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Search results with scores and highlights.</returns>
     Task<InvoiceSearchResponse> SearchAsync(
         string query,
+        string? callerObjectId,
         Guid? matterId = null,
         int top = 10,
         CancellationToken cancellationToken = default);
@@ -40,6 +44,7 @@ public sealed class InvoiceSearchService : IInvoiceSearchService
     private readonly SearchIndexClient _searchIndexClient;
     private readonly IConfiguration _configuration;
     private readonly IInvoiceAi? _invoiceAi;
+    private readonly IRetrievalAccessTrim? _accessTrim;
     private readonly ILogger<InvoiceSearchService> _logger;
 
     // Canonical index name: spaarke-invoices-index (per AI-SEARCH-INDEX-CATALOG.md; FR-10 + NFR-03).
@@ -59,12 +64,16 @@ public sealed class InvoiceSearchService : IInvoiceSearchService
         SearchIndexClient searchIndexClient,
         IConfiguration configuration,
         ILogger<InvoiceSearchService> logger,
-        IInvoiceAi? invoiceAi = null)
+        IInvoiceAi? invoiceAi = null,
+        IRetrievalAccessTrim? accessTrim = null)
     {
         _searchIndexClient = searchIndexClient ?? throw new ArgumentNullException(nameof(searchIndexClient));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _invoiceAi = invoiceAi; // Nullable: AI feature flags may be disabled. RequireAi() throws at use site.
+        // Nullable: registered with the AI public-contracts facade. Absent means no row can be checked, so every row
+        // is withheld (fail closed) - never returned unchecked.
+        _accessTrim = accessTrim;
     }
 
     /// <summary>
@@ -77,6 +86,7 @@ public sealed class InvoiceSearchService : IInvoiceSearchService
 
     public async Task<InvoiceSearchResponse> SearchAsync(
         string query,
+        string? callerObjectId,
         Guid? matterId = null,
         int top = 10,
         CancellationToken cancellationToken = default)
@@ -121,8 +131,9 @@ public sealed class InvoiceSearchService : IInvoiceSearchService
             var tenantId = _configuration["AzureAd:TenantId"] ?? string.Empty;
             var filter = BuildFilter(tenantId, matterId);
 
-            // Step 4: Build search options (hybrid search with semantic reranking)
-            var searchOptions = BuildSearchOptions(queryEmbedding, filter, top);
+            // Step 4: Build search options (hybrid search with semantic reranking). Over-fetch so the access trim
+            // below can still fill a page.
+            var searchOptions = BuildSearchOptions(queryEmbedding, filter, RetrievalAccessTrim.CandidatePoolSize(top));
 
             // Step 5: Execute search
             var response = await searchClient.SearchAsync<InvoiceSearchDocument>(
@@ -130,7 +141,12 @@ public sealed class InvoiceSearchService : IInvoiceSearchService
             var searchResults = response.Value;
 
             // Step 6: Process results
-            var results = await ProcessSearchResultsAsync(searchResults, cancellationToken);
+            var candidates = await ProcessSearchResultsAsync(searchResults, cancellationToken);
+
+            // Step 7: keep only what the caller can read - the invoice's source document AND the invoice record.
+            var results = (await TrimToReadableAsync(candidates, callerObjectId, cancellationToken))
+                .Take(top)
+                .ToList();
 
             stopwatch.Stop();
 
@@ -141,7 +157,8 @@ public sealed class InvoiceSearchService : IInvoiceSearchService
             return new InvoiceSearchResponse
             {
                 Results = results,
-                TotalCount = searchResults.TotalCount ?? results.Count,
+                // The count of results the caller may see, never the index count (which would count unreadable rows).
+                TotalCount = results.Count,
                 DurationMs = stopwatch.ElapsedMilliseconds
             };
         }
@@ -150,6 +167,48 @@ public sealed class InvoiceSearchService : IInvoiceSearchService
             _logger.LogError(ex, "Azure AI Search request failed: {Error}", ex.Message);
             throw;
         }
+    }
+
+    /// <summary>
+    /// Returns the results whose source document (<see cref="IRetrievalAccessTrim.TrimAsync{T}"/>) and invoice record
+    /// (<see cref="IRetrievalAccessTrim.TrimByRecordAsync{T}"/>) the caller can both Read, in rank order. Fails closed:
+    /// no trim service, no verified caller or a failed check returns nothing.
+    /// </summary>
+    private async Task<IReadOnlyList<InvoiceSearchResultItem>> TrimToReadableAsync(
+        IReadOnlyList<InvoiceSearchResultItem> candidates,
+        string? callerObjectId,
+        CancellationToken cancellationToken)
+    {
+        if (_accessTrim is null)
+        {
+            _logger.LogWarning(
+                "Invoice search withheld all {Count} result(s): the retrieval access trim is not available (fail closed)",
+                candidates.Count);
+            return [];
+        }
+
+        var byDocument = await _accessTrim.TrimAsync(
+            candidates, r => r.DocumentId.ToString("D"), callerObjectId, cancellationToken).ConfigureAwait(false);
+        if (byDocument.Withheld)
+        {
+            _logger.LogWarning(
+                "Invoice search withheld all {Count} result(s): {Outcome} (fail closed)", candidates.Count, byDocument.Outcome);
+            return [];
+        }
+
+        var byInvoice = await _accessTrim.TrimByRecordAsync(
+            byDocument.Rows,
+            r => RetrievalRecordKey.ParentRecord("invoice", r.InvoiceId.ToString("D")),
+            callerObjectId,
+            cancellationToken).ConfigureAwait(false);
+        if (byInvoice.Withheld)
+        {
+            _logger.LogWarning(
+                "Invoice search withheld all {Count} result(s): {Outcome} (fail closed)", candidates.Count, byInvoice.Outcome);
+            return [];
+        }
+
+        return byInvoice.Rows;
     }
 
     /// <summary>

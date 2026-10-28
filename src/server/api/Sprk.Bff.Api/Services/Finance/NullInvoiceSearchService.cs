@@ -29,6 +29,7 @@ public sealed class NullInvoiceSearchService : IInvoiceSearchService
 
     public Task<InvoiceSearchResponse> SearchAsync(
         string query,
+        string? callerObjectId,
         Guid? matterId = null,
         int top = 10,
         CancellationToken cancellationToken = default)
