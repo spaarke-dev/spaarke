@@ -445,6 +445,21 @@ describe('InvoiceView — review fixes (task 133)', () => {
   ];
   const callsOf = (onSubmit: jest.Mock) => onSubmit.mock.calls as unknown as Call[];
 
+  it('must-fire: a PO number over 100 characters (after trimming) shows an error and blocks Submit; must-not-fire at 100', async () => {
+    renderView({ onSubmit: jest.fn() });
+    await findRow('INV-4711.pdf');
+    await chooseMatter();
+    await userEvent.type(numberBox(), 'INV-4711');
+    const poBox = screen.getByRole('textbox', { name: /PO number/ });
+    await userEvent.type(poBox, ` ${'P'.repeat(100)} `);
+    await waitFor(() => expect(submitButton()).toBeEnabled());
+    expect(screen.queryByText('At most 100 characters.')).toBeNull();
+
+    await userEvent.type(poBox, 'X');
+    expect(await screen.findByText('At most 100 characters.')).toBeInTheDocument();
+    expect(submitButton()).toBeDisabled();
+  });
+
   describe('Retry sends what is on screen', () => {
     const retryable = () =>
       jest.fn(async () => ({ kind: 'retryable' as const, message: 'Outlook is busy. Try again.' }));

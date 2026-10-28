@@ -30,6 +30,7 @@ import {
   describeOverBudget,
   isPdfAttachment,
   FIRM_INVOICE_NUMBER_MAX,
+  PO_NUMBER_MAX,
   type InvoiceCoreRecordType,
   type InvoiceFirmOption,
   type InvoiceSubmissionInput,
@@ -307,6 +308,7 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
   const markingProblem = markingCheck.ok ? null : describeMarkingProblem(markingCheck.reason, attachments);
   const normalizedNumber = normalizeFirmInvoiceNumber(firmInvoiceNumber);
   const numberTooLong = firmInvoiceNumber.trim().length > FIRM_INVOICE_NUMBER_MAX;
+  const poTooLong = poNumber.trim().length > PO_NUMBER_MAX;
   const succeeded = outcome?.kind === 'success';
   const locked = submitting || succeeded;
   // Running, or showing the result of a submission the server accepted (it carries the tracking number).
@@ -340,6 +342,7 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
     isCoreRecordType(coreRecord.entityType) &&
     firmId.length > 0 &&
     normalizedNumber !== null &&
+    !poTooLong &&
     markingCheck.ok &&
     overBudget.length === 0 &&
     !locked;
@@ -623,7 +626,13 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
         <Input value={firmInvoiceNumber} onChange={(_, d) => setFirmInvoiceNumber(d.value)} disabled={locked} />
       </Field>
 
-      <Field label="PO number" hint="Optional">
+      <Field
+        label="PO number"
+        hint="Optional"
+        {...(poTooLong
+          ? { validationState: 'error' as const, validationMessage: `At most ${PO_NUMBER_MAX} characters.` }
+          : {})}
+      >
         <Input value={poNumber} onChange={(_, d) => setPoNumber(d.value)} disabled={locked} />
       </Field>
 
