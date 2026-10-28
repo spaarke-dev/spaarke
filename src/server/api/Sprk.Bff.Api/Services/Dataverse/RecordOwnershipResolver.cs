@@ -739,7 +739,7 @@ public sealed record RecordOwnershipContext
     internal const string DecisionRecordTable = "sprk_decisionrecord";
 
     /// <summary>The Decision Record's step envelope, which lists the Signals it resolved (<c>resolvedSignalIds</c>).</summary>
-    private const string DecisionRecordStepsColumn = "sprk_steps";
+    internal const string DecisionRecordStepsColumn = "sprk_steps";
     private const string TodoTable = "sprk_todo";
 
     /// <summary>

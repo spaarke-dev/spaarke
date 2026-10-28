@@ -1579,6 +1579,9 @@ public sealed class SecureChildReconciler
                     }
                 }
 
+                // UAC task 194b R4b-2b (F1): a Decision Record is filed under the subject of every Signal it resolved too (its
+                // question (c)), which no lineage lookup names — so the records that resolved a Signal of this level join it.
+                await AddDecisionRecordsResolvingAsync(level, next, seen).ConfigureAwait(false);
                 frontier = next;
             }
 
@@ -1588,6 +1591,78 @@ public sealed class SecureChildReconciler
                 await LoadGrantRowsAsync().ConfigureAwait(false);
             await LoadThreadsOutsidePassAsync().ConfigureAwait(false);
         }
+
+        /// <summary>
+        /// UAC task 194b R4b-2b (F1): every Decision Record that resolved a Signal this level reached, joined to the level (and
+        /// walked below, like any row of it) unless the pass already holds it. Its question (c) asks about the subject of every
+        /// Signal it resolved (<see cref="RecordOwnershipContext.ForExistingRowAsync"/>), so a subject this pass moves can move a
+        /// record that lies outside the root's lineage — into isolation (secure-if-any, D-123) or out of it.
+        /// <para>Two reads, unioned. The record whose <c>sprk_steps.resolvedSignalIds</c> lists the Signal — the ids its question
+        /// reads — matched as text (the writer stores each id in the <c>D</c> form, <c>DecisionRecordWriter</c>), chunked like the
+        /// lineage reads. And the record the Signal's own <c>sprk_decisionrecord</c> link names (already on the Signal row, so
+        /// one <c>id IN (…)</c> read per chunk), for a record whose steps the text match cannot see. The link alone is not enough:
+        /// a Signal someone else closed during the review is listed but never linked (<c>DecisionCommitService</c>,
+        /// <c>closed_during_review</c>). An incomplete read throws, as every read of this walk does.</para>
+        /// </summary>
+        private async Task AddDecisionRecordsResolvingAsync(
+            int level, List<(string, Guid)> next, HashSet<(string, Guid)> seen)
+        {
+            var signals = next
+                .Where(k => string.Equals(k.Item1, SignalTable, StringComparison.OrdinalIgnoreCase))
+                .Select(k => _byRef[k])
+                .ToArray();
+            if (signals.Length == 0)
+                return;
+
+            var records = new List<Entity>();
+            foreach (var chunk in signals.Select(s => s.Id).Chunk(SecureChildShareSynchronizer.DescendantConditionsPerQuery))
+            {
+                var query = new QueryExpression(RecordOwnershipContext.DecisionRecordTable)
+                {
+                    ColumnSet = new ColumnSet(true),
+                    NoLock = true,
+                };
+                var anyListed = new FilterExpression(LogicalOperator.Or);
+                foreach (var id in chunk)
+                    anyListed.AddCondition(RecordOwnershipContext.DecisionRecordStepsColumn, ConditionOperator.Like, $"%{id:D}%");
+                query.Criteria.AddFilter(anyListed);
+                records.AddRange(await ReadAllPagesAsync(RecordOwnershipContext.DecisionRecordTable, query).ConfigureAwait(false));
+            }
+
+            var listed = records.Select(r => r.Id).ToHashSet();
+            var linked = signals
+                .Select(s => s.GetAttributeValue<EntityReference>(SignalDecisionRecordLookup)?.Id ?? Guid.Empty)
+                .Where(id => id != Guid.Empty && !listed.Contains(id)
+                             && !seen.Contains((RecordOwnershipContext.DecisionRecordTable, id)))
+                .Distinct()
+                .ToArray();
+            foreach (var chunk in linked.Chunk(SecureChildShareSynchronizer.DescendantConditionsPerQuery))
+            {
+                var query = new QueryExpression(RecordOwnershipContext.DecisionRecordTable)
+                {
+                    ColumnSet = new ColumnSet(true),
+                    NoLock = true,
+                };
+                query.Criteria.AddCondition(
+                    RecordOwnershipContext.DecisionRecordTable + "id", ConditionOperator.In, chunk.Select(id => (object)id).ToArray());
+                records.AddRange(await ReadAllPagesAsync(RecordOwnershipContext.DecisionRecordTable, query).ConfigureAwait(false));
+            }
+
+            foreach (var entity in records)
+            {
+                var key = (RecordOwnershipContext.DecisionRecordTable, entity.Id);
+                if (!seen.Add(key))
+                    continue;
+                _descendants.Add((level, entity));
+                _byRef[key] = entity;
+                next.Add(key);
+            }
+        }
+
+        private const string SignalTable = "sprk_signal";
+
+        /// <summary>A Signal's link to the Decision Record that closed it (set only when that commit closed it).</summary>
+        private const string SignalDecisionRecordLookup = "sprk_decisionrecord";
 
         /// <summary>
         /// #2143 round 6: every record thread a message of this pass sits in that is not itself a row of the pass, read the way
@@ -2307,6 +2382,16 @@ public sealed class SecureChildReconciler
             try
             {
                 var answer = await _owner._ownership.ResolveOwnerAsync(ContextFor(row), _ct).ConfigureAwait(false);
+                if (!answer.IsOwned)
+                {
+                    // R4b-2b (F4): the rule gave no team (refused or unowned), so whether it is held cannot be said — logged by
+                    // code, never by name; the row stays where it is.
+                    Log.LogWarning("[SECURE-CHILD-RECONCILE] ordinary move {Table} {Id}: held in isolation; its owner rule gave " +
+                        "no team ({Outcome}, {RefusalCode}), so it is not reported held.", row.LogicalName, row.Id, answer.Outcome,
+                        answer.RefusalCode ?? "none");
+                    return null;
+                }
+
                 if (RecordOwnershipContext.DecisionRecordHeldInIsolation(
                         row.LogicalName, ownedInIsolation: true, answer, QuestionFor(row).Incomplete) is { } held)
                 {

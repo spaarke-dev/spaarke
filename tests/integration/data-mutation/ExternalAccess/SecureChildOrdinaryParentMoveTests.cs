@@ -776,6 +776,137 @@ public class SecureChildOrdinaryParentMoveTests
         _shares.MaskOf("sprk_signal", signal, DataversePrincipalRef.User(Sharee)).Should().BeNull();
     }
 
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
+    // R4b-2b (F1): a Decision Record outside the root's lineage, reached through a Signal it resolved
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>The ordinary matter M1 and its event E1: the core and subject of a Decision Record outside matter X's lineage.</summary>
+    private static readonly Guid M1 = Guid.Parse("1b000000-0000-4000-8000-000000194601");
+    private static readonly Guid E1 = Guid.Parse("1b000000-0000-4000-8000-000000194602");
+
+    /// <summary>Matter X's event E2, and Signal B about it (closed during the review: listed, never linked).</summary>
+    private static readonly Guid E2 = Guid.Parse("1b000000-0000-4000-8000-000000194603");
+    private static readonly Guid SignalB = Guid.Parse("1b000000-0000-4000-8000-000000194604");
+
+    private static string StepsListingIn(string idFormat, Guid signal) =>
+        "{\"reviewId\":\"" + Guid.NewGuid().ToString("D") + "\",\"resolvedSignalIds\":[\"" + signal.ToString(idFormat)
+        + "\"],\"steps\":[]}";
+
+    /// <summary>The Decision Record about E1 (core M1) that resolved Signal B, owned by <paramref name="owner"/>; its
+    /// <c>sprk_steps</c> lists B in <paramref name="idFormat"/> (the writer's form is <c>D</c>).</summary>
+    private Guid DecisionRecordAboutE1Resolving(Guid owner, string idFormat = "D")
+    {
+        _world.Add(Matter, M1, ("owningteam", TeamRef(GeneralTeam)), ("sprk_issecure", false));
+        Row("sprk_event", E1, TeamRef(GeneralTeam), ("sprk_regardingmatter", Matter, M1));
+        var record = Guid.Parse("1b000000-0000-4000-8000-000000194605");
+        OntologyRow("sprk_decisionrecord", record, TeamRef(owner), core: M1, subject: E1,
+            ("sprk_matter", Matter, M1), ("sprk_regardingevent", "sprk_event", E1));
+        _world.Set("sprk_decisionrecord", record, "sprk_steps", StepsListingIn(idFormat, SignalB));
+        return record;
+    }
+
+    /// <summary>E2 filed under matter X and Signal B about E2, both owned by <paramref name="owner"/>.</summary>
+    private void E2UnderXWithSignalB(Guid x, Guid owner)
+    {
+        Row("sprk_event", E2, TeamRef(owner), ("sprk_regardingmatter", Matter, x));
+        Row("sprk_signal", SignalB, TeamRef(owner), ("sprk_regardingevent", "sprk_event", E2));
+        _world.Set("sprk_signal", SignalB, "sprk_regardingrecordid", E2.ToString("D"));
+    }
+
+    [Fact(DisplayName = "194b R4b-2b F1 must fire: Make Secure on X moves IN a Decision Record outside X's lineage whose resolved Signal is about X's event (secure-if-any, D-123)")]
+    public async Task MakeSecure_MovesInADecisionRecord_ThatResolvedASignalAboutTheSecureRecordsEvent()
+    {
+        var x = Guid.NewGuid();
+        _world.SecureRoot(Matter, x);
+        E2UnderXWithSignalB(x, GeneralTeam);
+        var record = DecisionRecordAboutE1Resolving(GeneralTeam);
+
+        var report = await Reconciler().ReconcileAsync(
+            Matter, x, SecureChildReconcileMode.Apply, SecureChildPassTrigger.Provisioning, CancellationToken.None);
+
+        _world.OwnerOf("sprk_event", E2).Should().Be(DataversePrincipalRef.Team(SecureChildShareWorld.SecureTeam));
+        _world.OwnerOf("sprk_decisionrecord", record).Should().Be(DataversePrincipalRef.Team(SecureChildShareWorld.SecureTeam),
+            "its question asks about E2, the subject of the Signal it resolved, and E2 is now Secure");
+        report.Changes.Should().ContainSingle(c => c.Id == record).Which.Outcome.Should().Be(SecureChildRowOutcome.Changed);
+    }
+
+    [Fact(DisplayName = "194b R4b-2b F1 must fire: an Unsecure of X releases a Decision Record isolated only by X's event, the subject of a Signal it resolved")]
+    public async Task AnUnsecure_ReleasesADecisionRecord_IsolatedOnlyByTheUnsecuredRecordsEvent()
+    {
+        var x = Guid.NewGuid();
+        _world.FlaggedNotIsolatedRoot(Matter, x);
+        E2UnderXWithSignalB(x, SecureChildShareWorld.SecureTeam);
+        var record = DecisionRecordAboutE1Resolving(SecureChildShareWorld.SecureTeam);
+
+        var report = await Reconciler().ReconcileAsync(
+            Matter, x, SecureChildReconcileMode.Apply, SecureChildPassTrigger.Unsecure, CancellationToken.None);
+
+        _world.OwnerOf("sprk_event", E2).Should().Be(DataversePrincipalRef.Team(GeneralTeam));
+        _world.OwnerOf("sprk_decisionrecord", record).Should().Be(DataversePrincipalRef.Team(GeneralTeam),
+            "its whole question is ordinary once E2 is: released to its core's team (criterion 3)");
+        report.Changes.Should().ContainSingle(c => c.Id == record).Which.Outcome.Should().Be(SecureChildRowOutcome.Changed);
+        report.HeldInIsolation.Should().NotContain(h => h.Id == record);
+    }
+
+    [Fact(DisplayName = "194b R4b-2b F1 must fire: a Decision Record the text match cannot see (its steps list the Signal in another form) is reached through the Signal's own link")]
+    public async Task MakeSecure_ReachesADecisionRecord_ThroughTheSignalsLink()
+    {
+        var x = Guid.NewGuid();
+        _world.SecureRoot(Matter, x);
+        E2UnderXWithSignalB(x, GeneralTeam);
+        var record = DecisionRecordAboutE1Resolving(GeneralTeam, idFormat: "N");
+        _world.Set("sprk_signal", SignalB, "sprk_decisionrecord", new EntityReference("sprk_decisionrecord", record));
+
+        var report = await Reconciler().ReconcileAsync(
+            Matter, x, SecureChildReconcileMode.Apply, SecureChildPassTrigger.Provisioning, CancellationToken.None);
+
+        _world.OwnerOf("sprk_decisionrecord", record).Should().Be(DataversePrincipalRef.Team(SecureChildShareWorld.SecureTeam));
+        report.Changes.Should().ContainSingle(c => c.Id == record).Which.Outcome.Should().Be(SecureChildRowOutcome.Changed);
+    }
+
+    [Fact(DisplayName = "194b R4b-2b F1 must not fire: a Decision Record that resolved no Signal of the pass is not read into it")]
+    public async Task MakeSecure_LeavesADecisionRecord_ThatResolvedNoSignalOfThePass()
+    {
+        var x = Guid.NewGuid();
+        _world.SecureRoot(Matter, x);
+        E2UnderXWithSignalB(x, GeneralTeam);
+        var record = DecisionRecordAboutE1Resolving(GeneralTeam);
+        _world.Set("sprk_decisionrecord", record, "sprk_steps", StepsListingIn("D", Guid.NewGuid()));
+
+        var report = await Reconciler().ReconcileAsync(
+            Matter, x, SecureChildReconcileMode.Apply, SecureChildPassTrigger.Provisioning, CancellationToken.None);
+
+        _world.OwnerOf("sprk_decisionrecord", record).Should().Be(DataversePrincipalRef.Team(GeneralTeam));
+        report.Changes.Should().NotContain(c => c.Id == record);
+        report.Tables.Where(t => t.Table == "sprk_decisionrecord").Sum(t => t.Examined).Should().Be(0,
+            "only a record that resolved a Signal of the pass is read into it");
+    }
+
+    [Fact(DisplayName = "194b R4b-2b F3 must fire: an Unsecure RELEASES a Decision Record whose question is complete and all ordinary")]
+    public async Task AnUnsecure_ReleasesACompleteAllOrdinaryDecisionRecord()
+    {
+        var unsecured = Guid.NewGuid();
+        _world.FlaggedNotIsolatedRoot(Matter, unsecured);
+        var ordinaryEvent = Guid.NewGuid();
+        Row("sprk_event", ordinaryEvent, TeamRef(GeneralTeam));
+        var signal = Guid.NewGuid();
+        SignalAbout(signal, ordinaryEvent);
+        var record = Guid.NewGuid();
+        OntologyRow("sprk_decisionrecord", record, TeamRef(SecureChildShareWorld.SecureTeam), core: unsecured, subject: unsecured,
+            ("sprk_matter", Matter, unsecured), ("sprk_regardingmatter", Matter, unsecured));
+        _world.Set("sprk_decisionrecord", record, "sprk_steps", StepsListing(signal));
+        _shares.Seed("sprk_decisionrecord", record, DataversePrincipalRef.User(Sharee), CollaborateMask);
+
+        var report = await Reconciler().ReconcileAsync(
+            Matter, unsecured, SecureChildReconcileMode.Apply, SecureChildPassTrigger.Unsecure, CancellationToken.None);
+
+        _world.OwnerOf("sprk_decisionrecord", record).Should().Be(DataversePrincipalRef.Team(GeneralTeam),
+            "a whole question leaves isolation as any other row's does; only an incomplete one is held");
+        report.Changes.Should().ContainSingle(c => c.Id == record).Which.Outcome.Should().Be(SecureChildRowOutcome.Changed);
+        report.HeldInIsolation.Should().BeEmpty();
+        _shares.MaskOf("sprk_decisionrecord", record, DataversePrincipalRef.User(Sharee)).Should().BeNull();
+    }
+
     [Fact(DisplayName = "194b K3 must fire: an Unsecure never takes a no-core row the To Do job keeps OUT of isolation — held and reported with the job's rule")]
     public async Task AnUnsecure_HoldsANoCoreRowTheToDoJobKeeps()
     {
