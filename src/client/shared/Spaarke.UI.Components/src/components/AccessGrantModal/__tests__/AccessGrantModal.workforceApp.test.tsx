@@ -12,6 +12,8 @@
  * removing the grant alone says the share stays, and `/unshare-user`'s `pairedGrantEnded: false` adds a neutral note.
  * G3d: that note promises no timing (the daily clean-up ends the grant only when its writes are on); it says the grant
  * is still listed under Current Access, where it can be revoked — and the reload keeps it listed once its share is gone.
+ * G3e: a grant counts as paired only while its share is listed; one whose share is not listed is worded without a share
+ * (row, revoke confirmation, success notice).
  */
 
 import * as React from 'react';
@@ -29,7 +31,9 @@ import {
   groupPairedAccess,
   pairedShareNote,
   revokePairedGrantSentence,
+  revokeUnlistedShareGrantSentence,
   sharedWithColleagueSentence,
+  unlistedShareGrantMeta,
   unshareNotice,
   workforceAppNotShownSentence,
 } from '../AccessGrantModal';
@@ -532,9 +536,48 @@ describe('AccessGrantModal — Add person and workforce-app access (task 193 G3b
       expect(rows).toHaveLength(1);
       const grantRow = rowOf('Ada (contact)');
       expect(rows[0]).toBe(grantRow);
-      expect(grantRow).toHaveAttribute('data-paired', 'grant');
-      expect(within(grantRow).getByText(/^Workforce app access that goes with a share · granted /)).toBeInTheDocument();
+      // G3e: no longer paired in the UI — its share is not listed — so it is worded without a share.
+      expect(grantRow).not.toHaveAttribute('data-paired');
+      expect(within(grantRow).getByText(/^Workforce app access for Ada \(contact\) · granted /)).toBeInTheDocument();
+      expect(within(grantRow).queryByText(/share/i)).not.toBeInTheDocument();
       expect(within(grantRow).getByRole('button', { name: 'Revoke' })).toBeEnabled();
+    });
+
+    it('a paired grant whose share is not listed: the row, the confirmation and the notice never mention a share', async () => {
+      // `/user-shares` lists no share, so the grant's `pairedWith` names a share that is not there.
+      const fetchMock = throwingAuthenticatedFetch(async (url: string) => {
+        if (url.includes('/user-shares')) return jsonResponse({ shares: [] });
+        if (url === REVOKE) return jsonResponse({ deactivatedCount: 1, speContainerOutcome: 'NotAttempted' });
+        return jsonResponse({});
+      });
+      renderWithTheme(
+        <AccessGrantModal {...makeProps(fetchMock, null, { fetchExistingGrants: jest.fn(async () => [PAIRED_GRANT]) })} />
+      );
+
+      await screen.findByText('Ada (contact)');
+      const grantRow = rowOf('Ada (contact)');
+      expect(grantRow).not.toHaveAttribute('data-paired');
+      expect(
+        within(grantRow).getByText(`Workforce app access for Ada (contact) · granted ${displayDate('2026-10-28')}`)
+      ).toBeInTheDocument();
+      expect(within(grantRow).queryByText(/share/i)).not.toBeInTheDocument();
+
+      fireEvent.click(within(grantRow).getByRole('button', { name: 'Revoke' }));
+      const confirm = await screen.findByRole('alertdialog', { hidden: true });
+      expect(
+        within(confirm).getByText(
+          "Remove Ada (contact)'s workforce app access? The record will no longer show in their workforce app."
+        )
+      ).toBeInTheDocument();
+      expect(confirm.textContent ?? '').not.toMatch(/share/i);
+
+      await confirmRevoke();
+
+      const notice = await screen.findByText("Removed Ada (contact)'s workforce app access.");
+      expect(notice).toBeInTheDocument();
+      expect(screen.queryByText(/Their share stays/)).not.toBeInTheDocument();
+      expect(postsTo(fetchMock, REVOKE)).toHaveLength(1);
+      expect(postsTo(fetchMock, UNSHARE_USER)).toHaveLength(0);
     });
 
     it('pairedGrantEnded: false on a share removed while related records are pending: the note follows the detail', async () => {
@@ -578,6 +621,8 @@ describe('AccessGrantModal — Add person and workforce-app access (task 193 G3b
       const confirm = await screen.findByRole('alertdialog', { hidden: true });
       expect(within(confirm).getByText(revokePairedGrantSentence('Ada (contact)'))).toBeInTheDocument();
       expect(within(confirm).queryByText(/immediately lose access/)).not.toBeInTheDocument();
+      // G3e: the share is listed, so the standalone wording is not used.
+      expect(within(confirm).queryByText(revokeUnlistedShareGrantSentence('Ada (contact)'))).not.toBeInTheDocument();
 
       await confirmRevoke();
 
@@ -646,6 +691,12 @@ describe('AccessGrantModal — Add person and workforce-app access (task 193 G3b
         `(workforce app access expired ${displayDate(UNTIL)})`
       );
       expect(pairedShareNote([])).toBe('(with workforce app access)');
+      expect(unlistedShareGrantMeta('Ada (contact)', '2026-10-28')).toBe(
+        `Workforce app access for Ada (contact) · granted ${displayDate('2026-10-28')}`
+      );
+      expect(revokeUnlistedShareGrantSentence('Ada (contact)')).toBe(
+        "Remove Ada (contact)'s workforce app access? The record will no longer show in their workforce app."
+      );
       expect(unshareNotice('Ada', true)).toEqual({ intent: 'success', text: "Removed Ada's share and their workforce app access." });
       expect(unshareNotice('Ada', false)).toEqual({
         intent: 'info',

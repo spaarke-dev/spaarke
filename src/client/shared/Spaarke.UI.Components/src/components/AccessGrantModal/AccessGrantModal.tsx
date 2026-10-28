@@ -1049,10 +1049,22 @@ export function pairedShareNote(pairedGrants: readonly IAccessGrantRecord[]): st
     : `(workforce app access until ${formatGrantDate(grant.expiresDate)})`;
 }
 
-/** Task 193 G3b: the meta line of a workforce-app grant row that goes with a share. */
-export function pairedGrantMeta(share: IAccessGrantRecord | null, grantedDate: string | undefined): string {
-  const whose = share ? `${share.fullName}'s share` : 'a share';
-  return `Workforce app access that goes with ${whose} · granted ${formatGrantDate(grantedDate)}`;
+/** Task 193 G3b: the meta line of a workforce-app grant row listed under its share. */
+export function pairedGrantMeta(share: IAccessGrantRecord, grantedDate: string | undefined): string {
+  return `Workforce app access that goes with ${share.fullName}'s share · granted ${formatGrantDate(grantedDate)}`;
+}
+
+/**
+ * Task 193 G3e: the meta line of a workforce-app grant whose paired share is not listed (e.g. removed by an unshare
+ * that could not end the grant). A grant counts as paired only while its share is listed, so no share is mentioned.
+ */
+export function unlistedShareGrantMeta(fullName: string, grantedDate: string | undefined): string {
+  return `Workforce app access for ${fullName} · granted ${formatGrantDate(grantedDate)}`;
+}
+
+/** Task 193 G3e: the revoke confirmation for a workforce-app grant whose paired share is not listed (no share named). */
+export function revokeUnlistedShareGrantSentence(fullName: string): string {
+  return `Remove ${fullName}'s workforce app access? The record will no longer show in their workforce app.`;
 }
 
 /** Task 193 G3b: the revoke confirmation's sentence for a share that has a workforce-app grant paired with it. */
@@ -1486,8 +1498,16 @@ function describeOwnAccessPermission(
  * (task 065, `/unshare-user`). The two use different endpoints and different
  * identifying fields, so the confirm dialog branches on `kind`. */
 type PendingRevoke =
-  /** `pairedWithShare` (task 193 G3b): a workforce-app grant that goes with a share — removing it keeps the share. */
-  | { kind: 'grant'; accessRecordId: string; contactId: string; fullName: string; pairedWithShare?: boolean }
+  /** `pairedWithShare` (task 193 G3b): a workforce-app grant listed under its share — removing it keeps the share.
+   * `pairedShareNotListed` (G3e): a workforce-app grant whose paired share is not listed — no share is mentioned. */
+  | {
+      kind: 'grant';
+      accessRecordId: string;
+      contactId: string;
+      fullName: string;
+      pairedWithShare?: boolean;
+      pairedShareNotListed?: boolean;
+    }
   /** `hasPairedGrant` (task 193 G3b): removing this share also ends its workforce-app grant (the server does both). */
   | { kind: 'share'; systemUserId: string; fullName: string; hasPairedGrant?: boolean };
 
@@ -2788,14 +2808,18 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         });
         const fullName = pendingRevoke.fullName;
         const pairedWithShare = pendingRevoke.pairedWithShare === true;
+        const pairedShareNotListed = pendingRevoke.pairedShareNotListed === true;
         setPendingRevoke(null);
         await loadData();
         const notice = buildRevokeNotice(fullName, data);
-        // Task 193 G3b: a workforce-app grant that goes with a share ends alone; the share stays (as the server does).
+        // Task 193 G3b: a workforce-app grant listed under its share ends alone; the share stays (as the server does).
+        // G3e: one whose share is not listed says only that the workforce app access went (no share to speak of).
         setNoticeIfCurrent(
           pairedWithShare && notice.intent === 'success'
             ? { intent: 'success', text: `Removed ${fullName}'s workforce app access. Their share stays.` }
-            : notice
+            : pairedShareNotListed && notice.intent === 'success'
+              ? { intent: 'success', text: `Removed ${fullName}'s workforce app access.` }
+              : notice
         );
       } else {
         // Internal user share (task 063/065): unshare-user, not /revoke. Task 193 G2: it ends the paired workforce-app
@@ -3431,9 +3455,12 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                               : `standing-${grant.contactId}`;
                         // Task 193 G3b: a direct share with a paired workforce-app grant (listed below it, or not
                         // listed), and a grant that goes with a share (`pairedShare`: the share row, or null).
+                        // G3e: a grant counts as paired only while its share is listed; one whose share is not listed
+                        // (`pairedShare: null`) is its own row, worded without a share.
                         const hasPairedGrant =
                           rowKind === 'share' && (!!pairedGrants || grant.pairedWith?.kind === 'grant');
-                        const goesWithShare = pairedShare !== undefined;
+                        const goesWithShare = !!pairedShare;
+                        const pairedShareNotListed = pairedShare === null;
                         return (
                           <div
                             className={pairedShare ? mergeClasses(styles.row, styles.pairedRow) : styles.row}
@@ -3474,14 +3501,16 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                                     ? 'Standing grant — ongoing access to assigned records'
                                     : isOrg
                                       ? 'Organization grant — all organization contacts have access'
-                                      : goesWithShare
-                                        ? pairedGrantMeta(pairedShare ?? null, grant.grantedDate)
-                                        : autoSourceFor(grant.contactId)
-                                        ? `Automatic — ${autoSourceFor(grant.contactId)!.sourceFieldLabel} · granted ${formatGrantDate(grant.grantedDate)}`
-                                        : grant.grantedByContactName
-                                          ? // Task 140: issued by a contact from the external SPA (sprk_grantedbycontact).
-                                            `Granted by ${grant.grantedByContactName} (external contact) on ${formatGrantDate(grant.grantedDate)}`
-                                          : `Granted by ${grant.grantedByName ?? 'unknown'} on ${formatGrantDate(grant.grantedDate)}`}
+                                      : pairedShare
+                                        ? pairedGrantMeta(pairedShare, grant.grantedDate)
+                                        : pairedShareNotListed
+                                          ? unlistedShareGrantMeta(grant.fullName, grant.grantedDate)
+                                          : autoSourceFor(grant.contactId)
+                                            ? `Automatic — ${autoSourceFor(grant.contactId)!.sourceFieldLabel} · granted ${formatGrantDate(grant.grantedDate)}`
+                                            : grant.grantedByContactName
+                                              ? // Task 140: issued by a contact from the external SPA (sprk_grantedbycontact).
+                                                `Granted by ${grant.grantedByContactName} (external contact) on ${formatGrantDate(grant.grantedDate)}`
+                                              : `Granted by ${grant.grantedByName ?? 'unknown'} on ${formatGrantDate(grant.grantedDate)}`}
                               </Text>
                               {vetoReason && <Text className={styles.vetoReason}>{vetoReason}</Text>}
                               {suppressedReason && <Text className={styles.suppressedReason}>{suppressedReason}</Text>}
@@ -3564,6 +3593,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                                         contactId: grant.contactId,
                                         fullName: grant.fullName,
                                         pairedWithShare: goesWithShare,
+                                        pairedShareNotListed,
                                       })
                                     }
                                     disabled={revokeBlocked}
@@ -3722,6 +3752,11 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         {pendingRevoke?.kind === 'grant' && pendingRevoke.pairedWithShare ? (
           // Task 193 G3b: a workforce-app grant that goes with a share ends alone; the share stays (as the server does).
           <Text data-testid="revoke-paired-grant">{revokePairedGrantSentence(pendingRevoke.fullName)}</Text>
+        ) : pendingRevoke?.kind === 'grant' && pendingRevoke.pairedShareNotListed ? (
+          // Task 193 G3e: the grant's paired share is not listed, so no share is mentioned.
+          <Text data-testid="revoke-unlisted-share-grant">
+            {revokeUnlistedShareGrantSentence(pendingRevoke.fullName)}
+          </Text>
         ) : (
           <Text>
             Revoke access for <strong>{pendingRevoke?.fullName}</strong>? They will immediately lose access to this
