@@ -269,6 +269,10 @@ public class RecordOwnerAssignmentCensusTests
             "An Office job-tracking row (status and progress), authorized by its sprk_initiatedby creator lookup and "
             + "read app-only; not a child of any root in live metadata.",
             WaiverKind.Permanent),
+        new CensusEntry("InvoiceSubmissionService.cs", "sprk_document", 1, Disposition.Waived,
+            "ebilling-r1 task 095 (review K2): ResolveCommunicationFilingAsync's in-memory probe of a document linked only to the "
+            + "communication, handed to the filing walk, which reads its columns; it is never written, so there is no row to own.",
+            WaiverKind.Permanent),
         // ebilling-r1 (waiver agreed with spaarke-ontology-platform-r1 2026-10-20; PENDING the owner's rule-set scope model review,
         // because matter/project/work-assignment-level billing rules are planned): the billing rule's policy and its versions. The census
         // keys on (file, table), so the one waiver is two entries with one text: sprk_policy (1 site: CreateDraftRuleAsync's policy) and
@@ -2429,7 +2433,9 @@ public class RecordOwnerAssignmentCensusTests
         new PersonBearingWriter("CommunicationCreateTaskApplyService.cs", "ApplyAsync", "the confirming user, on the task it creates"),
         new PersonBearingWriter("TaskActionCore.cs", "CreateAsync", "the person who asked for the task (RequestedBySystemUserId)"),
         new PersonBearingWriter("ActionSeam.cs", "CreateTaskAsync", "hands RequestedBySystemUserId to the task core"),
-        new PersonBearingWriter("OfficeService.cs", "SaveAsync", "the Office user saving a document (carried to the worker)"),
+        // ebilling-r1 task 095: SaveAsync's body moved, unchanged in this respect, to SaveCoreAsync (shared with the from-email submission's
+        // in-process save, IOfficeSubmissionEmailSave); SaveAsync is now a one-line delegation.
+        new PersonBearingWriter("OfficeService.cs", "SaveCoreAsync", "the Office user saving a document (carried to the worker)"),
         new PersonBearingWriter("OfficeService.cs", "QuickCreateAsync", "the Office user quick-creating an invoice"),
         new PersonBearingWriter("OfficeService.cs", "ResolveTodoOwnerTeamAsync", "the Office user creating a To Do"),
         new PersonBearingWriter("OfficeDocumentPersistence.cs", "CreateDocumentWithSpePointersAsync", "the saving user, on the document"),

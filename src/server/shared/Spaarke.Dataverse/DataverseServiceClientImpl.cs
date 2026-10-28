@@ -351,6 +351,16 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             document[AccessPermissionColumn] = new OptionSetValue(accessPermission);
             document[DocumentAccessInheritanceColumn] = request.AccessInheritanceRecord;
         }
+
+        // ebilling-r1 task 095: the invoice-submission marker goes only with the own narrowing it records, in this one create.
+        if (request.RestrictedBySubmission)
+        {
+            if (request.AccessPermission != RestrictedAccessPermission || string.IsNullOrWhiteSpace(request.AccessInheritanceRecord))
+                throw new InvalidOperationException(
+                    "The invoice-submission marker is created only with the document's own Restricted Access Permission and its record (task 095).");
+
+            document[DocumentSubmissionMarkerColumn] = true;
+        }
     }
 
     // Task 130: sprk_document.sprk_relatedcommunication → sprk_communication (DocumentLinkFields), and the document's own
@@ -359,6 +369,12 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
     private const string CommunicationEntityName = "sprk_communication";
     private const string AccessPermissionColumn = "sprk_accesspermission";
     private const string DocumentAccessInheritanceColumn = "sprk_accessinheritance";
+
+    // ebilling-r1 task 095: the submission marker (task 088, InheritedAccessPermission.SubmissionMarkerColumn in the BFF).
+    private const string DocumentSubmissionMarkerColumn = "sprk_restrictedbysubmission";
+
+    // sprk_accesspermission "Restricted" (InheritedAccessPermission.Restricted in the BFF; docs/data-model/child-access-permission.md).
+    private const int RestrictedAccessPermission = 100000002;
 
     public async Task<DocumentEntity?> GetDocumentAsync(string id, CancellationToken ct = default)
     {

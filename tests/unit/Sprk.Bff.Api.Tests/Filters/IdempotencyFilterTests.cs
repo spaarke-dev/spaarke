@@ -586,6 +586,49 @@ public class IdempotencyFilterTests
         nextCalled.Should().BeTrue();
     }
 
+    /// <summary>ebilling-r1 095 review F5: a handler exception propagates once; it is never "failed open" into a second run.</summary>
+    [Fact]
+    public async Task InvokeAsync_HandlerThrows_IsInvokedExactlyOnce_AndTheExceptionSurfaces()
+    {
+        var filter = new IdempotencyFilter(CreateCache(), CreateMockLogger().Object);
+        var (httpContext, contextMock) = CreatePostContext(CreateUser());
+        httpContext.Request.Headers["X-Idempotency-Key"] = "throwing-key";
+
+        var invocations = 0;
+        EndpointFilterDelegate next = _ =>
+        {
+            invocations++;
+            throw new InvalidOperationException("handler fault " + invocations);
+        };
+
+        var act = async () => await filter.InvokeAsync(contextMock.Object, next);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>()).WithMessage("handler fault 1");
+        invocations.Should().Be(1, "the handler's own exception is not a cache fault and must not run the handler again");
+    }
+
+    /// <summary>ebilling-r1 095 review F5, the control: a cache fault still fails open, with exactly one handler run.</summary>
+    [Fact]
+    public async Task InvokeAsync_CacheFault_FailsOpen_WithExactlyOneInvocation()
+    {
+        var cache = new TenantCache(new ThrowingDistributedCache(), Mock.Of<ILogger<TenantCache>>());
+        var filter = new IdempotencyFilter(cache, CreateMockLogger().Object);
+        var (httpContext, contextMock) = CreatePostContext(CreateUser());
+        httpContext.Request.Headers["X-Idempotency-Key"] = "faulting-cache-key";
+
+        var invocations = 0;
+        EndpointFilterDelegate next = _ =>
+        {
+            invocations++;
+            return ValueTask.FromResult<object?>(Results.Ok());
+        };
+
+        var result = await filter.InvokeAsync(contextMock.Object, next);
+
+        result.Should().BeOfType<Ok>();
+        invocations.Should().Be(1);
+    }
+
     #endregion
 
     #region Extension Method Tests
