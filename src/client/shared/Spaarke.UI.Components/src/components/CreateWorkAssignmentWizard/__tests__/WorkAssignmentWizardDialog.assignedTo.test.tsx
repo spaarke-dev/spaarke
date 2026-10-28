@@ -72,15 +72,17 @@ async function openWithSendEmail(assignedTo: Assignee) {
   mockEnterInfo.props = null;
   mockGrid.props = null;
   mockEmail.props = null;
-  render(
-    <WorkAssignmentWizardDialog
-      open
-      onClose={jest.fn()}
-      dataService={{} as never}
-      authenticatedFetch={jest.fn() as never}
-      bffBaseUrl="https://bff.example"
-    />
-  );
+  const dialogProps = {
+    onClose: jest.fn(),
+    dataService: {} as never,
+    authenticatedFetch: jest.fn() as never,
+    bffBaseUrl: 'https://bff.example',
+  };
+  const dialog = render(<WorkAssignmentWizardDialog open {...dialogProps} />);
+  const reopen = () => {
+    dialog.rerender(<WorkAssignmentWizardDialog open={false} {...dialogProps} />);
+    dialog.rerender(<WorkAssignmentWizardDialog open {...dialogProps} />);
+  };
 
   const stepContent = (id: string) => {
     const step = (mockShell.props.steps as Array<{ id: string; renderContent: () => React.ReactNode }>).find(
@@ -107,10 +109,15 @@ async function openWithSendEmail(assignedTo: Assignee) {
     )!;
     mockEmail.props = null;
     emailTree.rerender(<>{card.renderStep()}</>);
-    return mockEmail.props as { emailBody: string; emailSubject: string; onEmailBodyChange: (v: string) => void };
+    return mockEmail.props as {
+      emailBody: string;
+      emailSubject: string;
+      onEmailBodyChange: (v: string) => void;
+      onEmailSubjectChange: (v: string) => void;
+    };
   };
   await waitFor(() => expect(readEmail().emailBody).toContain('Priority:'));
-  return { readEmail, reportEnterInfo };
+  return { readEmail, reportEnterInfo, reopen };
 }
 
 describe('WorkAssignmentWizardDialog — Assigned To in the summary (task 038, FR-37)', () => {
@@ -151,5 +158,33 @@ describe('WorkAssignmentWizardDialog — Assigned To in the summary (task 038, F
     reportEnterInfo({ assignedToId: 'c-2', assignedToName: 'Contact Z' });
 
     expect(readEmail().emailBody).toBe('My own words');
+  });
+
+  it('clearing the subject to retype it neither rewrites the subject nor overwrites an edited body (fix round 2)', async () => {
+    const { readEmail } = await openWithSendEmail({ assignedToId: 'c-1', assignedToName: 'Contact Y' });
+
+    const first = readEmail();
+    act(() => first.onEmailBodyChange('My own words'));
+    const second = readEmail();
+    act(() => second.onEmailSubjectChange(''));
+    await act(async () => undefined);
+
+    const after = readEmail();
+    expect(after.emailBody).toBe('My own words');
+    expect(after.emailSubject).toBe('');
+  });
+
+  it('a reopened dialog pre-fills the email afresh (the earlier pre-fill does not block it)', async () => {
+    const { readEmail, reportEnterInfo, reopen } = await openWithSendEmail({
+      assignedToId: 'c-1',
+      assignedToName: 'Contact Y',
+    });
+
+    reopen();
+    reportEnterInfo({ name: 'WA-9', assignedToId: '', assignedToName: '' });
+    act(() => mockGrid.props.onSelectionChange(['send-email']));
+
+    await waitFor(() => expect(readEmail().emailBody).toContain('Name: WA-9'));
+    expect(readEmail().emailSubject).toBe('Work Assignment: WA-9');
   });
 });

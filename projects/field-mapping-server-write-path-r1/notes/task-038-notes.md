@@ -100,6 +100,34 @@ Checks after the round: wizard folder + `LookupField` + the four sibling wizards
 no errors in changed files (the two environmental `@spaarke/auth` errors remain). client-lint ratchet `ui-components`: ok.
 Code page `src/solutions/CreateWorkAssignmentWizard` `npm run build`: ok (`dist/index.html` 1,071.11 kB).
 
+## Fix round 2 (scoped re-check of `efa9b1607c`)
+
+rework: fix-round-2
+
+All changes in `WorkAssignmentWizardDialog.tsx` plus tests.
+
+| # | Finding | Class | Resolution |
+|---|---|---|---|
+| 1 | The first Enter Info report flipped `enterInfoSeenRef`, so every later mount had `hasInitialValues = true` and AI pre-fill never ran again (files added after an empty first visit, a run abandoned by Back or failed, none retried) | F1 regression | Simplest correct option chosen: `hasInitialValues = (enterInfoSeenRef && formHoldsEntries(form)) \|\| !!prefillRef`, where `formHoldsEntries` = name, description, matter type, practice area or assignee set. Seeding from the form is unchanged; only the AI skip is conditional. Tracking "an AI run completed for this file set" was rejected: the run lives inside `useAiPrefill`/`EnterInfoStep` and a repeat run overwrites edits (`handlePrefillApply` sets name/description unconditionally), so a run must not repeat once the form holds anything. |
+| 2 | The reset lines were untested | F2 | `backNav.test.tsx`: reopen starts blank; a new record applies its own pre-fill, not the earlier edits (kills deleting the record-change reset); AI call counts: first visit with files runs (1), remount with entered values skips (0), files added after an empty first visit runs (1), Back during an in-flight run runs again (2). `assignedTo` dialog test: a reopened dialog pre-fills the email afresh (kills deleting the `autoEmailRef` reset). Perturbations: record-change reset removed: 1 red; `autoEmailRef` reset removed: 1 red. The `enterInfoSeenRef` reset on reopen was REMOVED as provably dead: a reopen empties the form (the seed is the form), and the old record id clearing triggers the record-change reset anyway, so no test can distinguish it; the comment says so. |
+| 3 | The Send Email pre-fill fired whenever the subject was empty: clearing the subject to retype it rewrote it and overwrote an edited body | F (older defect) | The pre-fill runs once per open, keyed on `autoEmailRef` (`!autoEmailRef.current`), not on an empty subject; the subject is no longer an effect dependency. Later changes only refresh an UNEDITED body (round 1). Test: `clearing the subject to retype it ...` (body kept, subject stays empty). |
+| 4 | A failed pre-fill read left the previous record's values in `prefillValues`, and Enter Info seeded from them | F (older defect) | `setPrefillValues(undefined)` at the start of the record effect. Test: `a failed pre-fill read for the new record does not seed Enter Info with the previous record values`. |
+
+Red before (round-2 tests against `efa9b1607c`'s dialog): **4 red** (clear-subject, failed read, AI runs after an empty first visit,
+AI runs again after an abandoned run); the others are negative controls or kill the line mutations above (**2 red** under
+mutation). After: all green.
+
+Checks after the round: wizard folder + `LookupField` + four sibling wizards + `userLookup` tests **33 suites, 340 tests passed**;
+`tsc --noEmit` no errors in changed files (the two environmental `@spaarke/auth` errors remain); client-lint `ui-components` ok;
+code page build ok (`dist/index.html` 1,071.22 kB).
+
+Known limits recorded this round:
+- K4: Back to Select Work clears the record and the Enter Info seed (`SelectWorkStep` has no `initialValues`).
+- K4: with entered or AI-filled content, files swapped after Back are not re-analysed (a repeat run would overwrite the content).
+- K4: a one-render lag between the `EnterInfoStep` `[initialValues]` effect and very fast typing.
+- K4: with a hint, the `LookupField` dropdown opens below the hint.
+- K4: two Enter Info reports landing before a re-render can skip one email refresh.
+
 No open F-class finding.
 
 ## Placement / component justification (CLAUDE.md §11)
