@@ -312,7 +312,7 @@ export * from './StatusBadge';
 // TrackingFieldTrio's onOpenGrantModal (task 040 → 041, teams-app-r1). Built
 // directly on the SprkModal base shell (Family 2 per MODAL-DECISION-CRITERIA);
 // writes sprk_externalrecordaccess exclusively through the built BFF endpoints
-// (/grant, /invite-and-grant, /revoke) — context-agnostic (ADR-012), no Xrm
+// (/grant, /invite, /revoke) — context-agnostic (ADR-012), no Xrm
 // dependency in the shared core.
 export * from './AccessGrantModal';
 

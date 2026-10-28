@@ -4,7 +4,7 @@
  * Built for teams-app-r1 task 041 (design.md §5.1 / spec FR-11/FR-12). The modal
  * writes the ONE built table, `sprk_externalrecordaccess`, exclusively through the
  * BFF's already-built external-access endpoints (`/api/v1/external-access/grant`,
- * `/invite-and-grant`, `/revoke`) — it never writes to that table directly, and it
+ * `/invite`, `/revoke`) — it never writes to that table directly, and it
  * never re-implements the BFF's grant/invite core. The shared core has NO hard
  * dependency on `Xrm` or any Dataverse-entity-specific field names: the caller
  * (the `TrackingFieldTrio` PCF's `index.ts`, which alone knows the `sprk_project`
@@ -267,7 +267,7 @@ export interface IAccessGrantModalProps {
    * id). Sent to the BFF as `recordId`. */
   recordId: string;
   /** The polymorphic root type this grant is held at (task 070/071). The modal
-   * sends `{recordType, recordId}` in every grant/invite-and-grant body so the
+   * sends `{recordType, recordId}` in every grant and invite body so the
    * BFF binds the correct typed root lookup. Defaults to `'project'` — the
    * pre-071 baseline — so a caller that has not yet wired the host entity keeps
    * writing project grants unchanged (the BFF also accepts the legacy `projectId`
@@ -299,8 +299,8 @@ export interface IAccessGrantModalProps {
    * the server's fail direction. */
   canGrantAccess?: boolean;
   /** Host-supplied `authenticatedFetch` (ADR-028 function-dependency contract
-   * — never a raw token). Used for the three built BFF calls: `/grant`,
-   * `/invite-and-grant`, `/revoke`. */
+   * — never a raw token). Used for every BFF call the modal makes (`/grant`, `/invite`, `/revoke`, `/share-user`,
+   * `/unshare-user`, `/set-record-share-expiry` and its reads). */
   authenticatedFetch: AuthenticatedFetchFn;
   /** Loads the record's membership candidates (task 021 role-allowlist
    * source). Called once when the modal opens. */
@@ -326,10 +326,9 @@ export interface IAccessGrantModalProps {
   fetchStandingContacts?: () => Promise<IAccessGrantRecord[]>;
   /** Searches Dataverse Contacts by free-text query (named-contact picker).
    * Debounced by the modal; the host implements the actual Contact query
-   * (Xrm.WebApi, host-context). Used ONLY as the fallback inline picker when
-   * {@link pickPerson} is not supplied (e.g. an SPA host with no side-pane
-   * lookup); when `pickPerson` is provided the modal uses the side-pane
-   * Advanced Lookup instead and this is not called. */
+   * (Xrm.WebApi, host-context). Kept in the props contract, but the modal does
+   * not call it: people are added only through {@link pickPerson} (there is no
+   * inline contact picker). */
   searchContacts: (query: string) => Promise<IContactSearchResult[]>;
   /** Searches `sprk_organization` firms/orgs by free-text query for the in-app
    * "Add organization" inline picker (task 073 UAT #4). Host implements the
@@ -344,8 +343,8 @@ export interface IAccessGrantModalProps {
    * dropdown); `Add (N)` commits a contact via `POST /api/v1/external-access/grant` (the server decides between a
    * share and a grant) and a user via `POST /api/v1/external-access/share-user` (an internal Dataverse POA share).
    * On a Restricted record the modal asks for users only, and none flagged external ({@link IPersonPickOptions}).
-   * Omit → the "Add person" button is hidden ({@link searchContacts} is the fallback for hosts, e.g. an SPA, that
-   * cannot open the native pane). */
+   * Omit → the "Add person" button is hidden, and no person can be added (there is no inline fallback;
+   * {@link searchContacts} is not called). */
   pickPerson?: (options: IPersonPickOptions) => Promise<IPersonPick | null>;
   /** Opens the host's NATIVE advanced-lookup side pane for a single
    * `sprk_organization` (task 073 UAT v1.0.24) — the PRIMARY "+ Organization"

@@ -554,6 +554,10 @@ class AccessGrantModalApiError extends Error {
   readonly parentRecordType?: string;
   /** Task 181: `/share-user`'s related-records-pending 500 also says whether the person could not be notified. */
   readonly notificationFailed?: boolean;
+  /** Task 193: `/grant`'s related-records-pending 500 for a contact answered with a share names the colleague shared
+   * with, and says when the add's Expiration was not applied (a share has no end date). */
+  readonly sharedWithUser?: { systemUserId: string; fullName?: string | null };
+  readonly expiryNotApplied?: boolean;
 
   constructor(
     status: number,
@@ -561,7 +565,13 @@ class AccessGrantModalApiError extends Error {
     reasonCode?: string,
     deactivatedCount?: number,
     speContainerOutcome?: SpeContainerRevokeOutcome,
-    extras?: { problemDetail?: string; parentRecordType?: string; notificationFailed?: boolean }
+    extras?: {
+      problemDetail?: string;
+      parentRecordType?: string;
+      notificationFailed?: boolean;
+      sharedWithUser?: { systemUserId: string; fullName?: string | null };
+      expiryNotApplied?: boolean;
+    }
   ) {
     super(`AccessGrantModal request failed (${status}): ${detail}`);
     this.name = 'AccessGrantModalApiError';
@@ -573,6 +583,8 @@ class AccessGrantModalApiError extends Error {
     this.problemDetail = extras?.problemDetail;
     this.parentRecordType = extras?.parentRecordType;
     this.notificationFailed = extras?.notificationFailed;
+    this.sharedWithUser = extras?.sharedWithUser;
+    this.expiryNotApplied = extras?.expiryNotApplied;
     // Restore the prototype chain (extending built-ins across ES5/ts-jest
     // transpilation targets can otherwise break `instanceof` checks) — same
     // fix as communicationApi.ts's SendCommunicationError.
@@ -624,6 +636,9 @@ class AccessGrantModalApiError extends Error {
       parentRecordType?: unknown;
       // Task 181: an extension of `/share-user`'s related-records-pending 500.
       notificationFailed?: unknown;
+      // Task 193: extensions of `/grant`'s related-records-pending 500 when the contact was answered with a share.
+      sharedWithUser?: unknown;
+      expiryNotApplied?: unknown;
     };
     const reasonCode = typeof body.reasonCode === 'string' ? body.reasonCode : undefined;
     const detail = body.detail ?? body.title ?? `HTTP ${status}`;
@@ -637,8 +652,27 @@ class AccessGrantModalApiError extends Error {
       problemDetail,
       parentRecordType: typeof body.parentRecordType === 'string' ? body.parentRecordType : undefined,
       notificationFailed: body.notificationFailed === true,
+      sharedWithUser: sharedWithUserOf(body.sharedWithUser),
+      expiryNotApplied: body.expiryNotApplied === true,
     });
   }
+}
+
+/** Task 193: reads a `sharedWithUser` value (`{ systemUserId, fullName }`); anything else is absent. */
+function sharedWithUserOf(raw: unknown): { systemUserId: string; fullName?: string | null } | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const value = raw as { systemUserId?: unknown; fullName?: unknown };
+  if (typeof value.systemUserId !== 'string' || !value.systemUserId) return undefined;
+  return { systemUserId: value.systemUserId, fullName: typeof value.fullName === 'string' ? value.fullName : null };
+}
+
+/** Task 193: the colleague a related-records-pending `/grant` answer shared with, or `null` when it was not a share. */
+function sharedWithColleagueOfError(err: unknown): ISharedWithColleague | null {
+  if (!(err instanceof AccessGrantModalApiError) || !err.sharedWithUser) return null;
+  return {
+    name: err.sharedWithUser.fullName || COLLEAGUE_FALLBACK_NAME,
+    expiryNotApplied: err.expiryNotApplied === true,
+  };
 }
 
 /**
@@ -979,6 +1013,11 @@ export function sharedWithColleagueSentence(shared: ISharedWithColleague): strin
     : `Shared with ${shared.name} — internal user.`;
 }
 
+/** Task 193: a suggestion the server answered with a share leads with "Shared with X", then names the suggestion. */
+function suggestionSharedLead(shared: ISharedWithColleague, sourceFieldLabel: string): string {
+  return `${sharedWithColleagueSentence(shared)} Suggested from ${sourceFieldLabel}.`;
+}
+
 /** Slice C2b: a person `/invite` sent nothing to because they already have an account. */
 interface IAlreadyHasAccount {
   name: string;
@@ -1087,13 +1126,22 @@ function buildGrantBatchNotice(outcome: IGrantBatchOutcome): IModalNotice {
   const alreadyHasAccount = outcome.alreadyHasAccount ?? [];
   // Slice B3: who was invited for a work-account sign-in, named once, before the other suffixes.
   const workAccount = outcome.workAccountInvited ?? [];
-  // Task 193: the contacts the server shared with their colleague instead, named first.
-  const sharedSuffix = (outcome.sharedWithColleagues ?? [])
-    .map(shared => ` ${sharedWithColleagueSentence(shared)}`)
-    .join('');
-  const workSuffix = `${sharedSuffix}${
-    workAccount.length > 0 ? ` ${workAccount.join(', ')}: ${WORK_ACCOUNT_INVITED_SENTENCE}` : ''
-  }`;
+  // Task 193: the contacts the server answered with a share with their colleague. A share is not a grant, so the
+  // notice LEADS with "Shared with X" and "Granted access" counts only the other items (shares are counted in `granted`).
+  const shared = outcome.sharedWithColleagues ?? [];
+  const sharedLead = shared.map(sharedWithColleagueSentence).join(' ');
+  const grantedOther = Math.max(0, granted - shared.length);
+  const ofSelected =
+    shared.length > 0
+      ? `${sharedLead} Granted access to ${grantedOther} of the other ${selectedCount - shared.length}`
+      : `Granted access to ${granted} of ${selectedCount}`;
+  const allGranted =
+    shared.length === 0
+      ? `Granted access to ${granted} item(s).`
+      : grantedOther > 0
+        ? `${sharedLead} Granted access to ${grantedOther} other item(s).`
+        : sharedLead;
+  const workSuffix = workAccount.length > 0 ? ` ${workAccount.join(', ')}: ${WORK_ACCOUNT_INVITED_SENTENCE}` : '';
   // Task 149: shares that WERE written (counted in `granted`) while some related records of the secure record are not
   // updated yet — the server's sentence is appended to whichever notice applies, never reported as a failure.
   // Task 181: likewise the could-not-notify sentence, last.
@@ -1104,7 +1152,7 @@ function buildGrantBatchNotice(outcome: IGrantBatchOutcome): IModalNotice {
   if (denied) {
     return {
       intent: 'error',
-      text: `Granted access to ${granted} of ${selectedCount} before access was denied; the message above says why.${relatedSuffix}`,
+      text: `${ofSelected} before access was denied; the message above says why.${relatedSuffix}`,
     };
   }
   const needsRetry = inviteNotSent.names.length > 0;
@@ -1116,7 +1164,7 @@ function buildGrantBatchNotice(outcome: IGrantBatchOutcome): IModalNotice {
     const accountSentence = alreadyHasAccount.map(entry => ` ${alreadyHasAccountSentence(entry)}`).join('');
     const reasons = policyRefusals.length > 0 ? ` ${Array.from(new Set(policyRefusals)).join(' ')}` : '';
     const others = failures > 0 ? ` ${failures} other item(s) failed; please try those again.` : '';
-    const text = `Granted access to ${granted} of ${selectedCount}.${inviteSentence}${accountSentence}${reasons}${others}${relatedSuffix}`;
+    const text = `${ofSelected}.${inviteSentence}${accountSentence}${reasons}${others}${relatedSuffix}`;
     // Slice C2c: a sign-in link is a link only when it is an absolute https URL; any other value stays text.
     const links = alreadyHasAccount.flatMap(entry => safeSignInHref(entry.signInUrl) ?? []);
     if (!needsRetry) return { intent: policyRefusals.length > 0 || failures > 0 ? 'error' : 'warning', text, links };
@@ -1132,22 +1180,22 @@ function buildGrantBatchNotice(outcome: IGrantBatchOutcome): IModalNotice {
     const others = failures > 0 ? ` ${failures} other item(s) failed; please try those again.` : '';
     return {
       intent: 'error',
-      text: `Granted access to ${granted} of ${selectedCount}. ${reasons}${others}${relatedSuffix}`,
+      text: `${ofSelected}. ${reasons}${others}${relatedSuffix}`,
     };
   }
   if (failures > 0) {
     return {
       intent: 'error',
-      text: `Granted access to ${granted} of ${selectedCount}; ${failures} failed. Please try again.${relatedSuffix}`,
+      text: `${ofSelected}; ${failures} failed. Please try again.${relatedSuffix}`,
     };
   }
   const narrowedNote = anyNarrowed
     ? ' Some were narrowed to your own access level on this record (you can only grant what you hold).'
     : '';
   if (relatedPending || anyNarrowed || anyNotificationFailed) {
-    return { intent: 'warning', text: `Granted access to ${granted} item(s).${narrowedNote}${relatedSuffix}` };
+    return { intent: 'warning', text: `${allGranted}${narrowedNote}${relatedSuffix}` };
   }
-  return { intent: 'success', text: `Granted access to ${granted} item(s).${workSuffix}` };
+  return { intent: 'success', text: `${allGranted}${workSuffix}` };
 }
 
 /** Task 181 (owner round 89 item 3): added to the batch notice when the server granted access but could not send the
@@ -2136,6 +2184,9 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         if (pendingDetail) {
           granted += 1;
           relatedRecordsPending.push(pendingDetail);
+          // Task 193: a contact answered with a share names the colleague (and the end date) here too.
+          const pendingShare = sharedWithColleagueOfError(err);
+          if (pendingShare) sharedWithColleagues.push(pendingShare);
           // Task 181: that response also says whether the person could not be notified.
           anyNotificationFailed =
             anyNotificationFailed || (err instanceof AccessGrantModalApiError && err.notificationFailed === true);
@@ -2327,17 +2378,19 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         await loadData();
         const notificationFailed = data.notificationFailed === true;
         // Task 193: `/grant` may answer a contact with a share with the colleague the contact represents.
-        const shared = data.sharedWithUser
-          ? ` ${sharedWithColleagueSentence({
-              name: data.sharedWithUser.fullName || COLLEAGUE_FALLBACK_NAME,
-              expiryNotApplied: data.expiryNotApplied === true,
-            })}`
-          : '';
+        // A share is not a grant: the notice leads with "Shared with X".
+        const lead = data.sharedWithUser
+          ? suggestionSharedLead(
+              {
+                name: data.sharedWithUser.fullName || COLLEAGUE_FALLBACK_NAME,
+                expiryNotApplied: data.expiryNotApplied === true,
+              },
+              entry.sourceFieldLabel
+            )
+          : `Granted ${name} access (suggested from ${entry.sourceFieldLabel}).`;
         setNoticeIfCurrent({
           intent: notificationFailed ? 'warning' : 'success',
-          text:
-            `Granted ${name} access (suggested from ${entry.sourceFieldLabel}).${shared}` +
-            (notificationFailed ? ` ${NOTIFICATION_FAILED_SENTENCE}` : ''),
+          text: lead + (notificationFailed ? ` ${NOTIFICATION_FAILED_SENTENCE}` : ''),
         });
       } catch (err) {
         const { deny, parentRefusal } = splitAccessFailure(err);
@@ -2349,11 +2402,14 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         else if (pendingDetail) {
           await loadData();
           const notificationFailed = err instanceof AccessGrantModalApiError && err.notificationFailed === true;
+          // Task 193: a contact answered with a share names the colleague (and the end date) here too.
+          const pendingShare = sharedWithColleagueOfError(err);
+          const lead = pendingShare
+            ? suggestionSharedLead(pendingShare, entry.sourceFieldLabel)
+            : `Granted ${name} access (suggested from ${entry.sourceFieldLabel}).`;
           setNoticeIfCurrent({
             intent: 'warning',
-            text:
-              `Granted ${name} access (suggested from ${entry.sourceFieldLabel}). ${pendingDetail}` +
-              (notificationFailed ? ` ${NOTIFICATION_FAILED_SENTENCE}` : ''),
+            text: `${lead} ${pendingDetail}` + (notificationFailed ? ` ${NOTIFICATION_FAILED_SENTENCE}` : ''),
           });
         } else
           setNoticeIfCurrent({

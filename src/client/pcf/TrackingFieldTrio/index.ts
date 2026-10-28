@@ -37,7 +37,7 @@
  * (ADR-012), receiving candidates/grants/search/classification via callback
  * props backed by `context.webAPI` (host-context Dataverse reads, per
  * `docs/standards/DATA-ACCESS-DECISION-CRITERIA.md`). BFF writes (grant /
- * invite-and-grant / revoke) go through `@spaarke/auth`'s `authenticatedFetch`
+ * invite / revoke / share-user) go through `@spaarke/auth`'s `authenticatedFetch`
  * (bootstrapped in `init()` via `authInit.ts`, same pattern as
  * `SemanticSearchControl`).
  *
@@ -122,6 +122,10 @@
  *   parent; no TrackingFieldTrio is placed on Communication.)
  * - The dead `onSetStandingGrant` wiring is removed (the modal has had no
  *   standing-grant control since task 073 UAT v1.0.24 #5).
+ *
+ * v1.0.56 (task 193 V-fix): no change in this file's logic. In the bundled modal, a contact the server answered with a
+ *   share leads its notice with "Shared with X" (never "Granted access"), and a share whose related records are still
+ *   pending also names the colleague and says when the Expiration was not applied.
  *
  * v1.0.55 (task 193, unified-access-control-r2 — #2338): Manage Access has ONE "Add person" entry. `pickPerson` opens
  *   the native lookup over contact and systemuser together (users only, none flagged external, on a Restricted
@@ -1537,7 +1541,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       title: (this.context.parameters.title?.raw as string) || undefined,
       showTitle,
       showVersion,
-      versionText: 'v1.0.55 • Built 2026-10-28',
+      versionText: 'v1.0.56 • Built 2026-10-28',
       // Task 175 (owner round 87): only the options at or above the parent's floor.
       accessPermissionOptions: accessPermissionPill.options,
       // Labels pulled from each bound field's Dataverse metadata so they
