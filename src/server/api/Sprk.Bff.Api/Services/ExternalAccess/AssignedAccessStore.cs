@@ -141,6 +141,14 @@ public static class AssignedAccessReason
     public const string AssignmentEnded = "assignment-ended";
 
     /// <summary>
+    /// Task 193 G4b: the assignment ended and its share is gone, but the grant paired with that share could not be confirmed
+    /// ended, so the row stays <see cref="AssignedAccessState.Shared"/> for the next pass to retry. The share's absence is
+    /// this rule's own doing, never an operator's removal: if the subject is assigned again before the retry, the rule shares
+    /// again instead of recording a decline (owner rule (b), 2026-10-28).
+    /// </summary>
+    public const string ShareEndedPairedGrantPending = "share-ended-paired-grant-pending";
+
+    /// <summary>
     /// Owner round 71 (2026-10-06): the row's record (project, matter or work assignment) was DELETED — its root lookup was
     /// emptied by the relationship's RemoveLink cascade and a read of the record its key names answered "not found". Written
     /// with <see cref="AssignedAccessState.Revoked"/> by <see cref="AssignedAccessReconciliationJob"/>; no access is changed

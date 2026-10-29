@@ -957,6 +957,17 @@ public sealed class AssignedAccessMaterializer
             return false; // a malformed row: decide fresh
 
         var current = await ReadDirectShareMaskAsync(run, user, ct).ConfigureAwait(false);
+        if (current == 0 && ours.Reason == AssignedAccessReason.ShareEndedPairedGrantPending)
+        {
+            // Task 193 G4b (owner rule (b)): this rule removed the share when the assignment ended, and the row stayed live
+            // only to retry ending its paired grant. The subject is assigned again: a new assignment, decided fresh, never an
+            // operator's removal. A paired grant still active pairs with the new share again; the next removal ends both.
+            _logger.LogInformation(
+                "[ASSIGNED-ACCESS] {Type} {RootId}: {Subject} is assigned again after this rule removed {User}'s share; decided " +
+                "fresh.", run.Logical, run.RootId, subject, user);
+            return false;
+        }
+
         if (current == 0 && target.Kind == TargetKind.Skip && target.SkipReason == AssignedAccessReason.Restricted
             && target.SystemUserId == user)
         {
@@ -1529,6 +1540,13 @@ public sealed class AssignedAccessMaterializer
             run.Entry(subject, fields, row.SystemUserId, AssignedAccessState.Revoked, reason, action);
         }
 
+        // Task 193 G4b: the share is gone and its paired grant is not confirmed ended, so the row stays live (Shared) for the
+        // next pass to retry. It says why: a subject assigned again before that retry is decided fresh (ContinueOursAsync),
+        // never read as an operator's removal of the share (owner rule (b)).
+        Task KeepForPairedGrantRetryAsync() =>
+            UpdateRowAsync(run, row,
+                new AssignedAccessLedgerWrite(AssignedAccessState.Shared, AssignedAccessReason.ShareEndedPairedGrantPending), ct);
+
         switch (row.State)
         {
             case AssignedAccessState.Granted:
@@ -1653,7 +1671,10 @@ public sealed class AssignedAccessMaterializer
                         // the grant paired with it did not complete. That grant is ended BEFORE the row; one not ended leaves
                         // the row live (the failure recorded), so the next pass tries again.
                         if (!await EndPairedGrantsAsync(run, subject, fields, user, ct).ConfigureAwait(false))
+                        {
+                            await KeepForPairedGrantRetryAsync().ConfigureAwait(false);
                             return;
+                        }
 
                         await EndAsync(AssignedAccessReason.AssignmentEnded, AssignedAccessAction.Ledger).ConfigureAwait(false);
                         return;
@@ -1687,7 +1708,10 @@ public sealed class AssignedAccessMaterializer
                     // Task 193 G4a (A-F1): the grant paired with a removed share ends BEFORE the row; one not ended leaves the
                     // row live (the failure recorded), so the next pass — which finds the share gone — tries again.
                     if (restoreTo == 0 && !await EndPairedGrantsAsync(run, subject, fields, user, ct).ConfigureAwait(false))
+                    {
+                        await KeepForPairedGrantRetryAsync().ConfigureAwait(false);
                         return;
+                    }
 
                     await EndAsync(restoreTo != 0 ? AssignedAccessReason.PriorLevelRestored : AssignedAccessReason.AccessRemoved,
                         restoreTo != 0 ? AssignedAccessAction.Restored : AssignedAccessAction.Revoked).ConfigureAwait(false);

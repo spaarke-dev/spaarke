@@ -494,6 +494,53 @@ public class PairedGrantFollowsShareRemovalTests
         AssignedRow(contact).State.Should().Be(AssignedAccessState.Revoked);
     }
 
+    /// <summary>
+    /// Task 193 G4b (owner rule (b)): the pass that cleared the field removed the share but could not end its paired grant,
+    /// so the row stayed live for the retry. The person is assigned again before the next pass. The share is gone because
+    /// this rule removed it, not because an operator did: the re-assignment gives the share back, and nothing is Declined.
+    /// The paired grant was not ended, so it pairs with the share again, and the next removal ends both.
+    /// </summary>
+    [Fact]
+    public async Task G4b_Materializer_ReassignedBeforeTheRetry_GivesTheShareBack_AndRecordsNoDecline()
+    {
+        var (contact, user, paired) = await AutoSharedThenPaired();
+        _grants.Grants.FailDeactivations = true;
+        _grants.Store.Assign(ExternalGrantRootType.Matter, _matter, Attorney1, null);
+        (await _grants.SyncAsync(ExternalGrantRootType.Matter, _matter)).Complete.Should().BeFalse();
+        _grants.Shares.MaskOf(MatterTable, _matter, User(user)).Should().BeNull();
+        _grants.Grants.FailDeactivations = false;
+
+        _grants.Store.Assign(ExternalGrantRootType.Matter, _matter, Attorney1, contact);
+        var outcome = await _grants.SyncAsync(ExternalGrantRootType.Matter, _matter);
+
+        outcome.Complete.Should().BeTrue();
+        AssignedRow(contact).State.Should().Be(AssignedAccessState.Shared, "the rule removed the share itself; that is no decline");
+        _grants.Shares.MaskOf(MatterTable, _matter, User(user)).Should().Be(CollaborateMask, "the re-assignment gives it back");
+        Active(_matter, paired).Should().BeTrue("the share is back, so its paired grant is whole again");
+
+        _grants.Store.Assign(ExternalGrantRootType.Matter, _matter, Attorney1, null);
+        (await _grants.SyncAsync(ExternalGrantRootType.Matter, _matter)).Complete.Should().BeTrue();
+        _grants.Shares.MaskOf(MatterTable, _matter, User(user)).Should().BeNull();
+        Active(_matter, paired).Should().BeFalse("the next removal ends both");
+    }
+
+    /// <summary>
+    /// MUST NOT FIRE (task 193 G4b): a share removed outside the BFF while the person stays assigned is still an operator's
+    /// removal, recorded Declined, so the rule does not share again.
+    /// </summary>
+    [Fact]
+    public async Task G4b_Materializer_AShareRemovedOutOfBandWhileAssigned_IsStillDeclined()
+    {
+        var (contact, user, _) = await AutoSharedThenPaired();
+        _grants.Shares.Seed(MatterTable, _matter, User(user), 0);
+
+        (await _grants.SyncAsync(ExternalGrantRootType.Matter, _matter)).Complete.Should().BeTrue();
+
+        AssignedRow(contact).State.Should().Be(AssignedAccessState.Declined);
+        AssignedRow(contact).Reason.Should().Be(AssignedAccessReason.RemovedOutOfBand);
+        _grants.Shares.MaskOf(MatterTable, _matter, User(user)).GetValueOrDefault().Should().Be(0);
+    }
+
     /// <summary>Task 193 G4a: a report-only job pass ends nothing; while a paired grant remains, the row stays live for a revoking pass.</summary>
     [Fact]
     public async Task G4a_Materializer_AReportOnlyPass_EndsNothing_AndKeepsTheRowLive_WhileAPairedGrantRemains()

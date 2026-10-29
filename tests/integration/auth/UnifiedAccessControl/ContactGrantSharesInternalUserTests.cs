@@ -1004,6 +1004,46 @@ public class ContactGrantSharesInternalUserTests
         AssignedRow(contact).State.Should().Be(AssignedAccessState.Declined);
     }
 
+    /// <summary>
+    /// Task 193 G4b (owner rule (b), 2026-10-28): access through the Assigned To that was revoked in Manage Access stays
+    /// removed until the person is added again, OR the Assigned To is cleared and set again. Clearing ends the Declined row;
+    /// setting the same person again is a new assignment, so the rule shares again.
+    /// </summary>
+    [Fact]
+    public async Task G4b_UnsharedWhileAssigned_ThenTheAssignedToClearedAndSetAgain_TheShareComesBack()
+    {
+        _h.HostResolvingPairedGrantRevoke(MatterTable, _matter);
+        var (contact, user) = Colleague();
+        await Assign(contact);
+        (await Grant(contact)).Should().BeOfType<Ok<GrantAccessResponse>>();
+        (await Unshare(user)).Should().BeOfType<Ok<UnshareRecordWithUserResponse>>();
+        AssignedRow(contact).State.Should().Be(AssignedAccessState.Declined);
+
+        await Assign(null);
+        AssignedRow(contact).State.Should().Be(AssignedAccessState.Revoked, "clearing the Assigned To ends the decline");
+        await Assign(contact);
+
+        ShareMask(user).Should().Be(CollaborateMask, "setting the Assigned To again gives the access back");
+        AssignedRow(contact).State.Should().Be(AssignedAccessState.Shared);
+    }
+
+    /// <summary>Task 193 G4b (owner rule (b)): the same, through someone else and then the person again.</summary>
+    [Fact]
+    public async Task G4b_UnsharedWhileAssigned_ThenSomeoneElseAssignedAndThenThemAgain_TheShareComesBack()
+    {
+        _h.HostResolvingPairedGrantRevoke(MatterTable, _matter);
+        var (contact, user) = Colleague();
+        await Assign(contact);
+        (await Grant(contact)).Should().BeOfType<Ok<GrantAccessResponse>>();
+        (await Unshare(user)).Should().BeOfType<Ok<UnshareRecordWithUserResponse>>();
+
+        await Assign(_h.Contact());
+        await Assign(contact);
+
+        ShareMask(user).Should().Be(CollaborateMask, "assigning them again gives the access back");
+        AssignedRow(contact).State.Should().Be(AssignedAccessState.Shared);
+    }
+
 
     [Fact]
     public async Task G2_Unshare_RemovesTheShare_ThenEndsTheGrantPairedWithIt()
