@@ -9,9 +9,9 @@
 
 | Field | Value |
 |---|---|
-| **Task** | No lane is running. **173 is DONE** (#2462 merged `f4a0fc6862`): an external assignee is emailed from the system mailbox. 168, 171 and 172 are done too. |
-| **Status** | No owner question is open (the From question was answered: A, system mailbox). **ebilling #1911:** ontology APPROVED the ontology surface after the F2/K1 re-check (PR comment 6503550108). It asked ebilling to make sure 105-override-server.md names the principal-change known limit. Other peer items: DI-137 (#2458) is with R3/uac-r2. |
-| **Next Action** | 1) Next docs→master: 168 + 173 + project docs. Before it: notices to R3, uac-r2 and word-add-in; merge master in; build + full ArchTests; open the PR with `--auto --merge`. 2) After the next dev BFF deploy (UAC's 194b hold): the 168/173 live proof (internal email + bell; an external email from the system mailbox; the portal view), the task-170 App Insights check and the `BUD-` number. 3) Owner re-checks for 114, 158-163 and 166. |
+| **Task** | No lane is running. 168, 171, 172 and 173 are DONE and ON MASTER (#2463 → `c8bb55d0cd`; docs fast-forwarded to it). |
+| **Status** | No owner question is open. ebilling #1911 is merged (`eaa0d44f7f`). Their next PR (104, 101) brings our two asks: the principal-change known limit in 105-override-server.md and the double RecordRefusal log; review it when it arrives. The main checkout `C:\code_files\spaarke` refuses fast-forwards because of another session's uncommitted `.claude/agent-memory/researcher/MEMORY.md`; leave it alone. |
+| **Next Action** | 1) After the next dev BFF deploy (UAC's 194b hold; R3 builds the candidate): the 168/173 live proof (internal email + bell; an external email from the system mailbox; the external portal view, DI-135), the task-170 App Insights check and the `BUD-` number. 2) Owner re-checks for 114, 158-163 and 166, then close them. 3) Review ebilling's next PR (104/101) for the ontology surface. 4) The remaining tasks: 111, 105 (v4 UAT), 090 wrap-up. |
 
 ## Task 168 decisions: D-199 (owner, 2026-10-29)
 
@@ -30,7 +30,7 @@ Q1 = A (an eligible internal user, or an onboarded external contact with a grant
 
 ## Next docs→master
 
-The last one was PR #2439, merged as master `f07ab2ef1f` (2026-10-29): 167b, 167c, 171, 172 and the 194b repoint; all checks passed. Docs was fast-forwarded to it. The next one carries 168 when it is ready. Before it: notices to word-add-in, R3 and uac-r2; merge master in; full ArchTests. The word-add-in session refuses held messages while the two sessions run in different permission modes.
+The last was PR #2463, merged as master `c8bb55d0cd` (2026-10-29): 168 and 173. Before the next: notices to R3, uac-r2 and word-add-in (current name `spaarke-wt-spaarkeai-word-add-in-r1-8a`); merge master in; build, the filtered Signals tests and the full ArchTests (1858 now).
 
 ## Blocked follow-ups (ours)
 
