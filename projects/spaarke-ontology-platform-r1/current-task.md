@@ -9,9 +9,9 @@
 
 | Field | Value |
 |---|---|
-| **Task** | No lane is running. **168 is DONE** (#2418 merged to docs `7cb3c263c0` after 4 fix rounds under D-199; all reviewers passed). 171 and 172 are done too. |
-| **Status** | Docs is ahead of master by 168 plus project docs. **Owner question open:** the From address for an external Assign Task assignee (A: always the system mailbox, recommended; B: as built, the assigner's mailbox first). A small follow-up if A. **ebilling #1911:** ontology review posted (PASS-WITH-FINDINGS, F2 + K1); ebilling is fixing F2 and K1 and will send the fix range on its own. The CheckVersionOwnerAsync IntentionalExemption is confirmed at `d3eb47376a`. Its invoice-approve caller (103) comes later. |
-| **Next Action** | 1) The owner answers the From question; if A, a small 168 follow-up PR. 2) Re-check ebilling's F2+K1 fix range for #1911 when it arrives. 3) Next docs→master: 168 (+ the From follow-up). Before it: notices; merge master in; full ArchTests. 4) After the next dev BFF deploy (it waits on UAC's 194b hold): the 168 live proof (internal email + bell; external email and the portal view), the task-170 App Insights check and the `BUD-` number. 5) Owner re-checks for 114, 158-163 and 166. |
+| **Task** | **173** (an external Assign Task assignee is emailed from the system mailbox; owner's D-199 amendment, 2026-10-29) is RUNNING: a Sonnet implementer in `C:\wts-168b`, branch `task/168b-external-sender`, from docs `78e8eec622`. It will open a PR into docs. 168, 171 and 172 are DONE. |
+| **Status** | No owner question is open (the From question was answered: A, system mailbox). **ebilling #1911:** ontology APPROVED the ontology surface after the F2/K1 re-check (PR comment 6503550108). It asked ebilling to make sure 105-override-server.md names the principal-change known limit. Other peer items: DI-137 (#2458) is with R3/uac-r2. |
+| **Next Action** | 1) When 173 reports: re-check its diff (scoped: the external route never calls the user-mode send; the gate is unchanged), wait for CI, merge its PR into docs, remove `C:\wts-168b` with Remove-WorktreeSafe, delete the branch, mark 173 complete (POML, completion block, TASK-INDEX), and run the drift check with `-Project`. 2) Next docs→master: 168 + 173. Before it: notices to R3, uac-r2 and word-add-in; merge master in; build + full ArchTests; open the PR with `--auto --merge`. 3) After the next dev BFF deploy (UAC's 194b hold): the 168/173 live proof, the task-170 App Insights check and the `BUD-` number. 4) Owner re-checks for 114, 158-163 and 166. |
 
 ## Task 168 decisions: D-199 (owner, 2026-10-29)
 
@@ -40,7 +40,7 @@ The last one was PR #2439, merged as master `f07ab2ef1f` (2026-10-29): 167b, 167
 ## Dev state (spaarkedev1 / spaarke-bff-dev)
 
 - **BFF:** `136568cf70` (R3, 2026-10-29). **Console:** `a8314c2e0e`. **SpaarkeMaster:** 1.2.4.0. **POL-MATTER-NOBUDGET:** v3 `…6313`.
-- **Worktrees:** none for lanes. Remove only with `Remove-WorktreeSafe.ps1`, one path per call.
+- **Worktrees:** `C:\wts-168b` (task 173). Remove only with `Remove-WorktreeSafe.ps1`, one path per call.
 - **Stash:** two old `lint-staged automatic backup` entries (20 and 30 h old) are not ours. Leave them.
 
 ## Peers (current session names)
