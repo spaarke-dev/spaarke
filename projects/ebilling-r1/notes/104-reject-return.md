@@ -33,14 +33,14 @@ Order (nothing is written before the claim):
 
 **Repeat.** The claimant (matched by the caller's own contact) completes what is missing; the record answers AlreadyRecorded, so there is never a second record. Anyone else gets a no-op. Once the record exists the request's reason no longer matters (fix round, F1-a): the repeat finds the stored record through the stored set, closes that set, writes the portion-to-record link and answers Decided. The stored record keeps the first reason (test `RepeatWithAnotherReason_FinishesTheClosesAndTheLink_WithoutASecondRecord`).
 
-**Resubmission linkage (D-43).** On an accepted submission (not AutoRejected), the persister reads the earlier invoices with the same firm (`sprk_vendororg`) and trimmed firm invoice number (ordered by created on then id, excluding the new invoice; no top count). It walks back past AUTOMATIC rejections (F1-b) and takes the first invoice that is not one as the predecessor. It links `sprk_supersedesinvoice` only if that predecessor is Returned to Firm and its single core record equals the new invoice's. A human-Rejected, Approved, In Review or Cancelled predecessor is never linked.
+**Resubmission linkage (D-43).** On an accepted submission (not AutoRejected), the persister reads the earlier invoices with the same firm (`sprk_vendororg`) and trimmed firm invoice number (ordered by created on then id, excluding the new invoice; no top count). It walks back past AUTOMATIC rejections (F1-b; the owner's rule, EB-D-174: automatic rejections are skipped and a rejection by a person ends the chain) and takes the first invoice that is not one as the predecessor. It links `sprk_supersedesinvoice` only if that predecessor is Returned to Firm and its single core record equals the new invoice's. A human-Rejected, Approved, In Review or Cancelled predecessor is never linked.
 
 An automatic rejection is told apart by its **approval row**: 049 creates an AutoRejected invoice Rejected with no `sprk_invoiceapproval`, while every other invoice, a human-Rejected one included, keeps its row (read for the Rejected candidates in one `In` query). The approval row was chosen over the submission's status because the submission is Rejected for both an automatic rejection and a Blocked one, and the row is on the invoice side of the same read. A read fault is a Retry (`ebilling.submission.supersedes_read_failed`) with nothing persisted.
 
 ## Decisions applied
 
 - **EB-D-169..172.** As above. Reject and return need the same Write on the invoice (`ebilling.invoice.decide`) plus live eligibility.
-- **D-43.** Linkage only from Returned to Firm.
+- **D-43 and EB-D-174.** Linkage only from Returned to Firm; automatic rejections are skipped, a rejection by a person ends the chain.
 - **D-101.** Held invoices are refused here.
 - **D-122.** Closed Signals are the invoice's and its lines' (D-122 names 104 for the invoice).
 
@@ -137,3 +137,13 @@ Self-review at FULL depth; the operator's adversarial review follows.
 - The claimant's completion does not re-check eligibility, as 103: the claim proved eligibility at decision time.
 - `DecidedInvoice_IsExcludedFromTheRollupSets` now also builds the actual and pending rollup queries from the sets (`BuildGroupedSpendFetchXml`, `BuildGroupedPendingSpendFetchXml`) and asserts the decided status is in neither.
 - The predecessor read has no top count (a firm and number are a handful of rows); a single `RetrieveMultiple` is not paged, fine below 5,000 rows.
+
+## Fix round gate (head after `c617f15b37`)
+
+| Check | Result |
+|---|---|
+| Fix seeds (each fix reverted, new tests red, restored) | F1-a stored record id: 4 red; F1-a link on the existing-record path: 10 red; F1-b automatic-rejection skip: 2 red; K2 decision id: 1 red; K1 wording: 2 red |
+| Full broad unit filter | 13,980 passed, 1 failed, 14 skipped. The 1 was `ChatMessageStreamingContractTests.SendMessage_ToAnotherUsersSession_...` (AI chat, unrelated; a 1 m 46 s stream copy fault under machine load). Rerun alone: 7 / 0 |
+| Full ArchTests | 1,858 / 0 |
+| `Sprk.Bff.Api.IntegrationTests` | 199 passed, 0 failed, 8 skipped |
+| Code review (Step 9.5, fix scope plus direct callers) | No new F-class finding. `CompleteOrNoOpAsync` passes the stored record id only to a claimant's finish; the existing-record branch writes the status, closes the stored set and links, each idempotent; the predecessor walk reads the approvals in one `In` query and a fault is a Retry. |

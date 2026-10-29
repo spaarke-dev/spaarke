@@ -959,11 +959,11 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
     }
 
     /// <summary>
-    /// D-43 (task 104): the invoice this submission's invoice supersedes. Walking back from the MOST RECENT earlier invoice (by created on, then
+    /// D-43 and EB-D-174 (task 104): the invoice this submission's invoice supersedes. Walking back from the MOST RECENT earlier invoice (by created on, then
     /// id) for the same firm and firm invoice number, AUTOMATIC rejections are skipped (049 creates them Rejected with no approval row: nobody
     /// decided them, and they must not hide the Returned invoice the firm is correcting); the first invoice that is not one is the predecessor,
     /// and only when it is Returned to Firm. A human-Rejected (a Rejected invoice that has its approval row), or any other, most-recent invoice
-    /// is never linked. The two invoices must regard the same single core record (<see cref="InvoiceFamilyCoreRecordGuard"/>
+    /// is never linked: EB-D-174 skips automatic rejections only, and a rejection by a person ends the chain. The two invoices must regard the same single core record (<see cref="InvoiceFamilyCoreRecordGuard"/>
     /// refuses a supersedes link across core records), else no link. Read app-only: a firm resubmitting must not be able to learn, from a
     /// refusal, that an invoice it cannot read exists. Throws on a read fault (the caller retries).
     /// </summary>
