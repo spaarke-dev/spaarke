@@ -4,7 +4,7 @@
     <title>An external Assign Task assignee is emailed from the system mailbox, never the assigner's (D-199 amendment)</title>
     <phase>11 UAT</phase>
     <gate>startable: 168 is merged to docs (`7cb3c263c0`)</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes .cs in the BFF send path; decides which mailbox an external party sees.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -40,4 +40,10 @@
       <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantAccessNotifier.cs (the reference: the portal email from the system mailbox)</file>
     </files>
   </knowledge>
+  <completion date="2026-10-29">
+    Delivered (PR #2462, merged to docs `f4a0fc6862`, head `ec76eea1f0`): when the recipient gate answers External, `AssignTaskNotifier.EmailAsync` sends in the request from the system mailbox (`SendMode.SharedMailbox`, `FromMailbox = RegistrationEmailService.ResolveFromMailbox`). This is the job's request shape, with no new setting, interface or job. A failure falls back to the existing system-mailbox job, which re-asks the gate. A blank DefaultMailbox sends nothing (`assignee_email_not_sent`). Internal recipients are unchanged. The gate calls, the content (portal link, display name only, no bell), the internal-only row and `sprk_sentby` are unchanged. One new log event: `EmailSentFromSystem` (50395).
+    Tests: the external case asserts the system sender on the real request, that the user-mode send is never called, and no '@' in the subject or body. Also: the system send failing, a blank mailbox, and the real OutboundCommunicationRow. AssignTask|Notifier|Communication 2392/0 (2 skipped); ArchTests 1665/1665. Mutation (external routed to user mode): 5 tests fail. Publish delta vs a fresh master: -2.5 KB (192 files each; no packages).
+    Review: main-session read of the diff (sender keyed on the gate's verdict; the fallback stays behind the gate). CI green.
+    rework: none task 173
+  </completion>
 </task>
