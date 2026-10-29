@@ -419,7 +419,8 @@ public static class ExternalAccessModule
         // savedquery source REQUIRES registering that view here, or its grid errors.
         //
         // sprk_project: grid 61711823. Primary name = sprk_projectnumber. Task 157 dropped (rule (b) only):
-        // statecode, createdon, ownerid, sprk_practicearea, sprk_projecttype_ref.
+        // statecode, createdon, ownerid, sprk_practicearea, sprk_projecttype_ref. r3 task 002 re-admitted
+        // sprk_projecttype_ref as a grid column (it is now referenced by the grid configuration, rule (a)).
         services.AddExternalModule(new ExternalModuleDescriptor
         {
             Name = "collaboration",
@@ -431,6 +432,8 @@ public static class ExternalAccessModule
             ReadableColumns = new HashSet<string>
             {
                 "sprk_projectid", "sprk_projectname", "sprk_projectnumber", "statuscode", "modifiedon",
+                // spaarke-SPA-external-access-platform-r3 task 002 (owner 2026-10-29): grid column on grid 61711823.
+                "sprk_projecttype_ref",
             },
         });
 
@@ -475,6 +478,8 @@ public static class ExternalAccessModule
                 "sprk_documentid", "sprk_documentname", "sprk_documenttype", "createdon",
                 "sprk_project", "sprk_matter", "sprk_workassignment",
                 "sprk_createdbyperson", "sprk_createdbycontact",
+                // spaarke-SPA-external-access-platform-r3 task 002 (owner 2026-10-29): grid column on grid 3af4102c.
+                "sprk_filetype", "modifiedon",
             },
         });
 
@@ -494,7 +499,7 @@ public static class ExternalAccessModule
                 new ScopeDimension { Attribute = "sprk_matter", AccessibleIds = p => p.GetAccessibleMatterIds() },
                 new ScopeDimension { Attribute = "sprk_project", AccessibleIds = p => p.GetAccessibleProjectIds().ToHashSet() },
             },
-            // Grid 3ff4102c. Primary name = sprk_name (not on the grid; admitted for the /record default
+            // Grid 3ff4102c. Primary name = sprk_name (on the grid since r3 task 002; also the /record default
             // projection). Task 157 dropped (rule (b) only): sprk_visibilitystate, modifiedon, statecode.
             SavedQueryIds = NoSavedQueries, // grid source inline (live 2026-10-02): no registered view
             PrimaryNameAttribute = "sprk_name",
@@ -506,6 +511,8 @@ public static class ExternalAccessModule
                 // grid-derived. The invoice status is statuscode; the SPA record detail reads it. Transitional:
                 // sprk_invoicestatus stays until ebilling removes it from grid 3ff4102c and from dev.
                 "statuscode",
+                // spaarke-SPA-external-access-platform-r3 task 002 (owner 2026-10-29): grid column on grid 3ff4102c.
+                "sprk_totalamount_base",
             },
         });
 
@@ -519,7 +526,7 @@ public static class ExternalAccessModule
             RecordEntity = "sprk_workassignment",
             RecordIdAttribute = "sprk_workassignmentid",
             AccessibleRecordIds = p => p.GetAccessibleWorkAssignmentIds(),
-            // Grid 42f4102c. Primary name = sprk_name (not on the grid; admitted for the /record default
+            // Grid 42f4102c. Primary name = sprk_name (on the grid since r3 task 002; also the /record default
             // projection). Task 157 dropped (rule (b) only): statecode, createdon, ownerid, sprk_assignedto.
             SavedQueryIds = NoSavedQueries, // grid source inline (live 2026-10-02): no registered view
             PrimaryNameAttribute = "sprk_name",
@@ -527,6 +534,8 @@ public static class ExternalAccessModule
             {
                 "sprk_workassignmentid", "sprk_name", "sprk_workassignmentnumber", "sprk_priority",
                 "sprk_responseduedate", "statuscode", "sprk_regardingproject",
+                // spaarke-SPA-external-access-platform-r3 task 002 (owner 2026-10-29): grid column on grid 42f4102c.
+                "sprk_mattertype", "modifiedon",
             },
         });
 
@@ -541,12 +550,15 @@ public static class ExternalAccessModule
             RecordIdAttribute = "sprk_matterid",
             AccessibleRecordIds = p => p.GetAccessibleMatterIds(),
             // Grid 583a2a33. Primary name = sprk_matternumber. Task 157 dropped (rule (b) only): statecode,
-            // createdon, sprk_mattertype, sprk_practicearea.
+            // createdon, sprk_mattertype, sprk_practicearea. r3 task 002 re-admitted sprk_mattertype as a grid
+            // column (it is now referenced by the grid configuration, rule (a)).
             SavedQueryIds = NoSavedQueries, // grid source inline (live 2026-10-02): no registered view
             PrimaryNameAttribute = "sprk_matternumber",
             ReadableColumns = new HashSet<string>
             {
                 "sprk_matterid", "sprk_mattername", "sprk_matternumber", "statuscode",
+                // spaarke-SPA-external-access-platform-r3 task 002 (owner 2026-10-29): grid column on grid 583a2a33.
+                "sprk_mattertype", "modifiedon",
             },
         });
 

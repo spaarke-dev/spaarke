@@ -81,6 +81,14 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
         "<attribute name='sprk_matter'/><attribute name='sprk_workassignment'/>" +
         "<order attribute='createdon' descending='true'/></entity></fetch>";
 
+    /// <summary>The documents grid FetchXML as it reads after the r3 task 002 rollout: the live grid plus sprk_filetype and modifiedon.</summary>
+    private const string DocumentsGridFetchXmlAfterTask002 =
+        "<fetch><entity name='sprk_document'><attribute name='sprk_documentid'/><attribute name='sprk_documentname'/>" +
+        "<attribute name='sprk_documenttype'/><attribute name='createdon'/><attribute name='sprk_project'/>" +
+        "<attribute name='sprk_matter'/><attribute name='sprk_workassignment'/>" +
+        "<attribute name='sprk_filetype'/><attribute name='modifiedon'/>" +
+        "<order attribute='createdon' descending='true'/></entity></fetch>";
+
     private static ExternalModuleDataEndpoints.FetchXmlGuardResult EvaluateDocuments(string? fetchXml) =>
         ExternalModuleDataEndpoints.EvaluateFetchXmlGuard(
             fetchXml, DocumentEntity, DocumentColumns, new FetchXmlEntityExtractor());
@@ -674,14 +682,17 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
         { "sprk_gridconfiguration", "sprk_name" },
     };
 
-    /// <summary>The live FetchXML of each outside-counsel grid (sprk_gridconfiguration.sprk_configjson, 2026-09-30).</summary>
+    /// <summary>The FetchXML of each outside-counsel grid (sprk_gridconfiguration.sprk_configjson): read live 2026-09-30, and for
+    /// project, matter, work assignment and invoice as it reads after the r3 task 002 rollout (owner 2026-10-29). The documents
+    /// row stays the pre-rollout <see cref="LiveDocumentsGridFetchXml"/>; its post-rollout FetchXML is
+    /// <see cref="DocumentsGridFetchXmlAfterTask002"/>.</summary>
     public static TheoryData<string, string> LiveGridFetchXml => new()
     {
-        { "sprk_project", "<fetch><entity name='sprk_project'><attribute name='sprk_projectid'/><attribute name='sprk_projectname'/><attribute name='sprk_projectnumber'/><attribute name='statuscode'/><attribute name='modifiedon'/><order attribute='sprk_projectname' descending='false'/></entity></fetch>" },
+        { "sprk_project", "<fetch><entity name='sprk_project'><attribute name='sprk_projectid'/><attribute name='sprk_projectname'/><attribute name='sprk_projectnumber'/><attribute name='statuscode'/><attribute name='modifiedon'/><attribute name='sprk_projecttype_ref'/><order attribute='sprk_projectname' descending='false'/></entity></fetch>" },
         { "sprk_document", LiveDocumentsGridFetchXml },
-        { "sprk_invoice", "<fetch><entity name='sprk_invoice'><attribute name='sprk_invoiceid'/><attribute name='sprk_invoicenumber'/><attribute name='sprk_invoicedate'/><attribute name='sprk_invoicestatus'/><attribute name='sprk_totalamount'/><attribute name='sprk_project'/><attribute name='sprk_matter'/><order attribute='sprk_invoicedate' descending='true'/></entity></fetch>" },
-        { "sprk_workassignment", "<fetch><entity name='sprk_workassignment'><attribute name='sprk_workassignmentid'/><attribute name='sprk_workassignmentnumber'/><attribute name='sprk_priority'/><attribute name='sprk_responseduedate'/><attribute name='statuscode'/><attribute name='sprk_regardingproject'/><order attribute='sprk_responseduedate' descending='false'/></entity></fetch>" },
-        { "sprk_matter", "<fetch><entity name='sprk_matter'><attribute name='sprk_matterid'/><attribute name='sprk_mattername'/><attribute name='sprk_matternumber'/><attribute name='statuscode'/><order attribute='sprk_mattername' descending='false'/></entity></fetch>" },
+        { "sprk_invoice", "<fetch><entity name='sprk_invoice'><attribute name='sprk_invoiceid'/><attribute name='sprk_name'/><attribute name='sprk_invoicenumber'/><attribute name='sprk_invoicedate'/><attribute name='statuscode'/><attribute name='sprk_totalamount'/><attribute name='sprk_project'/><attribute name='sprk_matter'/><attribute name='sprk_totalamount_base'/><order attribute='sprk_invoicedate' descending='true'/></entity></fetch>" },
+        { "sprk_workassignment", "<fetch><entity name='sprk_workassignment'><attribute name='sprk_workassignmentid'/><attribute name='sprk_name'/><attribute name='sprk_workassignmentnumber'/><attribute name='sprk_priority'/><attribute name='sprk_responseduedate'/><attribute name='statuscode'/><attribute name='sprk_regardingproject'/><attribute name='sprk_mattertype'/><attribute name='modifiedon'/><order attribute='sprk_responseduedate' descending='false'/></entity></fetch>" },
+        { "sprk_matter", "<fetch><entity name='sprk_matter'><attribute name='sprk_matterid'/><attribute name='sprk_mattername'/><attribute name='sprk_matternumber'/><attribute name='statuscode'/><attribute name='sprk_mattertype'/><attribute name='modifiedon'/><order attribute='sprk_mattername' descending='false'/></entity></fetch>" },
         { "sprk_servicerequest", "<fetch><entity name='sprk_servicerequest'><attribute name='sprk_servicerequestid'/><attribute name='sprk_servicerequestnumber'/><attribute name='sprk_name'/><attribute name='statuscode'/><attribute name='createdon'/><attribute name='sprk_requestedby'/><order attribute='createdon' descending='true'/></entity></fetch>" },
     };
 
@@ -749,7 +760,12 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
     /// </summary>
     private static readonly IReadOnlyDictionary<string, string[]> LiveDerivedAllowLists = new Dictionary<string, string[]>
     {
-        ["sprk_project"] = new[] { "sprk_projectid", "sprk_projectname", "sprk_projectnumber", "statuscode", "modifiedon" },
+        ["sprk_project"] = new[]
+        {
+            "sprk_projectid", "sprk_projectname", "sprk_projectnumber", "statuscode", "modifiedon",
+            // spaarke-SPA-external-access-platform-r3 task 002 (owner 2026-10-29): grid column on grid 61711823.
+            "sprk_projecttype_ref",
+        },
         ["sprk_document"] = new[]
         {
             "sprk_documentid", "sprk_documentname", "sprk_documenttype", "createdon",
@@ -758,6 +774,8 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
             // NOT grid-derived. The SPA reads them to offer Delete only on the caller's own documents; they name a
             // systemuser or contact id and nothing else (notes/task-032-notes.md).
             "sprk_createdbyperson", "sprk_createdbycontact",
+            // r3 task 002 (owner 2026-10-29): grid columns on grid 3af4102c.
+            "sprk_filetype", "modifiedon",
         },
         ["sprk_invoice"] = new[]
         {
@@ -767,13 +785,22 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
             // The SPA record detail reads the invoice status from statuscode. Appears on both sides of the task 134 shrink
             // comparison, so it drops nothing.
             "statuscode",
+            // r3 task 002 (owner 2026-10-29): grid column on grid 3ff4102c.
+            "sprk_totalamount_base",
         },
         ["sprk_workassignment"] = new[]
         {
             "sprk_workassignmentid", "sprk_name", "sprk_workassignmentnumber", "sprk_priority",
             "sprk_responseduedate", "statuscode", "sprk_regardingproject",
+            // r3 task 002 (owner 2026-10-29): grid columns on grid 42f4102c.
+            "sprk_mattertype", "modifiedon",
         },
-        ["sprk_matter"] = new[] { "sprk_matterid", "sprk_mattername", "sprk_matternumber", "statuscode" },
+        ["sprk_matter"] = new[]
+        {
+            "sprk_matterid", "sprk_mattername", "sprk_matternumber", "statuscode",
+            // r3 task 002 (owner 2026-10-29): grid columns on grid 583a2a33.
+            "sprk_mattertype", "modifiedon",
+        },
         ["sprk_servicerequest"] = new[]
         {
             "sprk_servicerequestid", "sprk_servicerequestnumber", "sprk_name", "statuscode", "createdon",
@@ -796,27 +823,32 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
         ["sprk_project"] = new[]
         {
             "sprk_projectid", "sprk_projectname", "sprk_projectnumber", "statuscode", "statecode",
-            "modifiedon", "createdon", "ownerid", "sprk_practicearea", "sprk_projecttype_ref",
+            "modifiedon", "createdon", "ownerid", "sprk_practicearea",
+            "sprk_projecttype_ref", // task 134 admitted it by rule (b); r3 task 002 (owner 2026-10-29) re-admits it as a grid column, so it is on both sides
         },
-        // Task 134's document list was the task-157 derivation (no rule-(b) column); task 032's two creator stamps are a
-        // later, deliberate addition, so they appear on both sides of the shrink comparison and drop nothing.
+        // Task 134's document list was the task-157 derivation (no rule-(b) column); task 032's two creator stamps and the
+        // r3 task 002 grid columns (sprk_filetype, modifiedon; owner 2026-10-29) are later, deliberate additions, so they
+        // appear on both sides of the shrink comparison and drop nothing.
         ["sprk_document"] = LiveDerivedAllowLists["sprk_document"],
         ["sprk_invoice"] = new[]
         {
             "sprk_invoiceid", "sprk_name", "sprk_invoicenumber", "sprk_invoicedate", "sprk_invoicestatus",
             "sprk_totalamount", "sprk_project", "sprk_matter", "sprk_visibilitystate", "modifiedon", "statecode",
             "statuscode", // the 2026-10-17 addition above; on both sides, so the shrink comparison is unchanged
+            "sprk_totalamount_base", // r3 task 002 addition (owner 2026-10-29); on both sides so the shrink comparison is unchanged
         },
         ["sprk_workassignment"] = new[]
         {
             "sprk_workassignmentid", "sprk_name", "sprk_workassignmentnumber", "sprk_priority",
             "sprk_responseduedate", "statuscode", "statecode", "sprk_regardingproject", "createdon",
             "ownerid", "sprk_assignedto",
+            "sprk_mattertype", "modifiedon", // r3 task 002 addition (owner 2026-10-29); on both sides so the shrink comparison is unchanged
         },
         ["sprk_matter"] = new[]
         {
             "sprk_matterid", "sprk_mattername", "sprk_matternumber", "statuscode", "statecode",
             "createdon", "sprk_mattertype", "sprk_practicearea",
+            "modifiedon", // r3 task 002 addition (owner 2026-10-29); on both sides so the shrink comparison is unchanged
         },
         ["sprk_servicerequest"] = LiveDerivedAllowLists["sprk_servicerequest"],
         ["sprk_gridconfiguration"] = LiveDerivedAllowLists["sprk_gridconfiguration"],
@@ -829,7 +861,6 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
         { "sprk_project", "createdon" },
         { "sprk_project", "ownerid" },
         { "sprk_project", "sprk_practicearea" },
-        { "sprk_project", "sprk_projecttype_ref" },
         { "sprk_invoice", "sprk_visibilitystate" },
         { "sprk_invoice", "modifiedon" },
         { "sprk_invoice", "statecode" },
@@ -839,7 +870,6 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
         { "sprk_workassignment", "sprk_assignedto" },
         { "sprk_matter", "statecode" },
         { "sprk_matter", "createdon" },
-        { "sprk_matter", "sprk_mattertype" },
         { "sprk_matter", "sprk_practicearea" },
     };
 
@@ -977,6 +1007,157 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
         record.Should().NotContainKey("@formattedValues", "its only entry was the dropped column's display value");
         record.Should().ContainKey(primaryId).And.ContainKey(module.PrimaryNameAttribute,
             "the /record default projection survives the shrink");
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════
+    // 7. r3 task 002 — owner grid columns (owner decision 2026-10-29)
+    // ═════════════════════════════════════════════════════════════════════════════
+    //
+    // Seven columns became readable so the external grids can show them. Each is a grid column (rule (a)): none is secured,
+    // a pointer, or a column the grid does not reference. The two lookups point at reference tables that have no module,
+    // so the lookup value is readable and the table behind it is not.
+
+    /// <summary>The seven columns r3 task 002 admitted: (entity, column).</summary>
+    public static TheoryData<string, string> Task002GridColumns => new()
+    {
+        { "sprk_project", "sprk_projecttype_ref" },
+        { "sprk_matter", "sprk_mattertype" },
+        { "sprk_matter", "modifiedon" },
+        { "sprk_workassignment", "sprk_mattertype" },
+        { "sprk_workassignment", "modifiedon" },
+        { "sprk_document", "sprk_filetype" },
+        { "sprk_document", "modifiedon" },
+        { "sprk_invoice", "sprk_totalamount_base" },
+    };
+
+    /// <summary>Columns beside the admitted ones that stay unreadable: (entity, column).</summary>
+    public static TheoryData<string, string> Task002SiblingColumnsStillRefused => new()
+    {
+        { "sprk_matter", "sprk_practicearea" },
+        { "sprk_project", "sprk_practicearea" },
+        { "sprk_project", "ownerid" },
+        { "sprk_workassignment", "sprk_assignedto" },
+        { "sprk_document", "sprk_searchindexed" },
+        { "sprk_invoice", "sprk_invoiceduedate" },
+    };
+
+    /// <summary>The grid FetchXML of <paramref name="entity"/> without <paramref name="column"/>, then with it appended.</summary>
+    private static string GridFetchXmlPlusColumn(string entity, string column)
+    {
+        var withoutColumn = LiveGridFetchXmlFor(entity).Replace($"<attribute name='{column}'/>", string.Empty, StringComparison.Ordinal);
+        return withoutColumn.Replace("<order", $"<attribute name='{column}'/><order", StringComparison.Ordinal);
+    }
+
+    private static Task<IResult> FetchGrantedEverywhere(string entity, string fetchXml, Guid id, ExternalModuleRegistry registry, FetchDouble dataverse) =>
+        ExternalModuleDataEndpoints.ExecuteScopedFetchCoreAsync(
+            new FetchRequestDto(entity, fetchXml, PagingCookie: null), GrantedEverywhere(id), registry,
+            new FetchXmlEntityExtractor(), dataverse.Execute, NoFlags, Narrow, NullLogger.Instance, CancellationToken.None);
+
+    [Fact]
+    public void ProductionModule_ForTheDocumentsGridAfterTheRollout_AdmitsItsFetchXml()
+    {
+        var module = ProductionRegistry().FindByEntity(DocumentEntity)!;
+
+        var result = ExternalModuleDataEndpoints.EvaluateFetchXmlGuard(
+            DocumentsGridFetchXmlAfterTask002, module.RecordEntity, module.ReadableColumns, new FetchXmlEntityExtractor());
+
+        result.Verdict.Should().Be(Verdict.Allowed, $"violation: {result.ColumnViolation}");
+    }
+
+    [Theory]
+    [MemberData(nameof(Task002GridColumns))]
+    public async Task ExecuteScopedFetch_WhenAnOwnerGridColumnIsRequested_ReturnsOkAndQueriesOnce(string entity, string column)
+    {
+        var id = Guid.NewGuid();
+        var dataverse = new FetchDouble();
+
+        var result = await FetchGrantedEverywhere(entity, GridFetchXmlPlusColumn(entity, column), id, ProductionRegistry(), dataverse);
+
+        result.Should().BeOfType<Ok<FetchResponseDto>>();
+        dataverse.Calls.Should().Be(1);
+    }
+
+    [Theory]
+    [MemberData(nameof(Task002SiblingColumnsStillRefused))]
+    public async Task ExecuteScopedFetch_WhenASiblingOfAnOwnerGridColumnIsRequested_Returns400AndNeverQueries(string entity, string column)
+    {
+        var id = Guid.NewGuid();
+        var dataverse = new FetchDouble();
+
+        var result = await FetchGrantedEverywhere(entity, GridFetchXmlPlusColumn(entity, column), id, ProductionRegistry(), dataverse);
+
+        ShouldBeProblem(result, StatusCodes.Status400BadRequest, ExternalModuleDataEndpoints.ErrorFetchXmlColumnNotPermitted);
+        dataverse.Calls.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ExecuteScopedFetch_WhenAMatterRowCarriesTheAdmittedAndAnUnadmittedLookup_KeepsOnlyTheAdmittedOneWithItsDisplayValue()
+    {
+        var id = Guid.NewGuid();
+        var matterType = new EntityReference("sprk_mattertype_ref", Guid.NewGuid());
+        var row = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["sprk_matterid"] = id,
+            ["sprk_mattername"] = "Alpha matter",
+            ["sprk_matternumber"] = "MAT-0001",
+            ["sprk_mattertype"] = matterType,
+            ["sprk_practicearea"] = new EntityReference("sprk_practicearea_ref", Guid.NewGuid()),
+            ["@logicalName"] = "sprk_matter",
+            ["@formattedValues"] = new Dictionary<string, string>
+            {
+                ["sprk_mattertype"] = "Litigation",
+                ["sprk_practicearea"] = "Employment",
+            },
+        };
+        var dataverse = new FetchDouble(row);
+
+        var result = await FetchGrantedEverywhere("sprk_matter", LiveGridFetchXmlFor("sprk_matter"), id, ProductionRegistry(), dataverse);
+
+        var projected = result.Should().BeOfType<Ok<FetchResponseDto>>().Subject.Value!.Entities.Should().ContainSingle().Subject;
+        projected.Should().ContainKey("sprk_mattertype").WhoseValue.Should().Be(matterType);
+        projected.Should().NotContainKey("sprk_practicearea");
+        var formatted = projected["@formattedValues"].Should().BeAssignableTo<IReadOnlyDictionary<string, string>>().Subject;
+        formatted.Should().ContainKey("sprk_mattertype").WhoseValue.Should().Be("Litigation");
+        formatted.Should().NotContainKey("sprk_practicearea", "a display value is a column value too");
+    }
+
+    [Theory]
+    [InlineData("sprk_mattertype_ref")]
+    [InlineData("sprk_projecttype_ref")]
+    public async Task GetScopedRecord_WhenTheEntityIsALookupTargetTableWithNoModule_IsRefusedWithoutReading(string entity)
+    {
+        var id = Guid.NewGuid();
+        var dataverse = new RecordDouble(new Dictionary<string, object?> { ["sprk_name"] = "Litigation" });
+
+        var result = await ExternalModuleDataEndpoints.GetScopedRecordCoreAsync(
+            entity, id, select: null, GrantedEverywhere(id), ProductionRegistry(), dataverse.Read,
+            NullLogger.Instance, CancellationToken.None);
+
+        ShouldBeNotRegistered(result);
+        dataverse.Calls.Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData("sprk_mattertype_ref")]
+    [InlineData("sprk_projecttype_ref")]
+    public async Task ExecuteScopedFetch_WhenTheEntityIsALookupTargetTableWithNoModule_IsRefusedWithoutQuerying(string entity)
+    {
+        var id = Guid.NewGuid();
+        var dataverse = new FetchDouble();
+        var fetchXml = $"<fetch><entity name='{entity}'><attribute name='sprk_name'/></entity></fetch>";
+
+        var result = await FetchGrantedEverywhere(entity, fetchXml, id, ProductionRegistry(), dataverse);
+
+        ShouldBeNotRegistered(result);
+        dataverse.Calls.Should().Be(0);
+    }
+
+    private static void ShouldBeNotRegistered(IResult result)
+    {
+        var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
+        problem.StatusCode.Should().Be(StatusCodes.Status403Forbidden);
+        problem.ProblemDetails.Extensions.Should().ContainKey("reasonCode")
+            .WhoseValue.Should().Be(ExternalModuleDataEndpoints.DenyModuleNotRegistered);
     }
 
     // ═════════════════════════════════════════════════════════════════════════════
