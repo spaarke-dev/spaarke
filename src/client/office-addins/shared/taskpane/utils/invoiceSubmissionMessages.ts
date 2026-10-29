@@ -2,7 +2,8 @@
  * invoiceSubmissionMessages.ts — user text for ebilling's from-email invoice submission (task 133 A1).
  *
  * Every code pinned in `projects/ebilling-r1/notes/095-from-email-contract.md` (pinned at fd70b8e1f6; the 2026-10-28
- * review round at cc7bb5eeee, task/ebill-095-from-email) §5 (replays),
+ * review round at cc7bb5eeee, task/ebill-095-from-email; task 094's rows at 97c793670b, merged into work/ebilling-r1 at
+ * ba63082008) §5 (replays),
  * §6 (refusals, with the `marks_invalid`, `email_unidentifiable` and `correction_not_allowed` reasons) and §9 (final
  * outcomes) has its own sentence here, in the catalog pattern of `errorMessages.ts`. No server prose is pinned (§9:
  * "the add-in localises"), so the server's `detail` is never shown in place of these. A code this file does not know
@@ -15,12 +16,25 @@ export const EMAIL_UNIDENTIFIABLE_CODE = 'ebilling.submission.email_unidentifiab
 /**
  * §6 refusals that cannot work from Outlook, so the view also suggests uploading in Spaarke: the email can't be
  * identified, or a marked file can't be kept byte for byte in the saved email (422, 2026-10-28; its `detail` names the
- * internal upload route).
+ * internal upload route). Task 094 (2026-10-28): the saved `.eml` is gone or empty, or no longer carries a marked file
+ * as marked (both 422, `detail` names the upload route), or belongs to another communication.
  */
 export const PERMANENT_SUBMISSION_CODES: ReadonlySet<string> = new Set([
   EMAIL_UNIDENTIFIABLE_CODE,
   'ebilling.submission.attachment_not_preserved',
+  'ebilling.submission.email_save_failed',
+  'ebilling.submission.document_unavailable',
+  'ebilling.submission.source_communication_mismatch',
 ]);
+
+/**
+ * §6 "After step A" (task 094): a refusal that comes after the submission filed the communication under the record
+ * keeps that filing, and its `detail` ENDS with this pinned sentence. It is the only signal the contract gives.
+ */
+export const FILING_KEPT_DETAIL = 'The communication was filed under the record first; that filing is kept.';
+
+/** What the user is told when {@link FILING_KEPT_DETAIL} is present: the email is filed even though nothing was submitted. */
+export const FILING_KEPT_MESSAGE = 'The email itself was filed under this record first, and it stays filed there.';
 
 /** What a sentence may name. */
 export interface InvoiceMessageContext {
@@ -38,6 +52,8 @@ export interface InvoiceRefusalLike {
   mark?: string;
   invoiceStatus?: string;
   retryAfterSeconds?: number;
+  /** §6 "After step A": the server filed the email under the record before it refused, and the filing is kept. */
+  filingKept?: boolean;
 }
 
 type Facts = InvoiceRefusalLike & InvoiceMessageContext;
@@ -160,6 +176,21 @@ export const SUBMISSION_ERROR_MESSAGES: Readonly<Record<string, Entry>> = {
   'ebilling.submission.document_core_record_mismatch': `This email is filed under a different matter, project or work assignment. Submit the invoice to that record. ${NOTHING}`,
   'ebilling.submission.correction_not_allowed': fromReasons(CORRECTION_REASON_MESSAGES, CORRECTION_FALLBACK),
   'sdap.access.deny.record_unavailable': `The invoice isn't available to you: it may not exist, or you can't change it. ${NOTHING}`,
+  // §6 task 094 (2026-10-28): step 1 reads the saved .eml and its communication, step A files an unfiled communication
+  'ebilling.submission.source_forbidden': `You can't open this email's saved copy in Spaarke, so it can't be submitted. ${NOTHING}`,
+  'ebilling.submission.document_not_found': `This email's saved copy is no longer in Spaarke. ${NOTHING}`,
+  'ebilling.submission.source_communication_mismatch':
+    "This email's saved copy in Spaarke doesn't belong to its email record, so it can't be submitted from Outlook.",
+  COMMUNICATION_REFILE_FORBIDDEN: `This email isn't filed yet, and you don't have permission to file it under this record. ${NOTHING}`,
+  'ebilling.submission.storage_not_configured': `Invoice file storage isn't set up in Spaarke. ${NOTHING} Ask an administrator.`,
+  'ebilling.tracking.unavailable': f =>
+    `Spaarke couldn't give the invoice a tracking number right now. ${NOTHING} ${tryAgain(f)}`,
+  'ebilling.submission.email_save_failed':
+    "This email's saved copy in Spaarke is missing or empty, so the invoice can't be submitted from Outlook.",
+  'ebilling.submission.document_unavailable':
+    "A marked file isn't in this email's saved copy as it was marked, so the invoice can't be submitted from Outlook.",
+  'ebilling.submission.earlier_attempt_being_removed': f =>
+    `An earlier attempt to submit this email failed and Spaarke is still clearing it away. ${NOTHING} ${tryAgain(f)}`,
   // §6: passed through from the in-process save
   OFFICE_004: `An attachment is too large to save. ${NOTHING}`,
   OFFICE_005: `The attachments together are too large to save. ${NOTHING}`,
@@ -192,6 +223,9 @@ export const INVOICE_OUTCOME_MESSAGES: Readonly<Record<string, Entry>> = {
   'ebilling.submission.processing_failed': "The invoice couldn't be processed.",
   'ebilling.submission.file_scan_timeout':
     "The malware scan of a marked file didn't finish in time, so the invoice was not processed. Submit it again.",
+  // Task 094 (2026-10-28): a re-attempt is allowed (EB-D-160).
+  'ebilling.submission.source_changed':
+    "The email's saved copy in Spaarke changed while the invoice was being processed, so it was not processed. Submit it again.",
   'ebilling.submission.blocked': 'The invoice was rejected by a billing rule.',
   'ebilling.submission.returned': 'The invoice was returned to the firm.',
 };
@@ -215,8 +249,13 @@ export function isRetryableSubmissionRefusal(status: number, code: string | unde
   return status === 503 || status === 429 || ((status === 502 || status === 504) && code === undefined);
 }
 
-/** The sentence for a refusal or a retryable failure (§5, §6). */
+/** The sentence for a refusal or a retryable failure (§5, §6), saying when the email stays filed (§6 "After step A"). */
 export function describeSubmissionRefusal(refusal: InvoiceRefusalLike, context: InvoiceMessageContext = {}): string {
+  const sentence = refusalSentence(refusal, context);
+  return refusal.filingKept ? `${sentence} ${FILING_KEPT_MESSAGE}` : sentence;
+}
+
+function refusalSentence(refusal: InvoiceRefusalLike, context: InvoiceMessageContext): string {
   const facts: Facts = { ...refusal, ...context };
   const entry = refusal.code ? SUBMISSION_ERROR_MESSAGES[refusal.code] : undefined;
   if (entry !== undefined) return render(entry, facts);

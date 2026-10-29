@@ -8,9 +8,11 @@ import {
   describeSubmissionRefusal,
   GENERIC_FAILED_OUTCOME_MESSAGE,
   GENERIC_OUTCOME_MESSAGE,
+  FILING_KEPT_MESSAGE,
   GENERIC_SUBMISSION_MESSAGE,
   HELD_FOR_REVIEW_MESSAGE,
   isRetryableSubmissionRefusal,
+  PERMANENT_SUBMISSION_CODES,
 } from '../invoiceSubmissionMessages';
 
 const PINNED_REFUSAL_CODES = [
@@ -47,6 +49,16 @@ const PINNED_REFUSAL_CODES = [
   'OFFICE_INTERNAL',
   'ebilling.submission.attachment_not_preserved', // added 2026-10-28 at cc7bb5eeee (422)
   'OFFICE_AUTH_ERROR', // added 2026-10-28 at cc7bb5eeee (500, the access probe faulted)
+  // task 094 rows (97c793670b)
+  'ebilling.submission.source_forbidden',
+  'ebilling.submission.document_not_found',
+  'ebilling.submission.source_communication_mismatch',
+  'COMMUNICATION_REFILE_FORBIDDEN',
+  'ebilling.submission.storage_not_configured',
+  'ebilling.tracking.unavailable',
+  'ebilling.submission.email_save_failed',
+  'ebilling.submission.document_unavailable',
+  'ebilling.submission.earlier_attempt_being_removed',
   // §2 firm fields
   'ebilling.submission.firm_invalid',
   'ebilling.submission.firm_not_linked',
@@ -83,6 +95,7 @@ const PINNED_OUTCOME_CODES = [
   'ebilling.submission.source_check_failed',
   'ebilling.submission.processing_failed',
   'ebilling.submission.file_scan_timeout', // added to the contract at f1ae28290e (task 092; Failed, re-attempt allowed)
+  'ebilling.submission.source_changed', // task 094 (97c793670b; Failed, re-attempt allowed)
   'ebilling.submission.blocked',
   'ebilling.submission.returned',
 ];
@@ -192,5 +205,60 @@ describe('invoice submission messages — specifics', () => {
     expect(isRetryableSubmissionRefusal(503, 'ebilling.disabled')).toBe(false);
     expect(isRetryableSubmissionRefusal(409, 'ebilling.submission.submission_already_ended')).toBe(false);
     expect(isRetryableSubmissionRefusal(400, 'ebilling.submission.marks_invalid')).toBe(false);
+    // task 094
+    expect(isRetryableSubmissionRefusal(503, 'ebilling.submission.earlier_attempt_being_removed')).toBe(true);
+    expect(isRetryableSubmissionRefusal(503, 'ebilling.tracking.unavailable')).toBe(true);
+    expect(isRetryableSubmissionRefusal(422, 'ebilling.submission.storage_not_configured')).toBe(false);
+    expect(isRetryableSubmissionRefusal(403, 'COMMUNICATION_REFILE_FORBIDDEN')).toBe(false);
+    expect(isRetryableSubmissionRefusal(403, 'ebilling.submission.source_forbidden')).toBe(false);
+  });
+});
+
+describe('invoice submission messages — task 094', () => {
+  it('the 422s whose detail names the upload route, and the source mismatch, are permanent (upload in Spaarke)', () => {
+    for (const code of [
+      'ebilling.submission.email_save_failed',
+      'ebilling.submission.document_unavailable',
+      'ebilling.submission.source_communication_mismatch',
+    ]) {
+      expect(PERMANENT_SUBMISSION_CODES.has(code)).toBe(true);
+    }
+    // must-not-fire: an unconfigured store would refuse an upload in Spaarke too, so it is not offered.
+    expect(PERMANENT_SUBMISSION_CODES.has('ebilling.submission.storage_not_configured')).toBe(false);
+  });
+
+  it('earlier_attempt_being_removed says to try again, with Retry-After when given', () => {
+    expect(
+      describeSubmissionRefusal({
+        kind: 'retryable',
+        status: 503,
+        code: 'ebilling.submission.earlier_attempt_being_removed',
+        retryAfterSeconds: 20,
+      })
+    ).toMatch(/earlier attempt .* failed.*Nothing was submitted\. Try again in 20 seconds\.$/);
+  });
+
+  it('source_changed (Failed) says to submit again', () => {
+    expect(describeInvoiceOutcome('ebilling.submission.source_changed', {}, 'Failed')).toMatch(/Submit it again\.$/);
+  });
+
+  it('must-fire: a refusal after step A says the email stays filed; must-not-fire: without the flag it does not', () => {
+    const base = { kind: 'refused' as const, status: 409, code: 'ebilling.submission.document_already_submitted' };
+    expect(describeSubmissionRefusal({ ...base, filingKept: true })).toBe(
+      `${describeSubmissionRefusal(base)} ${FILING_KEPT_MESSAGE}`
+    );
+    expect(describeSubmissionRefusal(base)).not.toContain(FILING_KEPT_MESSAGE);
+    // also on a retryable failure after step A, and on a code this client does not know
+    expect(
+      describeSubmissionRefusal({
+        kind: 'retryable',
+        status: 503,
+        code: 'ebilling.tracking.unavailable',
+        filingKept: true,
+      })
+    ).toMatch(/Try again in a moment\. The email itself was filed/);
+    expect(describeSubmissionRefusal({ kind: 'refused', status: 409, code: 'x.new', filingKept: true })).toBe(
+      `${GENERIC_SUBMISSION_MESSAGE} ${FILING_KEPT_MESSAGE}`
+    );
   });
 });
