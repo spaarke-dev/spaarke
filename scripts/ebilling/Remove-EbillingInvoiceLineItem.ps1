@@ -264,7 +264,7 @@ function Write-Inventory($inv) {
 # Removal steps
 # ---------------------------------------------------------------------------------------------------------------
 
-# Entity-scoped publish (never PublishAll: other sessions may have unpublished work in dev).
+# Entity-scoped publish (never a tenant-wide publish: other sessions may have unpublished work in dev).
 function Publish-Tables([string[]]$Tables) {
     if ($DryRun) { Write-Host "  WOULD PUBLISH $($Tables -join ', ')" -ForegroundColor Cyan; return }
     $ents = ($Tables | ForEach-Object { "<entity>$_</entity>" }) -join ''

@@ -169,7 +169,7 @@ try {
     Write-Host "3. Eligible approvers (N:N to contact)" -ForegroundColor Cyan
     Add-ManyToMany -Schema $NnSchema -Entity1 $ApprovalTable -Entity2 'contact' -Label1 'Eligible Approvers' -Label2 'Invoice Approvals (eligible approver)'
 
-    # --- Publish (only when something changed; entity-scoped, never PublishAllXml) ------------------------------------
+    # --- Publish (only when something changed; entity-scoped, never a tenant-wide publish) ------------------------------------
     Write-Host "Publish" -ForegroundColor Cyan
     $wrote = ($script:Created.Count + $script:Changed.Count) -gt 0
     if ($DryRun) {

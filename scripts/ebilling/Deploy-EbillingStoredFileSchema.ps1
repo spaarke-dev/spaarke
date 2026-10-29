@@ -65,7 +65,7 @@
     The securability pre-pass over every sprk_storedfile column runs before the marker is created and before any column is secured.
 
     PUBLISH. Only what this script and its relationships touched: sprk_storedfile, sprk_document, sprk_invoice, sprk_communication,
-    sprk_procedureversion, sprk_billingexport, systemuser and the sprk_storedfilepurpose choice. Never PublishAllXml.
+    sprk_procedureversion, sprk_billingexport, systemuser and the sprk_storedfilepurpose choice. Never a tenant-wide publish.
 
     NEVER: set any invoice to Superseded; write the marker on any row; create a form, view or subgrid for sprk_storedfile (the
     platform's own default system form and views come with every new table; none is created or changed here); change a role
@@ -757,7 +757,7 @@ function Assert-Securable($Specs, [string]$Then) {
     Write-Report 'OK' "securable: $((@($Specs) | ForEach-Object { "$($_.Table).$($_.Column)" }) -join ', ')"
 }
 
-# Entity-scoped publish of what this run changed (never PublishAllXml). Also called when a run stops after writing, so a re-run
+# Entity-scoped publish of what this run changed (never a tenant-wide publish). Also called when a run stops after writing, so a re-run
 # (which then skips every item and publishes nothing) never leaves an earlier run's change unpublished (review K2).
 function Publish-Changes {
     if ($DryRun) { Write-Host "  WhatIf: publish skipped" -ForegroundColor Cyan; return }
@@ -918,7 +918,7 @@ try {
     foreach ($spec in @($script:Secured | Where-Object { $_.Table -eq $StoredFile })) { Invoke-ColumnSecurity $spec }
     Test-OtherProfiles
 
-    # --- Publish (only when something changed; entity-scoped, never PublishAllXml) -------------------------------------------
+    # --- Publish (only when something changed; entity-scoped, never a tenant-wide publish) -------------------------------------------
     Write-Host "Publish" -ForegroundColor Cyan
     Publish-Changes
 

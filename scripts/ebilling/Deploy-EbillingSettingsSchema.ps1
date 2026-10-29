@@ -373,7 +373,7 @@ try {
         Write-Host "  SKIPPED  sprk_defaultcodeset ($CodeSetTable does not exist; task 029 re-runs the script after 018)" -ForegroundColor DarkYellow
     }
 
-    # --- Publish (only when something changed; entity-scoped, never PublishAllXml) ------------------------------------
+    # --- Publish (only when something changed; entity-scoped, never a tenant-wide publish) ------------------------------------
     Write-Host "Publish" -ForegroundColor Cyan
     $wrote = ($script:Created.Count + $script:Changed.Count) -gt 0
     if ($DryRun) {

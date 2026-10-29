@@ -27,7 +27,7 @@
     proposal).
 
     NEVER deletes or renames anything. A same-name column of another type, or an existing column shorter than 500, STOPS the script
-    with exit code 2 and an ESCALATION message. Publish is entity-scoped (PublishXml for sprk_invoicesubmission, never PublishAllXml),
+    with exit code 2 and an ESCALATION message. Publish is entity-scoped (PublishXml for sprk_invoicesubmission, never a tenant-wide publish),
     and only when this run wrote metadata. Pending (unpublished) forms / views of sprk_invoicesubmission that this script does not
     edit would be published too; the script lists them and refuses to publish unless -AllowPendingCollateral is given (D-103).
 

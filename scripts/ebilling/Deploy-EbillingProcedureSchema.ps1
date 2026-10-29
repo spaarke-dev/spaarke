@@ -1274,7 +1274,7 @@ try {
     foreach ($spec in $script:Secured) { Invoke-ColumnSecurity $spec }
     Test-OtherProfiles
 
-    # --- Publish (only when something changed; entity-scoped, never PublishAllXml) -------------------------------------------------
+    # --- Publish (only when something changed; entity-scoped, never a tenant-wide publish) -------------------------------------------------
     Write-Host "Publish" -ForegroundColor Cyan
     $metaChanged = $script:Created.Count -gt 0 -or @($script:Changed | Where-Object { $_ -like 'secure *' -or $_ -like '* auditing' }).Count -gt 0
     if ($DryRun) { Write-Host "  WhatIf: publish skipped" -ForegroundColor Cyan }

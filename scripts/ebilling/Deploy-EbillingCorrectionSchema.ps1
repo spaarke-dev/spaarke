@@ -216,7 +216,7 @@ try {
     Add-Column 'sprk_regardingrecordnumber' (New-StringDef 'sprk_RegardingRecordNumber' 'Regarding Record Number' 'ADR-024 resolver field: number of that record.' 100) 'String'
     Add-Column 'sprk_regardingrecordurl' (New-StringDef 'sprk_RegardingRecordUrl' 'Regarding Record URL' 'ADR-024 resolver field: URL of that record.' 500 'Url') 'String'
 
-    # --- Publish (only when something changed; entity-scoped, never PublishAllXml) ------------------------------------
+    # --- Publish (only when something changed; entity-scoped, never a tenant-wide publish) ------------------------------------
     Write-Host "Publish" -ForegroundColor Cyan
     $wrote = ($script:Created.Count + $script:Changed.Count) -gt 0
     if ($DryRun) {

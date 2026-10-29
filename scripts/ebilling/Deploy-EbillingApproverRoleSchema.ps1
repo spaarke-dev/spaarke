@@ -361,7 +361,7 @@ try {
         }
     }
 
-    # --- Publish (only when something changed; entity-scoped, never PublishAllXml) ------------------------------------
+    # --- Publish (only when something changed; entity-scoped, never a tenant-wide publish) ------------------------------------
     Write-Host "Publish" -ForegroundColor Cyan
     $wrote = ($script:Created.Count + $script:Changed.Count) -gt 0
     if ($DryRun) {

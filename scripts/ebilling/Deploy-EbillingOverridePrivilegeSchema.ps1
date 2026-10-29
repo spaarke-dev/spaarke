@@ -27,7 +27,7 @@
     NEVER removes or lowers anything. If sprk_ebillingoverride already exists with another primary name, or the role exists but is not a
     single root role, the script STOPS with exit code 2 (an escalation) and changes nothing further.
 
-    No publish of anything but the one table (entity-scoped, never PublishAllXml); privileges and roles are not published. The table and
+    No publish of anything but the one table (entity-scoped, never a tenant-wide publish); privileges and roles are not published. The table and
     role are added to the unmanaged solution named by -SolutionUniqueName; the SpaarkeMaster solution source is synced by the deploy
     task 112 (project CLAUDE.md section 3), not here.
 

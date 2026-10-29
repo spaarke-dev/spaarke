@@ -206,7 +206,7 @@ try {
         -Display 'Export Batch' -Description 'The AP export batch this invoice was sent in. Single-valued, so an invoice is in at most one batch (FR-41).'
     Set-EbEntity $ExportTable
 
-    # --- Publish (only when something changed; entity-scoped, never PublishAllXml) ------------------------------------
+    # --- Publish (only when something changed; entity-scoped, never a tenant-wide publish) ------------------------------------
     Write-Host "Publish" -ForegroundColor Cyan
     $wrote = ($script:Created.Count + $script:Changed.Count) -gt 0
     if ($DryRun) {

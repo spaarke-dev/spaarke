@@ -9,11 +9,11 @@
 #      ESCALATION (exit 2, nothing written) when 659490005 or the label exists with another meaning, a task-012 value is missing
 #      or relabelled, or statuscode holds a value the task does not know;
 #   3. the F1 values and the cascade comparison the verify uses;
-#   4. the script text: no form, view, role, profile-member, invoice-row or document-row write, and no PublishAllXml;
+#   4. the script text: no form, view, role, profile-member, invoice-row or document-row write, and only the entity-scoped publish (the repo-wide publish lint bans the tenant-wide one);
 #   4a. (task 088 pre-run fixes) the SchemaNames (table sprk_StoredFile, primary sprk_Name, every other column PascalCase after the
 #      prefix; logical names unchanged), AssociatedMenuConfiguration DoNotDisplay on all six relationship bodies (the module's
-#      Add-Lookup / Add-Table bodies are captured with Invoke-Dv mocked), the publish entity list (seven entities + the choice, no
-#      PublishAllXml) and the securability pre-pass (over every sprk_storedfile column, before the marker);
+#      Add-Lookup / Add-Table bodies are captured with Invoke-Dv mocked), the publish entity list (seven entities + the choice)
+#      and the securability pre-pass (over every sprk_storedfile column, before the marker);
 #   4b. (task 088 retype, run 1 on dev 2026-10-22) no BigInt column: sprk_sourceversion is a text 20 and sprk_sizebytes a whole number
 #      0 to 2147483647; and a RE-RUN against the partial state dev was left in (fake Dataverse, tests/scripts/fixtures/
 #      Invoke-StoredFileSchemaAgainstFake.ps1, a child process, no network): everything present is skipped, the two retyped columns
@@ -367,10 +367,8 @@ Describe 'the publish list (K-c)' {
         $ents.Count | Should Be 7
         $xml | Should Match '<optionsets><optionset>sprk_storedfilepurpose</optionset></optionsets>'
     }
-    It 'is what Publish-Changes sends, and never PublishAllXml (must-fire if either comes back)' {
+    It 'is what Publish-Changes sends (must-fire if it changes; the repo-wide publish lint bans the tenant-wide action)' {
         $script:Text.Contains("-Path 'PublishXml' -Method POST -Body @{ ParameterXml = (Get-PublishXml) }") | Should Be $true
-        $script:Text -match "(?i)-Path\s+['`"]PublishAllXml" | Should Be $false
-        $script:Text -match '(?i)PublishAllXml\s*-Method|Invoke-Dv\s+[''"]PublishAllXml' | Should Be $false
     }
 }
 
@@ -538,8 +536,7 @@ Describe 'the script text (what it never does)' {
         $script:Text -match "(?i)-Path\s+[`"']sprk_(invoices|documents)" | Should Be $false
         $script:Text -match '(?i)-Method\s+(PATCH|DELETE)' | Should Be $false
     }
-    It 'publishes entity-scoped only (no PublishAllXml)' {
-        $script:Text -match "(?i)-Path\s+['`"]PublishAllXml" | Should Be $false
+    It 'publishes entity-scoped only' {
         $script:Text -match "(?i)-Path\s+'PublishXml'" | Should Be $true
     }
     It 'never checks the reader profile against every default team (the check is over -ReaderBusinessUnits; no loop over $defaultTeams adds a problem)' {

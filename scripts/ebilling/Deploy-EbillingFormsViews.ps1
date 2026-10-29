@@ -23,7 +23,7 @@
               contact.sprk_systemuser equals the current user).
       Sitemap sprk_SpaarkeAdministration gets an eBilling area (settings, timekeeper, rate card, code set, rule set);
               sprk_MatterManagement gets the invoice submission and billing export entries after the sprk_invoice entry.
-      Publish PublishXml for the touched entities, the two sitemaps and the two app modules only. Never PublishAllXml.
+      Publish PublishXml for the touched entities, the two sitemaps and the two app modules only. Never a tenant-wide publish.
 
     Pending collateral (D-103): publishing an entity also publishes pending forms / views of that entity. The script lists any pending
     form or view that it does not edit itself and refuses to publish unless -AllowPendingCollateral is given.
@@ -512,7 +512,7 @@ Sync-AppTables 'sprk_SpaarkeAdministration' @('sprk_ebillingsetting', 'sprk_time
 Sync-AppTables 'sprk_MatterManagement' @('sprk_invoicesubmission', 'sprk_billingexport')
 }
 
-Write-Host "`n4. Publish (entity-scoped; never PublishAllXml)"
+Write-Host "`n4. Publish (entity-scoped; never a tenant-wide publish)"
 $pendingOthers = @($collateral | Where-Object {
         $id = ($_ -replace '^.*\(([0-9a-fA-F-]{36})\)\s*$', '$1').ToLowerInvariant()
         -not $EditedIds.Contains($id)
