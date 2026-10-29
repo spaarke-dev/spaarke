@@ -545,6 +545,9 @@ internal sealed class ApprovalWorld
         return condition.Operator switch
         {
             ConditionOperator.Equal => Same(actual, condition.Values.Single()),
+            // Task 102's line read leaves out removed Adjustment lines with sprk_costtype ne Adjustment (or null, or active). As in
+            // Dataverse, ne never matches an empty column (the read's own Null branch covers that).
+            ConditionOperator.NotEqual => actual is not null && !Same(actual, condition.Values.Single()),
             ConditionOperator.In => condition.Values.Any(v => Same(actual, v)),
             ConditionOperator.Null => actual is null,
             ConditionOperator.NotNull => actual is not null,
