@@ -101,7 +101,8 @@ public class InvoiceSubmissionPersisterTests
         line.GetAttributeValue<EntityReference>("sprk_matter").Id.Should().Be(Matter, "D-75: the line's own core lookup");
         line.GetAttributeValue<int>("sprk_linesequence").Should().Be(1);
         line.GetAttributeValue<OptionSetValue>("sprk_costtype").Value.Should().Be(InvoiceSubmissionPersister.CostTypeFee);
-        line.GetAttributeValue<OptionSetValue>("sprk_linestatus").Value.Should().Be(InvoiceSubmissionPersister.LineStatusPending);
+        line.GetAttributeValue<OptionSetValue>("sprk_linestatus").Value.Should().Be(InvoiceSubmissionPersister.LineStatusClean,
+            "103 Q2: an unflagged line of a coded invoice is Clean, or no invoice could be approved (I-2)");
         line.GetAttributeValue<Money>("sprk_amount").Value.Should().Be(750m);
         line.GetAttributeValue<decimal>("sprk_quantity").Should().Be(1.5m, "a fee line's hours");
         line.GetAttributeValue<string>("sprk_timekeeper").Should().Be("Jane Smith");
@@ -213,6 +214,8 @@ public class InvoiceSubmissionPersisterTests
         Target(requests[0]).GetAttributeValue<OptionSetValue>("statuscode").Value.Should().Be(InvoiceStatusCodes.InReview);
         var line = Target(requests[2]);
         line.Attributes.Should().NotContainKey("sprk_codingconfidence", "the lines are uncoded");
+        line.GetAttributeValue<OptionSetValue>("sprk_linestatus").Value.Should().Be(InvoiceSubmissionPersister.LineStatusPending,
+            "an uncoded line is still owed its codes: it stays Pending (Processing), not Clean (D-126, D-58)");
         using (var confidence = JsonDocument.Parse(line.GetAttributeValue<string>("sprk_extractionconfidence")))
         {
             confidence.RootElement.GetProperty("coding").GetProperty("status").GetString().Should().Be("NotCoded");
@@ -446,6 +449,62 @@ public class InvoiceSubmissionPersisterTests
 
         Target(store.Transactions.Single()[2]).GetAttributeValue<OptionSetValue>("sprk_linestatus").Value
             .Should().Be(InvoiceSubmissionPersister.LineStatusFlagged);
+    }
+
+    [Theory(DisplayName = "103 Q2: the initial line status - Flagged beats everything; an unflagged line is Clean when the invoice was coded, Pending when it was not")]
+    [InlineData(true, true, InvoiceSubmissionPersister.LineStatusFlagged)]
+    [InlineData(true, false, InvoiceSubmissionPersister.LineStatusFlagged)]
+    [InlineData(false, true, InvoiceSubmissionPersister.LineStatusClean)]
+    [InlineData(false, false, InvoiceSubmissionPersister.LineStatusPending)]
+    public void LineStatusFor_FlaggedThenCoded(bool flagged, bool coded, int expected) =>
+        InvoiceSubmissionPersister.LineStatusFor(flagged, coded).Should().Be(expected);
+
+    [Fact(DisplayName = "103 Q2 END TO END: a line the real persister wrote Clean is approvable through InvoiceApprovalService; the same line Pending is refused (I-2)")]
+    public async Task PersistedCleanLine_CanBeApproved_EndToEnd()
+    {
+        var outcome = await new ProcessorHarness().RunAsync();
+        var store = new Store();
+        await store.Build().PersistAsync(outcome, null);
+        var persisted = Target(store.Transactions.Single()[2]);
+        persisted.GetAttributeValue<OptionSetValue>("sprk_linestatus").Value.Should().Be(InvoiceSubmissionPersister.LineStatusClean);
+
+        // The persister's own line row, as written, in the approval's in-memory Dataverse (only its parent and core are re-pointed at the world).
+        ApprovalWorld WorldWith(Entity line)
+        {
+            var world = new ApprovalWorld("sprk_matter");
+            var row = new Entity(line.LogicalName, line.Id);
+            foreach (var attribute in line.Attributes)
+            {
+                row[attribute.Key] = attribute.Value;
+            }
+
+            row["sprk_invoice"] = new EntityReference("sprk_invoice", world.InvoiceId);
+            row["sprk_matter"] = new EntityReference("sprk_matter", world.CoreId);
+            row["versionnumber"] = 101L;
+            world.Put(row);
+            world.H.Rows[("sprk_billingevent", row.Id)] = new Entity("sprk_billingevent", row.Id)
+            {
+                ["sprk_matter"] = new EntityReference("sprk_matter", world.CoreId),
+                ["sprk_invoice"] = new EntityReference("sprk_invoice", world.InvoiceId),
+            };
+            return world;
+        }
+
+        var approvable = WorldWith(persisted);
+        var approved = await approvable.ApproveAs(ApprovalWorld.AliceUser);
+        approved.Outcome.Should().Be(ApprovalOutcome.Approved, "the Clean line is accepted in bulk (D-72) and the invoice is approved");
+        approvable.InvoiceStatus.Should().Be(InvoiceStatusCodes.Approved);
+
+        // The control that makes the assertion able to fail: the same row as the persister used to write it.
+        var oldBehaviour = new Entity(persisted.LogicalName, persisted.Id);
+        foreach (var attribute in persisted.Attributes)
+        {
+            oldBehaviour[attribute.Key] = attribute.Value;
+        }
+
+        oldBehaviour["sprk_linestatus"] = new OptionSetValue(InvoiceSubmissionPersister.LineStatusPending);
+        var refused = await WorldWith(oldBehaviour).ApproveAs(ApprovalWorld.AliceUser);
+        refused.Outcome.Should().NotBe(ApprovalOutcome.Approved, "a Pending line keeps the invoice from being approved");
     }
 
     // ── EB-D-170: AI provenance ──

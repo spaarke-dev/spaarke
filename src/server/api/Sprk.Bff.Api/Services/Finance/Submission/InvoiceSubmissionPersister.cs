@@ -133,6 +133,7 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
     internal const int CostTypeFee = 100000000;
     internal const int CostTypeExpense = 100000001;
     internal const int LineStatusPending = 100000000;
+    internal const int LineStatusClean = 100000001;
     internal const int LineStatusFlagged = 100000002;
     internal const int ApprovalStatusPending = 100000000;
 
@@ -1107,7 +1108,7 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             var flagged = flaggedByFinding.Contains(index)
                 || coding is { RefusedCodes.Count: > 0 }
                 || coding is { HasFirmCodeMismatch: true };
-            row[InvoiceTotalsService.LineStatus] = new OptionSetValue(flagged ? LineStatusFlagged : LineStatusPending);
+            row[InvoiceTotalsService.LineStatus] = new OptionSetValue(LineStatusFor(flagged, coded: coding is not null));
 
             var confidence = BuildExtractionConfidence(line, resolution, coding, outcome);
             if (confidence.Length <= ExtractionConfidenceMaxLength)
@@ -1127,6 +1128,14 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
 
         return rows;
     }
+
+    /// <summary>
+    /// The line status a persisted line starts in (103 Q2: nothing used to write Clean, so no invoice could ever be approved, I-2). A line a
+    /// finding, a refused code or a firm-code mismatch flagged is Flagged. Any other line of a CODED invoice is Clean: every check that can
+    /// flag a line has run. A line of an UNCODED invoice (D-126: coding was unavailable, so a hold finding stands) stays Pending, shown as
+    /// Processing (D-58): its codes are still owed, and a Pending line is neither decidable nor approvable.
+    /// </summary>
+    internal static int LineStatusFor(bool flagged, bool coded) => flagged ? LineStatusFlagged : coded ? LineStatusClean : LineStatusPending;
 
     internal static Entity BuildApproval(
         SubmissionEvaluationOutcome outcome, Guid invoiceId, InvoiceCoreRecord core, IReadOnlyDictionary<string, object> resolverFields,
