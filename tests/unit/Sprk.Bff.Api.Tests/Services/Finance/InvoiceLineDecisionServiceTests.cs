@@ -374,6 +374,33 @@ public sealed class InvoiceLineDecisionServiceTests
         World w, LineDecisionAction action, IEnumerable<LineDecisionLine> lines, string? reason = null, Guid? decisionId = null, bool bulk = false) =>
         new(w.InvoiceId, decisionId ?? Guid.NewGuid(), action, reason, lines.ToList(), Decider, bulk, CallerToken);
 
+    /// <summary>
+    /// For the persister's end-to-end test (EB-D-175 / EB-D-176): puts a line row AS THE REAL PERSISTER WROTE IT into this service's in-memory
+    /// Dataverse (only its parent invoice is re-pointed at the world), accepts it through the real <see cref="InvoiceLineDecisionService"/>,
+    /// and returns the outcome, the row as stored after the decision and the Decision Records it wrote.
+    /// </summary>
+    internal static async Task<(LineDecisionStatus Status, Entity Line, IReadOnlyList<Entity> Records)> AcceptPersistedLineAsync(Entity persisted, decimal billedTotal)
+    {
+        var w = new World(billedTotal);
+        var row = new Entity(persisted.LogicalName, persisted.Id);
+        foreach (var attribute in persisted.Attributes)
+        {
+            row[attribute.Key] = attribute.Value;
+        }
+
+        row["sprk_invoice"] = new EntityReference("sprk_invoice", w.InvoiceId);
+        row["versionnumber"] = 50L;
+        w.Lines.Add(row);
+        w.H.Rows[("sprk_billingevent", row.Id)] = new Entity("sprk_billingevent", row.Id)
+        {
+            ["sprk_project"] = new EntityReference("sprk_project", Core),
+            ["sprk_invoice"] = new EntityReference("sprk_invoice", w.InvoiceId),
+        };
+
+        var result = await w.Service().DecideAsync(Command(w, LineDecisionAction.Accept, [new(row.Id)]), CancellationToken.None);
+        return (result.Status, w.Line(row.Id), w.H.Created.ToList());
+    }
+
     // ── Outcomes: the line, the totals, the ledger ──
 
     [Fact(DisplayName = "100: a Reduce stores status, approved amount, reason, reviewer and time, recomputes the approved total, and records one Decision Record on the line")]

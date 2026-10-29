@@ -1107,7 +1107,8 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
 
             var flagged = flaggedByFinding.Contains(index)
                 || coding is { RefusedCodes.Count: > 0 }
-                || coding is { HasFirmCodeMismatch: true };
+                || coding is { HasFirmCodeMismatch: true }
+                || LineFindingCodeFor(line.Narrative.Value, coding) is not null; // EB-D-175 / EB-D-176
             row[InvoiceTotalsService.LineStatus] = new OptionSetValue(LineStatusFor(flagged, coded: coding is not null));
 
             var confidence = BuildExtractionConfidence(line, resolution, coding, outcome);
@@ -1131,11 +1132,33 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
 
     /// <summary>
     /// The line status a persisted line starts in (103 Q2: nothing used to write Clean, so no invoice could ever be approved, I-2). A line a
-    /// finding, a refused code or a firm-code mismatch flagged is Flagged. Any other line of a CODED invoice is Clean: every check that can
+    /// finding, a refused code, a firm-code mismatch, a line the coding Action did not return (EB-D-175) or a line with no description (EB-D-176)
+    /// flagged is Flagged. Any other line of a CODED invoice is Clean: every check that can
     /// flag a line has run. A line of an UNCODED invoice (D-126: coding was unavailable, so a hold finding stands) stays Pending, shown as
     /// Processing (D-58): its codes are still owed, and a Pending line is neither decidable nor approvable.
     /// </summary>
     internal static int LineStatusFor(bool flagged, bool coded) => flagged ? LineStatusFlagged : coded ? LineStatusClean : LineStatusPending;
+
+    /// <summary>The finding code of a line the AI did not check because the coding Action returned nothing usable for it (EB-D-175).</summary>
+    internal const string LineFindingNotReturned = "coding.not_returned";
+
+    /// <summary>The finding code of a line with a blank narrative (EB-D-176): it has no description to code or to read.</summary>
+    internal const string LineFindingNoDescription = "line.no_description";
+
+    /// <summary>The findings JSON member listing the lines flagged for being unchecked or undescribed: <c>[{ line, code, message }]</c>, no values.</summary>
+    internal const string LineFindingsMember = "lineFindings";
+
+    /// <summary>
+    /// The finding a line carries for lacking a check, or null (owner decisions EB-D-175 and EB-D-176: such a line is Flagged, not Clean, so a
+    /// reviewer must accept or correct it before approval). A blank narrative (a coded line that was never sent, <see cref="LineCodingStatus.NoNarrative"/>,
+    /// or any line of an uncoded invoice) is <see cref="LineFindingNoDescription"/>; a line sent to the model that came back unusable
+    /// (<see cref="LineCodingStatus.NotReturned"/>) is <see cref="LineFindingNotReturned"/>. The firm's codes are kept either way. These are
+    /// reviewer-facing findings stored in <c>sprk_findingsjson</c>; they raise no Signal, and a Flagged line is decided by status alone.
+    /// </summary>
+    internal static string? LineFindingCodeFor(string? narrative, LineCodingResult? coding) =>
+        string.IsNullOrWhiteSpace(narrative) || coding is { Status: LineCodingStatus.NoNarrative } ? LineFindingNoDescription
+        : coding is { Status: LineCodingStatus.NotReturned } ? LineFindingNotReturned
+        : null;
 
     internal static Entity BuildApproval(
         SubmissionEvaluationOutcome outcome, Guid invoiceId, InvoiceCoreRecord core, IReadOnlyDictionary<string, object> resolverFields,
@@ -1425,6 +1448,25 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             });
         }
 
+        // EB-D-175 / EB-D-176: the lines left Flagged for lacking a check or a description, each with a stable code. Additive (schema 1 readers
+        // ignore it); no Signal, no value: the reviewer decides the line from its Flagged status.
+        var codedByKey = outcome.Coding?.Lines.ToDictionary(l => l.LineKey, StringComparer.Ordinal);
+        var lineFindings = new JsonArray();
+        for (var index = 0; index < outcome.Read!.Lines.Count; index++)
+        {
+            LineCodingResult? lineCoding = null;
+            codedByKey?.TryGetValue(index.ToString(CultureInfo.InvariantCulture), out lineCoding);
+            if (LineFindingCodeFor(outcome.Read.Lines[index].Narrative.Value, lineCoding) is { } lineCode)
+            {
+                lineFindings.Add(new JsonObject
+                {
+                    ["line"] = index,
+                    ["code"] = lineCode,
+                    ["message"] = lineCode == LineFindingNotReturned ? "The line was not checked by the AI." : "The line has no description.",
+                });
+            }
+        }
+
         var root = new JsonObject
         {
             ["schema"] = 1,
@@ -1453,6 +1495,7 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             ["findings"] = findingsJson,
             ["pipelineFindings"] = pipeline,
             ["codingFindings"] = coding,
+            [LineFindingsMember] = lineFindings,
             ["invoiceName"] = InvoiceNameFor(outcome),
             ["invoiceNumberReadConfidence"] = outcome.InvoiceNumber?.ReadConfidence,
             ["signalPlan"] = SignalPlanJson(outcome, invoiceId, out planRefusals),

@@ -507,6 +507,150 @@ public class InvoiceSubmissionPersisterTests
         refused.Outcome.Should().NotBe(ApprovalOutcome.Approved, "a Pending line keeps the invoice from being approved");
     }
 
+    // ── EB-D-175 / EB-D-176: a line the AI did not check, and a line with no description, are Flagged ──
+
+    /// <summary>Persists a one-line invoice with the given narrative and coding outcome; returns the stored line and the stored findings JSON.</summary>
+    private static async Task<(Entity Line, JsonDocument Findings)> PersistOneLineAsync(string? narrative, bool notReturned, bool coded = true)
+    {
+        var harness = new ProcessorHarness
+        {
+            Lines = [InvoiceSubmissionProcessorTests.FeeLine() with { Narrative = InvoiceSubmissionProcessorTests.F<string?>(narrative) }],
+        };
+        if (notReturned)
+        {
+            harness.Coding.NotReturnedKeys = new HashSet<string> { "0" };
+        }
+
+        if (!coded)
+        {
+            harness.Coding.Failure = new LineCodingException(LineCodingException.NoCodeSet, "none");
+        }
+
+        var outcome = await harness.RunAsync();
+        var store = new Store();
+        await store.Build().PersistAsync(outcome, null);
+        var requests = store.Transactions.Single();
+        return (Target(requests[2]), JsonDocument.Parse(Target(requests[^1]).GetAttributeValue<string>("sprk_findingsjson")));
+    }
+
+    [Fact(DisplayName = "EB-D-175: a line the coding Action did not return is Flagged, with the coding.not_returned finding; the firm's codes are kept")]
+    public async Task ANotReturnedLine_IsFlagged_WithItsFinding()
+    {
+        var (line, findings) = await PersistOneLineAsync("Drafted the motion.", notReturned: true);
+        using (findings)
+        {
+            line.GetAttributeValue<OptionSetValue>("sprk_linestatus").Value.Should().Be(InvoiceSubmissionPersister.LineStatusFlagged);
+            line.GetAttributeValue<string>("sprk_taskcodeasbilled").Should().Be("L110", "the firm's codes are kept");
+            var stored = findings.RootElement.GetProperty(InvoiceSubmissionPersister.LineFindingsMember).EnumerateArray().Single();
+            stored.GetProperty("line").GetInt32().Should().Be(0);
+            stored.GetProperty("code").GetString().Should().Be("coding.not_returned");
+            stored.GetProperty("message").GetString().Should().Be("The line was not checked by the AI.");
+        }
+    }
+
+    [Fact(DisplayName = "EB-D-176: a line with a blank narrative on a coded invoice (NoNarrative) is Flagged, with the line.no_description finding")]
+    public async Task ABlankNarrativeLine_OfACodedInvoice_IsFlagged_WithItsFinding()
+    {
+        var (line, findings) = await PersistOneLineAsync("   ", notReturned: false);
+        using (findings)
+        {
+            line.GetAttributeValue<OptionSetValue>("sprk_linestatus").Value.Should().Be(InvoiceSubmissionPersister.LineStatusFlagged);
+            line.GetAttributeValue<string>("sprk_taskcodeasbilled").Should().Be("L110", "the firm's codes are kept");
+            var stored = findings.RootElement.GetProperty(InvoiceSubmissionPersister.LineFindingsMember).EnumerateArray().Single();
+            stored.GetProperty("code").GetString().Should().Be("line.no_description");
+            stored.GetProperty("message").GetString().Should().Be("The line has no description.");
+            JsonDocument.Parse(line.GetAttributeValue<string>("sprk_extractionconfidence")).RootElement
+                .GetProperty("coding").GetProperty("status").GetString().Should().Be("NoNarrative");
+        }
+    }
+
+    [Fact(DisplayName = "EB-D-176: a line with a blank narrative on an UNCODED invoice is Flagged too, with the line.no_description finding")]
+    public async Task ABlankNarrativeLine_OfAnUncodedInvoice_IsFlagged_WithItsFinding()
+    {
+        var (line, findings) = await PersistOneLineAsync(null, notReturned: false, coded: false);
+        using (findings)
+        {
+            line.GetAttributeValue<OptionSetValue>("sprk_linestatus").Value.Should().Be(InvoiceSubmissionPersister.LineStatusFlagged);
+            findings.RootElement.GetProperty(InvoiceSubmissionPersister.LineFindingsMember).EnumerateArray().Single()
+                .GetProperty("code").GetString().Should().Be("line.no_description");
+        }
+    }
+
+    [Fact(DisplayName = "EB-D-175/176 unchanged: a described, returned line is Clean with no line finding; an uncoded invoice's described line stays Pending")]
+    public async Task ADescribedReturnedLine_IsStillClean_AndAnUncodedDescribedLine_StillPending()
+    {
+        var (clean, cleanFindings) = await PersistOneLineAsync("Drafted the motion.", notReturned: false);
+        using (cleanFindings)
+        {
+            clean.GetAttributeValue<OptionSetValue>("sprk_linestatus").Value.Should().Be(InvoiceSubmissionPersister.LineStatusClean);
+            cleanFindings.RootElement.GetProperty(InvoiceSubmissionPersister.LineFindingsMember).GetArrayLength().Should().Be(0);
+        }
+
+        var (pending, pendingFindings) = await PersistOneLineAsync("Drafted the motion.", notReturned: false, coded: false);
+        using (pendingFindings)
+        {
+            pending.GetAttributeValue<OptionSetValue>("sprk_linestatus").Value.Should().Be(InvoiceSubmissionPersister.LineStatusPending, "D-126: unchanged");
+            pendingFindings.RootElement.GetProperty(InvoiceSubmissionPersister.LineFindingsMember).GetArrayLength().Should().Be(0);
+        }
+    }
+
+    [Theory(DisplayName = "EB-D-175/176: the finding code of a line - a blank narrative, or a NoNarrative result, is no_description; a NotReturned result is not_returned; else none")]
+    [InlineData(null, LineCodingStatus.Coded, "line.no_description")]
+    [InlineData("  ", LineCodingStatus.NotReturned, "line.no_description")]
+    [InlineData("x", LineCodingStatus.NoNarrative, "line.no_description")]
+    [InlineData("x", LineCodingStatus.NotReturned, "coding.not_returned")]
+    [InlineData("x", LineCodingStatus.Coded, null)]
+    public void LineFindingCodeFor_Cases(string? narrative, LineCodingStatus status, string? expected) =>
+        InvoiceSubmissionPersister.LineFindingCodeFor(narrative, new LineCodingResult
+        {
+            LineKey = "0", Status = status, Task = new LineCodeValue(null, null, false), Activity = new LineCodeValue(null, null, false),
+            Expense = new LineCodeValue(null, null, false), Confidence = 0m, Observations = [], RefusedCodes = [],
+            CodeSetId = Guid.Empty, CodeSetName = "x", CodeSetSource = CodeSetSource.FirmCodes,
+        }).Should().Be(expected);
+
+    [Fact(DisplayName = "EB-D-175/176 END TO END: a persisted NotReturned line is Flagged and blocks approval; the reviewer accepts it through InvoiceLineDecisionService; the invoice is then approved")]
+    public async Task AFlaggedNotReturnedLine_IsDecidableThenApprovable_EndToEnd()
+    {
+        var (persisted, findings) = await PersistOneLineAsync("Drafted the motion.", notReturned: true);
+        findings.Dispose();
+        persisted.GetAttributeValue<OptionSetValue>("sprk_linestatus").Value.Should().Be(InvoiceSubmissionPersister.LineStatusFlagged);
+
+        // The persister's own line row, as written, in the approval's in-memory Dataverse (only its parent and core are re-pointed at the world).
+        static ApprovalWorld WorldWith(Entity line)
+        {
+            var world = new ApprovalWorld("sprk_matter");
+            var row = new Entity(line.LogicalName, line.Id);
+            foreach (var attribute in line.Attributes)
+            {
+                row[attribute.Key] = attribute.Value;
+            }
+
+            row["sprk_invoice"] = new EntityReference("sprk_invoice", world.InvoiceId);
+            row["sprk_matter"] = new EntityReference("sprk_matter", world.CoreId);
+            row["versionnumber"] = 101L;
+            world.Put(row);
+            world.H.Rows[("sprk_billingevent", row.Id)] = new Entity("sprk_billingevent", row.Id)
+            {
+                ["sprk_matter"] = new EntityReference("sprk_matter", world.CoreId),
+                ["sprk_invoice"] = new EntityReference("sprk_invoice", world.InvoiceId),
+            };
+            return world;
+        }
+
+        var blocked = await WorldWith(persisted).ApproveAs(ApprovalWorld.AliceUser);
+        blocked.Outcome.Should().NotBe(ApprovalOutcome.Approved, "a Flagged line must be decided before the invoice is approved (I-2)");
+
+        var (decision, decided, records) = await InvoiceLineDecisionServiceTests.AcceptPersistedLineAsync(persisted, billedTotal: 750m);
+        decision.Should().Be(LineDecisionStatus.Applied, "the existing decision path needs only a non-Pending status: no Signal, no finding entry");
+        decided.GetAttributeValue<OptionSetValue>("sprk_linestatus").Value.Should().Be((int)InvoiceLineStatus.Accepted);
+
+        var approvable = WorldWith(decided);
+        approvable.H.Created.AddRange(records);
+        var approved = await approvable.ApproveAs(ApprovalWorld.AliceUser);
+        approved.Outcome.Should().Be(ApprovalOutcome.Approved, $"{approved.Code} {approved.Detail}");
+        approvable.InvoiceStatus.Should().Be(InvoiceStatusCodes.Approved);
+    }
+
     // ── EB-D-170: AI provenance ──
 
     [Fact(DisplayName = "EB-D-170: each line stores the analyzer id, API version, Action code and version; the submission stores the pair and the header as read")]
