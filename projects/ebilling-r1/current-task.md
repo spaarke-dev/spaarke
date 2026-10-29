@@ -1,6 +1,6 @@
 # Current Task State
 
-> **Last Updated**: 2026-10-29 ~17:45Z (context-handoff). The owner's request: commit/push → update from master → /conflict-check → /merge-to-master for work/ebilling-r1 (PR #1911). Steps 1–3 are done. Step 4 (merge-to-master) is blocked on ONE CI failure, a hanging test (below). Both peer reviews have approved.
+> **Last Updated**: 2026-10-29 ~19:40Z. merge-to-master for PR #1911: the CI timeout is fixed on work (aedb5c7dbf); waiting on CI.
 
 ## Quick Recovery (READ THIS FIRST)
 
@@ -8,9 +8,17 @@
 |-------|-------|
 | **Work branch** | origin/work/ebilling-r1 = **842110e6ab** (PR #1911, draft, MERGEABLE, BLOCKED by CI). It integrates 102, 103 @ dca71dfbed, storedfile-owner @ d3eb47376a, 095-errorcode @ d7218072fb, master 3d54ac845d and signal-close @ 7354384779, plus 842110e6ab (the retirement guard's ExcludedFiles list replaces a split-string constant). Local gate at f78afac072: unit 12,562/0/14, ArchTests 1,858, integration 199/0/8 and 353/0/23, Client lint ok. Route ledger = 146. |
 | **Reviews** | **uac PASS** (storedfile Q1/Q2; 102's Adjustment ForChild 5e863d29bd). "#1911 can go ready from UAC". **ontology APPROVED** (PR comment; F2 closed on every caller incl. 103 approve; K1 closed). |
-| **BLOCKER** | CI run 40919752696, "Office Add-ins Tests (Gate)", job **"Server tests (office scope) (rest)"** was CANCELLED by its 20-min timeout: tests started 17:21:18, then no output for 16 min. A test in that leg's filter HANGS. The filter is in `.github/workflows/office-addins-tests.yml` ~:712 (namespaces Api.Ai.RecordSearch, Api.Documents, Services.Office, Services.Documents, Domain.Dataverse, Filters, Integration.Regression, Infrastructure.*, Auth.Office, ... see the file). It is not a required check, but our rule is zero fail. |
-| **Next action** | (1) Reproduce locally: `dotnet test tests/unit/Sprk.Bff.Api.Tests --filter "<the rest leg filter>" --blame-hang --blame-hang-timeout 3m` and find the hanging test. Suspect tests touched by the integration in those namespaces: EntityAccessFilter / Filters (095 FromEmailSubmissionBody), Integration.Regression, Domain.Dataverse (master merge), an approval-world lock fake. Fix it, push, tell no one unless the fix touches reviewed code. (2) Re-arm the CI monitor (the command below). (3) When all checks are terminal with zero fail: add the integration counts to the PR body, `gh pr ready 1911`, `gh pr merge 1911 --auto --merge`, watch it merge, then do the A.6 post-merge sync of the main checkout (ff-only; never reset). |
+| **CI fix** | The office-scope "rest" leg was not hanging: email-save tests waited on a real token exchange (~22 s each) and a real Service Bus enqueue (5 s each). aedb5c7dbf (test code only) gives the Office test hosts a fake Graph factory and a loose job-submission mock: rest leg 12m21s → 7m32s locally, api-office 6m01s, 1,947/0 and 522/0/7. Not yet proven on CI. Follow-ups (not filed yet): test host working set ~5 GB; `test.search.windows.net` / `test.openai.azure.com` resolve to real Azure. |
+| **Next action** | Watch CI on the pushed head. When all checks are terminal with zero fail: add the integration counts to the PR body, `gh pr ready 1911`, `gh pr merge 1911 --auto --merge`, watch it merge, then the A.6 post-merge sync of the main checkout (ff-only; never reset). |
 | **CI monitor** | Use `gh pr checks 1911 --json name,bucket --jq '.[]\|"\(.bucket)\t\(.name)"'` and `grep -E` with `T=$'\t'`. NO bare jq, NO grep -P on this machine (memory: no-jq-use-gh-jq). The other checks on 842110e6ab were passing or pending at 17:40. |
+
+## Running agents (2026-10-29 late)
+- **ebill-reconcile-switch**: `Ebilling:StoredFileReconcileEnabled` (default false) on branch task/ebill-reconcile-switch. Merge into work before ebilling is switched on anywhere.
+- **ebill-104**: task 104 on task/ebill-104-reject-return.
+- **ebill-101**: resumed. Persister prep (provenance EB-D-170, Clean status Q2, #2455), then 101.
+
+## Dev enablement (EB-D-173, owner approved 2026-10-29)
+R3 deploys the dev BFF (needs uac to clear the 194b hold, plus the owner's direct approval in R3's session naming the SHA; R3 includes #1911 if merged). After R3's "gate passed, you can go" message (UAC 30-min check), WE apply the dev app settings: `Ebilling:Enabled=true` and the Finance file-store settings; `Ebilling:StoredFileReconcileEnabled=false`. Rollback: remove them. Then notify word-add-in that 095 is live on dev, and run the 015 column delete.
 
 ## After #1911 merges (on work, as a follow-up)
 - ontology asks (non-blocking): (1) the 105-override-server.md known limits must name the principal-change case: a repeat by a different person without Write on the Signal subjects gets 403, so only the original decider's retry completes the closes. (2) SubmissionOverrideService runs RecordRefusal twice in its catch filter, so the warning logs twice.
