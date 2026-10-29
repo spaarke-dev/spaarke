@@ -363,7 +363,7 @@ public sealed class InvoiceLifecycleServiceTests
     {
         var invoice = NewInvoice();
 
-        var result = CreateService().BuildCreateRequest(invoice, initial);
+        var result = CreateService().BuildInvoiceCreateRequest(invoice, initial);
 
         result.Succeeded.Should().BeTrue();
         result.Reason.Should().BeNull();
@@ -387,7 +387,7 @@ public sealed class InvoiceLifecycleServiceTests
     [InlineData(InvoiceLifecycleStatus.Cancelled)]
     public void BuildCreateRequest_ForAnyOtherStatus_IsRefused_WithNoRequest(InvoiceLifecycleStatus initial)
     {
-        var result = CreateService().BuildCreateRequest(NewInvoice(), initial);
+        var result = CreateService().BuildInvoiceCreateRequest(NewInvoice(), initial);
 
         result.Succeeded.Should().BeFalse();
         result.Requests.Should().BeEmpty("a refused create can never be sent by mistake");
@@ -398,7 +398,7 @@ public sealed class InvoiceLifecycleServiceTests
     [Fact]
     public void BuildCreateRequest_ForAnUndefinedStatus_IsRefused()
     {
-        var result = CreateService().BuildCreateRequest(NewInvoice(), (InvoiceLifecycleStatus)99);
+        var result = CreateService().BuildInvoiceCreateRequest(NewInvoice(), (InvoiceLifecycleStatus)99);
 
         result.Succeeded.Should().BeFalse();
         result.Reason.Should().Be(InvoiceTransitionReasons.InitialStatusNotAllowed);
@@ -414,7 +414,7 @@ public sealed class InvoiceLifecycleServiceTests
         var invoice = NewInvoice();
         invoice[column] = new OptionSetValue(InvoiceStatusCodes.Approved);
 
-        var result = CreateService().BuildCreateRequest(invoice, InvoiceLifecycleStatus.InReview);
+        var result = CreateService().BuildInvoiceCreateRequest(invoice, InvoiceLifecycleStatus.InReview);
 
         result.Succeeded.Should().BeFalse();
         result.Requests.Should().BeEmpty();
@@ -424,16 +424,16 @@ public sealed class InvoiceLifecycleServiceTests
     [Fact]
     public void BuildCreateRequest_ForARowOfAnotherTable_Throws_BecauseItIsAProgrammingError()
     {
-        var act = () => CreateService().BuildCreateRequest(new Entity("sprk_billingevent", Guid.NewGuid()), InvoiceLifecycleStatus.InReview);
+        var act = () => CreateService().BuildInvoiceCreateRequest(new Entity("sprk_billingevent", Guid.NewGuid()), InvoiceLifecycleStatus.InReview);
 
         act.Should().Throw<ArgumentException>().WithParameterName("invoice");
-        FluentActions.Invoking(() => CreateService().BuildCreateRequest(null!, InvoiceLifecycleStatus.InReview)).Should().Throw<ArgumentNullException>();
+        FluentActions.Invoking(() => CreateService().BuildInvoiceCreateRequest(null!, InvoiceLifecycleStatus.InReview)).Should().Throw<ArgumentNullException>();
     }
 
     [Fact]
     public void BuildCreateRequest_BuildsAnOrdinaryCreateRequest_ThatSitsInsideOneTransaction()
     {
-        var created = CreateService().BuildCreateRequest(NewInvoice(), InvoiceLifecycleStatus.Rejected).Requests.Single();
+        var created = CreateService().BuildInvoiceCreateRequest(NewInvoice(), InvoiceLifecycleStatus.Rejected).Requests.Single();
         var line = new CreateRequest { Target = new Entity("sprk_billingevent", Guid.NewGuid()) };
 
         var transaction = DataverseServiceClientImpl.BuildTransaction([created, line]);
@@ -445,8 +445,8 @@ public sealed class InvoiceLifecycleServiceTests
     [Fact]
     public void BuildCreateRequest_Performs_NoIo()
     {
-        CreateService().BuildCreateRequest(NewInvoice(), InvoiceLifecycleStatus.InReview);
-        CreateService().BuildCreateRequest(NewInvoice(), InvoiceLifecycleStatus.Approved);
+        CreateService().BuildInvoiceCreateRequest(NewInvoice(), InvoiceLifecycleStatus.InReview);
+        CreateService().BuildInvoiceCreateRequest(NewInvoice(), InvoiceLifecycleStatus.Approved);
 
         _records.VerifyNoOtherCalls();
     }

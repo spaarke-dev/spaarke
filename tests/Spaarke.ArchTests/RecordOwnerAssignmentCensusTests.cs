@@ -324,7 +324,7 @@ public class RecordOwnerAssignmentCensusTests
             "ebilling-r1 050a (D-134, moved from InvoiceReviewService with its calls): a reparent (task 146) with the invoice as the "
             + "inherited parent, after the persister's transaction linked the document; a refusal writes nothing."),
         new UnscannedWriter("InvoiceSubmissionPersister.cs",
-            "transaction CreateRequests of sprk_invoice (via 014's BuildCreateRequest), sprk_billingevent and sprk_invoiceapproval rows built with deterministic ids",
+            "transaction CreateRequests of sprk_invoice (via 014's BuildInvoiceCreateRequest), sprk_billingevent and sprk_invoiceapproval rows built with deterministic ids",
             "ebilling-r1 task 049 part C: ResolveOwnerAsync ForParents over the submission's one core record (secure-if-any), applied with "
             + "RecordOwnerResolution.ApplyTo to every row; an unresolved owner refuses before the transaction, so nothing is created."),
         new UnscannedWriter("InvoiceLineDecisionService.cs",

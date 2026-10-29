@@ -2,7 +2,7 @@
 //
 // Component Justification (CLAUDE.md §11):
 //   (1) Existing — InvoiceReviewService.ConfirmAsync created an invoice for a confirmed document (a Web API PATCH, matter only, no lines,
-//       no status; since 050a / D-134 confirm submits the document through InvoiceSubmissionService instead); InvoiceSubmissionService creates the submission; InvoiceLifecycleService.BuildCreateRequest (014) builds the invoice
+//       no status; since 050a / D-134 confirm submits the document through InvoiceSubmissionService instead); InvoiceSubmissionService creates the submission; InvoiceLifecycleService.BuildInvoiceCreateRequest (014) builds the invoice
 //       create in its status; IGenericEntityService.ExecuteTransactionAsync (part A) sends one transaction. Nothing turns an evaluated
 //       submission into an invoice with lines, an approval portion and the submission's link in one unit.
 //   (2) Extension — the processor (part B) is pure evaluation and writes nothing by contract, and the handler (part E) owns delivery,
@@ -347,7 +347,7 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         }
 
         var initial = outcome.Kind == SubmissionEvaluationKind.AutoRejected ? InvoiceLifecycleStatus.Rejected : InvoiceLifecycleStatus.InReview;
-        var create = _lifecycle.BuildCreateRequest(invoice, initial);
+        var create = _lifecycle.BuildInvoiceCreateRequest(invoice, initial);
         if (!create.Succeeded)
         {
             throw new InvalidOperationException($"The lifecycle service refused the invoice create ({create.Reason}).");

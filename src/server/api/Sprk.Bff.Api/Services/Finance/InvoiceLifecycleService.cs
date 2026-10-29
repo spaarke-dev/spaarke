@@ -137,19 +137,19 @@ public static class InvoiceTransitionReasons
     public const string ConcurrentChange = "invoice.concurrent_change";
 
     /// <summary>
-    /// <see cref="IInvoiceLifecycleService.BuildCreateRequest"/>: the requested initial status is not In Review or Rejected (D-101). Every other
+    /// <see cref="IInvoiceLifecycleService.BuildInvoiceCreateRequest"/>: the requested initial status is not In Review or Rejected (D-101). Every other
     /// status is refused, because an invoice is only ever created at the start of its lifecycle (In Review) or as an automatic rejection.
     /// </summary>
     public const string InitialStatusNotAllowed = "invoice.initial_status_not_allowed";
 
     /// <summary>
-    /// <see cref="IInvoiceLifecycleService.BuildCreateRequest"/>: the row the caller built already carries <c>statecode</c> or <c>statuscode</c>.
+    /// <see cref="IInvoiceLifecycleService.BuildInvoiceCreateRequest"/>: the row the caller built already carries <c>statecode</c> or <c>statuscode</c>.
     /// The lifecycle service is the only owner of those two columns (ADR-002, I-6), so a caller's value is refused, never overridden silently.
     /// </summary>
     public const string StatusSuppliedByCaller = "invoice.status_supplied_by_caller";
 }
 
-/// <summary>The result of <see cref="IInvoiceLifecycleService.BuildCreateRequest"/>.</summary>
+/// <summary>The result of <see cref="IInvoiceLifecycleService.BuildInvoiceCreateRequest"/>.</summary>
 /// <param name="Requested">The initial status the caller asked for.</param>
 /// <param name="Requests">The requests to place, in this order, in one transaction (<c>IGenericEntityService.ExecuteTransactionAsync</c>);
 /// empty when refused. Today one <c>CreateRequest</c> carrying the status pair. A list (task 049 part C) so that, if Dataverse refuses a create
@@ -220,7 +220,7 @@ public interface IInvoiceLifecycleService
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="invoice"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="invoice"/> is not a <c>sprk_invoice</c> row.</exception>
-    InvoiceCreateRequestResult BuildCreateRequest(Entity invoice, InvoiceLifecycleStatus initialStatus);
+    InvoiceCreateRequestResult BuildInvoiceCreateRequest(Entity invoice, InvoiceLifecycleStatus initialStatus);
 }
 
 /// <summary>
@@ -264,7 +264,7 @@ public sealed class InvoiceLifecycleService : IInvoiceLifecycleService
         status is InvoiceLifecycleStatus.InReview or InvoiceLifecycleStatus.Rejected;
 
     /// <inheritdoc />
-    public InvoiceCreateRequestResult BuildCreateRequest(Entity invoice, InvoiceLifecycleStatus initialStatus)
+    public InvoiceCreateRequestResult BuildInvoiceCreateRequest(Entity invoice, InvoiceLifecycleStatus initialStatus)
     {
         ArgumentNullException.ThrowIfNull(invoice);
 
