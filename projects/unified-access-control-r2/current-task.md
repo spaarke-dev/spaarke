@@ -36,7 +36,7 @@
 7. **#2292** (membership junction never populated): fix when there is capacity.
 
 ## Peer reviews owed (UAC is the gate)
-- **ebilling RecordFamilyEdges proposal** (task/ebill-master-sync 4beed693da, 22 rows + 2 baselines): three decisions (invoice ↔ work assignment cycle; submission.sprk_invoice; submission.sprk_reportdocument read as a parent by ParentsOf). **Code mapping RUNNING** → reply with a "UAC-r2 review:" line.
+- **ebilling RecordFamilyEdges proposal** (4beed693da): verdict SENT. Accepted 21 rows. The invoice ↔ work-assignment row is kept, and ebilling adds a write-time refusal plus a test that pins the container 409. submission.sprk_invoice and .sprk_reportdocument are baselined as outputs, and ebilling puts the submission's core lookups first. **UAC follow-up #2427:** an `OutputLookups` set in RecordOwnershipResolver, landing before `OrdinaryMovesWritesEnabled` is turned on (after 194b merges); send the sha to ebilling.
 - **ebilling 094 round 5:** re-check RUNNING → verdict to ebilling. 098 round 5 READY. 095 OK. Standing: no Procedure-table role privilege without UAC review; D-185.
 - **ontology #2418** (Assign Task email + bell): NOT READY (F-1..F-4, F1b); wait for the fix head after the owner answers ontology's policy questions; re-check the diff only. #2422 (D-198) APPROVED; #2414 APPROVED; #2409 merged. Filed #2423.
 - **field-mapping:** §13 (#2399) accepted. After 194b merges: run RecordFamilyEdgesGuardTests and 037's pins; check the copied default lands before the ownership step in `OwnedChildWrite.CreateAsync`. 071 starts after 194b.
