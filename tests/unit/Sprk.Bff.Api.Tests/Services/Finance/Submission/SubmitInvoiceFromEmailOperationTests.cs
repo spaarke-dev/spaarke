@@ -287,12 +287,15 @@ public sealed class SubmitInvoiceFromEmailOperationTests
             extensions: new Dictionary<string, object?> { ["reasonCode"] = "child_record.denied" });
         operation.StepA = _ => throw new InvoiceSubmissionEndpoints.SourceFilingRefusedException(refile);
 
-        var act = () => operation.SubmitAsync(Input(), CancellationToken.None);
+        // Changed 2026-10-29 (095 contract fix): a refusal result (it carries errorCode at the top level of the body), not an
+        // SdapProblemException the problem middleware would render with the code nested under extensions.code.
+        var result = await operation.SubmitAsync(Input(), CancellationToken.None);
 
-        var thrown = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
-        (thrown.StatusCode, thrown.Code).Should().Be((StatusCodes.Status403Forbidden, CommunicationRecordAuthorizationFilter.RefileDenyCode),
+        result.Outcome.Should().Be(FromEmailSubmitOutcome.Refused);
+        (result.Status, result.ErrorCode).Should().Be((StatusCodes.Status403Forbidden, CommunicationRecordAuthorizationFilter.RefileDenyCode),
             "contract section 6 lists only the re-file route's own 403 (review round 5)");
-        thrown.Detail.Should().Be(InvoiceSubmissionEndpoints.RefileForbidden().Detail, "the same words as a caller without Write gets (no existence oracle)");
+        result.Detail.Should().Be(InvoiceSubmissionEndpoints.RefileForbiddenDetail, "the same words as a caller without Write gets (no existence oracle)");
+        result.Filed.Should().BeFalse("nothing was filed");
         H.Writes.Should().Be(0);
         H.Allocations.Should().BeEmpty();
     }

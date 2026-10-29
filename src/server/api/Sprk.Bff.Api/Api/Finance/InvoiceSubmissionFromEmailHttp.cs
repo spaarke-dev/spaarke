@@ -403,7 +403,8 @@ internal static class InvoiceSubmissionFromEmailHttp
         catch (FromEmailRouteAnswerException ex)
         {
             // Task 094: another route's own answer (the communication re-file's refusal in step A, the owner refusal): nothing submitted.
-            return ex.Answer;
+            // A reasonCode-only answer (the owner refusal) after step A filed the communication keeps its code field and says the filing is kept.
+            return ex.FilingKept ? InvoiceSubmissionHttp.WithFilingKept(ex.Answer) : ex.Answer;
         }
 
         if (outcome.Receipt is { } receipt)
@@ -417,10 +418,16 @@ internal static class InvoiceSubmissionFromEmailHttp
         {
             // Contract section 6, the last row: the in-process save's own refusal, rendered exactly as /office/save renders it.
             var error = await OfficeEndpoints.WithholdCollisionIdentityIfUnauthorizedAsync(officeError, userId, http, authorization, logger, ct);
-            return OfficeEndpoints.MapSaveErrorToProblem(error, http.TraceIdentifier);
+            var office = OfficeEndpoints.MapSaveErrorToProblem(error, http.TraceIdentifier);
+            return outcome.FilingKept ? InvoiceSubmissionHttp.WithFilingKept(office) : office;
         }
 
         var extensions = new Dictionary<string, object?> { ["errorCode"] = outcome.ErrorCode };
+        if (outcome.FilingKept)
+        {
+            extensions[InvoiceSubmissionHttp.FilingKeptField] = true;
+        }
+
         foreach (var (key, value) in outcome.Extensions ?? new Dictionary<string, object?>())
         {
             extensions[key] = value;

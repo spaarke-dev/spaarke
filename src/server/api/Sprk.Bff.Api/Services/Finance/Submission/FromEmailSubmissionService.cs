@@ -26,6 +26,13 @@ internal sealed record FromEmailSubmissionOutcome
 
     public SaveError? OfficeError { get; init; }
 
+    /// <summary>
+    /// A refusal answered after step A filed the communication for this request: the route adds the top-level <c>filingKept: true</c>
+    /// (contract section 6, "After step A", changed 2026-10-29). An <see cref="ErrorCode"/> refusal already carries the sentence in its
+    /// <see cref="Detail"/>; an <see cref="OfficeError"/> pass-through is extended by the route.
+    /// </summary>
+    public bool FilingKept { get; init; }
+
     public static FromEmailSubmissionOutcome Accepted(FromEmailReceipt receipt) => new() { Receipt = receipt, Status = StatusCodes.Status202Accepted };
 
     public static FromEmailSubmissionOutcome Refused(int status, string errorCode, string detail, IReadOnlyDictionary<string, object?>? extensions = null) =>
@@ -275,7 +282,9 @@ internal sealed class FromEmailSubmissionService
                     result.Filed);
 
             case FromEmailSubmitOutcome.Refused when result.ErrorCode is not null:
-                return FromEmailSubmissionOutcome.Refused(result.Status, result.ErrorCode, result.Detail ?? "The invoice was not submitted.");
+                // The operation put the sentence in the detail of a refusal after its step A; the route adds filingKept.
+                return FromEmailSubmissionOutcome.Refused(result.Status, result.ErrorCode, result.Detail ?? "The invoice was not submitted.")
+                    with { FilingKept = result.Filed };
 
             default:
                 return NotQueued();
@@ -751,17 +760,17 @@ internal sealed class FromEmailSubmissionService
 
     /// <summary>
     /// Review round 5: a refusal answered after step A filed the communication for this request keeps the filing and says so (contract
-    /// section 6, "After step A"), as <see cref="InvoiceSubmissionService.AfterFiling"/> does for the source-document route. A receipt, an
-    /// Office answer or a request that filed nothing is unchanged.
+    /// section 6, "After step A"), as <see cref="InvoiceSubmissionService.AfterFiling"/> does for the source-document route, and the route adds
+    /// <c>filingKept: true</c> (changed 2026-10-29). Every non-receipt refusal gets it, whatever its code field: an <c>errorCode</c> refusal
+    /// gets the sentence here; an Office pass-through (no <c>errorCode</c>, a body this service does not build) is flagged and the route extends
+    /// its detail. A receipt or a request that filed nothing is unchanged.
     /// </summary>
-    private static FromEmailSubmissionOutcome AfterFiling(FromEmailSubmissionOutcome outcome, bool filed) =>
-        !filed || outcome.Receipt is not null || outcome.ErrorCode is not { } code
+    internal static FromEmailSubmissionOutcome AfterFiling(FromEmailSubmissionOutcome outcome, bool filed) =>
+        !filed || outcome.Receipt is not null
             ? outcome
-            : outcome with
-            {
-                Detail = InvoiceSubmissionService.AfterFiling(
-                    InvoiceSubmissionOutcome.Refused(outcome.Status, code, outcome.Detail ?? string.Empty), filed: true).Detail,
-            };
+            : outcome.ErrorCode is null
+                ? outcome with { FilingKept = true }
+                : outcome with { Detail = InvoiceSubmissionService.AfterFilingDetail(outcome.Detail), FilingKept = true };
 
     private static bool IsCallerCancellation(Exception ex, CancellationToken ct) => ex is OperationCanceledException && ct.IsCancellationRequested;
 

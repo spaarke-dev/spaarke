@@ -20,7 +20,11 @@ internal static class InvoiceSubmissionHttp
     /// </summary>
     internal const long MaxRequestBodyBytes = (EbillingOptions.MaxSubmissionFileSizeMbCeiling + 1L) * 1024 * 1024;
 
-    /// <summary>A read fault of the service (<see cref="InvoiceSubmissionService.ReadUnavailable"/>, 503) in this feature's problem shape.</summary>
+    /// <summary>
+    /// A read fault of the service (<see cref="InvoiceSubmissionService.ReadUnavailable"/>, 503), or any other <see cref="SdapProblemException"/> a
+    /// submission route meets, in this feature's problem shape (a top-level <c>errorCode</c>, never the problem middleware's nested
+    /// <c>extensions.code</c>; contract section 6, "Client rule").
+    /// </summary>
     internal static IResult ReadFault(SdapProblemException ex) => Refused(ex.StatusCode, ex.Code, ex.Detail ?? ex.Title);
 
     /// <summary>The parsed multipart body, or the refusal to return instead.</summary>
@@ -105,15 +109,49 @@ internal static class InvoiceSubmissionHttp
     internal static IResult ToResult(InvoiceSubmissionOutcome outcome, Func<Guid, string> statusUrl, string traceId) => outcome.Kind switch
     {
         InvoiceSubmissionOutcomeKind.Received => Accepted(outcome.Receipt!, statusUrl(outcome.Receipt!.SubmissionId)),
-        InvoiceSubmissionOutcomeKind.OwnerRefused => ProblemDetailsHelper.RecordOwnerRefused(outcome.OwnerRefusal!, "invoice submission", traceId),
-        _ => Refused(outcome.StatusCode, outcome.ErrorCode!, outcome.Detail!),
+        InvoiceSubmissionOutcomeKind.OwnerRefused => outcome.FilingKept
+            ? WithFilingKept(ProblemDetailsHelper.RecordOwnerRefused(outcome.OwnerRefusal!, "invoice submission", traceId))
+            : ProblemDetailsHelper.RecordOwnerRefused(outcome.OwnerRefusal!, "invoice submission", traceId),
+        _ => Refused(outcome.StatusCode, outcome.ErrorCode!, outcome.Detail!, outcome.FilingKept),
     };
 
     private static IResult Accepted(InvoiceSubmissionReceipt receipt, string statusUrl) =>
         Results.Accepted(statusUrl, new InvoiceSubmissionAccepted(receipt.SubmissionId, receipt.JobId, receipt.TrackingNumber, statusUrl));
 
-    internal static IResult Refused(int statusCode, string errorCode, string detail) =>
-        Results.Problem(
-            statusCode: statusCode, detail: detail,
-            extensions: new Dictionary<string, object?> { ["errorCode"] = errorCode });
+    /// <summary>
+    /// The route's own refusal: ProblemDetails with a top-level <c>errorCode</c>. <paramref name="filingKept"/> (contract section 6, "After step A",
+    /// changed 2026-10-29) adds the top-level boolean <c>filingKept: true</c> to a refusal that comes after step A filed the communication; a refusal
+    /// with nothing filed does not carry the field.
+    /// </summary>
+    internal static IResult Refused(int statusCode, string errorCode, string detail, bool filingKept = false)
+    {
+        var extensions = new Dictionary<string, object?> { ["errorCode"] = errorCode };
+        if (filingKept)
+        {
+            extensions[FilingKeptField] = true;
+        }
+
+        return Results.Problem(statusCode: statusCode, detail: detail, extensions: extensions);
+    }
+
+    /// <summary>
+    /// A refusal answered AFTER step A filed the communication, whose body this feature does not build (a <c>reasonCode</c>-only answer such as
+    /// <see cref="ProblemDetailsHelper.RecordOwnerRefused"/>, or the in-process Office save's pass-through): the unchanged
+    /// <see cref="InvoiceSubmissionService.FilingKeptSentence"/> is appended to its detail and the top-level <c>filingKept: true</c> is added.
+    /// Its code field (<c>errorCode</c> or <c>reasonCode</c>) is left as it is. An answer that is not a ProblemDetails body has no detail to
+    /// extend and is returned as it is.
+    /// </summary>
+    internal static IResult WithFilingKept(IResult answer)
+    {
+        if (answer is Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult { ProblemDetails: var problem })
+        {
+            problem.Detail = InvoiceSubmissionService.AfterFilingDetail(problem.Detail);
+            problem.Extensions[FilingKeptField] = true;
+        }
+
+        return answer;
+    }
+
+    /// <summary>The top-level field a refusal after step A carries (additive; the detail sentence stays).</summary>
+    internal const string FilingKeptField = "filingKept";
 }

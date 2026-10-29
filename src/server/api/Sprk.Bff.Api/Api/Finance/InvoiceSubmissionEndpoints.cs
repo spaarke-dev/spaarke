@@ -358,10 +358,10 @@ public static class InvoiceSubmissionEndpoints
     /// as it is (the intake has already judged the filing the chain gives). Before it files, the communication must be under no secure root
     /// and not owned by the Secure Record owner team (<see cref="ExistingDocumentIsolationCheck.CheckCommunicationForFilingAsync"/>: else 409
     /// <see cref="InvoiceSubmissionErrors.DocumentCoreRecordMismatch"/>, a fault 503), and the caller must have Write on it (else the
-    /// communication re-file route's own 403 <c>COMMUNICATION_REFILE_FORBIDDEN</c>). Then the communication re-file core
+    /// communication re-file route's own 403 <c>COMMUNICATION_REFILE_FORBIDDEN</c>, as <see cref="RefileForbidden"/>). Then the communication re-file core
     /// (<see cref="CommunicationEndpoints.RefileCommunicationAsync"/>) files it under the core record AS THE CALLER, with its own checks
     /// (AppendTo on the record, the owner, the thread following the filing); any answer but 204 is the route's answer. Every refusal throws
-    /// <see cref="SourceFilingRefusedException"/> (or the 403's <see cref="SdapProblemException"/>), so the intake writes nothing after it.
+    /// <see cref="SourceFilingRefusedException"/>, so the intake writes nothing after it.
     /// The filing it makes is NOT undone by a later refusal or by the job's undo (the answer and the administrator note say so).
     /// </summary>
     internal sealed class SourceFiling
@@ -417,7 +417,7 @@ public static class InvoiceSubmissionEndpoints
 
             if (!_rights.HasFlag(AccessRights.Write))
             {
-                throw RefileForbidden();
+                throw new SourceFilingRefusedException(RefileForbidden());
             }
 
             // The re-file core's own dependencies come from the request scope only when A runs (most submissions never file anything).
@@ -440,14 +440,18 @@ public static class InvoiceSubmissionEndpoints
     }
 
     /// <summary>
-    /// Step A's 403: the communication re-file route's own refusal, with its words (no existence oracle). Also the from-email operation's
-    /// answer to a 403 of the re-file core (review round 5), so that route sends only contract section 6's code.
+    /// Step A's 403 as the submission routes render a refusal (changed 2026-10-29, 095 contract fix): status 403 and a TOP-LEVEL
+    /// <c>errorCode</c> <c>COMMUNICATION_REFILE_FORBIDDEN</c> (<see cref="InvoiceSubmissionHttp.Refused"/>), so a client reading
+    /// <c>errorCode ?? reasonCode</c> finds it. It was an <see cref="SdapProblemException"/>, which the problem middleware renders with
+    /// the code only under a nested <c>extensions.code</c>. The words are the re-file route's own (no existence oracle), and nothing of the
+    /// submission is written. Also the from-email operation's answer to a 403 of the re-file core (review round 5), so that route sends
+    /// only contract section 6's code. The communication re-file route's own response is unchanged.
     /// </summary>
-    internal static SdapProblemException RefileForbidden() => new(
-        code: CommunicationRecordAuthorizationFilter.RefileDenyCode,
-        title: "Forbidden",
-        detail: "The communication does not exist or is not visible to the caller, or the caller may not change it.",
-        statusCode: StatusCodes.Status403Forbidden);
+    internal static IResult RefileForbidden() => InvoiceSubmissionHttp.Refused(
+        StatusCodes.Status403Forbidden, CommunicationRecordAuthorizationFilter.RefileDenyCode, RefileForbiddenDetail);
+
+    /// <summary>The words of <see cref="RefileForbidden"/>.</summary>
+    internal const string RefileForbiddenDetail = "The communication does not exist or is not visible to the caller, or the caller may not change it.";
 
     /// <summary>Step A's refusal, carrying the route's answer (the intake writes nothing after it; the route returns <see cref="Answer"/>).</summary>
     internal sealed class SourceFilingRefusedException(IResult answer) : Exception("Submit Invoice step A refused the filing of the source communication.")

@@ -311,11 +311,12 @@ public static class FinanceEndpoints
             // Step A's refusal (the re-file core's answer, an isolated communication, a fault): nothing was submitted.
             return ex.Answer;
         }
-        catch (Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException)
+        catch (Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException ex)
         {
-            // Step A's COMMUNICATION_REFILE_FORBIDDEN (no Write on the communication): the re-file route's own 403, rendered by the
-            // problem middleware as on that route, never the 500 below.
-            throw;
+            // Changed 2026-10-29 (095 contract fix): step A's COMMUNICATION_REFILE_FORBIDDEN now arrives as a SourceFilingRefusedException
+            // (above) and nothing throws a problem here on purpose. A problem that still does is answered in this route's shape, a
+            // top-level errorCode (never the problem middleware's nested extensions.code), and never the 500 below.
+            return InvoiceSubmissionHttp.ReadFault(ex);
         }
         catch (Exception ex)
         {

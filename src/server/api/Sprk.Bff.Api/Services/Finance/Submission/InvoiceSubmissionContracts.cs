@@ -193,6 +193,12 @@ public sealed record InvoiceSubmissionOutcome
 
     public RecordOwnerResolution? OwnerRefusal { get; init; }
 
+    /// <summary>
+    /// True on a refusal answered AFTER step A filed the source communication (<see cref="InvoiceSubmissionService.AfterFiling"/>): the
+    /// route adds the top-level <c>filingKept: true</c> beside the unchanged detail sentence (contract section 6, changed 2026-10-29).
+    /// </summary>
+    public bool FilingKept { get; init; }
+
     internal static InvoiceSubmissionOutcome Received(InvoiceSubmissionReceipt receipt) =>
         new() { Kind = InvoiceSubmissionOutcomeKind.Received, Receipt = receipt, StatusCode = StatusCodes.Status202Accepted };
 

@@ -114,11 +114,12 @@ internal sealed class FromEmailWorld
     /// <summary>SPE, read-only here (Strict: any write fails the test).</summary>
     public readonly Mock<SpeFileStore> Spe;
 
-    public FromEmailSubmissionService Build()
+    /// <param name="operation">Another Submit Invoice operation (the wire tests drive the real one); default: <see cref="Operation"/>, the double.</param>
+    public FromEmailSubmissionService Build(ISubmitInvoiceFromEmail? operation = null)
     {
         var callers = new Mock<ICallerSystemUserResolver>();
         callers.Setup(c => c.ResolveAsync(It.IsAny<ClaimsPrincipal?>(), It.IsAny<CancellationToken>())).ReturnsAsync(() => Caller);
-        return new FromEmailSubmissionService(Intake.Build(), Operation, Save, Entities.Object, Communications.Object, callers.Object,
+        return new FromEmailSubmissionService(Intake.Build(), operation ?? Operation, Save, Entities.Object, Communications.Object, callers.Object,
             Spe.Object, NullLogger<FromEmailSubmissionService>.Instance);
     }
 
