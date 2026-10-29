@@ -247,13 +247,26 @@ public sealed class InvoiceAdjustmentEndpointsAuthorizationContractTests
         host.GrantAll();
         host.Invoice = InvoiceRow(InvoiceStatusCodes.InReview);
         var foreign = Guid.NewGuid();
+        host.Lines.Add(new Entity("sprk_billingevent", foreign)
+        {
+            ["sprk_invoice"] = new EntityReference("sprk_invoice", Guid.NewGuid()), // an Adjustment line of ANOTHER invoice
+            ["sprk_costtype"] = new OptionSetValue((int)InvoiceLineCostType.Adjustment),
+            ["statecode"] = new OptionSetValue(0),
+            ["versionnumber"] = 3L,
+        });
+        var fee = FeeRow(500m); // a line of THIS invoice that is not an Adjustment
+        host.Lines.Add(fee);
 
-        var response = await host.SendAsync(Request("DELETE", One(foreign), null));
+        foreach (var id in new[] { foreign, fee.Id })
+        {
+            var response = await host.SendAsync(Request("DELETE", One(id), null));
 
-        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
-        var body = await response.Content.ReadAsStringAsync();
-        body.Should().NotContain(foreign.ToString());
-        JsonNode.Parse(body)!["reasonCode"]!.GetValue<string>().Should().Be("sdap.access.deny.record_unavailable");
+            response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+            var body = await response.Content.ReadAsStringAsync();
+            body.Should().NotContain(id.ToString());
+            JsonNode.Parse(body)!["reasonCode"]!.GetValue<string>().Should().Be("sdap.access.deny.record_unavailable");
+        }
+
         host.Writes.Should().Be(0);
     }
 

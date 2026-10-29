@@ -65,6 +65,7 @@ public static class InvoiceAdjustmentEndpoints
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status500InternalServerError)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         // DELETE /api/finance/invoices/{invoiceId}/adjustments/{lineId} - remove (deactivate) an adjustment
@@ -77,6 +78,7 @@ public static class InvoiceAdjustmentEndpoints
                 "Deactivates the Adjustment line (it is never deleted, NFR-09) and recomputes the invoice totals. Only while the invoice is " +
                 "In Review. Repeating the request for an already removed adjustment changes nothing.")
             .Produces<AdjustmentResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)

@@ -491,7 +491,9 @@ public sealed class InvoiceAdjustmentService
 
         try
         {
-            await _entities.ExecuteTransactionAsync([new CreateRequest { Target = row }], ct).ConfigureAwait(false);
+            // From the first write on the request's cancellation no longer applies: a cancelled request must not leave a committed line without its
+            // totals (D-130), so the write and the totals step that follow run to the end.
+            await _entities.ExecuteTransactionAsync([new CreateRequest { Target = row }], CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -500,7 +502,7 @@ public sealed class InvoiceAdjustmentService
             return new AdjustmentResult(AdjustmentStatus.Unavailable, AdjustmentCodes.Unavailable, "The adjustment could not be saved. Repeat the same request to be sure.");
         }
 
-        return await FinishAddAsync(command, lineId, method, value, reason, reviewedOn.UtcDateTime, invoice, alreadyApplied: false, ct).ConfigureAwait(false);
+        return await FinishAddAsync(command, lineId, method, value, reason, reviewedOn.UtcDateTime, invoice, alreadyApplied: false, CancellationToken.None).ConfigureAwait(false);
     }
 
     /// <summary>Step 2 of an add: 016 stores the totals. A refusal here (the dry run passed, so another writer changed the invoice) deactivates the new row.</summary>
@@ -674,7 +676,7 @@ public sealed class InvoiceAdjustmentService
                 await _entities.BulkUpdateIfRowVersionsMatchAsync(
                     InvoiceReviewReadService.LineEntity,
                     [(command.LineId, DeactivationFields(command.ReviewerSystemUserId, _time.GetUtcNow().UtcDateTime), version)],
-                    ct).ConfigureAwait(false);
+                    CancellationToken.None).ConfigureAwait(false);
             }
             catch (System.Data.DBConcurrencyException)
             {
@@ -690,11 +692,12 @@ public sealed class InvoiceAdjustmentService
         InvoiceTotalsCalculation calculation;
         try
         {
-            calculation = await _totals.RecalculateAsync(command.InvoiceId, ct).ConfigureAwait(false);
+            // The row is (or already was) deactivated: finish the totals whatever happens to the request.
+            calculation = await _totals.RecalculateAsync(command.InvoiceId, CancellationToken.None).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        catch (Exception ex)
         {
-            return Incomplete(command.InvoiceId, ex.GetType().Name);
+            return Incomplete(command.InvoiceId, ex.GetType().Name, removal: true);
         }
 
         if (calculation.IsRefused)
@@ -752,14 +755,16 @@ public sealed class InvoiceAdjustmentService
         return new AdjustmentResult(AdjustmentStatus.Unavailable, AdjustmentCodes.Unavailable, "The invoice could not be read; nothing was changed.");
     }
 
-    private AdjustmentResult Incomplete(Guid invoiceId, string detail)
+    private AdjustmentResult Incomplete(Guid invoiceId, string detail, bool removal = false)
     {
         _logger.LogError(
             "Adjustment on invoice {InvoiceId}: the line was written but the totals step failed ({Detail}); the caller repeats the same request to finish it.",
             invoiceId, detail);
         return new AdjustmentResult(
             AdjustmentStatus.Incomplete, AdjustmentCodes.Incomplete,
-            "The adjustment was saved but the invoice totals were not updated. Repeat the same request to complete it.");
+            removal
+                ? "The adjustment was removed but the invoice totals were not updated. Repeat the same request to complete it."
+                : "The adjustment was saved but the invoice totals were not updated. Repeat the same request to complete it.");
     }
 
     private AdjustmentResult Refused(Guid invoiceId, InvoiceTotalsCalculation calculation)

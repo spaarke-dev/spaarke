@@ -83,6 +83,7 @@ public sealed class InvoiceAdjustmentServiceTests
         public Exception? TotalsFault;
         public Exception? CreateFault;
         public Action? AfterCreate;
+        public Action? AfterDeactivate;
         private long _nextVersion = 100;
 
         public World(decimal billedTotal = 1100m, int status = InvoiceStatusCodes.InReview, bool withLines = true)
@@ -172,6 +173,7 @@ public sealed class InvoiceAdjustmentServiceTests
                         }
                     }
 
+                    AfterDeactivate?.Invoke();
                     return Task.CompletedTask;
                 });
 
@@ -189,9 +191,11 @@ public sealed class InvoiceAdjustmentServiceTests
 
             // 016's reads and writes, over the same rows.
             Records.Setup(r => r.RetrieveRecordFieldsAsync("sprk_invoice", InvoiceId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-                .Returns(() => TotalsFault is not null
+                .Returns((string _, Guid _, string[] _, CancellationToken token) => TotalsFault is not null
                     ? Task.FromException<Dictionary<string, object?>>(TotalsFault)
-                    : Task.FromResult(new Dictionary<string, object?>
+                    : token.IsCancellationRequested
+                        ? Task.FromCanceled<Dictionary<string, object?>>(token)
+                        : Task.FromResult(new Dictionary<string, object?>
                     {
                         ["sprk_totalamount"] = Invoice.GetAttributeValue<Money>("sprk_totalamount").Value,
                         ["versionnumber"] = 5L,
@@ -904,6 +908,50 @@ public sealed class InvoiceAdjustmentServiceTests
         repeat.AlreadyApplied.Should().BeTrue();
         w.Adjustments.Should().ContainSingle("a repeat adds no second line");
         w.Stored("sprk_approvedtotal").Should().Be(910m);
+    }
+
+    [Fact]
+    public async Task ARequestCancelledAfterTheCreate_StillStoresTheTotals_D130()
+    {
+        // The reviewer closes the tab after the line committed: the totals step must still run, or the stored total omits an active adjustment.
+        var w = new World();
+        using var cts = new CancellationTokenSource();
+        w.AfterCreate = cts.Cancel;
+
+        var result = await w.Service().AddAsync(Add(w, "percent", 10m), cts.Token);
+
+        result.Status.Should().Be(AdjustmentStatus.Applied);
+        w.Adjustments.Should().ContainSingle();
+        w.Stored("sprk_approvedtotal").Should().Be(910m);
+    }
+
+    [Fact]
+    public async Task ARequestCancelledAfterTheRemoval_StillStoresTheTotals_D130()
+    {
+        var w = new World();
+        var service = w.Service();
+        var added = await service.AddAsync(Add(w, "fixed", 50m), CancellationToken.None);
+        using var cts = new CancellationTokenSource();
+        w.AfterDeactivate = cts.Cancel;
+
+        var result = await service.RemoveAsync(new RemoveAdjustmentCommand(w.InvoiceId, added.Adjustment!.LineId, Remover), cts.Token);
+
+        result.Status.Should().Be(AdjustmentStatus.Applied);
+        w.Stored("sprk_approvedtotal").Should().Be(1000m, "the removed 50 is added back");
+    }
+
+    [Fact]
+    public async Task ATotalsFailureAfterTheRemoval_SaysTheAdjustmentWasRemoved_NotSaved()
+    {
+        var w = new World();
+        var service = w.Service();
+        var added = await service.AddAsync(Add(w, "fixed", 50m), CancellationToken.None);
+        w.TotalsFault = new TimeoutException("totals");
+
+        var failed = await service.RemoveAsync(new RemoveAdjustmentCommand(w.InvoiceId, added.Adjustment!.LineId, Remover), CancellationToken.None);
+
+        failed.Status.Should().Be(AdjustmentStatus.Incomplete);
+        failed.Detail.Should().Contain("removed").And.NotContain("saved");
     }
 
     [Fact]
