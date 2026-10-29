@@ -2,31 +2,15 @@
 
 > **Format (2026-10-06):** CURRENT state only, REWRITTEN at each checkpoint. Standing directives + gotchas: project `CLAUDE.md` → "Standing directives & gotchas" (incl. "Multi-customer add-in (Model 1)" and "Guest sign-in, PCFs and telemetry" blocks). History: git log + `notes/handoff-history/` (do not load on recovery; the pre-2026-10-21 state, including the Console run log, is archived in `notes/handoff-history/2026-10.md`).
 
-> **Last Updated**: 2026-10-28 (by context-handoff): fixing #2412 and #2416 (owner go 2026-10-28; email-communication-intelligence is CLOSED, so its engine is ours to fix).
+> **Last Updated**: 2026-10-29: #2412/#2416 closed after the owner re-test; ebilling 094 client in #2448 (auto-merge).
 
-## 🔥 ACTIVE NOW (2026-10-28): owner-approved fixes #2412 + #2416
+## 🔥 ACTIVE NOW (2026-10-29)
 
-- **#2412 (ISS-027): MERGED.** PR #2417 merged to master at cae791a743 (2026-10-28 21:58Z); review round 1 fixes were in 9450b4a0fd and the scoped re-check was clean.
-  - The Quick Save part is client-side, so the master push auto-deploys it with the add-in. The mapper part needs a dev BFF deploy.
-  - Known limits: Quick Save saves unfiled when any field is Ambiguous (accepted, noted on the PR); #2421 (suggestions re-evaluation ignores an existing filing).
-- **#2416 (ISS-028): a typed Document Name replaced the email subject.**
-  - Server: `task/word-2416-docname-server`, **C:\wt2416**, **PR #2419**. Commits 9939b19f6b and round 1 0dbcf27c1e:
-    - a blank typed name gets the suffix;
-    - an id-less key includes the typed name;
-    - the Office suite passes 975 of 975 (7 skipped).
-    - NO auto-merge yet.
-  - Client: `task/word-2416-docname-client`, **C:\wt2416c**, **PR #2420 DRAFT**. Commits 25ca6bf796 and round 1 2c37d7f47e:
-    - trims the typed name;
-    - email "Keep both" sends `isNameSystemDerived: true`, so the file is stored suffixed and the typed name is kept;
-    - fixed the stale SaveFlow.documentName test;
-    - 223 jest tests pass.
-    - HOLD until the server is live on dev.
-  - The scoped re-check was clean; the F4 doc fix is 39a8b88ce8. **#2419 MERGED at 136568cf70** (2026-10-28).
-- **LIVE on dev (2026-10-29):** BFF 136568cf70 since 02:23:53Z (R3; UAC gate passed, no night Office traffic, so UAC watches the next daytime window). #2420 merged at 5398af46b4 (03:05Z); add-in deploy run 40810178113 succeeded.
-- **Now:** the owner re-tests one Outlook save with a typed Document Name.
-  - Check the file name, the email subject on the document and on the communication, and filing to the chosen matter (#2412).
-  - Then close #2412/#2416 and set ISS-027/028 to Closed.
-  - Offer to correct the owner's 10-28 test record (comm 12f1f3f8…, doc 536204ff…) only if they ask.
+- **#2412 (ISS-027) and #2416 (ISS-028): CLOSED 2026-10-29.** The owner re-test passed on dev in Outlook web: a typed name produced `2026-10-08_New Email File Name 10-29-2026.eml` filed to PAT-935426, and the subject was kept. Retest comments are on both issues. Known limit: #2421.
+- **Outlook DESKTOP sign-in: "Bad Request - Request Too Long" (HTTP 400, request headers too long) on login.microsoftonline.com** in the sign-in popup. Outlook web is fine.
+  - Diagnosis: the cookie jar for login.microsoftonline.com in Outlook desktop's embedded browser has grown too large. The authorize URL is normal, and our MSAL `storeAuthStateInCookie` writes only on the add-in's own origin.
+  - Asked the owner to clear the Office add-in cache (`%LOCALAPPDATA%\Microsoft\Office\16.0\Wef\`, with Outlook closed). If it recurs soon after a clear, investigate what keeps adding cookies and file it.
+- Offer to correct the owner's 10-28 test record (comm 12f1f3f8…, doc 536204ff…) only if they ask.
 - **ebilling 094 merged into work/ebilling-r1** (094 head 600079fd11; contract unchanged since 97c793670b). The client for its codes is in **PR #2448, AUTO-MERGE ON**: `task/word-133-094-codes`, **C:\wt133d**; e480113b0c, then review round 1 d5a75a0479.
   - Every 094 row in §6 and §9 has a sentence. Permanent (upload hint): email_save_failed, document_unavailable, document_not_found, source_communication_mismatch, COMMUNICATION_REFILE_FORBIDDEN. storage_not_configured is a plain refusal.
   - `filingKept`: the top-level field first, then the pinned sentence. Code = `errorCode ?? reasonCode`, plus `extensions.code` on a 403 only.

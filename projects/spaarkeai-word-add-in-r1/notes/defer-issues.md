@@ -1286,7 +1286,7 @@ Capture never carries `contentId` (`emailContentCapture.ts`, `OutlookAdapter.ts:
 
 | Field | Value |
 |---|---|
-| **Status** | Fixed, live on dev 2026-10-29 (BFF 136568cf70); owner re-test pending |
+| **Status** | Closed 2026-10-29: owner re-test passed on dev (Outlook web; the email filed to PAT-935426) |
 | **Urgency** | now (owner go 2026-10-28) |
 | **Filed** | 2026-10-28 (owner's Outlook check on dev, found in passing; pre-existing) |
 | **GitHub Issue** | [#2412](https://github.com/spaarke-dev/spaarke/issues/2412) |
@@ -1297,7 +1297,7 @@ The owner saved an email to CMRCL-464674 whose body carried a signed tracking to
 
 | Field | Value |
 |---|---|
-| **Status** | Fixed, live on dev 2026-10-29 (BFF 136568cf70 + add-in 5398af46b4); owner re-test pending |
+| **Status** | Closed 2026-10-29: owner re-test passed on dev (Outlook web; file `2026-10-08_New Email File Name 10-29-2026.eml`, subject kept) |
 | **Urgency** | now (found in the same owner check) |
 | **Filed** | 2026-10-28 (owner's Outlook check on dev; pre-existing since the pane sent the typed name as `email.subject`) |
 | **GitHub Issue** | [#2416](https://github.com/spaarke-dev/spaarke/issues/2416) |
