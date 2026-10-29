@@ -1,47 +1,44 @@
 # Current Task State
 
-> **Last Updated**: 2026-10-29 (context-handoff). The owner asked: commit/push → update from master → /conflict-check → /merge-to-master for work/ebilling-r1 (PR #1911). Steps 1 and 3 are done. Step 2 is in progress (agent). Step 4 is blocked on the 194b writer fix, then CI and ontology-r1 review.
+> **Last Updated**: 2026-10-29 (context-handoff). Owner's request: commit/push → update from master → /conflict-check → /merge-to-master for work/ebilling-r1 (PR #1911). Steps 1–3 done. Step 4 (merge-to-master) is waiting on CI, the ontology-r1 review and the uac Q2 fix.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Work branch** | origin/work/ebilling-r1 = cb20efc537. It carries master a4b6459da3, 098, and the UAC RecordFamilyEdges ruling. PR #1911 is draft and CONFLICTING (master moved), so no CI has run. Its body carries "UAC-r2 review: accepted at cb20efc537 …". |
-| **Unpushed integration tip** | Worktree `C:\code_files\spaarke\.claude\worktrees\agent-ae9910636512ed719`, local branch `ebill-master-sync` @ bf9f6ae88d, 50 ahead of work. It holds 3723edfad9 (merge of master 2cd0f62e2c = uac 194b #2432) and 7a8fa8f0a7 (merge of 094 @ 600079fd11, uac READY). ArchTests: 1 fail, "194b R3b-2 … ForRow …", on 6 ebilling writers: RuleSetService, ProcedureService, InvoiceLineDecisionService, RateCardImportService, InvoiceSubmissionPersister, InvoiceSubmissionService. |
-| **Running agents** | **ebill-194b-writers** (opus, in that worktree): ForRow/ForChild writers plus ordinary/secure tests, merge master (~127 ahead), full gate incl. both integration suites and Client lint, push to work, add "UAC-r2 review: 094 READY at 600079fd11" to the #1911 body. It reports any ratchet entries; uac must accept them. **ebill-102** (sonnet, worktree agent-a67053723ffe4e2ba): local commit 0bae22d224, finishing and pushing `task/ebill-102-adjustments`. |
-| **Do not push to work** | Until ebill-194b-writers has pushed (its push must fast-forward). This checkpoint commit is local only; push it after. |
-| **Next action** | (1) Owner decisions on 103 F1 and Q1 (below). (2) Send the 103 fix round. (3) File the Q2 defect plus its fix. (4) When the writers agent is green: confirm the #1911 checks are terminal-green, request ontology-r1 review (project CLAUDE.md §4), get UAC acceptance of any ratchet entries, put the full integration counts in the PR body, mark it ready, then `gh pr merge 1911 --auto --merge`. |
+| **Work branch** | origin/work/ebilling-r1 = 66c49d5247 (PR #1911, draft, MERGEABLE). It carries master through d511a3297e (194b included), 094 @ 600079fd11 (uac READY), 098, the 194b writer fix 1028e5ccdd, the publish-lint and Pillow fix ba63082008, and the EB-D-170–172 log. Master is now 1e409b2ad2. The trial merge (merge-tree) is clean; master is not merged in yet. |
+| **Do not push to work** | Until ontology-r1 posts its review of ba63082008 (it asked for no pushes; it knows about 66c49d5247, which is docs only). If CI needs a fix, send ontology the new SHA first. |
+| **Running** | (1) Monitor on the #1911 checks. (2) Agent **ebill-storedfile-owner** (opus, worktree; branch task/ebill-storedfile-owner, pushes only that branch): the uac Q2 fix, StoredFileService.StageCreateFlipAsync ContentOf → ForRow(sprk_storedfile), plus the Q1 parity test, the no-core fallback pin and the hard-deny ArchTest. (3) Agent **ebill-103** (implementer, worktree agent-aad68f32362f173e0): the 103 fix round (EB-D-171 caller contact, EB-D-172 close Signals, F2–F4, K1–K4). |
+| **Next action** | When the storedfile fix is green: send uac the diff and wait for its re-check. After the ontology review: merge the fix branch plus master (1e409b2ad2+) into work, run the gate, push, and tell ontology the SHA. Then, with CI green and zero pending, put the full integration counts in the PR body, `gh pr ready 1911`, `gh pr merge 1911 --auto --merge`, and do the A.6 sync. |
+
+## PR #1911 merge checklist
+- [x] scoped-publish-lint: comments reworded; the StoredFile schema test drops the duplicate negative checks (ba63082008).
+- [x] Trivy: all alerts were the Pillow 12.3.0 pin in the eval-set generator; now 13.0.0 (ba63082008).
+- [ ] CI green, zero pending, CLEAN.
+- [ ] ontology-r1 review (asked 2026-10-29; running).
+- [ ] uac: Q1 accepted with the parity test; Q2 fix re-checked.
+- [ ] PR body: full integration counts (ab1ca98f45: 199/0/8 and 353/0/23; update after the final gate).
 
 ## Task branches (not on work)
 
 | Task | Branch @ head | State |
 |---|---|---|
-| 101 | task/ebill-101-corrections (local, worktree agent-ae6eabaa0ec9d718e) | Stopped at its POML trigger. Owner chose (EB-D-170, to log): store per-line provenance first (analyzer id/version and Action code/version in `sprk_extractionconfidence`, plus header provenance); old dev lines refuse extracted-field corrections with a stable 409. Resume after 094 is on work, rebased on work. |
-| 102 | task/ebill-102-adjustments | Finishing (agent). |
-| 103 | task/ebill-103-approval @ ea3eb20269 | Adversarial review done; findings below. Needs a fix round. |
-| 086 / 092 / 089 | existing branches | Merge work (once it carries 194b), then the content-team writers and the 086 fix round (uac F3-1, K1–K5; adversarial K2–K6). |
-
-## 103 adversarial findings (ea3eb20269)
-
-- **F1 (security; owner decision):** eligibility matches `contact.sprk_systemuser == caller` (EligibleApproverResolver.cs:323-341). That column is not secured and not audited, so anyone with contact Write can make themselves an approver. Options: (a) match the assignment contact against the caller's own contact via `IIdentityNormalizationService.ResolveAsync(caller).ContactId` (recommended); (b) field-secure and audit `sprk_systemuser`; (c) require both.
-- **F2:** an approve retry after a failed bulk accept loses the line Decision Records (InvoiceApprovalService.cs:409-417). Finish the accept-clean decision first, or answer 409 until it is complete. Add a test.
-- **F3:** approve does not require exactly one core lookup (`CoreOf` takes the first one), and the recorder's filing check runs after the transition. Fix: use `InvoiceFamilyCoreRecordGuard.CoreRecordLookups` exactly-one before the claim, ideally `CoreAncestorResolver.ResolveStampsAsync`.
-- **F4:** GET `canApprove` ignores Write on the invoice (InvoiceApprovalService.cs:654-665).
-- **K (fix cheaply):** make the claim conditional on decidedby being empty or the caller; clear the claim fields on Refused; the job reads the core from the invoice, not the portion; put the approved amount in the record Values; reject an unknown portion status. File a follow-up for "Approved with no Decision Record" (sweep).
-- **Q2 (real blocker, in 049's persister):** no line is ever written Clean (InvoiceSubmissionPersister.cs:812 writes only Pending/Flagged), so no invoice can be approved. Fix in the persister: unflagged → Clean. File it via /project-defer-issue-tracking and fix it in scope.
-- **Q1 (owner):** should approve close invoice-level Signals (D-122 pattern), or leave that to 104/later?
+| 101 | task/ebill-101-corrections (local, worktree agent-ae6eabaa0ec9d718e) | Waiting. Resume: rebase on work, persister prep (EB-D-170 provenance + Q2 Clean status for unflagged lines + an end-to-end persister → approve test), then build 101. |
+| 102 | task/ebill-102-adjustments @ 5ae2385531 | Done. Merge after 103; route ledger count reconciles to 145; check ForParents against 194b. |
+| 103 | task/ebill-103-approval | Fix round running (agent). Then file a follow-up issue for the "Approved with no Decision Record" sweep. |
+| 086 / 092 / 089 | existing branches | Merge work, then the content-team writers and the 086 fix round (uac F3-1, K1–K5; adversarial K2–K6). |
 
 ## Peers
-
-- uac-r2: 094 READY at 600079fd11. RecordFamilyEdges accepted at cb20efc537. 194b is on master (2cd0f62e2c) but NOT yet deployed to dev (waits on the dev BU arrangement); uac will notify. #2427 OutputLookups sha to come.
-- word-add-in-r1: has every 095 contract change up to 97c793670b. Waits on our notice when 094 merges to work, and when dev is live.
-- R3: dev BFF = master 136568cf70 (no ebilling code). On dev, ebilling is OFF (no Ebilling/Finance settings), so ebilling code on master is inert there (503 ebilling.disabled; the reconcile job skips).
+- uac-r2: Q1 accepted (parity test required); Q2 is a defect, take (b) before #1911 goes ready, then it re-checks the diff. #2427 OutputLookups sha to come. 194b dev-deploy notice to come.
+- ontology-r1: reviewing #1911 at ba63082008; will post a PR comment.
+- R3: removing `sprk_invoicestatus` from the master external allow-list in its task-002 PR. When it lands, drop InvoiceStatusRetirementGuardTests' TransitionalExemptions (and the two marked lines) in the same merge into work. R3 sends the sha.
+- word-add-in-r1: told that 094 is on work (2026-10-29). Notify again when dev is live.
 - Filed: #2426 (flaky ProvisionProject timeout test).
 
-## Owner decisions this session (to log in decisions-log once work is pushable)
-
-- EB-D-169 logged (faulted visibility read → 503).
-- EB-D-170 not yet logged: per-line AI provenance for corrections (101).
+## Open items
+- Pre-existing defect to fix or file: InvoiceLineDecisionService.CorrectionRow `CoreOf(invoice)!.Value` throws before the no-core refusal.
+- Mark 101/102/103 🔄 in TASK-INDEX.
+- Owner question still open: whether the R2 re-check button comes into R1.
 
 ## Standing rules (see project CLAUDE.md)
-No bare git stash, no --no-verify. Live writes and role changes need the owner's OK; schema runs need notices (uac-r2, R3, ontology as relevant). StoredFileReconcileJob is not enabled anywhere before F4 merges and DEF-044 is fixed. After merges: build the 5 test projects, then run the broad filter and ArchTests before pushing. Remove worktrees only with Remove-WorktreeSafe.ps1. Max 4 concurrent subagents. Scratchpad queue: scratchpad/queue.md.
+No bare git stash, no --no-verify. Live writes and role changes need the owner's OK; schema runs need notices. StoredFileReconcileJob is not enabled anywhere before F4 merges and DEF-044 is fixed. After merges: build the 5 test projects, then run the broad filter and ArchTests before pushing. Remove worktrees only with Remove-WorktreeSafe.ps1. Max 4 concurrent subagents. Scratchpad queue: scratchpad/queue.md.
