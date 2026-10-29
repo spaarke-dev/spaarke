@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
@@ -13,14 +14,16 @@ using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Finance.Files;
 using Sprk.Bff.Api.Services.Jobs;
 
 namespace Sprk.Bff.Api.Services.Finance.Submission;
 
 /// <summary>
-/// The one server-side invoice intake (ebilling-r1 FR-17, Processing Pipeline step 0, ADR-002): validates the request, stores the PDF in the core
-/// record's container, creates the <c>sprk_document</c> (type Invoice) and the <c>sprk_invoicesubmission</c> (Received, with its tracking number),
-/// and enqueues <see cref="JobType"/>. Both entry points call it: the external SPA route and the internal route (D-24: the same checks).
+/// The one server-side invoice intake (ebilling-r1 FR-17, Processing Pipeline step 0, ADR-002): validates the request, stages the PDF in the
+/// Finance file store (task 092: <see cref="StoredFileService.StageAsync"/> under <see cref="StoredFileIds.ForUpload"/> of the submission, parent
+/// the invoice the job will create), creates the <c>sprk_invoicesubmission</c> (Received, with its tracking number) and enqueues
+/// <see cref="JobType"/>. Both entry points call it: the external SPA route and the internal route (D-24: the same checks).
 /// </summary>
 /// <remarks>
 /// <para><b>Authorization of the CALLER is the routes' job.</b> Each route's endpoint filter decides the caller, the firm and the core record
@@ -33,21 +36,28 @@ namespace Sprk.Bff.Api.Services.Finance.Submission;
 /// is read. It reuses <see cref="ExternalParticipationService.GetReferencedOrganizationIdsAsync"/> (the access model's own record-to-organization
 /// read): that class lives in the external-access infrastructure namespace this service already depends on (<see cref="ExternalDataService"/>,
 /// <see cref="CallerPrincipal"/>), and the read is app-only and channel-neutral, so no new seam or interface is needed (ADR-010).</para>
-/// <para><b>Order (copied from the external upload, <c>ExternalProjectDataEndpoints.UploadDocumentForParent</c>):</b> every check and read first
-/// (number, file, firm, core-record fields, owner, container), then the bytes, then the rows, then the job. A failure after the upload is
-/// compensated in reverse order with its own token, so it leaves no Received submission behind (acceptance criterion 7). A compensation that
+/// <para><b>Order:</b> every check and read first (number, file, firm, core-record fields, owner), then the bytes, then the submission row, then
+/// the job. A failure after the stage is compensated in reverse order with its own token (the submission row, then the staged blob through
+/// <see cref="StoredFileService.DeleteStagedAsync"/>), so it leaves no Received submission behind (acceptance criterion 7). A compensation that
 /// itself fails is logged and never masks the original failure.</para>
-/// <para><b>The writes ignore the caller's token.</b> From the upload to the enqueue every call runs under <see cref="CancellationToken.None"/>:
-/// Graph, Dataverse and Service Bus finish a request they received even when the caller abandons it, and the abandoned call's reply (the id
-/// compensation needs) is lost. A client that disconnects mid-write therefore gets a complete submission it never hears about, not orphans.
+/// <para><b>The file store, not SharePoint Embedded (ebilling-r1 task 092; procedure-and-file-model 9.1, D-44 second half).</b> No
+/// <c>sprk_document</c> is created and the submission names none: the bytes are staged as a blob only. The job (049) reads the staged blob
+/// (<see cref="StoredFileService.OpenStagedForProcessingAsync"/>), writes the <c>sprk_storedfile</c> row inside its commit transaction (ADR-002:
+/// the row's one writer is that transaction) and flips it to Servable before its after-commit steps. The invoice PDF therefore no longer
+/// appears among the core record's Documents; the review reads it by its Stored File id.</para>
+/// <para><b>The writes ignore the caller's token.</b> From the stage to the enqueue every call runs under <see cref="CancellationToken.None"/>:
+/// Blob storage, Dataverse and Service Bus finish a request they received even when the caller abandons it, and the abandoned call's reply is
+/// lost. A client that disconnects mid-write therefore gets a complete submission it never hears about, not orphans.
 /// A caller already gone before the first write writes nothing.</para>
 /// <para><b>Only creator of submissions.</b> The row is created by <see cref="ITrackingNumberAllocator"/> with its number already set (D-87); the
 /// submission id is minted here once per request and is also the job's idempotency key. This service never creates <c>sprk_invoice</c> (task 049
 /// does).</para>
-/// <para><b>The existing-document entry (ebilling-r1 050a, D-134).</b> The review-confirm route calls <see cref="SubmitExistingDocumentAsync"/>:
-/// the same field, firm, core-record, firm-link and owner checks (<see cref="DecideAsync"/>), no file checks, no upload and no document create;
-/// the submission points at the confirmed document, its id is derived from the document (idempotent by document), and the job re-files the
-/// document under the invoice it creates (<see cref="InvoiceDocumentRefile"/>).</para>
+/// <para><b>Submit Invoice from a source document (ebilling-r1 050a, D-134; task 094, procedure-and-file-model 9.1).</b> The review-confirm
+/// route and the from-document route call <see cref="SubmitExistingDocumentAsync"/>: the same field, firm, core-record, firm-link and owner
+/// checks (<see cref="DecideAsync"/>), no file checks, no upload and no document create; the submission names the SOURCE document, its id
+/// is derived from the document (idempotent by document), and the job COPIES the document's bytes into the invoice's Stored File (9.1
+/// steps 2-6). The source document never moves: nothing here or in the job writes its owner, its shares or its <c>sprk_invoice</c> link
+/// (the 050a re-file is retired).</para>
 /// <para><b>Logging (ADR-015).</b> Ids and outcomes only; the firm invoice number, the tracking number and the file name are business data and are
 /// not logged above Debug.</para>
 /// </remarks>
@@ -55,9 +65,6 @@ public class InvoiceSubmissionService
 {
     /// <summary>The ADR-004 job type of the processing job (handled by task 049).</summary>
     public const string JobType = "InvoiceSubmissionProcessing";
-
-    /// <summary><c>sprk_document.sprk_documenttype</c> option "Invoice" (SpaarkeMaster sprk_Document/Entity.xml).</summary>
-    internal const int InvoiceDocumentType = 100000001;
 
     internal const string PdfContentType = "application/pdf";
     internal const int MaxPoNumberLength = 100;
@@ -71,6 +78,10 @@ public class InvoiceSubmissionService
     internal const string DocumentEntity = "sprk_document";
 
     private static readonly byte[] PdfSignature = "%PDF-"u8.ToArray();
+
+    /// <summary>Review round 5 (pass-2 F1-1): the detail of <see cref="InvoiceSubmissionErrors.EarlierAttemptBeingRemoved"/> on both routes.</summary>
+    internal const string EarlierAttemptBeingRemovedDetail =
+        "An earlier attempt to submit this invoice failed and is still being removed. Nothing was saved; try again shortly.";
 
     private static readonly string[] ViewColumns =
     {
@@ -86,12 +97,9 @@ public class InvoiceSubmissionService
 
     private readonly ITrackingNumberAllocator _allocator;
     private readonly IGenericEntityService _entities;
-    private readonly IDocumentDataverseService _documents;
     private readonly ICommunicationDataverseService _recordTypes;
-    private readonly ExternalDataService _externalData;
     private readonly ExternalParticipationService _participations;
-    private readonly SpeFileStore _spe;
-    private readonly RecordContainerResolver _containers;
+    private readonly StoredFileService _files;
     private readonly IRecordOwnershipResolver _ownership;
     private readonly ExistingDocumentIsolationCheck _isolation;
     private readonly JobSubmissionService _jobs;
@@ -101,12 +109,9 @@ public class InvoiceSubmissionService
     public InvoiceSubmissionService(
         ITrackingNumberAllocator allocator,
         IGenericEntityService entities,
-        IDocumentDataverseService documents,
         ICommunicationDataverseService recordTypes,
-        ExternalDataService externalData,
         ExternalParticipationService participations,
-        SpeFileStore spe,
-        RecordContainerResolver containers,
+        StoredFileService files,
         IRecordOwnershipResolver ownership,
         ExistingDocumentIsolationCheck isolation,
         JobSubmissionService jobs,
@@ -115,12 +120,9 @@ public class InvoiceSubmissionService
     {
         _allocator = allocator ?? throw new ArgumentNullException(nameof(allocator));
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
-        _documents = documents ?? throw new ArgumentNullException(nameof(documents));
         _recordTypes = recordTypes ?? throw new ArgumentNullException(nameof(recordTypes));
-        _externalData = externalData ?? throw new ArgumentNullException(nameof(externalData));
         _participations = participations ?? throw new ArgumentNullException(nameof(participations));
-        _spe = spe ?? throw new ArgumentNullException(nameof(spe));
-        _containers = containers ?? throw new ArgumentNullException(nameof(containers));
+        _files = files ?? throw new ArgumentNullException(nameof(files));
         _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _isolation = isolation ?? throw new ArgumentNullException(nameof(isolation));
         _jobs = jobs ?? throw new ArgumentNullException(nameof(jobs));
@@ -174,27 +176,7 @@ public class InvoiceSubmissionService
             return refused;
         }
 
-        ContainerDecision container;
-        try
-        {
-            container = await ResolveContainerAsync(core, ct);
-        }
-        catch (SdapProblemException ex)
-        {
-            return InvoiceSubmissionOutcome.Refused(ex.StatusCode, InvoiceSubmissionErrors.StorageNotConfigured, ex.Detail ?? ex.Title);
-        }
-
-        if (container.Outcome is ContainerDecisionOutcome.Unresolved or ContainerDecisionOutcome.FailClosed
-            || string.IsNullOrWhiteSpace(container.ContainerId))
-        {
-            // Never substitute another container: for a secure record that substitution is the leak (D-44, ADR-007).
-            _logger.LogWarning("Invoice submission refused: no usable container for {Entity} {RecordId} ({Outcome})",
-                core.EntityLogicalName, core.RecordId, container.Outcome);
-            return InvoiceSubmissionOutcome.Refused(StatusCodes.Status422UnprocessableEntity, InvoiceSubmissionErrors.StorageNotConfigured,
-                "This record has no storage container configured, so the invoice cannot be stored.");
-        }
-
-        return await WriteAsync(request, number, file, decision.Row!, decision.ResolverFields!, decision.Owner!, container.ContainerId!, ct);
+        return await WriteAsync(request, number, file, decision.Row!, decision.ResolverFields!, ct);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════════
@@ -203,13 +185,49 @@ public class InvoiceSubmissionService
 
     /// <summary>
     /// The submission id of the confirm of <paramref name="documentId"/>: deterministic, so the document has exactly one confirm submission.
-    /// It is the dedupe key of <see cref="SubmitExistingDocumentAsync"/> (D-134 "idempotent by document") and the marker by which the job knows
-    /// the submission's document was not created by intake and must be re-filed under the invoice (<see cref="InvoiceDocumentRefile"/>).
+    /// It is the dedupe key of <see cref="SubmitExistingDocumentAsync"/> (D-134 "idempotent by document"; kept by task 094).
     /// </summary>
     public static Guid ExistingDocumentSubmissionIdFor(Guid documentId) => InvoiceSubmissionPersister.IdOf($"ebilling-confirm-submission-{documentId:D}");
 
     /// <summary>The processing job id of that submission: deterministic too, so a retry answers with the same job id it was first given.</summary>
     public static Guid ExistingDocumentJobIdFor(Guid documentId) => InvoiceSubmissionPersister.IdOf($"ebilling-confirm-job-{documentId:D}");
+
+    /// <summary>
+    /// EB-D-167 (owner 2026-10-28; closes ISS-012): the most attempts one document's confirm can make (the first and every new attempt
+    /// after a Failed one), the from-email route's bound (<see cref="FromEmailSubmissionKey.MaxGeneration"/>).
+    /// </summary>
+    internal const int MaxExistingDocumentGeneration = FromEmailSubmissionKey.MaxGeneration;
+
+    /// <summary>
+    /// EB-D-167: the submission id of the <paramref name="generation"/>-th attempt to confirm <paramref name="documentId"/>. Generation 1 is
+    /// <see cref="ExistingDocumentSubmissionIdFor(Guid)"/> unchanged (every existing row keeps its id); a later one is derived from the
+    /// document and the generation, so one attempt per generation exists and two concurrent retries meet on the same id.
+    /// </summary>
+    public static Guid ExistingDocumentSubmissionIdFor(Guid documentId, int generation) => generation <= 1
+        ? ExistingDocumentSubmissionIdFor(documentId)
+        : InvoiceSubmissionPersister.IdOf(string.Create(CultureInfo.InvariantCulture, $"ebilling-confirm-submission-{documentId:D}-attempt-{generation}"));
+
+    /// <summary>EB-D-167: the processing job id of that attempt (generation 1 unchanged).</summary>
+    public static Guid ExistingDocumentJobIdFor(Guid documentId, int generation) => generation <= 1
+        ? ExistingDocumentJobIdFor(documentId)
+        : InvoiceSubmissionPersister.IdOf(string.Create(CultureInfo.InvariantCulture, $"ebilling-confirm-job-{documentId:D}-attempt-{generation}"));
+
+    /// <summary>
+    /// EB-D-167 (fix round F1-1 kept): true when <paramref name="submissionId"/> is one of the ids the intake derives for
+    /// <paramref name="documentId"/>'s attempts. A document is a source only for a submission created FOR it.
+    /// </summary>
+    internal static bool IsExistingDocumentSubmissionIdOf(Guid documentId, Guid submissionId)
+    {
+        for (var generation = 1; generation <= MaxExistingDocumentGeneration; generation++)
+        {
+            if (ExistingDocumentSubmissionIdFor(documentId, generation) == submissionId)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     /// <summary>
     /// The document's core-record lookups (050a review #3): the confirm's core record must be the one the document is filed under, if any. The
@@ -280,11 +298,23 @@ public class InvoiceSubmissionService
     /// </summary>
     internal const int MaxFilingChainDocuments = 4;
 
-    private static readonly string[] FilingChainColumns =
+    /// <summary>D-140: the columns a document of the filing chain is read with (task 094: shared by step 1, step 3 and step 5).</summary>
+    internal static readonly string[] FilingChainColumns =
         [.. DocumentCoreColumns.Select(c => c.Column), DocumentRelatedCommunication, DocumentParentDocument];
 
+    /// <summary>Task 094: the source document's own Restricted state (9.1 step 3: read, never a refusal ground, never stored).</summary>
+    private const string DocumentAccessPermission = InheritedAccessPermission.Column;
+
+    /// <summary>Task 094: the source's communication flags 9.1 step 3 reads (internal-only; the thread's privacy).</summary>
+    private const string CommunicationInternalOnly = Sprk.Bff.Api.Services.Communication.CommunicationInternalOnlyFloor.InternalOnlyField;
+
+    private const string ThreadPrivacy = Sprk.Bff.Api.Services.Communication.CommunicationInternalOnlyFloor.ThreadPrivacyField;
+
     private static readonly string[] ExistingDocumentColumns =
-        ["sprk_invoice", "sprk_graphdriveid", "sprk_graphitemid", .. FilingChainColumns];
+        ["sprk_invoice", "sprk_graphdriveid", "sprk_graphitemid", InvoiceReviewService.DocInvoiceReviewStatus, .. FilingChainColumns];
+
+    /// <summary>Task 094: the source document as steps 3 and 5 read it: the filing chain and its own Restricted state.</summary>
+    private static readonly string[] SourceCheckColumns = [.. FilingChainColumns, DocumentAccessPermission];
 
     /// <summary>
     /// The existing-document entry (D-134): a reviewer confirms that a document already stored (an email attachment) is an invoice. It runs the
@@ -327,27 +357,69 @@ public class InvoiceSubmissionService
         }
 
         var number = request.FirmInvoiceNumber!.Trim();
-        var submissionId = ExistingDocumentSubmissionIdFor(documentId);
-        var jobId = ExistingDocumentJobIdFor(documentId);
 
-        // ── 2. The earlier submission for this document, if any: the retry's answer ──
-        InvoiceSubmissionView? earlier;
+        // ── 2. The latest attempt for this document, if any: the retry's answer. EB-D-167 (owner 2026-10-28): the attempts are walked by
+        //       their derived ids while each one ended Failed; after a Failed one this request is a NEW attempt (the next generation,
+        //       created by this caller, through every check below), whoever made the failed one. Rejected keeps D-139 (409). ──
+        InvoiceSubmissionView? earlier = null;
+        var earlierGeneration = 0;
         try
         {
-            earlier = await GetAsync(submissionId, ct);
+            for (var g = 1; g <= MaxExistingDocumentGeneration; g++)
+            {
+                if (await GetAsync(ExistingDocumentSubmissionIdFor(documentId, g), ct) is not { } attempt)
+                {
+                    break;
+                }
+
+                (earlier, earlierGeneration) = (attempt, g);
+                if (attempt.Status != nameof(InvoiceSubmissionStatus.Failed))
+                {
+                    break;
+                }
+            }
         }
         catch (SdapProblemException ex)
         {
             return InvoiceSubmissionOutcome.Refused(ex.StatusCode, ex.Code, ex.Detail ?? ex.Title);
         }
 
-        if (earlier is not null)
+        if (earlier is not null && earlier.Status != nameof(InvoiceSubmissionStatus.Failed))
         {
-            return await AnswerWithEarlierAsync(request, number, earlier, documentId, jobId, ct);
+            return await AnswerWithEarlierAsync(
+                request, number, earlier, documentId, ExistingDocumentJobIdFor(documentId, earlierGeneration), request.FileSourceBeforeWrite, ct);
         }
 
-        // ── 3. The document: present, holding a file, not already an invoice's, not filed under another core record ──
-        if (await CheckExistingDocumentAsync(documentId, request.CoreRecord, ct) is { } documentRefusal)
+        // Review round 5 (pass-2 F1-1): no new attempt while the latest Failed one's undo is unfinished (its invoice still linked).
+        if (earlier is not null
+            && SubmissionCommitGate.UndoUnfinished(InvoiceSubmissionStatus.Failed, earlier.OutcomeReasonCode, earlier.InvoiceId))
+        {
+            _logger.LogInformation("Invoice submission {EarlierId} of document {DocumentId} ended Failed and its undo is unfinished; refused (503)",
+                earlier.SubmissionId, documentId);
+            return InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.EarlierAttemptBeingRemoved,
+                EarlierAttemptBeingRemovedDetail);
+        }
+
+        var generation = earlierGeneration + 1;
+        if (generation > MaxExistingDocumentGeneration)
+        {
+            _logger.LogInformation("Invoice submission: document {DocumentId} reached {Max} attempts; refused (409)", documentId, MaxExistingDocumentGeneration);
+            return InvoiceSubmissionOutcome.Refused(StatusCodes.Status409Conflict, InvoiceSubmissionErrors.SubmissionAlreadyEnded,
+                "The document was already submitted as an invoice too many times. Nothing was saved.");
+        }
+
+        var submissionId = ExistingDocumentSubmissionIdFor(documentId, generation);
+        var jobId = ExistingDocumentJobIdFor(documentId, generation);
+        if (earlier is not null)
+        {
+            _logger.LogInformation(
+                "Invoice submission {EarlierId} of document {DocumentId} ended Failed; this request is attempt {Generation} ({SubmissionId})",
+                earlier.SubmissionId, documentId, generation, submissionId);
+        }
+
+        // ── 3. The document: present, holding a file, not already an invoice's, not rejected, linking the route's communication, not filed
+        //       under another core record (D-140) and not isolated elsewhere ──
+        if (await CheckExistingDocumentAsync(documentId, request.CoreRecord, request.SourceCommunicationId, ct) is { } documentRefusal)
         {
             return documentRefusal;
         }
@@ -358,6 +430,10 @@ public class InvoiceSubmissionService
         {
             return refused;
         }
+
+        // ── 4b. Step A (fix round F1-b): the route's filing of an unfiled source communication, as the caller - only now, after every
+        //        read-only refusal above, so a refused submission never leaves a filing behind. Its refusal throws (the route answers). ──
+        var filed = request.FileSourceBeforeWrite is { } fileSource && await fileSource(ct);
 
         // ── 5. The submission, then its job ──
         var row = decision.Row!;
@@ -401,19 +477,19 @@ public class InvoiceSubmissionService
             // ours, so not touched.
             _logger.LogWarning(ex, "Invoice submission {SubmissionId}: the confirm of document {DocumentId} met a concurrent confirm with other details",
                 submissionId, documentId);
-            return DocumentAlreadySubmitted();
+            return AfterFiling(DocumentAlreadySubmitted(), filed);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Invoice submission {SubmissionId}: the confirm of document {DocumentId} could not be created", submissionId, documentId);
-            return NotQueued();
+            return AfterFiling(NotQueued(), filed);
         }
 
         if (!allocation.Succeeded)
         {
             _logger.LogWarning("Invoice submission {SubmissionId}: no tracking number could be allocated ({Reason})", submissionId, allocation.Reason);
-            return InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, TrackingNumberReasons.Unavailable,
-                "A tracking number could not be assigned right now, so nothing was saved. Try again shortly.");
+            return AfterFiling(InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, TrackingNumberReasons.Unavailable,
+                "A tracking number could not be assigned right now, so nothing was saved. Try again shortly."), filed);
         }
 
         if (allocation.Outcome == TrackingNumberOutcome.AlreadyCreated)
@@ -427,22 +503,23 @@ public class InvoiceSubmissionService
             }
             catch (SdapProblemException ex)
             {
-                return InvoiceSubmissionOutcome.Refused(ex.StatusCode, ex.Code, ex.Detail ?? ex.Title);
+                return AfterFiling(InvoiceSubmissionOutcome.Refused(ex.StatusCode, ex.Code, ex.Detail ?? ex.Title), filed);
             }
 
             if (concurrent is null)
             {
                 // Created, then gone before it could be read (a delete outside this path): nothing to answer with; a retry decides again.
                 _logger.LogWarning("Invoice submission {SubmissionId}: already created for document {DocumentId} but no longer readable", submissionId, documentId);
-                return NotQueued();
+                return AfterFiling(NotQueued(), filed);
             }
 
-            return await AnswerWithEarlierAsync(request, number, concurrent, documentId, jobId, write);
+            // Step A already ran above for this request: the concurrent row's answer never runs it again.
+            return AfterFiling(await AnswerWithEarlierAsync(request, number, concurrent, documentId, jobId, fileSource: null, write), filed);
         }
 
         if (!await TrySubmitJobAsync(jobId, submissionId, request.CorrelationId))
         {
-            return NotQueued();
+            return AfterFiling(NotQueued(), filed);
         }
 
         _logger.LogInformation(
@@ -454,16 +531,22 @@ public class InvoiceSubmissionService
     /// <summary>
     /// A retry (or a concurrent create, review #5): the document's confirm submission exists. The same firm, record and firm invoice number get
     /// it back (re-queued while it is still Received); anything else is 409 and names nothing about it. One that already ended Failed or
-    /// Rejected is 409 <see cref="InvoiceSubmissionErrors.SubmissionAlreadyEnded"/> naming that status, and the caller does not re-mark the
-    /// document (review #4; owner 2026-10-20, D-139: a new attempt after a terminal status is a later feature).
+    /// Rejected is 409 <see cref="InvoiceSubmissionErrors.SubmissionAlreadyEnded"/>, and the caller does not re-mark the document (review #4;
+    /// D-139). A new attempt after Failed is EB-D-167 (<see cref="SubmitExistingDocumentAsync"/> step 2), not an answer from here.
     /// </summary>
+    /// <remarks>Fix round F1-b: <paramref name="fileSource"/> (step A, the retry's own request) runs only once the answer is known to be the
+    /// earlier submission itself (the same details, not ended), never before a refusal.</remarks>
     private async Task<InvoiceSubmissionOutcome> AnswerWithEarlierAsync(
-        InvoiceSubmissionRequest request, string number, InvoiceSubmissionView earlier, Guid documentId, Guid jobId, CancellationToken ct)
+        InvoiceSubmissionRequest request, string number, InvoiceSubmissionView earlier, Guid documentId, Guid jobId,
+        Func<CancellationToken, Task<bool>>? fileSource, CancellationToken ct)
     {
+        // Task 094: an undone submission (9.1 step 5) has its firm invoice number cleared, so for a terminal one an empty number matches.
+        var ended = earlier.Status is nameof(InvoiceSubmissionStatus.Failed) or nameof(InvoiceSubmissionStatus.Rejected);
         var same = earlier.FirmId == request.FirmId
             && earlier.CoreRecord == request.CoreRecord
             && earlier.DocumentId == documentId
-            && string.Equals(earlier.FirmInvoiceNumber?.Trim(), number, StringComparison.OrdinalIgnoreCase)
+            && (string.Equals(earlier.FirmInvoiceNumber?.Trim(), number, StringComparison.OrdinalIgnoreCase)
+                || (ended && string.IsNullOrWhiteSpace(earlier.FirmInvoiceNumber)))
             && !string.IsNullOrEmpty(earlier.TrackingNumber);
         if (!same)
         {
@@ -474,19 +557,23 @@ public class InvoiceSubmissionService
 
         if (earlier.Status is nameof(InvoiceSubmissionStatus.Failed) or nameof(InvoiceSubmissionStatus.Rejected))
         {
+            // D-139 after Rejected. Failed reaches here only as the answer to a concurrent create that has already failed (step 2 starts a
+            // new attempt after a Failed one, EB-D-167): submitting again starts the next attempt.
             _logger.LogInformation("Invoice submission {SubmissionId}: the confirm of document {DocumentId} already ended {Status}; refused (409)",
                 earlier.SubmissionId, documentId, earlier.Status);
             return InvoiceSubmissionOutcome.Refused(StatusCodes.Status409Conflict, InvoiceSubmissionErrors.SubmissionAlreadyEnded,
-                $"The document was already submitted as an invoice and that submission ended {earlier.Status}. Nothing was saved; " +
-                "a new attempt for the same document is not available yet.");
+                earlier.Status == nameof(InvoiceSubmissionStatus.Rejected)
+                    ? "The document was already submitted as an invoice and that submission was rejected. Nothing was saved."
+                    : "The document's latest submission as an invoice failed. Nothing was saved; submit it again to start a new attempt.");
         }
 
+        var filed = fileSource is not null && await fileSource(ct);
         if (earlier.Status == nameof(InvoiceSubmissionStatus.Received))
         {
             ct.ThrowIfCancellationRequested();
             if (!await TrySubmitJobAsync(jobId, earlier.SubmissionId, request.CorrelationId))
             {
-                return NotQueued();
+                return AfterFiling(NotQueued(), filed);
             }
         }
 
@@ -501,7 +588,8 @@ public class InvoiceSubmissionService
     /// "filed under" is the EFFECTIVE core record through the filing chain (<see cref="ResolveFilingAsync"/>, D-140: an email attachment
     /// follows its communication's matter); an UNFILED document (nothing in the chain names a core record) is allowed (owner 2026-10-20, D-139).
     /// </summary>
-    private async Task<InvoiceSubmissionOutcome?> CheckExistingDocumentAsync(Guid documentId, InvoiceCoreRecord core, CancellationToken ct)
+    private async Task<InvoiceSubmissionOutcome?> CheckExistingDocumentAsync(
+        Guid documentId, InvoiceCoreRecord core, Guid? sourceCommunicationId, CancellationToken ct)
     {
         Entity? document;
         try
@@ -540,11 +628,28 @@ public class InvoiceSubmissionService
                 "The document has no stored file, so it cannot be submitted as an invoice.");
         }
 
+        // Task 094: a document rejected as not an invoice is refused up front on every route (the confirm route also refuses it itself);
+        // the job refuses a reject that lands later (InvoiceSubmissionPersister.DocumentRejectedCode).
+        if (document.GetAttributeValue<OptionSetValue>(InvoiceReviewService.DocInvoiceReviewStatus)?.Value == InvoiceReviewService.ReviewStatusRejectedNotInvoice)
+        {
+            return InvoiceSubmissionOutcome.Refused(StatusCodes.Status409Conflict, InvoiceSubmissionErrors.DocumentRejected,
+                "The document was rejected as not an invoice, so it cannot be submitted. Nothing was saved.");
+        }
+
+        // Task 094: the from-document route is keyed on (communication, document): the document must link exactly that communication.
+        if (sourceCommunicationId is { } named
+            && document.GetAttributeValue<EntityReference>(DocumentRelatedCommunication)?.Id != named)
+        {
+            _logger.LogInformation("Invoice submission refused: document {DocumentId} does not link communication {CommunicationId}", documentId, named);
+            return InvoiceSubmissionOutcome.Refused(StatusCodes.Status422UnprocessableEntity, InvoiceSubmissionErrors.SourceCommunicationMismatch,
+                "The document does not belong to the communication named, so it cannot be submitted from it. Nothing was saved.");
+        }
+
         // D-140 (owner 2026-10-20, "follow the email's matter"): the document's EFFECTIVE core record, through its filing chain.
         IReadOnlyList<(string Column, InvoiceCoreRecordKind Kind, Guid Id)>? filed;
         try
         {
-            filed = await ResolveFilingAsync(documentId, document, ct);
+            filed = await ResolveFilingAsync(_entities, documentId, document, ct);
         }
         catch (Exception ex) when (!IsCallerCancellation(ex, ct))
         {
@@ -609,8 +714,10 @@ public class InvoiceSubmissionService
     /// Null: the chain is longer than <see cref="MaxFilingChainDocuments"/> documents or loops, so the record is unknown (the caller refuses).
     /// A read fault propagates.
     /// </summary>
-    private async Task<IReadOnlyList<(string Column, InvoiceCoreRecordKind Kind, Guid Id)>?> ResolveFilingAsync(
-        Guid documentId, Entity document, CancellationToken ct)
+    /// <remarks>Task 094: static over the caller's reader, so step 1 (here), step 3 (the persister) and step 5 (<see cref="SubmissionCommitGate"/>)
+    /// run the one chain (uac-r2 F1-f).</remarks>
+    internal static async Task<IReadOnlyList<(string Column, InvoiceCoreRecordKind Kind, Guid Id)>?> ResolveFilingAsync(
+        IGenericEntityService entities, Guid documentId, Entity document, CancellationToken ct)
     {
         var visited = new HashSet<Guid> { documentId };
         var current = document;
@@ -619,7 +726,7 @@ public class InvoiceSubmissionService
             var filed = CoreRecordsOf(current, DocumentCoreColumns, DocumentEntity);
             if (filed.Count == 0
                 && current.GetAttributeValue<EntityReference>(DocumentRelatedCommunication) is { Id: var communicationId } && communicationId != Guid.Empty
-                && await ReadChainRowAsync(CommunicationEntity, communicationId, CommunicationHopColumns, ct) is { } communication)
+                && await ReadChainRowAsync(entities, CommunicationEntity, communicationId, CommunicationHopColumns, ct) is { } communication)
             {
                 filed = CoreRecordsOf(communication, CommunicationCoreColumns, CommunicationEntity);
 
@@ -634,7 +741,7 @@ public class InvoiceSubmissionService
                 // assignment) is compared here; any other ownership parent is the isolation check's. A thread that is gone files
                 // nothing; a read fault propagates (503).
                 if (communication.GetAttributeValue<EntityReference>(CommunicationThread) is { Id: var threadId } && threadId != Guid.Empty
-                    && await ReadChainRowAsync(ThreadEntity, threadId, ThreadHopColumns, ct) is { } thread)
+                    && await ReadChainRowAsync(entities, ThreadEntity, threadId, ThreadHopColumns, ct) is { } thread)
                 {
                     foreach (var threadParent in RecordThreadFiling.ParentsOf(thread))
                     {
@@ -661,7 +768,7 @@ public class InvoiceSubmissionService
                 return null;
             }
 
-            if (await ReadChainRowAsync(DocumentEntity, parentId, FilingChainColumns, ct) is not { } parent)
+            if (await ReadChainRowAsync(entities, DocumentEntity, parentId, FilingChainColumns, ct) is not { } parent)
             {
                 return filed; // the parent is gone: nothing files the document through it
             }
@@ -677,18 +784,130 @@ public class InvoiceSubmissionService
             .Where(c => c.Id != Guid.Empty)
             .ToList();
 
+    /// <summary>
+    /// ebilling-r1 task 094 fix round: step A decides "unfiled" from the D-140 chain. True when the communication <paramref name="communicationId"/>
+    /// is filed anywhere: any of its own filing columns (every regarding lookup and the resolver pair, <c>ReconciledEmailFiling.FilingColumns</c>,
+    /// which include the D-140 core columns) or ANY parent its thread files its messages under (<see cref="RecordThreadFiling.ParentsOf"/>,
+    /// the D-140 thread hop, every kind). Step A files only a communication for which this is false. A communication that is gone files
+    /// nothing (the re-file core then answers it); a thread that cannot be found counts as filed. A read fault propagates.
+    /// </summary>
+    internal static async Task<bool> IsCommunicationFiledAsync(IGenericEntityService entities, Guid communicationId, CancellationToken ct)
+    {
+        string[] columns = [.. Services.Office.ReconciledEmailFiling.FilingColumns.Union(CommunicationHopColumns, StringComparer.Ordinal)];
+        if (await ReadChainRowAsync(entities, CommunicationEntity, communicationId, columns, ct) is not { } communication)
+        {
+            return false;
+        }
+
+        if (Services.Office.ReconciledEmailFiling.FilingColumns.Any(column => communication.Attributes.TryGetValue(column, out var value) && value switch
+            {
+                null => false,
+                string text => !string.IsNullOrWhiteSpace(text),
+                EntityReference reference => reference.Id != Guid.Empty,
+                _ => true,
+            })
+            || CoreRecordsOf(communication, CommunicationCoreColumns, CommunicationEntity).Count > 0)
+        {
+            return true;
+        }
+
+        if (communication.GetAttributeValue<EntityReference>(CommunicationThread) is not { Id: var threadId } || threadId == Guid.Empty)
+        {
+            return false;
+        }
+
+        // The thread with every column (its ownership parents are whatever lookups it carries, not only the core ones D-140 compares).
+        // A thread that cannot be found counts as filed: step A never files a message whose thread's filing it cannot see (fail closed).
+        try
+        {
+            return RecordThreadFiling.ParentsOf(await RecordThreadFiling.ReadThreadAsync(entities, threadId, ct).ConfigureAwait(false)).Count > 0;
+        }
+        catch (InvalidOperationException)
+        {
+            return true;
+        }
+    }
+
     /// <summary>A row of the filing chain, or null when it no longer exists. A read fault propagates.</summary>
-    private async Task<Entity?> ReadChainRowAsync(string table, Guid id, string[] columns, CancellationToken ct)
+    private static async Task<Entity?> ReadChainRowAsync(IGenericEntityService entities, string table, Guid id, string[] columns, CancellationToken ct)
     {
         try
         {
-            return await _entities.RetrieveAsync(table, id, columns, ct);
+            return await entities.RetrieveAsync(table, id, columns, ct);
         }
         catch (Exception ex) when (IsNotFound(ex))
         {
             return null;
         }
     }
+
+    /// <summary>
+    /// Task 094 (procedure-and-file-model 9.1 steps 3 and 5): whether the Submit Invoice source <paramref name="documentId"/> is still filed
+    /// under <paramref name="core"/> only, read again. In order: the document (gone is <see cref="SourceFilingVerdict.Gone"/>); the D-140
+    /// filing chain (<see cref="ResolveFilingAsync"/>; another record, or a chain that cannot be placed, is
+    /// <see cref="SourceFilingVerdict.Mismatch"/>); the source's Restricted, internal-only and privacy state (owner K: never a refusal ground
+    /// and never stored, but read, so a source whose state cannot be read is never passed, uac-r2 conditions 1 and 2); then
+    /// <see cref="ExistingDocumentIsolationCheck.CheckAsync"/> (another or an undetermined secure root is Mismatch, unreadable is
+    /// <see cref="SourceFilingVerdict.Unavailable"/>). A Dataverse fault propagates; the caller decides what a fault means (step 3: a retry,
+    /// nothing committed; step 5: a failure).
+    /// </summary>
+    internal static async Task<SourceFilingCheck> CheckSourceFilingAsync(
+        IGenericEntityService entities, ExistingDocumentIsolationCheck isolation, Guid documentId, InvoiceCoreRecord core, CancellationToken ct)
+    {
+        var document = await ReadChainRowAsync(entities, DocumentEntity, documentId, SourceCheckColumns, ct).ConfigureAwait(false);
+        if (document is null)
+        {
+            return new SourceFilingCheck(SourceFilingVerdict.Gone, "the source document no longer exists");
+        }
+
+        var filed = await ResolveFilingAsync(entities, documentId, document, ct).ConfigureAwait(false);
+        if (filed is null)
+        {
+            return new SourceFilingCheck(SourceFilingVerdict.Mismatch, "the filing chain is too long or loops");
+        }
+
+        if (filed.FirstOrDefault(f => f.Kind != core.Kind || f.Id != core.RecordId) is { Column: not null } other)
+        {
+            return new SourceFilingCheck(SourceFilingVerdict.Mismatch, $"filed under {other.Column} {other.Id}");
+        }
+
+        var flags = await ReadSourceFlagsAsync(entities, document, ct).ConfigureAwait(false);
+
+        var isolated = await isolation.CheckAsync(documentId, core, ct).ConfigureAwait(false);
+        return isolated.Verdict switch
+        {
+            ExistingDocumentIsolationVerdict.Allowed => new SourceFilingCheck(SourceFilingVerdict.Allowed, null, isolated.Roots, flags),
+            ExistingDocumentIsolationVerdict.Unavailable => new SourceFilingCheck(SourceFilingVerdict.Unavailable, isolated.Detail),
+            _ => new SourceFilingCheck(SourceFilingVerdict.Mismatch, $"{isolated.Verdict}: {isolated.Detail}"),
+        };
+    }
+
+    /// <summary>
+    /// Task 094 (9.1 step 3, uac-r2 condition 2): reads the source's Restricted state (its own Access Permission, already on
+    /// <paramref name="document"/>), its communication's internal-only flag and that communication's thread's privacy state. Under owner K
+    /// none of them refuses and none is stored ((a′) derives them at read time, task 098), so the values are returned for the log and the
+    /// tests only. A row that is gone has no flag; a read fault propagates (an unreadable flag is never a pass).
+    /// </summary>
+    internal static async Task<SourceIsolationFlags> ReadSourceFlagsAsync(IGenericEntityService entities, Entity document, CancellationToken ct)
+    {
+        var restricted = document.GetAttributeValue<OptionSetValue>(DocumentAccessPermission)?.Value == InheritedAccessPermission.Restricted;
+        bool? internalOnly = null;
+        int? privacy = null;
+        if (document.GetAttributeValue<EntityReference>(DocumentRelatedCommunication) is { Id: var communicationId } && communicationId != Guid.Empty
+            && await ReadChainRowAsync(entities, CommunicationEntity, communicationId, [CommunicationInternalOnly, CommunicationThread], ct)
+                .ConfigureAwait(false) is { } communication)
+        {
+            internalOnly = communication.GetAttributeValue<bool?>(CommunicationInternalOnly);
+            if (communication.GetAttributeValue<EntityReference>(CommunicationThread) is { Id: var threadId } && threadId != Guid.Empty
+                && await ReadChainRowAsync(entities, ThreadEntity, threadId, [ThreadPrivacy], ct).ConfigureAwait(false) is { } thread)
+            {
+                privacy = thread.GetAttributeValue<OptionSetValue>(ThreadPrivacy)?.Value;
+            }
+        }
+
+        return new SourceIsolationFlags(restricted, internalOnly, privacy);
+    }
+
 
     /// <summary>Submits the job (ADR-004, the submission id as idempotency key); false when the queue refused it (logged).</summary>
     private async Task<bool> TrySubmitJobAsync(Guid jobId, Guid submissionId, string? correlationId)
@@ -704,6 +923,27 @@ public class InvoiceSubmissionService
             return false;
         }
     }
+
+    /// <summary>
+    /// Fix round F1-b: a refusal answered AFTER step A filed the source communication must not say "nothing was saved": the filing is kept
+    /// (it is the caller's own, made with their rights, and is not undone). Unchanged when nothing was filed or the outcome is Received.
+    /// </summary>
+    internal static InvoiceSubmissionOutcome AfterFiling(InvoiceSubmissionOutcome outcome, bool filed)
+    {
+        if (!filed || outcome.Kind == InvoiceSubmissionOutcomeKind.Received)
+        {
+            return outcome;
+        }
+
+        var detail = (outcome.Detail ?? string.Empty)
+            .Replace("Nothing was saved", "No submission was saved", StringComparison.Ordinal)
+            .Replace("nothing was saved", "no submission was saved", StringComparison.Ordinal)
+            .TrimEnd();
+        return outcome with { Detail = (detail.Length == 0 ? string.Empty : detail + " ") + FilingKeptSentence };
+    }
+
+    /// <summary>Fix round F1-b: what a refusal after step A adds.</summary>
+    internal const string FilingKeptSentence = "The communication was filed under the record first; that filing is kept.";
 
     private static InvoiceSubmissionOutcome DocumentAlreadySubmitted() =>
         InvoiceSubmissionOutcome.Refused(StatusCodes.Status409Conflict, InvoiceSubmissionErrors.DocumentAlreadySubmitted,
@@ -726,7 +966,8 @@ public class InvoiceSubmissionService
     /// order: the firm is active, the core record's fields derive (013), the firm is one of the record's assigned law firms (D-106 / D-110), and
     /// an owner team resolves. Reads only; nothing is written.
     /// </summary>
-    private async Task<IntakeDecision> DecideAsync(InvoiceSubmissionRequest request, CallerPrincipal? spaCaller, CancellationToken ct)
+    private async Task<IntakeDecision> DecideAsync(
+        InvoiceSubmissionRequest request, CallerPrincipal? spaCaller, CancellationToken ct, Guid? requesterSystemUserId = null)
     {
         var core = request.CoreRecord;
         switch (await IsActiveFirmAsync(request.FirmId, ct))
@@ -776,7 +1017,7 @@ public class InvoiceSubmissionService
         var owner = await _ownership.ResolveOwnerAsync(
             RecordOwnershipContext.ForParents(new RecordOwnershipParent?[] { new(core.EntityLogicalName, core.RecordId) }) with
             {
-                RequestedBy = RecordRequester.Of(systemUserId: spaCaller?.SystemUserId, objectId: request.CallerObjectId),
+                RequestedBy = RecordRequester.Of(systemUserId: requesterSystemUserId ?? spaCaller?.SystemUserId, objectId: request.CallerObjectId),
             },
             ct);
         if (!owner.IsOwned)
@@ -789,9 +1030,29 @@ public class InvoiceSubmissionService
         return new(null, row, decided.ResolverFields, owner);
     }
 
-    /// <summary>The container of the core record (D-44: secure when secure; fail closed). Virtual so a test can stand in for the resolver.</summary>
-    internal virtual Task<ContainerDecision> ResolveContainerAsync(InvoiceCoreRecord core, CancellationToken ct) =>
-        _containers.ResolveForRecordAsync(core.EntityLogicalName, core.RecordId, ct);
+    /// <summary>
+    /// Task 094 (from-email, <see cref="SubmitInvoiceFromEmailOperation"/>): the checks every entry runs before it writes (<see cref="DecideAsync"/>:
+    /// the firm active, the core record's fields, the firm link D-106, the owner), with the submission's creator person the caller's own
+    /// <paramref name="callerSystemUserId"/> (OP-5; every generation, whoever made an earlier one). Reads only. The answer: a refusal, or the
+    /// submission row (core lookup, owner and creator person set) and its resolver fields.
+    /// </summary>
+    internal async Task<(InvoiceSubmissionOutcome? Refusal, Entity? Row, InvoiceFamilyResolverFields? ResolverFields)> DecideForFromEmailAsync(
+        InvoiceSubmissionRequest request, Guid callerSystemUserId, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (callerSystemUserId == Guid.Empty || request.Channel != InvoiceSubmissionChannel.Internal)
+        {
+            throw new ArgumentException("A from-email submission is internal and names its caller's systemuser.", nameof(request));
+        }
+
+        if (ValidateFields(request) is { } invalid)
+        {
+            return (invalid, null, null);
+        }
+
+        var decision = await DecideAsync(request, spaCaller: null, ct, callerSystemUserId);
+        return (decision.Refusal, decision.Row, decision.ResolverFields);
+    }
 
     private InvoiceSubmissionOutcome? Validate(InvoiceSubmissionRequest request)
     {
@@ -886,7 +1147,7 @@ public class InvoiceSubmissionService
         // An in-memory probe of a document, never written: the walk reads only its columns. Task 146's create census lists it as a
         // Permanent waiver (095 review K2), rather than hiding it from the census by leaving out its logical name.
         var linkedOnly = new Entity(DocumentEntity) { [DocumentRelatedCommunication] = new EntityReference(CommunicationEntity, communicationId) };
-        return await ResolveFilingAsync(Guid.Empty, linkedOnly, ct) ?? Array.Empty<(string, InvoiceCoreRecordKind, Guid)>();
+        return await ResolveFilingAsync(_entities, Guid.Empty, linkedOnly, ct) ?? Array.Empty<(string, InvoiceCoreRecordKind, Guid)>();
     }
 
     /// <summary>True for an active firm, false for a missing or inactive one, null when it could not be read (a fault is never "no firm").</summary>
@@ -994,19 +1255,17 @@ public class InvoiceSubmissionService
     // ── Writes, in order, each compensated on a later failure ──
 
     private async Task<InvoiceSubmissionOutcome> WriteAsync(
-        InvoiceSubmissionRequest request, string number, InvoiceSubmissionFile file, Entity row,
-        InvoiceFamilyResolverFields resolverFields, RecordOwnerResolution owner, string driveId, CancellationToken ct)
+        InvoiceSubmissionRequest request, string number, InvoiceSubmissionFile file, Entity row, InvoiceFamilyResolverFields resolverFields,
+        CancellationToken ct)
     {
         var core = request.CoreRecord;
         var submissionId = Guid.NewGuid();
         var jobId = Guid.NewGuid();
+        var spec = UploadFileSpec(submissionId, file.FileName, request.Channel);
 
-        // 1. The bytes go under a flat name unique to this submission (two firms' "invoice.pdf" never collide; Fail never overwrites). The
-        //    name carries the submission id, so whatever sits at it can only be this request's own upload.
-        var uploadPath = SpeUploadPath.SanitizeFileName(UploadName(file.FileName, submissionId));
-        string? uploadAttemptedAt = null;
-        string? uploadedItemId = null;
-        Guid? documentId = null;
+        // True from the moment the stage is asked: a stage whose reply is lost may have written the blob, so compensation removes it by its
+        // deterministic name whenever it MAY exist (an absent blob is ignored).
+        var blobMayExist = false;
         // True from the moment the allocator is asked: a create whose reply is lost (a timeout) may have committed the row, so compensation
         // deletes it by its id whenever it MAY exist (a delete of an absent row is ignored).
         var submissionMayExist = false;
@@ -1017,28 +1276,28 @@ public class InvoiceSubmissionService
 
         try
         {
-            FileHandleDto? uploaded;
+            // 1. The bytes, staged under the submission's deterministic file id with the invoice the job will create as the parent
+            //    (procedure-and-file-model 9.1 step 2). The row is written by the job, in its commit (step 4).
+            StageResult stage;
             await using (var content = new MemoryStream(file.Content, writable: false))
             {
-                uploadAttemptedAt = uploadPath;
-                uploaded = await _spe.UploadSmallAsync(driveId, uploadPath, content, ConflictBehavior.Fail, write);
+                blobMayExist = true;
+                stage = await _files.StageAsync(spec, content, write);
             }
 
-            if (uploaded is null)
+            if (!stage.IsStaged)
             {
-                throw new InvalidOperationException("The invoice upload returned no file handle.");
+                // A refusal wrote nothing (StoredFileBlobs.StageAsync). An unconfigured store keeps the 422 storage_not_configured the
+                // route answered when no SPE container resolved (044), so the external route contract and 051's message are unchanged.
+                _logger.LogWarning("Invoice submission {SubmissionId}: the file store refused the PDF ({Code})", submissionId, stage.RefusalCode);
+                return stage.RefusalCode == StoredFileRefusal.NotConfigured
+                    ? InvoiceSubmissionOutcome.Refused(StatusCodes.Status422UnprocessableEntity, InvoiceSubmissionErrors.StorageNotConfigured,
+                        "Invoice file storage is not configured, so the invoice cannot be stored. Nothing was saved.")
+                    : InvoiceSubmissionOutcome.Refused(StatusCodes.Status500InternalServerError, InvoiceSubmissionErrors.Failed,
+                        "The invoice could not be stored. Nothing was saved; try again.");
             }
 
-            uploadedItemId = uploaded.Id;
-
-            // 2. The document row, linked to the core record, then typed Invoice. Internal: the id is chosen here and sent with the create,
-            //    so a create whose reply is lost is still deleted by it. SPA: the external create mints the id; a lost reply is found by
-            //    the uploaded item instead (CompensateAsync). Either way a failed follow-up update is compensated too.
-            documentId = request.Channel == InvoiceSubmissionChannel.Spa ? null : Guid.NewGuid();
-            documentId = await CreateDocumentRowAsync(request, documentId, uploaded, driveId, file, owner, write);
-            await CompleteDocumentRowAsync(request, documentId.Value, uploaded, driveId, file, write);
-
-            // 3. The submission, created with its tracking number (D-87).
+            // 2. The submission, created with its tracking number (D-87). It names no document: the job finds the file by the submission id.
             foreach (var (column, value) in resolverFields.ToFields())
             {
                 row[column] = value;
@@ -1047,7 +1306,6 @@ public class InvoiceSubmissionService
             row["sprk_name"] = number;
             row["sprk_processingstatus"] = new OptionSetValue((int)InvoiceSubmissionStatus.Received);
             row["sprk_channel"] = new OptionSetValue((int)request.Channel);
-            row["sprk_document"] = new EntityReference(DocumentEntity, documentId.Value);
             row["sprk_receivedon"] = DateTime.UtcNow;
             if (!string.IsNullOrWhiteSpace(request.PoNumber))
             {
@@ -1076,101 +1334,49 @@ public class InvoiceSubmissionService
             {
                 _logger.LogWarning("Invoice submission {SubmissionId}: no tracking number could be allocated ({Reason})", submissionId, allocation.Reason);
                 // A refusal creates nothing (TrackingNumberAllocator: the bound was reached without a create).
-                await CompensateAsync(submissionId, submissionMayExist: false, documentId, driveId, uploadedItemId, uploadAttemptedAt);
+                await CompensateAsync(submissionId, submissionMayExist: false, spec);
                 return InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, TrackingNumberReasons.Unavailable,
                     "A tracking number could not be assigned right now, so nothing was saved. Try again shortly.");
             }
 
-            // 4. The job (ADR-004): payload { submissionId }, idempotency key = the submission id.
+            // 3. The job (ADR-004): payload { submissionId }, idempotency key = the submission id.
             await _jobs.SubmitJobAsync(BuildJob(jobId, submissionId, request.CorrelationId), write);
 
             _logger.LogInformation(
-                "Invoice submission {SubmissionId} received through {Channel} for {Entity} {RecordId}; job {JobId} enqueued",
-                submissionId, request.Channel, core.EntityLogicalName, core.RecordId, jobId);
+                "Invoice submission {SubmissionId} received through {Channel} for {Entity} {RecordId}; file {FileId} staged; job {JobId} enqueued",
+                submissionId, request.Channel, core.EntityLogicalName, core.RecordId, spec.FileId, jobId);
             _logger.LogDebug("Invoice submission {SubmissionId} tracking number {TrackingNumber}", submissionId, allocation.TrackingNumber);
 
-            return InvoiceSubmissionOutcome.Received(new InvoiceSubmissionReceipt(submissionId, jobId, allocation.TrackingNumber!, documentId.Value));
-        }
-        catch (SpaarkeStorageException ex) when (ex.StatusCode == StatusCodes.Status409Conflict && uploadedItemId is null)
-        {
-            // The name carries this submission's id, so the file holding it is this request's own: the PUT committed, its reply was lost
-            // and the Graph handler's retry was answered 409. Remove it (found by its path) and refuse; nothing else was written yet.
-            _logger.LogWarning("Invoice submission {SubmissionId}: the upload was answered 409 (a retried PUT); removing the file it left", submissionId);
-            await CompensateAsync(submissionId, submissionMayExist: false, documentId: null, driveId, itemId: null, uploadAttemptedAt);
-            return InvoiceSubmissionOutcome.Refused(StatusCodes.Status409Conflict, InvoiceSubmissionErrors.Failed,
-                "The invoice could not be stored. Nothing was saved; try again.");
+            return InvoiceSubmissionOutcome.Received(new InvoiceSubmissionReceipt(submissionId, jobId, allocation.TrackingNumber!, DocumentId: null));
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Invoice submission {SubmissionId} failed; removing what it wrote", submissionId);
-            await CompensateAsync(submissionId, submissionMayExist, documentId, driveId, uploadedItemId, uploadAttemptedAt);
+            await CompensateAsync(submissionId, submissionMayExist, blobMayExist ? spec : null);
             return InvoiceSubmissionOutcome.Refused(StatusCodes.Status500InternalServerError, InvoiceSubmissionErrors.Failed,
                 "The invoice could not be submitted and nothing was saved. Try again; if it keeps failing, contact support.");
         }
     }
 
     /// <summary>
-    /// Creates the document row. SPA: the external surface's create (<see cref="ExternalDataService.CreateDocumentAsync"/>), which binds the core
-    /// record, the owner team and the FR-25 creator stamp of the resolved principal. Internal: the shared document seam with the creator person
-    /// and the id this service chose (<see cref="CreateDocumentRequest.Id"/>).
+    /// The Stored File spec of the PDF uploaded with <paramref name="submissionId"/> (ebilling-r1 task 092): id
+    /// <see cref="StoredFileIds.ForUpload"/>, purpose Invoice PDF, parent the invoice the job creates
+    /// (<see cref="InvoiceSubmissionPersister.InvoiceIdFor"/>), Firm-visible only when the firm uploaded it through the SPA (section 4.1).
+    /// The intake stages under it and the job builds the row from it, so both derive the same id, parent and path.
     /// </summary>
-    private async Task<Guid> CreateDocumentRowAsync(
-        InvoiceSubmissionRequest request, Guid? presetId, FileHandleDto uploaded, string driveId, InvoiceSubmissionFile file,
-        RecordOwnerResolution owner, CancellationToken ct)
-    {
-        var core = request.CoreRecord;
-        if (request.Channel == InvoiceSubmissionChannel.Spa)
+    /// <param name="clientFileName">The client's file name (intake only). Neither the blob's name nor its metadata carries it, so the job,
+    /// which never sees it, names the row by <paramref name="trackingNumber"/> instead.</param>
+    internal static StoredFileRowSpec UploadFileSpec(
+        Guid submissionId, string? clientFileName, InvoiceSubmissionChannel channel, string? trackingNumber = null) => new()
         {
-            var created = await _externalData.CreateDocumentAsync(
-                core.DocumentParentKind,
-                core.RecordId,
-                new ExternalUploadedFilePointers(uploaded.DriveId ?? driveId, uploaded.Id, uploaded.Name, uploaded.Size ?? file.Content.LongLength, uploaded.WebUrl),
-                owner.OwningTeamId!.Value,
-                request.ExternalCaller!,
-                ct);
-            return Guid.Parse(created.SprkDocumentid);
-        }
-
-        return Guid.Parse(await _documents.CreateDocumentAsync(new CreateDocumentRequest
-        {
-            Id = presetId,
-            Name = uploaded.Name,
-            ContainerId = driveId,
-            OwningTeamId = owner.OwningTeamId,
-            CreatedByPersonId = owner.CreatedByPerson,
-        }, ct));
-    }
-
-    /// <summary>
-    /// Types the document Invoice with the PDF MIME type. The internal row also gets its file pointers and its core-record lookup here (the SPA
-    /// create already set both).
-    /// </summary>
-    private Task CompleteDocumentRowAsync(
-        InvoiceSubmissionRequest request, Guid documentId, FileHandleDto uploaded, string driveId, InvoiceSubmissionFile file, CancellationToken ct)
-    {
-        var core = request.CoreRecord;
-        var update = request.Channel == InvoiceSubmissionChannel.Spa
-            ? new UpdateDocumentRequest
-            {
-                DocumentType = InvoiceDocumentType,
-                MimeType = PdfContentType,
-            }
-            : new UpdateDocumentRequest
-            {
-                GraphDriveId = uploaded.DriveId ?? driveId,
-                GraphItemId = uploaded.Id,
-                FileName = uploaded.Name,
-                FileSize = uploaded.Size ?? file.Content.LongLength,
-                MimeType = PdfContentType,
-                HasFile = true,
-                FilePath = uploaded.WebUrl,
-                DocumentType = InvoiceDocumentType,
-                MatterLookup = core.Kind == InvoiceCoreRecordKind.Matter ? core.RecordId : null,
-                ProjectLookup = core.Kind == InvoiceCoreRecordKind.Project ? core.RecordId : null,
-                WorkAssignmentLookup = core.Kind == InvoiceCoreRecordKind.WorkAssignment ? core.RecordId : null,
-            };
-        return _documents.UpdateDocumentAsync(documentId.ToString(), update, ct);
-    }
+            FileId = StoredFileIds.ForUpload(submissionId),
+            Purpose = StoredFilePurpose.InvoicePdf,
+            Parent = new StoredFileParent(StoredFileParentKind.Invoice, InvoiceSubmissionPersister.InvoiceIdFor(submissionId)),
+            Name = UploadName(clientFileName, trackingNumber),
+            ContentType = PdfContentType,
+            FirmVisible = channel == InvoiceSubmissionChannel.Spa,
+            SubmissionId = submissionId,
+        };
 
     internal static JobContract BuildJob(Guid jobId, Guid submissionId, string? correlationId) => new()
     {
@@ -1182,10 +1388,14 @@ public class InvoiceSubmissionService
         Payload = JsonSerializer.SerializeToDocument(new { submissionId }, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }),
     };
 
-    /// <summary><c>{client name without extension}-{submission id}.pdf</c>, so each submission's file name is its own.</summary>
-    internal static string UploadName(string? clientFileName, Guid submissionId)
+    /// <summary>
+    /// The display name of the uploaded PDF (<c>sprk_storedfile.sprk_name</c>): the tracking number when given (the job, which writes the
+    /// row), else the client's file name without its extension, else <c>invoice</c>; at most 100 characters, then <c>.pdf</c>.
+    /// </summary>
+    internal static string UploadName(string? clientFileName, string? trackingNumber)
     {
-        var stem = Path.GetFileNameWithoutExtension(clientFileName ?? string.Empty);
+        var stem = StoredFileSchema.NameSegmentOf(trackingNumber)
+            ?? Path.GetFileNameWithoutExtension(clientFileName ?? string.Empty);
         if (string.IsNullOrWhiteSpace(stem))
         {
             stem = "invoice";
@@ -1196,27 +1406,14 @@ public class InvoiceSubmissionService
             stem = stem[..100];
         }
 
-        return $"{stem}-{submissionId:N}.pdf";
+        return $"{stem}.pdf";
     }
 
     /// <summary>Best effort, reverse order, own token: a failed compensation is logged and never masks the original failure.</summary>
-    /// <param name="uploadPath">The path an upload was attempted at (null when none was). With no <paramref name="itemId"/> the upload's reply
-    /// never arrived, so the item is looked up by this path: the name carries the submission id, so anything there is this request's own.</param>
-    private async Task CompensateAsync(
-        Guid submissionId, bool submissionMayExist, Guid? documentId, string driveId, string? itemId, string? uploadPath)
+    /// <param name="stagedSpec">The spec a stage was attempted under (null when none was). Its blob is removed by its deterministic name, and
+    /// only while no Stored File row references it (<see cref="StoredFileService.DeleteStagedAsync"/>).</param>
+    private async Task CompensateAsync(Guid submissionId, bool submissionMayExist, StoredFileRowSpec? stagedSpec)
     {
-        if (itemId is null && uploadPath is not null)
-        {
-            try
-            {
-                itemId = (await _spe.GetDriveItemByPathAsync(driveId, uploadPath, CancellationToken.None))?.Id;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Invoice submission {SubmissionId}: cleanup could not look up the uploaded file by its path", submissionId);
-            }
-        }
-
         if (submissionMayExist)
         {
             try
@@ -1233,55 +1430,16 @@ public class InvoiceSubmissionService
             }
         }
 
-        if (documentId is { } doc)
-        {
-            await DeleteDocumentAsync(submissionId, doc);
-        }
-        else if (itemId is not null)
-        {
-            // No id came back from the document create (a lost reply on the SPA path, which mints the id itself): the row, if it was
-            // committed, carries the uploaded item in sprk_graphitemid.
-            try
-            {
-                var query = new QueryExpression(DocumentEntity) { ColumnSet = new ColumnSet(false), TopCount = 5 };
-                query.Criteria.AddCondition("sprk_graphitemid", ConditionOperator.Equal, itemId);
-                foreach (var row in (await _entities.RetrieveMultipleAsync(query, CancellationToken.None)).Entities)
-                {
-                    await DeleteDocumentAsync(submissionId, row.Id);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Invoice submission {SubmissionId}: cleanup could not look up a document for the uploaded file", submissionId);
-            }
-        }
-
-        if (itemId is not null)
+        if (stagedSpec is not null)
         {
             try
             {
-                await _spe.DeleteFileAsync(driveId, itemId, CancellationToken.None);
+                await _files.DeleteStagedAsync(stagedSpec, CancellationToken.None);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Invoice submission {SubmissionId}: cleanup could not delete the uploaded file {ItemId}", submissionId, itemId);
+                _logger.LogError(ex, "Invoice submission {SubmissionId}: cleanup could not delete the staged file {FileId}", submissionId, stagedSpec.FileId);
             }
-        }
-    }
-
-    private async Task DeleteDocumentAsync(Guid submissionId, Guid documentId)
-    {
-        try
-        {
-            await _entities.DeleteAsync(DocumentEntity, documentId, CancellationToken.None);
-        }
-        catch (Exception ex) when (IsNotFound(ex))
-        {
-            // A create whose reply was lost went the other way (the preset id was never committed). Nothing to remove.
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Invoice submission {SubmissionId}: cleanup could not delete document {DocumentId}", submissionId, documentId);
         }
     }
 

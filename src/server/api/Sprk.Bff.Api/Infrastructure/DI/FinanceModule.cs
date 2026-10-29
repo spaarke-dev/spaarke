@@ -29,10 +29,10 @@ public static class FinanceModule
         //           ExtractionDeploymentName
         // task 061 fail-fast sweep: canonical AddOptions chain with ValidateOnStart. No member is required (all have
         // safe defaults; InvoiceExtractionPlaybookId is intentionally empty in lower envs, so it is NOT [Required]).
-        // ebilling-r1 task 028: the two eBilling container ids are format-checked only ([RegularExpression], b!…) —
-        // empty passes, so no stamp fails to boot and IOptionsDriftTests demands no key.
-        // The two container ids must also be distinct from each other and from the email/archive containers
-        // (FinanceOptionsValidator; fails start-up naming both keys).
+        // ebilling-r1 task 028: the eBilling container id (Procedure Library) is format-checked only ([RegularExpression], b!…) —
+        // empty passes, so no stamp fails to boot and IOptionsDriftTests demands no key. It must also be distinct from the
+        // email/archive containers (FinanceOptionsValidator; fails start-up naming both keys). Task 092 retired the second key
+        // (Finance:EbillingOutputContainerId): export files are Stored Files in Finance:FileStore.
         services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<FinanceOptions>, FinanceOptionsValidator>();
         services.AddOptions<FinanceOptions>()
             .Bind(configuration.GetSection(FinanceOptions.SectionName))
@@ -164,11 +164,12 @@ public static class FinanceModule
         services.AddScoped<ExistingDocumentIsolationCheck>();
         // Submit Invoice from an email (ebilling-r1 task 095, model §9.1): the from-email route's orchestration (marks, firm, replay, the
         // in-process Office save, the .eml's resolution), scoped like its scoped dependencies (the Office save, InvoiceSubmissionService).
-        // The seam onto task 094's Submit Invoice operation is the not-yet-available stand-in until 094 merges (the route answers 503
-        // ebilling.submission.failed before any write); 094 replaces this one registration. The job's byte read of the .eml (094 calls it
-        // at staging) is scoped like IGenericEntityService and SpeFileStore. All unconditional (flag rule above).
+        // The seam onto Submit Invoice is task 094's operation (it replaced 095's not-yet-available stand-in): step 1, the intake's checks,
+        // step A, the marked parts read out of the .eml and staged with their source, the submission and its job. Scoped like its scoped
+        // dependencies (InvoiceSubmissionService, the allocator, StoredFileService). The .eml's byte read (EmlMarkedPartReader, which the
+        // operation calls at staging) is scoped like IGenericEntityService and SpeFileStore. All unconditional (flag rule above).
         services.AddScoped<FromEmailSubmissionService>();
-        services.AddSingleton<ISubmitInvoiceFromEmail, SubmitInvoiceFromEmailNotYetAvailable>();
+        services.AddScoped<ISubmitInvoiceFromEmail, SubmitInvoiceFromEmailOperation>();
         services.AddScoped<EmlMarkedPartReader>();
         // Billing Decision Records (ebilling-r1 task 074, FR-30, D-75, D-100, D-101): the one Finance-side owner of a billing decision's record,
         // over the writer's additive WriteBillingDecisionAsync. Concrete (ADR-010: no interface, one implementation). Singleton: it holds no
@@ -187,8 +188,9 @@ public static class FinanceModule
         // Invoice submission processing (ebilling-r1 task 049 parts B-E, FR-20 / FR-21, D-101; Processing Pipeline steps 1-9). The pipeline is
         // three scoped components behind the seams the handler tests fake, plus the ADR-004 job handler that composes them:
         //   * IInvoiceSubmissionProcessor  - read (043), resolve (046), code (047), evaluate (072), decide (073); writes nothing.
-        //   * IInvoiceSubmissionPersister  - the one all-or-nothing transaction (invoice, lines, approval, document link, submission link).
-        //   * IInvoiceSubmissionAfterSteps - Signals, the automatic rejection's Decision Record, indexing, notification, terminal status last.
+        //   * IInvoiceSubmissionPersister  - the one all-or-nothing transaction (invoice, its Stored File row, lines, approval, the source
+        //     guard, submission link), then the commit gate.
+        //   * IInvoiceSubmissionAfterSteps - Signals, the automatic rejection's Decision Record, notification, terminal status last.
         //   * InvoiceSubmissionProcessingJobHandler - payload, the eBilling flag (read by the handler itself), the per-submission lock, the
         //     step-0 re-read, the document download, and the mapping of every result to a JobOutcome.
         // Scoped like their scoped dependencies (IGenericEntityService, IInvoiceAi, the evaluator, the lifecycle and totals services). Every
@@ -197,12 +199,11 @@ public static class FinanceModule
         services.AddScoped<IInvoiceSubmissionProcessor, InvoiceSubmissionProcessor>();
         services.AddScoped<IInvoiceSubmissionPersister, InvoiceSubmissionPersister>();
         services.AddScoped<IInvoiceSubmissionAfterSteps, InvoiceSubmissionAfterSteps>();
-        //   * InvoiceDocumentRefile - the after-steps' first step for a confirmed EXISTING document (050a, D-134 item 3; review #1: the one
-        //     writer of its sprk_invoice link): live-row check, isolation read,
-        //     ReparentAsync under the invoice (its conditional write sets the link), SecureChildReconciler.AfterRefileAsync. Scoped like its
-        //     dependencies (IRecordOwnershipResolver, IFieldMappingDataverseService,
-        //     SecureChildReconciler, ExternalAccessModule).
-        services.AddScoped<InvoiceDocumentRefile>();
+        //   * SubmissionCommitGate (ebilling-r1 task 094; procedure-and-file-model 9.1 steps 5-6) - the post-commit gate of every channel,
+        //     shared by the persister (after its commit), the after-steps' resume (first) and the handler (a held undo): the source re-run,
+        //     the flip of every file, and the undo. Concrete (ADR-010: one implementation). Scoped like the isolation check and the share
+        //     synchronizer it composes. It replaces 050a's InvoiceDocumentRefile (retired: a Submit Invoice source is copied, never re-filed).
+        services.AddScoped<SubmissionCommitGate>();
         services.AddScoped<IJobHandler, InvoiceSubmissionProcessingJobHandler>();
 
         // ============================================================================

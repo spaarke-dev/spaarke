@@ -395,7 +395,17 @@ internal static class InvoiceSubmissionFromEmailHttp
             return ProblemDetailsHelper.OfficeAccessDenied(http.TraceIdentifier);
         }
 
-        var outcome = await service.SubmitAsync(input, userId, http, ct);
+        FromEmailSubmissionOutcome outcome;
+        try
+        {
+            outcome = await service.SubmitAsync(input, userId, http, ct);
+        }
+        catch (FromEmailRouteAnswerException ex)
+        {
+            // Task 094: another route's own answer (the communication re-file's refusal in step A, the owner refusal): nothing submitted.
+            return ex.Answer;
+        }
+
         if (outcome.Receipt is { } receipt)
         {
             var statusUrl = InvoiceSubmissionEndpoints.StatusUrl(receipt.SubmissionId);

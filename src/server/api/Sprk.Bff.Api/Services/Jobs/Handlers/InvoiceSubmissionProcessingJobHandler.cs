@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
@@ -8,6 +9,7 @@ using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Finance;
+using Sprk.Bff.Api.Services.Finance.Files;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Signals;
 
@@ -32,7 +34,9 @@ namespace Sprk.Bff.Api.Services.Jobs.Handlers;
 /// without its tracking number (D-87) or another field the pipeline cannot default is Failed, Poisoned, before Processing is written.</para>
 /// <para><b>A Failed submission is terminal.</b> A redelivered Failed submission is a no-op Success. Recovery from Failed is a new submission
 /// (D-37: a resubmission), not a replay. A message that outlives a flag flipped off never overwrites a finished submission: the flag is checked
-/// on the re-read, after the terminal rule.</para>
+/// on the re-read, after the terminal rule. <b>The one exception (ebilling-r1 task 094):</b> a submission Failed by the commit gate's undo
+/// (<see cref="SubmissionCommitGate.UndoReasonCodes"/>) may still hold rows of the commit when a delete of the undo faulted (held); its
+/// redelivery runs the compensation (<see cref="SubmissionCommitGate.CompensateAsync"/>) instead of the no-op, and nothing else.</para>
 /// <para><b>Outcomes.</b> Permanent failures write <c>sprk_processingstatus = Failed</c> and <c>sprk_outcomereasoncode</c> (ADR-017: the status is
 /// written, never left ambiguous) and return Poisoned, so nothing retries. Transient ones return Failure until
 /// <see cref="JobContract.IsFinalDelivery"/>; on the final delivery a submission that committed no invoice is marked Failed and the job is
@@ -43,7 +47,19 @@ namespace Sprk.Bff.Api.Services.Jobs.Handlers;
 /// marking a linked submission Failed would strand an invoice that has no Signals, record or notification, make every replay after a code fix a
 /// no-op, and could overwrite a reviewer's decision made since the read. An after-steps <c>Refused</c> (the stored state, the signal plan or the
 /// link does not match, a bug; or, for a confirmed document, its re-file was refused after the commit, a real outcome the administrator must
-/// resolve, 050a) therefore leaves the submission Processing, logs the id and code, sets the administrator's attention text and returns Poisoned.</para>
+/// resolve, 050a) therefore leaves the submission Processing, logs the id and code, sets the administrator's attention text and returns Poisoned.
+/// <b>The commit gate (tasks 092, 094; procedure-and-file-model 9.1 steps 5-6)</b> is the one path that ends a linked submission Failed: when
+/// the source re-run or a flip fails after the commit, the gate itself writes Failed and undoes the commit (<see cref="SubmissionCommitGate"/>),
+/// and this handler maps the result (<see cref="SubmissionPersistStatus.Undone"/> / <see cref="SubmissionAfterStepsStatus.Undone"/>).</para>
+/// <para><b>The PDF, by <see cref="SubmissionSnapshot.FileSource"/> (092 review item 1: never by a null document).</b> An upload's bytes are
+/// the blob the intake staged in the Finance file store (<see cref="StoredFileService.OpenStagedForProcessingAsync"/>): no scan verdict yet
+/// is transient, Malicious is Failed <see cref="SubmissionReasonCodes.FileMalicious"/>, missing (or bytes that do not match the staged hash)
+/// is Failed <see cref="SubmissionReasonCodes.DocumentUnavailable"/>. A Submit Invoice source document (task 094, 9.1 step 2) is read from
+/// SharePoint Embedded as the application (its pointer's container verified first) and its bytes are COPIED: staged under
+/// <see cref="StoredFileIds.ForSourceVersion"/> of the submission and the source's <c>versionnumber</c> read in the same retrieve, with the
+/// version and SHA-256 recorded for the persister (<see cref="SubmissionEvaluationOutcome.StagedFiles"/>). When the source changed before
+/// the commit (<see cref="SubmissionPersistStatus.SourceChanged"/>), its new version is staged and, when its bytes are the bytes evaluated,
+/// persisted once more; otherwise the delivery is retried. A kind this handler does not know is refused permanently (task 095 adds its own).</para>
 /// <para><b>Logging (ADR-015).</b> Submission id, invoice id, attempt and reason codes only; never a value read from the invoice.</para>
 /// <para>§11: <i>Existing</i> - <c>InvoiceExtractionJobHandler</c> (payload, document read, pointer-container check, download) and
 /// <c>BillingRuleDraftJobHandler</c> (lock, final-delivery rule); the pipeline components are 049 parts B-D. <i>Extension</i> - the extraction
@@ -70,8 +86,14 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
 
     private static readonly string[] StatusColumns = ["sprk_processingstatus", InvoiceSubmissionPersister.SubmissionInvoice];
 
+    /// <summary>The source document as step 2 reads it: the file pointer, the version and the type, in ONE retrieve.</summary>
+    private static readonly string[] SourceDocumentColumns =
+    [
+        "sprk_graphdriveid", "sprk_graphitemid", "sprk_mimetype", InvoiceReviewService.VersionNumber,
+        "sprk_relatedcommunication", "sprk_isemailarchive",
+    ];
+
     private readonly IGenericEntityService _entities;
-    private readonly IDocumentDataverseService _documents;
     private readonly ISpeFileOperations _spe;
     private readonly RecordContainerResolver _containerResolver;
     private readonly IInvoiceSubmissionProcessor _processor;
@@ -80,11 +102,12 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
     private readonly IEbillingNotificationSink _sink;
     private readonly IIdempotencyService _idempotency;
     private readonly IOptionsMonitor<EbillingOptions> _ebilling;
+    private readonly StoredFileService _files;
+    private readonly SubmissionCommitGate _gate;
     private readonly ILogger<InvoiceSubmissionProcessingJobHandler> _logger;
 
     public InvoiceSubmissionProcessingJobHandler(
         IGenericEntityService entities,
-        IDocumentDataverseService documents,
         ISpeFileOperations spe,
         RecordContainerResolver containerResolver,
         IInvoiceSubmissionProcessor processor,
@@ -93,10 +116,11 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
         IEbillingNotificationSink sink,
         IIdempotencyService idempotency,
         IOptionsMonitor<EbillingOptions> ebilling,
+        StoredFileService files,
+        SubmissionCommitGate gate,
         ILogger<InvoiceSubmissionProcessingJobHandler> logger)
     {
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
-        _documents = documents ?? throw new ArgumentNullException(nameof(documents));
         _spe = spe ?? throw new ArgumentNullException(nameof(spe));
         _containerResolver = containerResolver ?? throw new ArgumentNullException(nameof(containerResolver));
         _processor = processor ?? throw new ArgumentNullException(nameof(processor));
@@ -105,6 +129,8 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
         _sink = sink ?? throw new ArgumentNullException(nameof(sink));
         _idempotency = idempotency ?? throw new ArgumentNullException(nameof(idempotency));
         _ebilling = ebilling ?? throw new ArgumentNullException(nameof(ebilling));
+        _files = files ?? throw new ArgumentNullException(nameof(files));
+        _gate = gate ?? throw new ArgumentNullException(nameof(gate));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -208,6 +234,16 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
         var status = row.GetAttributeValue<OptionSetValue>(InvoiceSubmissionPersister.SubmissionStatus)?.Value;
         var linked = row.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.SubmissionInvoice) is { Id: var l } && l != Guid.Empty;
 
+        // Task 094 (uac-r2 condition 3, "complete or held"): a submission the commit gate Failed may still hold rows of its commit. Its
+        // redelivery finishes the compensation (idempotent; nothing left is a no-op) and does nothing else.
+        if (status == (int)InvoiceSubmissionStatus.Failed
+            && row.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionReasonCode) is { } failedCode
+            && SubmissionCommitGate.UndoReasonCodes.Contains(failedCode))
+        {
+            return await CompensatedAsync(job, submissionId, failedCode, await _gate.CompensateAsync(submissionId, ct).ConfigureAwait(false), stopwatch, ct)
+                .ConfigureAwait(false);
+        }
+
         // Terminal comes FIRST. The after-steps write Accepted / Rejected LAST, so a terminal status means complete; Failed is terminal too.
         if (IsTerminal(status))
         {
@@ -257,62 +293,119 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
         var current = row;
         for (var pass = 0; pass <= MaxReEvaluations; pass++)
         {
-            var outcome = await _processor.EvaluateAsync(current, LoadDocumentAsync, ct).ConfigureAwait(false);
-            switch (outcome.Kind)
-            {
-                case SubmissionEvaluationKind.Failed:
-                    return await FailAsync(job, submissionId, outcome.ReasonCode ?? SubmissionReasonCodes.ProcessingFailed, linked, stopwatch, ct).ConfigureAwait(false);
-
-                case SubmissionEvaluationKind.RejectedUnreadable:
-                    return await RejectUnreadableAsync(job, submissionId, outcome, stopwatch, ct).ConfigureAwait(false);
-            }
-
-            // 3. Record-before-mutate (074 K-3): refuse an automatic rejection the recorder would refuse BEFORE the invoice is created.
+            // Task 094 (9.1 step 2): the copy a source-document read staged, carried to the persister with the outcome. Fix round F2-b: the
+            // copy is discarded in the finally below on EVERY path (a fault of the evaluation, the reader or the persister included) unless the
+            // persister's answer means a row of this run's commit may name it: Committed, Undone (the undo removed it), a Retry that links
+            // the invoice, or the outcome-unknown Retry (the commit may yet be proved). The discard is row-guarded
+            // (StoredFileService.DeleteStagedAsync keeps a blob a row names, and keeps it when the row read faults), so a Resumed run's copy
+            // at another version is removed too and a committed copy never is.
+            StagedSourceCopy? staged = null;
+            var keepStaged = false;
             try
             {
-                _afterSteps.PreflightRejection(outcome);
+                var outcome = await _processor.EvaluateAsync(current, async (snapshot, token) =>
+                {
+                    var (read, copy) = await LoadDocumentAsync(snapshot, token).ConfigureAwait(false);
+                    staged = copy;
+                    return read;
+                }, ct).ConfigureAwait(false);
+                switch (outcome.Kind)
+                {
+                    case SubmissionEvaluationKind.Failed:
+                        return await FailAsync(job, submissionId, outcome.ReasonCode ?? SubmissionReasonCodes.ProcessingFailed, linked, stopwatch, ct).ConfigureAwait(false);
+
+                    case SubmissionEvaluationKind.RejectedUnreadable:
+                        return await RejectUnreadableAsync(job, submissionId, outcome, stopwatch, ct).ConfigureAwait(false);
+                }
+
+                // 3. Record-before-mutate (074 K-3): refuse an automatic rejection the recorder would refuse BEFORE the invoice is created.
+                try
+                {
+                    _afterSteps.PreflightRejection(outcome);
+                }
+                catch (DecisionRecordRefusedException ex)
+                {
+                    return await FailAsync(job, submissionId, ex.Reason, linked, stopwatch, ct).ConfigureAwait(false);
+                }
+
+                if (staged is not null)
+                {
+                    outcome = outcome with { StagedFiles = [staged] };
+                }
+
+                var persisted = await _persister.PersistAsync(outcome, correlation, ct).ConfigureAwait(false);
+                if (persisted.Status == SubmissionPersistStatus.SourceChanged && staged is not null)
+                {
+                    // Task 094 (9.1 step 4): the source changed before the commit (the persister deleted the stale copy). Stage its new version;
+                    // the evaluation stands only when the bytes are the bytes it read, and the commit is tried ONCE more.
+                    var readSha = staged.Spec.SourceSha256;
+                    staged = null;
+                    var (_, again) = await LoadDocumentAsync(outcome.Submission!, ct).ConfigureAwait(false);
+                    staged = again;
+                    if (again is null || !string.Equals(again.Spec.SourceSha256, readSha, StringComparison.Ordinal))
+                    {
+                        _logger.LogInformation("Invoice submission {SubmissionId}: its source's content changed since it was read; retry evaluates it again", submissionId);
+                        return await TransientAsync(job, submissionId, SubmissionReasonCodes.SourceChanged, stopwatch, ct).ConfigureAwait(false);
+                    }
+
+                    persisted = await _persister.PersistAsync(outcome with { StagedFiles = [again] }, correlation, ct).ConfigureAwait(false);
+                }
+
+                keepStaged = persisted.Status is SubmissionPersistStatus.Committed or SubmissionPersistStatus.Undone
+                    || (persisted.Status == SubmissionPersistStatus.Retry
+                        && (persisted.InvoiceId is not null || persisted.ReasonCode == InvoiceSubmissionPersister.TransactionOutcomeUnknownCode));
+
+                switch (persisted.Status)
+                {
+                    case SubmissionPersistStatus.Committed:
+                        return await MapAfterStepsAsync(job, submissionId, await _afterSteps.RunAsync(persisted, correlation, ct).ConfigureAwait(false), stopwatch, ct)
+                            .ConfigureAwait(false);
+
+                    case SubmissionPersistStatus.Retry when persisted.InvoiceId is not null:
+                    case SubmissionPersistStatus.Resumed:
+                        // R2: the submission links its invoice, so the after-steps run from the STORED state, never from this run's outcome. Resumed:
+                        // the link appeared while this run evaluated (a lock that expired under a slow run), and the terminal this run's outcome
+                        // implies could contradict the committed one. Retry with the invoice id: the transaction committed and only the totals
+                        // failed; the resume recalculates them again, then does the Signals, the record and the rest. RunAsync is for Committed
+                        // only - a run that committed in this delivery.
+                        return await MapAfterStepsAsync(job, submissionId, await _afterSteps.ResumeAsync(submissionId, correlation, ct).ConfigureAwait(false), stopwatch, ct)
+                            .ConfigureAwait(false);
+
+                    case SubmissionPersistStatus.Retry:
+                        return await TransientAsync(job, submissionId, persisted.ReasonCode ?? SubmissionReasonCodes.ProcessingFailed, stopwatch, ct).ConfigureAwait(false);
+
+                    case SubmissionPersistStatus.SourceChanged:
+                        // A second change under one run: do not loop. Another delivery evaluates the source as it is then.
+                        return await TransientAsync(job, submissionId, SubmissionReasonCodes.SourceChanged, stopwatch, ct).ConfigureAwait(false);
+
+                    case SubmissionPersistStatus.Undone:
+                        return await UndoneAsync(job, submissionId, persisted.ReasonCode, persisted.UndoHeld, stopwatch, ct).ConfigureAwait(false);
+
+                    case SubmissionPersistStatus.Refused:
+                        return await FailAsync(job, submissionId, persisted.ReasonCode ?? SubmissionReasonCodes.ProcessingFailed, linked, stopwatch, ct).ConfigureAwait(false);
+
+                    case SubmissionPersistStatus.SubmissionMissing:
+                        _logger.LogInformation("Invoice submission job {JobId}: submission {SubmissionId} vanished before it was persisted; nothing to do", job.JobId, submissionId);
+                        return Done(job, stopwatch);
+
+                    case SubmissionPersistStatus.ReEvaluate:
+                        current = persisted.CurrentSubmission
+                            ?? throw new InvalidOperationException("The persister asked to re-evaluate without the current submission.");
+                        _logger.LogInformation("Invoice submission job {JobId}: the core record of submission {SubmissionId} changed; re-evaluating (pass {Pass})",
+                            job.JobId, submissionId, pass + 1);
+                        break;
+
+                    default:
+                        throw new InvalidOperationException($"Unhandled persist status {persisted.Status}.");
+                }
             }
-            catch (DecisionRecordRefusedException ex)
+            finally
             {
-                return await FailAsync(job, submissionId, ex.Reason, linked, stopwatch, ct).ConfigureAwait(false);
-            }
-
-            var persisted = await _persister.PersistAsync(outcome, correlation, ct).ConfigureAwait(false);
-            switch (persisted.Status)
-            {
-                case SubmissionPersistStatus.Committed:
-                    return await MapAfterStepsAsync(job, submissionId, await _afterSteps.RunAsync(persisted, correlation, ct).ConfigureAwait(false), stopwatch, ct)
-                        .ConfigureAwait(false);
-
-                case SubmissionPersistStatus.Retry when persisted.InvoiceId is not null:
-                case SubmissionPersistStatus.Resumed:
-                    // R2: the submission links its invoice, so the after-steps run from the STORED state, never from this run's outcome. Resumed:
-                    // the link appeared while this run evaluated (a lock that expired under a slow run), and the terminal this run's outcome
-                    // implies could contradict the committed one. Retry with the invoice id: the transaction committed and only the totals
-                    // failed; the resume recalculates them again, then does the Signals, the record and the rest. RunAsync is for Committed
-                    // only - a run that committed in this delivery.
-                    return await MapAfterStepsAsync(job, submissionId, await _afterSteps.ResumeAsync(submissionId, correlation, ct).ConfigureAwait(false), stopwatch, ct)
-                        .ConfigureAwait(false);
-
-                case SubmissionPersistStatus.Retry:
-                    return await TransientAsync(job, submissionId, persisted.ReasonCode ?? SubmissionReasonCodes.ProcessingFailed, stopwatch, ct).ConfigureAwait(false);
-
-                case SubmissionPersistStatus.Refused:
-                    return await FailAsync(job, submissionId, persisted.ReasonCode ?? SubmissionReasonCodes.ProcessingFailed, linked, stopwatch, ct).ConfigureAwait(false);
-
-                case SubmissionPersistStatus.SubmissionMissing:
-                    _logger.LogInformation("Invoice submission job {JobId}: submission {SubmissionId} vanished before it was persisted; nothing to do", job.JobId, submissionId);
-                    return Done(job, stopwatch);
-
-                case SubmissionPersistStatus.ReEvaluate:
-                    current = persisted.CurrentSubmission
-                        ?? throw new InvalidOperationException("The persister asked to re-evaluate without the current submission.");
-                    _logger.LogInformation("Invoice submission job {JobId}: the core record of submission {SubmissionId} changed; re-evaluating (pass {Pass})",
-                        job.JobId, submissionId, pass + 1);
-                    break;
-
-                default:
-                    throw new InvalidOperationException($"Unhandled persist status {persisted.Status}.");
+                if (!keepStaged)
+                {
+                    // Best effort, never cancelled half-way: a blob left here has no row, and nothing serves a blob without its row.
+                    await DiscardStagedAsync(submissionId, staged, CancellationToken.None).ConfigureAwait(false);
+                }
             }
         }
 
@@ -337,21 +430,22 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
                 _logger.LogInformation("Invoice submission job {JobId}: submission {SubmissionId} vanished during the after-steps; nothing to do", job.JobId, submissionId);
                 return Done(job, stopwatch);
 
+            case SubmissionAfterStepsStatus.Undone:
+                // Tasks 092 / 094: the resume's commit gate failed; the gate wrote Failed and undid the commit (or holds the undo).
+                return await UndoneAsync(job, submissionId, result.ReasonCode, result.UndoHeld, stopwatch, ct).ConfigureAwait(false);
+
             case SubmissionAfterStepsStatus.Refused:
                 // Both callers reach here only with the invoice linked (Committed / Retry-with-invoice / Resumed / a Processing+link resume).
-                // The refusal is either an inconsistency in the stored state (a bug) or a refused re-file of a confirmed document (050a: the
-                // document was filed elsewhere, rejected or deleted after the commit, or the ownership resolver refused; a real outcome, not a
-                // bug). Either way: never Failed (terminal, unconditional write), so the invoice is not stranded and a replay once the cause
-                // is resolved resumes it. No status write at all - only the administrator's attention text (R3, D-133), which says the
-                // invoice has no document when the re-file was refused (review round 2, 2(b)).
-                return await LeaveLinkedSubmissionAsync(job, submissionId, result.ReasonCode ?? SubmissionReasonCodes.ProcessingFailed, stopwatch, ct,
-                    result.DocumentNotFiled).ConfigureAwait(false);
+                // The refusal is an inconsistency in the stored state (a bug) or a refusal the administrator must resolve. Either way: never
+                // Failed (terminal, unconditional write), so the invoice is not stranded and a replay once the cause is resolved resumes it.
+                // No status write at all - only the administrator's attention text (R3, D-133).
+                return await LeaveLinkedSubmissionAsync(job, submissionId, result.ReasonCode ?? SubmissionReasonCodes.ProcessingFailed, stopwatch, ct)
+                    .ConfigureAwait(false);
 
             case SubmissionAfterStepsStatus.Retry:
-                // The submission stays Processing with its invoice link; the redelivery resumes. A re-file Retry carries DocumentNotFiled (review
-                // round 3, F2), so the final delivery tells the administrator the document is NOT filed under the invoice.
-                return await TransientAsync(job, submissionId, result.ReasonCode ?? SubmissionReasonCodes.ProcessingFailed, stopwatch, ct,
-                    result.DocumentNotFiled).ConfigureAwait(false);
+                // The submission stays Processing with its invoice link; the redelivery resumes.
+                return await TransientAsync(job, submissionId, result.ReasonCode ?? SubmissionReasonCodes.ProcessingFailed, stopwatch, ct)
+                    .ConfigureAwait(false);
 
             default:
                 throw new InvalidOperationException($"Unhandled after-steps status {result.Status}.");
@@ -403,6 +497,45 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
     }
 
     /// <summary>
+    /// ebilling-r1 task 094 (procedure-and-file-model 9.1 step 5): the commit gate undid the commit and wrote Failed with
+    /// <paramref name="reasonCode"/> itself. Complete: Poisoned (permanent, nothing retries). Held (a delete of the undo faulted): Failure, so
+    /// the broker redelivers and step 0 finishes the compensation; Poisoned on the final delivery (a replay of the dead-lettered message
+    /// finishes it). Fix round F2-a: on that final delivery the administrator note says "undo held — operator action"
+    /// (<see cref="SubmissionCommitGate.NoteUndoHeldAsync"/>; a fault writing it never changes the outcome).
+    /// </summary>
+    private async Task<JobOutcome> UndoneAsync(JobContract job, Guid submissionId, string? reasonCode, bool held, Stopwatch stopwatch, CancellationToken ct)
+    {
+        var code = reasonCode ?? SubmissionReasonCodes.FileUnservable;
+        if (!held)
+        {
+            _logger.LogWarning("Invoice submission job {JobId}: submission {SubmissionId} Failed ({ReasonCode}); its commit was undone", job.JobId, submissionId, code);
+            return JobOutcome.Poisoned(job.JobId, JobType, code, job.Attempt, stopwatch.Elapsed);
+        }
+
+        _logger.LogError("Invoice submission job {JobId}: submission {SubmissionId} Failed ({ReasonCode}); the undo of its commit is held ({HeldCode})",
+            job.JobId, submissionId, code, SubmissionReasonCodes.UndoHeld);
+        if (!job.IsFinalDelivery)
+        {
+            return JobOutcome.Failure(job.JobId, JobType, SubmissionReasonCodes.UndoHeld, job.Attempt, stopwatch.Elapsed);
+        }
+
+        await _gate.NoteUndoHeldAsync(submissionId, code, ct).ConfigureAwait(false);
+        return JobOutcome.Poisoned(job.JobId, JobType, SubmissionReasonCodes.UndoHeld, job.Attempt, stopwatch.Elapsed);
+    }
+
+    /// <summary>Step 0's compensation of a held undo (task 094): complete is Success; still held is a retry (Poisoned on the final delivery).</summary>
+    private async Task<JobOutcome> CompensatedAsync(JobContract job, Guid submissionId, string failedCode, bool complete, Stopwatch stopwatch, CancellationToken ct)
+    {
+        if (complete)
+        {
+            _logger.LogInformation("Invoice submission job {JobId}: submission {SubmissionId} is Failed and nothing of its commit is left", job.JobId, submissionId);
+            return Done(job, stopwatch);
+        }
+
+        return await UndoneAsync(job, submissionId, failedCode, held: true, stopwatch, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// A permanent failure of a submission that links its invoice: NO status write. It stays Processing (a replay of the dead-lettered message
     /// resumes it once the cause is fixed), the id and code are logged at Error (ADR-015), and the job is Poisoned - the same rule as the final
     /// transient delivery with a link and the flag-off-with-link path. R3 (D-133): the submission is shown to the administrator through
@@ -410,12 +543,12 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
     /// and a fault writing it is logged and never changes this outcome).
     /// </summary>
     private async Task<JobOutcome> LeaveLinkedSubmissionAsync(
-        JobContract job, Guid submissionId, string reasonCode, Stopwatch stopwatch, CancellationToken ct, bool documentNotFiled = false)
+        JobContract job, Guid submissionId, string reasonCode, Stopwatch stopwatch, CancellationToken ct)
     {
         _logger.LogError(
-            "Invoice submission job {JobId}: submission {SubmissionId} links its invoice and failed permanently ({ReasonCode}, document not filed: {DocumentNotFiled}); it stays Processing, not Failed - fix the cause, then replay the message",
-            job.JobId, submissionId, reasonCode, documentNotFiled);
-        await AdminAttentionText.NoteAsync(_entities, submissionId, null, AdminAttentionText.StoppedNote(reasonCode, documentNotFiled), _logger, ct)
+            "Invoice submission job {JobId}: submission {SubmissionId} links its invoice and failed permanently ({ReasonCode}); it stays Processing, not Failed - fix the cause, then replay the message",
+            job.JobId, submissionId, reasonCode);
+        await AdminAttentionText.NoteAsync(_entities, submissionId, null, AdminAttentionText.StoppedNote(reasonCode), _logger, ct)
             .ConfigureAwait(false);
         return JobOutcome.Poisoned(job.JobId, JobType, reasonCode, job.Attempt, stopwatch.Elapsed);
     }
@@ -429,11 +562,10 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
     /// <summary>
     /// A transient failure: Failure (the broker redelivers) until the final delivery. On the final delivery a submission that committed no
     /// invoice is marked Failed; one that links its invoice stays Processing so a replay of the dead-lettered message resumes it (and its
-    /// <c>sprk_adminattention</c> says so, R3; with <paramref name="documentNotFiled"/>, that its document is NOT filed under the invoice,
-    /// 050a review round 3, F2). Either way the job is Poisoned.
+    /// <c>sprk_adminattention</c> says so, R3). Either way the job is Poisoned.
     /// </summary>
     private async Task<JobOutcome> TransientAsync(
-        JobContract job, Guid submissionId, string reasonCode, Stopwatch stopwatch, CancellationToken ct, bool documentNotFiled = false)
+        JobContract job, Guid submissionId, string reasonCode, Stopwatch stopwatch, CancellationToken ct)
     {
         if (!job.IsFinalDelivery)
         {
@@ -458,7 +590,7 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
                 if (linked && !IsTerminal(status))
                 {
                     // R3 (D-133): it stays Processing for good (the message is dead-lettered), so the administrator is told. Not a status write.
-                    await AdminAttentionText.NoteAsync(_entities, submissionId, null, AdminAttentionText.StoppedNote(reasonCode, documentNotFiled), _logger, ct)
+                    await AdminAttentionText.NoteAsync(_entities, submissionId, null, AdminAttentionText.StoppedNote(reasonCode), _logger, ct)
                         .ConfigureAwait(false);
                 }
             }
@@ -479,8 +611,8 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
     }
 
     /// <summary>
-    /// Invariant: only called before an invoice is linked (every caller checks, or runs before the persister); a linked submission is never marked
-    /// Failed, so this write is unconditional - it carries no status or version condition because nothing else may have decided the submission.
+    /// Invariant: only called before an invoice is linked (every caller checks, or runs before the persister). A linked submission is made
+    /// Failed only by the commit gate's undo (task 094). The write is unconditional - it carries no status or version condition.
     /// </summary>
     private Task MarkFailedAsync(Guid submissionId, string reasonCode, CancellationToken ct) =>
         _entities.UpdateAsync(FinanceBaseValues.SubmissionEntity, submissionId, new Dictionary<string, object>
@@ -494,7 +626,11 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
     // ── Reads ──
 
     private static readonly string[] SubmissionColumns =
-        [.. SubmissionSnapshot.Columns.Concat([InvoiceSubmissionPersister.SubmissionStatus, InvoiceSubmissionPersister.SubmissionInvoice]).Distinct()];
+    [
+        .. SubmissionSnapshot.Columns.Concat([
+            InvoiceSubmissionPersister.SubmissionStatus, InvoiceSubmissionPersister.SubmissionInvoice, InvoiceSubmissionPersister.SubmissionReasonCode,
+        ]).Distinct(),
+    ];
 
     private async Task<Entity?> ReadSubmissionAsync(Guid submissionId, string[] columns, CancellationToken ct)
     {
@@ -525,26 +661,64 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
         status is (int)InvoiceSubmissionStatus.Accepted or (int)InvoiceSubmissionStatus.Rejected or (int)InvoiceSubmissionStatus.Failed;
 
     /// <summary>
-    /// Step 1a, as <c>InvoiceExtractionJobHandler</c> does it: the document row, its pointer's container verified FIRST (the download follows
-    /// the pointer as the application; fail closed, permanent), then the bytes. Called by the processor only after the flag and the row passed.
+    /// Step 1a, by <see cref="SubmissionSnapshot.FileSource"/> (092 review item 1). An upload (task 092): the blob the intake staged in the
+    /// Finance file store (<see cref="LoadUploadAsync"/>); no copy. A Submit Invoice source document (task 094): <see cref="LoadSourceDocumentAsync"/>,
+    /// which also stages its copy. A kind not handled here is refused permanently. Called by the processor only after the flag and the row
+    /// passed, and once more by the run for a source that changed before the commit.
     /// </summary>
-    private async Task<InvoiceReadRequest> LoadDocumentAsync(SubmissionSnapshot snapshot, CancellationToken ct)
+    private async Task<(InvoiceReadRequest Read, StagedSourceCopy? Copy)> LoadDocumentAsync(SubmissionSnapshot snapshot, CancellationToken ct)
     {
-        var documentId = snapshot.DocumentId;
-        var document = await _documents.GetDocumentAsync(documentId.ToString(), ct).ConfigureAwait(false);
-        if (document is null || string.IsNullOrEmpty(document.GraphDriveId) || string.IsNullOrEmpty(document.GraphItemId))
+        switch (snapshot.FileSource)
         {
-            _logger.LogError("Invoice submission {SubmissionId}: document {DocumentId} is missing or has no file pointer", snapshot.SubmissionId, documentId);
+            case SubmissionFileSource.Upload:
+                return (await LoadUploadAsync(snapshot, ct).ConfigureAwait(false), null);
+            case SubmissionFileSource.SourceDocument:
+                var (read, copy) = await LoadSourceDocumentAsync(snapshot, ct).ConfigureAwait(false);
+                return (read, copy);
+            default:
+                _logger.LogError("Invoice submission {SubmissionId}: its file source {FileSource} is not handled by this job", snapshot.SubmissionId, snapshot.FileSource);
+                throw new SubmissionStepFailure(SubmissionReasonCodes.DocumentUnavailable, permanent: true);
+        }
+    }
+
+    /// <summary>
+    /// Task 094 (procedure-and-file-model 9.1 step 2): the source document's row (file pointer, <c>versionnumber</c>, names; ONE retrieve), its
+    /// pointer's container verified FIRST (the download follows the pointer as the application; fail closed, permanent), then the bytes, their
+    /// SHA-256, and the copy staged under <see cref="StoredFileIds.ForSourceVersion"/> of the submission and that version (Invoice PDF,
+    /// Firm-visible No, the source ids). A blob already staged under that id with other bytes (the file changed without a new row version) is
+    /// replaced. An email archive is not a Submit Invoice source (task 095 has its own kind): refused permanently.
+    /// </summary>
+    private async Task<(InvoiceReadRequest Read, StagedSourceCopy Copy)> LoadSourceDocumentAsync(SubmissionSnapshot snapshot, CancellationToken ct)
+    {
+        var documentId = snapshot.DocumentId
+            ?? throw new SubmissionStepFailure(SubmissionReasonCodes.DocumentUnavailable, permanent: true);
+        Entity document;
+        try
+        {
+            document = await _entities.RetrieveAsync(InvoiceSubmissionPersister.DocumentEntity, documentId, SourceDocumentColumns, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (IsRecordNotFound(ex))
+        {
+            _logger.LogError("Invoice submission {SubmissionId}: its source document {DocumentId} no longer exists", snapshot.SubmissionId, documentId);
             throw new SubmissionStepFailure(SubmissionReasonCodes.DocumentUnavailable, permanent: true);
         }
 
-        if (!await _containerResolver.IsDocumentPointerContainerAllowedAsync(documentId, document.GraphDriveId, document.GraphItemId, ct).ConfigureAwait(false))
+        var driveId = document.GetAttributeValue<string>("sprk_graphdriveid");
+        var itemId = document.GetAttributeValue<string>("sprk_graphitemid");
+        if (string.IsNullOrEmpty(driveId) || string.IsNullOrEmpty(itemId) || document.GetAttributeValue<bool?>("sprk_isemailarchive") == true)
+        {
+            _logger.LogError("Invoice submission {SubmissionId}: source document {DocumentId} has no file pointer or is an email archive", snapshot.SubmissionId, documentId);
+            throw new SubmissionStepFailure(SubmissionReasonCodes.DocumentUnavailable, permanent: true);
+        }
+
+        var version = InvoiceSubmissionPersister.VersionOf(document);
+        if (!await _containerResolver.IsDocumentPointerContainerAllowedAsync(documentId, driveId, itemId, ct).ConfigureAwait(false))
         {
             _logger.LogWarning("Invoice submission {SubmissionId}: the storage of document {DocumentId} could not be verified", snapshot.SubmissionId, documentId);
             throw new SubmissionStepFailure(SubmissionReasonCodes.DocumentStorageUnverified, permanent: true);
         }
 
-        var stream = await _spe.DownloadFileAsync(document.GraphDriveId, document.GraphItemId, ct).ConfigureAwait(false);
+        var stream = await _spe.DownloadFileAsync(driveId, itemId, ct).ConfigureAwait(false);
         if (stream is null)
         {
             // Transient (SharePoint Embedded may answer later), as the rule-draft handler treats a download that returns nothing.
@@ -552,13 +726,115 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
             throw new SubmissionStepFailure(SubmissionReasonCodes.ProcessingFailed, permanent: false);
         }
 
+        byte[] bytes;
         using (stream)
         {
             using var buffer = new MemoryStream();
             await stream.CopyToAsync(buffer, ct).ConfigureAwait(false);
-            return string.IsNullOrWhiteSpace(document.MimeType)
-                ? new InvoiceReadRequest { Content = buffer.ToArray(), DocumentId = documentId }
-                : new InvoiceReadRequest { Content = buffer.ToArray(), DocumentId = documentId, ContentType = document.MimeType };
+            bytes = buffer.ToArray();
+        }
+
+        var mimeType = document.GetAttributeValue<string>("sprk_mimetype");
+        var contentType = string.IsNullOrWhiteSpace(mimeType) || mimeType.Length > StoredFileSchema.ContentTypeMaxLength
+            ? InvoiceSubmissionService.PdfContentType
+            : mimeType;
+        var spec = new StoredFileRowSpec
+        {
+            FileId = StoredFileIds.ForSourceVersion(snapshot.SubmissionId, version),
+            Purpose = StoredFilePurpose.InvoicePdf,
+            Parent = new StoredFileParent(StoredFileParentKind.Invoice, InvoiceSubmissionPersister.InvoiceIdFor(snapshot.SubmissionId)),
+            Name = SourceCopyName(snapshot.TrackingNumber),
+            ContentType = contentType,
+            FirmVisible = false,
+            SourceDocumentId = documentId,
+            SourceCommunicationId = document.GetAttributeValue<EntityReference>("sprk_relatedcommunication")?.Id is { } communication && communication != Guid.Empty
+                ? communication
+                : null,
+            SourceVersion = version,
+            SourceSha256 = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant(),
+            SubmissionId = snapshot.SubmissionId,
+        };
+
+        var staged = await _files.StageAsync(spec, new MemoryStream(bytes, writable: false), ct).ConfigureAwait(false);
+        if (staged.RefusalCode == StoredFileRefusal.ContentConflict)
+        {
+            // Other bytes under this id: the file changed without a new row version. The stale stage is replaced (no row exists before the commit).
+            await _files.DeleteStagedAsync(spec, ct).ConfigureAwait(false);
+            staged = await _files.StageAsync(spec, new MemoryStream(bytes, writable: false), ct).ConfigureAwait(false);
+        }
+
+        if (staged.Blob is not { } blob)
+        {
+            _logger.LogWarning("Invoice submission {SubmissionId}: the copy of source {DocumentId} could not be staged ({Code})",
+                snapshot.SubmissionId, documentId, staged.RefusalCode);
+            throw new SubmissionStepFailure(
+                staged.RefusalCode == StoredFileRefusal.SizeOutOfRange ? SubmissionReasonCodes.FileUnservable : SubmissionReasonCodes.ProcessingFailed,
+                permanent: staged.RefusalCode == StoredFileRefusal.SizeOutOfRange);
+        }
+
+        var read = new InvoiceReadRequest { Content = bytes, DocumentId = documentId, ContentType = contentType };
+        return (read, new StagedSourceCopy(spec, blob, version));
+    }
+
+    /// <summary>
+    /// The copy's display name: the submission's tracking number, else <c>invoice</c>; cut to the column. Fix round (uac K1): never the source
+    /// document's file name - the copy row is read by the invoice's readers, who need not be able to read the source document.
+    /// </summary>
+    internal static string SourceCopyName(string? trackingNumber)
+    {
+        var name = (StoredFileSchema.NameSegmentOf(trackingNumber) ?? "invoice") + ".pdf";
+        return name.Length <= StoredFileSchema.NameMaxLength ? name : name[..StoredFileSchema.NameMaxLength];
+    }
+
+    /// <summary>Deletes a staged source copy no commit will write a row for (best effort; only when no row exists).</summary>
+    private async Task DiscardStagedAsync(Guid submissionId, StagedSourceCopy? copy, CancellationToken ct)
+    {
+        if (copy is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _files.DeleteStagedAsync(copy.Spec, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("Invoice submission {SubmissionId}: its staged copy {FileId} could not be deleted ({Fault})", submissionId, copy.Spec.FileId, ex.GetType().Name);
+        }
+    }
+
+    /// <summary>
+    /// Task 092 (model 4.2, 9.2): the upload's bytes from the file store, by the deterministic id and parent the intake staged them under.
+    /// The bytes go inline to the reader as before; the reader's document id (logged only) is the Stored File id.
+    /// </summary>
+    private async Task<InvoiceReadRequest> LoadUploadAsync(SubmissionSnapshot snapshot, CancellationToken ct)
+    {
+        var fileId = StoredFileIds.ForUpload(snapshot.SubmissionId);
+        var parent = new StoredFileParent(StoredFileParentKind.Invoice, InvoiceSubmissionPersister.InvoiceIdFor(snapshot.SubmissionId));
+        var read = await _files.OpenStagedForProcessingAsync(StoredFilePurpose.InvoicePdf, parent, fileId, ct).ConfigureAwait(false);
+        switch (read.Outcome)
+        {
+            case StoredFileProcessingOutcome.Ok when read.Content is { } content:
+                return new InvoiceReadRequest
+                {
+                    Content = content.ToArray(),
+                    ContentType = string.IsNullOrWhiteSpace(read.ContentType) ? InvoiceSubmissionService.PdfContentType : read.ContentType,
+                    DocumentId = fileId,
+                };
+
+            case StoredFileProcessingOutcome.Pending:
+                // No scan verdict yet (or the blob changed since its verdict): the broker redelivers and the scan catches up.
+                _logger.LogInformation("Invoice submission {SubmissionId}: its PDF {FileId} has no scan verdict yet; retry", snapshot.SubmissionId, fileId);
+                throw new SubmissionStepFailure(SubmissionReasonCodes.ProcessingFailed, permanent: false);
+
+            case StoredFileProcessingOutcome.Malicious:
+                _logger.LogWarning("Invoice submission {SubmissionId}: its PDF {FileId} was scanned Malicious; not read", snapshot.SubmissionId, fileId);
+                throw new SubmissionStepFailure(SubmissionReasonCodes.FileMalicious, permanent: true);
+
+            default:
+                _logger.LogError("Invoice submission {SubmissionId}: its PDF {FileId} is missing or does not match its staged hash", snapshot.SubmissionId, fileId);
+                throw new SubmissionStepFailure(SubmissionReasonCodes.DocumentUnavailable, permanent: true);
         }
     }
 

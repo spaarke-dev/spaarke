@@ -1091,10 +1091,7 @@ public class ExternalDocumentNarrowingGuardTests
     /// </summary>
     private static readonly IReadOnlyDictionary<string, string> GenericWritersThatUpdateNoDocument = new Dictionary<string, string>
     {
-        // ebilling-r1 050a (D-134): the confirmed document's link moved from InvoiceReviewService into the job's re-file.
-        ["Sprk.Bff.Api.Services.Finance.Submission.InvoiceDocumentRefile::RefileAsync"] =
-            "Writes only sprk_Invoice@odata.bind (DocInvoiceLinkBind) on sprk_document, inside ReparentAsync: a literal key, not a D7 " +
-            "link or access column.",
+        // ebilling-r1 task 094: 050a's InvoiceDocumentRefile is retired - a Submit Invoice source is copied, never linked or re-filed.
         ["Sprk.Bff.Api.Services.Finance.InvoiceReviewService::MarkDocumentConfirmedAsync"] =
             "Writes BuildReviewStatusFields on sprk_document: the invoice review status, reviewed-on and notes (literal keys).",
         ["Sprk.Bff.Api.Services.Finance.InvoiceReviewService::RejectInvoiceAsync"] =
@@ -1115,6 +1112,10 @@ public class ExternalDocumentNarrowingGuardTests
         // refusal: sprk_storedfile is itself refused whole (AccessTables, uac-r2 F4), and this is its typed writer.
         ["Sprk.Bff.Api.Services.Finance.Files.StoredFileService::FlipToServableAsync"] =
             "Writes only sprk_filestatus (StoredFileSchema.Status, Servable) on sprk_storedfile, a literal key, under the row's own " +
+            "version (UpdateIfRowVersionMatchesAsync); never a document.",
+        // ebilling-r1 task 094 (uac-r2 re-check (b)): the submission undo withdraws the invoice's file rows before their blobs go.
+        ["Sprk.Bff.Api.Services.Finance.Files.StoredFileService::WithdrawForUndoAsync"] =
+            "Writes only sprk_filestatus (StoredFileSchema.Status, Removed) on sprk_storedfile, a literal key, under the row's own " +
             "version (UpdateIfRowVersionMatchesAsync); never a document.",
         ["Sprk.Bff.Api.Services.ScorecardCalculatorService::UpdateEntityGradesAsync"] =
             "Writes its own grade fields to sprk_matter or sprk_project only (UpdateExistingRecordFieldsAsync).",

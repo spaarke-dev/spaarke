@@ -460,7 +460,7 @@ public sealed class StoredFileEndpointsTests
         return $"{(int)response.StatusCode}|{response.Content.Headers.ContentType}|{node.ToJsonString()}";
     }
 
-    private sealed class Host : IAsyncDisposable
+    internal sealed class Host : IAsyncDisposable
     {
         private WebApplication _app = null!;
         private HttpClient _client = null!;
@@ -473,9 +473,11 @@ public sealed class StoredFileEndpointsTests
         public IReadOnlyList<(EventId EventId, string Message)> AuditEvents =>
             Logs.Entries.Where(e => e.EventId.Id == StoredFileAudit.Downloaded.Id).ToList();
 
-        public static async Task<Host> StartAsync(bool ebillingEnabled = true, bool? malwareScanningEnabled = true, bool configured = true)
+        public static async Task<Host> StartAsync(
+            bool ebillingEnabled = true, bool? malwareScanningEnabled = true, bool configured = true, StoredFileRig? rig = null)
         {
-            var host = new Host { Rig = new StoredFileRig(malwareScanningEnabled, configured) };
+            // ebilling-r1 task 094: a caller may pass its own rig (the copy-rule end-to-end test serves the copy Submit Invoice committed).
+            var host = new Host { Rig = rig ?? new StoredFileRig(malwareScanningEnabled, configured) };
             host.Logs = new CapturingProvider(host.Timeline);
             host.Rig.Gateway.OnFirstRead = () => host.Timeline.Enqueue("first-byte");
 
@@ -552,7 +554,7 @@ public sealed class StoredFileEndpointsTests
         }
     }
 
-    private sealed class CapturingProvider(ConcurrentQueue<string> timeline) : ILoggerProvider
+    internal sealed class CapturingProvider(ConcurrentQueue<string> timeline) : ILoggerProvider
     {
         public ConcurrentQueue<(EventId EventId, string Message)> Entries { get; } = new();
 

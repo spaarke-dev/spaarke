@@ -17,8 +17,9 @@ namespace Sprk.Bff.Api.Services.Finance;
 /// <para><b>Confirm (ebilling-r1 task 050a, owner decision D-134, refining D-71).</b> Confirm creates NO invoice and queues no
 /// extraction: it submits the document through the one invoice intake, <see cref="InvoiceSubmissionService.SubmitExistingDocumentAsync"/>
 /// (the same firm, firm-link, core-record and owner checks as an upload; no upload, no second document; one submission per document). No
-/// confirm path creates an invoice: the submission's processing job creates it (ADR-002, D-19) and re-files the document under it with the
-/// secure-record isolation step (<see cref="InvoiceDocumentRefile"/>). The firm invoice number is required (D-91). The document's review
+/// confirm path creates an invoice: the submission's processing job creates it (ADR-002, D-19) and, since ebilling-r1 task 094, COPIES the
+/// document's bytes into the invoice's Stored File (procedure-and-file-model 9.1; the document is never re-filed, re-owned or linked to the
+/// invoice: <see cref="Submission.SubmissionCommitGate"/>). The firm invoice number is required (D-91). The document's review
 /// decision and version are read BEFORE the intake (a document already rejected is refused, 409
 /// <see cref="InvoiceReviewFailure.ReviewDecisionChanged"/>); when the submission is received, the document is marked ConfirmedInvoice,
 /// conditional on that version (an unrelated change is re-read and retried; a reject that landed in between is 409
@@ -99,6 +100,14 @@ public record InvoiceReviewConfirmRequest
     /// </summary>
     [System.Text.Json.Serialization.JsonIgnore]
     public RecordRequester? RequestedBy { get; init; }
+
+    /// <summary>
+    /// ebilling-r1 task 094 fix round (F1-b): the route's step A (file an unfiled source communication under the matter, as the caller),
+    /// handed to the intake, which runs it only after every read-only refusal (<see cref="InvoiceSubmissionRequest.FileSourceBeforeWrite"/>).
+    /// Never bound from the request body.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public Func<CancellationToken, Task<bool>>? FileSourceBeforeWrite { get; init; }
 }
 
 /// <summary>
@@ -344,6 +353,7 @@ public class InvoiceReviewService : IInvoiceReviewService
             ExistingDocumentId = request.DocumentId,
             CallerObjectId = request.RequestedBy?.ObjectId,
             CorrelationId = correlationId,
+            FileSourceBeforeWrite = request.FileSourceBeforeWrite,
         }, ct);
 
         if (outcome.Kind != InvoiceSubmissionOutcomeKind.Received)

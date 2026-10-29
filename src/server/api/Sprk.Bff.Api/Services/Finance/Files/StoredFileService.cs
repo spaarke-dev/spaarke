@@ -4,6 +4,7 @@ using System.Security.Claims;
 using Azure;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
+using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
@@ -68,7 +69,14 @@ public sealed class StoredFileService
     /// under an existing id are refusals with nothing written; the same bytes under an existing id are reused (a retry).
     /// </summary>
     /// <exception cref="RequestFailedException">A storage fault.</exception>
-    public Task<StageResult> StageAsync(StoredFileRowSpec spec, Stream content, CancellationToken ct)
+    public Task<StageResult> StageAsync(StoredFileRowSpec spec, Stream content, CancellationToken ct) => StageAsync(spec, content, manifest: null, ct);
+
+    /// <summary>
+    /// <see cref="StageAsync(StoredFileRowSpec, Stream, CancellationToken)"/>, recording the spec's source facts in the blob's metadata
+    /// (task 094: the job that writes the row reads them back, <see cref="ReadStagedSourceAsync"/>) and, for a from-email Invoice part,
+    /// <paramref name="manifest"/>: the Supporting parts staged with it and the file extension.
+    /// </summary>
+    internal Task<StageResult> StageAsync(StoredFileRowSpec spec, Stream content, StagedSourceManifest? manifest, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(spec);
         ArgumentNullException.ThrowIfNull(content);
@@ -78,7 +86,146 @@ public sealed class StoredFileService
             return Task.FromResult(StageResult.Refused(StoredFileRefusal.InvalidRequest));
         }
 
-        return _blobs.StageAsync(spec.Purpose, spec.Parent, spec.FileId, content, spec.ContentType, spec.SubmissionId, ct);
+        return _blobs.StageAsync(spec.Purpose, spec.Parent, spec.FileId, content, spec.ContentType, spec.SubmissionId, ct, SourceMetadataOf(spec, manifest));
+    }
+
+    /// <summary>The source facts of <paramref name="spec"/> (and the manifest) as blob metadata; ASCII only (an identity that is not is left out).</summary>
+    internal static IReadOnlyDictionary<string, string> SourceMetadataOf(StoredFileRowSpec spec, StagedSourceManifest? manifest)
+    {
+        var metadata = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (spec.SourceDocumentId is { } document)
+            metadata[StoredFileBlobs.MetadataSourceDocument] = document.ToString("D");
+        if (spec.SourceCommunicationId is { } communication)
+            metadata[StoredFileBlobs.MetadataSourceCommunication] = communication.ToString("D");
+        if (spec.SourceVersion is { } version)
+            metadata[StoredFileBlobs.MetadataSourceVersion] = StoredFileSourceVersion.ToCanonical(version);
+        if (spec.SourceAttachmentIdentity is { } identity && IsMetadataToken(identity))
+            metadata[StoredFileBlobs.MetadataSourceAttachment] = identity;
+        if (manifest is not null)
+        {
+            if (manifest.SupportingOrdinals.Count > 0)
+                metadata[StoredFileBlobs.MetadataEmlParts] = string.Join(",", manifest.SupportingOrdinals.Select(o => o.ToString(CultureInfo.InvariantCulture)));
+            if (manifest.Extension is { } extension && IsExtension(extension))
+                metadata[StoredFileBlobs.MetadataExtension] = extension;
+        }
+
+        return metadata;
+    }
+
+    /// <summary>A file extension the metadata may carry: a dot and 1 to 10 ASCII letters or digits.</summary>
+    internal static bool IsExtension(string value) =>
+        value.Length is >= 2 and <= 11 && value[0] == '.' && value.Skip(1).All(char.IsAsciiLetterOrDigit);
+
+    private static bool IsMetadataToken(string value) =>
+        value.Length is > 0 and <= 200 && value.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.');
+
+    /// <summary>
+    /// ebilling-r1 task 094 (review round 5): whether a stage can be made now: the store is configured and its name segment is confirmed as
+    /// this environment's OrganizationId (the two checks a stage answers <see cref="StoredFileRefusal.NotConfigured"/> on). Read-only (the
+    /// environment read is cached for the process), so a caller can refuse before its first write. A fault of the environment read throws.
+    /// </summary>
+    internal async Task<bool> CanStageAsync(CancellationToken ct) =>
+        _blobs.IsConfigured && await _blobs.EnvironmentConfirmedAsync(ct).ConfigureAwait(false);
+
+    /// <summary>
+    /// ebilling-r1 task 094 (from-email): the blob staged under <paramref name="fileId"/> and the source facts its stage recorded
+    /// (<see cref="StageAsync(StoredFileRowSpec, Stream, StagedSourceManifest?, CancellationToken)"/>), read back by its name (built from
+    /// the typed purpose, parent and id). <c>null</c> when no usable blob is there (as <see cref="GetStagedAsync"/>). A fault throws.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The store is not configured.</exception>
+    internal async Task<StagedSource?> ReadStagedSourceAsync(StoredFilePurpose purpose, StoredFileParent parent, Guid fileId, CancellationToken ct)
+    {
+        if (!Enum.IsDefined(purpose) || StoredFileSchema.ParentKindOf(purpose) != parent.Kind || parent.Id == Guid.Empty || fileId == Guid.Empty)
+        {
+            return null;
+        }
+
+        if (!_blobs.IsConfigured)
+        {
+            throw new InvalidOperationException("The Finance file store is not configured; a staged file cannot be read.");
+        }
+
+        var container = StoredFileSchema.ContainerOf(purpose);
+        var name = StoredFileBlobName.Build(_blobs.TenantId, parent, fileId);
+        var properties = await _blobs.GetPropertiesAsync(container, name, ct).ConfigureAwait(false);
+        if (properties is null || StagedSha256Of(properties) is not { } sha || !StoredFileSize.TryToColumnValue(properties.ContentLength, out _))
+        {
+            return null;
+        }
+
+        var metadata = properties.Metadata;
+        // Review round 5: a source key that is present but cannot be read marks the blob unreadable (fail closed), never an upload. A
+        // present key with a blank value is one of them (the stage never writes a blank value; an absent key is the upload's shape).
+        var unreadable = false;
+        string? Value(string key)
+        {
+            if (!metadata.TryGetValue(key, out var value))
+                return null;
+            if (!string.IsNullOrWhiteSpace(value))
+                return value;
+            unreadable = true;
+            return null;
+        }
+
+        Guid? IdOf(string key)
+        {
+            if (Value(key) is not { } raw)
+                return null;
+            if (Guid.TryParse(raw, out var id) && id != Guid.Empty)
+                return id;
+            unreadable = true;
+            return null;
+        }
+
+        var ordinals = new List<int>();
+        foreach (var token in (Value(StoredFileBlobs.MetadataEmlParts) ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (!int.TryParse(token, NumberStyles.None, CultureInfo.InvariantCulture, out var ordinal))
+            {
+                unreadable = true;
+                ordinals.Clear();
+                break;
+            }
+
+            ordinals.Add(ordinal);
+        }
+
+        var document = IdOf(StoredFileBlobs.MetadataSourceDocument);
+        var communication = IdOf(StoredFileBlobs.MetadataSourceCommunication);
+        long? version = null;
+        if (Value(StoredFileBlobs.MetadataSourceVersion) is { } rawVersion)
+        {
+            if (long.TryParse(rawVersion, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed))
+                version = parsed;
+            else
+                unreadable = true;
+        }
+
+        string? extension = null;
+        if (Value(StoredFileBlobs.MetadataExtension) is { } rawExtension)
+        {
+            if (IsExtension(rawExtension))
+                extension = rawExtension;
+            else
+                unreadable = true;
+        }
+
+        var attachment = Value(StoredFileBlobs.MetadataSourceAttachment);
+        if (unreadable)
+        {
+            _logger.LogWarning("Stored file {FileId}: a source fact its stage recorded is not readable", fileId);
+        }
+
+        return new StagedSource(
+            new StagedBlob(container, name, sha, properties.ContentLength, Reused: true),
+            document,
+            communication,
+            version,
+            attachment,
+            ordinals,
+            extension,
+            string.IsNullOrWhiteSpace(properties.ContentType) ? null : properties.ContentType,
+            unreadable);
     }
 
     /// <summary>
@@ -278,6 +425,16 @@ public sealed class StoredFileService
     private async Task<StoredFileCreateResult> StageCreateFlipAsync(
         StoredFileRowSpec spec, Stream content, RecordRequester? requester, Guid? creatorPersonId, CancellationToken ct)
     {
+        // ebilling-r1 task 094 (uac-r2, the InvoicePdf writer guard): an invoice PDF is created ONLY in the commit that creates its
+        // invoice (InvoiceSubmissionPersister). The external invoice predicate (task 098) reads a sourceless InvoicePdf as the
+        // upload's own PDF, so no route may add one onto an existing invoice. Refused before any read or write.
+        if (spec.Purpose == StoredFilePurpose.InvoicePdf)
+        {
+            _logger.LogWarning("Stored file {FileId} refused: an invoice PDF is created only with its invoice ({Code})",
+                spec.FileId, StoredFileRefusal.InvalidRequest);
+            return StoredFileCreateResult.Refused(StoredFileRefusal.InvalidRequest);
+        }
+
         var owner = await _owners.ResolveOwnerAsync(
             RecordOwnershipContext.ContentOf(spec.Parent.Table, spec.Parent.Id) with { RequestedBy = requester }, ct).ConfigureAwait(false);
         if (owner.IsRefused)
@@ -415,7 +572,205 @@ public sealed class StoredFileService
             return new StoredFileProcessingRead(StoredFileProcessingOutcome.Missing);
         }
 
-        var scan = await _blobs.GetScanStateAsync(row.Container!, row.BlobPath!, ct).ConfigureAwait(false);
+        return await ReadVerifiedAsync(fileId, row.Container!, row.BlobPath!, expectedSha256: _ => row.Sha256, row.ContentType, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The job read of a file STAGED under a deterministic id whose row is written later, in the caller's own transaction (ebilling-r1
+    /// task 092: a firm upload is staged at intake, and its row is created with the invoice the job commits). When the row exists the
+    /// answer is <see cref="OpenForProcessingAsync"/>'s. Otherwise the blob is found by its name (built from the typed purpose, parent
+    /// and id, never read back), its scan verdict is read as for a row, and its bytes must match the SHA-256 the stage recorded in the
+    /// blob's metadata; no metadata hash, a mismatch or no blob is <see cref="StoredFileProcessingOutcome.Missing"/>. A fault throws.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The store is not configured (an operator fault; the job retries).</exception>
+    public async Task<StoredFileProcessingRead> OpenStagedForProcessingAsync(
+        StoredFilePurpose purpose, StoredFileParent parent, Guid fileId, CancellationToken ct)
+    {
+        if (await ReadRowAsync(fileId, ct).ConfigureAwait(false) is not null)
+        {
+            return await OpenForProcessingAsync(fileId, ct).ConfigureAwait(false);
+        }
+
+        if (!Enum.IsDefined(purpose) || StoredFileSchema.ParentKindOf(purpose) != parent.Kind || parent.Id == Guid.Empty || fileId == Guid.Empty)
+        {
+            return new StoredFileProcessingRead(StoredFileProcessingOutcome.Missing);
+        }
+
+        if (!_blobs.IsConfigured)
+        {
+            throw new InvalidOperationException("The Finance file store is not configured; a staged file cannot be read.");
+        }
+
+        var name = StoredFileBlobName.Build(_blobs.TenantId, parent, fileId);
+        return await ReadVerifiedAsync(fileId, StoredFileSchema.ContainerOf(purpose), name, StagedSha256Of, contentType: null, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The facts of the blob staged for <paramref name="spec"/> (ebilling-r1 task 092), read back where the stage's answer is not at
+    /// hand: the job that writes the row runs in another process than the intake that staged the bytes. The SHA-256 is the one the
+    /// stage recorded in the blob's metadata; <see cref="FlipToServableAsync"/> later recomputes it by streaming before the row is
+    /// served. <c>null</c> when no blob is there, its metadata hash is not 64 lower-case hex characters or its length does not fit
+    /// the size column. A fault throws.
+    /// </summary>
+    /// <exception cref="ArgumentException">An invalid spec.</exception>
+    /// <exception cref="InvalidOperationException">The store is not configured.</exception>
+    public async Task<StagedBlob?> GetStagedAsync(StoredFileRowSpec spec, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(spec);
+        if (spec.Invalid() is { } reason)
+        {
+            throw new ArgumentException($"Invalid Stored File spec: {reason}.", nameof(spec));
+        }
+
+        if (!_blobs.IsConfigured)
+        {
+            throw new InvalidOperationException("The Finance file store is not configured; a staged file cannot be read.");
+        }
+
+        var container = StoredFileSchema.ContainerOf(spec.Purpose);
+        var name = StoredFileBlobName.Build(_blobs.TenantId, spec.Parent, spec.FileId);
+        var properties = await _blobs.GetPropertiesAsync(container, name, ct).ConfigureAwait(false);
+        if (properties is null
+            || StagedSha256Of(properties) is not { } sha
+            || !StoredFileSize.TryToColumnValue(properties.ContentLength, out _))
+        {
+            _logger.LogWarning("Stored file {FileId}: no usable staged blob at {BlobName}", spec.FileId, name);
+            return null;
+        }
+
+        return new StagedBlob(container, name, sha, properties.ContentLength, Reused: true);
+    }
+
+    /// <summary>
+    /// The compensation of a stage whose caller then failed before any row could reference it (ebilling-r1 task 092: the intake's
+    /// submission create or job enqueue failed). Deletes the blob of <paramref name="spec"/>, found by its name, only when Dataverse
+    /// answers that no row with the file id exists; a row (or a row read that faulted) keeps the blob. False when nothing was deleted.
+    /// </summary>
+    /// <exception cref="RequestFailedException">A storage fault.</exception>
+    public async Task<bool> DeleteStagedAsync(StoredFileRowSpec spec, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(spec);
+        if (spec.Invalid() is not null || !_blobs.IsConfigured)
+        {
+            return false;
+        }
+
+        var (known, row) = await TryReadRowAsync(spec.FileId, ct).ConfigureAwait(false);
+        if (!known || row is not null)
+        {
+            _logger.LogWarning("Stored file {FileId}: the staged blob is kept (rowKnown={Known}, rowExists={Exists})", spec.FileId, known, row is not null);
+            return false;
+        }
+
+        var name = StoredFileBlobName.Build(_blobs.TenantId, spec.Parent, spec.FileId);
+        var deleted = await _blobs.DeleteAsync(StoredFileSchema.ContainerOf(spec.Purpose), name, ct).ConfigureAwait(false);
+        _logger.LogInformation("Stored file {FileId}: staged blob {BlobName} removed by compensation (deleted={Deleted})", spec.FileId, name, deleted);
+        return deleted;
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 094 (uac-r2 re-check (b); procedure-and-file-model 9.1 undo): withdraws every row of <paramref name="rows"/> that is
+    /// not already <see cref="StoredFileStatus.Removed"/> (one write of <c>sprk_filestatus</c> = Removed per row, conditioned on the row
+    /// version that was read), so no row of an invoice being undone is served once its blob is deleted. Only
+    /// <see cref="Submission.SubmissionCommitGate.CompensateAsync"/> calls it, before <see cref="DeleteBlobForUndoAsync"/>. A row changed
+    /// since the read or any fault throws (the undo is held and a later delivery re-reads and retries); a row already gone is skipped.
+    /// </summary>
+    internal async Task WithdrawForUndoAsync(IReadOnlyList<StoredFileRow> rows, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+        foreach (var row in rows.Where(r => r.Status != StoredFileStatus.Removed))
+        {
+            var rowVersion = row.RowVersion ?? throw new InvalidOperationException($"Stored file {row.FileId} was read without a row version.");
+            if (row.Status == StoredFileStatus.Servable)
+            {
+                _logger.LogWarning("Stored file {FileId}: Servable, withdrawn by the undo of its invoice's commit", row.FileId);
+            }
+
+            try
+            {
+                await _entities.UpdateIfRowVersionMatchesAsync(
+                    StoredFileSchema.Entity, row.FileId, rowVersion,
+                    new Dictionary<string, object> { [StoredFileSchema.Status] = new OptionSetValue((int)StoredFileStatus.Removed) },
+                    ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (StoredFileNotFound.Is(ex))
+            {
+                // Already gone: nothing to serve.
+            }
+        }
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 094 fix round (undo ordering): the blob of <paramref name="row"/> only, when the row's path is its own (a path that
+    /// is not cannot name this file's blob, so nothing is touched). The row stays: the undo deletes it in ONE transaction with its invoice
+    /// (<see cref="Submission.SubmissionCommitGate.CompensateAsync"/>), so the invoice is never left without its file rows. A blob that is
+    /// already gone is not a fault; a storage fault throws (the undo is then held and retried).
+    /// </summary>
+    internal async Task DeleteBlobForUndoAsync(StoredFileRow row, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        if (!PathIsOwn(row))
+        {
+            return;
+        }
+
+        if (!_blobs.IsConfigured)
+        {
+            throw new InvalidOperationException("The Finance file store is not configured; a committed file's blob cannot be deleted.");
+        }
+
+        if (row.Status == StoredFileStatus.Servable)
+        {
+            _logger.LogWarning("Stored file {FileId}: Servable, its blob deleted by the undo of its invoice's commit", row.FileId);
+        }
+
+        await _blobs.DeleteAsync(row.Container!, row.BlobPath!, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 094: every Stored File row whose parent is the invoice <paramref name="invoiceId"/>, as the store's rules read them
+    /// (whatever their channel: an upload, a Submit Invoice copy or a from-email part). At most <paramref name="max"/>; a fault throws.
+    /// </summary>
+    internal async Task<IReadOnlyList<StoredFileRow>> ReadRowsForInvoiceAsync(Guid invoiceId, int max, CancellationToken ct)
+    {
+        var query = new QueryExpression(StoredFileSchema.Entity) { ColumnSet = new ColumnSet(StoredFileSchema.ReadColumns), TopCount = max };
+        query.Criteria.AddCondition(StoredFileSchema.InvoiceTable, ConditionOperator.Equal, invoiceId);
+        var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+        return rows.Entities.Select(e => StoredFileRow.From(e, _blobs.TenantId)).ToList();
+    }
+
+    /// <summary>The most copies <see cref="CountCopiesOfDocumentAsync"/> counts; any count above zero refuses a delete.</summary>
+    internal const int CopyCountCap = 5000;
+
+    /// <summary>
+    /// ebilling-r1 task 094 (ontology-r1 088 gate F1; procedure-and-file-model 5.2): how many Stored Files, active or not, name
+    /// <paramref name="documentId"/> as their source document (<c>sprk_sourcedocument</c>, Delete = Restrict), up to
+    /// <see cref="CopyCountCap"/>. App-only, ids never returned. Static: the Dataverse document delete route calls it without a
+    /// request's store. A fault throws (the caller refuses the delete; fail closed).
+    /// </summary>
+    internal static async Task<int> CountCopiesOfDocumentAsync(IGenericEntityService entities, Guid documentId, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(entities);
+        var query = new QueryExpression(StoredFileSchema.Entity) { ColumnSet = new ColumnSet(StoredFileSchema.IdColumn), TopCount = CopyCountCap };
+        query.Criteria.AddCondition(StoredFileSchema.SourceDocument, ConditionOperator.Equal, documentId);
+        var rows = await entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+        return rows.Entities.Count;
+    }
+
+    /// <summary>The SHA-256 the stage wrote to the blob's metadata, when it is 64 lower-case hex characters.</summary>
+    private static string? StagedSha256Of(Infrastructure.Storage.BlobPropertiesInfo properties) =>
+        properties.Metadata.TryGetValue(StoredFileBlobs.MetadataSha256, out var sha) && StoredFileRowSpec.IsSha256Hex(sha) ? sha : null;
+
+    /// <summary>
+    /// The verdict-gated, hash-checked read shared by <see cref="OpenForProcessingAsync"/> (hash from the row) and
+    /// <see cref="OpenStagedForProcessingAsync"/> (hash from the staged blob's metadata). The bytes are read pinned to the ETag whose
+    /// verdict was read; a change since then is Pending.
+    /// </summary>
+    private async Task<StoredFileProcessingRead> ReadVerifiedAsync(
+        Guid fileId, string container, string blobPath, Func<Infrastructure.Storage.BlobPropertiesInfo, string?> expectedSha256,
+        string? contentType, CancellationToken ct)
+    {
+        var scan = await _blobs.GetScanStateAsync(container, blobPath, ct).ConfigureAwait(false);
         switch (scan)
         {
             case null:
@@ -426,10 +781,17 @@ public sealed class StoredFileService
                 return new StoredFileProcessingRead(StoredFileProcessingOutcome.Pending);
         }
 
+        var expected = expectedSha256(scan.Value.Properties);
+        if (expected is null)
+        {
+            _logger.LogWarning("Stored file {FileId}: no SHA-256 to check the bytes against; not processed ({Code})", fileId, StoredFileRefusal.HashMismatch);
+            return new StoredFileProcessingRead(StoredFileProcessingOutcome.Missing);
+        }
+
         BinaryData? bytes;
         try
         {
-            bytes = await _blobs.ReadAllAsync(row.Container!, row.BlobPath!, scan.Value.Properties.ETag, ct).ConfigureAwait(false);
+            bytes = await _blobs.ReadAllAsync(container, blobPath, scan.Value.Properties.ETag, ct).ConfigureAwait(false);
         }
         catch (RequestFailedException ex) when (ex.Status == StatusCodes.Status412PreconditionFailed)
         {
@@ -443,13 +805,13 @@ public sealed class StoredFileService
         }
 
         var sha = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes.ToMemory().Span));
-        if (!string.Equals(sha, row.Sha256, StringComparison.Ordinal))
+        if (!string.Equals(sha, expected, StringComparison.Ordinal))
         {
-            _logger.LogWarning("Stored file {FileId}: the blob's bytes do not match the row's SHA-256; not processed ({Code})", fileId, StoredFileRefusal.HashMismatch);
+            _logger.LogWarning("Stored file {FileId}: the blob's bytes do not match the recorded SHA-256; not processed ({Code})", fileId, StoredFileRefusal.HashMismatch);
             return new StoredFileProcessingRead(StoredFileProcessingOutcome.Missing);
         }
 
-        return new StoredFileProcessingRead(StoredFileProcessingOutcome.Ok, bytes, row.ContentType);
+        return new StoredFileProcessingRead(StoredFileProcessingOutcome.Ok, bytes, contentType ?? scan.Value.Properties.ContentType);
     }
 
     /// <summary>Opens the stream of a file <see cref="JudgeServableAsync"/> decided to serve, pinned to the version it judged.</summary>

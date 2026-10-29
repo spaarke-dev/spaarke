@@ -45,6 +45,7 @@ public sealed class FindingsJsonAppOnlyReadGuardTests
         typeof(AdminAttentionText),
         typeof(SubmissionOverrideService),
         typeof(InvoiceReviewReadService),
+        typeof(SubmissionCommitGate), // task 094: reads it app-only (IGenericEntityService) to decide whether a commit is left, and clears it in the undo
     ];
 
     /// <summary>The assemblies whose types may read Dataverse: the BFF and its data layer.</summary>

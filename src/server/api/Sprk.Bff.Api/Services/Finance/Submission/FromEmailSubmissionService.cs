@@ -56,6 +56,8 @@ internal sealed class FromEmailSubmissionService
         "sprk_processingstatus", TrackingNumberAllocator.TrackingNumberColumn, TrackingNumberAllocator.FirmColumn,
         TrackingNumberAllocator.FirmInvoiceNumberColumn, "sprk_regardingmatter", "sprk_regardingproject", "sprk_regardingworkassignment",
         RecordCreatorPerson.Column,
+        // Review round 5 (pass-2 F1-1): whether a Failed attempt's undo is unfinished.
+        InvoiceSubmissionPersister.SubmissionReasonCode, InvoiceSubmissionPersister.SubmissionInvoice,
     ];
 
     private const string DocumentEntity = "sprk_document";
@@ -240,6 +242,7 @@ internal sealed class FromEmailSubmissionService
             CallerSystemUserId = callerId,
             CallerObjectId = Guid.TryParse(CallerResolution.ResolveObjectId(http.User), out var oid) ? oid : null,
             CorrelationId = http.TraceIdentifier,
+            Http = http,
         }, ct);
 
         switch (result.Outcome)
@@ -257,16 +260,19 @@ internal sealed class FromEmailSubmissionService
                 var concurrent = await ReadAttemptAsync(submissionId, ct);
                 if (concurrent.Refusal is { } concurrentFault)
                 {
-                    return concurrentFault;
+                    return AfterFiling(concurrentFault, result.Filed);
                 }
 
                 // The concurrency guard of K (the deterministic id and the allocator's AlreadyCreated): the creator, the status and the
                 // details are re-checked on the row that won, so of two callers racing on one Failed attempt exactly one creates the new
-                // generation and the other gets 409 (EB-D-165), and a same-caller retry with other details gets its 409 too.
-                return concurrent.Row is { } row
+                // generation and the other gets 409 (EB-D-165), and a same-caller retry with other details gets its 409 too. Step A may have
+                // filed for this request before it lost the race: a refusal then says the filing is kept (review round 5).
+                return AfterFiling(
+                    concurrent.Row is { } row
                     && await AnswerExistingAsync(row, generation, k, callerId, invoiceSha, input, http, ct) is { } replayed
                         ? replayed
-                        : NotQueued();
+                        : NotQueued(),
+                    result.Filed);
 
             case FromEmailSubmitOutcome.Refused when result.ErrorCode is not null:
                 return FromEmailSubmissionOutcome.Refused(result.Status, result.ErrorCode, result.Detail ?? "The invoice was not submitted.");
@@ -380,6 +386,17 @@ internal sealed class FromEmailSubmissionService
         var status = StatusOf(row);
         if (status == InvoiceSubmissionStatus.Failed)
         {
+            // Review round 5 (pass-2 F1-1): no new attempt while the failed one's undo is unfinished (its invoice still linked).
+            if (SubmissionCommitGate.UndoUnfinished(
+                    status, row.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionReasonCode),
+                    row.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.SubmissionInvoice)?.Id))
+            {
+                _logger.LogInformation("From-email submission {SubmissionId} (attempt {Generation}) ended Failed and its undo is unfinished; refused (503)",
+                    row.Id, generation);
+                return FromEmailSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.EarlierAttemptBeingRemoved,
+                    InvoiceSubmissionService.EarlierAttemptBeingRemovedDetail);
+            }
+
             return null; // EB-D-160 / EB-D-165: a new attempt (generation + 1), created by this caller
         }
 
@@ -731,6 +748,20 @@ internal sealed class FromEmailSubmissionService
     private static FromEmailSubmissionOutcome NotQueued() =>
         FromEmailSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.Failed,
             "The invoice could not be submitted right now. Try again shortly.");
+
+    /// <summary>
+    /// Review round 5: a refusal answered after step A filed the communication for this request keeps the filing and says so (contract
+    /// section 6, "After step A"), as <see cref="InvoiceSubmissionService.AfterFiling"/> does for the source-document route. A receipt, an
+    /// Office answer or a request that filed nothing is unchanged.
+    /// </summary>
+    private static FromEmailSubmissionOutcome AfterFiling(FromEmailSubmissionOutcome outcome, bool filed) =>
+        !filed || outcome.Receipt is not null || outcome.ErrorCode is not { } code
+            ? outcome
+            : outcome with
+            {
+                Detail = InvoiceSubmissionService.AfterFiling(
+                    InvoiceSubmissionOutcome.Refused(outcome.Status, code, outcome.Detail ?? string.Empty), filed: true).Detail,
+            };
 
     private static bool IsCallerCancellation(Exception ex, CancellationToken ct) => ex is OperationCanceledException && ct.IsCancellationRequested;
 

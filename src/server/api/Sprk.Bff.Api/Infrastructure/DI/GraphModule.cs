@@ -20,9 +20,10 @@ public static class GraphModule
     /// <para><c>SharePointEmbedded:OwnedContainerIds</c> is for environments whose containers predate the ownership
     /// marker (dev, demo): an operator lists them there. Provisioned stamps never need it — the BFF marks every
     /// container it creates, and H4b writes the default and archive keys.</para>
-    /// <para>The two <c>Finance:</c> keys are the eBilling Procedure Library and E-Billing Output Files containers
-    /// (ebilling-r1 FR-16, owner D-55 / D-67), so app-only eBilling writers (exports, reports, rule drafts) reach them.
-    /// Same status as the keys above: written by provisioning or an operator, never by the customer.</para>
+    /// <para>The <c>Finance:</c> key is the eBilling Procedure Library container (ebilling-r1 FR-16, owner D-55 / D-67), so
+    /// app-only eBilling writers (rule-set sources, rate-card workbooks) reach it. Same status as the keys above: written by
+    /// provisioning or an operator, never by the customer. <c>Finance:EbillingOutputContainerId</c> was retired by ebilling-r1
+    /// task 092: export files are Stored Files in the Finance file store, not SPE documents.</para>
     /// </remarks>
     public static readonly IReadOnlyList<string> StampContainerSettingKeys = new[]
     {
@@ -30,7 +31,6 @@ public static class GraphModule
         "Communication:ArchiveContainerId",
         OwnedContainerIdsKey,
         "Finance:ProcedureLibraryContainerId",
-        "Finance:EbillingOutputContainerId",
     };
 
     private const string OwnedContainerIdsKey = "SharePointEmbedded:OwnedContainerIds";

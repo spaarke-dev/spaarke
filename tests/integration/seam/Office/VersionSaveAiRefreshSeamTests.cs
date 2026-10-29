@@ -385,8 +385,7 @@ public sealed class VersionSaveAiRefreshSeamTests : IDisposable
                 new FileIndexingService(
                     spe.Object, extractor.Object, chunker.Object, Index, NullLogger<FileIndexingService>.Instance,
                     // The saved document's pointer names its business unit's container (task 166 r1 pointer check).
-                    TestRecordContainerResolver.ForBusinessUnitContainers(Drive),
-                    Options.Create(new FinanceOptions())),
+                    TestRecordContainerResolver.ForBusinessUnitContainers(Drive)),
                 Idempotency,
                 Mock.Of<IDocumentDataverseService>(),
                 resolver.Object,
