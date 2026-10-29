@@ -11,7 +11,7 @@
 | 2 | Partner sign-in | ✅ 2026-10-20 | Owner (`task-070-deploy-record.md`) |
 | 3 | Licensed user: stored link; /me resolves to the systemuser | ✅ 2026-10-29 | §1 below |
 | 4 | Resubmit: no second contact | ✅ 2026-10-29 | §2 below |
-| 5 | Existing-record bind after an invitation; no duplicate | blocked (account setup) | §3 below: the test user's token has no `email` claim; nothing was bound or created. Re-run after the owner sets the user's email attribute |
+| 5 | Existing-record bind after an invitation; no duplicate | ✅ 2026-10-29 | §3 below (first run blocked on the test account's missing email attribute; passed after the owner set it) |
 | 6 | Unlisted directory → 401 at the BFF and the not-set-up page | pending | Needs an account in a directory dev does not list |
 | 7 | The Dewey Cheatham member token carries `email` | ✅ 2026-10-28 | `contact-identity-dev-rollout-record.md` §3 (customer-directory token probe: `email` present, `xms_edov` true) |
 | 8 | Intake submit as the new contact | ✅ 2026-10-29 | §2 below |
@@ -30,7 +30,7 @@
 - **Owner run (~13:55Z):** Tracy Cheatham (initials TC) signed in with "Sign in with your company account". There was no popup, no registration form and no profile confirmation. TC submitted a service request. Messages worked both ways, and TC could not see internal-only messages. A document upload worked.
 - **Dataverse (read-only, 14:2xZ):** exactly 1 contact for TC: plane WorkforceHome, external tenant and object id set, created 2026-10-20 18:31Z (the probe 1 registration). The resubmit did not create a second contact. 1 service request created since 13:00Z (13:58:24Z, Active).
 
-## 3. Existing-record bind: blocked on account setup (2026-10-29)
+## 3. Existing-record bind (2026-10-29)
 
 - **Setup:** the owner created a Dewey Cheatham member, initials TH. Staff then granted TH Collaborate on a matter through Manage Access. That created one contact at 14:09:18Z and recorded the invitation (invited on 14:10:06Z, invited tenant set). The contact's email equals TH's sign-in address, and no identity is bound yet.
 - **Owner run (14:10–14:13Z):** sign-in → profile form (email shown) → Continue → "We could not read your email address".
@@ -38,3 +38,4 @@
 - **Defect filed:** the form shows the username as the email although registration will refuse it (ISS-023, #2449). The refusal itself is correct.
 - **Re-run:** after the owner sets TH's email attribute in Entra, sign in from a new private window. Expected: "We found your existing record" → confirm → the invited contact is bound and there is no second contact.
 - **Not a probe finding:** one `GET /me` 401 at 13:49:12Z came from a non-browser client. That was the Azure CLI token attempt in §1, outside the 13:41–13:47 window.
+- **Re-run (14:25Z, after the owner set TH's Email in Entra; no mailbox licence):** sign-in → "We found your existing record" (the invited contact's address) → Confirm and continue → the workspace loads. Server: `POST /registration` 409 (`existing_record_found`) → 200 (bound). Dataverse (read-only): still exactly 1 TH contact, the invited one created 14:09:18Z, now plane WorkforceHome with external tenant and object id set; the invited-tenant marker is cleared. **Pass: bound to the existing record, no duplicate.**- **Grant-time notice (App Insights):** staff's `invite-and-grant` at 14:10:02Z classified the domain as a customer tenant's (a work-account invite: no CIAM account, no CIAM invite email). The BFF then sent the work-account notice email from the shared mailbox at 14:10:10Z (Graph `sendMail` 202; a Dataverse communication record was created; the trace reads "the work-account notice was sent"). TH has no mailbox, so it could not have been delivered.
