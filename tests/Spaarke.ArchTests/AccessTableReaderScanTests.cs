@@ -65,6 +65,7 @@ public class AccessTableReaderScanTests
             ["savedquery"] = "View definitions (SavedQueryService).",
             ["privilege"] = "Platform-defined and read-only (Dataverse refuses a write); UserPrivilegeChecker reads its names.",
             ["template"] = "Email templates; the filter checks the caller's own Read on the row (CommunicationRecordAuthorizationFilter).",
+            ["sprk_policyversion"] = "Read as the caller, for its display name only (task 071, RecordFamilyReader).",
         };
 
     /// <summary>
