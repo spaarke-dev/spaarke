@@ -488,5 +488,15 @@ Criterion 89 (blank the writer client id, expect the writer-failure alert to fir
 - **Solution:** SpaarkeMaster 1.2.4.0 published by run 40806065681 from master `a4b6459da3` (same SpaarkeMaster source as `136568cf70`). The manifest reads back 1.2.4.0 at 02:24:48Z.
   - It carries our `3c6b316899`, `accfc2d2f7`, `4e9e295a30`, `7d6f7044bd`, `423fac833d`, `5098b423bb`, `0140c1cbc6` and `cf6e09a393`.
   - Our condition, passed to provisioning: after a stamp's stage-and-upgrade, confirm the removed privileges (D-185 Reads, 049 Writes) are gone.
-- **Pending (after uac-r2's gate ends ~02:54Z and R3's after-notice):** the decide-lane smoke, the task-170 App Insights check (at most 2 WhoAmI per commit, plus the wall time), and the budget plan check (currency prefilled).
+- **R3 after-notice:** DLL `1.0.0+136568cf70…` live since 02:23:53Z. UAC's gate passed. Ordinary moves stayed report-only (moved=0).
+- **Decide-lane smoke (~03:10Z, as the owner via az CLI against the BFF API):** PASS.
+  - `GET /api/v1/signals/worklist`: 200, 3.1–4.6 s, 53 Decide and 21 Do groups.
+  - `GET /api/v1/signals/c0084ce2-…/decision-plan` (v3 `…6313`): 200 in 1.6 s.
+    - `create-budget` is recommended and first, then `assign-task`. Next steps: `add-todo`, `assign-work`.
+    - The budget parameters include amount, category (5 options from metadata), year (max 4), start and end dates (`notBefore: startDate`), period (5 options), and reason.
+    - **Currency is prefilled with US Dollar** (`73d7a6ea…`, from `currency:active`). That is the 167/D-193 budget plan check, PASS.
+- **Task 170, App Insights (spe-insights-dev-67e2xz):**
+  - **WhoAmI per request after the deploy:** worklist 1 (27 Dataverse calls, then 20 on the second call); decision-plan 0.
+  - **Baseline on `e56a3a51d4` (2026-10-27..29):** worklist 1; decision-plan 0; `POST …/decision` averaged **28 WhoAmI (max 35), 179 Dataverse calls, 22.4 s** across 2 commits. 170 targets that commit path.
+  - **Not exercised:** no decision commit since the deploy. A commit would act on the owner's open UAT items. The commit-side check (at most 2 WhoAmI per commit, plus the wall time) and the `BUD-` number on a new budget wait for the owner's next commit. Then query App Insights for `POST /api/v1/signals/{id}/decision` after 02:23:53Z.
 
