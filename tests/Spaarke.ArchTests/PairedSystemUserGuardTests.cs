@@ -22,8 +22,11 @@ namespace Spaarke.ArchTests;
 /// <item>The column is field-secured in the solution source: a caller's own write is refused by field security, and the app-only
 /// create path refuses any field-secured column in a caller payload (<c>CallerWriteAuthorization</c> step 3), so a caller can
 /// never name a pairing of its own.</item>
-/// <item>The writers: only <c>GrantExternalAccessEndpoint.cs</c> (the grant core) assigns the pairing bind — a second writer
-/// would have to change this allow-list and be reviewed.</item>
+/// <item>The writers: only <c>GrantExternalAccessEndpoint.cs</c> (the grant core) SETS the pairing bind — a second writer
+/// would have to change this allow-list and be reviewed. Task 193 G4a: only <c>ExternalGrantRevocationService.cs</c> CLEARS
+/// it (assigns <c>null</c>), on a paired grant whose end is confirmed, rows and file access alike; an inactive row still
+/// paired is one whose file step is not confirmed yet, which the next end for that user retries. A clear names no user, so
+/// it needs none of the grant core's checks.</item>
 /// </list>
 /// <para>Crude by design (<see cref="SourceScan"/>): text, not syntax. Each rule was seeded with its violation and seen to go
 /// red before this file was committed (task 193 notes).</para>
@@ -122,19 +125,43 @@ public class PairedSystemUserGuardTests
         @"(\{(ExternalGrantLifecycle\.)?PairedSystemUserNavigationProperty\}@odata\.bind""|""sprk_PairedSystemUser@odata\.bind""|\[(ExternalGrantLifecycle\.|ExternalAccessReconciliationJob\.)?PairedSystemUserAttribute|\[""sprk_pairedsystemuser"")\]\s*=",
         RegexOptions.CultureInvariant);
 
+    /// <summary>A write of the pairing that assigns <c>null</c>: a clear (task 193 G4a).</summary>
+    private static readonly Regex PairingClear = new(PairingWrite + @"\s*null\b", RegexOptions.CultureInvariant);
+
     [Fact(DisplayName = "Task 193 G1: only the grant core writes the pairing column")]
     public void OnlyTheGrantCoreWritesThePairing()
     {
-        var writers = new List<string>();
+        var setters = new List<string>();
+        var clearers = new List<string>();
         foreach (var file in Directory.EnumerateFiles(Path.Combine(SourceScan.RepoRoot, "src", "server"), "*.cs", SearchOption.AllDirectories))
         {
-            var code = SourceScan.CodeText(File.ReadAllLines(file));
-            if (PairingWrite.IsMatch(code))
-                writers.Add(SourceScan.Relative(file).Replace('\\', '/'));
+            var (sets, clears) = Classify(SourceScan.CodeText(File.ReadAllLines(file)));
+            var relative = SourceScan.Relative(file).Replace('\\', '/');
+            if (sets)
+                setters.Add(relative);
+            if (clears)
+                clearers.Add(relative);
         }
 
         Assert.Equal(
             new[] { "src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantExternalAccessEndpoint.cs" },
-            writers.OrderBy(w => w, StringComparer.Ordinal).ToArray());
+            setters.OrderBy(w => w, StringComparer.Ordinal).ToArray());
+        Assert.Equal(
+            new[] { "src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalGrantRevocationService.cs" },
+            clearers.OrderBy(w => w, StringComparer.Ordinal).ToArray());
     }
+
+    /// <summary>Must fire and must not fire: a set is a setter even beside a clear; a clear alone is only a clearer.</summary>
+    [Fact(DisplayName = "Task 193 G4a: a pairing set and a pairing clear are told apart")]
+    public void ASetAndAClearAreToldApart()
+    {
+        const string bind = "[\"sprk_PairedSystemUser@odata.bind\"]";
+        Assert.Equal((true, false), Classify($"p{bind} = $\"/systemusers({{id}})\";"));
+        Assert.Equal((false, true), Classify($"p{bind} = null;"));
+        Assert.Equal((true, true), Classify($"a{bind} = null; b{bind} = x;"));
+        Assert.Equal((false, false), Classify("var name = \"sprk_PairedSystemUser@odata.bind\";"));
+    }
+
+    private static (bool Sets, bool Clears) Classify(string code) =>
+        (PairingWrite.Matches(code).Count > PairingClear.Matches(code).Count, PairingClear.IsMatch(code));
 }

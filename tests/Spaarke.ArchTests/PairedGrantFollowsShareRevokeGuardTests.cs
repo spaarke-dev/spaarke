@@ -150,7 +150,7 @@ internal sealed class PairedGrantGuardControl_RevokesAndEnds
         IDataverseRecordShareService shares, ExternalGrantRevocationService grants, Guid id, CancellationToken ct)
     {
         await shares.RevokeAccessAsync("sprk_matters", id, Spaarke.Dataverse.DataversePrincipalRef.User(id), ct);
-        await grants.RevokePairedWithAsync("sprk_matter", id, id, ct);
+        await grants.RevokePairedWithAsync("sprk_matter", id, id, GrantEndCause.System, ct);
     }
 }
 
