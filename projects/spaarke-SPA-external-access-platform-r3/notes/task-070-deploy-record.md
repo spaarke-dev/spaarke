@@ -48,3 +48,4 @@ Owner direction 2026-10-20: "070-071-072 - yes proceed".
 - **Tracy Cheatham in Teams (owner: pass):** 16:56:48–16:57:04Z, resolved to her existing WorkforceHome contact (10 resolutions, no second contact, no denials).
 - **Ralph Dewey in Teams (owner: pass):** 16:58:10–16:58:28Z, resolved through the stored home link to the licensed systemuser (6 resolutions, no profile form).
 - No `/api/v1/external/*` errors after 16:51:10Z. Every error in the 45-minute window was the registration-without-email sequence above.
+- **Client (owner, 2026-10-29):** all of today's Teams runs used **Teams web**: the Spaarke-tenant not-set-up check, the new-employee registration, Tracy and Ralph Dewey. Desktop and mobile are still to run.
