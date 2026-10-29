@@ -29,16 +29,49 @@ import {
   ChevronDown16Regular,
   ChevronUp16Regular,
 } from '@fluentui/react-icons';
+import { getXrm, type IPolymorphicWebApi } from '@spaarke/ui-components';
+import {
+  getViewerRecordNameResolver,
+  type ViewerRecordNameResolver,
+} from '@spaarke/communication-components/logic/connections/viewerRecordNames';
 import { AssociationStatus, type ICommunicationRecord } from '../types/communication';
 import {
   type ProvenanceDoc,
   type Connection,
   type CreateAction,
+  type ViewerTargetName,
   confidenceBand,
   deriveConnections,
   deriveCreateActions,
   topCandidate,
 } from './provenance';
+
+function lookupOf(resolver: ViewerRecordNameResolver | undefined): ViewerTargetName {
+  return (entity, id) => resolver?.nameOf(entity, id);
+}
+
+/**
+ * The viewer's own names for the provenance's candidate targets, from the shared page-session resolver (one batched
+ * read per entity through the host's Xrm.WebApi, as the viewer). The lookup's identity changes as names arrive; a
+ * candidate with no name yet, or one the viewer cannot read, gets no slot.
+ */
+function useCandidateViewerNames(provenance: ProvenanceDoc | null): ViewerTargetName {
+  const resolver = React.useMemo(() => {
+    const webApi = getXrm()?.WebApi as unknown as IPolymorphicWebApi | undefined;
+    return webApi ? getViewerRecordNameResolver(webApi) : undefined;
+  }, []);
+  const [viewerName, setViewerName] = React.useState<ViewerTargetName>(() => lookupOf(resolver));
+  React.useEffect(() => {
+    setViewerName(() => lookupOf(resolver));
+    if (!resolver) return undefined;
+    return resolver.subscribe(() => setViewerName(() => lookupOf(resolver)));
+  }, [resolver]);
+  React.useEffect(() => {
+    if (!resolver || !provenance) return;
+    void resolver.resolve(provenance.candidates.map(c => ({ entity: c.targetEntity, id: c.targetId })));
+  }, [resolver, provenance]);
+  return viewerName;
+}
 
 export type ReviewLayout = 'summary' | 'card' | 'rail';
 
@@ -253,13 +286,18 @@ function CreateActions({ actions }: { actions: CreateAction[] }): React.JSX.Elem
 function EditorBody({
   record,
   provenance,
+  viewerName,
 }: {
   record: ICommunicationRecord;
   provenance: ProvenanceDoc;
+  viewerName: ViewerTargetName;
 }): React.JSX.Element {
   const s = useStyles();
   const isResolved = record.sprk_associationstatus === AssociationStatus.Resolved;
-  const connections = React.useMemo(() => deriveConnections(provenance, isResolved), [provenance, isResolved]);
+  const connections = React.useMemo(
+    () => deriveConnections(provenance, isResolved, viewerName),
+    [provenance, isResolved, viewerName]
+  );
   const createActions = React.useMemo(() => deriveCreateActions(provenance), [provenance]);
   const [confirmed, setConfirmed] = React.useState<Set<string>>(new Set());
 
@@ -312,6 +350,7 @@ function EditorBody({
 export function ConnectionsEditor({ record, provenance, layout }: ConnectionsEditorProps): React.JSX.Element | null {
   const s = useStyles();
   const [open, setOpen] = React.useState(false);
+  const viewerName = useCandidateViewerNames(provenance);
 
   // Resolved with no provenance: simple confirmation.
   if (!provenance) {
@@ -331,13 +370,13 @@ export function ConnectionsEditor({ record, provenance, layout }: ConnectionsEdi
   }
 
   const isResolved = record.sprk_associationstatus === AssociationStatus.Resolved;
-  const connections = deriveConnections(provenance, isResolved);
+  const connections = deriveConnections(provenance, isResolved, viewerName);
   const toReview = connections.filter(c => c.status !== 'confirmed').length;
 
   if (layout === 'rail') {
     return (
       <aside className={s.rail}>
-        <EditorBody record={record} provenance={provenance} />
+        <EditorBody record={record} provenance={provenance} viewerName={viewerName} />
       </aside>
     );
   }
@@ -345,7 +384,7 @@ export function ConnectionsEditor({ record, provenance, layout }: ConnectionsEdi
   if (layout === 'card') {
     return (
       <div className={s.card}>
-        <EditorBody record={record} provenance={provenance} />
+        <EditorBody record={record} provenance={provenance} viewerName={viewerName} />
       </div>
     );
   }
@@ -389,7 +428,7 @@ export function ConnectionsEditor({ record, provenance, layout }: ConnectionsEdi
       </div>
       {open && (
         <div className={s.summaryExpand}>
-          <EditorBody record={record} provenance={provenance} />
+          <EditorBody record={record} provenance={provenance} viewerName={viewerName} />
         </div>
       )}
     </>
