@@ -9,22 +9,13 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **168** (#2418): fix rounds 2 and 3 are done; head `ab6dbb8f16`. uac-r2 PASSED round 2. Round 3 (the composition follows the assignee's portal plane, plus the home-link read) was re-checked by the main session and is with R3 (the resolver lift) and uac-r2 (HomeLinkAsync). Then: CI, merge into docs, mark 168 complete. **Owner question open:** the From address for external assignees (A: always the system mailbox, recommended; B: as built). |
-| **Status** | No lane is running. The worktrees `C:\wts-171` and `C:\wts-172` are removed. uac-r2 was sent the 171 fix-diff SHA `e025152e3b` after the merge; if they raise anything, handle it as a follow-up before docs→master. DI-124 (#2300) has the `-CustomerBusinessUnit` / `-WhatIf` comment. |
-| **Next Action** | 1) Re-check the 168 fix round (D-199) in `C:\wts-168` (plan below). 2) After the owner's next real decision commit: the task-170 App Insights check and the `BUD-` number (Lane facts). 4) Read any uac-r2 reply on the 171 fix diff. |
+| **Task** | No lane is running. **168 is DONE** (#2418 merged to docs `7cb3c263c0` after 4 fix rounds under D-199; all reviewers passed). 171 and 172 are done too. |
+| **Status** | Docs is ahead of master by 168 plus project docs. **Owner question open:** the From address for an external Assign Task assignee (A: always the system mailbox, recommended; B: as built, the assigner's mailbox first). A small follow-up if A. **ebilling #1911:** ontology review posted (PASS-WITH-FINDINGS, F2 + K1); ebilling is fixing F2 and K1 and will send the fix range on its own. The CheckVersionOwnerAsync IntentionalExemption is confirmed at `d3eb47376a`. Its invoice-approve caller (103) comes later. |
+| **Next Action** | 1) The owner answers the From question; if A, a small 168 follow-up PR. 2) Re-check ebilling's F2+K1 fix range for #1911 when it arrives. 3) Next docs→master: 168 (+ the From follow-up). Before it: notices; merge master in; full ArchTests. 4) After the next dev BFF deploy (it waits on UAC's 194b hold): the 168 live proof (internal email + bell; external email and the portal view), the task-170 App Insights check and the `BUD-` number. 5) Owner re-checks for 114, 158-163 and 166. |
 
 ## Task 168 decisions: D-199 (owner, 2026-10-29)
 
-Q1 = A: an eligible internal user, or an onboarded external contact with an active grant on the matter (portal link); nobody else, fail closed. The owner also requires that the record shows its related tasks to whoever has access, including in the portal. Checked: the portal lists every event on the matter to a contact with Read, but shows no Task type, no assignee and has no task deep link. That is DI-135 (#2445, R3); the 168 email links to the matter. Q2 = yes: the system-mailbox fallback, to the same recipients only.
-
-## 168 fix plan (after Q1/Q2; uac-r2 agreed the plan and re-checks only the fix diff)
-
-Branch `task/168-assign-task-notify`, head `8064311c54`. First merge docs (it now contains master + 194b).
-- A gate copied from master `GrantAccessNotifier.cs:222-260`: one eligible internal user per contact; `SecureShareNoAccessGuard.CheckRecordAndSecureParentsAsync(core,user,AsFlagged)` = NotSecure/NotWalled; Read on the task; fail closed. It runs in both `NotifyAsync` and `SendFromSystemMailboxAsync`.
-- `InquiryRecordFacts.ResolveAsync` for the name and link lines; the fallback only after the gate.
-- The job re-reads `sprk_assignedto` + `statecode` + the gate at send time. An inactive contact gets no email.
-- `IsInternalOnly=true` (read-back test + mutation); the `DecisionCommitFollowUps` DI test; "Assigned by" + `sprk_sentby`; Poisoned on 4xx; log the exception type and Graph code, not the exception object.
-- Must-not-fire: walled; secure non-member; Restricted + flagged-external; unverifiable. Watch UAC 193 `ContactUserRepresentation` (K-1).
+Q1 = A (an eligible internal user, or an onboarded external contact with a grant on the matter and a portal link); Q2 = the system-mailbox fallback to the same recipients. Built and merged (see the 168 POML completion block).
 
 ## Lane facts to carry
 
@@ -49,7 +40,7 @@ The last one was PR #2439, merged as master `f07ab2ef1f` (2026-10-29): 167b, 167
 ## Dev state (spaarkedev1 / spaarke-bff-dev)
 
 - **BFF:** `136568cf70` (R3, 2026-10-29). **Console:** `a8314c2e0e`. **SpaarkeMaster:** 1.2.4.0. **POL-MATTER-NOBUDGET:** v3 `…6313`.
-- **Worktrees:** `C:\wts-168`. Remove only with `Remove-WorktreeSafe.ps1`, one path per call.
+- **Worktrees:** none for lanes. Remove only with `Remove-WorktreeSafe.ps1`, one path per call.
 - **Stash:** two old `lint-staged automatic backup` entries (20 and 30 h old) are not ours. Leave them.
 
 ## Peers (current session names)
