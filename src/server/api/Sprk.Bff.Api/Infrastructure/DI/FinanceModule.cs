@@ -139,6 +139,9 @@ public static class FinanceModule
         services.AddScoped<InvoiceLineDecisionService>();
         // Invoice-level adjustments (ebilling-r1 task 102, FR-32, D-74): add / remove an Adjustment line and the rule list; 016 owns the amounts and totals.
         services.AddScoped<InvoiceAdjustmentService>();
+        // Value and code corrections (ebilling-r1 task 101 part B1, FR-31, FR-22, D-64): the D-64 correction rows and the corrected value. Concrete (ADR-010).
+        // Scoped: it holds the scoped CodeSetResolver and the scoped EligibleApproverResolver. Unconditional (flag rule above); the routes carry the kill switch.
+        services.AddScoped<InvoiceCorrectionService>();
         // UTBMS line coding (ebilling-r1 task 047, FR-22, D-46): resolves an invoice's code set (CodeSetResolver), codes its
         // lines through IInvoiceAi.CodeLinesAsync in chunks, and refuses any code outside the set (ILineCodingService).
         // Scoped (they hold the scoped IInvoiceAi and the scoped suggestion provider; IGenericEntityService is a singleton);
