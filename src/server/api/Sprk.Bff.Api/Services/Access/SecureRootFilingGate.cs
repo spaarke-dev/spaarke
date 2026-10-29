@@ -135,6 +135,34 @@ public sealed class SecureRootFilingGate
     }
 
     /// <summary>
+    /// Owner decision 2026-10-29: the matters and projects a work assignment's owner question must name when it is filed only
+    /// under an invoice or event — <c>SecureRootInheritance.OwnerLookupsThroughIntermediatesAsync</c>, the derivation the un-secure cascade names its parents by. A row that holds a typed matter or project, or no
+    /// intermediate, adds nothing and costs no scope. A host without the inheritance answers unverifiable (fail closed), as
+    /// <see cref="PlanCreateAsync"/> does.
+    /// </summary>
+    internal async Task<SecureRootInheritance.OwnerFilingThroughIntermediates> OwnerLookupsThroughIntermediatesAsync(
+        string table, IEnumerable<KeyValuePair<string, RecordOwnershipParent?>> lookups, CancellationToken ct)
+    {
+        var intermediates = SecureRootInheritance.OwnerIntermediatesOf(table, lookups);
+        if (intermediates.Count == 0)
+            return SecureRootInheritance.OwnerFilingThroughIntermediates.None;
+
+        using var scope = _scopeFactory.CreateScope();
+        var inheritance = scope.ServiceProvider.GetService<SecureRootInheritance>();
+        if (inheritance is null)
+        {
+            _logger.LogError(
+                "[SECURE-INHERIT] A {Table} is filed under an invoice or event, and this host cannot read what that record belongs " +
+                "to (SecureRootInheritance is not registered). Refused (fail closed).", table);
+            return new SecureRootInheritance.OwnerFilingThroughIntermediates(
+                Array.Empty<KeyValuePair<string, RecordOwnershipParent?>>(),
+                "what the record it is filed under belongs to cannot be read here");
+        }
+
+        return await inheritance.OwnerLookupsThroughIntermediatesAsync(table, intermediates, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Task 158 r1 (owner round 31 item 2): AFTER a create made INTO isolation — its creator shared (read back), its container,
     /// its parents' sharees; a row whose creator could not be shared is deleted again. See
     /// <see cref="SecureRootInheritance.CompleteIsolatedCreateAsync"/>. Never throws: a host without the inheritance (which

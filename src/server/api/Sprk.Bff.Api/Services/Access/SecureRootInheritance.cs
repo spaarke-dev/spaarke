@@ -3587,6 +3587,141 @@ public sealed partial class SecureRootInheritance
             .Where(c => c.Id is { } i && i != Guid.Empty)
             .Select(c => (c.Table, c.Id!.Value));
 
+    /// <summary>
+    /// #1630: the matters and projects <paramref name="filedIntermediates"/> belong to, in order (each intermediate as read into
+    /// <paramref name="intermediates"/>, its <see cref="IntermediateParentColumns"/> order), and why any could not be named —
+    /// an intermediate whose read faulted is unknown; one the read did not return confers nothing, or (the read path's
+    /// <paramref name="absentIsUnknown"/>) is unknown. The ONE rule both <see cref="NameParentsAsync"/> (the inheritance and
+    /// the un-secure cascade) and <see cref="OwnerLookupsThroughIntermediatesAsync(IGenericEntityService, ILogger, string, IReadOnlyList{ValueTuple{string, Guid}}, CancellationToken)"/>
+    /// (a create's owner question) apply.
+    /// </summary>
+    private static (List<(string Table, Guid Id)> Parents, string? Unknown) NameThroughIntermediates(
+        IEnumerable<(string Table, Guid Id)> filedIntermediates, IntermediateReads intermediates, bool absentIsUnknown)
+    {
+        var parents = new List<(string Table, Guid Id)>();
+        string? unknown = null;
+        foreach (var intermediate in filedIntermediates)
+        {
+            var read = intermediates[intermediate];
+            if (read.Faulted)
+            {
+                unknown ??= $"what the {intermediate.Table} it is filed under belongs to could not be read";
+                continue;
+            }
+
+            // The read path opts in (absentIsUnknown): an intermediate the read did not return is not "belongs to nothing",
+            // it is unknown (the same rule DecideNamedParents applies to a named matter or project).
+            if (read.Parents is null && absentIsUnknown)
+                unknown ??= $"the {intermediate.Table} it is filed under was not returned (missing, or not visible to the reader)";
+
+            parents.AddRange(read.Parents ?? Array.Empty<(string Table, Guid Id)>());
+        }
+
+        return (parents, unknown);
+    }
+
+    /// <summary>
+    /// What a row's owner question adds through its intermediates
+    /// (<see cref="OwnerLookupsThroughIntermediatesAsync(IGenericEntityService, ILogger, string, IReadOnlyList{ValueTuple{string, Guid}}, CancellationToken)"/>):
+    /// the matters and projects, keyed under the typed column that files a row there; or why they could not be read.
+    /// </summary>
+    internal sealed record OwnerFilingThroughIntermediates(
+        IReadOnlyList<KeyValuePair<string, RecordOwnershipParent?>> Lookups, string? Unverifiable)
+    {
+        /// <summary>Nothing to add: the row holds a typed parent, or no intermediate.</summary>
+        internal static OwnerFilingThroughIntermediates None { get; } =
+            new(Array.Empty<KeyValuePair<string, RecordOwnershipParent?>>(), null);
+    }
+
+    /// <summary>
+    /// Owner decision 2026-10-29 (a work assignment belongs to its core record): the intermediates a row of
+    /// <paramref name="table"/> about to be written is filed under (<see cref="IntermediateFilingColumns"/>) whose matters and
+    /// projects its owner question must name — empty when the table has no intermediate lookups, when the row holds a typed
+    /// parent lookup (<see cref="TypedFilingColumns"/>: then that parent is its core record, and nothing changes), or when it
+    /// holds no intermediate. Reads nothing.
+    /// </summary>
+    internal static IReadOnlyList<(string Table, Guid Id)> OwnerIntermediatesOf(
+        string? table, IEnumerable<KeyValuePair<string, RecordOwnershipParent?>> lookups)
+    {
+        ArgumentNullException.ThrowIfNull(lookups);
+        var logical = table?.Trim().ToLowerInvariant();
+        if (logical is null
+            || !IntermediateFilingColumns.TryGetValue(logical, out var intermediateColumns) || intermediateColumns.Count == 0
+            || !TypedFilingColumns.TryGetValue(logical, out var typed))
+        {
+            return Array.Empty<(string, Guid)>();
+        }
+
+        var held = lookups.Where(l => l.Value is { IsSpecified: true }).ToArray();
+        IEnumerable<Guid> IdsUnder(string column) => held
+            .Where(l => string.Equals(l.Key?.Trim(), column, StringComparison.OrdinalIgnoreCase))
+            .Select(l => l.Value!.RecordId);
+
+        if (typed.Any(t => IdsUnder(t.Column).Any()))
+            return Array.Empty<(string, Guid)>();
+
+        return intermediateColumns
+            .SelectMany(c => IdsUnder(c.Column).Select(id => (Table: c.Intermediate, Id: id)))
+            .Distinct()
+            .ToArray();
+    }
+
+    /// <summary>
+    /// Owner decision 2026-10-29: a work assignment filed only under an invoice or event (no typed matter or project) is owned
+    /// in the business unit of the matters and projects THAT record belongs to — what <see cref="NameParentsAsync"/> names for
+    /// it (#1630 Option A, "exactly as if it were filed under them directly"), so creation and the un-secure cascade
+    /// (<c>UnsecureFollowingParentsAsync</c>) name the same parents. Each is returned keyed under the typed column that files a
+    /// row under its table (<see cref="TypedFilingColumns"/>), so the one builder (<c>RecordOwnershipContext.ForRow</c>) ranks
+    /// it first in the table's order (<c>SecureChildLineage.RootLookupOrder</c>: matter, then project), ahead of the
+    /// intermediate — which the caller keeps among the parents, so secure-if-any reads at least what it read before.
+    /// </summary>
+    /// <returns>An intermediate that cannot be read: <see cref="OwnerFilingThroughIntermediates.Unverifiable"/> (the caller
+    /// refuses; never "under nothing"). One that does not exist confers nothing. Never throws a read fault.</returns>
+    internal static async Task<OwnerFilingThroughIntermediates> OwnerLookupsThroughIntermediatesAsync(
+        IGenericEntityService dataverse, ILogger logger, string table, IReadOnlyList<(string Table, Guid Id)> filedIntermediates,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(filedIntermediates);
+        var logical = table.Trim().ToLowerInvariant();
+        if (filedIntermediates.Count == 0 || !TypedFilingColumns.TryGetValue(logical, out var typed))
+            return OwnerFilingThroughIntermediates.None;
+
+        var reads = new IntermediateReads();
+        await ReadIntermediatesIntoAsync(dataverse, logger, filedIntermediates, reads, batched: false, ct).ConfigureAwait(false);
+        var (parents, unknown) = NameThroughIntermediates(filedIntermediates, reads, absentIsUnknown: false);
+        if (unknown is not null)
+            return new OwnerFilingThroughIntermediates(Array.Empty<KeyValuePair<string, RecordOwnershipParent?>>(), unknown);
+
+        var keyed = new List<KeyValuePair<string, RecordOwnershipParent?>>();
+        foreach (var (parentTable, id) in parents.Distinct())
+        {
+            var column = typed.FirstOrDefault(t => string.Equals(t.ParentTable, parentTable, StringComparison.OrdinalIgnoreCase)).Column;
+            if (column is not null)
+                keyed.Add(KeyValuePair.Create(column, (RecordOwnershipParent?)new RecordOwnershipParent(parentTable, id)));
+        }
+
+        return new OwnerFilingThroughIntermediates(keyed, null);
+    }
+
+    /// <summary>
+    /// The same, from the lookups a row holds (column → record: a mapped write's, or an existing row's
+    /// <c>RecordOwnershipContext.LookupsOf(row)</c>) — <see cref="OwnerIntermediatesOf"/>, then the read. A caller with an
+    /// <see cref="IGenericEntityService"/> (the resolver's read path, a writer) asks it for a row of any table: a table with no
+    /// intermediate lookups, or a row holding a typed matter or project, answers <see cref="OwnerFilingThroughIntermediates.None"/>
+    /// with nothing read. It then refuses on <see cref="OwnerFilingThroughIntermediates.Unverifiable"/> and otherwise asks
+    /// <c>RecordOwnershipContext.ForRow(table, result.Lookups.Concat(lookups), …)</c>.
+    /// </summary>
+    internal static Task<OwnerFilingThroughIntermediates> OwnerLookupsThroughIntermediatesAsync(
+        IGenericEntityService dataverse, ILogger logger, string table,
+        IEnumerable<KeyValuePair<string, RecordOwnershipParent?>> lookups, CancellationToken ct) =>
+        OwnerLookupsThroughIntermediatesAsync(dataverse, logger, table, OwnerIntermediatesOf(table, lookups), ct);
+
+    /// <summary><see cref="OwnerLookupsThroughIntermediatesAsync(IGenericEntityService, ILogger, string, IReadOnlyList{ValueTuple{string, Guid}}, CancellationToken)"/>
+    /// over this service's reader (<see cref="SecureRootFilingGate.OwnerLookupsThroughIntermediatesAsync"/>).</summary>
+    internal Task<OwnerFilingThroughIntermediates> OwnerLookupsThroughIntermediatesAsync(
+        string table, IReadOnlyList<(string Table, Guid Id)> filedIntermediates, CancellationToken ct) =>
+        OwnerLookupsThroughIntermediatesAsync(_dataverse, _logger, table, filedIntermediates, ct);
+
     /// <summary>The records <paramref name="facts"/> names as what it is filed under (typed lookups, #1630 the matters and
     /// projects its intermediates belong to, then the pair), and why any could not be named. Reads only the pair's TYPE (cached
     /// in <paramref name="recordTypes"/>) and each intermediate's parent columns (cached in <paramref name="intermediates"/>;
@@ -3622,26 +3757,13 @@ public sealed partial class SecureRootInheritance
             intermediates ??= new IntermediateReads();
             await ReadIntermediatesIntoAsync(dataverse, logger, filedIntermediates, intermediates, batched: false, ct)
                 .ConfigureAwait(false);
-            foreach (var intermediate in filedIntermediates)
+            var through = NameThroughIntermediates(filedIntermediates, intermediates, absentIsUnknown);
+            unknown ??= through.Unknown;
+            foreach (var parent in through.Parents)
             {
-                var read = intermediates[intermediate];
-                if (read.Faulted)
-                {
-                    unknown ??= $"what the {intermediate.Table} it is filed under belongs to could not be read";
-                    continue;
-                }
-
-                // The read path opts in (absentIsUnknown): an intermediate the read did not return is not "belongs to nothing",
-                // it is unknown (the same rule DecideNamedParents applies to a named matter or project).
-                if (read.Parents is null && absentIsUnknown)
-                    unknown ??= $"the {intermediate.Table} it is filed under was not returned (missing, or not visible to the reader)";
-
-                foreach (var parent in read.Parents ?? Array.Empty<(string Table, Guid Id)>())
-                {
-                    named.Add(parent);
-                    if (!direct.Contains(parent))
-                        viaIntermediate.Add(parent);
-                }
+                named.Add(parent);
+                if (!direct.Contains(parent))
+                    viaIntermediate.Add(parent);
             }
         }
 

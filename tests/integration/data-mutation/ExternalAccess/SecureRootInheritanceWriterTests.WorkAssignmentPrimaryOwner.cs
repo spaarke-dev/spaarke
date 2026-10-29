@@ -117,4 +117,177 @@ public partial class SecureRootInheritanceWriterTests
         fields["sprk_issecure"].Should().Be(true, "created INTO isolation: flagged in the create itself");
         ShouldBeSecure(created, "filed under an ordinary matter and a secure event");
     }
+
+    // ── Owner decision 2026-10-29: a work assignment filed ONLY under an invoice or event belongs to that record's matter ──
+
+    /// <summary>The route's create of a work assignment whose body is <paramref name="filing"/> (bind key → bind path).</summary>
+    private async Task<IResult> CreateFiledWorkAssignmentThroughTheRoute(params (string Key, string Bind)[] filing)
+    {
+        var body = new Dictionary<string, object?> { ["sprk_name"] = "Prepare the hearing bundle" };
+        foreach (var (key, bind) in filing)
+            body[key] = bind;
+
+        using var scope = _fixture.Services.CreateScope();
+        return await ChildRecordEndpoints.CreateAsync(
+            "sprk_workassignment", JsonSerializer.SerializeToElement(body),
+            new SecureChildOwnershipAiToolTests.ScriptedUserClient(Creator),
+            WorldResolver(),
+            AppCreatesIntoTheWorld().Object,
+            new StampWorld().Restamper,
+            scope.ServiceProvider.GetRequiredService<SecureChildShareSynchronizer>(),
+            _gate,
+            new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
+            new DefaultHttpContext(), NullLogger<Program>.Instance, CancellationToken.None);
+    }
+
+    private RecordOwnershipResolver WorldResolver() =>
+        new(SecureChildShareWorld.EntitiesOver(() => _fixture.ChildWorld).Object, SecureChildShareWorld.Configuration(),
+            NullLogger<RecordOwnershipResolver>.Instance);
+
+    /// <summary>
+    /// The owner the un-secure cascade gives <paramref name="workAssignment"/> (<c>UnsecureFollowingParentsAsync</c>): the
+    /// ownership rule over the records it is filed under directly, as the cascade's own read names them
+    /// (<see cref="SecureParentsAnswer.DirectParents"/>), in that order.
+    /// </summary>
+    private async Task<Guid?> CascadeOwnerOf(Guid workAssignment)
+    {
+        var entities = SecureChildShareWorld.EntitiesOver(() => _fixture.ChildWorld).Object;
+        var ancestry = await SecureRootInheritance.ReadSecureParentsAsync(
+            entities, NullLogger.Instance, SecureRootInheritance.WorkAssignment, workAssignment, CancellationToken.None,
+            maxDepth: SecureRootInheritance.MaxFilingDepth);
+        ancestry.IsKnown.Should().BeTrue(ancestry.Unverifiable);
+        var owner = await WorldResolver().ResolveOwnerAsync(
+            RecordOwnershipContext.ForParents(ancestry.DirectParents.Select(p =>
+                (RecordOwnershipParent?)new RecordOwnershipParent(p.Parent.Table, p.Parent.Id))),
+            CancellationToken.None);
+        return owner.OwningTeamId;
+    }
+
+    /// <summary>An ordinary matter in unit A and an ordinary <paramref name="table"/> in unit B that belongs to it.</summary>
+    private (Guid Matter, Guid Intermediate) AnIntermediateInUnitBUnderAMatterInUnitA(string table, string matterColumn)
+    {
+        TwoBusinessUnits();
+        var (matter, intermediate) = (Guid.NewGuid(), Guid.NewGuid());
+        _fixture.SeedMatter(matter, owningTeamId: UnitAMatterTeam, isSecure: false);
+        World.Add(table, intermediate,
+            ("owningteam", new EntityReference("team", UnitBEventTeam)),
+            (matterColumn, new EntityReference("sprk_matter", matter)));
+        return (matter, intermediate);
+    }
+
+    [Theory]
+    [InlineData("sprk_event", "sprk_regardingmatter", "sprk_RegardingEvent@odata.bind", "sprk_events")]
+    [InlineData("sprk_invoice", "sprk_matter", "sprk_RegardingInvoice@odata.bind", "sprk_invoices")]
+    public async Task WorkAssignmentPrimaryOwner_UnderOnlyAnIntermediateInUnitB_WhoseMatterIsInUnitA_IsOwnedByUnitAsDefaultTeam_AsTheCascadeNames(
+        string table, string matterColumn, string bindKey, string entitySet)
+    {
+        var (_, intermediate) = AnIntermediateInUnitBUnderAMatterInUnitA(table, matterColumn);
+
+        var result = await CreateFiledWorkAssignmentThroughTheRoute((bindKey, $"/{entitySet}({intermediate:D})"));
+
+        RouteStatus(result).Should().Be(StatusCodes.Status201Created, RouteDetail(result));
+        var (_, created, fields) = _writes.Should().ContainSingle().Subject;
+        BoundId(fields, "ownerid@odata.bind").Should().Be(UnitADefaultTeam,
+            $"a work assignment belongs to its core record (owner decision 2026-10-29): the matter the {table} belongs to, in "
+            + $"unit A — never the {table}'s own unit B ({UnitBDefaultTeam:D})");
+        ShouldNotBeSecured(created, $"filed under an ordinary {table} of an ordinary matter");
+        (await CascadeOwnerOf(created)).Should().Be(UnitADefaultTeam,
+            "creation and the un-secure cascade name the same parents, so they land in the same business unit");
+    }
+
+    [Fact]
+    public async Task WorkAssignmentPrimaryOwner_UnderOnlyAnEventOfASecureMatter_IsSecure()
+    {
+        TwoBusinessUnits();
+        var (secureMatter, @event) = (Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, secureMatter);
+        World.Add("sprk_event", @event,
+            ("owningteam", new EntityReference("team", UnitBEventTeam)),
+            ("sprk_regardingmatter", new EntityReference("sprk_matter", secureMatter)));
+
+        var result = await CreateFiledWorkAssignmentThroughTheRoute(("sprk_RegardingEvent@odata.bind", $"/sprk_events({@event:D})"));
+
+        RouteStatus(result).Should().Be(StatusCodes.Status201Created, RouteDetail(result));
+        var (_, created, fields) = _writes.Should().ContainSingle().Subject;
+        BoundId(fields, "ownerid@odata.bind").Should().Be(SecureTeam, "filed through the event under a secure matter (#1630)");
+        ShouldBeSecure(created, "filed under an event of a secure matter");
+    }
+
+    [Fact]
+    public async Task WorkAssignmentPrimaryOwner_UnderOnlyAnEventThatCannotBeRead_IsRefused_AndNothingIsCreated()
+    {
+        var (_, @event) = AnIntermediateInUnitBUnderAMatterInUnitA("sprk_event", "sprk_regardingmatter");
+        World.FailingRowReadsOf("sprk_event", @event);
+
+        var result = await CreateFiledWorkAssignmentThroughTheRoute(("sprk_RegardingEvent@odata.bind", $"/sprk_events({@event:D})"));
+
+        RouteStatus(result).Should().NotBe(StatusCodes.Status201Created, RouteDetail(result));
+        _writes.Should().BeEmpty("what the event belongs to cannot be read: never \"filed under nothing\"");
+    }
+
+    [Fact]
+    public async Task WorkAssignmentPrimaryOwner_UnderAMatterAndAnEventOfAnotherMatter_IsOwnedByItsOwnMattersUnit()
+    {
+        // The event belongs to a matter in unit B; the work assignment's own matter (unit A) is its core record.
+        TwoBusinessUnits();
+        var (matter, otherMatter, @event) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        _fixture.SeedMatter(matter, owningTeamId: UnitAMatterTeam, isSecure: false);
+        _fixture.SeedMatter(otherMatter, owningTeamId: UnitBEventTeam, isSecure: false);
+        World.Add("sprk_event", @event,
+            ("owningteam", new EntityReference("team", UnitBEventTeam)),
+            ("sprk_regardingmatter", new EntityReference("sprk_matter", otherMatter)));
+
+        var result = await CreateEventFirstWorkAssignmentThroughTheRoute(@event, matter);
+
+        RouteStatus(result).Should().Be(StatusCodes.Status201Created, RouteDetail(result));
+        BoundId(_writes.Should().ContainSingle().Subject.Fields, "ownerid@odata.bind").Should().Be(UnitADefaultTeam,
+            "a work assignment that holds a matter is unchanged: its matter first, never the event's matter");
+    }
+
+    [Fact]
+    public void OwnerLookupsThroughIntermediates_AddNothing_ForAWorkAssignmentThatHoldsAMatterOrAProject()
+    {
+        var @event = KeyValuePair.Create("sprk_regardingevent", (RecordOwnershipParent?)new RecordOwnershipParent("sprk_event", Guid.NewGuid()));
+        foreach (var (column, table) in new[] { ("sprk_regardingmatter", "sprk_matter"), ("sprk_regardingproject", "sprk_project") })
+        {
+            SecureRootInheritance.OwnerIntermediatesOf("sprk_workassignment",
+                    [@event, KeyValuePair.Create(column, (RecordOwnershipParent?)new RecordOwnershipParent(table, Guid.NewGuid()))])
+                .Should().BeEmpty($"a work assignment holding a {table} is filed under it directly; nothing is read");
+        }
+
+        SecureRootInheritance.OwnerIntermediatesOf("sprk_workassignment", [@event])
+            .Should().Equal(("sprk_event", @event.Value!.RecordId));
+        SecureRootInheritance.OwnerIntermediatesOf("sprk_project", [@event]).Should().BeEmpty("a project has no intermediate");
+    }
+
+    /// <summary>
+    /// The shared helper's read contract (what the resolver's read path calls with its own reader): the intermediate's matter
+    /// keyed under the work assignment's matter column; an intermediate that cannot be read is unverifiable; one that does
+    /// not exist confers nothing.
+    /// </summary>
+    [Fact]
+    public async Task OwnerLookupsThroughIntermediates_NameTheMatter_RefuseAnUnreadableIntermediate_AndIgnoreAMissingOne()
+    {
+        var (matter, @event) = AnIntermediateInUnitBUnderAMatterInUnitA("sprk_event", "sprk_regardingmatter");
+        var entities = SecureChildShareWorld.EntitiesOver(() => _fixture.ChildWorld).Object;
+        Task<SecureRootInheritance.OwnerFilingThroughIntermediates> Ask(Guid id) =>
+            SecureRootInheritance.OwnerLookupsThroughIntermediatesAsync(entities, NullLogger.Instance, "sprk_workassignment",
+                [KeyValuePair.Create("sprk_regardingevent", (RecordOwnershipParent?)new RecordOwnershipParent("sprk_event", id))],
+                CancellationToken.None);
+
+        var found = await Ask(@event);
+        found.Unverifiable.Should().BeNull();
+        var named = found.Lookups.Should().ContainSingle().Subject;
+        named.Key.Should().Be("sprk_regardingmatter", "keyed under the column that files a work assignment under a matter");
+        named.Value.Should().Be(new RecordOwnershipParent("sprk_matter", matter));
+
+        var missing = await Ask(Guid.NewGuid());
+        missing.Unverifiable.Should().BeNull("a record that does not exist confers nothing");
+        missing.Lookups.Should().BeEmpty();
+
+        World.FailingRowReadsOf("sprk_event", @event);
+        var unreadable = await Ask(@event);
+        unreadable.Unverifiable.Should().NotBeNull("an unreadable intermediate is unverifiable, never \"under nothing\"");
+        unreadable.Lookups.Should().BeEmpty();
+    }
 }
