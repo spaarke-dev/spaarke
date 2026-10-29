@@ -65,8 +65,9 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
     private const string DocumentEntity = "sprk_document";
     private const string ProjectEntity = "sprk_project";
 
-    /// <summary>The production sprk_document allow-list (ExternalAccessModule, task 134 derivation, plus task 032's two
-    /// creator stamps).</summary>
+    /// <summary>The pre-task-002 production sprk_document allow-list (ExternalAccessModule, task 134 derivation, plus task 032's
+    /// two creator stamps). The production list has since gained sprk_filetype and modifiedon (r3 task 002); these tests
+    /// exercise the guard and the registration checks with this fixed list, not the live one.</summary>
     private static readonly IReadOnlySet<string> DocumentColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
         "sprk_documentid", "sprk_documentname", "sprk_documenttype", "createdon",
@@ -93,7 +94,7 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
         ExternalModuleDataEndpoints.EvaluateFetchXmlGuard(
             fetchXml, DocumentEntity, DocumentColumns, new FetchXmlEntityExtractor());
 
-    /// <summary>A documents module identical in scope and columns to the production one.</summary>
+    /// <summary>A documents module identical in scope, and in columns to the pre-task-002 production list.</summary>
     private static ExternalModuleDescriptor DocumentsModule() => DocumentsModuleWithColumns(DocumentColumns);
 
     /// <summary>The same module with an arbitrary column list — <c>null</c> is passed through as-is — and,
@@ -682,8 +683,8 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
         { "sprk_gridconfiguration", "sprk_name" },
     };
 
-    /// <summary>The FetchXML of each outside-counsel grid (sprk_gridconfiguration.sprk_configjson): read live 2026-09-30, and for
-    /// project, matter, work assignment and invoice as it reads after the r3 task 002 rollout (owner 2026-10-29). The documents
+    /// <summary>The FetchXML each outside-counsel grid carries once the r3 task 002 grid update is rolled out (owner 2026-10-29),
+    /// for project, matter, work assignment, invoice and service request (the others as read live 2026-09-30). The documents
     /// row stays the pre-rollout <see cref="LiveDocumentsGridFetchXml"/>; its post-rollout FetchXML is
     /// <see cref="DocumentsGridFetchXmlAfterTask002"/>.</summary>
     public static TheoryData<string, string> LiveGridFetchXml => new()
@@ -731,7 +732,7 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
             fetchXml, module.RecordEntity, module.ReadableColumns, new FetchXmlEntityExtractor());
 
         result.Verdict.Should().Be(Verdict.Allowed,
-            $"the live {entity} grid must render unchanged after task 134 (violation: {result.ColumnViolation})");
+            $"the {entity} grid FetchXML (post-task-002 rollout) must be admitted in full (violation: {result.ColumnViolation})");
     }
 
     [Fact]
@@ -816,9 +817,10 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
     };
 
     /// <summary>
-    /// The lists task 134 shipped (2026-09-30), kept verbatim as the "before" side of the shrink: the new
-    /// list must be a SUBSET of it (a shrink never adds a column) and the difference must be exactly the
-    /// rule-(b)-only columns.
+    /// The lists task 134 shipped (2026-09-30) as the "before" side of the shrink: the new list must be a SUBSET of it
+    /// (a shrink never adds a column) and the difference must be exactly the rule-(b)-only columns. Later deliberate
+    /// additions (task 032 creator stamps, the 2026-10-12 statecode, the invoice statuscode, the r3 task 002 grid columns)
+    /// sit on BOTH sides, so they never show up as a shrink or a growth.
     /// </summary>
     private static readonly IReadOnlyDictionary<string, string[]> Task134AllowLists = new Dictionary<string, string[]>
     {
@@ -1023,11 +1025,11 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
     // 7. r3 task 002 — owner grid columns (owner decision 2026-10-29)
     // ═════════════════════════════════════════════════════════════════════════════
     //
-    // Seven columns became readable so the external grids can show them. Each is a grid column (rule (a)): none is secured,
+    // Nine columns became readable so the external grids can show them. Each is a grid column (rule (a)): none is secured,
     // a pointer, or a column the grid does not reference. The two lookups point at reference tables that have no module,
     // so the lookup value is readable and the table behind it is not.
 
-    /// <summary>The seven columns r3 task 002 admitted: (entity, column).</summary>
+    /// <summary>The nine (entity, column) pairs r3 task 002 admitted.</summary>
     public static TheoryData<string, string> Task002GridColumns => new()
     {
         { "sprk_project", "sprk_projecttype_ref" },
@@ -1050,6 +1052,9 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
         { "sprk_workassignment", "sprk_assignedto" },
         { "sprk_document", "sprk_searchindexed" },
         { "sprk_invoice", "sprk_invoiceduedate" },
+        // The currency columns Dataverse adds beside a Money column: not grid columns, so not readable.
+        { "sprk_invoice", "transactioncurrencyid" },
+        { "sprk_invoice", "exchangerate" },
     };
 
     /// <summary>The grid FetchXML of <paramref name="entity"/> without <paramref name="column"/>, then with it appended.</summary>
@@ -1092,12 +1097,119 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
     public async Task ExecuteScopedFetch_WhenAnOwnerGridColumnIsRequested_ReturnsOkAndQueriesOnce(string entity, string column)
     {
         var id = Guid.NewGuid();
-        var dataverse = new FetchDouble();
+        var value = ColumnValue(column);
+        var dataverse = new FetchDouble(RowCarrying(entity, id, (column, value)));
 
         var result = await FetchGrantedEverywhere(entity, GridFetchXmlPlusColumn(entity, column), id, ProductionRegistry(), dataverse);
 
-        result.Should().BeOfType<Ok<FetchResponseDto>>();
         dataverse.Calls.Should().Be(1);
+        var projected = result.Should().BeOfType<Ok<FetchResponseDto>>().Subject.Value!.Entities.Should().ContainSingle().Subject;
+        projected.Should().ContainKey(column).WhoseValue.Should().Be(value, "the admitted column reaches the caller");
+        var formatted = projected["@formattedValues"].Should().BeAssignableTo<IReadOnlyDictionary<string, string>>().Subject;
+        formatted.Should().ContainKey(column).WhoseValue.Should().Be(FormattedColumnValue(column));
+    }
+
+    /// <summary>A value of the column's own shape: a lookup, a date, a string or Money.</summary>
+    private static object ColumnValue(string column) => column switch
+    {
+        "sprk_projecttype_ref" => new EntityReference("sprk_projecttype_ref", Guid.Parse("11111111-1111-1111-1111-111111111111")),
+        "sprk_mattertype" => new EntityReference("sprk_mattertype_ref", Guid.Parse("22222222-2222-2222-2222-222222222222")),
+        "modifiedon" => new DateTime(2026, 10, 29, 12, 0, 0, DateTimeKind.Utc),
+        "sprk_filetype" => "pdf",
+        "sprk_totalamount_base" => new Money(1250.5m),
+        "transactioncurrencyid" => new EntityReference("transactioncurrency", Guid.Parse("33333333-3333-3333-3333-333333333333")),
+        "exchangerate" => 1.0m,
+        _ => throw new ArgumentOutOfRangeException(nameof(column), column, "no test value"),
+    };
+
+    private static string FormattedColumnValue(string column) => $"display of {column}";
+
+    /// <summary>
+    /// One in-scope row of <paramref name="entity"/>, carrying <paramref name="extra"/> columns and a display value for each,
+    /// scoped to <see cref="GrantedEverywhere"/> (or, for service requests, the workforce contact) by <paramref name="id"/>.
+    /// </summary>
+    private static IReadOnlyDictionary<string, object?> RowCarrying(string entity, Guid id, params (string Column, object Value)[] extra)
+    {
+        var row = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase) { ["@logicalName"] = entity };
+        switch (entity)
+        {
+            case "sprk_project":
+            case "sprk_matter":
+            case "sprk_workassignment":
+                row[$"{entity}id"] = id;
+                break;
+            case "sprk_document":
+                row["sprk_documentid"] = Guid.NewGuid();
+                row["sprk_project"] = new EntityReference("sprk_project", id);
+                break;
+            case "sprk_invoice":
+                row["sprk_invoiceid"] = Guid.NewGuid();
+                row["sprk_matter"] = new EntityReference("sprk_matter", id);
+                break;
+            case "sprk_servicerequest":
+                row["sprk_servicerequestid"] = Guid.NewGuid();
+                row["sprk_requestedby"] = id;
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(entity), entity, "no test row");
+        }
+        var formatted = new Dictionary<string, string>();
+        foreach (var (column, value) in extra)
+        {
+            row[column] = value;
+            formatted[column] = FormattedColumnValue(column);
+        }
+        row["@formattedValues"] = formatted;
+        return row;
+    }
+
+    public static TheoryData<string, string> Task002RecordSelectLookups => new()
+    {
+        { "sprk_matter", "sprk_mattertype" },
+        { "sprk_project", "sprk_projecttype_ref" },
+    };
+
+    [Theory]
+    [MemberData(nameof(Task002RecordSelectLookups))]
+    public async Task GetScopedRecord_WhenSelectNamesAnOwnerGridLookup_ReturnsTheRecordWithTheKey(string entity, string column)
+    {
+        var id = Guid.NewGuid();
+        var value = ColumnValue(column);
+        var dataverse = new RecordDouble(new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+        {
+            [$"{entity}id"] = id,
+            [column] = value,
+        });
+
+        var result = await ExternalModuleDataEndpoints.GetScopedRecordCoreAsync(
+            entity, id, column, GrantedEverywhere(id), ProductionRegistry(), dataverse.Read,
+            NullLogger.Instance, CancellationToken.None);
+
+        var record = result.Should().BeOfType<Ok<IReadOnlyDictionary<string, object?>>>().Subject.Value!;
+        dataverse.Calls.Should().Be(1);
+        record.Should().ContainKey(column).WhoseValue.Should().Be(value);
+    }
+
+    [Fact]
+    public async Task ExecuteScopedFetch_WhenAnInvoiceRowCarriesTheCurrencySiblingsOfAnAdmittedMoneyColumn_KeepsOnlyTheMoneyColumn()
+    {
+        var id = Guid.NewGuid();
+        var row = RowCarrying("sprk_invoice", id,
+            ("sprk_totalamount_base", ColumnValue("sprk_totalamount_base")),
+            ("transactioncurrencyid", ColumnValue("transactioncurrencyid")),
+            ("exchangerate", ColumnValue("exchangerate")));
+        var dataverse = new FetchDouble(row);
+
+        var result = await FetchGrantedEverywhere("sprk_invoice", LiveGridFetchXmlFor("sprk_invoice"), id, ProductionRegistry(), dataverse);
+
+        var projected = result.Should().BeOfType<Ok<FetchResponseDto>>().Subject.Value!.Entities.Should().ContainSingle().Subject;
+        projected.Should().ContainKey("sprk_totalamount_base");
+        projected.Should().NotContainKey("transactioncurrencyid");
+        projected.Should().NotContainKey("exchangerate");
+        var formatted = projected["@formattedValues"].Should().BeAssignableTo<IReadOnlyDictionary<string, string>>().Subject;
+        formatted.Should().ContainKey("sprk_totalamount_base");
+        formatted.Should().NotContainKey("transactioncurrencyid", "a display value is a column value too");
+        formatted.Should().NotContainKey("exchangerate", "a display value is a column value too");
     }
 
     [Theory]

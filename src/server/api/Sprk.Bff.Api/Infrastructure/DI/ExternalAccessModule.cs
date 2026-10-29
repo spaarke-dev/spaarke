@@ -420,7 +420,8 @@ public static class ExternalAccessModule
         //
         // sprk_project: grid 61711823. Primary name = sprk_projectnumber. Task 157 dropped (rule (b) only):
         // statecode, createdon, ownerid, sprk_practicearea, sprk_projecttype_ref. r3 task 002 re-admitted
-        // sprk_projecttype_ref as a grid column (it is now referenced by the grid configuration, rule (a)).
+        // sprk_projecttype_ref as a grid column (referenced by the grid configuration once the r3 task 002 grid update follows
+        // this deploy, rule (a)).
         services.AddExternalModule(new ExternalModuleDescriptor
         {
             Name = "collaboration",
@@ -551,7 +552,7 @@ public static class ExternalAccessModule
             AccessibleRecordIds = p => p.GetAccessibleMatterIds(),
             // Grid 583a2a33. Primary name = sprk_matternumber. Task 157 dropped (rule (b) only): statecode,
             // createdon, sprk_mattertype, sprk_practicearea. r3 task 002 re-admitted sprk_mattertype as a grid
-            // column (it is now referenced by the grid configuration, rule (a)).
+            // column (referenced by the grid configuration once the r3 task 002 grid update follows this deploy, rule (a)).
             SavedQueryIds = NoSavedQueries, // grid source inline (live 2026-10-02): no registered view
             PrimaryNameAttribute = "sprk_matternumber",
             ReadableColumns = new HashSet<string>
