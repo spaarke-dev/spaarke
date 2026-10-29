@@ -11,11 +11,11 @@
 | **Active** | **071 ✅ done** (PR #2442 ready, auto-merge; task/fm-071 @ 9c151ead66). **Next: task 072** (GET /records/{table}/{id}/family, FR-31, sonnet/high, FULL), which builds on RecordFamilyReader. Start it via task-execute once #2442 is on master. |
 | **Next Action** | 1) Watch #2442 merge. 2) task-execute 072 from master. 3) After 072: mark #2383 (074) ready; run the TrackingFieldTrio suite when it meets 074. |
 | **Owner decisions today** | Q1 drop; Q2 (B), seeding the 7 canonical index rows per customer, team-owned, no BU defaults. Depth cap counted from the TOP (exception to UAC C4; design §12.11, quoted on #2442; UAC adopted it). WA owning unit follows its matter (UAC #2451). |
-| **#2399** | Dev re-own done (57 rows → team 2dae7e6e in BU1, read-back clean). Waiting for the owner's UI re-test as Test User 1. Rollback list: session scratchpad `reown-2399-backup.json`. |
+| **#2399** | Live part FIXED: the owner re-tested the WA create as Test User 1 on 2026-10-29 (saves, with number and Assigned To). Open for the durable fix: FR-38/W3 still need the scope procedure (spec amendment → task-create → TASK-INDEX → owner approval); FR-39 and the index rows are provisioning's #2429. |
 | **Open PRs** | #2442 (071, draft). #2383 (074, HOLD until 072). #2387 (075, HOLD, ships with 040). Both overlap current-task.md: keep the work branch's version. |
 | **Issues** | #2444 (UAC: shared reads-agnostic ordering helper). #2413 (known limit). #2429 (provisioning H7c team + H12b index-row seed + H4b allow-list; I review the PR). |
 | **Waiting on** | UAC 195 → 040, 076. Provisioning's #2429 PR. 017 blocked on ebilling #1911. |
-| **Owner to do** | Stash 3067d28d24 (ebilling-r1 lint-staged backup): drop only on the owner's explicit OK. Leftover locked worktree agent-aec6d06ca99a5a9f6 (075): end of project. |
+| **Owner to do** | Leftover locked worktree agent-aec6d06ca99a5a9f6 (075): end of project. |
 
 ## Blocked: 017
 
