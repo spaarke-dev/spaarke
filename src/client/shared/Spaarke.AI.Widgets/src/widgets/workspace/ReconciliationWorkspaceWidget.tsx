@@ -23,8 +23,8 @@
  *     inside SpaarkeAi's `AiSessionProvider` tree); threads BFF queue-feed /
  *     apply / dismiss / `.eml` render calls (ADR-028).
  *   - `resolveReview` / `resolveRegarding` — the row → picker-props and row →
- *     confirmed-regarding adapters; `resolveRegarding` reuses the shipped pure
- *     `derivePrimaryReview` reducer (NFR-10 gate), no bespoke fetch.
+ *     confirmed-regarding adapters; `resolveRegarding` is the shared resolver
+ *     from `@spaarke/communication-components` (NFR-10 gate), no bespoke fetch.
  *
  * `configId` is NOT passed — `ReconciliationGrid` defaults to its
  * `NEEDS_REVIEW_CONFIG_ID` placeholder (task 059 seeds + sets the real record).
@@ -37,9 +37,8 @@ import { makeStyles } from '@fluentui/react-components';
 import {
   ReconciliationWorkspace,
   bffRefile,
-  derivePrimaryReview,
+  resolveRegarding,
   type EmailConnectionsReviewProps,
-  type ReconcileRegarding,
   type EmailWorkspaceWebApi,
   type CreatedRecordRef,
   type EmlSource,
@@ -85,30 +84,9 @@ function num(record: Record<string, unknown>, field: string): number | null {
   return Number.isNaN(n) ? null : n;
 }
 
-/**
- * Row → CONFIRMED `ReconcileRegarding | null` (NFR-10 gate). Reuses the shipped
- * pure `derivePrimaryReview` reducer — the SAME logic the resolver body uses to
- * decide the single confirmed primary. Only a green (Resolved) primary with a
- * resolvable typed entity + id enables the Fields/Tasks tabs.
- */
-function resolveRegarding(record: Record<string, unknown>): ReconcileRegarding | null {
-  const model = derivePrimaryReview(
-    str(record, 'sprk_associationprovenance'),
-    num(record, 'sprk_associationstatus'),
-    undefined,
-    {
-      recordName: str(record, 'sprk_regardingrecordname'),
-      recordNumber: str(record, 'sprk_regardingrecordnumber'),
-      entityType: null,
-      recordTypeLabel: str(record, 'sprk_regardingrecordtypename'),
-    }
-  );
-  const primary = model.state === 'confirmed' ? model.primary : undefined;
-  if (primary && primary.entity && primary.targetId) {
-    return { entityType: primary.entity, recordId: primary.targetId };
-  }
-  return null;
-}
+// Row → CONFIRMED regarding (NFR-10 gate): the SHARED `resolveRegarding` (logic/connections/reconciliationResolvers),
+// the same one the standalone code page and the LegalWorkspace shim use. It reads the row's typed regarding lookups,
+// so the gate never depends on a candidate's display name.
 
 /**
  * Direct workspace widget wrapper for `<ReconciliationWorkspace />`.
