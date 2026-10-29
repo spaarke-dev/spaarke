@@ -121,15 +121,29 @@ public record UnshareRecordWithUserRequest(
 /// nothing was written. Repeating an unshare is therefore safe.
 /// </param>
 /// <param name="PairedGrantEnded">
-/// Task 193 G2: whether the workforce-app grant PAIRED with this share (Manage Access's "Add person") was ended too —
-/// <c>true</c> it was; <c>false</c> it could not be (the share stays removed; the reconciliation job ends it on its next run);
-/// absent when no grant on the record is paired with this user.
+/// Task 193 G2 (kept for compatibility; <paramref name="PairedGrant"/> says more): whether the workforce-app grant PAIRED
+/// with this share (Manage Access's "Add person") was ended too — <c>true</c> only when it was (<c>pairedGrant</c>
+/// <c>ended</c>); <c>false</c> when it was not confirmed ended (<c>endFailed</c>, <c>unconfirmed</c> or
+/// <c>fileAccessUnconfirmed</c>); absent when no grant on the record is paired with this user (<c>none</c>). The share stays
+/// removed either way. Repeating the removal is what ends a grant that was not ended: the reconciliation job's R5 deactivates
+/// an active paired grant whose share is gone only when it runs with writes enabled
+/// (<c>ExternalAccess:Reconciliation:WritesEnabled</c>; report-only by default), and never retries file access.
+/// </param>
+/// <param name="PairedGrant">
+/// Task 193 G4a (B-F1): what happened to the grant paired with this share, set whenever the pairing step ran (the share is
+/// confirmed gone): <c>ended</c> — every paired grant was ended; <c>none</c> — no grant on the record is paired with this
+/// user; <c>endFailed</c> — a paired grant could not be ended and is still active and listed (repeat the removal);
+/// <c>unconfirmed</c> — which grants are paired could not be read, so whether one exists is unknown (repeat the removal);
+/// <c>fileAccessUnconfirmed</c> — the paired grant was ended and is no longer listed, but removing its file access could not
+/// be confirmed (repeat the removal: it retries the file step). Absent when the pairing step did not run. Additive.
 /// </param>
 public record UnshareRecordWithUserResponse(
     Guid SystemUserId,
     bool Removed,
     [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
-    bool? PairedGrantEnded = null);
+    bool? PairedGrantEnded = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    string? PairedGrant = null);
 
 /// <summary>Query string for <c>GET /api/v1/external-access/user-shares?recordType=&amp;recordId=</c>.</summary>
 /// <param name="RecordType"><c>project</c> | <c>matter</c> | <c>workassignment</c> (case-insensitive). Required.</param>

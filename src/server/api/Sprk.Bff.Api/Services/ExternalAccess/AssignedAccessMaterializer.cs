@@ -687,32 +687,53 @@ public sealed class AssignedAccessMaterializer
     }
 
     /// <summary>
-    /// Task 193 G2b (owner F1-b: the paired grant follows the share): this rule removed <paramref name="user"/>'s share on
-    /// the root (confirmed by read-back, not put back to an earlier level). An "Add person" share at the level this rule
-    /// wrote reads as this rule's, so the share removed may be the one a grant is PAIRED with: every such grant on the root
-    /// is ended through the one grant revoke, the same call <c>/unshare-user</c> makes, resolved from this scope (the
-    /// revoke depends on this class, so it cannot be a constructor dependency). The share first, then the grant. One that is
-    /// not ended is a failure (<c>paired-grant-not-ended</c>), so the run is not complete; the revoke logs it at Error with
-    /// ids only, and the reconciliation job's R5 ends it. A pairing column that is not provisioned is the revoke's Warning.
+    /// Task 193 G2b (owner F1-b: the paired grant follows the share): <paramref name="user"/>'s share on the root is gone —
+    /// this rule removed it (confirmed by read-back, not put back to an earlier level), or it was already gone when an ended
+    /// assignment's row was decided. An "Add person" share at the level this rule wrote reads as this rule's, so the share
+    /// removed may be the one a grant is PAIRED with: every such grant on the root is ended through the one grant revoke, the
+    /// same call <c>/unshare-user</c> makes, resolved from this scope (the revoke depends on this class, so it cannot be a
+    /// constructor dependency), as a SYSTEM removal (task 193 G4a, owner ruling 2026-10-28: no operator decline). The share
+    /// first, then the grant, then the row. <c>false</c> when one was not confirmed ended: a failure
+    /// (<c>paired-grant-not-ended</c>), so the run is not complete, and the caller leaves the ledger row live so the next pass
+    /// tries again (task 193 G4a, A-F1). In a report-only job pass (<see cref="AssignedAccessRequest.RevokeOnChange"/> false)
+    /// nothing is ended: a pairing still on the root is reported (<see cref="AssignedAccessAction.WouldRevoke"/>) and the row
+    /// stays live. A pairing column that is not provisioned is the revoke's Warning.
     /// </summary>
-    private async Task EndPairedGrantsAsync(Run run, AssignedSubject subject, Guid user, CancellationToken ct)
+    private async Task<bool> EndPairedGrantsAsync(
+        Run run, AssignedSubject subject, IReadOnlyList<string> fields, Guid user, CancellationToken ct)
     {
+        if (!run.Request.RevokeOnChange)
+        {
+            var read = await ExternalGrantLifecycle.ReadUserPairingsOnRecordAsync(
+                    _dataverse, run.Request.RootType, run.RootId, user, top: 1, ct).ConfigureAwait(false);
+            if (read.Status == GrantPairingReadStatus.ColumnMissing || (read.Status == GrantPairingReadStatus.Read && read.Rows.Count == 0))
+                return true;
+
+            run.Entry(subject, fields, user, AssignedAccessState.Shared, PairedGrantNotEndedKind,
+                AssignedAccessAction.WouldRevoke);
+            return false;
+        }
+
         if (_services?.GetService<Sprk.Bff.Api.Api.ExternalAccess.ExternalGrantRevocationService>() is not { } pairedGrants)
         {
             _logger.LogWarning(
-                "[ASSIGNED-ACCESS] {Type} {RootId}: {User}'s share was removed; no host scope to end a grant paired with it now — " +
-                "the reconciliation job ends it.", run.Logical, run.RootId, user);
-            return;
+                "[ASSIGNED-ACCESS] {Type} {RootId}: {User}'s share was removed; no host scope to end a grant paired with it.",
+                run.Logical, run.RootId, user);
+            return true;
         }
 
         var paired = await pairedGrants
-            .RevokePairedWithAsync(run.Request.RootType, run.RootId, user, ct).ConfigureAwait(false);
+            .RevokePairedWithAsync(run.Request.RootType, run.RootId, user, Sprk.Bff.Api.Api.ExternalAccess.GrantEndCause.System, ct)
+            .ConfigureAwait(false);
         if (paired.PairedGrantEnded is false)
         {
             run.Fail(subject, PairedGrantNotEndedKind,
-                $"The automatic share of user {user} was removed, but the external access paired with it could not be ended " +
-                "yet. The scheduled safety net ends it.");
+                $"The automatic share of user {user} was removed, but the external access paired with it could not be confirmed " +
+                $"ended ({paired.Outcome}). The next Assigned-To pass on this record tries again.");
+            return false;
         }
+
+        return true;
     }
 
     /// <summary>Task 193 G2b: the failure kind of a paired grant that was not ended after its share was removed.</summary>
@@ -1628,6 +1649,12 @@ public sealed class AssignedAccessMaterializer
                     var current = await ReadDirectShareMaskAsync(run, user, ct).ConfigureAwait(false);
                     if (current == 0)
                     {
+                        // Task 193 G4a (A-F1): the share is already gone — removed elsewhere, or by an earlier pass whose end of
+                        // the grant paired with it did not complete. That grant is ended BEFORE the row; one not ended leaves
+                        // the row live (the failure recorded), so the next pass tries again.
+                        if (!await EndPairedGrantsAsync(run, subject, fields, user, ct).ConfigureAwait(false))
+                            return;
+
                         await EndAsync(AssignedAccessReason.AssignmentEnded, AssignedAccessAction.Ledger).ConfigureAwait(false);
                         return;
                     }
@@ -1657,10 +1684,13 @@ public sealed class AssignedAccessMaterializer
                     if (!await RemoveOrRestoreShareAsync(run, subject, user, restoreTo, ct).ConfigureAwait(false))
                         return; // failure recorded
 
+                    // Task 193 G4a (A-F1): the grant paired with a removed share ends BEFORE the row; one not ended leaves the
+                    // row live (the failure recorded), so the next pass — which finds the share gone — tries again.
+                    if (restoreTo == 0 && !await EndPairedGrantsAsync(run, subject, fields, user, ct).ConfigureAwait(false))
+                        return;
+
                     await EndAsync(restoreTo != 0 ? AssignedAccessReason.PriorLevelRestored : AssignedAccessReason.AccessRemoved,
                         restoreTo != 0 ? AssignedAccessAction.Restored : AssignedAccessAction.Revoked).ConfigureAwait(false);
-                    if (restoreTo == 0)
-                        await EndPairedGrantsAsync(run, subject, user, ct).ConfigureAwait(false);
                     return;
                 }
 

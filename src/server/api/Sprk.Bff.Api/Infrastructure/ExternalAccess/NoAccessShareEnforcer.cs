@@ -1004,7 +1004,8 @@ public sealed class NoAccessShareEnforcer
     /// the entry names — the user, a contact they represent, or an organization of such contacts — the covered users are
     /// these, so the pairing ends either way. A grant that is not ended is a failure (<c>paired-grant-not-ended</c>), so the
     /// entry is never reported fully enforced while it may still be active; the revoke logs it at Error with ids only, and
-    /// the reconciliation job's R5 ends it. A pairing column that is not provisioned is the revoke's Warning: the share
+    /// every later enforcement of the entry (the 5-minute No Access job) retries it, since it runs whether or not the user
+    /// still holds a share. A pairing column that is not provisioned is the revoke's Warning: the share
     /// alone is enforced, as before.
     /// </summary>
     private async Task EndPairedGrantsAsync(string logicalName, Guid recordId, Guid userId, Run run, CancellationToken ct)
@@ -1012,12 +1013,15 @@ public sealed class NoAccessShareEnforcer
         if (_pairedGrants is null)
             return;
 
-        var paired = await _pairedGrants.RevokePairedWithAsync(logicalName, recordId, userId, ct).ConfigureAwait(false);
+        // Task 193 G4a (owner ruling 2026-10-28): a SYSTEM removal — no operator decline is recorded.
+        var paired = await _pairedGrants.RevokePairedWithAsync(
+            logicalName, recordId, userId, Sprk.Bff.Api.Api.ExternalAccess.GrantEndCause.System, ct).ConfigureAwait(false);
         if (paired.PairedGrantEnded is false)
         {
             run.Fail(logicalName, recordId, userId, PairedGrantNotEndedKind,
-                $"User {userId}'s share on this record is gone, but the external access paired with it could not be ended " +
-                "yet. The scheduled safety net ends it; open the record's Manage Access to check.");
+                $"User {userId}'s share on this record is gone, but the external access paired with it could not be confirmed " +
+                $"ended ({paired.Outcome}). The No Access job retries it within a few minutes; open the record's Manage " +
+                "Access to check.");
         }
     }
 

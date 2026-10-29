@@ -187,6 +187,14 @@ public static class AssignedAccessReason
     public const string CoveringShareEnded = "covering-share-ended";
 
     /// <summary>
+    /// Task 193 G4a (A-F1): an inherited-share row whose share the secure-root inheritance REMOVED, but whose paired
+    /// workforce-app grant ("Add person") could not be confirmed ended. The row stays <see cref="AssignedAccessState.Shared"/>
+    /// (live) with this reason, so the next pass — or a repeated unshare — ends the grant, then the row. A KNOWN cause: the
+    /// share missing is never read as <see cref="RemovedOutOfBand"/>.
+    /// </summary>
+    public const string PairedGrantPending = "paired-grant-pending";
+
+    /// <summary>
     /// Task 158 r1: the filed record itself was UNSECURED — every share on it is revoked by the unsecure, so what its parents
     /// had passed on ends with it (a row left Shared would later read as an operator's removal when it is secured again).
     /// </summary>

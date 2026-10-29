@@ -159,6 +159,34 @@ public class PairedGrantFollowsShareRemovalTests
         Active(SecureProject, paired).Should().BeTrue("the share was not removed, so neither is its grant");
     }
 
+    /// <summary>The paired contact's Assigned-To suggestion on the record (a pending row), as task 142 records it.</summary>
+    private AssignedAccessLedgerRow Suggestion(ExternalGrantRootType type, Guid rootId, Guid contact) =>
+        _grants.Store.SeedRow(type, rootId, Attorney1, new AssignedSubject(AssignedSubjectKind.Contact, contact),
+            AssignedAccessState.PendingConfirmation);
+
+    private AssignedAccessState StateOf(AssignedAccessLedgerRow row) =>
+        _grants.Store.Ledger.Single(r => r.Id == row.Id).State;
+
+    /// <summary>
+    /// Task 193 G4a (A-F2, owner ruling 2026-10-28): the No Access enforcer's end of the paired grant is a SYSTEM removal.
+    /// The contact's Assigned-To suggestion on the record stays as it was; only an operator's manual removal is a decline.
+    /// </summary>
+    [Fact]
+    public async Task G4a_NoAccess_EndingThePairedGrant_LeavesTheContactsAssignedToSuggestionAlone()
+    {
+        var h = NoAccess();
+        h.Shares.Seed(Project, SecureProject, User(Walled), CollaborateMask);
+        var paired = PairedGrant(ExternalGrantRootType.Project, SecureProject, Walled, WalledContact);
+        var suggestion = Suggestion(ExternalGrantRootType.Project, SecureProject, WalledContact);
+        var entry = h.Store.AddEntry(subjectUser: Walled, objectRecord: (Project, SecureProject), modifiedBy: Author);
+
+        var report = await h.Enforcer.EnforceEntryAsync(entry, new[] { Tenant }, CancellationToken.None);
+
+        report.Complete.Should().BeTrue();
+        Active(SecureProject, paired).Should().BeFalse("the paired grant follows the share");
+        StateOf(suggestion).Should().Be(AssignedAccessState.PendingConfirmation, "a system removal records no operator decline");
+    }
+
     /// <summary>
     /// Task 193 G3a: an organization entry walls three users off three secure records (nine pairs) on a host without the
     /// pairing column. The column is checked once and ONE Warning is logged for the pass; the shares are all removed.
@@ -296,6 +324,70 @@ public class PairedGrantFollowsShareRemovalTests
         Active(_matter, paired).Should().BeTrue("left for the reconciliation job's R5");
     }
 
+    /// <summary>
+    /// Task 193 G4a (A-F1): a pass whose paired-grant end failed left the share removed; the NEXT pass finds the barred user
+    /// holding no share and ends the grant still paired with them (as the No Access enforcer does), instead of never again.
+    /// </summary>
+    [Fact]
+    public async Task G4a_Restricted_WhenThePairedGrantCouldNotBeEnded_TheNextPassEndsIt()
+    {
+        var external = _grants.SystemUser(isExternal: true);
+        _grants.Shares.Seed(MatterTable, _matter, User(external), CollaborateMask);
+        var paired = PairedGrant(ExternalGrantRootType.Matter, _matter, external);
+        _grants.Grants.FailDeactivations = true;
+        (await RemoveRestricted()).Complete.Should().BeFalse();
+        _grants.Grants.FailDeactivations = false;
+
+        var next = await RemoveRestricted();
+
+        next.Complete.Should().BeTrue();
+        next.Removed.Should().BeEmpty("the share was already removed");
+        Active(_matter, paired).Should().BeFalse("the barred user holds no share, so the grant paired with them ends");
+    }
+
+    /// <summary>The must-not-fire twin: an INTERNAL user's paired grant, with no share, is not the Restricted rule's (R5's).</summary>
+    [Fact]
+    public async Task G4a_Restricted_LeavesThePairedGrantOfAnInternalUserWithNoShare()
+    {
+        var internalUser = _grants.SystemUser(isExternal: false);
+        var paired = PairedGrant(ExternalGrantRootType.Matter, _matter, internalUser);
+
+        var report = await RemoveRestricted();
+
+        report.Complete.Should().BeTrue();
+        Active(_matter, paired).Should().BeTrue("only a user barred from the Restricted record has their pairing ended here");
+    }
+
+    /// <summary>Task 193 G4a (A-F1): the pairing read failing is reported, never read as "nobody paired".</summary>
+    [Fact]
+    public async Task G4a_Restricted_WhenThePairingCannotBeRead_ThePassIsNotComplete()
+    {
+        _grants.SystemUser(isExternal: true);
+        _grants.Grants.FailPairingReads = true;
+
+        var report = await RemoveRestricted();
+
+        report.Complete.Should().BeFalse();
+        report.Failures.Should().ContainSingle(f => f.Kind == RestrictedExternalShareRemover.PairedGrantNotEndedKind);
+    }
+
+    /// <summary>Task 193 G4a (A-F2): the Restricted remover's end of the paired grant records no operator decline.</summary>
+    [Fact]
+    public async Task G4a_Restricted_EndingThePairedGrant_LeavesTheContactsAssignedToSuggestionAlone()
+    {
+        var external = _grants.SystemUser(isExternal: true);
+        var contact = Guid.NewGuid();
+        _grants.Shares.Seed(MatterTable, _matter, User(external), CollaborateMask);
+        var paired = PairedGrant(ExternalGrantRootType.Matter, _matter, external, contact);
+        var suggestion = Suggestion(ExternalGrantRootType.Matter, _matter, contact);
+
+        var report = await RemoveRestricted();
+
+        report.Complete.Should().BeTrue();
+        Active(_matter, paired).Should().BeFalse();
+        StateOf(suggestion).Should().Be(AssignedAccessState.PendingConfirmation, "a system removal records no operator decline");
+    }
+
     // ── The Assigned-To materializer ────────────────────────────────────────────────────────────────────────────────
 
     private const string Attorney1 = "sprk_assignedattorney1";
@@ -379,4 +471,72 @@ public class PairedGrantFollowsShareRemovalTests
         _grants.Shares.MaskOf(MatterTable, _matter, User(user)).Should().Be(CollaborateMask);
         Active(_matter, paired).Should().BeTrue();
     }
+
+    /// <summary>
+    /// Task 193 G4a (A-F1): the pass that removed the share could not end its paired grant, so the ledger row stays live; the
+    /// NEXT pass finds the share gone, ends the grant, then the row.
+    /// </summary>
+    [Fact]
+    public async Task G4a_Materializer_WhenThePairedGrantCouldNotBeEnded_TheNextPassEndsIt()
+    {
+        var (contact, user, paired) = await AutoSharedThenPaired();
+        _grants.Grants.FailDeactivations = true;
+        _grants.Store.Assign(ExternalGrantRootType.Matter, _matter, Attorney1, null);
+        (await _grants.SyncAsync(ExternalGrantRootType.Matter, _matter)).Complete.Should().BeFalse();
+        AssignedRow(contact).State.Should().Be(AssignedAccessState.Shared, "the row stays live while the paired grant remains");
+        _grants.Grants.FailDeactivations = false;
+
+        var next = await _grants.SyncAsync(ExternalGrantRootType.Matter, _matter);
+
+        next.Complete.Should().BeTrue();
+        _grants.Shares.MaskOf(MatterTable, _matter, User(user)).Should().BeNull();
+        Active(_matter, paired).Should().BeFalse("the next pass ends the grant paired with the removed share");
+        AssignedRow(contact).State.Should().Be(AssignedAccessState.Revoked);
+    }
+
+    /// <summary>Task 193 G4a: a report-only job pass ends nothing; while a paired grant remains, the row stays live for a revoking pass.</summary>
+    [Fact]
+    public async Task G4a_Materializer_AReportOnlyPass_EndsNothing_AndKeepsTheRowLive_WhileAPairedGrantRemains()
+    {
+        var (contact, _, paired) = await AutoSharedThenPaired();
+        _grants.Grants.FailDeactivations = true;
+        _grants.Store.Assign(ExternalGrantRootType.Matter, _matter, Attorney1, null);
+        await _grants.SyncAsync(ExternalGrantRootType.Matter, _matter);
+        _grants.Grants.FailDeactivations = false;
+
+        await _grants.SyncAsync(ExternalGrantRootType.Matter, _matter, revokeOnChange: false);
+
+        Active(_matter, paired).Should().BeTrue("a report-only pass ends nothing");
+        AssignedRow(contact).State.Should().Be(AssignedAccessState.Shared, "kept live for the next revoking pass");
+
+        (await _grants.SyncAsync(ExternalGrantRootType.Matter, _matter)).Complete.Should().BeTrue();
+        Active(_matter, paired).Should().BeFalse();
+    }
+
+    /// <summary>
+    /// Task 193 G4a (A-F2): the materializer's end of a paired grant is a SYSTEM removal — the grant's contact keeps its own
+    /// Assigned-To row on the record as it was (never Declined).
+    /// </summary>
+    [Fact]
+    public async Task G4a_Materializer_EndingThePairedGrant_LeavesTheGrantContactsAssignedToRowUndeclined()
+    {
+        _grants.HostResolvingPairedGrantRevoke(MatterTable, _matter);
+        var (linked, user) = _grants.LinkedContact();
+        var other = _grants.Contact();
+        _grants.Store.Assign(ExternalGrantRootType.Matter, _matter, Attorney1, linked);
+        _grants.Store.Assign(ExternalGrantRootType.Matter, _matter, Paralegal1, other);
+        (await _grants.SyncAsync(ExternalGrantRootType.Matter, _matter)).Complete.Should().BeTrue();
+        var otherGrant = _grants.Grants.ActiveRowsOf(_matter, other).Single();
+        _grants.Grants.PairedUsers[otherGrant.Id] = user; // the grant on that contact is paired with the user's share
+
+        _grants.Store.Assign(ExternalGrantRootType.Matter, _matter, Attorney1, null);
+        await _grants.SyncAsync(ExternalGrantRootType.Matter, _matter);
+
+        Active(_matter, otherGrant.Id).Should().BeFalse("the paired grant follows the share");
+        _grants.Store.RowsOf(_matter, other).Single(r => r.SourceField == Paralegal1).State
+            .Should().NotBe(AssignedAccessState.Declined, "a system removal records no operator decline");
+    }
+
+    private AssignedAccessLedgerRow AssignedRow(Guid contact) =>
+        _grants.Store.RowsOf(_matter, contact).Single(r => r.SourceField == Attorney1);
 }

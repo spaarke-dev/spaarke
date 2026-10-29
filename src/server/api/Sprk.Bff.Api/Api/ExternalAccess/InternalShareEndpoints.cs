@@ -240,8 +240,9 @@ public static class InternalShareEndpoints
             .WithDescription(
                 "Revokes a system user's POA share on the record and confirms it is gone. A user with no share is " +
                 "answered removed = false without a write, so repeating the call is safe. Once the share is gone, the " +
-                "workforce-app grant paired with it is ended too (pairedGrantEnded; false = not ended, the share stays " +
-                "removed). Requires Write and Share on the record.")
+                "workforce-app grant paired with it is ended too (pairedGrant: ended, none, endFailed, unconfirmed or " +
+                "fileAccessUnconfirmed; pairedGrantEnded kept for compatibility). The share stays removed either way; repeating " +
+                "the call retries the grant. Requires Write and Share on the record.")
             .Produces<UnshareRecordWithUserResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -361,27 +362,31 @@ public static class InternalShareEndpoints
         // GONE — removed now, or held none (the 200), or the record's own share removed with its children still catching up
         // (children_incomplete) — every grant on the record PAIRED with them is ended through the one grant revoke. The share
         // first, then the grant: a share removal that failed or was refused changes nothing here. A grant that is not ended
-        // leaves the share removed and says so (pairedGrantEnded = false); the reconciliation job's R5 ends it next run. The
-        // grant revoke is registered in every host (ExternalAccessModule, task 193 G2b); the auth tests that drive this
-        // handler without it exercise the share alone.
+        // leaves the share removed and says so (pairedGrant, task 193 G4a: ended | none | endFailed | unconfirmed |
+        // fileAccessUnconfirmed; pairedGrantEnded kept for compatibility); repeating the removal retries it. This is a manual
+        // removal in Manage Access, so it records the operator's decline on the contact's Assigned-To rows (owner ruling
+        // 2026-10-28). The grant revoke is registered in every host (ExternalAccessModule, task 193 G2b); the auth tests that
+        // drive this handler without it exercise the share alone.
         if (pairedGrants is null || !ShareConfirmedGone(result)
             || GrantExternalAccessEndpoint.ResolveExplicitRoot(request.RecordType, request.RecordId) is not { Ok: true } root
             || request.SystemUserId is not { } systemUserId)
             return result;
 
-        var paired = await pairedGrants.RevokePairedWithAsync(root.Type, root.Id, systemUserId, ct);
-
-        if (paired.PairedGrantEnded is not { } ended)
-            return result;
+        // Task 193 G4a (A-F4): the share is already confirmed gone, so its paired grant is ended whatever happens to the
+        // request now — an aborted request must not leave the grant behind (as MarkContactShareAdoptedAsync).
+        var paired = await pairedGrants.RevokePairedWithAsync(
+            root.Type, root.Id, systemUserId, GrantEndCause.Operator, CancellationToken.None);
 
         if (result is Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult { ProblemDetails: { } problem })
         {
-            problem.Extensions["pairedGrantEnded"] = ended;
+            if (paired.PairedGrantEnded is { } endedInProblem)
+                problem.Extensions["pairedGrantEnded"] = endedInProblem;
+            problem.Extensions["pairedGrant"] = paired.Outcome;
             return result;
         }
 
         return result is Microsoft.AspNetCore.Http.HttpResults.Ok<UnshareRecordWithUserResponse> { Value: { } body }
-            ? TypedResults.Ok(body with { PairedGrantEnded = ended })
+            ? TypedResults.Ok(body with { PairedGrantEnded = paired.PairedGrantEnded, PairedGrant = paired.Outcome })
             : result;
     }
 
@@ -732,6 +737,14 @@ public static class InternalShareEndpoints
         // where that part could not be given back yet — the opposite direction from a share not removed, so its own sentence.
         var filedNotRegiven = filed.NotRegiven;
         var filedNotEnded = filed.IsComplete ? 0 : filedNotRegiven > 0 && filed.NotDone == 0 ? 0 : Math.Max(filed.NotDone, 1);
+        // Task 193 G4a: records whose inherited share IS removed, but whose paired grant could not be confirmed ended. Not a
+        // share left in place, so not "removed automatically": its own sentence asks for the retry that ends it.
+        var filedPairedNotEnded = Math.Min(filed.PairedNotEnded, filedNotEnded);
+        var filedSharesNotEnded = filedNotEnded - filedPairedNotEnded;
+        var pairedSentence = filedPairedNotEnded == 0
+            ? string.Empty
+            : $" On {filedPairedNotEnded} secure work assignment(s) or project(s) filed under it, this person's access was " +
+              "removed, but the external access paired with it could not be confirmed ended. Try again to end it.";
         var regivenSentence = filedNotRegiven == 0
             ? string.Empty
             : $" On {filedNotRegiven} secure work assignment(s) or project(s) filed under it, the access the other secure records " +
@@ -745,12 +758,12 @@ public static class InternalShareEndpoints
                 "had passed on were not all ended or given back: {Detail} (caller {CallerOid}). The secure-root inheritance job " +
                 "completes it.", systemUserId, root.Type, root.Id, removed, filed.Detail, callerOid);
             return ChildrenIncomplete(httpContext, ChildrenIncompleteTitle,
-                (filedNotEnded == 0
+                (filedSharesNotEnded == 0
                     ? "This user's access to the record was removed."
                     : "This user's access to the record was removed, but the access this record gave them on " +
-                      $"{filedNotEnded} secure work assignment(s) or project(s) filed under it could not be removed yet, so " +
+                      $"{filedSharesNotEnded} secure work assignment(s) or project(s) filed under it could not be removed yet, so " +
                       "they may still open those. They are removed automatically within a few minutes, or you can try again.")
-                + regivenSentence,
+                + pairedSentence + regivenSentence,
                 systemUserId, children, ("removed", removed), ("childrenNotUpdated", children.ChildrenNotUpdated),
                 ("filedRecordsNotUpdated", filedNotEnded + filedNotRegiven));
         }
@@ -771,7 +784,7 @@ public static class InternalShareEndpoints
               "updated yet, so they may still open those. They are removed automatically within a few minutes, or you can " +
               "try again.";
 
-        return ChildrenIncomplete(httpContext, ChildrenIncompleteTitle, detail + regivenSentence, systemUserId, children,
+        return ChildrenIncomplete(httpContext, ChildrenIncompleteTitle, detail + pairedSentence + regivenSentence, systemUserId, children,
             ("removed", removed), ("childrenNotUpdated", children.ChildrenNotUpdated),
             ("filedRecordsNotUpdated", filedNotEnded + filedNotRegiven));
     }

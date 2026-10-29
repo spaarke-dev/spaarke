@@ -467,14 +467,54 @@ internal static class ExternalGrantLifecycle
     /// read and the same never-throws contract as <see cref="ReadPairingsAsync"/>: a missing column is
     /// <see cref="GrantPairingReadStatus.ColumnMissing"/>, any other fault <see cref="GrantPairingReadStatus.Unreadable"/>.
     /// </summary>
+    /// <param name="includeInactive">Task 193 G4a: also the INACTIVE rows (a row still paired after its end is one whose file
+    /// access was not confirmed removed) — the Restricted remover's look for barred users whose pairing is left.</param>
     internal static Task<GrantPairingRead> ReadPairingsOnRecordAsync(
         DataverseWebApiClient dataverseClient, ExternalGrantRootType rootType, Guid rootId, Guid? pairedWith, int? top,
-        CancellationToken ct)
+        CancellationToken ct, bool includeInactive = false)
     {
-        var filter = $"{ExternalGrantRoot.ValueColumnFor(rootType)} eq {rootId} and statecode eq 0";
+        var filter = includeInactive
+            ? $"{ExternalGrantRoot.ValueColumnFor(rootType)} eq {rootId} and {PairedSystemUserValueProperty} ne null"
+            : $"{ExternalGrantRoot.ValueColumnFor(rootType)} eq {rootId} and statecode eq 0";
         if (pairedWith is { } systemUserId)
             filter += $" and {PairedSystemUserValueProperty} eq {systemUserId}";
         return ReadPairingsByFilterAsync(dataverseClient, filter, top, ct);
+    }
+
+    /// <summary>
+    /// Task 193 G4a (A-F3): the rows on one record paired with <paramref name="systemUserId"/>, ACTIVE and INACTIVE, with their
+    /// state — what ending that user's paired grants reads. An inactive row still paired is one whose end did not confirm its
+    /// file access (a confirmed end clears the pairing). The same one-column read and never-throws contract as
+    /// <see cref="ReadPairingsAsync"/>: a missing column is <see cref="GrantPairingReadStatus.ColumnMissing"/>, any other
+    /// fault <see cref="GrantPairingReadStatus.Unreadable"/>.
+    /// </summary>
+    internal static async Task<UserPairingRead> ReadUserPairingsOnRecordAsync(
+        DataverseWebApiClient dataverseClient, ExternalGrantRootType rootType, Guid rootId, Guid systemUserId, int? top,
+        CancellationToken ct)
+    {
+        try
+        {
+            var rows = await dataverseClient.QueryAsync<PairingRow>(
+                EntitySet,
+                filter: $"{ExternalGrantRoot.ValueColumnFor(rootType)} eq {rootId} and {PairedSystemUserValueProperty} eq {systemUserId}",
+                select: $"sprk_externalrecordaccessid,statecode,{PairedSystemUserValueProperty}",
+                top: top,
+                cancellationToken: ct).ConfigureAwait(false);
+
+            return new UserPairingRead(GrantPairingReadStatus.Read,
+                rows.Where(r => r.Id != Guid.Empty)
+                    .Select(r => new UserPairedRow(r.Id, r.PairedSystemUserId is { } p && p != Guid.Empty ? p : null, r.StateCode is null or 0))
+                    .ToList(),
+                null);
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.BadRequest)
+        {
+            return new UserPairingRead(GrantPairingReadStatus.ColumnMissing, Array.Empty<UserPairedRow>(), ex);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            return new UserPairingRead(GrantPairingReadStatus.Unreadable, Array.Empty<UserPairedRow>(), ex);
+        }
     }
 
     private static async Task<GrantPairingRead> ReadPairingsByFilterAsync(
@@ -538,6 +578,10 @@ internal static class ExternalGrantLifecycle
 
         [JsonPropertyName(PairedSystemUserValueProperty)]
         public Guid? PairedSystemUserId { get; set; }
+
+        /// <summary>Only <see cref="ReadUserPairingsOnRecordAsync"/> selects it (task 193 G4a); <c>null</c> elsewhere.</summary>
+        [JsonPropertyName("statecode")]
+        public int? StateCode { get; set; }
     }
 
     /// <summary>The ONE text form of a contact issuer's id in <see cref="GrantedByContactIdAttribute"/>: lower-case, hyphenated (<c>D</c>).</summary>
@@ -1196,6 +1240,12 @@ internal enum GrantPairingReadStatus
 
 /// <summary>What <see cref="ExternalGrantLifecycle.ReadPairingsAsync"/> read: row id → paired systemuser (<c>null</c> = unpaired).</summary>
 internal sealed record GrantPairingRead(GrantPairingReadStatus Status, IReadOnlyDictionary<Guid, Guid?> ByRow, Exception? Fault);
+
+/// <summary>One row <see cref="ExternalGrantLifecycle.ReadUserPairingsOnRecordAsync"/> read (task 193 G4a).</summary>
+internal sealed record UserPairedRow(Guid Id, Guid? PairedWith, bool Active);
+
+/// <summary>What <see cref="ExternalGrantLifecycle.ReadUserPairingsOnRecordAsync"/> read (task 193 G4a).</summary>
+internal sealed record UserPairingRead(GrantPairingReadStatus Status, IReadOnlyList<UserPairedRow> Rows, Exception? Fault);
 
 /// <summary>
 /// Task 193 G1: the pairing a contact grant is written with — the internal user it pairs with, and what each active row on

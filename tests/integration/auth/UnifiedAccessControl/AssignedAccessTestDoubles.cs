@@ -694,6 +694,7 @@ internal static class AssignedAccessTestDoubles
                         {
                             ["sprk_externalrecordaccessid"] = r.Id,
                             [ExternalGrantLifecycle.PairedSystemUserValueProperty] = PairedUsers.TryGetValue(r.Id, out var u) ? u : null,
+                            ["statecode"] = r.StateCode,
                         })
                         .ToList();
                     return Task.FromResult(JsonSerializer.Deserialize<List<T>>(JsonSerializer.Serialize(paired))!);
@@ -852,6 +853,9 @@ internal static class AssignedAccessTestDoubles
                 var paired = Regex.Match(json, @"""sprk_PairedSystemUser@odata.bind"":""/systemusers\(([0-9a-fA-F-]{36})\)""");
                 if (paired.Success)
                     PairedUsers[id] = Guid.Parse(paired.Groups[1].Value);
+                // Task 193 G4a: a confirmed paired end clears the pairing (an unbind).
+                if (json.Contains("\"sprk_PairedSystemUser@odata.bind\":null", StringComparison.Ordinal))
+                    PairedUsers.TryRemove(id, out _);
             }
 
             return Task.CompletedTask;
@@ -1350,13 +1354,17 @@ internal static class AssignedAccessTestDoubles
         /// Task 193 G2b: the PRODUCTION grant revoke over this harness's grant table, flags and materializer, for a record on
         /// the shared business-unit container (no SPE permission of its own to remove).
         /// </summary>
+        /// <param name="containers">Task 193 G4a: the container resolver the revoke's file step uses (default: the record is on
+        /// the shared business-unit container, so the file step has nothing to remove). A throwing one makes the file step
+        /// undecidable (<c>SpeContainerRevokeOutcome.Failed</c>).</param>
         public Sprk.Bff.Api.Api.ExternalAccess.ExternalGrantRevocationService PairedGrantRevokeFor(
-            string logicalName, Guid rootId, ILogger? logger = null) => new(
+            string logicalName, Guid rootId, ILogger? logger = null,
+            Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver? containers = null) => new(
             Grants,
             new SpeContainerMembershipService(
                 TestInfrastructure.TestSpeOwnership.AllowAll(Moq.Mock.Of<Sprk.Bff.Api.Infrastructure.Graph.IGraphClientFactory>()),
                 NullLogger<SpeContainerMembershipService>.Instance),
-            Participations, Materializer, TestRecordContainerResolver.ForNonSecureRecord(logicalName, rootId), Time, null,
+            Participations, Materializer, containers ?? TestRecordContainerResolver.ForNonSecureRecord(logicalName, rootId), Time, null,
             logger ?? NullLogger.Instance);
 
         /// <summary>

@@ -936,7 +936,7 @@ public class ContactGrantSharesInternalUserTests
         var result = await Unshare(user);
 
         result.Should().BeOfType<Ok<UnshareRecordWithUserResponse>>().Subject.Value
-            .Should().Be(new UnshareRecordWithUserResponse(user, Removed: true, PairedGrantEnded: true));
+            .Should().Be(new UnshareRecordWithUserResponse(user, Removed: true, PairedGrantEnded: true, PairedGrant: "ended"));
         ShareMask(user).GetValueOrDefault().Should().Be(0);
         _h.Grants.ActiveRowsOf(_matter, contact).Should().BeEmpty("the paired grant follows the share");
     }
@@ -950,7 +950,8 @@ public class ContactGrantSharesInternalUserTests
         var result = await Unshare(user);
 
         result.Should().BeOfType<Ok<UnshareRecordWithUserResponse>>().Subject.Value
-            .Should().Be(new UnshareRecordWithUserResponse(user, Removed: true, PairedGrantEnded: false));
+            .Should().Be(new UnshareRecordWithUserResponse(user, Removed: true, PairedGrantEnded: false, PairedGrant: "endFailed"),
+                "the grant is still active and listed");
         ShareMask(user).GetValueOrDefault().Should().Be(0, "the share stays removed");
         _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle().Which.Id.Should().Be(grant,
             "left for the reconciliation job's R5");
@@ -980,7 +981,8 @@ public class ContactGrantSharesInternalUserTests
         var result = await Unshare(user);
 
         result.Should().BeOfType<Ok<UnshareRecordWithUserResponse>>().Subject.Value
-            .Should().Be(new UnshareRecordWithUserResponse(user, Removed: true), "nothing is paired where the column is missing");
+            .Should().Be(new UnshareRecordWithUserResponse(user, Removed: true, PairedGrant: "none"),
+                "nothing is paired where the column is missing");
         ShareMask(user).GetValueOrDefault().Should().Be(0);
         _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle();
     }
@@ -993,7 +995,9 @@ public class ContactGrantSharesInternalUserTests
 
         var result = await Unshare(user);
 
-        result.Should().BeOfType<Ok<UnshareRecordWithUserResponse>>().Subject.Value!.PairedGrantEnded.Should().BeFalse();
+        var body = result.Should().BeOfType<Ok<UnshareRecordWithUserResponse>>().Subject.Value!;
+        body.PairedGrantEnded.Should().BeFalse();
+        body.PairedGrant.Should().Be("unconfirmed", "a read that failed is not a grant that failed to end (task 193 G4a, B-F1)");
         ShareMask(user).GetValueOrDefault().Should().Be(0);
         _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle();
     }
@@ -1027,7 +1031,7 @@ public class ContactGrantSharesInternalUserTests
         var again = await Unshare(user);
 
         again.Should().BeOfType<Ok<UnshareRecordWithUserResponse>>().Subject.Value
-            .Should().Be(new UnshareRecordWithUserResponse(user, Removed: false, PairedGrantEnded: true));
+            .Should().Be(new UnshareRecordWithUserResponse(user, Removed: false, PairedGrantEnded: true, PairedGrant: "ended"));
         _h.Grants.ActiveRowsOf(_matter, contact).Should().BeEmpty();
     }
 
@@ -1040,7 +1044,7 @@ public class ContactGrantSharesInternalUserTests
         var result = await Unshare(user);
 
         result.Should().BeOfType<Ok<UnshareRecordWithUserResponse>>().Subject.Value
-            .Should().Be(new UnshareRecordWithUserResponse(user, Removed: true));
+            .Should().Be(new UnshareRecordWithUserResponse(user, Removed: true, PairedGrant: "none"));
     }
 
     /// <summary>children_incomplete is sent only after the record's own share is removed, so the paired grant is ended there too.</summary>
@@ -1054,6 +1058,7 @@ public class ContactGrantSharesInternalUserTests
 
         ReasonCode(result).Should().Be(InternalShareEndpoints.ChildrenIncompleteReasonCode);
         Extensions(result)["pairedGrantEnded"].Should().Be(true);
+        Extensions(result)["pairedGrant"].Should().Be("ended");
         ShareMask(user).GetValueOrDefault().Should().Be(0);
         _h.Grants.ActiveRowsOf(_matter, contact).Should().BeEmpty();
     }
@@ -1070,6 +1075,72 @@ public class ContactGrantSharesInternalUserTests
         _h.Grants.ActiveRowsOf(_matter, contact).Should().BeEmpty();
         ShareMask(user).Should().Be(CollaborateMask, "the share stands on its own");
         _h.Shares.WriteLog.Should().NotContain(w => w.Action.StartsWith("Revoke", StringComparison.Ordinal));
+    }
+
+    // ── Task 193 G4a: the paired grant's end is told apart, retried, and never lost to an aborted request ─────────────
+
+    /// <summary><c>/unshare-user</c> with a given grant revoke and token.</summary>
+    private Task<IResult> UnshareWith(
+        Guid user, Sprk.Bff.Api.Api.ExternalAccess.ExternalGrantRevocationService pairedGrants, CancellationToken ct = default)
+    {
+        _h.Grants.RootOwners.TryAdd(_matter, Guid.NewGuid());
+        return InternalShareEndpoints.UnshareAsync(
+            new UnshareRecordWithUserRequest("matter", _matter, user),
+            _h.Shares, _h.Grants, _h.Participations, _h.Cache.Mock.Object, _h.Materializer, _h.Children,
+            TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(), new Spaarke.Scheduling.ProcessLocalScheduledJobLease(),
+            InternalUserShareCoreTests.Rig.Caller(), NullLogger<Program>.Instance, ct, _h.WorkforceIdentity, pairedGrants);
+    }
+
+    /// <summary>
+    /// A-F3 + B-F1: the paired grant's rows end (it is no longer listed) but its file access cannot be confirmed removed. The
+    /// answer says exactly that, not "still listed"; the pairing is kept, so repeating the removal retries the file step and
+    /// then reports it ended; a third removal finds nothing paired.
+    /// </summary>
+    [Fact]
+    public async Task G4a_Unshare_WhenThePairedGrantsFileAccessCannotBeConfirmed_SaysSo_AndARepeatRetriesTheFileStep()
+    {
+        var (contact, user, grant) = await AddedColleague();
+        var fileStepUndecidable = _h.PairedGrantRevokeFor(MatterTable, _matter,
+            containers: TestRecordContainerResolver.Throwing(new HttpRequestException("Simulated container read failure.")));
+
+        var first = await UnshareWith(user, fileStepUndecidable);
+
+        first.Should().BeOfType<Ok<UnshareRecordWithUserResponse>>().Subject.Value.Should().Be(
+            new UnshareRecordWithUserResponse(user, Removed: true, PairedGrantEnded: false, PairedGrant: "fileAccessUnconfirmed"));
+        _h.Grants.ActiveRowsOf(_matter, contact).Should().BeEmpty("its rows are ended, so it is no longer listed");
+        _h.Grants.PairedUsers.Should().ContainKey(grant, "the pairing is kept so a repeat retries the file step");
+
+        var again = await Unshare(user);
+
+        again.Should().BeOfType<Ok<UnshareRecordWithUserResponse>>().Subject.Value.Should().Be(
+            new UnshareRecordWithUserResponse(user, Removed: false, PairedGrantEnded: true, PairedGrant: "ended"),
+            "the repeat ran the file step again and it completed");
+        _h.Grants.PairedUsers.Should().NotContainKey(grant, "a confirmed end clears the pairing");
+
+        (await Unshare(user)).Should().BeOfType<Ok<UnshareRecordWithUserResponse>>().Subject.Value!.PairedGrant
+            .Should().Be("none");
+    }
+
+    /// <summary>
+    /// A-F4: the request is aborted after its share is confirmed gone; the paired grant is still ended (the step runs to its
+    /// end whatever happens to the request, as the adoption marker does).
+    /// </summary>
+    [Fact]
+    public async Task G4a_Unshare_AbortedOnceTheShareIsGone_StillEndsThePairedGrant()
+    {
+        var (contact, user, _) = await AddedColleague();
+        using var abort = new CancellationTokenSource();
+        _h.Grants.BeforeGrantQuery = _ =>
+        {
+            if (ShareMask(user).GetValueOrDefault() == 0)
+                abort.Cancel(); // the client goes away once the share is removed
+        };
+
+        var result = await UnshareWith(user, _h.PairedGrantRevokeFor(MatterTable, _matter), abort.Token);
+
+        abort.IsCancellationRequested.Should().BeTrue("the request was aborted after its share was removed");
+        result.Should().BeOfType<Ok<UnshareRecordWithUserResponse>>().Subject.Value!.PairedGrant.Should().Be("ended");
+        _h.Grants.ActiveRowsOf(_matter, contact).Should().BeEmpty("the grant does not outlive its share");
     }
 
     // ── Current Access: pairedWith ──────────────────────────────────────────────────────────────────────────────────
