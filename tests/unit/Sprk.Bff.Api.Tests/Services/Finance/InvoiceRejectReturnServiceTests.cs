@@ -656,6 +656,29 @@ public sealed class InvoiceRejectReturnServiceTests
         w.Transitions.Should().Be(1);
     }
 
+    [Theory(DisplayName = "104 D-122 SEEDED (#1911 F2): a finish over an already-written record whose close fails is Incomplete at 'signals', never Decided")]
+    [MemberData(nameof(Kinds))]
+    public async Task FailedClose_OverAnExistingRecord_IsIncomplete(InvoiceDecisionKind kind)
+    {
+        var w = new ApprovalWorld();
+        var closes = w.AddInvoiceSignal("EB-DUP");
+        var fails = w.AddInvoiceSignal("EB-TOTAL");
+        w.CloseFailsOnce[fails] = SignalAutomatedCloseOutcome.ChangedSinceRead;
+        (await Decide(w, kind, AliceUser)).Outcome.Should().Be(InvoiceDecisionOutcome.Incomplete);
+
+        // The portion names the record but is not yet marked decided (the defensive branch: a record the finish finds already linked).
+        w.Portion["sprk_decisionrecord"] = new EntityReference("sprk_decisionrecord", w.ClosedBy[closes]);
+        w.Portion["sprk_approvalstatus"] = new OptionSetValue(InvoiceApprovalService.PortionPending);
+        w.CloseFailsOnce[fails] = SignalAutomatedCloseOutcome.ChangedSinceRead;
+
+        var repeat = await Decide(w, kind, AliceUser);
+
+        repeat.Outcome.Should().Be(InvoiceDecisionOutcome.Incomplete);
+        repeat.FailedStep.Should().Be("signals");
+        w.RecordsOf(ActionOf(kind)).Should().ContainSingle();
+        w.SignalStatus(fails).Should().Be(SignalWriter.SignalStatusOpen);
+    }
+
     [Theory(DisplayName = "104 D-122: with no Signal on the invoice or its lines, no rights are asked")]
     [MemberData(nameof(Kinds))]
     public async Task NoSignals_NoRightsAsked(InvoiceDecisionKind kind)
