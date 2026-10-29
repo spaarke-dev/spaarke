@@ -88,6 +88,9 @@ public sealed class AssignTaskNotifierTests
         public AccessRights? TaskRights { get; set; } = AccessRights.Read | AccessRights.Write;
         public bool? Restricted { get; set; } = false;
         public AccessRights? PortalRights { get; set; } = AccessRights.None;
+
+        /// <summary>The portal events list's per-row verdict on the task (true listed, false withheld, null undecided).</summary>
+        public bool? PortalListsTask { get; set; } = true;
         public List<string> GateQuestions { get; } = new();
 
         // The record name InquiryRecordFacts would show (Standard + confirmed internal).
@@ -108,7 +111,7 @@ public sealed class AssignTaskNotifierTests
             var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["ExternalAccess:PortalUrl"] = PortalUrl }).Build();
             var customer = new CustomerIdentity(Options.Create(new CustomerOptions { Id = CustomerKey }), config, NullLogger<CustomerIdentity>.Instance);
 
-            Gate = new Mock<AssignTaskRecipientGate>(Identities.Object, Links, null!, null!, null!, null!, GateLog) { CallBase = true };
+            Gate = new Mock<AssignTaskRecipientGate>(Identities.Object, Links, null!, null!, null!, null!, null!, GateLog) { CallBase = true };
             Gate.Setup(g => g.WallAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
                 .Returns((string entity, Guid id, Guid user, CancellationToken _) =>
                 {
@@ -132,6 +135,12 @@ public sealed class AssignTaskNotifierTests
                 {
                     GateQuestions.Add($"grants {contact} {table} {id}");
                     return PortalRights;
+                });
+            Gate.Setup(g => g.PortalListsTaskAsync(It.IsAny<ContactBindingRow>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((ContactBindingRow contact, Guid task, CancellationToken _) =>
+                {
+                    GateQuestions.Add($"portal {contact.ContactId} {task}");
+                    return PortalListsTask;
                 });
 
             Identities.Setup(i => i.GetContactAsync(Contact, It.IsAny<CancellationToken>()))
@@ -365,7 +374,7 @@ public sealed class AssignTaskNotifierTests
         sent.Body.Should().Contain($"Assigned by {AssignerName}").And.NotContain(AssignerUpn);
         h.Bells.Should().BeEmpty("an external contact has no model-driven app");
         h.Facts.Verify(f => f.ResolveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()), Times.Never);
-        h.GateQuestions.Should().Equal($"grants {Contact} sprk_matter {Matter}");
+        h.GateQuestions.Should().Equal($"grants {Contact} sprk_matter {Matter}", $"portal {Contact} {TaskId}");
     }
 
     // ── Must not fire: the gate refuses (D-199) ──────────────────────────────────────────────────────────────────────────
@@ -425,6 +434,7 @@ public sealed class AssignTaskNotifierTests
     [InlineData("contact-unreadable")]
     [InlineData("links-unreadable")]
     [InlineData("grants-incomplete")]
+    [InlineData("portal-rule-undecided")]
     public async Task ACheckThatCannotBeMade_SendsNothing_FailClosed_MustNotFire(string fault)
     {
         var h = new Harness();
@@ -442,12 +452,31 @@ public sealed class AssignTaskNotifierTests
                 h.Identities.Setup(i => i.GetContactAsync(Contact, It.IsAny<CancellationToken>())).ReturnsAsync(ContactLookup.Failed);
                 break;
             case "links-unreadable": h.Links.FailLinkRead = true; break;
+            case "portal-rule-undecided":
+                h.MakeExternal();
+                h.PortalListsTask = null;
+                break;
             default: h.MakeExternal(portalRights: null); break;
         }
 
         (await h.NotifyAsync()).Should().Equal(AssignTaskRecipient.UnverifiedWarning);
 
         h.NothingWasSent();
+    }
+
+    [Fact]
+    public async Task AnExternalContact_WithAGrant_ButTheTaskWithheldByThePortalsEventsList_GetsNoEmail_InTheRequestOrTheJob_MustNotFire()
+    {
+        // Fix round 2, item 1: Read on the matter, but the task is also filed to a secure record the contact cannot read.
+        var h = new Harness { PortalListsTask = false };
+        h.MakeExternal();
+
+        (await h.NotifyAsync()).Should().Equal(AssignTaskRecipient.NoAccessWarning);
+        h.NothingWasSent();
+        h.GateQuestions.Should().Equal($"grants {Contact} sprk_matter {Matter}", $"portal {Contact} {TaskId}");
+
+        (await h.Handler().ProcessAsync(Job(Payload()), CancellationToken.None)).Status.Should().Be(JobStatus.Completed, "a refusal is final");
+        h.SystemSends.Should().BeEmpty();
     }
 
     [Fact]

@@ -15,8 +15,11 @@ namespace Sprk.Bff.Api.Services.Signals;
 //     IContactIdentityStore + AssignedAccessStore + the binder's oid decision, InternalShareEndpoints.ClassifyEligibility, the
 //     SecureShareNoAccessGuard record-and-secure-parents check, and the external IsOnboardedWithEmail test);
 //     IAccessibleRecordSetService.ComposeForCiamContactAsync (the portal's own grant term + vetoes for a contact);
-//     CallerRecordAccessProbe.GetPrincipalRightsAppOnlyOrUnknownAsync (Dataverse's answer for a named systemuser).
-//   Extension: every one of those is called unchanged (IsOnboardedWithEmail only became internal). The grant notifier cannot be
+//     CallerRecordAccessProbe.GetPrincipalRightsAppOnlyOrUnknownAsync (Dataverse's answer for a named systemuser);
+//     ExternalDataService.CheckLiveParentsAsync (fix round 2: the portal events list's per-row rule, tasks 039/187, for one event)
+//     over CiamContactPrincipalStrategy.ComposeAsync (the principal the portal builds for the contact).
+//   Extension: every one of those is called unchanged (IsOnboardedWithEmail only became internal; fix round 2 lifted the CIAM
+//     principal composition out of CiamContactPrincipalStrategy.ResolveAsync into an internal static, same behaviour). The grant notifier cannot be
 //     extended for this: it answers "who to tell about a grant on a root" and sends its own messages; this answers "may this one
 //     assignee be emailed about a task under this record", which adds the task Read check and the external grant check.
 //     uac-r2 task 193's ContactUserRepresentation (the one extracted contact -> user rule) is not on master yet (K-1): the
@@ -94,16 +97,19 @@ public sealed record AssignTaskRecipient(AssignTaskRecipientKind Kind, AssignTas
 /// the No Access check on the record and its secure parents (<see cref="SecureWallRecordScope.AsFlagged"/>) is NotSecure or
 /// NotWalled; and Dataverse answers Read for that user on the task.</item>
 /// <item><b>External</b> (the <c>EmailExternalContactGrantAsync</c> gate): no internal user represents the contact; it is active,
-/// onboarded with an email (<see cref="GrantAccessNotifier.IsOnboardedWithEmail"/>), not the assigner, and the portal's own grant
+/// onboarded with an email (<see cref="GrantAccessNotifier.IsOnboardedWithEmail"/>), not the assigner, the portal's own grant
 /// composition (<see cref="IAccessibleRecordSetService.ComposeForCiamContactAsync"/>: grants, Secure suppression, No Access,
-/// Restricted) gives it Read on the record.</item>
+/// Restricted) gives it Read on the record, and the portal's events list would show it THIS task: the list's per-row rule
+/// (<see cref="ExternalDataService.CheckLiveParentsAsync"/>, tasks 039/187) withholds a task also filed to a secure record the
+/// contact cannot read.</item>
 /// <item><b>Nobody else</b>, and nobody when a check cannot be made (ADR-003).</item>
 /// </list>
 /// Never throws (except the caller's cancellation): a fault is <see cref="AssignTaskRefusal.Unverified"/>. App-only reads; ids only in
 /// the logs.
 /// </summary>
 /// <remarks>The Dataverse-facing steps (<see cref="WallAsync"/>, <see cref="TaskRightsAsync"/>, <see cref="RestrictedAsync"/>,
-/// <see cref="ContactRightsAsync"/>) are virtual one-line delegations: the test seams, so the decision itself is what the tests run.</remarks>
+/// <see cref="ContactRightsAsync"/>, <see cref="PortalListsTaskAsync"/>) are virtual: the test seams, so the decision itself is
+/// what the notifier tests run; each seam's own logic is tested directly over its real dependency.</remarks>
 public class AssignTaskRecipientGate
 {
     /// <summary>The task table's entity set, as <c>RetrievePrincipalAccess</c> names it.</summary>
@@ -115,6 +121,7 @@ public class AssignTaskRecipientGate
     private readonly SecureShareNoAccessGuard _noAccessGuard;
     private readonly CallerRecordAccessProbe _probe;
     private readonly IAccessibleRecordSetService _accessibleSet;
+    private readonly ExternalDataService _portalData;
     private readonly ILogger<AssignTaskRecipientGate> _logger;
 
     public AssignTaskRecipientGate(
@@ -124,6 +131,7 @@ public class AssignTaskRecipientGate
         SecureShareNoAccessGuard noAccessGuard,
         CallerRecordAccessProbe probe,
         IAccessibleRecordSetService accessibleSet,
+        ExternalDataService portalData,
         ILogger<AssignTaskRecipientGate> logger)
     {
         _identities = identities ?? throw new ArgumentNullException(nameof(identities));
@@ -132,6 +140,7 @@ public class AssignTaskRecipientGate
         _noAccessGuard = noAccessGuard;
         _probe = probe;
         _accessibleSet = accessibleSet;
+        _portalData = portalData;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -316,7 +325,21 @@ public class AssignTaskRecipientGate
         if (!answered.HasFlag(AccessRights.Read))
             return Refuse(AssignTaskRefusal.NoAccess, contact.ContactId, taskId, "the external contact has no active grant with Read on the record");
 
-        return AssignTaskRecipient.ForExternal();
+        // The portal's events list decides each task row on its own (tasks 039/187): a task ALSO filed to a secure record the
+        // contact cannot read is withheld there, so it is not emailed with a link to a page that hides it.
+        if (taskId is not { } task || task == Guid.Empty)
+            return Refuse(AssignTaskRefusal.Unverified, contact.ContactId, taskId, "the task id is unknown, so the portal's rule for it cannot be asked");
+
+        switch (await PortalListsTaskAsync(contact, task, ct).ConfigureAwait(false))
+        {
+            case true:
+                return AssignTaskRecipient.ForExternal();
+            case false:
+                return Refuse(AssignTaskRefusal.NoAccess, contact.ContactId, taskId,
+                    "the portal's events list withholds the task (it is also filed to a secure record the contact cannot read)");
+            default:
+                return Refuse(AssignTaskRefusal.Unverified, contact.ContactId, taskId, "the portal's rule for the task could not be decided");
+        }
     }
 
     private AssignTaskRecipient Refuse(AssignTaskRefusal why, Guid contactId, Guid? taskId, string reason)
@@ -373,5 +396,29 @@ public class AssignTaskRecipientGate
         var set = await _accessibleSet.ComposeForCiamContactAsync(contactId, grantTable, ct).ConfigureAwait(false);
         var rights = set.RightsFor(recordId);
         return !rights.HasFlag(AccessRights.Read) && set.Capped ? null : rights;
+    }
+
+    /// <summary>
+    /// Would the portal's events list show this contact the task? The list's own per-row rule for one event
+    /// (<see cref="ExternalDataService.CheckLiveParentsAsync"/>: the task's three <c>sprk_regarding*</c> roots and the live roots
+    /// of its other parents, the secure flags of those the contact cannot read, <see cref="ExternalMultiRootRule.ChildRowReadable"/>)
+    /// on the principal the portal composes for the contact (<see cref="CiamContactPrincipalStrategy.ComposeAsync"/>). True: listed;
+    /// false: withheld; null: a read the rule needed failed, or it was withheld while a composition was capped (the contact may
+    /// hold the root the principal lacks).
+    /// </summary>
+    internal virtual async Task<bool?> PortalListsTaskAsync(ContactBindingRow contact, Guid taskId, CancellationToken ct)
+    {
+        var composed = await CiamContactPrincipalStrategy
+            .ComposeAsync(_accessibleSet, contact.ContactId, contact.Email, contact.Binding.Oid?.ToString("D"), ct)
+            .ConfigureAwait(false);
+        var decision = await _portalData
+            .CheckLiveParentsAsync(ExternalDataService.DeletableKind.Event, taskId, composed.Principal, ct)
+            .ConfigureAwait(false);
+        return decision switch
+        {
+            ExternalDataService.LiveParentDecision.Readable => true,
+            ExternalDataService.LiveParentDecision.Withheld when !composed.Capped => false,
+            _ => null,
+        };
     }
 }

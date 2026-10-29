@@ -534,15 +534,38 @@ public sealed class CiamContactPrincipalStrategy : ICallerPrincipalStrategy
         // plane composition the workforce contact also uses. Nothing here reads a grant's level: the
         // evaluator decides which level counts (DirectAccessLevel on a Secure root) and which records
         // survive (deny list, then Restricted).
-        var reqCt = httpContext.RequestAborted;
-        var accessibleProjects = await _accessibleSet
-            .ComposeForCiamContactAsync(contactId, AccessibleRecordSetService.ProjectEntity, reqCt)
+        var principal = (await ComposeAsync(_accessibleSet, contactId, email, oid, httpContext.RequestAborted)
+            .ConfigureAwait(false)).Principal;
+
+        _logger.LogInformation(
+            "[EXT-AUTH] Contact {ContactId} authenticated (oid-resolved: {ByOid}) — accessible roots: {Projects} project / {Matters} matter / {Was} work-assignment",
+            contactId, !string.IsNullOrEmpty(oid), principal.ProjectAccess.Count,
+            principal.MatterAccess.Count, principal.WorkAssignmentAccess.Count);
+
+        return CallerPrincipalResolution.Resolved(principal);
+    }
+
+    /// <summary>
+    /// The CIAM contact's principal: the ONE contact-plane composition
+    /// (<see cref="IAccessibleRecordSetService.ComposeForCiamContactAsync"/>) of each grant root, its Read-bearing entries
+    /// mapped onto the principal. Shared with the Assign Task recipient gate (ontology task 168, fix round 2), which asks the
+    /// portal's events-list rule for a contact who is not the one signed in, so the two cannot build different principals.
+    /// <see cref="CiamContactComposition.Capped"/>: a composition stopped at its ceiling, so the principal may lack a root
+    /// the contact holds. An evaluator fault propagates.
+    /// </summary>
+    internal static async Task<CiamContactComposition> ComposeAsync(
+        IAccessibleRecordSetService accessibleSet, Guid contactId, string? email, string? oid, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(accessibleSet);
+
+        var accessibleProjects = await accessibleSet
+            .ComposeForCiamContactAsync(contactId, AccessibleRecordSetService.ProjectEntity, ct)
             .ConfigureAwait(false);
-        var accessibleMatters = await _accessibleSet
-            .ComposeForCiamContactAsync(contactId, AccessibleRecordSetService.MatterEntity, reqCt)
+        var accessibleMatters = await accessibleSet
+            .ComposeForCiamContactAsync(contactId, AccessibleRecordSetService.MatterEntity, ct)
             .ConfigureAwait(false);
-        var accessibleWorkAssignments = await _accessibleSet
-            .ComposeForCiamContactAsync(contactId, AccessibleRecordSetService.WorkAssignmentEntity, reqCt)
+        var accessibleWorkAssignments = await accessibleSet
+            .ComposeForCiamContactAsync(contactId, AccessibleRecordSetService.WorkAssignmentEntity, ct)
             .ConfigureAwait(false);
 
         // Per-record rights, straight from the evaluator — as WorkforcePrincipalStrategy does. Only entries
@@ -554,22 +577,19 @@ public sealed class CiamContactPrincipalStrategy : ICallerPrincipalStrategy
         var matterAccess = CallerPrincipal.FromReadBearing(accessibleMatters.Rights);
         var workAssignmentAccess = CallerPrincipal.FromReadBearing(accessibleWorkAssignments.Rights);
 
-        _logger.LogInformation(
-            "[EXT-AUTH] Contact {ContactId} authenticated (oid-resolved: {ByOid}) — accessible roots: {Projects} project / {Matters} matter / {Was} work-assignment",
-            contactId, !string.IsNullOrEmpty(oid), projectAccess.Count,
-            matterAccess.Count, workAssignmentAccess.Count);
-
-        return CallerPrincipalResolution.Resolved(new CallerPrincipal
-        {
-            Plane = CallerPrincipalPlane.CiamContact,
-            ContactId = contactId,
-            SystemUserId = null,
-            Email = email ?? string.Empty,
-            Oid = oid,
-            ProjectAccess = projectAccess,
-            MatterAccess = matterAccess,
-            WorkAssignmentAccess = workAssignmentAccess,
-        });
+        return new CiamContactComposition(
+            new CallerPrincipal
+            {
+                Plane = CallerPrincipalPlane.CiamContact,
+                ContactId = contactId,
+                SystemUserId = null,
+                Email = email ?? string.Empty,
+                Oid = oid,
+                ProjectAccess = projectAccess,
+                MatterAccess = matterAccess,
+                WorkAssignmentAccess = workAssignmentAccess,
+            },
+            accessibleProjects.Capped || accessibleMatters.Capped || accessibleWorkAssignments.Capped);
     }
 
     /// <summary>
@@ -837,3 +857,9 @@ public sealed class WorkforcePrincipalStrategy : ICallerPrincipalStrategy
         });
     }
 }
+
+/// <summary>
+/// What <see cref="CiamContactPrincipalStrategy.ComposeAsync"/> composed for a contact: its principal, and whether any of the
+/// three compositions stopped at its ceiling (<see cref="AccessibleRecordSet.Capped"/>: the principal may lack a root).
+/// </summary>
+internal sealed record CiamContactComposition(CallerPrincipal Principal, bool Capped);
