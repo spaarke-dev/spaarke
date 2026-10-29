@@ -748,3 +748,22 @@ MSAL's account list is shared across clients in the tab. The CIAM plane has no a
 ## Closed
 
 (none)
+
+### ISS-020 — Removal sweep leaves no telemetry on a pass with no candidates
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round (before anyone turns `IdentityLink:Reconciliation:RemovalSweepWritesEnabled` on) |
+| **Filed** | 2026-10-28 |
+| **Source** | Dev rollout of the contact identity hardening, step 3 (`notes/contact-identity-dev-rollout-record.md`) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2415 |
+
+**Description**
+
+`ExternalAccessRemovalSweep` logs only per-contact lines and failures, and the `[ID-LINK-RECON] heartbeat` carries no sweep counts. A pass with no candidates therefore leaves no trace. After the `e56a3a51d4` deploy, about 6 hours of runs logged nothing, and only a direct Dataverse count of the two candidate queries (both 0) proved that the sweep had nothing to do. Add a per-pass summary (mode, skipped, candidates, would-mark/marked, deferred, failed), either as its own line or as heartbeat fields. Telemetry only.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Services/ExternalAccess/ExternalAccessRemovalSweep.cs` (`RunAsync`)
+- `src/server/api/Sprk.Bff.Api/Services/ExternalAccess/IdentityLinkReconciliationJob.cs` (`RunRemovalSweepAsync`, heartbeat)

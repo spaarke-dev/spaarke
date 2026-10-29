@@ -1,0 +1,67 @@
+{
+  "release": "SpaarkeMaster 1.2.4.0",
+  "source": "spaarke-ontology-platform-r1, 2026-10-29: role XML diff 1.2.3.0 (8754fcdf11) to the published a4b6459da3 (D-185, 049 / D-17 D-62 D-147 D-159 Q6, D-160, D-189). Re-checked by ontology against 1.2.3.1 (736ed4d648, what stamps run): the upgrade also REMOVES Basic User prvReadsprk_Policy (Deep; added 49ef71b852 D-110, removed accfc2d2f7 D-185; D-189 note 53c01465dc) and ADDS Ontology Administrator Append on Policy/PolicyVersion (task 101); no other differences. Contact field-security and billing rule-set role changes are not listed here (uac-r2 / ebilling own them).",
+  "note": "absent = must not be held at any depth. present = must be held at exactly this depth. Checked on the ROOT copy of each role (inherited copies report the root's set). Only a managed stage-and-upgrade removes privileges from a managed role; a leftover after a plain update import is an import-method error, and a privilege added by hand after the last import is drift.",
+  "roles": {
+    "Spaarke Console User": {
+      "absent": [
+        "prvReadsprk_Policy",
+        "prvReadsprk_PolicyVersion",
+        "prvWritesprk_Signal",
+        "prvCreatesprk_DecisionRecord"
+      ],
+      "present": {
+        "prvReadsprk_Signal": "Deep",
+        "prvReadsprk_DecisionRecord": "Deep",
+        "prvAppendsprk_Signal": "Deep",
+        "prvAppendsprk_DecisionRecord": "Deep",
+        "prvAppendTosprk_Signal": "Deep",
+        "prvAppendTosprk_DecisionRecord": "Deep",
+        "prvAppendTosprk_Policy": "Deep",
+        "prvAppendTosprk_PolicyVersion": "Deep"
+      }
+    },
+    "Spaarke Ontology Administrator": {
+      "absent": ["prvCreatesprk_DecisionRecord", "prvWritesprk_Signal"],
+      "present": {
+        "prvReadsprk_Policy": "Deep",
+        "prvCreatesprk_Policy": "Deep",
+        "prvWritesprk_Policy": "Deep",
+        "prvDeletesprk_Policy": "Deep",
+        "prvAppendsprk_Policy": "Deep",
+        "prvAppendTosprk_Policy": "Deep",
+        "prvReadsprk_PolicyVersion": "Deep",
+        "prvCreatesprk_PolicyVersion": "Deep",
+        "prvWritesprk_PolicyVersion": "Deep",
+        "prvDeletesprk_PolicyVersion": "Deep",
+        "prvAppendsprk_PolicyVersion": "Deep",
+        "prvAppendTosprk_PolicyVersion": "Deep",
+        "prvReadsprk_Signal": "Deep",
+        "prvAppendsprk_Signal": "Deep",
+        "prvAppendTosprk_Signal": "Deep",
+        "prvAssignsprk_Signal": "Deep",
+        "prvDeletesprk_Signal": "Deep",
+        "prvReadsprk_DecisionRecord": "Deep",
+        "prvAppendsprk_DecisionRecord": "Deep",
+        "prvAppendTosprk_DecisionRecord": "Deep"
+      }
+    },
+    "Spaarke Basic User": {
+      "absent": ["prvReadsprk_Policy"],
+      "present": {
+        "prvReadsprk_Signal": "Basic",
+        "prvReadsprk_DecisionRecord": "Basic"
+      }
+    },
+    "Spaarke Ontology Service": {
+      "absent": ["prvWritesprk_DecisionRecord"],
+      "present": {
+        "prvCreatesprk_Signal": "Global",
+        "prvReadsprk_Signal": "Global",
+        "prvWritesprk_Signal": "Global",
+        "prvCreatesprk_DecisionRecord": "Global",
+        "prvReadsprk_DecisionRecord": "Global"
+      }
+    }
+  }
+}

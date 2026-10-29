@@ -1,4 +1,5 @@
 ## SharePoint Embedded + Graph
+- [atk oauth/register minimal project (2026-10-28)](atk-oauth-register-minimal-project-2026-10-28.md) — yaml-only project works; appId any non-empty GUID; scopes comma-split; idempotent only via env-file configurationId; verified to token step
 - [Entra publisher verification (2026-10-14)](publisher-verification-2026-10-14.md) — setVerifiedPublisher delegated-only (app-only NOT supported); PGA ID + MFA + App Admin; admin consent not blocked
 - [B2B guest (A8) vs multi-tenant /organizations (Option A) (2026-10-13)](b2b-guest-vs-multitenant-home-authority-2026-10-13.md) — auto-redeem needs BOTH tenants; MFA trust off by default; MS-managed consent default; NAA silent for guest/multitenant unconfirmed
 - [B2B guest home-tenant classification (2026-10-12)](b2b-guest-home-tenant-classification-2026-10-12.md) — no documented home-tid claim/user prop; tid=resource tenant; idp GUID practice only; beta signIn.homeTenantId; bind at invite time
