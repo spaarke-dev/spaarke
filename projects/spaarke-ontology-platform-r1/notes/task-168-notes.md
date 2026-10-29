@@ -201,3 +201,60 @@ No packages were added, so there is no new CVE surface.
 
 4. An internal assignee on a walled or secure matter where they are not a member: no email and no bell. The wizard says "no access".
 5. An onboarded external contact with an active grant: one email with the portal link and no matter name. The task shows on the matter in the portal.
+
+## Fix round 2 — review of the fix-round-1 diff (2026-10-29)
+
+Two reviews of `f2ff16d842..e8b460a9ea`. Every F item is fixed, and so is the K item. The From behaviour is unchanged: the assigner's mailbox in the request, `DefaultMailbox` in the job. The owner decides that separately.
+
+| # | Class | Change |
+|---|---|---|
+| 1 | F (uac-r2) | **External assignee: the portal's per-row rule for THIS task.** The gate checked Read on the core only, so a task also filed to a secure root the contact can't read was emailed with a link to a page that withholds it. After the matter Read, `DecideExternalAsync` now asks `PortalListsTaskAsync`. That calls `ExternalDataService.CheckLiveParentsAsync(DeletableKind.Event, task, principal)`, which is already public and is the single-row form of the events list's rule. It is the same `ReadLiveParentRootsAsync` + `ReadSecureRootFlagsAsync` + `ExternalMultiRootRule.ChildRowReadable`, reused unchanged. It runs on the principal the portal composes: `CiamContactPrincipalStrategy.ComposeAsync` is a new internal static, lifted out of `ResolveAsync` (the resolver calls it, same behaviour). Withheld gives no access. A failed read, or withheld while a composition is capped, gives Unverified. `ExternalDataService` is not changed, and no schema or privilege is needed. |
+| 2 | F1 | `AssignTaskEmailJob.IsPermanent`: `>= 400 and < 500 and not 408 and not 429`. Graph throttling, `DAILY_SEND_LIMIT_REACHED` and a timeout are retried. |
+| 3 | F1 | `RestrictedAsync`: a table that is not a matter, project or work assignment (`!IsFlagBearingRootType`) answers null, which means Unverified for a user flagged external. It is never read. An empty answer is no longer "not Restricted". The comment is corrected. No existing helper reads such a table's root through the filing walk for this purpose, so it fails closed. |
+| 4 | F3 | New `AssignTaskRecipientGateSeamTests`: each seam runs over its real dependency. <br>• Wall: the REAL `SecureShareNoAccessGuard`. AsFlagged is pinned: an entry on a non-secure matter does not wall. <br>• Task Read: only the `sprk_events` set answers. <br>• Restricted: the flag stub returns Restricted, Standard, unreadable, absent or a throw, plus no-flag tables. <br>• Grants: a capped set with a missing record gives null. <br>• Portal: the fake Dataverse of the events-list tests. |
+| 5 | K2 | **The job gates and links the CURRENT filing.** The send-time re-read selects `CoreAncestorLookups` (the `sprk_regarding{type}` the executor writes). `TryCurrentFiling` keeps the queued record while its lookup still names it. Otherwise it uses the one core the task is filed under (or none). Several others means no email. |
+
+**Item 1, same verdict as the list:** a task under a readable matter and a secure project is refused. A test asserts that `GetEventsAsync(Matter)` lists only the control row for the same principal and the same fake Dataverse.
+
+**`ContactUserRepresentation`:** the swap is filed as **#2457 (DI-136)**, with uac-r2's guidance: use `DecideOnLink`, and read Restricted up front.
+
+### Tests
+
+- **`AssignTask` filter:** 120/120. In round 1 it was 84; the new tests are 11 in the notifier and 25 seam tests.
+- **Wider filtered `Sprk.Bff.Api.Tests`:** 6788 passed, 5 skipped, 0 failed. The filter is round 1's, plus `CallerPrincipal`, `Ciam`, `ExternalRootEventRead`, `ExternalLiveParentRead`, `ExternalDeleteOwn` and `ExternalTodoScope`.
+- **`Spaarke.ArchTests`, full:** 1665/1665.
+- **Intermediate commit `6789b73bd2`:** builds (test project).
+
+### Mutation check (each alone, then reverted; `AssignTask` filter)
+
+| Mutation | Failed |
+|---|---|
+| M1 portal-withheld task still emailed | 2 |
+| M2 undecided portal rule passes | 1 |
+| M3 capped composition ignored | 1 |
+| M4 asks the to-do table | 4 |
+| M5 Unavailable read as listed | 1 |
+| M6 408/429 poisoned (the old rule) | 3 |
+| M7 no-flag table read (type check removed) | 5 |
+| M7b empty answer read as "not Restricted" (the old line) | 1 |
+| M8 unreadable flag read as its value | 1 |
+| M9 wall asked BeingSecured | 2 |
+| M10 `sprk_event` instead of `sprk_events` | 1 |
+| M11 capped grant set read as complete | 1 |
+| M12 filing not re-read (the old select) | 10 |
+| M13 queued record always used (the old line) | 4 |
+| M14 several filings take the first | 1 |
+
+All 15 are caught. M7 first survived, because the stub answered empty. The no-flag-table test now also covers a reader that answers, and it asserts the read is never made.
+
+### Publish size (bff-hygiene item 4)
+
+Fresh detached worktrees: `C:\wt168m` (origin/master `3d54ac845d`) and `C:\wt168b` (`04c9ae45e7`). Each was built with `dotnet publish -c Release`, then zipped with `Compress-Archive`. Both were removed with `Remove-WorktreeSafe.ps1`.
+
+| | Zip | Raw | Files |
+|---|---|---|---|
+| Master | 39,791,796 B | 132,640,648 B | 192 |
+| Branch | 39,817,423 B | 132,723,556 B | 192 |
+| **Delta** | **+25,627 B (+0.026 MB)** | +82,908 B | 0 |
+
+No packages were added, so there is no new CVE surface.
