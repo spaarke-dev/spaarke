@@ -49,7 +49,14 @@ import { EmailReadingHeader, EmailReadingAttachments } from '../EmailReadingHead
 import { EmailRecipients } from '../EmailRecipients';
 import { EmailConnectionsReview, ConfirmedChip, useConnectionsReviewStyles } from '../EmailAssociationsAndTracking';
 import { useEmailComposeActions } from '../EmailComposeActions';
-import { derivePrimaryReview, summarizePrimaryReview, clearPrimaryRegarding, bffRefile } from '../../logic/connections';
+import {
+  derivePrimaryReview,
+  summarizePrimaryReview,
+  clearPrimaryRegarding,
+  bffRefile,
+  parseProvenance,
+} from '../../logic/connections';
+import { useViewerRecordNames } from '../useViewerRecordNames';
 import { launchCreate, refusedAttachmentsNotice, type CreateKind, type IArchiveResult } from '../../logic/actions';
 import { CollapsibleSection } from './CollapsibleSection';
 import {
@@ -310,22 +317,32 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
 
   const filedAssociations = record.recordState?.filedAssociations ?? [];
 
+  // Stored candidates are named only by the viewer's own reads (shared page-session resolver); a candidate the
+  // viewer cannot read never names the header chip.
+  const provenanceJson = record.recordState?.associationProvenanceJson ?? null;
+  const candidateRefs = React.useMemo(
+    () => (parseProvenance(provenanceJson)?.candidates ?? []).map(c => ({ entity: c.targetEntity, id: c.targetId })),
+    [provenanceJson]
+  );
+  const viewerName = useViewerRecordNames(webApi, candidateRefs);
+
   // Single-primary review state (🔴 requires review · 🟡 needs confirmation ·
   // 🟢 confirmed) — drives the merged "Related to" section's status dot AND the
   // confirmed chip shown in that section's header (visible while collapsed).
   const primaryModel = React.useMemo(
     () =>
       derivePrimaryReview(
-        record.recordState?.associationProvenanceJson ?? null,
+        provenanceJson,
         record.recordState?.associationStatus ?? null,
         filedAssociations,
         {
           recordName: record.recordState?.regardingRecordName,
           recordNumber: record.recordState?.regardingRecordNumber,
           recordTypeLabel: record.recordState?.regardingRecordType,
-        }
+        },
+        viewerName
       ),
-    [record.recordState, filedAssociations]
+    [provenanceJson, record.recordState, filedAssociations, viewerName]
   );
   const associationSummary = React.useMemo(() => summarizePrimaryReview(primaryModel), [primaryModel]);
   const connStyles = useConnectionsReviewStyles();

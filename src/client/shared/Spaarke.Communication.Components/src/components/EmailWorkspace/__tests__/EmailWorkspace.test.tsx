@@ -460,3 +460,71 @@ describe('Negative: dual-mount parity + NFR-05 + no self-mounted FluentProvider'
     }
   });
 });
+
+describe('"Related to" header chip: candidate names come only from the viewer read', () => {
+  const MATTER_ID = '22222222-3333-4444-5555-666666666666';
+
+  function storedProvenance(contributorText: string): string {
+    return JSON.stringify({
+      version: 2,
+      direction: 'Incoming',
+      decision: { status: 'Resolved', autoFiled: true, killSwitchEnabled: true, aiInvolved: false },
+      rungsFired: ['RecordNameMatch'],
+      candidates: [
+        {
+          field: 'sprk_regardingmatter',
+          targetEntity: 'sprk_matter',
+          targetId: MATTER_ID,
+          reinforcedConfidence: 0.97,
+          deterministicConfidence: 0.97,
+          written: true,
+          conflict: false,
+          contributors: [{ rung: 'RecordNameMatch', confidence: 0.97, provenance: contributorText }],
+        },
+      ],
+      signals: [],
+    });
+  }
+
+  /** The viewer's own read: a row for the matter only when the viewer can read it. */
+  function viewerWebApi(canRead: boolean): EmailWorkspaceProps['webApi'] {
+    return {
+      updateRecord: jest.fn().mockResolvedValue({}),
+      retrieveMultipleRecords: jest.fn().mockImplementation((entity: string) =>
+        Promise.resolve({
+          entities:
+            canRead && entity === 'sprk_matter'
+              ? [{ sprk_matterid: MATTER_ID, sprk_mattername: 'Viewer Read Matter' }]
+              : [],
+        })
+      ),
+    } as unknown as EmailWorkspaceProps['webApi'];
+  }
+
+  async function openResolvedEmail(webApi: EmailWorkspaceProps['webApi'], provenanceJson: string): Promise<void> {
+    const dataService = makeDataService();
+    (dataService.retrieveRecord as jest.Mock).mockResolvedValue({
+      ...FULL_RECORD,
+      sprk_associationstatus: 100000000,
+      sprk_associationprovenance: provenanceJson,
+      sprk_regardingrecordname: null,
+    });
+    renderWorkspace({ dataService, webApi });
+    const listPane = await screen.findByTestId('email-list-pane');
+    fireEvent.click(await within(listPane).findByText('Quarterly filing update'));
+  }
+
+  it('names the confirmed candidate with the viewer read name', async () => {
+    await openResolvedEmail(viewerWebApi(true), storedProvenance('record-name-match:matched=number'));
+    await waitFor(() => expect(screen.getByTestId('association-confirmed')).toHaveTextContent('Viewer Read Matter'));
+  });
+
+  it('a candidate the viewer cannot read never names the chip, and stored text is never shown', async () => {
+    await openResolvedEmail(
+      viewerWebApi(false),
+      storedProvenance('record-name-match:sprk_matter:where=subject:matched=name:name="Stored Candidate Name"')
+    );
+    await waitFor(() => expect(screen.getByTestId('section-toggle-related-to')).toBeInTheDocument());
+    expect(screen.queryByText(/Viewer Read Matter|Stored Candidate Name/)).not.toBeInTheDocument();
+  });
+});
