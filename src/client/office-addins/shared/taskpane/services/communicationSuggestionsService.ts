@@ -4,6 +4,7 @@ import {
   type PrimaryReviewModel,
   type PrimaryCandidate,
   type ProvenanceDoc,
+  type ViewerTargetName,
 } from '@spaarke/communication-components/logic/connections/provenance';
 import type { EntitySearchResult, EntityType } from '../hooks/useEntitySearch';
 
@@ -65,7 +66,10 @@ interface CommunicationSuggestionsWire {
   communicationId: string;
   subject: string;
   suggestions: SuggestAssociationsWire;
-  /** Server-resolved display names keyed by candidate targetId (the provenance stores only ids). */
+  /**
+   * Display names keyed by candidate targetId, read by the server with the caller's own delegated access (the
+   * provenance stores only ids). These are the viewer's names: a candidate with none gets no card.
+   */
   names?: Record<string, string>;
   /**
    * Task 084 (#1037): whether the caller can FILE to each candidate, keyed by candidate targetId (same
@@ -141,7 +145,7 @@ function buildEndpoint(internetMessageId: string): string {
  * to the SHARED `derivePrimaryReview` verbatim (no client-side recompute; ADR-045).
  * Only the fields `derivePrimaryReview` consumes are populated.
  */
-function toProvenanceDoc(suggestions: SuggestAssociationsWire, names?: Record<string, string>): ProvenanceDoc {
+function toProvenanceDoc(suggestions: SuggestAssociationsWire): ProvenanceDoc {
   return {
     version: 1,
     direction: '',
@@ -160,9 +164,6 @@ function toProvenanceDoc(suggestions: SuggestAssociationsWire, names?: Record<st
       field: c.field,
       targetEntity: c.targetEntity,
       targetId: c.targetId,
-      // Server-resolved display name (the provenance stores only ids); when absent, the
-      // shared model falls back to the id — identical to the code page's un-resolved case.
-      ...(names?.[c.targetId] ? { targetName: names[c.targetId] } : {}),
       reinforcedConfidence: c.reinforcedConfidence,
       deterministicConfidence: c.deterministicConfidence,
       written: c.written,
@@ -252,10 +253,18 @@ async function fetchModel(internetMessageId: string | undefined): Promise<Sugges
   }
   if (!response?.suggestions) return null;
 
-  // SAME candidate model as the code page (no fork; ADR-045). Server-resolved display
-  // names are folded into the model's `targetName` (the field it is designed to receive). Filing access
-  // (task 084) is NOT folded in — it rides alongside and is applied when mapping to the picker's shape.
-  const model = derivePrimaryReview(JSON.stringify(toProvenanceDoc(response.suggestions, response.names)), null, []);
+  // SAME candidate model as the code page (no fork; ADR-045). Candidate names come from the route's `names` map — the
+  // caller's own reads — passed as the model's viewer lookup. Filing access (task 084) is NOT folded in — it rides
+  // alongside and is applied when mapping to the picker's shape.
+  const names = response.names ?? {};
+  const viewerName: ViewerTargetName = (_entity, id) => names[id];
+  const model = derivePrimaryReview(
+    JSON.stringify(toProvenanceDoc(response.suggestions)),
+    null,
+    [],
+    undefined,
+    viewerName
+  );
   return { model, ...(response.filingAccess ? { filingAccess: response.filingAccess } : {}) };
 }
 

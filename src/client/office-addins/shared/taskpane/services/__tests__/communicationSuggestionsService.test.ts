@@ -22,11 +22,20 @@ jest.mock('@shared/services', () => {
 
 const mockGet = apiClient.get as jest.Mock;
 
-function matterSuggestion(overrides?: Record<string, unknown>, names?: Record<string, string>) {
+/** Names the server read with the caller's own access, keyed by candidate targetId (the route's `names`). */
+const CALLER_NAMES: Record<string, string> = {
+  '11111111-1111-1111-1111-111111111111': 'Readable Matter',
+  '22222222-2222-2222-2222-222222222222': 'Readable Organization',
+  '33333333-3333-3333-3333-333333333333': 'Weak Matter',
+  '44444444-4444-4444-4444-444444444444': 'Readable Account',
+  '55555555-5555-5555-5555-555555555555': 'Readable Project',
+};
+
+function matterSuggestion(overrides?: Record<string, unknown>, names: Record<string, string> = CALLER_NAMES) {
   return {
     communicationId: 'comm-1',
     subject: 'Re: Smith matter',
-    ...(names ? { names } : {}),
+    names,
     suggestions: {
       communicationId: 'comm-1',
       status: 'Suggested',
@@ -74,13 +83,12 @@ describe('fetchEnginePreSelection', () => {
     expect(result!.predicted.name).toBe('Smith v Jones');
   });
 
-  it('falls back to the id for the name when the server resolved none (matches the code page)', async () => {
-    mockGet.mockResolvedValueOnce(matterSuggestion());
+  it('gives no pre-selection for a candidate the server named none for (the caller cannot read it)', async () => {
+    mockGet.mockResolvedValueOnce(matterSuggestion(undefined, {}));
 
     const result = await fetchEnginePreSelection('<abc@contoso.com>');
 
-    expect(result).not.toBeNull();
-    expect(result!.predicted.name).toBe('11111111-1111-1111-1111-111111111111');
+    expect(result).toBeNull();
   });
 
   it('maps the engine-predicted matter to a picker EntitySearchResult', async () => {
@@ -92,8 +100,10 @@ describe('fetchEnginePreSelection', () => {
     expect(result!.predicted.entityType).toBe('Matter');
     expect(result!.predicted.logicalName).toBe('sprk_matter');
     expect(result!.predicted.id).toBe('11111111-1111-1111-1111-111111111111');
-    // Record number (from the RecordNameMatch contributor) surfaces as displayInfo.
-    expect(result!.predicted.displayInfo).toBe('REAL-2026-123');
+    // The name is the caller-read one; a number in the contributor text is never shown (displayInfo is the reason).
+    expect(result!.predicted.name).toBe('Readable Matter');
+    expect(result!.predicted.displayInfo).toBeDefined();
+    expect(result!.predicted.displayInfo).not.toContain('REAL-2026-123');
     // Endpoint is the by-message-id/{id}/suggestions route with the id URL-encoded.
     expect(mockGet).toHaveBeenCalledWith(expect.stringContaining('/api/office/communications/by-message-id/'));
     expect(mockGet).toHaveBeenCalledWith(expect.stringContaining('/suggestions'));
