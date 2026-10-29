@@ -693,7 +693,7 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
         { "sprk_invoice", "<fetch><entity name='sprk_invoice'><attribute name='sprk_invoiceid'/><attribute name='sprk_name'/><attribute name='sprk_invoicenumber'/><attribute name='sprk_invoicedate'/><attribute name='statuscode'/><attribute name='sprk_totalamount'/><attribute name='sprk_project'/><attribute name='sprk_matter'/><attribute name='sprk_totalamount_base'/><order attribute='sprk_invoicedate' descending='true'/></entity></fetch>" },
         { "sprk_workassignment", "<fetch><entity name='sprk_workassignment'><attribute name='sprk_workassignmentid'/><attribute name='sprk_name'/><attribute name='sprk_workassignmentnumber'/><attribute name='sprk_priority'/><attribute name='sprk_responseduedate'/><attribute name='statuscode'/><attribute name='sprk_regardingproject'/><attribute name='sprk_mattertype'/><attribute name='modifiedon'/><order attribute='sprk_responseduedate' descending='false'/></entity></fetch>" },
         { "sprk_matter", "<fetch><entity name='sprk_matter'><attribute name='sprk_matterid'/><attribute name='sprk_mattername'/><attribute name='sprk_matternumber'/><attribute name='statuscode'/><attribute name='sprk_mattertype'/><attribute name='modifiedon'/><order attribute='sprk_mattername' descending='false'/></entity></fetch>" },
-        { "sprk_servicerequest", "<fetch><entity name='sprk_servicerequest'><attribute name='sprk_servicerequestid'/><attribute name='sprk_servicerequestnumber'/><attribute name='sprk_name'/><attribute name='statuscode'/><attribute name='createdon'/><attribute name='sprk_requestedby'/><order attribute='createdon' descending='true'/></entity></fetch>" },
+        { "sprk_servicerequest", "<fetch><entity name='sprk_servicerequest'><attribute name='sprk_servicerequestid'/><attribute name='sprk_servicerequestnumber'/><attribute name='sprk_name'/><attribute name='statuscode'/><attribute name='createdon'/><attribute name='sprk_requestedby'/><attribute name='modifiedon'/><order attribute='createdon' descending='true'/></entity></fetch>" },
     };
 
     private ExternalModuleRegistry ProductionRegistry() =>
@@ -809,6 +809,8 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
             // closed flag to hide Delete on a closed request (the delete route enforces it again). Appears on both sides of
             // the task 134 shrink comparison, so it drops nothing.
             "statecode",
+            // r3 task 002 (owner 2026-10-29): grid column on grid 403e5d37 ("Last Activity").
+            "modifiedon",
         },
         ["sprk_gridconfiguration"] = new[] { "sprk_gridconfigurationid", "sprk_name", "sprk_configjson" },
     };
@@ -850,7 +852,15 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
             "createdon", "sprk_mattertype", "sprk_practicearea",
             "modifiedon", // r3 task 002 addition (owner 2026-10-29); on both sides so the shrink comparison is unchanged
         },
-        ["sprk_servicerequest"] = LiveDerivedAllowLists["sprk_servicerequest"],
+        // Task 134's service-request list was the task-157 derivation (no rule-(b) column); the 2026-10-12 statecode and the
+        // r3 task 002 modifiedon are later, deliberate additions, so they are listed here on the "before" side too.
+        ["sprk_servicerequest"] = new[]
+        {
+            "sprk_servicerequestid", "sprk_servicerequestnumber", "sprk_name", "statuscode", "createdon",
+            "sprk_requestedby",
+            "statecode", // the 2026-10-12 addition above; on both sides, so the shrink comparison is unchanged
+            "modifiedon", // r3 task 002 addition (owner 2026-10-29); on both sides so the shrink comparison is unchanged
+        },
         ["sprk_gridconfiguration"] = LiveDerivedAllowLists["sprk_gridconfiguration"],
     };
 
@@ -1028,6 +1038,7 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
         { "sprk_document", "sprk_filetype" },
         { "sprk_document", "modifiedon" },
         { "sprk_invoice", "sprk_totalamount_base" },
+        { "sprk_servicerequest", "modifiedon" },
     };
 
     /// <summary>Columns beside the admitted ones that stay unreadable: (entity, column).</summary>
@@ -1048,9 +1059,21 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
         return withoutColumn.Replace("<order", $"<attribute name='{column}'/><order", StringComparison.Ordinal);
     }
 
+    /// <summary>The service-requests module scopes to the caller's OWN contact id, which a partner (CIAM) caller holds only
+    /// when the partner switch is on; a workforce caller with a contact always qualifies, so the column tests use one.</summary>
+    private static CallerPrincipal WorkforceContact(Guid contactId) => new()
+    {
+        Plane = CallerPrincipalPlane.Workforce,
+        ContactId = contactId,
+        Email = "staff@firm.test",
+        Oid = Guid.NewGuid().ToString(),
+        ProjectAccess = Array.Empty<CallerProjectAccess>(),
+    };
+
     private static Task<IResult> FetchGrantedEverywhere(string entity, string fetchXml, Guid id, ExternalModuleRegistry registry, FetchDouble dataverse) =>
         ExternalModuleDataEndpoints.ExecuteScopedFetchCoreAsync(
-            new FetchRequestDto(entity, fetchXml, PagingCookie: null), GrantedEverywhere(id), registry,
+            new FetchRequestDto(entity, fetchXml, PagingCookie: null),
+            entity == "sprk_servicerequest" ? WorkforceContact(id) : GrantedEverywhere(id), registry,
             new FetchXmlEntityExtractor(), dataverse.Execute, NoFlags, Narrow, NullLogger.Instance, CancellationToken.None);
 
     [Fact]
@@ -1150,6 +1173,50 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
 
         ShouldBeNotRegistered(result);
         dataverse.Calls.Should().Be(0);
+    }
+
+    // The service-requests module is built by a factory from the partner switch, so the registry enumeration alone does not
+    // show that BOTH settings carry the same column list. These run against the factory's descriptor directly.
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ServiceRequestsModule_WhateverThePartnerSwitch_AdmitsModifiedOnAndRefusesSiblings(bool partnerSwitch)
+    {
+        var module = Sprk.Bff.Api.Infrastructure.DI.ExternalAccessModule.ServiceRequestsModule(partnerSwitch);
+        var registry = Registry(module);
+        var contact = Guid.NewGuid();
+        var extractor = new FetchXmlEntityExtractor();
+        const string gridFetch =
+            "<fetch><entity name='sprk_servicerequest'><attribute name='sprk_servicerequestid'/><attribute name='sprk_name'/>" +
+            "<attribute name='sprk_requestedby'/>{0}</entity></fetch>";
+
+        module.ReadableColumns.Should().Contain("modifiedon");
+        ExternalModuleDataEndpoints.EvaluateFetchXmlGuard(
+                string.Format(gridFetch, "<attribute name='modifiedon'/>"), module.RecordEntity, module.ReadableColumns, extractor)
+            .Verdict.Should().Be(Verdict.Allowed);
+
+        foreach (var sibling in new[] { "ownerid", "sprk_requesttype" })
+        {
+            ExternalModuleDataEndpoints.EvaluateFetchXmlGuard(
+                    string.Format(gridFetch, $"<attribute name='{sibling}'/>"), module.RecordEntity, module.ReadableColumns, extractor)
+                .Verdict.Should().Be(Verdict.ColumnNotPermitted, sibling);
+
+            // The column guard runs before scoping, so a partner caller the switch leaves with no rows gets the same refusal.
+            var dataverse = new FetchDouble();
+            var result = await ExternalModuleDataEndpoints.ExecuteScopedFetchCoreAsync(
+                new FetchRequestDto("sprk_servicerequest", string.Format(gridFetch, $"<attribute name='{sibling}'/>"), PagingCookie: null),
+                Ciam(), registry, extractor, dataverse.Execute, NoFlags, Narrow, NullLogger.Instance, CancellationToken.None);
+            ShouldBeProblem(result, StatusCodes.Status400BadRequest, ExternalModuleDataEndpoints.ErrorFetchXmlColumnNotPermitted);
+            dataverse.Calls.Should().Be(0);
+        }
+
+        var allowed = new FetchDouble();
+        var ok = await ExternalModuleDataEndpoints.ExecuteScopedFetchCoreAsync(
+            new FetchRequestDto("sprk_servicerequest", string.Format(gridFetch, "<attribute name='modifiedon'/>"), PagingCookie: null),
+            WorkforceContact(contact), registry, extractor, allowed.Execute, NoFlags, Narrow, NullLogger.Instance, CancellationToken.None);
+        ok.Should().BeOfType<Ok<FetchResponseDto>>();
+        allowed.Calls.Should().Be(1, "a workforce caller with a contact qualifies whatever the partner switch says");
     }
 
     private static void ShouldBeNotRegistered(IResult result)

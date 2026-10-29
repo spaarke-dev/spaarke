@@ -800,8 +800,8 @@ public static class ExternalAccessModule
                 || (partnerServiceRequestsEnabled && p.Plane == CallerPrincipalPlane.CiamContact))
                 ? new HashSet<Guid> { p.ContactId }
                 : EmptyRecordIds,
-        // Grid 403e5d37. Primary name = sprk_name. Unchanged by task 157 (task 134 already admitted no
-        // sibling-view column here).
+        // Grid 403e5d37. Primary name = sprk_name. Task 157 dropped nothing here (task 134 admitted no sibling-view
+        // column); r3 task 002 added modifiedon as a grid column.
         SavedQueryIds = NoSavedQueries, // grid source inline (live 2026-10-02): no registered view
         PrimaryNameAttribute = "sprk_name",
         ReadableColumns = new HashSet<string>
@@ -811,6 +811,8 @@ public static class ExternalAccessModule
             // Owner decision 2026-10-12: the SPA hides Delete on a closed request. statecode is the platform's own
             // open (0) / closed (1) flag; the delete route enforces it again server-side.
             "statecode",
+            // spaarke-SPA-external-access-platform-r3 task 002 (owner 2026-10-29): grid column on grid 403e5d37 ("Last Activity").
+            "modifiedon",
         },
     };
 }
