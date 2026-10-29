@@ -87,6 +87,13 @@ value. First pass emitted null because no existing source covered the family tab
   ignores its token cannot hold the page; the semaphore is released in `finally` and never disposed because an abandoned read
   may still release it. Why: a slow Redis (CacheModule's 5 s timeouts) or a cold cache must not make the page cost
   N x (timeout + RetrieveEntity).
+- **Scoped re-check fix (F3): an abandoned read still warms the cache.** The budget token only cancels the WAIT for a slot;
+  the metadata read itself gets no token. MetadataService passes its token on to the cache write, so a budget-cancelled read
+  never wrote the cache, and a table whose cold `RetrieveEntity` takes longer than the budget would have stayed unlabelled on
+  every page. Now the read runs to the end (one per table, at most 4 at once; a table still queued at the budget is not
+  started) and the next page finds the label. A non-budget `OperationCanceledException` (a transport timeout inside the read)
+  is now a logged fault, not a silent "out of budget". Test: the hung read's token is never cancelled (red with the budget
+  token passed to the read: 1 failed / 22 passed; green 23 / 23).
 - **Fix round 2 (F1): cache key versioned.** `MetadataService` now caches under `sdap:dv:entitymetadata:v2:{logicalName}`
   (comment: the DTO gained `DisplayName`; instances still on the old build during a slot swap keep writing v1 entries without
   it). Entries under the old prefix are simply never read again, so no entry can serve a missing `DisplayName`: the first read of
@@ -176,3 +183,10 @@ fails with a `TimeoutException` at its 10 s net (1 failed / 22 passed); green 23
 - **Residual timing:** the table gate and the Guid.Empty branch answer without a probe (public information, by design); the
   systemuserid lookup (WhoAmI) runs before the table gate, as the brief orders, so a non-family table costs one OBO exchange.
 - No live Dataverse call was made; the endpoint is proven against in-memory doubles only.
+- **K2 (scoped re-check): no test pins caller-cancellation propagation** (`ct.ThrowIfCancellationRequested` after the label
+  wait) or the limit of 4 with more than 4 tables. Both are covered by reading the code; a client that went away gets nothing
+  either way.
+- **K3 (scoped re-check): older notes in other projects still name the v1 key** (`spaarke-redis-cache-remediation-r1/notes/
+  system-cache-exceptions.md:69`, `spaarke-ontology-platform-r1/notes/140-schema-delta.md:173`,
+  `unified-access-control-r2/notes/ontology-standard-child-contract-2026-10-12.md:73`). History documents, read by no code;
+  `SystemCacheKeys`, `MetadataService` and the deployment guide are current.

@@ -238,7 +238,9 @@ public static class RecordFamilyEndpoints
     /// It is not caller data, so there is no impersonation concern; which tables exist is already public. A label is decoration:
     /// the tables are read concurrently (<see cref="MaxConcurrentLabelReads"/>) under one <see cref="LabelBudgetMilliseconds"/>
     /// budget, and a table that faulted (not found, Dataverse fault, cache fault) or is still pending at the budget gets null, a
-    /// Warning with its name, and the read still returns. A read abandoned at the budget is not awaited. Only cancellation of
+    /// Warning with its name, and the read still returns. A read abandoned at the budget is not awaited, but it is not cancelled
+    /// either: it runs to the end and warms the cache for the next page (one read per table, at most
+    /// <see cref="MaxConcurrentLabelReads"/> at once; a table still queued at the budget is not started). Only cancellation of
     /// <paramref name="ct"/> propagates.
     /// </summary>
     private static async Task<IReadOnlyDictionary<string, string?>> ReadTableLabelsAsync(
@@ -279,22 +281,24 @@ public static class RecordFamilyEndpoints
         return result;
     }
 
-    /// <summary>One table's label into <paramref name="labels"/>; a fault stores null. A cancellation (the budget, or the
-    /// caller's, which <see cref="ReadTableLabelsAsync"/> rethrows) stores nothing: MetadataService rethrows every cancellation.</summary>
+    /// <summary>One table's label into <paramref name="labels"/>; a fault stores null. <paramref name="waitToken"/> (the budget,
+    /// or the caller's, which <see cref="ReadTableLabelsAsync"/> rethrows) only cancels the wait for a slot. The read itself gets
+    /// no token: MetadataService passes its token on to the cache write, so a budget-cancelled read would never warm the cache
+    /// and a slow table would stay unlabelled on every page.</summary>
     private static async Task ReadLabelAsync(
         MetadataService metadata, string table, SemaphoreSlim gate, ConcurrentDictionary<string, string?> labels,
-        ILogger logger, CancellationToken token)
+        ILogger logger, CancellationToken waitToken)
     {
         var entered = false;
         try
         {
-            await gate.WaitAsync(token).ConfigureAwait(false);
+            await gate.WaitAsync(waitToken).ConfigureAwait(false);
             entered = true;
-            labels[table] = (await metadata.GetMetadataAsync(table, token).ConfigureAwait(false)).DisplayName;
+            labels[table] = (await metadata.GetMetadataAsync(table, CancellationToken.None).ConfigureAwait(false)).DisplayName;
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (waitToken.IsCancellationRequested && !entered)
         {
-            // Out of budget (or the caller went away): no entry, so the table reads as null.
+            // Out of budget (or the caller went away) before a slot came free: no entry, so the table reads as null.
         }
         catch (Exception ex)
         {

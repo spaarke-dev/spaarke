@@ -124,6 +124,8 @@ public class RecordFamilyEndpointsContractTests
         var members = JsonNode.Parse(body)!["members"]!.AsArray().Select(m => m!.AsObject()).ToList();
         members.Single(m => m["table"]!.GetValue<string>() == Matter)["recordType"]!.GetValue<string>().Should().Be("Matter");
         members.Single(m => m["table"]!.GetValue<string>() == Document)["recordType"].Should().BeNull();
+        host.HungReadTokenIsCancelled.Should().BeFalse(
+            "a read abandoned at the budget is not cancelled: it finishes and warms the cache for the next page");
     }
 
     // ── 200: the documented shape ──
@@ -502,6 +504,9 @@ public class RecordFamilyEndpointsContractTests
 
         public IDistributedCache Inner { get; }
 
+        /// <summary>The token the hung read was given.</summary>
+        public CancellationToken HungReadToken { get; private set; }
+
         public Task Hang(string key)
         {
             var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -513,6 +518,7 @@ public class RecordFamilyEndpointsContractTests
         {
             if (_hung.TryGetValue(key, out var started))
             {
+                HungReadToken = token;
                 started.TrySetResult();
                 await Task.Delay(Timeout.Infinite); // deliberately ignores the token: the endpoint must not depend on the read honouring it
             }
@@ -575,6 +581,8 @@ public class RecordFamilyEndpointsContractTests
 
         /// <summary>Make the metadata read of <paramref name="table"/> start and never finish (a hung Dataverse call).
         /// The returned task completes once that read has begun.</summary>
+        public bool HungReadTokenIsCancelled => _metadataCache.HungReadToken.IsCancellationRequested;
+
         public Task HangTableMetadata(string table) => _metadataCache.Hang("sdap:dv:entitymetadata:v2:" + table);
 
         public static async Task<FamilyHost> StartAsync()
