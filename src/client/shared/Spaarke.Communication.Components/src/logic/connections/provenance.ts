@@ -305,8 +305,8 @@ export function entityLabel(entity: string): string {
  * True when a string is a bare Dataverse GUID (8-4-4-4-12 hex, optional braces). Used to detect a
  * candidate whose display name fell back to the raw target id — the engine records only a GUID for
  * thread/attachment matches (no embedded `name="…"`), so the card shows the match reason + entity type
- * instead of an opaque GUID (email-communication-intelligence-r2 R3-CARD-1). Host `resolveDisplayName`
- * wiring for real names on those cards is deferred to r3.
+ * instead of an opaque GUID (email-communication-intelligence-r2 R3-CARD-1). Engine candidates now carry only
+ * viewer-read names (a candidate with none gets no card), so this guards reviewer-added records.
  */
 export function looksLikeGuid(value: string | null | undefined): boolean {
   return !!value && /^\{?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\}?$/.test(value);

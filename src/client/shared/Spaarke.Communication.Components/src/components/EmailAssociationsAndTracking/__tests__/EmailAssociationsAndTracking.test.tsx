@@ -25,6 +25,7 @@ import {
   _resetNavPropCacheForTests,
   type FiledAssociation,
   type IResolverWriteContext,
+  type ViewerTargetName,
 } from '../../../logic/connections';
 import type { EmailConnectionsReviewProps, EmailTrackingPanelProps } from '../EmailAssociationsAndTracking.types';
 import { DEFAULT_LINK_CATALOG } from '../EmailConnectionsReview.helpers';
@@ -90,7 +91,14 @@ function makeWriteContext(): IResolverWriteContext {
 const STATUS_RESOLVED = 100000000;
 const STATUS_PENDING = 100000001;
 
-/** Build a single provenance candidate carrying a RecordNameMatch (→ number + reason). */
+/**
+ * Names the viewer's own reads return, keyed by target id. `cand` registers each candidate's name here; the stored
+ * trace carries a DIFFERENT text ("Stored …"), which must never render.
+ */
+const VIEWER_READS = new Map<string, string>();
+const viewerName: ViewerTargetName = (_entity, id) => VIEWER_READS.get(id);
+
+/** Build a single provenance candidate carrying a RecordNameMatch reason; the viewer can read it under `name`. */
 function cand(
   field: string,
   entity: string,
@@ -99,11 +107,12 @@ function cand(
   confidence: number,
   opts: { written?: boolean; conflict?: boolean; number?: string } = {}
 ): Record<string, unknown> {
+  VIEWER_READS.set(id, name);
   return {
     field,
     targetEntity: entity,
     targetId: id,
-    targetName: name,
+    targetName: `Stored ${name}`,
     reinforcedConfidence: confidence,
     deterministicConfidence: confidence,
     written: opts.written ?? false,
@@ -112,7 +121,7 @@ function cand(
       {
         rung: 'RecordNameMatch',
         confidence,
-        provenance: `record-name-match:${entity}:where=subject:matched=name:name="${name}":number="${opts.number ?? ''}":reason="name in subject"`,
+        provenance: `record-name-match:${entity}:where=subject:matched=name:name="Stored ${name}":number="${opts.number ?? ''}":reason="name in subject"`,
       },
     ],
   };
@@ -142,12 +151,16 @@ function baseProps(overrides: Partial<EmailConnectionsReviewProps> = {}): EmailC
   return {
     communicationId: HOST_ID,
     associationStatus: STATUS_PENDING,
-    associationProvenanceJson: provenance([
-      cand('sprk_regardingmatter', 'sprk_matter', 'mtr-1', 'Acme v Beta', 0.82, { number: 'MAT-1' }),
-      cand('sprk_regardingorganization', 'sprk_organization', 'org-1', 'Acme Corp', 0.75, { number: 'ORG-1' }),
-    ]),
+    // Built only when not overridden, so its `cand` calls never re-register another fixture's names.
+    associationProvenanceJson:
+      overrides.associationProvenanceJson ??
+      provenance([
+        cand('sprk_regardingmatter', 'sprk_matter', 'mtr-1', 'Acme v Beta', 0.82, { number: 'MAT-1' }),
+        cand('sprk_regardingorganization', 'sprk_organization', 'org-1', 'Acme Corp', 0.75, { number: 'ORG-1' }),
+      ]),
     filedAssociations: [] as FiledAssociation[],
     writeContext: makeWriteContext(),
+    viewerName,
     ...overrides,
   };
 }
@@ -469,11 +482,11 @@ describe('EmailConnectionsReview — reconcile variant (owner UAT round-3 2026-0
       />
     );
 
-    // Cards stay visible after confirm (they were hidden before item 2f) — the compact
-    // card renders "{REC#} : {name}". The primary name also appears in the filed banner,
-    // so match the card's specific "MAT-1 : …" / "ORG-1 : …" form.
-    expect(screen.getByText(/MAT-1 : Acme v Beta/)).toBeInTheDocument();
-    expect(screen.getByText(/ORG-1 : Acme Corp/)).toBeInTheDocument();
+    // Cards stay visible after confirm (they were hidden before item 2f). The compact card shows the
+    // viewer-read name; a number from the stored trace is never shown.
+    expect(screen.getByTitle('Acme v Beta')).toBeInTheDocument();
+    expect(screen.getByTitle('Acme Corp')).toBeInTheDocument();
+    expect(screen.queryByText(/MAT-1|ORG-1/)).not.toBeInTheDocument();
     // The current primary (mtr-1) card carries Undo; the other candidate keeps Confirm (switch).
     expect(screen.getByTestId('candidate-undo')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Confirm' })).toBeInTheDocument();
@@ -557,8 +570,8 @@ describe('R3-CARD-2: "See all" candidates modal (top-3 strip cap)', () => {
     fireEvent.click(screen.getByTestId('see-all-candidates'));
     const modal = screen.getByTestId('see-all-candidates-modal');
     // All four compact rows are present in the modal, the hidden 4th included.
-    expect(within(modal).getByText('MAT-1 : Alpha')).toBeInTheDocument();
-    expect(within(modal).getByText('MAT-4 : Delta')).toBeInTheDocument();
+    expect(within(modal).getByText('Alpha')).toBeInTheDocument();
+    expect(within(modal).getByText('Delta')).toBeInTheDocument();
     expect(within(modal).getAllByRole('button', { name: 'Confirm' })).toHaveLength(4);
   });
 
@@ -593,62 +606,75 @@ describe('R3-CARD-2: "See all" candidates modal (top-3 strip cap)', () => {
     renderWithProvider(<EmailConnectionsReview {...fourCandidateProps({ readOnly: true })} />);
     fireEvent.click(screen.getByTestId('see-all-candidates'));
     const modal = screen.getByTestId('see-all-candidates-modal');
-    expect(within(modal).getByText('MAT-4 : Delta')).toBeInTheDocument();
+    expect(within(modal).getByText('Delta')).toBeInTheDocument();
     expect(within(modal).queryByRole('button', { name: 'Confirm' })).not.toBeInTheDocument();
   });
 });
 
-describe('R3-CARD-1: a GUID-only candidate shows type + reason, never the raw GUID', () => {
+describe('Candidate names come only from the viewer (R3-CARD-1: never a raw GUID)', () => {
   const GUID = '99999999-8888-7777-6666-555555555555';
+  const GUID_2 = '99999999-8888-7777-6666-444444444444';
 
   beforeEach(() => {
     _resetNavPropCacheForTests();
     global.fetch = jest.fn().mockResolvedValue(NAV_PROPS_RESPONSE) as unknown as typeof fetch;
   });
 
-  it('renders the match reason + entity type for a thread match with no recoverable name (GUID target)', () => {
+  function guidProvenance(ids: string[]): string {
+    return provenance(
+      ids.map(id => ({
+        field: 'sprk_regardingmatter',
+        targetEntity: 'sprk_matter',
+        targetId: id,
+        targetName: 'Stored Matter Title',
+        reinforcedConfidence: 0.9,
+        deterministicConfidence: 0.9,
+        written: false,
+        conflict: false,
+        contributors: [{ rung: 'ThreadContinuity', confidence: 0.9, provenance: 'thread-continuity' }],
+      }))
+    );
+  }
+
+  it('a candidate the viewer has not read gets no card — no GUID, no reason, no stored name', () => {
+    renderWithProvider(
+      <EmailConnectionsReview
+        {...baseProps({ variant: 'reconcile', associationProvenanceJson: guidProvenance([GUID]) })}
+      />
+    );
+
+    expect(screen.queryByText(new RegExp(GUID, 'i'))).not.toBeInTheDocument();
+    expect(screen.queryByText(/Matched from email thread/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Stored Matter Title/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Confirm' })).not.toBeInTheDocument();
+  });
+
+  it('with no host lookup, the component reads the names itself as the viewer (one batched read per entity)', async () => {
+    const ctx = makeWriteContext();
+    const retrieve = ctx.webApi.retrieveMultipleRecords as jest.Mock;
+    retrieve.mockImplementation((entity: string) =>
+      Promise.resolve({
+        entities: entity === 'sprk_matter' ? [{ sprk_matterid: GUID, sprk_mattername: 'Viewer Matter Title' }] : [],
+      })
+    );
+
     renderWithProvider(
       <EmailConnectionsReview
         {...baseProps({
-          variant: 'reconcile',
-          // A thread-continuity match: GUID target, no targetName, no name="…" contributor.
-          associationProvenanceJson: JSON.stringify({
-            version: 1,
-            direction: 'inbound',
-            decision: {
-              status: '',
-              autoFiled: false,
-              killSwitchEnabled: false,
-              autoFileThreshold: 0.85,
-              topDeterministicConfidence: 0,
-              topConfidence: 0,
-              aiInvolved: false,
-              reason: '',
-            },
-            rungsFired: [],
-            candidates: [
-              {
-                field: 'sprk_regardingmatter',
-                targetEntity: 'sprk_matter',
-                targetId: GUID,
-                reinforcedConfidence: 0.9,
-                deterministicConfidence: 0.9,
-                written: false,
-                conflict: false,
-                contributors: [{ rung: 'ThreadContinuity', confidence: 0.9, provenance: 'thread-continuity' }],
-              },
-            ],
-            signals: [],
-          }),
+          writeContext: ctx,
+          viewerName: undefined,
+          associationProvenanceJson: guidProvenance([GUID, GUID_2]),
         })}
       />
     );
 
-    // The raw GUID is never shown to the reviewer …
-    expect(screen.queryByText(new RegExp(GUID, 'i'))).not.toBeInTheDocument();
-    // … instead the card shows the plain-English reason as its identity and the entity type.
-    expect(screen.getByText(/Matched from email thread/)).toBeInTheDocument();
-    expect(screen.getByText(/Matter ·/)).toBeInTheDocument();
+    // The readable candidate appears under the viewer-read name; the unreadable one gets no card.
+    expect(await screen.findByRole('radio', { name: /Viewer Matter Title/ })).toBeInTheDocument();
+    expect(screen.getAllByRole('radio')).toHaveLength(1);
+    expect(screen.queryByText(/Stored Matter Title/)).not.toBeInTheDocument();
+    const matterReads = retrieve.mock.calls.filter(c => c[0] === 'sprk_matter');
+    expect(matterReads).toHaveLength(1);
+    expect(matterReads[0][1]).toContain('$select=sprk_matterid,sprk_mattername');
   });
 });
 

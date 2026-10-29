@@ -71,9 +71,8 @@ export function CandidateCard({
 }): React.ReactElement {
   const selectedClass = tone === 'primary' ? s.cardPrimary : s.cardSelected;
 
-  // R3-CARD-1: the engine records only a target GUID for thread/attachment matches (no embedded name),
-  // so `targetName` falls back to that GUID. Show the match reason + entity type instead of an opaque
-  // GUID. (Real names on those cards need host `resolveDisplayName` wiring — deferred to email-r3.)
+  // R3-CARD-1: never show a raw GUID as a name. Engine candidates carry the viewer-read name (a candidate with
+  // none gets no card); this fallback covers a reviewer-added record whose name is a GUID.
   const nameIsGuid = looksLikeGuid(candidate.targetName);
   const displayName = nameIsGuid
     ? (candidate.matchReason ?? (candidate.entity ? entityLabel(candidate.entity) : 'Record'))

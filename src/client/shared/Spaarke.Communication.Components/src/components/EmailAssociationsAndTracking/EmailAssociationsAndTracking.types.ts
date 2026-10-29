@@ -18,7 +18,7 @@
  * via that path (spec FR-13 MUST) — the host only supplies the current
  * record state + a live `IResolverWriteContext`.
  */
-import type { FiledAssociation, IResolverWriteContext } from '../../logic/connections';
+import type { FiledAssociation, IResolverWriteContext, ViewerTargetName } from '../../logic/connections';
 import type { RecordTypeCatalogEntry, IPolymorphicPickerWebApi } from '@spaarke/ui-components';
 
 /**
@@ -77,8 +77,12 @@ export interface EmailConnectionsReviewProps {
   pickerWebApi?: IPolymorphicPickerWebApi;
   /** Catalog for "Link another record…". Defaults to a catalog derived from `TODO_REGARDING_CATALOG` when omitted. */
   linkAnotherCatalog?: readonly RecordTypeCatalogEntry[];
-  /** Resolve a friendly display name for a target (entity + GUID). Falls back to the slot's own `targetName` when omitted/undefined. */
-  resolveDisplayName?: (entity: string, id: string) => string | undefined;
+  /**
+   * The viewer's own name lookup for candidate targets (see `ViewerTargetName`). Omitted ⇒ the component resolves
+   * the candidates itself, as the viewer, through `writeContext.webApi`. Either way a candidate with no viewer-read
+   * name gets no card.
+   */
+  viewerName?: ViewerTargetName;
   /** Hide every write affordance (Confirm/Change/Remove/Link another) — review-only display. */
   readOnly?: boolean;
   /**

@@ -34,6 +34,7 @@ import { Search20Regular, DocumentAdd20Regular, ArrowUndo16Regular } from '@flue
 import { getXrmForPicker, SprkModal, cleanGuid, RowActionMenu } from '@spaarke/ui-components';
 import {
   derivePrimaryReview,
+  parseProvenance,
   applyRegardingSelection,
   advanceAssociationStatus,
   clearPrimaryRegarding,
@@ -43,6 +44,7 @@ import type { EmailConnectionsReviewProps } from './EmailAssociationsAndTracking
 import { useConnectionsReviewStyles } from './EmailConnectionsReview.styles';
 import { DEFAULT_LINK_CATALOG } from './EmailConnectionsReview.helpers';
 import { CandidateCard, BlankCard } from './EmailConnectionsReviewRows';
+import { useViewerRecordNames } from '../useViewerRecordNames';
 
 const candidateKey = (c: Pick<PrimaryCandidate, 'entity' | 'targetId'>): string =>
   `${c.entity}:${cleanGuid(c.targetId)}`;
@@ -86,14 +88,35 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
     setSeeAllOpen(false);
   }, [communicationId]);
 
+  // Candidate names come only from the viewer's own reads: the host's lookup when given, else this component
+  // resolves the candidates itself through the write context's webApi (a candidate with no name gets no card).
+  const candidateRefs = React.useMemo(
+    () =>
+      props.viewerName
+        ? []
+        : (parseProvenance(associationProvenanceJson)?.candidates ?? []).map(c => ({
+            entity: c.targetEntity,
+            id: c.targetId,
+          })),
+    [props.viewerName, associationProvenanceJson]
+  );
+  const ownViewerName = useViewerRecordNames(props.viewerName ? undefined : writeContext.webApi, candidateRefs);
+  const viewerName = props.viewerName ?? ownViewerName;
+
   // SAME data path as the engine (no client recompute; ADR-045).
   const model = React.useMemo(
     () =>
-      derivePrimaryReview(associationProvenanceJson, associationStatus, filedAssociations, {
-        recordName: regardingRecordName,
-        recordNumber: regardingRecordNumber,
-        recordTypeLabel: regardingRecordType,
-      }),
+      derivePrimaryReview(
+        associationProvenanceJson,
+        associationStatus,
+        filedAssociations,
+        {
+          recordName: regardingRecordName,
+          recordNumber: regardingRecordNumber,
+          recordTypeLabel: regardingRecordType,
+        },
+        viewerName
+      ),
     [
       associationProvenanceJson,
       associationStatus,
@@ -101,6 +124,7 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
       regardingRecordName,
       regardingRecordNumber,
       regardingRecordType,
+      viewerName,
     ]
   );
 
