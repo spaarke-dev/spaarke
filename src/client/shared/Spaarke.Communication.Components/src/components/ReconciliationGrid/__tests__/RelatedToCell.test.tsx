@@ -12,6 +12,8 @@
  * Harness (candidate provenance + write-context mock) mirrors
  * EmailAssociationsAndTracking.test.tsx — the confirm path exercises the REAL
  * `applyRegardingSelection` over a mock `webApi.updateRecord` (the single writer).
+ * Candidate names come only from the viewer's own read through `writeContext.webApi`
+ * (the matter row below); the stored trace's own text is never shown.
  */
 import * as React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
@@ -21,6 +23,7 @@ import { _resetNavPropCacheForTests, type IResolverWriteContext } from '../../..
 import type { EmailConnectionsReviewProps } from '../../EmailAssociationsAndTracking/EmailAssociationsAndTracking.types';
 
 const HOST_ID = '22222222-2222-2222-2222-222222222222';
+const MATTER_ID = '33333333-3333-3333-3333-333333333333';
 const STATUS_PENDING = 100000001;
 const STATUS_RESOLVED = 100000000;
 
@@ -53,7 +56,13 @@ function makeWriteContext(): IResolverWriteContext {
   return {
     webApi: {
       updateRecord: jest.fn().mockResolvedValue({}),
-      retrieveMultipleRecords: jest.fn().mockResolvedValue({ entities: [] }),
+      // The viewer's read: the matter candidate is readable and named "Acme v Beta"; the display-name catalog
+      // (`sprk_recordtype_ref`) has no row, so the per-entity primary name field is used.
+      retrieveMultipleRecords: jest.fn().mockImplementation((entity: string) =>
+        Promise.resolve({
+          entities: entity === 'sprk_matter' ? [{ sprk_matterid: MATTER_ID, sprk_mattername: 'Acme v Beta' }] : [],
+        })
+      ),
     } as unknown as IResolverWriteContext['webApi'],
     hostEntity: 'sprk_communication',
     hostRecordId: HOST_ID,
@@ -81,8 +90,8 @@ function provenance(): string {
       {
         field: 'sprk_regardingmatter',
         targetEntity: 'sprk_matter',
-        targetId: 'mtr-1',
-        targetName: 'Acme v Beta',
+        targetId: MATTER_ID,
+        targetName: 'Stored Text Name',
         reinforcedConfidence: 0.82,
         deterministicConfidence: 0.82,
         written: false,
@@ -92,7 +101,7 @@ function provenance(): string {
             rung: 'RecordNameMatch',
             confidence: 0.82,
             provenance:
-              'record-name-match:sprk_matter:where=subject:matched=name:name="Acme v Beta":number="MAT-1":reason="name in subject"',
+              'record-name-match:sprk_matter:where=subject:matched=name:name="Stored Text Name":number="MAT-1":reason="name in subject"',
           },
         ],
       },
@@ -140,7 +149,8 @@ describe('RelatedToCell', () => {
     fireEvent.click(screen.getByTestId('related-to-open-picker'));
 
     expect(await screen.findByTestId('email-connections-review')).toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: /Acme v Beta/ })).toBeInTheDocument();
+    expect(await screen.findByRole('radio', { name: /Acme v Beta/ })).toBeInTheDocument();
+    expect(screen.queryByText(/Stored Text Name|MAT-1/)).not.toBeInTheDocument();
   });
 
   it('Confirm writes via the single applyRegardingSelection path (hostRecordId===communicationId); fires onConfirmed', async () => {
