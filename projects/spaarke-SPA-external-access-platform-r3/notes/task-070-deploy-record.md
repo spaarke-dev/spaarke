@@ -35,3 +35,18 @@ Owner direction 2026-10-20: "070-071-072 - yes proceed".
 - Rollback: tag `external-spa-dev-rollback-28274e04e` → `gh workflow run deploy-external-spa.yml --ref external-spa-dev-rollback-28274e04e -f environment=dev`.
 - Owner smoke (pending): partner sign-in (normal window); the old failing path (company account → "not set up" → "choose a different sign-in" → Partner); Ralph Dewey workspace; UAC: on a ViewOnly project (the admin has 22; any but `b12496d1…`) upload / new to-do / new event hidden or disabled and no 403 in the network panel; on FullAccess `b12496d1…` they show; no new `useAccessLevel` console errors.
 
+
+## Teams live checks: progress 2026-10-29
+
+- **Spaarke tenant (unknown directory):** the package was uploaded and the app added. The tab shows "Your organization is not set up for Spaarke" as designed: the Teams startup reads the tenant first and makes no token request or backend call (`main.tsx` `bootstrapTeams`). Client not yet stated by the owner.
+- **Dewey Cheatham:** the Teams admin center refused `admin@…` with `INVALID_PRIVILEGE` (open, with the owner; roles to be checked as active). The app was nevertheless added in Teams, and the owner reports "the SPA workforce portal works". Server (App Insights):
+  - 16:44–16:49Z: one home account was refused registration five times (`registration_email_missing`: no email attribute; the form issue is ISS-023 / #2449);
+  - 16:51:12Z: `POST /registration` 201, a new WorkforceHome contact created (1 contact with an identity plane created since 16:00Z);
+  - after that, the account resolves as a ContactOnly workforce principal with 0 roots (a new contact with no grants).
+- **Test artifact:** that new contact is probably the Dewey Cheatham admin account registering itself. Remove it after testing if it should not stay.
+- **Still to run:** Tracy Cheatham (workforce contact) and Ralph Dewey (licensed user) in Teams desktop, web and mobile.
+- **Tracy Cheatham in Teams (owner: pass):** 16:56:48–16:57:04Z, resolved to her existing WorkforceHome contact (10 resolutions, no second contact, no denials).
+- **Ralph Dewey in Teams (owner: pass):** 16:58:10–16:58:28Z, resolved through the stored home link to the licensed systemuser (6 resolutions, no profile form).
+- No `/api/v1/external/*` errors after 16:51:10Z. Every error in the 45-minute window was the registration-without-email sequence above.
+- **Client (owner, 2026-10-29):** all of today's Teams runs used **Teams web**: the Spaarke-tenant not-set-up check, the new-employee registration, Tracy and Ralph Dewey. Desktop and mobile are still to run.
+- **CORRECTION (owner, ~17:10Z):** in Teams web the app "opens in its own browser as the SPA (not in Teams)". So the web results above most likely ran in a separate browser window (the browser plane), **not** in the Teams-hosted tab. They prove the sign-in planes, not the Teams host. Teams desktop: Ralph Dewey gets "This tab can't be used with a guest account" (a client-side guard; no BFF call), and Tracy gets "400 … can't connect to service". **071 is not passed on any Teams client yet.** The root-cause investigation is under way.

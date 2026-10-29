@@ -12,7 +12,7 @@
 | 3 | Licensed user: stored link; /me resolves to the systemuser | ✅ 2026-10-29 | §1 below |
 | 4 | Resubmit: no second contact | ✅ 2026-10-29 | §2 below |
 | 5 | Existing-record bind after an invitation; no duplicate | ✅ 2026-10-29 | §3 below (first run blocked on the test account's missing email attribute; passed after the owner set it) |
-| 6 | Unlisted directory → 401 at the BFF and the not-set-up page | pending | Needs an account in a directory dev does not list |
+| 6 | Unlisted directory → 401 at the BFF and the not-set-up page | ✅ 2026-10-29 | §4 below (the SPA stops first; the BFF is not reached) |
 | 7 | The Dewey Cheatham member token carries `email` | ✅ 2026-10-28 | `contact-identity-dev-rollout-record.md` §3 (customer-directory token probe: `email` present, `xms_edov` true) |
 | 8 | Intake submit as the new contact | ✅ 2026-10-29 | §2 below |
 
@@ -39,3 +39,10 @@
 - **Re-run:** after the owner sets TH's email attribute in Entra, sign in from a new private window. Expected: "We found your existing record" → confirm → the invited contact is bound and there is no second contact.
 - **Not a probe finding:** one `GET /me` 401 at 13:49:12Z came from a non-browser client. That was the Azure CLI token attempt in §1, outside the 13:41–13:47 window.
 - **Re-run (14:25Z, after the owner set TH's Email in Entra; no mailbox licence):** sign-in → "We found your existing record" (the invited contact's address) → Confirm and continue → the workspace loads. Server: `POST /registration` 409 (`existing_record_found`) → 200 (bound). Dataverse (read-only): still exactly 1 TH contact, the invited one created 14:09:18Z, now plane WorkforceHome with external tenant and object id set; the invited-tenant marker is cleared. **Pass: bound to the existing record, no duplicate.**- **Grant-time notice (App Insights):** staff's `invite-and-grant` at 14:10:02Z classified the domain as a customer tenant's (a work-account invite: no CIAM account, no CIAM invite email). The BFF then sent the work-account notice email from the shared mailbox at 14:10:10Z (Graph `sendMail` 202; a Dataverse communication record was created; the trace reads "the work-account notice was sent"). TH has no mailbox, so it could not have been delivered.
+
+## 4. Unlisted directory (2026-10-29)
+
+- **Owner run (afternoon):** "Sign in with your company account" with an account from a directory dev does not list → "Your organization is not set up for Spaarke". The owner reports a pass.
+- **Server (App Insights, 3 h window):** no `sdap.auth.deny.workforce_home` trace, and no `/api/v1/external/*` 401 other than the 13:49Z CLI attempt (§3). The SPA picks a backend from `homeTenantIds` and sends nothing for a tenant no entry lists (`src/client/external-spa/src/auth/backend-selection.ts` ~94, ~555; `OrganizationNotSetUp.tsx`). So the "401 at the BFF" half of the acceptance cannot be reached from the SPA. The BFF's own refusal of an unlisted tenant (`WorkforceIdentity:CustomerTenantIds`, `AuthorizationModule.cs` ~704-712) is a backstop that was not exercised live.
+
+**074 closed 2026-10-29: all 8 probes pass.**
