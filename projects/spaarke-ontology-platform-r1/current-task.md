@@ -9,9 +9,9 @@
 
 | Field | Value |
 |---|---|
-| **Task** | Parallel lanes: **171** (PR #2433), **172** (PR #2434), **168** (#2418, blocked on owner Q1/Q2). |
-| **Status** | **171** (`C:\wts-171`, `task/171-seed-owner`, head `9177fcb083`): **uac-r2 OK** (K1 Assign depth not checked; K2 RetrieveUserPrivileges/teammemberships unverified live; both fail closed). Pester 119/119 (Pester 5.7.1 now installed CurrentUser). My Sonnet adversarial-reviewer pass is RUNNING; wait for it, then merge after Router is green. **172** (`C:\wts-172`, `task/172-owner-unit-409`, head `ddab988203`): rewritten to a D-197 pin test (comment + test; 183/183 filtered; mutation caught). Needs a review (ask uac-r2, whose suggestion it was) + CI, then merge. |
-| **Next Action** | 1) On the 171 reviewer result: fix F-class in the lane, scoped re-check, merge #2433 (`gh pr merge --merge --delete-branch`), then `Remove-WorktreeSafe.ps1 -Path C:/wts-171`. 2) 172: send `ddab988203` to uac-r2, check CI, merge, remove `C:\wts-172`. 3) Mark 171 and 172 ✅ (POML `<status>completed` + completion block + TASK-INDEX), then `pwsh scripts/check-task-status-drift.ps1`. 4) Comment on DI-124 (#2300): the release phase must pass `-CustomerBusinessUnit`; confirm K2 on the first live `-WhatIf`. 5) When the owner answers Q1/Q2: record D-199, then the 168 fix round in `C:\wts-168` (plan below). |
+| **Task** | **168** (#2418) is blocked on owner Q1/Q2. 171 and 172 are DONE (171: #2433 merged `3452d3017e` after fix round 1; 172: #2434 merged `fab8c91531`). |
+| **Status** | No lane is running. The worktrees `C:\wts-171` and `C:\wts-172` are removed. uac-r2 was sent the 171 fix-diff SHA `e025152e3b` after the merge; if they raise anything, handle it as a follow-up before docs→master. DI-124 (#2300) has the `-CustomerBusinessUnit` / `-WhatIf` comment. |
+| **Next Action** | 1) When the owner answers Q1/Q2: record D-199, then run the 168 fix round in `C:\wts-168` (plan below). 2) After the owner's next real decision commit: the task-170 App Insights check and the `BUD-` number (Lane facts). 3) Next docs→master (below). 4) Read any uac-r2 reply on the 171 fix diff. |
 
 ## Open owner questions (task 168, asked 2026-10-28; explained in detail 2026-10-29)
 
@@ -41,7 +41,7 @@ Branch `task/168-assign-task-notify`, head `8064311c54`. First merge docs (it no
 
 ## Next docs→master
 
-Contents: #2414, #2422, the 194b repoint, 171, 172, and 168 when ready. Before notices to word-add-in, R3 and uac-r2; merge master in; full ArchTests.
+Contents: #2414, #2422, the 194b repoint, 171 (`3452d3017e`), 172 (`fab8c91531`), and 168 when ready. Before notices to word-add-in, R3 and uac-r2; merge master in; full ArchTests.
 
 ## Blocked follow-ups (ours)
 
@@ -51,7 +51,7 @@ Contents: #2414, #2422, the 194b repoint, 171, 172, and 168 when ready. Before n
 ## Dev state (spaarkedev1 / spaarke-bff-dev)
 
 - **BFF:** `136568cf70` (R3, 2026-10-29). **Console:** `a8314c2e0e`. **SpaarkeMaster:** 1.2.4.0. **POL-MATTER-NOBUDGET:** v3 `…6313`.
-- **Worktrees:** `C:\wts-168`, `C:\wts-171`, `C:\wts-172`. Remove only with `Remove-WorktreeSafe.ps1`, one path per call.
+- **Worktrees:** `C:\wts-168`. Remove only with `Remove-WorktreeSafe.ps1`, one path per call.
 - **Stash:** two old `lint-staged automatic backup` entries (20 and 30 h old) are not ours. Leave them.
 
 ## Peers (current session names)
