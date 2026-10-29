@@ -780,7 +780,7 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
         },
         ["sprk_invoice"] = new[]
         {
-            "sprk_invoiceid", "sprk_name", "sprk_invoicenumber", "sprk_invoicedate", "sprk_invoicestatus",
+            "sprk_invoiceid", "sprk_name", "sprk_invoicenumber", "sprk_invoicedate",
             "sprk_totalamount", "sprk_project", "sprk_matter",
             // spaarke-SPA-external-access-platform-r3 (owner Partner UAT 2026-10-17, ebilling-r1 task 015): NOT grid-derived.
             // The SPA record detail reads the invoice status from statuscode. Appears on both sides of the task 134 shrink
@@ -885,6 +885,16 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
         { "sprk_matter", "sprk_practicearea" },
     };
 
+    /// <summary>
+    /// The drop set that is NOT rule (b): columns the allow-list admitted that the owner later retired once nothing external
+    /// read them. sprk_invoice.sprk_invoicestatus: grid 3ff4102c moved to statuscode on 2026-10-18; removed by r3 task 002 with
+    /// ebilling's OK on 2026-10-29. Task 134 had admitted it as a grid column, so it is on the "before" side of the shrink.
+    /// </summary>
+    public static TheoryData<string, string> RetiredAfterTask157 => new()
+    {
+        { "sprk_invoice", "sprk_invoicestatus" },
+    };
+
     public static TheoryData<string> DerivedEntities
     {
         get
@@ -938,11 +948,12 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
 
     [Theory]
     [MemberData(nameof(DerivedEntities))]
-    public void LiveDerivation_ComparedWithTask134_OnlyShrinksAndDropsExactlyTheRuleBColumns(string entity)
+    public void LiveDerivation_ComparedWithTask134_OnlyShrinksAndDropsExactlyTheRuleBAndRetiredColumns(string entity)
     {
         var before = Task134AllowLists[entity];
         var after = LiveDerivedAllowLists[entity];
-        var expectedDrop = RuleBOnlyColumns.Where(row => (string)row[0] == entity).Select(row => (string)row[1]);
+        var expectedDrop = RuleBOnlyColumns.Concat(RetiredAfterTask157)
+            .Where(row => (string)row[0] == entity).Select(row => (string)row[1]);
 
         after.Should().BeSubsetOf(before, "a shrink never adds a column");
         before.Except(after).Should().BeEquivalentTo(expectedDrop);
@@ -1284,6 +1295,34 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
         var result = await FetchGrantedEverywhere(entity, fetchXml, id, ProductionRegistry(), dataverse);
 
         ShouldBeNotRegistered(result);
+        dataverse.Calls.Should().Be(0);
+    }
+
+    [Theory]
+    [MemberData(nameof(RetiredAfterTask157))]
+    public async Task ExecuteScopedFetch_WhenARetiredColumnIsRequested_Returns400AndNeverQueries(string entity, string column)
+    {
+        var id = Guid.NewGuid();
+        var dataverse = new FetchDouble();
+
+        var result = await FetchGrantedEverywhere(entity, GridFetchXmlPlusColumn(entity, column), id, ProductionRegistry(), dataverse);
+
+        ShouldBeProblem(result, StatusCodes.Status400BadRequest, ExternalModuleDataEndpoints.ErrorFetchXmlColumnNotPermitted);
+        dataverse.Calls.Should().Be(0);
+    }
+
+    [Theory]
+    [MemberData(nameof(RetiredAfterTask157))]
+    public async Task GetScopedRecord_WhenSelectNamesARetiredColumn_Returns400AndNeverReads(string entity, string column)
+    {
+        var id = Guid.NewGuid();
+        var dataverse = new RecordDouble(new Dictionary<string, object?> { [column] = "x" });
+
+        var result = await ExternalModuleDataEndpoints.GetScopedRecordCoreAsync(
+            entity, id, column, GrantedEverywhere(id), ProductionRegistry(), dataverse.Read,
+            NullLogger.Instance, CancellationToken.None);
+
+        ShouldBeProblem(result, StatusCodes.Status400BadRequest, ExternalModuleDataEndpoints.ErrorRecordColumnNotPermitted);
         dataverse.Calls.Should().Be(0);
     }
 
