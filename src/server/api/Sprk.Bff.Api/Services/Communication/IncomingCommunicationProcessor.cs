@@ -1332,35 +1332,7 @@ public sealed class IncomingCommunicationProcessor
             communicationId, spePath);
 
         // Create sprk_document record linking to the archived file
-        var senderEmail = message.From?.EmailAddress?.Address;
-        var recipientEmails = message.ToRecipients?
-            .Where(r => r.EmailAddress?.Address is not null)
-            .Select(r => r.EmailAddress!.Address!)
-            .ToArray();
-
-        var document = new DataverseEntity("sprk_document")
-        {
-            ["sprk_documentname"] = $"Archived: {TruncateTo(message.Subject ?? "(No Subject)", 180)}",
-            ["sprk_filename"] = emlResult.FileName, // e.g., "email-2026-03-12.eml" — AI analyzer reads this for file type
-            ["sprk_documenttype"] = new OptionSetValue(100000006), // Email
-            ["sprk_sourcetype"] = new OptionSetValue(659490003), // Email Archive
-            ["sprk_relatedcommunication"] = new EntityReference("sprk_communication", communicationId),
-            ["sprk_graphitemid"] = fileHandle?.Id,
-            [Spaarke.Dataverse.DocumentPointerBinding.BoundItemIdColumn] = fileHandle?.Id, // Task 171 round 72 (F4): the field-secured copy the pointer check compares — same write, same value.
-            ["sprk_graphdriveid"] = driveId,
-            ["sprk_isemailarchive"] = true,
-            ["sprk_emailsubject"] = message.Subject ?? "(No Subject)",
-            ["sprk_emaildirection"] = new OptionSetValue(100000000), // Received
-        };
-
-        if (!string.IsNullOrEmpty(senderEmail))
-            document["sprk_emailfrom"] = senderEmail;
-        if (recipientEmails is { Length: > 0 })
-            document["sprk_emailto"] = string.Join("; ", recipientEmails);
-        if (message.ReceivedDateTime.HasValue)
-            document["sprk_emaildate"] = message.ReceivedDateTime.Value.DateTime;
-
-        ApplyOwner(document, owner); // task 146 — owned like its communication
+        var document = ArchivedEmlDocument(message, emlResult.FileName, communicationId, fileHandle?.Id, driveId, owner);
 
         var documentId = await _genericEntityService.CreateAsync(document, ct);
 
@@ -1386,6 +1358,48 @@ public sealed class IncomingCommunicationProcessor
             }
             await EnqueueRagIndexingAsync(driveId, fileHandle.Id, documentId, emlResult.FileName, communicationId, parentEntity, ct);
         }
+    }
+
+    /// <summary>
+    /// THE archived <c>.eml</c> document of an inbound communication (task 146): it names its communication
+    /// (<c>sprk_relatedcommunication</c>) and is owned exactly as the communication is (<see cref="ApplyOwner"/>). UAC task 194b
+    /// fix round, slice 3: one builder, which the existing-row parity test calls — so the lookups the reconciler later asks
+    /// about are the ones this writer writes.
+    /// </summary>
+    internal static DataverseEntity ArchivedEmlDocument(
+        Message message, string fileName, Guid communicationId, string? fileItemId, string driveId,
+        Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution owner)
+    {
+        var senderEmail = message.From?.EmailAddress?.Address;
+        var recipientEmails = message.ToRecipients?
+            .Where(r => r.EmailAddress?.Address is not null)
+            .Select(r => r.EmailAddress!.Address!)
+            .ToArray();
+
+        var document = new DataverseEntity("sprk_document")
+        {
+            ["sprk_documentname"] = $"Archived: {TruncateTo(message.Subject ?? "(No Subject)", 180)}",
+            ["sprk_filename"] = fileName, // e.g., "email-2026-03-12.eml" — AI analyzer reads this for file type
+            ["sprk_documenttype"] = new OptionSetValue(100000006), // Email
+            ["sprk_sourcetype"] = new OptionSetValue(659490003), // Email Archive
+            ["sprk_relatedcommunication"] = new EntityReference("sprk_communication", communicationId),
+            ["sprk_graphitemid"] = fileItemId,
+            [Spaarke.Dataverse.DocumentPointerBinding.BoundItemIdColumn] = fileItemId, // Task 171 round 72 (F4): the field-secured copy the pointer check compares — same write, same value.
+            ["sprk_graphdriveid"] = driveId,
+            ["sprk_isemailarchive"] = true,
+            ["sprk_emailsubject"] = message.Subject ?? "(No Subject)",
+            ["sprk_emaildirection"] = new OptionSetValue(100000000), // Received
+        };
+
+        if (!string.IsNullOrEmpty(senderEmail))
+            document["sprk_emailfrom"] = senderEmail;
+        if (recipientEmails is { Length: > 0 })
+            document["sprk_emailto"] = string.Join("; ", recipientEmails);
+        if (message.ReceivedDateTime.HasValue)
+            document["sprk_emaildate"] = message.ReceivedDateTime.Value.DateTime;
+
+        ApplyOwner(document, owner); // task 146 — owned like its communication
+        return document;
     }
 
     /// <summary>

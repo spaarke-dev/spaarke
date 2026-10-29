@@ -262,10 +262,14 @@ public class TodoAssigneeOwnerReconciliationJobTests
             shape == "secure-parent" ? [("sprk_matter", new EntityReference("sprk_matter", SecureMatter))] : []);
         if (shape == "record-resolved-secure-signal")
         {
-            // An also-resolved Signal about another item, under the secure matter, linked to this record.
-            _world.Add("sprk_signal", Guid.NewGuid(), ("owningteam", new EntityReference("team", SecureTeam)),
+            // An also-resolved Signal about the secure matter, linked to this record and listed in its sprk_steps.
+            var resolved = Guid.NewGuid();
+            _world.Add("sprk_signal", resolved, ("owningteam", new EntityReference("team", SecureTeam)),
                 ("sprk_decisionrecord", new EntityReference("sprk_decisionrecord", id)),
+                ("sprk_regardingrecordid", SecureMatter.ToString("D")),
+                ("sprk_regardingmatter", new EntityReference("sprk_matter", SecureMatter)),
                 ("sprk_matter", new EntityReference("sprk_matter", SecureMatter)), ("versionnumber", 1L));
+            _world.Set("sprk_decisionrecord", id, "sprk_steps", Steps(resolved));
         }
 
         var run = await Job(writes: "true").ExecuteAsync(Context(), CancellationToken.None);
@@ -517,22 +521,90 @@ public class TodoAssigneeOwnerReconciliationJobTests
         Result(next).GetProperty("carriedToDos").GetInt32().Should().Be(0, "the rest waits for the nightly recompute");
     }
 
-    [Fact(DisplayName = "148: the Signal table's columns cannot be probed — the nightly pass never writes a DR past its unchecked resolved Signals")]
+    [Fact(DisplayName = "148: the Signal table's columns cannot be probed — the nightly pass never writes a DR past its resolved Signals (194b R A6: read by id from its sprk_steps, so a secure one is still asked)")]
     public async Task SignalProbeFault_DecisionRecordIsNotWrittenPastItsResolvedSignals()
     {
         PersonalToDo(modified: BeforeNightly.AddDays(-10)); // outside the watermark: only the nightly pass reads its record
         LinkAssignee(Eligible(Assignee));
         var record = Row("sprk_decisionrecord", GeneralTeam);
-        _world.Add("sprk_signal", Guid.NewGuid(), ("owningteam", new EntityReference("team", SecureTeam)),
+        var resolved = Guid.NewGuid();
+        _world.Add("sprk_signal", resolved, ("owningteam", new EntityReference("team", SecureTeam)),
             ("sprk_decisionrecord", new EntityReference("sprk_decisionrecord", record)),
+            ("sprk_regardingrecordid", SecureMatter.ToString("D")),
+            ("sprk_regardingmatter", new EntityReference("sprk_matter", SecureMatter)),
             ("sprk_matter", new EntityReference("sprk_matter", SecureMatter)), ("versionnumber", 1L));
+        _world.Set("sprk_decisionrecord", record, "sprk_steps", Steps(resolved));
         _clock.SetUtcNow(BeforeNightly.AddHours(2)); // 03:00 UTC
 
         var run = await Job(writes: "true", failingProbeOf: "sprk_signal").ExecuteAsync(Context(), CancellationToken.None);
 
         Result(run).GetProperty("fullPass").GetBoolean().Should().BeTrue();
         Result(run).GetProperty("status").GetString().Should().Be(TodoAssigneeOwnerReconciliationJob.StatusError);
-        Result(run).GetProperty("unverified").GetInt32().Should().Be(1, "the record was read but could not be decided");
+        Result(run).GetProperty("skippedSecure").GetInt32().Should().Be(1, "the resolved Signal is read by id, without the probe");
+        _world.OwnerOf("sprk_decisionrecord", record).Should().Be(DataversePrincipalRef.Team(GeneralTeam));
+        _webApi.ConditionalWrites.Should().BeEmpty();
+    }
+
+    // ── UAC task 194b fix round R (A6): the Signals a Decision Record resolved, from its sprk_steps ─────────────────────
+
+    [Fact(DisplayName = "194b R (A6) must fire: a Signal closed during the review (listed in the record's sprk_steps, not linked to it) has a SECURE subject — the job never re-owns the Decision Record to an ordinary team: SkippedSecure")]
+    public async Task ClosedSignalWithASecureSubject_DecisionRecordIsSkippedSecure_NeverReownedOrdinary()
+    {
+        PersonalToDo(modified: BeforeNightly.AddMinutes(-1));
+        LinkAssignee(Eligible(Assignee));
+        var record = Row("sprk_decisionrecord", GeneralTeam);
+        _world.Set("sprk_decisionrecord", record, "sprk_steps", Steps(ClosedSignalAbout(SecureMatter)));
+
+        var run = await Job(writes: "true").ExecuteAsync(Context(), CancellationToken.None);
+
+        Result(run).GetProperty("skippedSecure").GetInt32().Should().Be(1);
+        Result(run).GetProperty("reowned").GetInt32().Should().Be(0);
+        _world.OwnerOf("sprk_decisionrecord", record).Should().Be(DataversePrincipalRef.Team(GeneralTeam));
+        _webApi.ConditionalWrites.Should().BeEmpty("a Decision Record under a secure subject is never moved to an ordinary team");
+    }
+
+    [Fact(DisplayName = "194b R (A6) must not fire: a Signal closed during the review with an ORDINARY subject — the Decision Record follows the assignee")]
+    public async Task ClosedSignalWithAnOrdinarySubject_DecisionRecordFollowsTheAssignee()
+    {
+        PersonalToDo(modified: BeforeNightly.AddMinutes(-1));
+        LinkAssignee(Eligible(Assignee));
+        var record = Row("sprk_decisionrecord", GeneralTeam);
+        _world.Set("sprk_decisionrecord", record, "sprk_steps", Steps(ClosedSignalAbout(Matter)));
+
+        var run = await Job(writes: "true").ExecuteAsync(Context(), CancellationToken.None);
+
+        Result(run).GetProperty("reowned").GetInt32().Should().Be(1);
+        _world.OwnerOf("sprk_decisionrecord", record).Should().Be(DataversePrincipalRef.Team(OtherBuTeam));
+    }
+
+    [Theory(DisplayName = "194b R (A6) must fire: an INCOMPLETE question (a listed Signal gone, or no resolvedSignalIds) never writes an ordinary owner — not decided, the run partial; a secure subject in the known part is still SkippedSecure")]
+    [InlineData("gone", false)]
+    [InlineData("no-list", false)]
+    [InlineData("gone", true)]
+    public async Task IncompleteQuestion_NeverWritesAnOrdinaryOwner(string why, bool knownSecure)
+    {
+        PersonalToDo(modified: BeforeNightly.AddMinutes(-1));
+        LinkAssignee(Eligible(Assignee));
+        var record = Row("sprk_decisionrecord", GeneralTeam);
+        var listed = new List<Guid> { Guid.NewGuid() }; // never added: gone
+        if (knownSecure)
+            listed.Add(ClosedSignalAbout(SecureMatter));
+        _world.Set("sprk_decisionrecord", record, "sprk_steps",
+            why == "no-list" ? "{\"reviewId\":\"x\"}" : Steps(listed.ToArray()));
+
+        var run = await Job(writes: "true").ExecuteAsync(Context(), CancellationToken.None);
+
+        Result(run).GetProperty("reowned").GetInt32().Should().Be(0);
+        if (knownSecure)
+        {
+            Result(run).GetProperty("skippedSecure").GetInt32().Should().Be(1);
+        }
+        else
+        {
+            Result(run).GetProperty("unverified").GetInt32().Should().Be(1, "an ordinary owner is never written on part of the question");
+            Result(run).GetProperty("status").GetString().Should().NotBe(TodoAssigneeOwnerReconciliationJob.StatusOk);
+        }
+
         _world.OwnerOf("sprk_decisionrecord", record).Should().Be(DataversePrincipalRef.Team(GeneralTeam));
         _webApi.ConditionalWrites.Should().BeEmpty();
     }
@@ -555,18 +627,42 @@ public class TodoAssigneeOwnerReconciliationJobTests
     private static AssignedLinkCandidate Eligible(Guid user) =>
         new(user, AssigneeContact, Oid: null, IsDisabled: false, AccessMode: 0, ApplicationId: null, IsExternal: false);
 
-    /// <summary>A Signal or Decision Record about the To Do, owned by <paramref name="team"/>.</summary>
+    /// <summary>A Signal or Decision Record about the To Do, owned by <paramref name="team"/>. A Decision Record carries the
+    /// <c>sprk_steps</c> its writer writes, listing no other resolved Signal unless a test sets one (194b R, A6).</summary>
     private Guid Row(string table, Guid team, (string Column, object Value)[]? extra = null)
     {
         var id = Guid.NewGuid();
+        var steps = table == "sprk_decisionrecord" ? new (string, object)[] { ("sprk_steps", Steps()) } : [];
         _world.Add(table, id,
             new (string, object)[]
             {
                 ("sprk_regardingtodo", new EntityReference("sprk_todo", Todo)),
                 ("owningteam", new EntityReference("team", team)),
                 ("versionnumber", 1L),
-            }.Concat(extra ?? []).ToArray());
+            }.Concat(steps).Concat(extra ?? []).ToArray());
         return id;
+    }
+
+    /// <summary>A Decision Record's <c>sprk_steps</c> listing <paramref name="resolvedSignals"/> (DecisionRecordWriter's shape).</summary>
+    private static string Steps(params Guid[] resolvedSignals) => System.Text.Json.JsonSerializer.Serialize(new
+    {
+        reviewId = Guid.NewGuid().ToString("D"),
+        resolvedSignalIds = resolvedSignals.Select(s => s.ToString("D")),
+        steps = Array.Empty<object>(),
+    });
+
+    /// <summary>A Signal about matter <paramref name="matter"/>, closed during the review: resolved and NOT linked to any
+    /// record (no <c>sprk_decisionrecord</c>) — only a record's <c>sprk_steps</c> names it.</summary>
+    private Guid ClosedSignalAbout(Guid matter)
+    {
+        var signal = Guid.NewGuid();
+        _world.Add("sprk_signal", signal,
+            ("owningteam", new EntityReference("team", GeneralTeam)),
+            ("sprk_signalstatus", new OptionSetValue(SignalWriter.SignalStatusResolved)),
+            ("sprk_regardingrecordid", matter.ToString("D")),
+            ("sprk_regardingmatter", new EntityReference("sprk_matter", matter)),
+            ("versionnumber", 1L));
+        return signal;
     }
 
     private TodoAssigneeOwnerReconciliationJob Job(

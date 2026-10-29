@@ -1,0 +1,199 @@
+{
+  "schemaVersion": 1,
+  "description": "What the 'Spaarke Core User' role must hold so the client create wizards can save (issue #2382). A wizard creates its record as the user (Xrm.WebApi, or the BFF child-record route, which checks the same rights as the caller) and binds lookups in the same create. Dataverse then needs Append on the created table and AppendTo on every bound target. The rule: Core User can link wizard lookups at its Read depth, so AppendTo on each target is exactly 'appendToDepth', which is the role's Read depth on that table (no lower, so the save works; no higher than Read), except where 'appendToAboveRead' declares why, and Append on each created table is at least the role's Create depth. This file is the ONE declared list. tests/Spaarke.ArchTests/CoreUserWizardLinkingGuardTests.cs checks the role XML against it and fails when a wizard binds an entity set it does not list; scripts/Set-WizardLinkingAndMembershipPrivileges.ps1 applies it to an environment.",
+  "howToExtend": [
+    "A wizard that binds a new lookup target fails the guard's source scan until the target is listed in 'bindTargets'. Add it with the wizard that binds it and where the bind comes from.",
+    "'appendToDepth' is the depth the role holds AppendTo at, and the role's Read depth on that table. The guard fails when the role XML holds AppendTo or Read at any other depth; the script raises AppendTo to it (never above it) and -Verify fails when the live Read or AppendTo depth differs from it.",
+    "'appendToAboveRead' (rare) declares a target whose AppendTo is deliberately above Read: its 'readDepth', the 'reason' and the commit ('since') that made it so. Without it, AppendTo above Read fails the guard.",
+    "'appendToPrivilege', 'readPrivilege', 'appendPrivilege' and 'createPrivilege' are the privilege names from metadata (EntityDefinitions(LogicalName='x')/Privileges). The casing follows the schema name.",
+    "Never raise Read, Create, Write, Delete, Share or Assign to satisfy this file. It only adds or raises AppendTo and Append."
+  ],
+  "roleName": "Spaarke Core User",
+  "bindTargets": [
+    {
+      "logicalName": "contact",
+      "entitySet": "contacts",
+      "readPrivilege": "prvReadContact",
+      "appendToPrivilege": "prvAppendToContact",
+      "appendToDepth": "Deep",
+      "boundBy": "Project, Matter, Event, Report Card, To Do and Work Assignment wizards (assigned people); field mappings from a matter"
+    },
+    {
+      "logicalName": "sprk_organization",
+      "entitySet": "sprk_organizations",
+      "readPrivilege": "prvReadsprk_Organization",
+      "appendToPrivilege": "prvAppendTosprk_Organization",
+      "appendToDepth": "Deep",
+      "boundBy": "Project and Matter (outside counsel), Invoice (vendor), Report Card; field mappings from a matter"
+    },
+    {
+      "logicalName": "account",
+      "entitySet": "accounts",
+      "readPrivilege": "prvReadAccount",
+      "appendToPrivilege": "prvAppendToAccount",
+      "appendToDepth": "Deep",
+      "boundBy": "Project and Matter wizards launched from an account; regarding parent"
+    },
+    {
+      "logicalName": "sprk_aisearchindex",
+      "entitySet": "sprk_aisearchindexes",
+      "readPrivilege": "prvReadsprk_AISearchIndex",
+      "appendToPrivilege": "prvAppendTosprk_AISearchIndex",
+      "appendToDepth": "Deep",
+      "boundBy": "Business-unit default cascade (Project, Matter, Event, Invoice)"
+    },
+    {
+      "logicalName": "sprk_mattertype_ref",
+      "entitySet": "sprk_mattertype_refs",
+      "readPrivilege": "prvReadsprk_MatterType_Ref",
+      "appendToPrivilege": "prvAppendTosprk_MatterType_Ref",
+      "appendToDepth": "Global",
+      "boundBy": "Matter wizard"
+    },
+    {
+      "logicalName": "sprk_practicearea_ref",
+      "entitySet": "sprk_practicearea_refs",
+      "readPrivilege": "prvReadsprk_PracticeArea_Ref",
+      "appendToPrivilege": "prvAppendTosprk_PracticeArea_Ref",
+      "appendToDepth": "Global",
+      "boundBy": "Project and Matter wizards"
+    },
+    {
+      "logicalName": "sprk_projecttype_ref",
+      "entitySet": "sprk_projecttype_refs",
+      "readPrivilege": "prvReadsprk_ProjectType_Ref",
+      "appendToPrivilege": "prvAppendTosprk_ProjectType_Ref",
+      "appendToDepth": "Global",
+      "boundBy": "Project wizard"
+    },
+    {
+      "logicalName": "sprk_recordtype_ref",
+      "entitySet": "sprk_recordtype_refs",
+      "readPrivilege": "prvReadsprk_RecordType_Ref",
+      "appendToPrivilege": "prvAppendTosprk_RecordType_Ref",
+      "appendToDepth": "Global",
+      "boundBy": "Regarding resolver fields (Event, Invoice, Report Card, To Do, Work Assignment)"
+    },
+    {
+      "logicalName": "sprk_eventtype_ref",
+      "entitySet": "sprk_eventtype_refs",
+      "readPrivilege": "prvReadsprk_EventType_Ref",
+      "appendToPrivilege": "prvAppendTosprk_EventType_Ref",
+      "appendToDepth": "Global",
+      "appendToAboveRead": {
+        "readDepth": "Deep",
+        "reason": "Global because users sit in child and secure BUs and the reference rows are owned outside them (section 18 says the root BU; on dev 2026-10-28 they are owned in a child BU, see #2401); it matches Service Writer and Basic User's Global AppendTo on sprk_recordtype_ref (projects/spaarke-ontology-platform-r1/notes/security-roles.md section 18, D-110, task 159: the Assign Task step binds sprk_eventtype_ref as the caller). Added to the role XML by commit 4e9e295a30 (ontology task 159 fix round 1, 2026-10-22); Read has been Deep since 65eb1cb2b2. #2382 does not change it.",
+        "since": "4e9e295a30"
+      },
+      "boundBy": "Event wizard"
+    },
+    {
+      "logicalName": "sprk_matter",
+      "entitySet": "sprk_matters",
+      "readPrivilege": "prvReadsprk_Matter",
+      "appendToPrivilege": "prvAppendTosprk_Matter",
+      "appendToDepth": "Deep",
+      "boundBy": "Regarding parent; Matter wizard follow-on invoice update"
+    },
+    {
+      "logicalName": "sprk_project",
+      "entitySet": "sprk_projects",
+      "readPrivilege": "prvReadsprk_Project",
+      "appendToPrivilege": "prvAppendTosprk_Project",
+      "appendToDepth": "Deep",
+      "boundBy": "Regarding parent"
+    },
+    {
+      "logicalName": "sprk_invoice",
+      "entitySet": "sprk_invoices",
+      "readPrivilege": "prvReadsprk_Invoice",
+      "appendToPrivilege": "prvAppendTosprk_Invoice",
+      "appendToDepth": "Deep",
+      "boundBy": "Regarding parent"
+    },
+    {
+      "logicalName": "sprk_workassignment",
+      "entitySet": "sprk_workassignments",
+      "readPrivilege": "prvReadsprk_WorkAssignment",
+      "appendToPrivilege": "prvAppendTosprk_WorkAssignment",
+      "appendToDepth": "Deep",
+      "boundBy": "Regarding parent; Work Assignment follow-on event"
+    },
+    {
+      "logicalName": "sprk_event",
+      "entitySet": "sprk_events",
+      "readPrivilege": "prvReadsprk_Event",
+      "appendToPrivilege": "prvAppendTosprk_Event",
+      "appendToDepth": "Deep",
+      "boundBy": "Regarding parent (Work Assignment)"
+    },
+    {
+      "logicalName": "sprk_servicerequest",
+      "entitySet": "sprk_servicerequests",
+      "readPrivilege": "prvReadsprk_ServiceRequest",
+      "appendToPrivilege": "prvAppendTosprk_ServiceRequest",
+      "appendToDepth": "Deep",
+      "boundBy": "Regarding parent (shared regarding resolver)"
+    },
+    {
+      "logicalName": "sprk_budget",
+      "entitySet": "sprk_budgets",
+      "readPrivilege": "prvReadsprk_Budget",
+      "appendToPrivilege": "prvAppendTosprk_Budget",
+      "appendToDepth": "Deep",
+      "boundBy": "Regarding parent (Event)"
+    },
+    {
+      "logicalName": "sprk_analysis",
+      "entitySet": "sprk_analyses",
+      "readPrivilege": "prvReadsprk_analysis",
+      "appendToPrivilege": "prvAppendTosprk_analysis",
+      "appendToDepth": "Deep",
+      "boundBy": "Regarding parent (Event)"
+    }
+  ],
+  "createdTables": [
+    {
+      "logicalName": "sprk_project",
+      "createPrivilege": "prvCreatesprk_Project",
+      "appendPrivilege": "prvAppendsprk_Project",
+      "createdBy": "Project wizard (Xrm.WebApi)"
+    },
+    {
+      "logicalName": "sprk_matter",
+      "createPrivilege": "prvCreatesprk_Matter",
+      "appendPrivilege": "prvAppendsprk_Matter",
+      "createdBy": "Matter wizard (Xrm.WebApi)"
+    },
+    {
+      "logicalName": "sprk_event",
+      "createPrivilege": "prvCreatesprk_Event",
+      "appendPrivilege": "prvAppendsprk_Event",
+      "createdBy": "Event and Work Assignment wizards (BFF child-record route)"
+    },
+    {
+      "logicalName": "sprk_invoice",
+      "createPrivilege": "prvCreatesprk_Invoice",
+      "appendPrivilege": "prvAppendsprk_Invoice",
+      "createdBy": "Invoice wizard (BFF child-record route); Matter wizard follow-on update"
+    },
+    {
+      "logicalName": "sprk_reportcard",
+      "createPrivilege": "prvCreatesprk_ReportCard",
+      "appendPrivilege": "prvAppendsprk_ReportCard",
+      "createdBy": "Report Card wizard (BFF child-record route)"
+    },
+    {
+      "logicalName": "sprk_todo",
+      "createPrivilege": "prvCreatesprk_Todo",
+      "appendPrivilege": "prvAppendsprk_Todo",
+      "createdBy": "To Do wizard (BFF child-record route)"
+    },
+    {
+      "logicalName": "sprk_workassignment",
+      "createPrivilege": "prvCreatesprk_WorkAssignment",
+      "appendPrivilege": "prvAppendsprk_WorkAssignment",
+      "createdBy": "Work Assignment wizard (BFF child-record route)"
+    }
+  ]
+}

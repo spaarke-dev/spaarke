@@ -70,7 +70,10 @@ public sealed class ComposeContentDedupTests
         NullLogger<ComposeService>.Instance,
         ComposeServiceCollaborators.Resolver(_dataverse.Object),
         ComposeServiceCollaborators.Probe().Object,
-        dedupDetector: detector, ownership: new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble());
+        dedupDetector: detector, ownership: _ownership);
+
+    /// <summary>The owner question the promoter asks (UAC task 194b V-fix 3 reads it back).</summary>
+    private readonly Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble _ownership = new();
 
     // SessionId "" skips the FR-07 rebind (no ChatSessionManager interaction) so the test targets the dedup hook.
     private static PromoteComposeDocumentRequest Request() => new()
@@ -137,6 +140,55 @@ public sealed class ComposeContentDedupTests
         created.GetAttributeValue<string>(CanonicalHashAttr).Should().Be("hashDup");
         _dedup.Verify(d => d.NotifyLinkedCopyAsync(It.IsAny<string>(), canonical, It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once,
             "a linked copy must NOTIFY the uploader — never silent");
+    }
+
+    // UAC task 194b V-fix 3: the canonical a copy is linked to is a Secure-only parent of the copy's owner question — in
+    // secure-if-any, never the primary — and the question is the one the reconciler asks about the written copy.
+    [Fact]
+    public async Task CreateOnSave_ContentMatchesCanonical_AsksTheOwnerQuestionWithTheCanonicalAsASecureOnlyParent()
+    {
+        var canonical = Guid.NewGuid();
+        ArrangeNoExistingRow();
+        Entity? created = null;
+        _dataverse.Setup(d => d.UpsertAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((e, _) => created = e)
+            .ReturnsAsync((Guid.NewGuid(), true));
+        _dedup.Setup(d => d.ResolveContentIdentityAsync(DriveId, SpeItemId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(("hashDup", canonical));
+
+        await CreateSut(_dedup.Object).PromoteIfEphemeralAsync(Request(), HttpCtx());
+
+        var question = _ownership.Requests.Should().ContainSingle().Subject;
+        var link = new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent("sprk_document", canonical);
+        question.SecureOnlyParents.Should().Equal(new[] { link }, "a copy of Secure content is Secure");
+        question.Parents.Should().NotContain(link, "the canonical is never the copy's primary (task 146: not the canonical's BU)");
+        question.Parents.Should().Equal(Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.OrderedParentsOf(created!),
+            "the reconciler's question about the written copy");
+        question.SecureOnlyParents.Should().Equal(
+            Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.SecureOnlyParentsOf(created!));
+    }
+
+    [Fact]
+    public async Task CreateOnSave_CopyOfASecureCanonical_IsCreatedOwnedByTheSecureTeam()
+    {
+        var canonical = Guid.NewGuid();
+        var secureTeam = Guid.NewGuid();
+        _ownership.AnswerFor = context =>
+            context.SecureOnlyParents.Any(p => p.RecordId == canonical)
+                ? Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution.Owned(secureTeam) with { IsSecureOwner = true }
+                : null;
+        ArrangeNoExistingRow();
+        Entity? created = null;
+        _dataverse.Setup(d => d.UpsertAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((e, _) => created = e)
+            .ReturnsAsync((Guid.NewGuid(), true));
+        _dedup.Setup(d => d.ResolveContentIdentityAsync(DriveId, SpeItemId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(("hashDup", canonical));
+
+        await CreateSut(_dedup.Object).PromoteIfEphemeralAsync(Request(), HttpCtx());
+
+        created!.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(secureTeam,
+            "created Secure on the upsert itself, never re-owned afterwards");
     }
 
     [Fact]
