@@ -157,3 +157,56 @@ Consumers: no SPA or shared client type mirrors this read model (searched `src/`
 Tests (`InvoiceReviewReadServiceTests`): each code shown on its line and not on others; old row (no member) reads empty with no log; no submission reads empty; five kinds of malformed entry skipped with one warning and the good entry kept; non-array member reads empty with one warning.
 
 UI follow-up (not built): the review page should show `lineFindings[].message` as the reason on a Flagged line that has no policy findings, and may count them in its line badge. The server counts do not include them.
+
+## B2b-1. Re-evaluation, findings patch, line status
+
+Branch `task/ebill-101-corrections`, on top of `6d54c3fcd5`.
+
+| Piece | Where |
+|---|---|
+| Follow-through | `Services/Finance/InvoiceCorrectionReevaluation.cs` (public sealed, concrete, scoped, ADR-010). `ApplyAsync(CorrectionApplied, ct)` is the service's `onValueWritten`. |
+| Wiring | `InvoiceCorrectionService`'s public constructor takes it and passes `ApplyAsync` as the seam; `FinanceModule` registers it next to the service. |
+| Step names | `CorrectionCodes.FindingsStep` (`findings`), `CorrectionCodes.StatusStep` (`status`); a failure is `CorrectionStepException(step)`, mapped to the 503 Incomplete `failedStep`. Any other seam failure stays `reevaluation`. |
+| Uncoded re-code (D-126) | `InvoiceCorrectionService.CorrectLineAsync` / `CheckCodeAsync` / `ResolveForUncodedAsync` |
+| Guards | `FindingsJsonAppOnlyReadGuardTests` reviewed type (row 8 in the task 122 notes: app-only read and row-version-conditional write). |
+
+**Order.** After the value write: (1) findings step: read the invoice, its fee and expense lines, every correction row, the latest submission; rebuild the request; load the facts once; evaluate twice; patch; one row-version-conditional update of `sprk_findingsjson` (skipped when the patch changes nothing). (2) Status step: one transaction of row-version-conditional line updates (skipped when no status changes).
+
+**The request, rebuilt.** Header: a field with a Corrected / Confirmed row from its column, any other from the header provenance's read value (the invoice number column holds the typed number), else its column. Lines: the columns; codes, observations and confidences from the line's extraction JSON; the resolved timekeeper and approved rate as Found / matched or not. The corrected field takes its pre-correction value on the "before" side (the previous Corrected / Confirmed row's `sprk_finalvalue`, else the first row's `sprk_aivalue`) and the latest row's final value on the "after" side. Confidence 1.0 for every field with a Corrected / Confirmed row, and for the corrected field on the after side (on the before side only when an earlier row exists). Facts the rows do not keep (the timekeeper's unmatched reason, an observation's quoted text, a rate's not-found reason) are rebuilt the same on both sides, so they cannot make a difference.
+
+**The patch.**
+- `findings[]`, keyed (policy version, subject, line, reason code): a key whose entries differ between the two evaluations has its stored entries replaced in place (same `index`, 073's `consequence` / `rejects` / `heldBecause` kept), the extra ones removed, new ones appended at an index above every stored index and every `decision.deciding` index (a removed index is never reused). A new entry carries the rule version's consequence and `rejects: false` (073 is not re-run on an In Review invoice). D-112 scrub follows the after evaluation's withheld groups.
+- `signalPlan[]`, keyed (policy code, subject entity, subject id): a group whose mapped entry differs is replaced, added or removed. An entry the writer's preflight would refuse is left out (removed).
+- Code correction (any code field, allowed by construction): that line's `codingFindings[]` entry loses the refused codes of the corrected kind and that kind's `mismatch` flag; the entry goes when no refusal and no mismatch is left. A `coding.not_returned` entry of the line goes.
+- Narrative correction to a non-blank value: the line's `line.no_description` goes.
+- `rules.not_checked` is never removed.
+- A decided line (Accepted, Reduced, Disallowed): no entry naming it is touched (findings, plan, clears) and its status is not written.
+
+**`pendingSignalChanges` (exactly what is stored).** A new root member `{ "rule": [...], "system": [...] }`:
+- `rule[]`: one entry per (policy, subject) whose plan entry a correction changed since B2b-2 last reconciled: `{ policyCode, subjectEntity, subjectId, closeFingerprint, raiseFingerprint }`. `closeFingerprint` is the stored plan entry's fingerprint before the FIRST correction that changed the group (null when none was stored); later corrections keep it. `raiseFingerprint` is the fingerprint now in the plan (null when the group no longer fires). An entry with both null is dropped.
+- `system[]`: `{ line, kind, reason }` per system finding removed from `codingFindings[]` (`kind` Task / Activity / Expense, `reason` `refused` or `firmCodeMismatch`); de-duplicated.
+- No value is stored. `StoredFindings.Parse` ignores the member.
+
+**Line status.** For each line the diff or a clear touched (the corrected line always): `InvoiceSubmissionPersister.LineStatusFor(flagged, coded)` where flagged = any `findings[]` (subject Line), `lineFindings[]` or `codingFindings[]` entry names the line in the PATCHED JSON, and coded = the line's coding records a `codeSetId`. A line of an uncoded invoice that is not re-coded therefore re-derives Pending when its last finding clears (the persister's rule).
+
+**Uncoded invoices (D-126).** A code correction of a Pending line whose coding says `NotCoded` is allowed; any other Pending line is still 409 `ebilling.line.pending`. The set is resolved by `CodeSetResolver.ResolveAsync` for the invoice's single core record over the invoice's lines as stored (the FR-22 order, including step 4's suggestion provider). No usable set (`LineCodingException.NoCodeSet`) is 409 `code_set_unavailable` and nothing is written. On success `codeSetId`, `codeSetName`, `codeSetSource`, `needsReview` are recorded in the line's `coding` block with the code; `status` stays `NotCoded` (no AI coded the line, so task 100's bulk label rows still skip it), and a later correction reads the set back with `LoadRecordedAsync`. The correction row has no source code / version (the AI offered no code, B1's rule).
+
+**Not here.** Currency and TotalDue corrections are not re-evaluated (B2c). Timekeeper and date corrections stay refused (B2c). No Signal is written or closed, the D-125 hold stays (B2b-2).
+
+**Known limits (K-class).** (1) A replaced plan entry is mapped without 073's decisions, so a group stored as Held / Blocked loses that presentation when a correction changes it. (2) Corrections never re-run 073. (3) A refused plan entry is dropped without a `signalPlanRefusals` record. (4) A replaced AiObservation finding carries an empty quoted text.
+
+**Tests** (`InvoiceCorrectionReevaluationTests`, 12, over `CorrectionWorld` and 072's real evaluator): the diff adds and removes (hours 25 to 2.5: daily cap removed, whole-hour increment added, plan and pending entries); the last finding cleared makes the line Clean; task code clears the task kind's refused and mismatch entries but keeps an activity refusal; not-returned plus the emptied coding entry cleared, line Clean; no-description cleared; `rules.not_checked` kept; a decided line untouched; uncoded Pending line re-coded from the settings default set; no resolvable set 409; non-code correction of a Pending line still refused; retry after a findings failure; retry after a status failure (no second patch).
+
+Changed 101 test files: `CorrectionWorld` (firm, submission version, a transaction fault hook, `In` conditions, the resolver's core read, a settings default set); `InvoiceCorrectionServiceTests.ALineThatWasNotCoded_HasNoCodeSet_Conflict` clears the code sets (D-126 makes an uncoded line re-codable; the test keeps its 409 by leaving no set to resolve). 049's suites are unchanged.
+
+**Seeded proofs.** The decided-line flag forced false: the decided-line test failed. The re-evaluation skipped when `CorrectionApplied.ValueChanged` is false: both retry tests failed. Restored.
+
+**Gate.** BFF and tests build; unit filter `Finance|Ebilling|Billing|Signals|Approval|Invoice` 8993 passed, 7 skipped, 0 failed; ArchTests 1858 passed. Publish-size delta not measured in this part (one source file, no package).
+
+### For B2b-2
+
+1. Read `pendingSignalChanges`: for each `rule[]` entry, close the open Signal of (policyCode, subject) whose fingerprint is `closeFingerprint` with `SignalWriter.CloseAsync(..., ResolutionConditionCleared, ...)` (record-free), and when `raiseFingerprint` is set write the current `signalPlan[]` entry of that key through `SignalEpisodeLifecycle.WriteAsync(..., ResolvedEpisodeRule.ReopenAsNextEpisode)`. An entry whose two fingerprints are equal is a refresh (the facts changed, not the reasons).
+2. For `system[]`: re-map the system findings from the patched JSON (`StoredFindings.SystemFindings`) per line and close or refresh that line's SubmissionIntegrity Signal.
+3. Clear the member (or the entries it reconciled) in the same row-version-conditional write, so a repeat converges. The member accumulates across corrections until then.
+4. The D-125 coding hold: when the last uncoded line is re-coded, close the hold Signal and decide whether `pipelineFindings[]`'s hold entry is removed (this part leaves it).
+5. The end-to-end approval test (a corrected invoice becomes approvable).

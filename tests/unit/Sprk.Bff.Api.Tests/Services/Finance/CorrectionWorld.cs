@@ -12,6 +12,7 @@ using Sprk.Bff.Api.Services.Ai.Membership.Models;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Coding;
+using Sprk.Bff.Api.Services.Finance.Models;
 
 namespace Sprk.Bff.Api.Tests.Services.Finance;
 
@@ -25,6 +26,7 @@ internal sealed class CorrectionWorld
     public static readonly Guid Reviewer = Guid.Parse("10100000-0000-4000-8000-000000000001");
     public static readonly Guid ReviewerContact = Guid.Parse("10100000-0000-4000-8000-0000000000e1");
     public static readonly Guid Core = Guid.Parse("10100000-0000-4000-8000-0000000000c0");
+    public static readonly Guid Firm = Guid.Parse("10100000-0000-4000-8000-0000000000f1");
     public static readonly Guid CodeSetId = Guid.Parse("10100000-0000-4000-8000-0000000000d1");
     public static readonly Guid InvoiceId = Guid.Parse("10100000-0000-4000-8000-0000000000a1");
     public static readonly Guid FeeLineId = Guid.Parse("10100000-0000-4000-8000-0000000000b1");
@@ -81,6 +83,12 @@ internal sealed class CorrectionWorld
     public Exception? RowFault;
     public Exception? ValueFault;
 
+    /// <summary>B2b-1: a fault for a whole transaction, chosen by its requests (null = none); the transaction then applies nothing.</summary>
+    public Func<IReadOnlyList<OrganizationRequest>, Exception?>? TransactionFault;
+
+    /// <summary>B2b-1: the settings default code set the resolver falls back to (FR-22 step 5) for an uncoded invoice's re-code.</summary>
+    public Guid? DefaultCodeSetId;
+
     /// <summary>Runs just before a conditional write is checked, so a test can change the row under the service (a concurrent writer).</summary>
     public Action? BeforeValueWrite;
 
@@ -105,6 +113,7 @@ internal sealed class CorrectionWorld
             ["sprk_billingperiodstart"] = new DateTime(2026, 9, 1, 0, 0, 0, DateTimeKind.Utc),
             ["sprk_billingperiodend"] = new DateTime(2026, 9, 30, 0, 0, 0, DateTimeKind.Utc),
             ["sprk_project"] = new EntityReference("sprk_project", Core),
+            ["sprk_vendororg"] = new EntityReference("sprk_organization", Firm),
             ["sprk_regardingrecordtype"] = new EntityReference("sprk_recordtype_ref", Guid.NewGuid()),
             ["sprk_regardingrecordid"] = Core.ToString("D"),
             ["sprk_regardingrecordname"] = "Project",
@@ -118,6 +127,7 @@ internal sealed class CorrectionWorld
             ["sprk_invoice"] = new EntityReference("sprk_invoice", InvoiceId),
             ["sprk_findingsjson"] = HeaderFindingsJson,
             ["createdon"] = T0.AddDays(-2),
+            ["versionnumber"] = 30L,
         };
         CodeSets.Add(new Entity("sprk_billingcodeset", CodeSetId) { ["sprk_name"] = "UTBMS Litigation", ["statecode"] = new OptionSetValue(0) });
         foreach (var (code, type) in new[]
@@ -136,6 +146,10 @@ internal sealed class CorrectionWorld
         Identity.Setup(i => i.ResolveAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Guid user, CancellationToken _) => new PersonIdentity(user, CallerContact));
         Ownership.Setup(o => o.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>())).ReturnsAsync(() => Owner);
+
+        // B2b-1: the core record as the code-set resolver reads it (no matter type, no practice area: the resolver falls through to the settings default).
+        Entities.Setup(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string entity, Guid id, string[] _, CancellationToken _) => new Entity(entity, id));
 
         Entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
             .Returns((QueryExpression query, CancellationToken _) =>
@@ -166,6 +180,11 @@ internal sealed class CorrectionWorld
             .Returns((IReadOnlyList<OrganizationRequest> requests, CancellationToken _) =>
             {
                 // ONE transaction, all or nothing: the correction row upserts and the conditional value update commit together or not at all.
+                if (TransactionFault?.Invoke(requests) is { } fault)
+                {
+                    return Task.FromException(fault);
+                }
+
                 var upserts = requests.OfType<UpsertRequest>().ToList();
                 var updates = requests.OfType<UpdateRequest>().ToList();
                 if (upserts.Count > 0 && RowFault is not null)
@@ -222,7 +241,12 @@ internal sealed class CorrectionWorld
             });
     }
 
-    private Entity RowOf(Entity target) => target.LogicalName == "sprk_invoice" ? Invoice : Lines.Single(l => l.Id == target.Id);
+    private Entity RowOf(Entity target) => target.LogicalName switch
+    {
+        "sprk_invoice" => Invoice,
+        "sprk_invoicesubmission" => Submission!,
+        _ => Lines.Single(l => l.Id == target.Id),
+    };
 
     public const string HeaderFindingsJson =
         """
@@ -294,6 +318,7 @@ internal sealed class CorrectionWorld
     public InvoiceCorrectionService Service()
     {
         var settings = new Mock<IEbillingSettingsReader>();
+        settings.Setup(s => s.GetAsync(It.IsAny<CancellationToken>())).ReturnsAsync(() => new EbillingSettings { DefaultCodeSetId = DefaultCodeSetId });
         var suggestions = new Mock<ICodeSetSuggestionProvider>();
         var resolver = new CodeSetResolver(Entities.Object, settings.Object, suggestions.Object, NullLogger<CodeSetResolver>.Instance);
         return new InvoiceCorrectionService(
@@ -328,6 +353,7 @@ internal sealed class CorrectionWorld
             var ok = condition.Operator switch
             {
                 ConditionOperator.Equal => value is not null && Equals(Norm(condition.Values[0]), value),
+                ConditionOperator.In => value is not null && condition.Values.Select(Norm).Contains(value),
                 ConditionOperator.Null => value is null,
                 ConditionOperator.NotNull => value is not null,
                 _ => throw new NotSupportedException($"The test store does not model {condition.Operator}."),

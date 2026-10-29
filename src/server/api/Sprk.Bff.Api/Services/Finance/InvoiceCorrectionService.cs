@@ -7,6 +7,7 @@ using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance.Coding;
@@ -53,8 +54,14 @@ public static class CorrectionCodes
     /// <summary>The correction is saved but the step after it did not finish; repeat the same request to complete it (503, with <c>failedStep</c>).</summary>
     public const string Incomplete = "ebilling.correction.incomplete";
 
-    /// <summary>The <c>failedStep</c> of an <see cref="Incomplete"/> answer: the re-evaluation that follows a saved value.</summary>
+    /// <summary>The <c>failedStep</c> of an <see cref="Incomplete"/> answer when the step that failed is not one of the named steps below.</summary>
     public const string ReevaluationStep = "reevaluation";
+
+    /// <summary>The <c>failedStep</c> of an <see cref="Incomplete"/> answer: the re-evaluation and the patch of the stored findings (B2b-1).</summary>
+    public const string FindingsStep = "findings";
+
+    /// <summary>The <c>failedStep</c> of an <see cref="Incomplete"/> answer: the line status re-derived from the patched findings (B2b-1).</summary>
+    public const string StatusStep = "status";
     public const string ReviewerUnresolved = LineDecisionCodes.DeciderUnresolved;
 
     /// <summary>FR-22: the code is not in the line's resolved code set; nothing was written.</summary>
@@ -115,7 +122,7 @@ public sealed record CorrectionApplied(Guid InvoiceId, Guid? LineId, string Fiel
 /// Reviewer corrections of extracted values and AI codes (ebilling-r1 task 101 part B1; FR-31, FR-22, D-64, EB-D-170, EB-D-171, NFR-09).
 /// Writes one D-64 correction row per field (Corrected or Confirmed individually, both labels), then the corrected value; reads the rows back
 /// for the History pane and the calibration report. Kept strictly separate from Reduce (task 100): a correction never touches a line's
-/// status, approved amount or decision fields.
+/// approved amount or decision fields; its status follows only the re-evaluation (B2b-1), never on a decided line.
 /// </summary>
 /// <remarks>
 /// <para><b>Order and exactly-once.</b> Validate everything, then (1) the correction row, a deterministic-id upsert, then (2) the value, a
@@ -136,9 +143,12 @@ public sealed record CorrectionApplied(Guid InvoiceId, Guid? LineId, string Fiel
 /// <para><b>Reviewer role (D-64, directional).</b> <c>eligible-approver</c> when the caller's OWN contact
 /// (<see cref="IIdentityNormalizationService.ResolveAsync"/>, EB-D-171) is in the live eligible set of the invoice's single core record
 /// (<c>EligibleApproverResolver.SingleCoreOf</c>, #2455); otherwise <c>invoice-reviewer</c>, also when the lookup fails (logged).</para>
-/// <para><b>Not here (part B2).</b> Re-running the billing rules, the Signal reconcile, <c>findings[]</c> / <c>signalPlan[]</c> in the stored
-/// findings, line status and the totals follow-through. They hook in at <see cref="OnValueWrittenAsync"/>. Timekeeper and date corrections
-/// (the rate must be re-resolved) are refused with <see cref="CorrectionCodes.FieldNotSupportedYet"/>.</para>
+/// <para><b>Follow-through (part B2).</b> B2b-1 wires <see cref="InvoiceCorrectionReevaluation"/> into <see cref="OnValueWrittenAsync"/>: the billing
+/// rules re-run, <c>findings[]</c> / <c>signalPlan[]</c> and the line findings of the stored copy patched, then the line status re-derived. Still not
+/// here: the Signal reconcile (B2b-2) and the totals follow-through (B2c). Timekeeper and date corrections (the rate must be re-resolved) are refused
+/// with <see cref="CorrectionCodes.FieldNotSupportedYet"/>. <b>Uncoded invoices (D-126).</b> A code correction of a Pending line whose coding says
+/// <c>NotCoded</c> is the re-code path: its set is resolved through <see cref="CodeSetResolver.ResolveAsync"/> for the invoice's single core record
+/// and recorded on the line; no resolvable set is 409 <see cref="CorrectionCodes.CodeSetUnavailable"/>. Any other Pending line is still refused.</para>
 /// <para><b>Component justification (CLAUDE.md section 11).</b> Existing: <see cref="InvoiceLineDecisionService"/> writes the bulk / Unreviewed
 /// correction rows and owns decisions; nothing writes a Corrected or Confirmed row or an extracted value. Extension: that service is task 100's
 /// and decides lines, the rows here are a different write (a value, not a decision), so the row builder is repeated in miniature and
@@ -218,9 +228,11 @@ public sealed class InvoiceCorrectionService
         IRecordOwnershipResolver ownership,
         IIdentityNormalizationService identity,
         EligibleApproverResolver approvers,
+        InvoiceCorrectionReevaluation reevaluation,
         ILogger<InvoiceCorrectionService> logger)
         : this(entities, codeSets, ownership, identity,
-            (approvers ?? throw new ArgumentNullException(nameof(approvers))).ResolveAsync, logger)
+            (approvers ?? throw new ArgumentNullException(nameof(approvers))).ResolveAsync, logger,
+            onValueWritten: (reevaluation ?? throw new ArgumentNullException(nameof(reevaluation))).ApplyAsync)
     {
     }
 
@@ -248,10 +260,10 @@ public sealed class InvoiceCorrectionService
     // ── The B2 seam ──
 
     /// <summary>
-    /// PART B2 HOOKS IN HERE. Called once per successful request after the correction row and the value are written (also on a repeat that
-    /// finds both already written, so a re-evaluation that failed after the first attempt is run again). B2 re-evaluates the billing rules
-    /// for the affected line(s), reconciles the Signals, patches <c>findings[]</c> / <c>signalPlan[]</c> in <c>sprk_findingsjson</c>, sets the
-    /// line status Clean or Flagged and recomputes the totals. B1 leaves it empty: a correction in B1 does not change a line's status or Signals.
+    /// The part B2 seam. Called once per successful request after the correction row and the value are written (also on a repeat that
+    /// finds both already written, so a re-evaluation that failed after the first attempt is run again). In DI it runs
+    /// <see cref="InvoiceCorrectionReevaluation.ApplyAsync"/> (B2b-1: findings patch, then line status); a failure names its step. Null (the B1
+    /// no-op) only through the test constructor.
     /// </summary>
     internal Task OnValueWrittenAsync(CorrectionApplied applied, CancellationToken ct) =>
         _onValueWritten is null ? Task.CompletedTask : _onValueWritten(applied, ct);
@@ -363,26 +375,6 @@ public sealed class InvoiceCorrectionService
             return new CorrectionResult(CorrectionStatus.LineNotCorrectable, CorrectionCodes.LineNotCorrectable, "An Adjustment line is computed, not read.");
         }
 
-        if (status == (int)InvoiceLineStatus.Pending)
-        {
-            return new CorrectionResult(CorrectionStatus.LineNotCorrectable, CorrectionCodes.LinePending, "A line still being processed cannot be corrected.");
-        }
-
-        if (status is not ((int)InvoiceLineStatus.Clean or (int)InvoiceLineStatus.Flagged))
-        {
-            return new CorrectionResult(CorrectionStatus.LineNotCorrectable, CorrectionCodes.LineNotCorrectable, "Only a line that is not yet decided can be corrected.");
-        }
-
-        if ((spec.FeeOnly && type != (int)InvoiceLineCostType.Fee) || (spec.ExpenseOnly && type != (int)InvoiceLineCostType.Expense))
-        {
-            return new CorrectionResult(CorrectionStatus.InvalidRequest, CorrectionCodes.FieldNotApplicable, "This field does not apply to this kind of line.");
-        }
-
-        if (!line.TryGetAttributeValue<long>(InvoiceTotalsService.VersionNumber, out var version) || version <= 0)
-        {
-            return new CorrectionResult(CorrectionStatus.Unavailable, CorrectionCodes.Unavailable, "The line version could not be read; nothing was changed.");
-        }
-
         var extractionJson = line.GetAttributeValue<string>(InvoiceSubmissionPersister.LineExtractionConfidence);
         JsonNode? extraction = null;
         if (!string.IsNullOrWhiteSpace(extractionJson))
@@ -397,6 +389,27 @@ public sealed class InvoiceCorrectionService
             }
         }
 
+        // D-126 (B2b-1): a code correction is the re-code path of an UNCODED invoice, whose lines stay Pending. Any other Pending line is still refused.
+        if (status == (int)InvoiceLineStatus.Pending && !(spec.Kind == Kind.Code && IsUncoded(extraction)))
+        {
+            return new CorrectionResult(CorrectionStatus.LineNotCorrectable, CorrectionCodes.LinePending, "A line still being processed cannot be corrected.");
+        }
+
+        if (status is not ((int)InvoiceLineStatus.Clean or (int)InvoiceLineStatus.Flagged or (int)InvoiceLineStatus.Pending))
+        {
+            return new CorrectionResult(CorrectionStatus.LineNotCorrectable, CorrectionCodes.LineNotCorrectable, "Only a line that is not yet decided can be corrected.");
+        }
+
+        if ((spec.FeeOnly && type != (int)InvoiceLineCostType.Fee) || (spec.ExpenseOnly && type != (int)InvoiceLineCostType.Expense))
+        {
+            return new CorrectionResult(CorrectionStatus.InvalidRequest, CorrectionCodes.FieldNotApplicable, "This field does not apply to this kind of line.");
+        }
+
+        if (!line.TryGetAttributeValue<long>(InvoiceTotalsService.VersionNumber, out var version) || version <= 0)
+        {
+            return new CorrectionResult(CorrectionStatus.Unavailable, CorrectionCodes.Unavailable, "The line version could not be read; nothing was changed.");
+        }
+
         // The value stored now, as text, and (for a code) the set it must belong to.
         var current = spec.Kind == Kind.Code ? CodeOf(extraction, spec.CodeMember!) : CurrentText(spec, line);
         string? finalText;
@@ -408,7 +421,7 @@ public sealed class InvoiceCorrectionService
             }
             else
             {
-                var checkedCode = await CheckCodeAsync(spec, command.Value!, extraction, ct).ConfigureAwait(false);
+                var checkedCode = await CheckCodeAsync(spec, command.Value!, extraction, command.InvoiceId, core, ct).ConfigureAwait(false);
                 if (checkedCode.Failure is { } failure)
                 {
                     return failure;
@@ -635,12 +648,15 @@ public sealed class InvoiceCorrectionService
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            _logger.LogError("Correction of {Field} on invoice {InvoiceId}: saved, but the step after it failed ({ExceptionType}); the caller repeats the same request to finish it.",
-                spec.Name, command.InvoiceId, ex.GetType().Name);
+            // B2b-1: the re-evaluation names its step (findings, then status); anything else is the generic step.
+            var step = ex is CorrectionStepException named ? named.Step : CorrectionCodes.ReevaluationStep;
+            var cause = ex is CorrectionStepException { InnerException: { } inner } ? inner : ex;
+            _logger.LogError("Correction of {Field} on invoice {InvoiceId}: saved, but the step {FailedStep} after it failed ({ExceptionType}); the caller repeats the same request to finish it.",
+                spec.Name, command.InvoiceId, step, cause.GetType().Name);
             return new CorrectionResult(
                 CorrectionStatus.Incomplete, CorrectionCodes.Incomplete,
                 "The correction was saved but a later step did not finish. Repeat the same request to complete it.",
-                FailedStep: CorrectionCodes.ReevaluationStep);
+                FailedStep: step);
         }
 
         return new CorrectionResult(CorrectionStatus.Applied, "ok", Correction: dto, AlreadyApplied: rowExists && !valueChanged);
@@ -783,11 +799,19 @@ public sealed class InvoiceCorrectionService
 
     private sealed record CheckedCode(string? Canonical, CorrectionResult? Failure);
 
-    private async Task<CheckedCode> CheckCodeAsync(Spec spec, string raw, JsonNode? extraction, CancellationToken ct)
+    private async Task<CheckedCode> CheckCodeAsync(
+        Spec spec, string raw, JsonNode? extraction, Guid invoiceId, (string Entity, Guid Id) core, CancellationToken ct)
     {
         var coding = extraction?["coding"];
         if (coding?["codeSetId"] is not JsonValue idValue || !idValue.TryGetValue<string>(out var idText) || !Guid.TryParse(idText, out var setId))
         {
+            if (IsUncoded(extraction))
+            {
+                // D-126 (B2b-1): the re-code of an uncoded invoice's line resolves the set through 047's resolver (the FR-22 order, no second one)
+                // for the invoice's single core record, and records it on the line, so a later correction reads it back (LoadRecordedAsync).
+                return await ResolveForUncodedAsync(spec, raw, coding!.AsObject(), invoiceId, core, ct).ConfigureAwait(false);
+            }
+
             return new CheckedCode(null, new CorrectionResult(
                 CorrectionStatus.CodeSetUnavailable, CorrectionCodes.CodeSetUnavailable, "This line was not coded, so it has no code set to check a code against."));
         }
@@ -811,10 +835,90 @@ public sealed class InvoiceCorrectionService
                 CorrectionStatus.CodeSetUnavailable, CorrectionCodes.CodeSetUnavailable, "The code set this line was coded with is no longer in use."));
         }
 
+        return InSet(spec, raw, set);
+    }
+
+    private static CheckedCode InSet(Spec spec, string raw, ResolvedCodeSet set)
+    {
         var kind = spec.CodeMember switch { "task" => BillingCodeKind.Task, "activity" => BillingCodeKind.Activity, _ => BillingCodeKind.Expense };
         return set.TryGetCode(kind, raw, out var canonical)
             ? new CheckedCode(canonical, null)
             : new CheckedCode(null, new CorrectionResult(CorrectionStatus.CodeNotInSet, CorrectionCodes.CodeNotInSet, "The code is not in this line's code set."));
+    }
+
+    /// <summary>The line's coding block says the invoice was not coded (D-126: <c>status</c> <c>NotCoded</c>, written by the persister).</summary>
+    internal static bool IsUncoded(JsonNode? extraction) =>
+        extraction?["coding"] is JsonObject coding && coding["status"] is JsonValue status && status.TryGetValue<string>(out var text)
+        && string.Equals(text, "NotCoded", StringComparison.Ordinal);
+
+    /// <summary>
+    /// D-126 (B2b-1): the code set of an uncoded invoice's line, resolved by <see cref="CodeSetResolver.ResolveAsync"/> for the invoice's single core
+    /// record over the invoice's lines as stored (the same input the submission's coding step gives it). A resolution with no usable set is 409
+    /// <see cref="CorrectionCodes.CodeSetUnavailable"/>. On success the set is recorded in the line's <c>coding</c> block (<c>codeSetId</c>,
+    /// <c>codeSetName</c>, <c>codeSetSource</c>, <c>needsReview</c>; <c>status</c> stays <c>NotCoded</c>, because no AI coded the line) and is written
+    /// with the corrected code.
+    /// </summary>
+    private async Task<CheckedCode> ResolveForUncodedAsync(
+        Spec spec, string raw, JsonObject coding, Guid invoiceId, (string Entity, Guid Id) core, CancellationToken ct)
+    {
+        ResolvedCodeSet set;
+        try
+        {
+            var lines = await ReadCodingLinesAsync(invoiceId, ct).ConfigureAwait(false);
+            set = await _codeSets.ResolveAsync(new CodingCoreRecord(core.Entity, core.Id), lines, ct).ConfigureAwait(false);
+        }
+        catch (LineCodingException ex) when (ex.ReasonCode == LineCodingException.NoCodeSet)
+        {
+            _logger.LogWarning("Correction of {Field} on invoice {InvoiceId}: no code set resolves for the uncoded invoice; nothing changed.", spec.Name, invoiceId);
+            return new CheckedCode(null, new CorrectionResult(
+                CorrectionStatus.CodeSetUnavailable, CorrectionCodes.CodeSetUnavailable, "No code set can be resolved for this invoice, so a code cannot be checked."));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("Correction of {Field} on invoice {InvoiceId}: the code set could not be resolved ({ExceptionType}); nothing changed.", spec.Name, invoiceId, ex.GetType().Name);
+            return new CheckedCode(null, new CorrectionResult(CorrectionStatus.Unavailable, CorrectionCodes.Unavailable, "The code set could not be read; nothing was changed. Try again."));
+        }
+
+        var checkedCode = InSet(spec, raw, set);
+        if (checkedCode.Failure is null)
+        {
+            coding["codeSetId"] = set.CodeSetId.ToString("D");
+            coding["codeSetName"] = set.CodeSetName;
+            coding["codeSetSource"] = set.Source.ToString();
+            coding["needsReview"] = set.NeedsReview;
+        }
+
+        return checkedCode;
+    }
+
+    /// <summary>The invoice's fee and expense lines as the coding step reads them (FR-22 step 1 reads the firm's task codes).</summary>
+    private async Task<IReadOnlyList<InvoiceLineToCode>> ReadCodingLinesAsync(Guid invoiceId, CancellationToken ct)
+    {
+        var query = new QueryExpression(InvoiceReviewReadService.LineEntity)
+        {
+            ColumnSet = new ColumnSet(InvoiceReviewReadService.LineColumns),
+            Criteria = new FilterExpression(LogicalOperator.And),
+        };
+        query.Criteria.AddCondition(InvoiceFamilyCoreRecordGuard.LineInvoiceColumn, ConditionOperator.Equal, invoiceId);
+        query.AddOrder(InvoiceSubmissionPersister.LineSequence, OrderType.Ascending);
+        var rows = await InvoiceReviewReadService.ReadPagedAsync(_entities, query, ct).ConfigureAwait(false);
+        return rows
+            .Where(r => r.GetAttributeValue<OptionSetValue>(InvoiceTotalsService.LineCostType)?.Value is (int)InvoiceLineCostType.Fee or (int)InvoiceLineCostType.Expense)
+            .Select(r => new InvoiceLineToCode
+            {
+                LineKey = ((r.GetAttributeValue<int?>(InvoiceSubmissionPersister.LineSequence) ?? 0) - 1).ToString(CultureInfo.InvariantCulture),
+                Date = r.GetAttributeValue<DateTime?>(InvoiceSubmissionPersister.LineEventDate) is { } date ? DateOnly.FromDateTime(date) : null,
+                LineType = r.GetAttributeValue<OptionSetValue>(InvoiceTotalsService.LineCostType)?.Value == (int)InvoiceLineCostType.Fee
+                    ? InvoiceLineType.Fee
+                    : InvoiceLineType.Expense,
+                Narrative = r.GetAttributeValue<string>(InvoiceSubmissionPersister.LineDescription),
+                Hours = r.GetAttributeValue<decimal?>(InvoiceSubmissionPersister.LineQuantity),
+                Amount = r.GetAttributeValue<Money>(InvoiceTotalsService.LineAmount)?.Value,
+                BilledTaskCode = r.GetAttributeValue<string>(InvoiceSubmissionPersister.LineTaskCodeAsBilled),
+                BilledActivityCode = r.GetAttributeValue<string>(InvoiceSubmissionPersister.LineActivityCodeAsBilled),
+                BilledExpenseCode = r.GetAttributeValue<string>(InvoiceSubmissionPersister.LineExpenseCodeAsBilled),
+            })
+            .ToList();
     }
 
     private static string? CodeOf(JsonNode? extraction, string member) =>

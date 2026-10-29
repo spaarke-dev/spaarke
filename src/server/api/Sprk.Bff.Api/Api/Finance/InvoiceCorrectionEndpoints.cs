@@ -24,8 +24,9 @@ namespace Sprk.Bff.Api.Api.Finance;
 /// <c>field_not_supported_yet</c>, <c>value_required</c>, <c>value_invalid</c>, <c>nothing_to_confirm</c>); 401; 403; 404 uniform (invoice or
 /// line absent or unreadable); 409 (not In Review, line Pending or already decided, no recorded AI source, no code set, the line or invoice
 /// changed); 503 <c>ebilling.disabled</c> or a transient failure (repeat the same request: it writes no second row); 503
-/// <c>ebilling.correction.incomplete</c> with <c>failedStep</c> <c>reevaluation</c> when the value was saved but the step after it did not finish
-/// (repeat the same request: it writes no second row and runs that step again).</para>
+/// <c>ebilling.correction.incomplete</c> with <c>failedStep</c> <c>findings</c> (the re-evaluation and the findings patch), <c>status</c> (the line
+/// status) or <c>reevaluation</c> (any other step) when the value was saved but a step after it did not finish (repeat the same request: it writes no
+/// second row and runs the steps again). A code correction is also the re-code path of a Pending line of an uncoded invoice (D-126, B2b-1).</para>
 /// </remarks>
 public static class InvoiceCorrectionEndpoints
 {

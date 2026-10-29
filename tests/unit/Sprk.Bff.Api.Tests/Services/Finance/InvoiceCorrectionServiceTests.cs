@@ -366,6 +366,7 @@ public sealed class InvoiceCorrectionServiceTests
     {
         var world = new CorrectionWorld();
         world.Line()["sprk_extractionconfidence"] = W.ExtractionJson(coded: false);
+        world.CodeSets.Clear(); // B2b-1 (D-126): an uncoded line is re-coded from the resolved set; here no set resolves, so the 409 stands
 
         var result = await world.Service().CorrectAsync(Line("TaskCode", "L100"), CancellationToken.None);
 
