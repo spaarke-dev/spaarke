@@ -716,6 +716,94 @@ public sealed class InvoiceLineDecisionServiceTests
         w.H.Created.Should().BeEmpty();
     }
 
+    // ── #2455: exactly one core record ──
+
+    private static void NoWrites(World w)
+    {
+        w.LineWrites.Should().BeEmpty("a refused decision writes nothing");
+        w.H.Created.Should().BeEmpty("no Decision Record");
+        w.Corrections.Should().BeEmpty("no correction row");
+        w.TotalsWrites.Should().BeEmpty("no totals");
+    }
+
+    [Fact(DisplayName = "#2455 SEEDED: an invoice naming TWO core records refuses a line decision (OwnerUnresolved) and writes nothing")]
+    public async Task TwoCores_RefuseTheDecision_AndWriteNothing()
+    {
+        var w = new World();
+        var line = w.AddLine(100m, InvoiceLineStatus.Flagged);
+        w.Invoice["sprk_matter"] = new EntityReference("sprk_matter", Guid.NewGuid());
+
+        var result = await w.Service().DecideAsync(Command(w, LineDecisionAction.Accept, [new(line.Id)]), CancellationToken.None);
+
+        result.Status.Should().Be(LineDecisionStatus.OwnerUnresolved);
+        result.Code.Should().Be(LineDecisionCodes.OwnerUnresolved);
+        NoWrites(w);
+    }
+
+    [Fact(DisplayName = "#2455: an invoice naming NO core record is the stable OwnerUnresolved refusal, not a throw, on a single decision")]
+    public async Task NoCore_IsTheStableRefusal_OnADecision()
+    {
+        var w = new World();
+        var line = w.AddLine(100m, InvoiceLineStatus.Flagged);
+        w.Invoice.Attributes.Remove("sprk_project");
+
+        var result = await w.Service().DecideAsync(Command(w, LineDecisionAction.Accept, [new(line.Id)]), CancellationToken.None);
+
+        result.Status.Should().Be(LineDecisionStatus.OwnerUnresolved);
+        result.Code.Should().Be(LineDecisionCodes.OwnerUnresolved);
+        NoWrites(w);
+    }
+
+    [Fact(DisplayName = "#2455: Accept all Clean on an invoice with no core record (lines with AI fields) is the stable refusal, not a throw from the correction rows")]
+    public async Task NoCore_AcceptAllClean_IsRefused_NotAThrow()
+    {
+        var w = new World();
+        w.AddLine(100m, InvoiceLineStatus.Clean, extraction: Extraction);
+        w.Invoice.Attributes.Remove("sprk_project");
+
+        var result = await w.Service().AcceptCleanAsync(w.InvoiceId, Guid.NewGuid(), Decider, CancellationToken.None);
+
+        result.Status.Should().Be(LineDecisionStatus.OwnerUnresolved);
+        NoWrites(w);
+    }
+
+    [Fact(DisplayName = "#2455: Accept all Clean on an invoice naming two cores is refused with nothing written")]
+    public async Task TwoCores_AcceptAllClean_IsRefused()
+    {
+        var w = new World();
+        w.AddLine(100m, InvoiceLineStatus.Clean, extraction: Extraction);
+        w.Invoice["sprk_regardingworkassignment"] = new EntityReference("sprk_workassignment", Guid.NewGuid());
+
+        var result = await w.Service().AcceptCleanAsync(w.InvoiceId, Guid.NewGuid(), Decider, CancellationToken.None);
+
+        result.Status.Should().Be(LineDecisionStatus.OwnerUnresolved);
+        NoWrites(w);
+    }
+
+    [Fact(DisplayName = "#2455: the Unreviewed rows (103 D-72) on an invoice naming two cores are refused and no row is built")]
+    public async Task TwoCores_WriteUnreviewed_IsRefused()
+    {
+        var w = new World();
+        w.AddLine(100m, InvoiceLineStatus.Accepted, extraction: Extraction);
+        w.Invoice["sprk_matter"] = new EntityReference("sprk_matter", Guid.NewGuid());
+
+        var result = await w.Service().WriteUnreviewedAsync(w.InvoiceId, Guid.NewGuid(), Decider, "Approver", DateTime.UtcNow, CancellationToken.None);
+
+        result.Status.Should().Be(LineDecisionStatus.OwnerUnresolved);
+        w.Corrections.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "#2455: an invoice naming exactly one core still decides (the new check does not refuse the normal case)")]
+    public async Task OneCore_StillDecides()
+    {
+        var w = new World();
+        var line = w.AddLine(100m, InvoiceLineStatus.Flagged);
+
+        var result = await w.Service().DecideAsync(Command(w, LineDecisionAction.Accept, [new(line.Id)]), CancellationToken.None);
+
+        result.Status.Should().Be(LineDecisionStatus.Applied);
+    }
+
     // ── Credit lines (D-128, D-129) ──
 
     [Fact(DisplayName = "100: a credit line can be disallowed, and reduced to an amount between the billed credit and 0 (never refused for being negative)")]

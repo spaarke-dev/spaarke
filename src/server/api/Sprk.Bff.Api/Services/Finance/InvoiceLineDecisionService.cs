@@ -362,9 +362,15 @@ public sealed class InvoiceLineDecisionService
             return ReadFailed(invoiceId, ex);
         }
 
+        // #2455: exactly one core record, before any row is built (none or several is refused, never the first one found, never a throw).
+        if (SingleCoreOf(invoice) is not { } singleCore)
+        {
+            return NoSingleCore(invoiceId);
+        }
+
         var kind = new CorrectionKind(
             invoiceId, (line, field) => IdOf($"ebilling-correction-unreviewed-{scopeId:D}-{line:D}-{field}"),
-            OutcomeUnreviewed, reviewerRole, reviewerSystemUserId);
+            OutcomeUnreviewed, reviewerRole, reviewerSystemUserId, singleCore);
         var rows = lineRows
             .Select(ToTarget)
             .Where(t => t.Type is InvoiceLineCostType.Fee or InvoiceLineCostType.Expense
@@ -510,6 +516,13 @@ public sealed class InvoiceLineDecisionService
             if (invoice.GetAttributeValue<OptionSetValue>("statuscode")?.Value != InvoiceStatusCodes.InReview)
             {
                 return new LineDecisionResult(LineDecisionStatus.NotInReview, LineDecisionCodes.NotInReview, "Lines can be decided only while the invoice is In Review.");
+            }
+
+            // #2455: a decision is made on an invoice that names exactly ONE core record (013). None or several is refused here, before anything
+            // is chosen or written: the rights, the correction rows and the Decision Records all file under that one core.
+            if (SingleCoreOf(invoice) is null)
+            {
+                return NoSingleCore(command.InvoiceId);
             }
 
             lineRows = await InvoiceReviewReadService.ReadPagedAsync(_entities, InvoiceReviewReadService.LineQuery(command.InvoiceId), ct).ConfigureAwait(false);
@@ -930,9 +943,9 @@ public sealed class InvoiceLineDecisionService
             return null;
         }
 
-        if (CoreOf(invoice) is not { } core)
+        if (SingleCoreOf(invoice) is not { } core)
         {
-            return new LineDecisionResult(LineDecisionStatus.OwnerUnresolved, LineDecisionCodes.OwnerUnresolved, "The invoice names no single core record.");
+            return NoSingleCore(command.InvoiceId);
         }
 
         var refusal = await HumanDecisionSignalClose.AuthorizeAsync(
@@ -955,9 +968,14 @@ public sealed class InvoiceLineDecisionService
     private async Task<CorrectionBuild> BuildCorrectionsAsync(
         LineDecisionCommand command, Entity invoice, IReadOnlyList<Proposal> proposals, DateTime decidedOnUtc, CancellationToken ct)
     {
+        if (SingleCoreOf(invoice) is not { } singleCore)
+        {
+            return new CorrectionBuild([], NoSingleCore(command.InvoiceId));
+        }
+
         var kind = new CorrectionKind(
             command.InvoiceId, (line, field) => IdOf($"ebilling-correction-{command.DecisionId:D}-{line:D}-{field}"),
-            OutcomeAcceptedInBulk, DeciderRole, command.DeciderSystemUserId);
+            OutcomeAcceptedInBulk, DeciderRole, command.DeciderSystemUserId, singleCore);
         var rows = new List<Entity>();
         foreach (var proposal in proposals)
         {
@@ -978,10 +996,9 @@ public sealed class InvoiceLineDecisionService
     /// </summary>
     private async Task<LineDecisionResult?> StampOwnerAsync(List<Entity> rows, Entity invoice, Guid invoiceId, Guid creatorSystemUserId, CancellationToken ct)
     {
-        var core = CoreOf(invoice);
-        if (core is null)
+        if (SingleCoreOf(invoice) is null)
         {
-            return new LineDecisionResult(LineDecisionStatus.OwnerUnresolved, LineDecisionCodes.OwnerUnresolved, "The invoice names no single core record.");
+            return NoSingleCore(invoiceId);
         }
 
         // UAC 194b R3b-2: each row's question is built from the row itself (RecordOwnershipContext.ForChild: its invoice, its line, its core
@@ -1030,9 +1047,27 @@ public sealed class InvoiceLineDecisionService
     }
 
     /// <summary>What a correction row records: its invoice, its deterministic id, the outcome type, and the reviewer and role.</summary>
-    private sealed record CorrectionKind(Guid InvoiceId, Func<Guid, string, Guid> IdFor, int Outcome, string Role, Guid Reviewer);
+    private sealed record CorrectionKind(Guid InvoiceId, Func<Guid, string, Guid> IdFor, int Outcome, string Role, Guid Reviewer, (string Entity, Guid Id) Core);
 
-    /// <summary>The invoice's one core record (matter, project, else work assignment); null when it names none.</summary>
+    /// <summary>
+    /// #2455: the invoice's ONE core record (013's lookups: exactly one of them is set). None or several is null: the callers refuse
+    /// (<see cref="NoSingleCore"/>), never the first one found.
+    /// </summary>
+    internal static (string Entity, Guid Id)? SingleCoreOf(Entity invoice) =>
+        EligibleApproverResolver.SingleCoreOf(InvoiceReviewReadService.InvoiceEntity, invoice);
+
+    /// <summary>The stable refusal when the invoice names no single core record (none, or several): nothing was written.</summary>
+    private LineDecisionResult NoSingleCore(Guid invoiceId)
+    {
+        _logger.LogWarning("Line decision on invoice {InvoiceId}: the invoice names no single core record; nothing changed.", invoiceId);
+        return new LineDecisionResult(LineDecisionStatus.OwnerUnresolved, LineDecisionCodes.OwnerUnresolved, "The invoice names no single core record.");
+    }
+
+    /// <summary>
+    /// The invoice's first core record found (matter, project, else work assignment); null when it names none. NOT the single-core rule: with
+    /// two lookups set it returns the first. The line decisions and corrections use <see cref="SingleCoreOf"/>; the remaining callers are
+    /// <c>InvoiceAdjustmentService</c> and <c>SubmissionOverrideService</c> (#2455 follow-up).
+    /// </summary>
     internal static (string Entity, Guid Id)? CoreOf(Entity invoice)
     {
         foreach (var (column, entity) in new[] { ("sprk_matter", "sprk_matter"), ("sprk_project", "sprk_project"), ("sprk_regardingworkassignment", "sprk_workassignment") })
@@ -1136,8 +1171,9 @@ public sealed class InvoiceLineDecisionService
             row["sprk_aiconfidence"] = Math.Round(c, 4, MidpointRounding.AwayFromZero);
         }
 
-        // 013: exactly one core-record lookup, plus the resolver fields, copied from the invoice (a line shares its invoice's core record).
-        var core = CoreOf(invoice)!.Value;
+        // 013: exactly one core-record lookup (the caller resolved it with SingleCoreOf, #2455), plus the resolver fields, copied from the
+        // invoice (a line shares its invoice's core record).
+        var core = kind.Core;
         row[CoreAncestorResolver.StampColumnFor(core.Entity)] = new EntityReference(core.Entity, core.Id);
         foreach (var column in new[]
         {
