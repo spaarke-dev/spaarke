@@ -41,7 +41,7 @@
 ## Peer reviews owed (UAC is the gate)
 - **ebilling RecordFamilyEdges proposal** (4beed693da): verdict SENT. Accepted 21 rows. The invoice ↔ work-assignment row is kept, and ebilling adds a write-time refusal plus a test that pins the container 409. submission.sprk_invoice and .sprk_reportdocument are baselined as outputs, and ebilling puts the submission's core lookups first. **UAC follow-up #2427 (implementer RUNNING in C:/wt2427):** an `OutputLookups` set in RecordOwnershipResolver, landing before `OrdinaryMovesWritesEnabled` is turned on (after 194b merges); send the sha to ebilling.
 - **ebilling 094 round 5:** READY at 600079fd11. 098 round 5 READY. 095 OK. Standing: no Procedure-table role privilege without UAC review; D-185.
-- **ontology #2418** (Assign Task email + bell): NOT READY (F-1..F-4, F1b); wait for the fix head after the owner answers ontology's policy questions; re-check the diff only. #2422 (D-198) APPROVED; #2414 APPROVED; #2409 merged. Filed #2423.
+- **ontology #2418** (Assign Task email + bell): NOT READY (F-1..F-4, F1b); wait for the fix head after the owner answers ontology's policy questions; re-check the diff only. #2422 (D-198) APPROVED; 171 PR #2433 OK at 9177fcb083 (K1 Assign depth, K2 live shapes); repoint f1133d951b OK; 172 = round-137 pin; #2414 APPROVED; #2409 merged. Filed #2423.
 - **field-mapping §13.5 (owner 10-29):**
   - Q1: drop, on every write path.
   - Q2: (B). Each customer environment gets the 7 canonical `sprk_aisearchindex` rows, owned by the config team, with no business-unit defaults. The reason: the code-page picker is empty with 0 rows, and ACME is in that state today.
