@@ -1272,6 +1272,7 @@ public sealed partial class OntologyAdminAuthoringService
             }
         }
 
+        // D-197 / UAC round 137: author wins, including the root; a child table here would make 194b refuse root-homed authors.
         RecordOwnerResolution owner;
         try
         {
