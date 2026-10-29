@@ -3,19 +3,19 @@
 > **Last Updated**: 2026-10-29 (main session, context-handoff at 85%). State only: history is in git log, task `<completion>` blocks and
 > `notes/handoff-history/2026-10.md`. Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 and §6. Decisions: [`notes/decisions.md`](notes/decisions.md)
 > (D-1..D-199). Deferred work: one self-contained GitHub issue per item, label `ontology-deferred`, plus a DI-nn row in both tables of
-> `notes/defer-issues.md` (next free: **DI-135**). Sub-agents never edit this file.
+> `notes/defer-issues.md` (next free: **DI-136**). Sub-agents never edit this file.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Task** | **168** (#2418): D-199 is recorded, and the fix round is next. 171 and 172 are DONE (171: #2433 merged `3452d3017e` after fix round 1; 172: #2434 merged `fab8c91531`). |
+| **Task** | **168** (#2418): the fix round under D-199 is RUNNING (Opus implementer in `C:\wts-168`; review findings saved in the session scratchpad as `r168-0.txt`). When it reports: re-check the fix diff, send it to uac-r2, wait for CI, merge. 171 and 172 are DONE (171: #2433 merged `3452d3017e` after fix round 1; 172: #2434 merged `fab8c91531`). |
 | **Status** | No lane is running. The worktrees `C:\wts-171` and `C:\wts-172` are removed. uac-r2 was sent the 171 fix-diff SHA `e025152e3b` after the merge; if they raise anything, handle it as a follow-up before docs→master. DI-124 (#2300) has the `-CustomerBusinessUnit` / `-WhatIf` comment. |
-| **Next Action** | 1) Run the 168 fix round (D-199) in `C:\wts-168` (plan below). 2) After the owner's next real decision commit: the task-170 App Insights check and the `BUD-` number (Lane facts). 4) Read any uac-r2 reply on the 171 fix diff. |
+| **Next Action** | 1) Re-check the 168 fix round (D-199) in `C:\wts-168` (plan below). 2) After the owner's next real decision commit: the task-170 App Insights check and the `BUD-` number (Lane facts). 4) Read any uac-r2 reply on the 171 fix diff. |
 
 ## Task 168 decisions: D-199 (owner, 2026-10-29)
 
-Q1 = A: an eligible internal user, or an onboarded external contact with an active grant on the matter (portal link); nobody else, fail closed. The owner also requires that the record shows its related tasks to whoever has access, including in the portal; 168 verifies this, and a gap goes to the owner. Q2 = yes: the system-mailbox fallback, to the same recipients only.
+Q1 = A: an eligible internal user, or an onboarded external contact with an active grant on the matter (portal link); nobody else, fail closed. The owner also requires that the record shows its related tasks to whoever has access, including in the portal. Checked: the portal lists every event on the matter to a contact with Read, but shows no Task type, no assignee and has no task deep link. That is DI-135 (#2445, R3); the 168 email links to the matter. Q2 = yes: the system-mailbox fallback, to the same recipients only.
 
 ## 168 fix plan (after Q1/Q2; uac-r2 agreed the plan and re-checks only the fix diff)
 
