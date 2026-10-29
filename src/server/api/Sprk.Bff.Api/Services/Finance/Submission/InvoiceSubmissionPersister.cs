@@ -1264,7 +1264,13 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             };
         }
 
-        return new JsonObject { ["fields"] = fields, ["coding"] = codingJson }.ToJsonString(Json);
+        // EB-D-170: the analyzer and API version that read the line, and the Action and version that coded it, so a correction names its source.
+        return new JsonObject
+        {
+            ["fields"] = fields,
+            ["coding"] = codingJson,
+            [ExtractionProvenance.Member] = ExtractionProvenance.ForLine(outcome.Read!, coding is not null),
+        }.ToJsonString(Json);
     }
 
     private static JsonObject FieldJson<T>(ExtractedInvoiceField<T> field, ResolvedInvoiceLine resolution, string name)
@@ -1441,6 +1447,9 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             ["invoiceName"] = InvoiceNameFor(outcome),
             ["invoiceNumberReadConfidence"] = outcome.InvoiceNumber?.ReadConfidence,
             ["signalPlan"] = SignalPlanJson(outcome, invoiceId, out planRefusals),
+
+            // EB-D-170: the header's home for provenance: the pair, and the header fields as read (a correction of one still names what the AI read).
+            [ExtractionProvenance.Member] = ExtractionProvenance.ForSubmission(outcome.Read!, outcome.Coding is not null, outcome.Resolution),
         };
         if (planRefusals.Count > 0)
         {

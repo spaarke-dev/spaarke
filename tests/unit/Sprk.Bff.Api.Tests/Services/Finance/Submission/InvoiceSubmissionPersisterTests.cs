@@ -448,6 +448,70 @@ public class InvoiceSubmissionPersisterTests
             .Should().Be(InvoiceSubmissionPersister.LineStatusFlagged);
     }
 
+    // ── EB-D-170: AI provenance ──
+
+    [Fact(DisplayName = "EB-D-170: each line stores the analyzer id, API version, Action code and version; the submission stores the pair and the header as read")]
+    public async Task Provenance_IsStored_OnTheLine_AndOnTheSubmission()
+    {
+        var outcome = await new ProcessorHarness().RunAsync();
+        var store = new Store();
+
+        await store.Build().PersistAsync(outcome, null);
+
+        var requests = store.Transactions.Single();
+        var line = ExtractionProvenance.ParseLine(Target(requests[2]).GetAttributeValue<string>("sprk_extractionconfidence"));
+        line.Should().NotBeNull("a line written now carries its provenance");
+        line!.AnalyzerId.Should().Be(outcome.Read!.AnalyzerId);
+        line.ApiVersion.Should().Be(outcome.Read.ApiVersion);
+        line.ActionCode.Should().Be(LineCodingService.ActionCode);
+        line.ActionVersion.Should().Be(LineCodingService.ActionVersion);
+        line.HasExtraction.Should().BeTrue();
+
+        var submission = ExtractionProvenance.ParseSubmission(Target(requests[^1]).GetAttributeValue<string>("sprk_findingsjson"));
+        submission.Should().NotBeNull("the header's provenance home is the submission's stored findings");
+        submission!.AnalyzerId.Should().Be(outcome.Read.AnalyzerId);
+        submission.ApiVersion.Should().Be(outcome.Read.ApiVersion);
+        submission.ActionVersion.Should().Be(LineCodingService.ActionVersion);
+        submission.Header.Keys.Should().BeEquivalentTo(ExtractionProvenance.HeaderFieldNames, "every correctable header field is recorded as read");
+        var header = outcome.Read.Header;
+        submission.Header["FirmInvoiceNumber"].Value.Should().Be(header.FirmInvoiceNumber.Value);
+        submission.Header["FirmInvoiceNumber"].Confidence.Should().Be(header.FirmInvoiceNumber.Confidence);
+        submission.Header["TotalDue"].Value.Should().Be(ExtractionProvenance.Text(header.TotalDue.Value));
+        submission.Header["InvoiceDate"].Value.Should().Be(ExtractionProvenance.Text(header.InvoiceDate.Value));
+        submission.Header["Currency"].Combined.Should().Be(outcome.Resolution!.HeaderFields["Currency"].Combined, "046's combined confidence is stored with it");
+    }
+
+    [Fact(DisplayName = "EB-D-170: a line that was not coded stores no Action pair (only the analyzer pair)")]
+    public async Task Provenance_UncodedLine_HasNoActionPair()
+    {
+        var harness = new ProcessorHarness();
+        harness.Coding.Failure = new LineCodingException(LineCodingException.NoCodeSet, "none");
+        var outcome = await harness.RunAsync();
+        var store = new Store();
+
+        await store.Build().PersistAsync(outcome, null);
+
+        var requests = store.Transactions.Single();
+        var line = ExtractionProvenance.ParseLine(Target(requests[2]).GetAttributeValue<string>("sprk_extractionconfidence"));
+        line!.HasExtraction.Should().BeTrue();
+        line.ActionCode.Should().BeNull("no AI code exists to attribute");
+        line.ActionVersion.Should().BeNull();
+        ExtractionProvenance.ParseSubmission(Target(requests[^1]).GetAttributeValue<string>("sprk_findingsjson"))!.ActionCode.Should().BeNull();
+    }
+
+    [Theory(DisplayName = "EB-D-170: a line or submission stored before the change (no provenance member) parses to null, never to blanks")]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("{}")]
+    [InlineData("{\"fields\":{},\"coding\":{}}")]
+    [InlineData("not json")]
+    [InlineData("{\"provenance\":\"x\"}")]
+    public void Provenance_LegacyOrDamagedJson_IsNull(string? json)
+    {
+        ExtractionProvenance.ParseLine(json).Should().BeNull();
+        ExtractionProvenance.ParseSubmission(json).Should().BeNull();
+    }
+
     // ── owner ──
 
     [Fact(DisplayName = "049 C (uac-r2, 194b R3b-2): the invoice's owner is asked through ForRow over its core record and applied to every invoice-family row; the Stored File asks its own question")]
