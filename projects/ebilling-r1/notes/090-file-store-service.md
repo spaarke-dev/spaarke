@@ -194,3 +194,7 @@ Known limits:
   This is also recorded in the project CLAUDE.md §6.
 - **K2:** the ETag pin misses a reused staged blob. DEF-044, #2296. Fix it before StoredFileReconcileJob is enabled anywhere.
 - **K3:** the parent-gone pass doesn't check that the blob path's parent is a gone lookup. Defence in depth. DEF-045, #2297.
+
+## Addendum: the job's dedicated off-by-default switch
+
+`StoredFileReconcileJob` now also needs `Ebilling:StoredFileReconcileEnabled` (default false; skips as `reconcile-disabled` before anything is read). K2 above (DEF-044) and fix F4 must both be closed before it is set to true anywhere. See `notes/040-ebilling-flag.md`.

@@ -62,3 +62,11 @@ Adversarial review (one pass): no F-class findings; K1-K3 as listed above. adr-c
    reads `IOptionsMonitor<EbillingOptions>.CurrentValue.Enabled` itself.
 4. Task 051 learns flag state from the 503 on a read route.
 5. `TASK-INDEX.md` row 040 -> done (not touched by this task, per instruction).
+
+## Dedicated switch: `Ebilling:StoredFileReconcileEnabled`
+
+`StoredFileReconcileJob` (task 090) deletes blobs and Stored File rows. A standing hard rule keeps it off everywhere until fix F4 is merged and DEF-044 (#2296) is fixed, but `Ebilling:Enabled` also gates every eBilling route, so switching eBilling on in dev would have started it.
+
+- Setting: `Ebilling:StoredFileReconcileEnabled` (app setting `Ebilling__StoredFileReconcileEnabled`), `bool`, **default false**, also when the section is absent. Declared on `EbillingOptions`; shipped in `appsettings.template.json` as `false`.
+- Behaviour: the job checks it first, before anything else is read; when false it returns Skipped with `skippedReason = "reconcile-disabled"`, one heartbeat, and no Dataverse or storage call. When true it still needs `Ebilling:Enabled` and a configured store (`ebilling-disabled` / `store-not-configured` as before).
+- **Do not set it to true in any environment until F4 is merged and DEF-044 is fixed.** Task 053's dev switch-on sets `Ebilling__Enabled` only.
