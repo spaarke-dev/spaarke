@@ -43,7 +43,6 @@ import { ArrowClockwiseRegular, Dismiss24Regular, Search20Regular } from '@fluen
 import {
   TODO_REGARDING_CATALOG,
   cleanGuid,
-  resolveRecordDisplayNameFieldName,
   type IPolymorphicWebApi,
   OOB_MODAL_SIZES,
   getXrm,
@@ -64,6 +63,11 @@ import {
   unlinkRegarding,
   type IResolverWriteContext,
   type IRegardingSelection,
+  getViewerRecordNameResolver,
+  viewerVisibleName,
+  type ProvenanceDoc,
+  type ViewerRecordNameResolver,
+  type ViewerTargetName,
 } from '@spaarke/communication-components/logic/connections';
 import { ConnectionsEditor } from './ConnectionsEditor';
 import { refileThroughBff } from './bffWrites';
@@ -227,28 +231,34 @@ const useStyles = makeStyles({
   },
 });
 
-// Fallback primary-name field per entity, used ONLY when the `sprk_recordtype_ref`
-// catalog has no `sprk_recorddisplaynamefield` row (resolveRecordDisplayNameFieldName
-// returns null). The catalog is authoritative (SRFR-052); this map just guarantees
-// the common targets never fall back to a raw GUID. OOB entities are certain;
-// sprk_* entries follow the platform naming convention (a wrong guess simply 400s
-// on $select and degrades to the GUID — no worse than before).
-const PRIMARY_NAME_FALLBACK: Record<string, string> = {
-  contact: 'fullname',
-  account: 'name',
-  sprk_matter: 'sprk_mattername',
-  sprk_organization: 'sprk_name',
-  sprk_project: 'sprk_name',
-  sprk_invoice: 'sprk_name',
-  sprk_event: 'sprk_name',
-  sprk_servicerequest: 'sprk_name',
-  sprk_workassignment: 'sprk_name',
-};
-
-/** Stable key for the resolved-display-name map: entity + normalized GUID. */
-function displayNameKey(entity: string, id: string): string {
-  return `${entity}:${cleanGuid(id)}`;
+function lookupOf(resolver: ViewerRecordNameResolver): ViewerTargetName {
+  return (entity, id) => resolver.nameOf(entity, id);
 }
+
+/**
+ * The viewer's own names for the provenance's candidate targets, from the shared page-session resolver (one batched
+ * read per entity, as the viewer). The lookup's identity changes as names arrive, so derivations recompute; a
+ * candidate with no name yet, or one the viewer cannot read, gets no card.
+ */
+function useCandidateViewerNames(webApi: IPolymorphicWebApi, provenance: ProvenanceDoc | null): ViewerTargetName {
+  const resolver = React.useMemo(() => getViewerRecordNameResolver(webApi), [webApi]);
+  const [viewerName, setViewerName] = React.useState<ViewerTargetName>(() => lookupOf(resolver));
+  React.useEffect(() => {
+    setViewerName(() => lookupOf(resolver));
+    return resolver.subscribe(() => setViewerName(() => lookupOf(resolver)));
+  }, [resolver]);
+  React.useEffect(() => {
+    if (!provenance) return;
+    void resolver.resolve(provenance.candidates.map(c => ({ entity: c.targetEntity, id: c.targetId })));
+  }, [resolver, provenance]);
+  return viewerName;
+}
+
+/**
+ * Status advancement counts every stored slot, readable by this viewer or not, so hiding a candidate never changes
+ * the review state. Only the slot fields are used; the id stands in for a name and is never rendered.
+ */
+const EVERY_STORED_SLOT: ViewerTargetName = (_entity, id) => id;
 
 /** A regarding lookup that is actually populated on the communication (a filed association). */
 export interface IFiledAssociation {
@@ -385,59 +395,8 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
 
   const provenance = React.useMemo(() => parseProvenance(provenanceRaw), [provenanceRaw]);
 
-  // Resolve friendly display names for the suggested targets. The Association
-  // Engine writes only the target GUID into the provenance JSON (no `targetName`),
-  // so without this the review slots render a raw GUID. We resolve the per-entity
-  // display-name field from the `sprk_recordtype_ref` catalog (the same SRFR-052
-  // mechanism the write path uses) and read that field off each target record.
-  // Best-effort: any failure leaves the slot on its GUID fallback (S-nonfatal).
-  const [displayNames, setDisplayNames] = React.useState<ReadonlyMap<string, string>>(new Map());
-
-  React.useEffect(() => {
-    if (!provenance) return;
-    let cancelled = false;
-    const api = context.webAPI as unknown as IPolymorphicWebApi;
-
-    // Unique (entity, id) pairs that still need a name (engine supplied none).
-    const seen = new Set<string>();
-    const pairs: { entity: string; id: string; key: string }[] = [];
-    for (const c of provenance.candidates) {
-      if (!c.targetEntity || !c.targetId || c.targetName) continue;
-      const key = displayNameKey(c.targetEntity, c.targetId);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      pairs.push({ entity: c.targetEntity, id: cleanGuid(c.targetId), key });
-    }
-    if (pairs.length === 0) return;
-
-    void (async () => {
-      const next = new Map<string, string>();
-      await Promise.all(
-        pairs.map(async ({ entity, id, key }) => {
-          try {
-            const field = (await resolveRecordDisplayNameFieldName(api, entity)) ?? PRIMARY_NAME_FALLBACK[entity];
-            if (!field) return;
-            const rec = await context.webAPI.retrieveRecord(entity, id, `?$select=${field}`);
-            const name = rec?.[field];
-            if (typeof name === 'string' && name.trim().length > 0) next.set(key, name.trim());
-          } catch (err) {
-            console.warn(`[CommunicationConnections] display-name resolve failed for ${entity} ${id}:`, err);
-          }
-        })
-      );
-      if (!cancelled && next.size > 0) setDisplayNames(next);
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [provenance, context.webAPI]);
-
-  /** Look up a resolved friendly name for a target, or undefined to use the fallback. */
-  const resolveDisplayName = React.useCallback(
-    (entity: string, id: string): string | undefined => displayNames.get(displayNameKey(entity, id)),
-    [displayNames]
-  );
+  // Candidate names come only from the viewer's own reads (shared batched resolver).
+  const viewerName = useCandidateViewerNames(context.webAPI as unknown as IPolymorphicWebApi, provenance);
 
   // Host record GUID is stable for the lifetime of a review surface (the record
   // always exists) — capture once (S5).
@@ -532,7 +491,9 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
   // Full review slot set (used to decide when to advance status to Resolved).
   const reviewSlots = React.useMemo<Connection[]>(() => {
     if (!provenance) return [];
-    return deriveConnections(provenance, status === AssociationStatus.Resolved).filter(c => c.status !== 'confirmed');
+    return deriveConnections(provenance, status === AssociationStatus.Resolved, EVERY_STORED_SLOT).filter(
+      c => c.status !== 'confirmed'
+    );
   }, [provenance, status]);
 
   const [confirmedFields, setConfirmedFields] = React.useState<Set<string>>(new Set());
@@ -553,11 +514,11 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
   // fields when nothing is filed yet, so an outbound draft still shows its regarding.
   const filedConnections = React.useMemo<Connection[]>(() => {
     const merged = mergeFiledConnections(
-      provenance ? deriveConnections(provenance, status === AssociationStatus.Resolved) : [],
+      provenance ? deriveConnections(provenance, status === AssociationStatus.Resolved, viewerName) : [],
       filedAssociations
     );
     return groupConnectionsByAction(merged, [], confirmedFields, new Set<string>()).filed;
-  }, [provenance, status, filedAssociations, confirmedFields]);
+  }, [provenance, status, filedAssociations, confirmedFields, viewerName]);
 
   const primaryFiled = React.useMemo<Connection | null>(() => {
     if (filedConnections.length === 0) return null;
@@ -566,13 +527,12 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
     return filedConnections.find(c => c.field === eff) ?? null;
   }, [filedConnections, primaryField]);
 
-  // Card Name: the filed association's real record name (resolved friendly name when
-  // available, else the lookup's formatted value). Card Number: the filed
-  // association's provenance-derived reference number, falling back to the denorm
-  // number (correct for outbound). Both fall back to the denorm fields when nothing
-  // is filed yet.
+  // Card Name: the filed association's record name (the viewer-read name when
+  // available, else the lookup's formatted value). Card Number: the host record's own
+  // number field (the stored trace carries no numbers). Both fall back to the denorm
+  // fields when nothing is filed yet.
   const cardName = primaryFiled
-    ? (resolveDisplayName(primaryFiled.entity, primaryFiled.targetId) ?? primaryFiled.targetName)
+    ? (viewerVisibleName(viewerName, primaryFiled.entity, primaryFiled.targetId) ?? primaryFiled.targetName)
     : primaryDenorm.name;
   const cardNumber = primaryFiled ? (primaryFiled.recordNumber ?? primaryDenorm.number) : primaryDenorm.number;
 
@@ -957,7 +917,7 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
                 busy={busy}
                 confirmedFields={confirmedFields}
                 primaryField={primaryField ?? undefined}
-                resolveDisplayName={resolveDisplayName}
+                viewerName={viewerName}
                 filedAssociations={filedAssociations}
                 onConfirm={handleConfirm}
                 onAcceptAll={handleAcceptAll}

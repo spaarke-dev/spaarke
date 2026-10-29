@@ -19,7 +19,15 @@ import {
   type Connection,
   type AiSuggestedType,
   type ProvenanceDoc,
+  type ViewerTargetName,
 } from '@spaarke/communication-components/logic/connections/provenance';
+
+/**
+ * The viewer's own reads: target id → name. `cand` registers each candidate here; the stored trace carries a
+ * different text ("Stored …"), which never reaches a slot.
+ */
+const VIEWER_READS = new Map<string, string>();
+const viewer: ViewerTargetName = (_entity, id) => VIEWER_READS.get(id);
 
 function mkConn(partial: Partial<Connection> & Pick<Connection, 'field' | 'status'>): Connection {
   return {
@@ -132,7 +140,7 @@ describe('groupConnectionsByAction', () => {
       ],
       signals: [{ category: 'ai', confidence: 0.7, provenance: 'types=[sprk_invoice]', obligations: [] }],
     });
-    const conns = deriveConnections(doc, false);
+    const conns = deriveConnections(doc, false, viewer);
     const ai = deriveAiSuggestedTypes(doc, new Set(conns.map(c => c.entity)));
     const g = groupConnectionsByAction(conns, ai, NO_CONFIRM, NO_DISMISS);
 
@@ -151,11 +159,12 @@ function cand(
   targetName: string,
   confidence: number
 ): ProvenanceDoc['candidates'][number] {
+  VIEWER_READS.set(targetId, targetName);
   return {
     field,
     targetEntity,
     targetId,
-    targetName,
+    targetName: `Stored ${targetName}`,
     reinforcedConfidence: confidence,
     deterministicConfidence: confidence,
     written: false,

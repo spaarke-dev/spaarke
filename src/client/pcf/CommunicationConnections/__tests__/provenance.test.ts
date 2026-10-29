@@ -14,7 +14,15 @@ import {
   connectionTarget,
   confidenceBand,
   type ProvenanceDoc,
+  type ViewerTargetName,
 } from '@spaarke/communication-components/logic/connections/provenance';
+
+/**
+ * The viewer's own reads: target id → name. `mkCand` registers each candidate here; the stored trace carries a
+ * different text ("Stored …"), which never reaches a slot.
+ */
+const VIEWER_READS = new Map<string, string>();
+const viewer: ViewerTargetName = (_entity, id) => VIEWER_READS.get(id);
 
 function docWith(partial: Partial<ProvenanceDoc>): ProvenanceDoc {
   return {
@@ -55,10 +63,25 @@ describe('deriveConnections', () => {
       ],
     });
 
-    const conns = deriveConnections(doc, false);
+    const conns = deriveConnections(doc, false, viewer);
     expect(conns.map(c => c.slotLabel)).toEqual(['Matter', 'Organization', 'Contact']); // ordered
     expect(conns.every(c => c.status === 'suggested')).toBe(true);
     expect(conns[0].targetName).toBe('Acme v. Beta');
+  });
+
+  it('gives no slot to a candidate the viewer has not read, and never shows the stored text', () => {
+    const doc = docWith({
+      candidates: [
+        mkCand('sprk_regardingmatter', 'sprk_matter', 'mtr-1', 'Acme v. Beta', 0.92),
+        { ...mkCand('sprk_regardingperson', 'contact', 'con-unread', 'Unread Contact', 0.7) },
+      ],
+    });
+    VIEWER_READS.delete('con-unread');
+
+    expect(deriveConnections(doc, false)).toEqual([]); // no viewer lookup → no slots
+    const conns = deriveConnections(doc, false, viewer);
+    expect(conns.map(c => c.slotLabel)).toEqual(['Matter']);
+    expect(JSON.stringify(conns)).not.toContain('Stored');
   });
 
   it('marks a slot ambiguous when two conflicting candidates share a field', () => {
@@ -69,7 +92,7 @@ describe('deriveConnections', () => {
       ],
     });
 
-    const conns = deriveConnections(doc, false);
+    const conns = deriveConnections(doc, false, viewer);
     expect(conns).toHaveLength(1);
     expect(conns[0].status).toBe('ambiguous');
     expect(conns[0].alternatives).toHaveLength(2);
@@ -82,7 +105,7 @@ describe('deriveConnections', () => {
     const doc = docWith({
       candidates: [{ ...mkCand('sprk_regardingmatter', 'sprk_matter', 'mtr-1', 'Matter A', 0.92), written: true }],
     });
-    expect(deriveConnections(doc, false)[0].status).toBe('confirmed');
+    expect(deriveConnections(doc, false, viewer)[0].status).toBe('confirmed');
   });
 
   it('keeps an unwritten slot suggested even when the record is Resolved (written precedence over isResolved)', () => {
@@ -91,7 +114,7 @@ describe('deriveConnections', () => {
     const doc = docWith({
       candidates: [mkCand('sprk_regardingmatter', 'sprk_matter', 'mtr-1', 'Matter A', 0.92)], // written:false
     });
-    expect(deriveConnections(doc, true)[0].status).toBe('suggested');
+    expect(deriveConnections(doc, true, viewer)[0].status).toBe('suggested');
   });
 });
 
@@ -116,7 +139,7 @@ describe('connectionTarget', () => {
     const doc = docWith({
       candidates: [mkCand('sprk_regardingmatter', 'sprk_matter', 'mtr-1', 'Matter A', 0.92)],
     });
-    const [conn] = deriveConnections(doc, false);
+    const [conn] = deriveConnections(doc, false, viewer);
     expect(connectionTarget(conn)).toEqual({
       entityType: 'sprk_matter',
       recordId: 'mtr-1',
@@ -141,11 +164,12 @@ function mkCand(
   targetName: string,
   confidence: number
 ): ProvenanceDoc['candidates'][number] {
+  VIEWER_READS.set(targetId, targetName);
   return {
     field,
     targetEntity,
     targetId,
-    targetName,
+    targetName: `Stored ${targetName}`,
     reinforcedConfidence: confidence,
     deterministicConfidence: confidence,
     written: false,

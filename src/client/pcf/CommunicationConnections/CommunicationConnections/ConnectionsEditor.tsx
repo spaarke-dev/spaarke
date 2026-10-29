@@ -84,6 +84,8 @@ import {
   groupConnectionsByAction,
   isConnectionConfirmed,
   entityLabel,
+  viewerVisibleName,
+  type ViewerTargetName,
 } from '@spaarke/communication-components/logic/connections';
 
 export type ReviewLayout = 'summary' | 'card' | 'rail';
@@ -142,12 +144,11 @@ export interface ConnectionsEditorProps extends ConnectionsCallbacks {
    */
   primaryField?: string;
   /**
-   * Resolve a friendly display name for a target (entity + GUID). The App supplies
-   * this from the catalog-driven name resolution; returns undefined when no name
-   * has been resolved yet, in which case the slot's own `targetName` (GUID
-   * fallback) is used. Keeps the editor free of any webApi dependency.
+   * The viewer's own name lookup for candidate targets (the App supplies it from the shared viewer-side resolver).
+   * A candidate with no viewer-read name gets no slot; omitted ⇒ only filed rows show. Keeps the editor free of any
+   * webApi dependency.
    */
-  resolveDisplayName?: (entity: string, id: string) => string | undefined;
+  viewerName?: ViewerTargetName;
   /**
    * The record's actually-filed regarding lookups (incl. manual "Link another"
    * ones the engine never suggested). Merged into the slots so the surface shows
@@ -426,26 +427,26 @@ function DecisionBlock({
   conn,
   busy,
   readOnly,
-  resolveDisplayName,
+  viewerName,
   onConfirm,
 }: {
   conn: Connection;
   busy: boolean;
   readOnly: boolean;
-  resolveDisplayName?: (entity: string, id: string) => string | undefined;
+  viewerName?: ViewerTargetName;
   onConfirm: (conn: Connection, chosen?: ProvenanceCandidate) => void;
 }): JSX.Element {
   const s = useStyles();
   // Collapse duplicate-named alternatives so the reviewer sees the DISTINCT choices.
   const groups: CandidateGroup[] = React.useMemo(
-    () => groupCandidatesByName(conn.alternatives ?? []),
-    [conn.alternatives]
+    () => groupCandidatesByName(conn.alternatives ?? [], viewerName),
+    [conn.alternatives, viewerName]
   );
   const [selected, setSelected] = React.useState<string | null>(null);
   const slot = conn.slotLabel.toLowerCase();
 
   const nameOf = (g: CandidateGroup) =>
-    resolveDisplayName?.(g.candidates[0].targetEntity, g.candidates[0].targetId) ?? g.targetName;
+    viewerVisibleName(viewerName, g.candidates[0].targetEntity, g.candidates[0].targetId) ?? g.targetName;
 
   return (
     <div>
@@ -510,7 +511,7 @@ function FiledRow({
   isPrimary,
   busy,
   readOnly,
-  resolveDisplayName,
+  viewerName,
   onChange,
   onSetPrimary,
   onUnlink,
@@ -520,13 +521,13 @@ function FiledRow({
   isPrimary: boolean;
   busy: boolean;
   readOnly: boolean;
-  resolveDisplayName?: (entity: string, id: string) => string | undefined;
+  viewerName?: ViewerTargetName;
   onChange: (conn: Connection) => void;
   onSetPrimary: (conn: Connection) => void;
   onUnlink: (conn: Connection) => void;
 }): JSX.Element {
   const s = useStyles();
-  const name = resolveDisplayName?.(conn.entity, conn.targetId) ?? conn.targetName;
+  const name = viewerVisibleName(viewerName, conn.entity, conn.targetId) ?? conn.targetName;
 
   return (
     <div className={mergeClasses(s.row, !first && s.rowBorder)}>
@@ -596,7 +597,7 @@ function SuggestedRow({
   first,
   busy,
   readOnly,
-  resolveDisplayName,
+  viewerName,
   onConfirm,
   onDismiss,
 }: {
@@ -604,12 +605,12 @@ function SuggestedRow({
   first: boolean;
   busy: boolean;
   readOnly: boolean;
-  resolveDisplayName?: (entity: string, id: string) => string | undefined;
+  viewerName?: ViewerTargetName;
   onConfirm: (conn: Connection) => void;
   onDismiss: (key: string) => void;
 }): JSX.Element {
   const s = useStyles();
-  const name = resolveDisplayName?.(conn.entity, conn.targetId) ?? conn.targetName;
+  const name = viewerVisibleName(viewerName, conn.entity, conn.targetId) ?? conn.targetName;
   return (
     <div className={mergeClasses(s.row, !first && s.rowBorder)}>
       <span className={s.ico}>{entityIcon(conn.entity)}</span>
@@ -718,7 +719,7 @@ function EditorBody({
   busy,
   confirmedFields,
   primaryField,
-  resolveDisplayName,
+  viewerName,
   filedAssociations,
   onConfirm,
   onChange,
@@ -733,7 +734,7 @@ function EditorBody({
   busy: boolean;
   confirmedFields: Set<string>;
   primaryField?: string;
-  resolveDisplayName?: (entity: string, id: string) => string | undefined;
+  viewerName?: ViewerTargetName;
   filedAssociations?: FiledAssociation[];
   onConfirm: (conn: Connection, chosen?: ProvenanceCandidate) => void;
   onChange: (conn: Connection) => void;
@@ -748,8 +749,8 @@ function EditorBody({
   // Merge the engine's suggested slots with what's actually filed on the record
   // (authoritative — includes manual "Link another" associations). SAME data path.
   const connections = React.useMemo(
-    () => mergeFiledConnections(deriveConnections(provenance, isResolved), filedAssociations ?? []),
-    [provenance, isResolved, filedAssociations]
+    () => mergeFiledConnections(deriveConnections(provenance, isResolved, viewerName), filedAssociations ?? []),
+    [provenance, isResolved, filedAssociations, viewerName]
   );
   const aiSuggestions = React.useMemo(
     () => deriveAiSuggestedTypes(provenance, new Set(connections.map(c => c.entity))),
@@ -804,7 +805,7 @@ function EditorBody({
                   conn={conn}
                   busy={busy}
                   readOnly={readOnly}
-                  resolveDisplayName={resolveDisplayName}
+                  viewerName={viewerName}
                   onConfirm={onConfirm}
                 />
               </React.Fragment>
@@ -831,7 +832,7 @@ function EditorBody({
                 isPrimary={conn.field === effectivePrimary}
                 busy={busy}
                 readOnly={readOnly}
-                resolveDisplayName={resolveDisplayName}
+                viewerName={viewerName}
                 onChange={onChange}
                 onSetPrimary={onSetPrimary}
                 onUnlink={onUnlink}
@@ -858,7 +859,7 @@ function EditorBody({
                 first={i === 0}
                 busy={busy}
                 readOnly={readOnly}
-                resolveDisplayName={resolveDisplayName}
+                viewerName={viewerName}
                 onConfirm={onConfirm}
                 onDismiss={onDismiss}
               />
@@ -933,7 +934,7 @@ export function ConnectionsEditor(props: ConnectionsEditorProps): JSX.Element | 
     busy,
     confirmedFields: props.confirmedFields ?? new Set<string>(),
     primaryField: props.primaryField,
-    resolveDisplayName: props.resolveDisplayName,
+    viewerName: props.viewerName,
     filedAssociations,
     onConfirm: props.onConfirm ?? (() => undefined),
     onChange: props.onChange ?? (() => undefined),
@@ -983,7 +984,7 @@ export function ConnectionsEditor(props: ConnectionsEditorProps): JSX.Element | 
 
   // summary: one-line bar that expands.
   const isResolved = record.sprk_associationstatus === AssociationStatus.Resolved;
-  const connections = mergeFiledConnections(deriveConnections(doc, isResolved), filedAssociations);
+  const connections = mergeFiledConnections(deriveConnections(doc, isResolved, props.viewerName), filedAssociations);
   const toReview = connections.filter(c => !isConnectionConfirmed(c, bodyProps.confirmedFields)).length;
   const top = topCandidate(doc);
   return (
