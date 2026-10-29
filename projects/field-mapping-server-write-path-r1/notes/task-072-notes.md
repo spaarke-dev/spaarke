@@ -11,7 +11,8 @@ route-authorization ledger, existence-equalised 404). Executed on sonnet at high
 | `src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs` | One `app.MapRecordFamilyEndpoints()` call next to `MapFieldMappingEndpoints()` (+ one `using`). |
 | `src/server/api/Sprk.Bff.Api/Services/Dataverse/RecordFamilyReader.cs` | Small, behaviour-preserving: `FamilyTablesOf(kind)` (the set `Walk` built inline) and `TryGetFamilyEntitySet(table, kind, out entitySet)` (internal static), so the endpoint's table gate uses the reader's own notion of a family table. `Walk` now calls `FamilyTablesOf`. |
 | `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs` | `GovernedFile` + `HandlerDecision` for the route; census 133 -> 134 with a MAINTENANCE log comment. |
-| `tests/unit/domain/Api/Records/RecordFamilyEndpointsTests.cs` | 21 test cases (see Tests). |
+| `tests/integration/contract/Api/Records/RecordFamilyEndpointsContractTests.cs` | 23 test cases (see Tests). |
+| `src/server/api/Sprk.Bff.Api/Services/Dataverse/MetadataService.cs`, `Infrastructure/Cache/SystemCacheKeys.cs` | `DisplayName` projection; cache key prefix versioned to `sdap:dv:entitymetadata:v2:` (fix round 2). |
 
 `RecordNoAccessEndpoint.cs` is untouched (CLAUDE.md §11.5).
 
@@ -77,6 +78,20 @@ value. First pass emitted null because no existing source covered the family tab
   failure for a table (not found, Dataverse fault, cache fault) gives `recordType` null for that table's members, a Warning with
   the table name, and the 200 still returns. Cancellation of the request propagates. There is no `IMetadataService`; the
   concrete scoped `MetadataService` is injected (no new service, no new DI registration).
+- **Fix round 2 (F3): the label fetch is concurrent and budgeted.** The tables are read at most 4 at a time
+  (`MaxConcurrentLabelReads`) under ONE budget of `LabelBudgetMilliseconds` = 1500 ms for the whole set, on the request's
+  `TimeProvider` (`GetService<TimeProvider>() ?? TimeProvider.System`, so a test drives it with `FakeTimeProvider`). A table whose
+  read faulted, or is still pending at the budget, gets null (Warning names the table); an `OperationCanceledException` while
+  the caller's token is NOT cancelled is the budget and means "no entry". The caller's cancellation propagates (re-checked after
+  the wait). Reads abandoned at the budget are not awaited (the wait is `Task.WhenAny(WhenAll(reads), expired)`), so a fetch that
+  ignores its token cannot hold the page; the semaphore is released in `finally` and never disposed because an abandoned read
+  may still release it. Why: a slow Redis (CacheModule's 5 s timeouts) or a cold cache must not make the page cost
+  N x (timeout + RetrieveEntity).
+- **Fix round 2 (F1): cache key versioned.** `MetadataService` now caches under `sdap:dv:entitymetadata:v2:{logicalName}`
+  (comment: the DTO gained `DisplayName`; instances still on the old build during a slot swap keep writing v1 entries without
+  it). Entries under the old prefix are simply never read again, so no entry can serve a missing `DisplayName`: the first read of
+  each table after deploy is one cold `RetrieveEntity` (a one-time cold start per table, then 6 h hits). The three tests that
+  pin the raw key, `SystemCacheKeys` and the deployment guide's two mentions were updated to `:v2:`.
 
 ## Ledger scope chosen, and why
 
@@ -96,7 +111,11 @@ overload denies with a 403, the wrong shape. Census `ExpectedEndpointFileCount` 
   `RequireAuthorization`), registered with ONE Map call in `EndpointMappingExtensions.MapDomainEndpoints`, unconditionally
   (`RecordFamilyReader` is registered unconditionally, `AddDataverseMetadataServices`).
 - **Not AI:** no `PublicContracts` facade. **No background work** (ADR-052 N/A). **No DI registration added, no package added.**
-- **Publish-size delta and CVE:** not measured here (main session, per the brief).
+- **Publish-size delta (fix round 2, measured):** `dotnet publish` of the BFF, zipped with `Compress-Archive` at short
+  `C:\tmp` paths. master `7008180304`: 39,814,144 bytes, 192 files. branch `4322768861`: 39,820,910 bytes, 192 files.
+  Delta **+6,766 bytes** (0.0 MB; the threshold for explicit justification is +5 MB); total 37.98 MB (review threshold 55 MB).
+  The round-2 edits add no package and no file to the publish output.
+- **CVE:** `dotnet list package --vulnerable --include-transitive` on the BFF: no vulnerable packages. No package was added.
 
 ## Component justification (CLAUDE.md §11, from the POML `<justification>`)
 
@@ -114,22 +133,26 @@ a second copy of the family-table test; no new service or abstraction.
 - *Extension:* yes, this is it: one trailing optional string on the existing DTO, filled in the existing projection.
 - *Cost of doing nothing:* the Family modal's Record type column is always blank.
 
-## Tests (`tests/unit/domain/Api/Records/RecordFamilyEndpointsTests.cs`, 21 cases)
+## Tests (`tests/integration/contract/Api/Records/RecordFamilyEndpointsContractTests.cs`, 23 cases)
 
-KEEP path `tests/unit/domain/**` (ADR-038 §2). A minimal TestServer host (the push contract tests' shape) maps the REAL
-`MapRecordFamilyEndpoints` over the REAL `RecordFamilyReader`; substituted at module boundaries only: `CallerRecordAccessProbe`
-(its virtual rights and WhoAmI seams; it also records whether each rights question arrived through the equalised gate method, by
-reading the gate's `AsyncLocal`) and `IImpersonatedCommunicationQuery` (an in-memory caller-scoped Dataverse that records every
-call and the caller it impersonated).
+Contract tier (moved from `tests/unit/domain/**` in fix round 2: it is an endpoint contract test over a TestServer host).
+A minimal TestServer host (this endpoint mapped alone, the push contract tests' shape) maps the REAL `MapRecordFamilyEndpoints`
+over the REAL `RecordFamilyReader` and the REAL `MetadataService`; substituted at module boundaries only:
+`CallerRecordAccessProbe` through its protected wire seams (`ExchangeForDataverseTokenAsync`, `ResolveCallerSystemUserIdAsync`,
+`SendPrincipalAccessRequestAsync` answering 200 / 403 / 404, `DelayAsync` recorded, never slept), as
+`AuthorizationGateTimingTests` does, so the real non-virtual gate method runs and no reflection on a private is needed;
+`IImpersonatedCommunicationQuery` (an in-memory caller-scoped Dataverse recording every call and the caller it impersonated);
+the metadata `IDistributedCache` (in-memory, with a hang switch) and a `FakeTimeProvider`.
 
 | Case | Criterion |
 |---|---|
 | 200 for a readable anchor: exact property sets (no extras), kind and edgeKind on members, anchor among the members, `recordType` = each member's table display name, every read impersonates the caller | shape, first page, recordType |
 | a metadata failure for one table: null `recordType` for that table's members, the page still 200 | recordType never fails the read |
+| a metadata read that starts and never completes (and ignores its token): after the clock advances by `LabelBudgetMilliseconds` the page returns 200, that table's `recordType` null, the other table's label present; a 10 s `WaitAsync` is only the failure net | F3 budget |
 | `MetadataServiceDisplayNameTests` (3, in `tests/unit/domain/Dataverse (ADR-038 KEEP path)`): `ProjectToDto` carries the user-localized label, falls back to the first localized label, and is null when absent | DTO projection |
 | `direction=down` / `DOWN&kind=filing`: root omitted, anchor on top | root omitted |
 | default / `full` / `FULL&kind=Filing`: root present | root present |
-| unknown anchor vs unreadable anchor: identical 404 (apart from ids), both asked through the gate method, nothing read | equalised 404 |
+| unknown anchor (Dataverse 404) vs unreadable anchor (Dataverse 403): byte-identical 404 bodies (traceId / correlationId removed), the same 3 attempts and the same waits (400 ms, 1200 ms), nothing read | equalised 404 (#2137) |
 | probe fault / unresolvable caller / vanished after the probe: the same 404 | uniform 404 |
 | `contact`, `sprk_notatable`, the alias `matter`: the same 404 with no probe and no Dataverse call | table gate |
 | bad `kind` / `direction` (6 shapes): 400, no echo, no probe, no WhoAmI, no Dataverse call | 400 before any call |
@@ -138,16 +161,18 @@ call and the caller it impersonated).
 
 Red phase (before the endpoint existed, with a 501 skeleton mapping the route): 20 failed / 1 passed (the 401 case passes on
 the skeleton because the group's `RequireAuthorization` already existed). Green: 21 / 21 (22 endpoint cases after fix round 1). Fix round 1 red phase (mapping and endpoint label disabled): 4 failed / 21 passed
-of 25; green 25 / 25.
+of 25; green 25 / 25. Fix round 2 red phase for F3 (the wait changed to `await Task.WhenAll(reads)`, no budget): the hung-read case
+fails with a `TimeoutException` at its 10 s net (1 failed / 22 passed); green 23 / 23 with the budget restored.
 
 ## Known limits / open items
 
-- **K-class: stale metadata cache.** Cache entries written before `DisplayName` existed deserialize with it null until their 6-hour
-  TTL ends (no cache-key bump, by decision), so `recordType` is null for those tables for up to 6 hours after deploy. The
-  modal tolerates null.
+- **K-class: root semantics.** On the full view `root` is the walk's top, which the caller can read by construction (the reader
+  lists only records the caller may read), and it is omitted on `down`. So `root` is the only reading that hints at no hidden
+  ancestor: when the caller cannot read an ancestor, the root is simply the highest record they can see, indistinguishable
+  from a true root. This matches the client contract (`recordFamilyService.ts`); the owner has been told.
+- **One-time cold start (replaces the old "stale up to 6 h" limit).** With the v2 key, each table's metadata is fetched once
+  from Dataverse after deploy, then cached 6 h. No entry can serve a missing `DisplayName`. During a slot swap an old instance
+  still writes v1 entries, which v2 readers ignore.
 - **Residual timing:** the table gate and the Guid.Empty branch answer without a probe (public information, by design); the
   systemuserid lookup (WhoAmI) runs before the table gate, as the brief orders, so a non-family table costs one OBO exchange.
-- The reflection read of `CallerRecordAccessProbe.EqualizeNoAccessWithNotFound` in the test fails loudly (it throws in the
-  probe double) if that field is renamed; the gate method is deliberately non-virtual, so there is no other seam that proves a
-  call came through it.
 - No live Dataverse call was made; the endpoint is proven against in-memory doubles only.

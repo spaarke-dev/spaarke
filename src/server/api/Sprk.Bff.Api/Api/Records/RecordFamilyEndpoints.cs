@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Spaarke.Core.Auth;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Auth;
@@ -176,7 +177,8 @@ public static class RecordFamilyEndpoints
         switch (read.Outcome)
         {
             case RecordFamilyReadOutcome.Read when read.Anchor is { } anchor && read.Top is { } top:
-                var tableLabels = await ReadTableLabelsAsync(metadata, read.Members, logger, ct).ConfigureAwait(false);
+                var time = httpContext.RequestServices.GetService<TimeProvider>() ?? TimeProvider.System;
+                var tableLabels = await ReadTableLabelsAsync(metadata, read.Members, time, logger, ct).ConfigureAwait(false);
                 return TypedResults.Ok(new RecordFamilyResponse(
                     ToRef(anchor),
                     direction == RecordFamilyDirection.Full ? ToRef(top) : null,
@@ -222,34 +224,88 @@ public static class RecordFamilyEndpoints
     }
 
     /// <summary>
+    /// How long the page waits for the table labels in all (<c>recordType</c> is decoration): a slow Redis (CacheModule's 5 s
+    /// timeouts) or a cold cache must not make the page take N x (timeout + RetrieveEntity).
+    /// </summary>
+    internal const int LabelBudgetMilliseconds = 1500;
+
+    /// <summary>How many tables' labels are read at once.</summary>
+    private const int MaxConcurrentLabelReads = 4;
+
+    /// <summary>
     /// The display name of each DISTINCT member table on the page (<c>recordType</c>: "Matter", a property of the table, never of
     /// a record), from <see cref="MetadataService"/>: Redis-cached, app-level schema metadata read with the application identity.
     /// It is not caller data, so there is no impersonation concern; which tables exist is already public. A label is decoration:
-    /// any failure for a table (not found, Dataverse fault, cache fault) gives null for that table, a Warning with the table
-    /// name, and the read still returns. Only cancellation of <paramref name="ct"/> propagates.
+    /// the tables are read concurrently (<see cref="MaxConcurrentLabelReads"/>) under one <see cref="LabelBudgetMilliseconds"/>
+    /// budget, and a table that faulted (not found, Dataverse fault, cache fault) or is still pending at the budget gets null, a
+    /// Warning with its name, and the read still returns. A read abandoned at the budget is not awaited. Only cancellation of
+    /// <paramref name="ct"/> propagates.
     /// </summary>
     private static async Task<IReadOnlyDictionary<string, string?>> ReadTableLabelsAsync(
-        MetadataService metadata, IEnumerable<RecordFamilyMember> members, ILogger logger, CancellationToken ct)
+        MetadataService metadata, IEnumerable<RecordFamilyMember> members, TimeProvider time, ILogger logger, CancellationToken ct)
     {
-        var labels = new Dictionary<string, string?>(StringComparer.Ordinal);
-        foreach (var table in members.Select(m => m.Table).Distinct(StringComparer.Ordinal))
+        var tables = members.Select(m => m.Table).Distinct(StringComparer.Ordinal).ToArray();
+        var result = new Dictionary<string, string?>(StringComparer.Ordinal);
+        if (tables.Length == 0)
+            return result;
+
+        var labels = new ConcurrentDictionary<string, string?>(StringComparer.Ordinal);
+        using var budget = new CancellationTokenSource(TimeSpan.FromMilliseconds(LabelBudgetMilliseconds), time);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, budget.Token);
+        var expired = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var onExpiry = linked.Token.Register(() => expired.TrySetResult());
+        // Not disposed: a read abandoned at the budget may still release it later.
+        var gate = new SemaphoreSlim(MaxConcurrentLabelReads);
+
+        var reads = tables.Select(table => ReadLabelAsync(metadata, table, gate, labels, logger, linked.Token)).ToArray();
+        await Task.WhenAny(Task.WhenAll(reads), expired.Task).ConfigureAwait(false);
+        ct.ThrowIfCancellationRequested();
+
+        foreach (var table in tables)
         {
-            try
+            if (labels.TryGetValue(table, out var label))
             {
-                labels[table] = (await metadata.GetMetadataAsync(table, ct).ConfigureAwait(false)).DisplayName;
+                result[table] = label;
             }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            else
             {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "{Marker} The display name of table {Table} could not be read; recordType is null for it.", LogMarker, table);
-                labels[table] = null;
+                logger.LogWarning(
+                    "{Marker} The display name of table {Table} was not read within {Budget} ms; recordType is null for it.",
+                    LogMarker, table, LabelBudgetMilliseconds);
+                result[table] = null;
             }
         }
 
-        return labels;
+        return result;
+    }
+
+    /// <summary>One table's label into <paramref name="labels"/>; a fault stores null. A cancellation (the budget, or the
+    /// caller's, which <see cref="ReadTableLabelsAsync"/> rethrows) stores nothing: MetadataService rethrows every cancellation.</summary>
+    private static async Task ReadLabelAsync(
+        MetadataService metadata, string table, SemaphoreSlim gate, ConcurrentDictionary<string, string?> labels,
+        ILogger logger, CancellationToken token)
+    {
+        var entered = false;
+        try
+        {
+            await gate.WaitAsync(token).ConfigureAwait(false);
+            entered = true;
+            labels[table] = (await metadata.GetMetadataAsync(table, token).ConfigureAwait(false)).DisplayName;
+        }
+        catch (OperationCanceledException)
+        {
+            // Out of budget (or the caller went away): no entry, so the table reads as null.
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "{Marker} The display name of table {Table} could not be read; recordType is null for it.", LogMarker, table);
+            labels[table] = null;
+        }
+        finally
+        {
+            if (entered)
+                gate.Release();
+        }
     }
 
     /// <summary>ONE fixed 400 for every continuation that is malformed, oversize, tampered, re-bound or stale.</summary>

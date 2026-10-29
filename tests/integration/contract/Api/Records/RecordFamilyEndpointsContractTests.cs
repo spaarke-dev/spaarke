@@ -1,6 +1,6 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http.Headers;
-using System.Reflection;
 using System.Security.Claims;
 using System.Text.Encodings.Web;
 using System.Text.Json;
@@ -19,9 +19,12 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Time.Testing;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Records;
+using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Dataverse;
@@ -29,16 +32,17 @@ using Sprk.Bff.Api.Services.Dataverse.Models;
 using Xunit;
 using FamilyKind = Sprk.Bff.Api.Services.Dataverse.RecordFamilyEdges.FamilyKind;
 
-namespace Sprk.Bff.Api.Tests.Domain.RecordFamilyEndpoint;
+namespace Sprk.Bff.Api.Tests.Api.Records;
 
 /// <summary>
 /// field-mapping-server-write-path-r1 task 072 (FR-31; design §12.3 C) — <c>GET /api/v1/records/{table}/{id}/family</c>
-/// through the REAL <c>MapRecordFamilyEndpoints</c> and the REAL <see cref="RecordFamilyReader"/>, on a minimal host (the
-/// push contract tests' shape). Substituted at module boundaries only: <see cref="CallerRecordAccessProbe"/> (its virtual
-/// rights and WhoAmI seams) and <see cref="IImpersonatedCommunicationQuery"/> (an in-memory caller-scoped Dataverse that
-/// records every call). Contract cases only (ADR-038 KEEP path, tests/unit/domain/**).
+/// through the REAL <c>MapRecordFamilyEndpoints</c> and the REAL <see cref="RecordFamilyReader"/>, on a minimal TestServer host
+/// (this endpoint mapped alone, the push contract tests' shape). Substituted at module boundaries only:
+/// <see cref="CallerRecordAccessProbe"/> (its protected wire seams: the OBO exchange, WhoAmI, RetrievePrincipalAccess and the
+/// wait between re-asks, as AuthorizationGateTimingTests does), <see cref="IImpersonatedCommunicationQuery"/> (an in-memory
+/// caller-scoped Dataverse that records every call) and the metadata cache. Route, status, ProblemDetails and payload shape.
 /// </summary>
-public class RecordFamilyEndpointsTests
+public class RecordFamilyEndpointsContractTests
 {
     private const string Matter = "sprk_matter";
     private const string Document = "sprk_document";
@@ -100,6 +104,24 @@ public class RecordFamilyEndpointsTests
         status.Should().Be(HttpStatusCode.OK, body);
         var members = JsonNode.Parse(body)!["members"]!.AsArray().Select(m => m!.AsObject()).ToList();
         members.Should().HaveCount(2);
+        members.Single(m => m["table"]!.GetValue<string>() == Matter)["recordType"]!.GetValue<string>().Should().Be("Matter");
+        members.Single(m => m["table"]!.GetValue<string>() == Document)["recordType"].Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Family_AHungMetadataRead_IsGivenUpOnAtTheLabelBudget_ThatTablesRecordTypeIsNull_AndTheReadStillReturns200()
+    {
+        await using var host = ReadableFamily(await FamilyHost.StartAsync());
+        var started = host.HangTableMetadata(Document); // the metadata read for sprk_document starts and never finishes
+
+        var request = GetAsync(host, Route(Document, DocumentId));
+        await started.WaitAsync(TimeSpan.FromSeconds(10));
+        request.IsCompleted.Should().BeFalse("the endpoint waits for the label budget, not forever and not zero");
+        host.Time.Advance(TimeSpan.FromMilliseconds(RecordFamilyEndpoints.LabelBudgetMilliseconds));
+
+        var (status, body) = await request.WaitAsync(TimeSpan.FromSeconds(10)); // the safety net: a budget that never fires fails here, not by hanging the run
+        status.Should().Be(HttpStatusCode.OK, body);
+        var members = JsonNode.Parse(body)!["members"]!.AsArray().Select(m => m!.AsObject()).ToList();
         members.Single(m => m["table"]!.GetValue<string>() == Matter)["recordType"]!.GetValue<string>().Should().Be("Matter");
         members.Single(m => m["table"]!.GetValue<string>() == Document)["recordType"].Should().BeNull();
     }
@@ -195,10 +217,12 @@ public class RecordFamilyEndpointsTests
         await using var host = ReadableFamily(await FamilyHost.StartAsync());
         var unreadable = Guid.Parse("07207207-0000-4000-8000-0000000000e1");
         host.Dataverse.Add(Document, unreadable, ("sprk_documentname", "Secret"), ("_sprk_matter_value", MatterId.ToString()));
-        // The caller holds nothing on `unreadable`; `UnknownId` has no row at all.
+        host.Probe.Forbid(unreadable); // Dataverse answers 403 (no access) for it, and 404 (does not exist) for UnknownId
 
         var unknown = await GetAsync(host, Route(Document, UnknownId));
+        var unknownWork = host.Probe.TakeWork();
         var denied = await GetAsync(host, Route(Document, unreadable));
+        var deniedWork = host.Probe.TakeWork();
 
         unknown.Status.Should().Be(HttpStatusCode.NotFound);
         denied.Status.Should().Be(HttpStatusCode.NotFound);
@@ -206,9 +230,9 @@ public class RecordFamilyEndpointsTests
         denied.Body.Should().NotContain(unreadable.ToString()).And.NotContain("Secret");
         unknown.Body.Should().NotContain(UnknownId.ToString());
 
-        host.Probe.Asked.Should().Equal(
-            new[] { ("sprk_documents", UnknownId, true), ("sprk_documents", unreadable, true) },
-            "both went through GetCallerRightsForAuthorizationGateAsync (#2137), the equalised schedule");
+        // The equalised gate (#2137): the 403 follows the not-found schedule, so both took the same attempts and the same waits.
+        unknownWork.Attempts.Should().Be(3).And.Be(deniedWork.Attempts);
+        unknownWork.Waits.Should().Equal(deniedWork.Waits).And.Equal(NotFoundSchedule);
         host.Dataverse.Calls.Should().BeEmpty("nothing is read for a record the caller may not read");
     }
 
@@ -244,12 +268,12 @@ public class RecordFamilyEndpointsTests
         host.Probe.Grant("contacts", DocumentId, AccessRights.Read);
 
         var known = await GetAsync(host, Route(Document, UnknownId));
-        host.Probe.Asked.Clear();
+        host.Probe.TakeWork();
         var (status, body) = await GetAsync(host, Route(table, DocumentId));
 
         status.Should().Be(HttpStatusCode.NotFound);
         Normalize(body).Should().Be(Normalize(known.Body));
-        host.Probe.Asked.Should().BeEmpty("table names are public; the gate needs no probe");
+        host.Probe.TakeWork().Attempts.Should().Be(0, "table names are public; the gate needs no probe");
         host.Dataverse.Calls.Should().BeEmpty();
     }
 
@@ -270,7 +294,7 @@ public class RecordFamilyEndpointsTests
 
         status.Should().Be(HttpStatusCode.BadRequest, body);
         body.Should().NotContain("Priority").And.NotContain("sideways").And.NotContain(DocumentId.ToString());
-        host.Probe.Asked.Should().BeEmpty();
+        host.Probe.TakeWork().Attempts.Should().Be(0);
         host.Probe.WhoAmICalls.Should().Be(0);
         host.Dataverse.Calls.Should().BeEmpty();
     }
@@ -314,7 +338,7 @@ public class RecordFamilyEndpointsTests
         using var response = await host.SendAsync(new HttpRequestMessage(HttpMethod.Get, Route(Document, DocumentId)));
 
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
-        host.Probe.Asked.Should().BeEmpty();
+        host.Probe.TakeWork().Attempts.Should().Be(0);
         host.Probe.WhoAmICalls.Should().Be(0);
         host.Dataverse.Calls.Should().BeEmpty();
     }
@@ -324,42 +348,95 @@ public class RecordFamilyEndpointsTests
 
     // ── fixtures ──
 
-    /// <summary>The probe's two virtual seams: rights per (entity set, id), and WhoAmI. Records whether each rights question
-    /// came through the equalised gate method (its AsyncLocal is set while the gate asks).</summary>
+    private static readonly TimeSpan[] NotFoundSchedule = { TimeSpan.FromMilliseconds(400), TimeSpan.FromMilliseconds(1200) };
+
+    /// <summary>The production probe with its wire steps answered from memory (the OBO exchange, WhoAmI, RetrievePrincipalAccess,
+    /// and the wait between re-asks, which is recorded and never slept), the shape AuthorizationGateTimingTests uses. Dataverse's
+    /// answers: 200 for a granted record, 403 (no access) for a forbidden one, 404 (does not exist) for any other.</summary>
     private sealed class SeamProbe : CallerRecordAccessProbe
     {
-        private static readonly FieldInfo EqualizeField = typeof(CallerRecordAccessProbe).GetField(
-            "EqualizeNoAccessWithNotFound", BindingFlags.NonPublic | BindingFlags.Static)
-            ?? throw new InvalidOperationException("CallerRecordAccessProbe no longer carries the gate's AsyncLocal; update this test.");
+        private static readonly System.Text.RegularExpressions.Regex Target = new(
+            "\"@odata.id\":\"(?<set>\\w+)\\((?<id>[0-9a-f-]{36})\\)\"", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
-        private readonly Dictionary<(string, Guid), AccessRights> _granted = new();
+        private readonly HashSet<(string, Guid)> _granted = new();
+        private readonly HashSet<Guid> _forbidden = new();
+        private readonly ConcurrentQueue<TimeSpan> _waits = new();
+        private int _attempts;
+        private int _whoAmICalls;
 
         public SeamProbe()
-            : base(new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance)
+            : base(
+                new HttpClient(),
+                new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["AzureAd:TenantId"] = "00000000-0000-0000-0000-0000000000aa",
+                    ["AzureAd:ClientId"] = "00000000-0000-0000-0000-0000000000bb",
+                    ["Dataverse:ServiceUrl"] = "https://test.crm.dynamics.com",
+                }).Build(),
+                NullLogger<CallerRecordAccessProbe>.Instance,
+                // Never asked for a client (the exchange is substituted); the probe only refuses OBO without one.
+                new OrderedCredentialClientProvider(
+                    Options.Create(new CredentialSelectionOptions { Order = new List<string> { "ManagedIdentityFederated" } }),
+                    new ConfigurationBuilder().Build(),
+                    NullLogger<OrderedCredentialClientProvider>.Instance))
         {
         }
 
-        public List<(string EntitySet, Guid Id, bool ViaGate)> Asked { get; } = new();
-        public int WhoAmICalls { get; private set; }
+        /// <summary>WhoAmI questions the endpoint asked (<c>GetCallerSystemUserIdAsync</c>).</summary>
+        public int WhoAmICalls => Volatile.Read(ref _whoAmICalls);
+
         public Guid? SystemUserId { get; set; } = CallerSystemUserId;
         public Exception? Fault { get; set; }
 
-        public void Grant(string entitySet, Guid id, AccessRights rights) => _granted[(entitySet, id)] = rights;
-
-        public override Task<AccessRights> GetCallerRightsAsync(
-            string? callerBearerToken, string entitySet, Guid recordId, CancellationToken ct = default)
+        public void Grant(string entitySet, Guid id, AccessRights rights)
         {
-            Asked.Add((entitySet, recordId, ((AsyncLocal<bool>)EqualizeField.GetValue(null)!).Value));
-            if (Fault is not null)
-                return Task.FromException<AccessRights>(Fault);
-            return Task.FromResult(
-                !string.IsNullOrEmpty(callerBearerToken) && _granted.TryGetValue((entitySet, recordId), out var rights) ? rights : AccessRights.None);
+            if ((rights & AccessRights.Read) == AccessRights.Read)
+                _granted.Add((entitySet, id));
         }
 
-        public override Task<Guid?> GetCallerSystemUserIdAsync(string? callerBearerToken, CancellationToken ct = default)
+        public void Forbid(Guid id) => _forbidden.Add(id);
+
+        /// <summary>The RetrievePrincipalAccess attempts and waits since the last call, then reset.</summary>
+        public (int Attempts, IReadOnlyList<TimeSpan> Waits) TakeWork()
         {
-            WhoAmICalls++;
-            return Task.FromResult(string.IsNullOrEmpty(callerBearerToken) ? null : SystemUserId);
+            var work = (Interlocked.Exchange(ref _attempts, 0), (IReadOnlyList<TimeSpan>)_waits.ToList());
+            _waits.Clear();
+            return work;
+        }
+
+        public override async Task<Guid?> GetCallerSystemUserIdAsync(string? callerBearerToken, CancellationToken ct = default)
+        {
+            Interlocked.Increment(ref _whoAmICalls);
+            return await base.GetCallerSystemUserIdAsync(callerBearerToken, ct);
+        }
+
+        protected override Task<string?> ExchangeForDataverseTokenAsync(string callerBearerToken, string context, CancellationToken ct)
+            => Task.FromResult<string?>("dataverse-token");
+
+        protected override Task<Guid?> ResolveCallerSystemUserIdAsync(string dataverseToken, CancellationToken ct)
+            => Task.FromResult(SystemUserId);
+
+        protected override Task<(HttpStatusCode Status, string Body)> SendPrincipalAccessRequestAsync(
+            string url, string dataverseToken, CancellationToken ct)
+        {
+            Interlocked.Increment(ref _attempts);
+            if (Fault is not null)
+                return Task.FromException<(HttpStatusCode, string)>(Fault);
+
+            var match = Target.Match(Uri.UnescapeDataString(url));
+            var key = (match.Groups["set"].Value, Guid.Parse(match.Groups["id"].Value));
+            (HttpStatusCode, string) answer = _granted.Contains(key)
+                ? (HttpStatusCode.OK, """{"AccessRights":"ReadAccess"}""")
+                : _forbidden.Contains(key.Item2)
+                    ? (HttpStatusCode.Forbidden, """{"error":{"code":"0x80048306","message":"Principal user is missing access"}}""")
+                    : (HttpStatusCode.NotFound, """{"error":{"code":"0x80040217","message":"Does Not Exist"}}""");
+            return Task.FromResult(answer);
+        }
+
+        protected override Task DelayAsync(TimeSpan delay, CancellationToken ct)
+        {
+            _waits.Enqueue(delay);
+            return Task.CompletedTask;
         }
     }
 
@@ -415,6 +492,44 @@ public class RecordFamilyEndpointsTests
         }
     }
 
+    /// <summary>A distributed cache that answers from memory, except for keys told to hang: a read of one starts, signals,
+    /// and then never completes (it does not even honour its token).</summary>
+    private sealed class HangingCache : IDistributedCache
+    {
+        private readonly ConcurrentDictionary<string, TaskCompletionSource> _hung = new();
+
+        public HangingCache(IDistributedCache inner) => Inner = inner;
+
+        public IDistributedCache Inner { get; }
+
+        public Task Hang(string key)
+        {
+            var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            _hung[key] = started;
+            return started.Task;
+        }
+
+        public async Task<byte[]?> GetAsync(string key, CancellationToken token = default)
+        {
+            if (_hung.TryGetValue(key, out var started))
+            {
+                started.TrySetResult();
+                await Task.Delay(Timeout.Infinite); // deliberately ignores the token: the endpoint must not depend on the read honouring it
+            }
+
+            return await Inner.GetAsync(key, token);
+        }
+
+        public byte[]? Get(string key) => Inner.Get(key);
+        public void Set(string key, byte[] value, DistributedCacheEntryOptions options) => Inner.Set(key, value, options);
+        public Task SetAsync(string key, byte[] value, DistributedCacheEntryOptions options, CancellationToken token = default)
+            => Inner.SetAsync(key, value, options, token);
+        public void Refresh(string key) => Inner.Refresh(key);
+        public Task RefreshAsync(string key, CancellationToken token = default) => Inner.RefreshAsync(key, token);
+        public void Remove(string key) => Inner.Remove(key);
+        public Task RemoveAsync(string key, CancellationToken token = default) => Inner.RemoveAsync(key, token);
+    }
+
     private sealed class FamilyTestAuthHandler : AuthenticationHandler<AuthenticationSchemeOptions>
     {
         public const string SchemeName = "FamilyTest";
@@ -444,16 +559,23 @@ public class RecordFamilyEndpointsTests
         public FakeCallerDataverse Dataverse { get; } = new();
         private EphemeralDataProtectionProvider Keys { get; } = new();
         public IDataProtector Protector => Keys.CreateProtector(RecordFamilyReader.ContinuationPurpose);
-        private readonly MemoryDistributedCache _metadataCache = new(Options.Create(new MemoryDistributedCacheOptions()));
+        private readonly HangingCache _metadataCache = new(new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions())));
+
+        /// <summary>The clock the endpoint's label budget runs on; tests advance it instead of waiting.</summary>
+        public FakeTimeProvider Time { get; } = new();
 
         /// <summary>The cached metadata of <paramref name="table"/> as MetadataService wrote it (key and camelCase JSON).</summary>
         public void SeedTableDisplayName(string table, string displayName) =>
-            _metadataCache.SetString("sdap:dv:entitymetadata:" + table, JsonSerializer.Serialize(
+            _metadataCache.Inner.SetString("sdap:dv:entitymetadata:v2:" + table, JsonSerializer.Serialize(
                 new EntityMetadataDto(table, table + "id", "name", Array.Empty<AttributeDto>(), displayName),
                 new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
 
         /// <summary>No cache entry: MetadataService goes to Dataverse, which the substituted service cannot reach (a fault).</summary>
-        public void UnseedTableDisplayName(string table) => _metadataCache.Remove("sdap:dv:entitymetadata:" + table);
+        public void UnseedTableDisplayName(string table) => _metadataCache.Inner.Remove("sdap:dv:entitymetadata:v2:" + table);
+
+        /// <summary>Make the metadata read of <paramref name="table"/> start and never finish (a hung Dataverse call).
+        /// The returned task completes once that read has begun.</summary>
+        public Task HangTableMetadata(string table) => _metadataCache.Hang("sdap:dv:entitymetadata:v2:" + table);
 
         public static async Task<FamilyHost> StartAsync()
         {
@@ -476,6 +598,7 @@ public class RecordFamilyEndpointsTests
             builder.Services.AddAuthorization();
             builder.Services.AddRateLimiter(opt =>
                 opt.AddPolicy("dataverse-query", _ => RateLimitPartition.GetNoLimiter("dataverse-query-test")));
+            builder.Services.AddSingleton<TimeProvider>(Time);
             builder.Services.AddSingleton<CallerRecordAccessProbe>(Probe);
             builder.Services.AddSingleton<IImpersonatedCommunicationQuery>(Dataverse);
             builder.Services.AddSingleton(new RecordFamilyReader(Dataverse, Keys, NullLogger<RecordFamilyReader>.Instance));
