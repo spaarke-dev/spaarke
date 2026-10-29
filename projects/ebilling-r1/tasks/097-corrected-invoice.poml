@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="097" project="ebilling-r1">
+  <metadata>
+    <title>Corrected invoice: the old invoice closes Superseded in step 4 (guarded) and its open Signals close Superseded</title>
+    <phase>3 Procedures and files (WP3, EB-D-148) — wave W3-F</phase>
+    <gate>blocked until 094, 104 and 088 are done</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes the invoice write path and lifecycle (a new close inside the commit transaction), an authorization guard across firms, and append-only Signal history (tags bff-api, auth).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-firm authorization guard, an If-Match re-check inside the transaction, undo that reopens, and a durable idempotent after-step over ontology-owned Signals.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3-F</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Shares InvoiceSubmissionContracts.cs and InvoiceSubmissionService.cs with 095; run 095 and 097 one after the other.</parallel-reason>
+    <deps>094, 104, 088</deps>
+    <tags>bff-api, api, auth, finance, write-path, signals</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+  </metadata>
+
+  <prompt>Implement model section 9.1 "Existing invoice" for a corrected invoice: a Submit Invoice request in mode Correction names the old invoice; the new invoice links to it through 104's sprk_supersedesinvoice; the old invoice closes with status reason Superseded (088) inside step 4's transaction; the refusal for Approved, Sent to AP or Paid is checked at intake and re-checked inside step 4 with IfRowVersionMatches; step 5's undo reopens the old invoice; after step 5 passes, every open billing Signal on the old invoice is closed Superseded through SignalWriter.CloseAsync as a durable, resumable, idempotent after-step.</prompt>
+
+  <role>SPAARKE platform developer. Expert in the Dataverse write path (ADR-002), ExecuteTransaction with optimistic concurrency, the Finance lifecycle service and the ontology Signal writer. Follow ADRs strictly.</role>
+
+  <goal>A correction produces a new invoice linked to the old one, the old one Superseded in the same transaction, its open Signals closed Superseded after step 5, and every guard and failure path behaving as below; a failed correction leaves the old invoice exactly as it was.</goal>
+
+  <context>
+    <background>Read projects/ebilling-r1/notes/procedure-and-file-model.md section 9.1 bullet "Existing invoice" and "All or nothing" steps 4-6; notes/procedure-model-reviews.md section 14 (F1-d). Code facts (verified 2026-10-21): SignalWriter.ResolutionSuperseded = 100000003 (Services/Signals/SignalWriter.cs:411); the system close SignalWriter.CloseAsync(signalId, rowVersion, resolutionType, policyCode) (:943), conditional on the Signal's row version, returning SignalCloseOutcome.ChangedSinceRead when a person resolved it since the read; not CloseActedByDecisionAsync (:1020). The after-steps already hold a Superseded close delegate (InvoiceSubmissionAfterSteps.cs:134, used at :1159) and read an invoice's open Signals (ReadOpenSignalsAsync, :765). Resume re-runs idempotent after-steps until the terminal status (ResumeAsync :233-269); the totals Retry is the model for a durable step (:226, :266, :484). Transitions belong to InvoiceLifecycleService.TransitionAsync (Services/Finance/InvoiceLifecycleService.cs:306). sprk_supersedesinvoice is read today only by SecureChildLineage and InvoiceFamilyCoreRecordGuard; 104 writes it for a Returned to Firm predecessor. 088 adds status reason Superseded on sprk_invoice. 094 provides steps 1-6 and the undo.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/Submission/InvoiceSubmissionContracts.cs (mode Correction, old invoice id)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/Submission/InvoiceSubmissionService.cs (intake guards)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/Submission/InvoiceSubmissionPersister.cs (supersedes link, old-invoice close and If-Match guard in the transaction)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/Submission/SubmitInvoiceIsolationRerun.cs or its 094 equivalent (undo reopens the old invoice)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/Submission/InvoiceSubmissionAfterSteps.cs (superseded-Signal close after-step)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceLifecycleService.cs (In Review → Superseded in the matrix; a request builder usable inside the transaction)</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/Submission/ (InvoiceSubmissionServiceTests, InvoiceSubmissionPersisterTests, InvoiceSubmissionAfterStepsTests) and the lifecycle tests</file>
+      <file role="modify">tests/integration/contract/Api/Finance/InvoiceSubmissionEndpointsContractTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="model 9.1 Existing invoice (uac-r2 F1-d)">Every Correction request, before any write: the caller's own Write on the old invoice (gate variant); the old and the new invoice have the same sprk_vendororg and the same core record; the old invoice is not Approved, Sent to AP or Paid (409). A caller without Write gets the uniform Finance answer for an invisible record (no existence leak).</constraint>
+    <constraint source="model 9.1 step 4">Inside the one transaction: the new invoice's sprk_supersedesinvoice = the old invoice, and the old invoice's close to status reason Superseded carried with IfRowVersionMatches at the version read at the pre-transaction check. A guard fault rolls the whole commit back; the job re-reads the old invoice: now Approved, Sent to AP or Paid → the submission ends Failed with the 409 reason; otherwise the transaction's ordinary Retry.</constraint>
+    <constraint source="FR-06, ADR-002">The Superseded transition is defined only in InvoiceLifecycleService (In Review → Superseded, and Superseded → In Review for the undo only); the persister takes its request from there and writes no status columns of its own.</constraint>
+    <constraint source="model 9.1 step 5 (uac-r2 F1-d)">Step 5's undo list reopens the old invoice to the status it had, with an If-Match write, after the new invoice's rows are deleted; a reopen fault keeps the submission Failed and held until compensation finishes, as 094's undo.</constraint>
+    <constraint source="model 9.1 (ontology-r1 v5.8)">After step 5 passes, every open billing Signal on the old invoice and its lines is closed with SignalWriter.CloseAsync and resolution Superseded (no person recorded); never Dismissed and never CloseActedByDecisionAsync. The step re-reads each Signal; an already-closed Signal counts as success; ChangedSinceRead leaves the Signal as it is.</constraint>
+    <constraint source="model 9.1 (ontology-r1, durable)">The close is an after-step that runs before the terminal status and returns Retry on any failure, so the existing resume and Retry re-run it after a process death or a failed close. No new writer entry point on SignalWriter.</constraint>
+    <constraint source="model 9.1, (a′)">(a′) does not follow sprk_supersedesinvoice: each invoice is judged by its own source. The new invoice's evaluation raises its own Signals from its snapshot.</constraint>
+    <constraint source="CLAUDE.md §10">BFF hygiene per .claude/constraints/bff-extensions.md: publish-size delta against a fresh master build; no new package; no new HIGH CVE.</constraint>
+    <constraint source="live data">No live Dataverse writes and no deploys.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/notes/procedure-and-file-model.md (section 9.1)</file>
+      <file>projects/ebilling-r1/notes/procedure-model-reviews.md (section 14)</file>
+      <file>projects/ebilling-r1/notes/094-submit-invoice.md (written by 094)</file>
+      <file>projects/ebilling-r1/notes/decisions-log.md (D-34, D-37, D-43)</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Superseded Signal close in the after-steps" location="src/server/api/Sprk.Bff.Api/Services/Finance/Submission/InvoiceSubmissionAfterSteps.cs:134, :1159">Reuse the existing delegate; do not add a second binding of CloseAsync.</pattern>
+      <pattern name="Durable after-step via Retry" location="src/server/api/Sprk.Bff.Api/Services/Finance/Submission/InvoiceSubmissionAfterSteps.cs:233-269, :484">The totals Retry: a step that fails returns Retry before the terminal status, and resume re-runs it.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare FULL. Read 094's and 104's notes and code (where the transaction is built, how 104 sets sprk_supersedesinvoice) and 088's Superseded status reason value.</step>
+    <step order="1">Contracts and intake guards (Write, same firm, same core record, status 409) on both Submit Invoice entries (094's route; 095's from-email if merged).</step>
+    <step order="2">Lifecycle: In Review → Superseded and the undo's reopen; a transaction-ready request.</step>
+    <step order="3">Persister: link + If-Match close in the transaction; the guard-fault re-read.</step>
+    <step order="4">Undo: reopen the old invoice.</step>
+    <step order="5">After-step: close the old invoice's open Signals Superseded, idempotent, Retry on failure.</step>
+    <step order="6">Tests per the acceptance criteria; seeding proof; build; Finance, Submission and Signals unit tests; full ArchTests; publish-size delta.</step>
+    <step order="7">Notes in projects/ebilling-r1/notes/097-corrected-invoice.md; update TASK-INDEX.md: this task's status cell to `✅ [done]` after the adversarial review.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a helper that closes one invoice's set of Signals is needed beyond calling the existing CloseAsync delegate per Signal, STOP: it goes through ontology-r1's owner review first (model 9.1).</trigger>
+    <trigger>The model defines refusals only for Approved, Sent to AP and Paid. Before coding, ask the owner how a correction of an Inactive invoice (Rejected, Returned to Firm, Cancelled, Superseded) is answered; proposal: 409 invoice_not_correctable, with Returned to Firm resubmissions left to 104's automatic link.</trigger>
+    <trigger>If the lifecycle transition cannot be expressed as a request inside the persister's ExecuteTransaction without a second status writer, STOP and report (FR-06 single owner).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>104 links a Returned to Firm predecessor through sprk_supersedesinvoice; InvoiceLifecycleService owns transitions; InvoiceSubmissionAfterSteps already binds a Superseded CloseAsync (:134).</existing>
+    <extension>Yes: extends 094's operation with a Correction mode, the lifecycle matrix with one transition, the persister's transaction with one guarded update and the after-steps with one step; no new service, route or Signal writer entry point.</extension>
+    <cost-of-doing-nothing>A firm's corrected invoice would sit beside the wrong one: both In Review, both counted toward spend, the old one's findings still open and decidable (owner I, 4.x item 2).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">build, test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">InvoiceSubmissionContracts, InvoiceSubmissionService, InvoiceSubmissionPersister, 094's undo class, InvoiceSubmissionAfterSteps, InvoiceLifecycleService</output>
+    <output type="test">Updated Submission, lifecycle and Finance contract tests</output>
+    <output type="docs">projects/ebilling-r1/notes/097-corrected-invoice.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Happy path: a Correction of an In Review invoice commits the new invoice with sprk_supersedesinvoice = the old one and the old invoice Superseded in the same transaction; after step 5 passes the old invoice and its lines have no open Signal, each closed with resolution Superseded and no person (test: "a superseded invoice is left with no open Signal").</criterion>
+    <criterion testable="true">Guards before any write: no Write on the old invoice → the uniform not-found answer; a different sprk_vendororg → refused; a different core record → refused; old invoice Approved, Sent to AP or Paid → 409 (one test each).</criterion>
+    <criterion testable="true">Race: the old invoice approved between intake and commit → the If-Match guard faults, nothing is committed, the submission ends Failed with the 409 reason, the old invoice stays Approved (test).</criterion>
+    <criterion testable="true">Undo: a step-5 failure deletes the new invoice's rows and reopens the old invoice to In Review; no Signal on the old invoice is closed (test).</criterion>
+    <criterion testable="true">Durable close: the close fails once and the resume completes it; the submission reaches its terminal status only after every open Signal is closed (test: "the close fails once and the resume completes it").</criterion>
+    <criterion testable="true">Idempotent close: an already-closed Signal counts as success; a Signal changed since the read (ChangedSinceRead) is left as it is and does not fail the step (tests).</criterion>
+    <criterion testable="true">No Signal is closed with resolution Dismissed or through CloseActedByDecisionAsync by this path (test asserts the resolution and the call).</criterion>
+    <criterion testable="true">(a′): hiding the old invoice's source does not hide the new invoice, and the reverse (test against 098's predicate).</criterion>
+    <criterion testable="true">Seeding proof, recorded in notes: remove the same-sprk_vendororg check → the different-firm test fails; restored.</criterion>
+    <criterion testable="true">dotnet build exits 0; Finance, Submission and Signals unit tests and the full ArchTests pass (known pre-existing failures listed by name); publish-size delta recorded; no new HIGH CVE.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Reviews: adversarial-reviewer twice (auth: cross-firm guard), ontology-r1 for the Signal close, uac-r2 for F1-d. Tracking numbers follow D-37 (firm invoice number kept, new .n via 045). Adding supporting files to an existing invoice is 090's internal upload route, not this task. OWNER 2026-10-21 (re-plan Q2): an Inactive invoice (Rejected, Returned to Firm, Cancelled, Superseded) cannot be changed; a correction against it is refused with 409 before any write. It becomes changeable only if reactivated, and only an admin may reactivate (reactivation itself is out of this task's scope). This answers the escalation trigger on Inactive invoices. ontology-r1 088 gate 2026-10-22, F1 for this task: the Duplicate rule treats a Superseded invoice as live. BillingFactLoader.cs:578-583 maps any status it doesn't list to BillingPriorStatus.Active, and DuplicateHandler.cs:63 compares against Active priors. A corrected invoice keeps the firm's invoice number (D-37) and supersedes the old one, so it raises a Duplicate against the invoice it replaced. Fix: map Superseded (659490005) to null, as Cancelled is. Must-fire test: a corrected invoice whose predecessor is Superseded raises no Duplicate. Must-not-fire: an Active prior with the same number still raises one. BillingFactLoader is under ontology's Services/Signals/Billing path, so ontology-r1 reviews that change.2026-10-22 (088 on dev): sprk_storedfile.sprk_sourcedocument and sprk_sourcecommunication are Restrict, so deleting a Document or Communication that a Stored File points at is refused. Any delete or cleanup path this task adds must expect and handle that refusal (uac-r2 delete design section 15 covers core-record deletes).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load every file in knowledge/files before Step 1. Follow task-execute for rigor, checkpoints and quality gates.</protocol>
+  </execution>
+</task>

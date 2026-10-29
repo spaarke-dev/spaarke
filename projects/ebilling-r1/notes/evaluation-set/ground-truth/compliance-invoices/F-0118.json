@@ -1,0 +1,33 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0118",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0118","generator_id":"gen_eval_set.py@1 F-0118","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0118.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-04"},
+ "header":{"firm":"Garrison & Whitcombe LLP","firm_invoice_number":"A-16635/2026","invoice_date":"2025-08-04","billing_period_start":"2025-07-01","billing_period_end":"2025-07-31","firm_matter_reference":"16762-0028","po_number":"PO-4551206","fees_total":6902.5,"expenses_total":205.83,"adjustments_total":0.0,"total_due":7108.33,"currency":"USD"},
+ "timekeepers":[{"name":"Ivan Kowalczyk","title":"Legal Assistant","rate":160.0,"billed_as":"IK"},{"name":"Naomi Dunleavy","title":"Of Counsel","rate":595.0,"billed_as":"ND"},{"name":"Priya Quillen","title":"Partner","rate":570.0,"billed_as":"PQ"},{"name":"Sofia Abernathy","title":"Associate","rate":335.0,"billed_as":"SA"},{"name":"Sofia Sandoval","title":"Partner","rate":590.0,"billed_as":"SS"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-07-01","timekeeper":"SA","timekeeper_name":"Sofia Abernathy","timekeeper_title":"Associate","title":"Assoc","hours":1.0,"rate":335.0,"amount":335.0,"narrative":"Draft settlement proposal for trial in the customs audit","codes":["L430","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-07-01","timekeeper":"SA","timekeeper_name":"Sofia Abernathy","timekeeper_title":"Associate","title":"Assoc","hours":2.25,"rate":335.0,"amount":753.75,"narrative":"Prepare monthly status report to client regarding the supply agreement","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-07-01","timekeeper":"SA","timekeeper_name":"Sofia Abernathy","timekeeper_title":"Associate","title":"Assoc","hours":1.0,"rate":335.0,"amount":335.0,"narrative":"Draft settlement proposal for trial in the customs audit","codes":["L430","A103"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-07-02","timekeeper":"IK","timekeeper_name":"Ivan Kowalczyk","timekeeper_title":"Legal Assistant","title":"LA","hours":0.5,"rate":160.0,"amount":80.0,"narrative":"Prepare fact witness for testimony regarding the distribution agreement","codes":["L410","A101"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-07-03","timekeeper":"SA","timekeeper_name":"Sofia Abernathy","timekeeper_title":"Associate","title":"Assoc","hours":2.5,"rate":545.0,"amount":1362.5,"narrative":"Attend trial day in the vendor agreement","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-07-03","timekeeper":"PQ","timekeeper_name":"Priya Quillen","timekeeper_title":"Partner","title":"Ptr","hours":1.25,"rate":570.0,"amount":712.5,"narrative":"Attend hearing on mediation statement in the insurance coverage issue","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-07-11","timekeeper":"IK","timekeeper_name":"Ivan Kowalczyk","timekeeper_title":"Legal Assistant","title":"LA","hours":2.75,"rate":160.0,"amount":440.0,"narrative":"Prepare expert witness for testimony in the distribution agreement","codes":["L420","A101"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-07-16","timekeeper":"ND","timekeeper_name":"Naomi Dunleavy","timekeeper_title":"Of Counsel","title":"O/C","hours":1.75,"rate":595.0,"amount":1041.25,"narrative":"Plan strategy for upcoming phase of the distribution agreement with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-07-31","timekeeper":"SA","timekeeper_name":"Sofia Abernathy","timekeeper_title":"Associate","title":"Assoc","hours":2.75,"rate":335.0,"amount":921.25,"narrative":"Attend trial day in the distribution agreement","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-07-31","timekeeper":"SA","timekeeper_name":"Sofia Abernathy","timekeeper_title":"Associate","title":"Assoc","hours":2.75,"rate":335.0,"amount":921.25,"narrative":"Attend trial day in the distribution agreement","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-07-11","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":3.0,"rate":62.01,"amount":186.03,"narrative":"Overnight courier to Quarry Lane Partners counsel","codes":["E107"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-07-17","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":30.0,"rate":0.66,"amount":19.8,"narrative":"Mileage to courthouse","codes":["E109"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["306 Federal Plaza","Portland","Tax ID 69-3195860"],"template":"T07","pages":1},
+ "rule_set_id":"RS-04",
+ "context":{"matter_open":"2024-09-07","matter_close":"2025-10-29","matter_budget":53433.0,"approved_timekeepers":["Louis Whitfield","Ivan Kowalczyk","Naomi Dunleavy","Sofia Abernathy","Sofia Sandoval"],"invoice_received_date":"2025-08-19"},
+ "expected_findings":[
+  {"rule_id":"RS-04-R01","rule_type":"ApprovedTimekeeper","scope":"line","line_refs":[6],"consequence":"Reject"},
+  {"rule_id":"RS-04-R02","rule_type":"ApprovedRate","scope":"line","line_refs":[5],"consequence":"Reduce"},
+  {"rule_id":"RS-04-R06","rule_type":"Duplicate","scope":"line","line_refs":[3],"consequence":"Disallow","related_line_refs":[1]},
+  {"rule_id":"RS-04-R06","rule_type":"Duplicate","scope":"line","line_refs":[10],"consequence":"Disallow","related_line_refs":[9]}
+ ],
+ "seeded_violations":4
+}

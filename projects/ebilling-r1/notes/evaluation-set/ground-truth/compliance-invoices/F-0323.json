@@ -1,0 +1,27 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0323",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0323","generator_id":"gen_eval_set.py@1 F-0323","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0323.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-05"},
+ "header":{"firm":"Penhallow and Yardley LLP","firm_invoice_number":"INV-2025-01847","invoice_date":"2025-04-01","billing_period_start":"2025-03-01","billing_period_end":"2025-03-31","firm_matter_reference":"58399-0027","po_number":"PO-4570093","fees_total":3653.5,"expenses_total":1986.97,"adjustments_total":0.0,"total_due":5640.47,"currency":"USD"},
+ "timekeepers":[{"name":"Elena Rosenthal","title":"Associate","rate":290.0,"billed_as":"Rosenthal, E."},{"name":"Emeka Lindqvist","title":"Partner","rate":465.0,"billed_as":"Lindqvist, E."},{"name":"Sofia Delacroix","title":"Associate","rate":230.0,"billed_as":"Delacroix, S."},{"name":"Sofia Wickham","title":"Associate","rate":305.0,"billed_as":"Wickham, S."},{"name":"Yusuf Santoro","title":"Partner","rate":445.0,"billed_as":"Santoro, Y."}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-03-07","timekeeper":"Lindqvist, E.","timekeeper_name":"Emeka Lindqvist","timekeeper_title":"Partner","title":"Partner","hours":1.2,"rate":465.0,"amount":558.0,"narrative":"Prepare case assessment memorandum regarding the supply agreement and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-03-10","timekeeper":"Delacroix, S.","timekeeper_name":"Sofia Delacroix","timekeeper_title":"Associate","title":"Associate","hours":2.1,"rate":230.0,"amount":483.0,"narrative":"Revise motion for summary judgment after review by lead counsel","codes":["L430","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-03-12","timekeeper":"Wickham, S.","timekeeper_name":"Sofia Wickham","timekeeper_title":"Associate","title":"Associate","hours":0.6,"rate":305.0,"amount":183.0,"narrative":"Review draft expert disclosure for the distribution agreement","codes":["L420","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-03-14","timekeeper":"Santoro, Y.","timekeeper_name":"Yusuf Santoro","timekeeper_title":"Partner","title":"Partner","hours":2.6,"rate":445.0,"amount":1157.0,"narrative":"Prepare monthly status report to client regarding the lease dispute","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-03-18","timekeeper":"Rosenthal, E.","timekeeper_name":"Elena Rosenthal","timekeeper_title":"Associate","title":"Associate","hours":2.2,"rate":290.0,"amount":638.0,"narrative":"Draft settlement proposal for trial in the distribution agreement","codes":["L430","A103"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-03-19","timekeeper":"Rosenthal, E.","timekeeper_name":"Elena Rosenthal","timekeeper_title":"Associate","title":"Associate","hours":0.4,"rate":290.0,"amount":116.0,"narrative":"Prepare fact witness for testimony regarding the data incident","codes":["L410","A101"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-03-28","timekeeper":"Wickham, S.","timekeeper_name":"Sofia Wickham","timekeeper_title":"Associate","title":"Associate","hours":1.7,"rate":305.0,"amount":518.5,"narrative":"Research standard for new trial in the employment claim","codes":["L460","A102"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"expense","date":"2025-03-06","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":3.0,"rate":18.12,"amount":54.36,"narrative":"Overnight courier to Ironbridge Steel counsel","codes":["E107"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2025-03-07","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":730.0,"rate":0.08,"amount":58.4,"narrative":"Photocopies - 730 pages","codes":["E101"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-03-11","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1671.98,"amount":1671.98,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-03-24","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":202.23,"amount":202.23,"narrative":"Court filing fee","codes":["E112"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["711 Congress Boulevard","Seattle","Tax ID 11-9869396"],"template":"T06","pages":2},
+ "rule_set_id":"RS-05",
+ "context":{"matter_open":"2024-03-31","matter_close":"2025-06-29","matter_budget":47561.0,"approved_timekeepers":["Elena Rosenthal","Jordan Carmichael","Yusuf Santoro","Dmitri Ashdown","Ivan Galbraith","Sofia Delacroix","Sofia Wickham","Emeka Lindqvist"],"invoice_received_date":"2025-04-04"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

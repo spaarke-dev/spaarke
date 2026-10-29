@@ -1,0 +1,29 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0487",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0487","generator_id":"gen_eval_set.py@1 F-0487","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0487.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Sutherland Dunmore PC","firm_invoice_number":"LF0018755","invoice_date":"2026-05-03","billing_period_start":"2026-04-01","billing_period_end":"2026-04-30","firm_matter_reference":"46963-0010","po_number":"PO-4516741","fees_total":5302.0,"expenses_total":446.07,"adjustments_total":0.0,"total_due":5748.07,"currency":"USD"},
+ "timekeepers":[{"name":"Cyrus Castellanos","title":"Associate","rate":345.0,"billed_as":"CC"},{"name":"Dalia Santoro","title":"Senior Associate","rate":440.0,"billed_as":"DS"},{"name":"Emeka Ashdown","title":"Associate","rate":345.0,"billed_as":"EA"},{"name":"Emeka Hargrove","title":"Of Counsel","rate":570.0,"billed_as":"EH"},{"name":"Gregory Brennan","title":"Partner","rate":585.0,"billed_as":"GB"},{"name":"Priya Castellanos","title":"Associate","rate":350.0,"billed_as":"PC"},{"name":"Samuel Quillen","title":"Paralegal","rate":190.0,"billed_as":"SQ"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-04-01","timekeeper":"SQ","timekeeper_name":"Samuel Quillen","timekeeper_title":"Paralegal","title":"Para","hours":1.7,"rate":190.0,"amount":323.0,"narrative":"Prepare expert witness for testimony in the vendor agreement","codes":["L420","A101"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-04-01","timekeeper":"EA","timekeeper_name":"Emeka Ashdown","timekeeper_title":"Associate","title":"Assoc","hours":0.8,"rate":345.0,"amount":276.0,"narrative":"Review draft expert disclosure for the lease dispute","codes":["L420","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-04-08","timekeeper":"SQ","timekeeper_name":"Samuel Quillen","timekeeper_title":"Paralegal","title":"Para","hours":1.7,"rate":190.0,"amount":323.0,"narrative":"Draft post-trial motion in the regulatory inquiry","codes":["L460","A103"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-04-09","timekeeper":"PC","timekeeper_name":"Priya Castellanos","timekeeper_title":"Associate","title":"Assoc","hours":1.0,"rate":350.0,"amount":350.0,"narrative":"Prepare expert witness for testimony in the warranty claim","codes":["L420","A101"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-04-13","timekeeper":"SQ","timekeeper_name":"Samuel Quillen","timekeeper_title":"Paralegal","title":"Para","hours":1.2,"rate":190.0,"amount":228.0,"narrative":"Analyze exposure and damages model for the data incident","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-04-14","timekeeper":"CC","timekeeper_name":"Cyrus Castellanos","timekeeper_title":"Associate","title":"Assoc","hours":0.2,"rate":345.0,"amount":69.0,"narrative":"Attend hearing on witness list in the data incident","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-04-16","timekeeper":"DS","timekeeper_name":"Dalia Santoro","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.7,"rate":440.0,"amount":748.0,"narrative":"Review draft expert disclosure for the insurance coverage issue","codes":["L420","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-04-17","timekeeper":"GB","timekeeper_name":"Gregory Brennan","timekeeper_title":"Partner","title":"Ptr","hours":1.8,"rate":585.0,"amount":1053.0,"narrative":"Draft post-trial motion in the construction contract","codes":["L460","A103"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-04-21","timekeeper":"EA","timekeeper_name":"Emeka Ashdown","timekeeper_title":"Associate","title":"Assoc","hours":0.5,"rate":345.0,"amount":172.5,"narrative":"Attend trial day in the customs audit","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2026-04-27","timekeeper":"CC","timekeeper_name":"Cyrus Castellanos","timekeeper_title":"Associate","title":"Assoc","hours":1.3,"rate":345.0,"amount":448.5,"narrative":"Attend hearing on reply brief in the customs audit","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2026-04-29","timekeeper":"EH","timekeeper_name":"Emeka Hargrove","timekeeper_title":"Of Counsel","title":"O/C","hours":2.3,"rate":570.0,"amount":1311.0,"narrative":"Plan strategy for upcoming phase of the licensing dispute with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2026-04-10","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":33.82,"amount":33.82,"narrative":"Long distance conference call charges","codes":["E105"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2026-04-17","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":412.25,"amount":412.25,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["737 Elm Court","Boston","Tax ID 93-2495449"],"template":"T19","pages":2},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2025-04-19","matter_close":"2026-07-29","matter_budget":47992.0,"approved_timekeepers":["Emeka Ashdown","Ivan Santoro","Samuel Quillen","Priya Castellanos","Anders Blackwood","Dalia Santoro","Cyrus Castellanos","Gregory Brennan","Emeka Hargrove"],"invoice_received_date":"2026-05-08"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

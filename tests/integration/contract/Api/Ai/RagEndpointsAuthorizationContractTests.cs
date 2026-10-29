@@ -560,6 +560,30 @@ public sealed class RagEndpointsAuthorizationContractTests : IClassFixture<Route
     }
 
     [Fact]
+    public async Task IndexFile_FileInANonIndexedContainer_Is200Skipped_AndDoesNotStampTheDocument()
+    {
+        // ebilling-r1 task 028 (FR-16): indexing skips a file in the E-Billing Output Files container; the
+        // route must not then stamp the document row as indexed.
+        GrantWriteAndParent();
+        ArrangeRow(new DocumentEntity
+        {
+            Id = WritableDocument.ToString(), Name = "invoice.ledes", GraphDriveId = Drive, GraphItemId = Item,
+            MatterId = ParentMatter.ToString(), MatterName = "Acme v. Zenith",
+        });
+        _fixture.FileIndexing
+            .Setup(f => f.IndexFileAsync(It.IsAny<FileIndexRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(FileIndexingResult.Skip(FileIndexingService.NonIndexedContainerReason, WritableDocument.ToString(), Item));
+
+        var response = await PostIndexFileAsync(IndexFile(
+            documentId: WritableDocument.ToString(),
+            parent: new ParentEntityContext("matter", ParentMatter.ToString(), "Acme v. Zenith")));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await response.Content.ReadAsStringAsync()).Should().Contain(FileIndexingService.NonIndexedContainerReason);
+        VerifyNoStamp();
+    }
+
+    [Fact]
     public async Task IndexFile_EntityCreationServiceShape_WithoutDocumentId_Is200_WithNoDataverseWrite()
     {
         _fixture.Access.Grant(WorkAssignment, AccessRights.AppendTo);

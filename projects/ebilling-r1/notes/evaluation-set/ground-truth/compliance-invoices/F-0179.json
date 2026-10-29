@@ -1,0 +1,35 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0179",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0179","generator_id":"gen_eval_set.py@1 F-0179","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0179.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-05"},
+ "header":{"firm":"Kestrel & Forsythe LLP","firm_invoice_number":"LF0074003","invoice_date":"2025-09-01","billing_period_start":"2025-08-01","billing_period_end":"2025-08-31","firm_matter_reference":"37575-0024","po_number":"PO-4517353","fees_total":9515.25,"expenses_total":250.62,"adjustments_total":0.0,"total_due":9765.87,"currency":"USD"},
+ "timekeepers":[{"name":"Helena Nakamura","title":"Partner","rate":430.0,"billed_as":"HN"},{"name":"Ingrid Quillen","title":"Associate","rate":235.0,"billed_as":"IQ"},{"name":"Katya Castellanos","title":"Partner","rate":480.0,"billed_as":"KC"},{"name":"Marcus Voss","title":"Paralegal","rate":140.0,"billed_as":"MV"},{"name":"Oliver Tavares","title":"Associate","rate":310.0,"billed_as":"OT"},{"name":"Victor Castellanos","title":"Legal Assistant","rate":130.0,"billed_as":"VC"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-08-01","timekeeper":"OT","timekeeper_name":"Oliver Tavares","timekeeper_title":"Associate","title":"Assoc","hours":2.8,"rate":310.0,"amount":868.0,"narrative":"Draft reply brief for trial in the insurance coverage issue","codes":["L430","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-08-06","timekeeper":"HN","timekeeper_name":"Helena Nakamura","timekeeper_title":"Partner","title":"Ptr","hours":1.6,"rate":430.0,"amount":688.0,"narrative":"Telephone conference with witness regarding the employment claim","codes":["L410","A106"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-08-11","timekeeper":"IQ","timekeeper_name":"Ingrid Quillen","timekeeper_title":"Associate","title":"Assoc","hours":2.2,"rate":235.0,"amount":517.0,"narrative":"Attend hearing on answer and affirmative defenses in the supply agreement","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-08-11","timekeeper":"HN","timekeeper_name":"Helena Nakamura","timekeeper_title":"Partner","title":"Ptr","hours":2.9,"rate":775.0,"amount":2247.5,"narrative":"Prepare fact witness for testimony regarding the distribution agreement","codes":["L410","A101"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-08-14","timekeeper":"IQ","timekeeper_name":"Ingrid Quillen","timekeeper_title":"Associate","title":"Assoc","hours":0.85,"rate":235.0,"amount":199.75,"narrative":"Prepare examination outlines for trial in the lease dispute","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-08-14","timekeeper":"OT","timekeeper_name":"Oliver Tavares","timekeeper_title":"Associate","title":"Assoc","hours":2.6,"rate":310.0,"amount":806.0,"narrative":"Attend hearing on interrogatory responses in the vendor agreement","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-08-21","timekeeper":"OT","timekeeper_name":"Oliver Tavares","timekeeper_title":"Associate","title":"Assoc","hours":0.4,"rate":310.0,"amount":124.0,"narrative":"Prepare examination outlines for trial in the regulatory inquiry","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-08-21","timekeeper":"VC","timekeeper_name":"Victor Castellanos","timekeeper_title":"Legal Assistant","title":"LA","hours":0.5,"rate":130.0,"amount":65.0,"narrative":"Prepare fact witness for testimony regarding the vendor agreement","codes":["L410","A101"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-08-25","timekeeper":"MV","timekeeper_name":"Marcus Voss","timekeeper_title":"Paralegal","title":"Para","hours":2.1,"rate":210.0,"amount":441.0,"narrative":"Attend trial day in the licensing dispute","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-08-27","timekeeper":"MV","timekeeper_name":"Marcus Voss","timekeeper_title":"Paralegal","title":"Para","hours":1.0,"rate":140.0,"amount":140.0,"narrative":"Attend hearing on protective order in the employment claim","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-08-27","timekeeper":"KC","timekeeper_name":"Katya Castellanos","timekeeper_title":"Partner","title":"Ptr","hours":2.1,"rate":480.0,"amount":1008.0,"narrative":"Plan strategy for upcoming phase of the data incident with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2025-08-27","timekeeper":"OT","timekeeper_name":"Oliver Tavares","timekeeper_title":"Associate","title":"Assoc","hours":2.9,"rate":310.0,"amount":899.0,"narrative":"Review draft expert disclosure for the employment claim","codes":["L420","A104"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"fee","date":"2025-08-28","timekeeper":"HN","timekeeper_name":"Helena Nakamura","timekeeper_title":"Partner","title":"Ptr","hours":2.8,"rate":430.0,"amount":1204.0,"narrative":"Prepare examination outlines for trial in the lease dispute","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":14,"line_type":"fee","date":"2025-08-29","timekeeper":"MV","timekeeper_name":"Marcus Voss","timekeeper_title":"Paralegal","title":"Para","hours":2.2,"rate":140.0,"amount":308.0,"narrative":"Revise motion to compel after review by lead counsel","codes":["L430","A104"],"page":1,"narrative_style":"clear"},
+  {"n":15,"line_type":"expense","date":"2025-08-11","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":250.62,"amount":250.62,"narrative":"Court filing fee","codes":["E112"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["88 Harbor Road","Denver","Tax ID 47-3065302"],"template":"T19","pages":2},
+ "rule_set_id":"RS-05",
+ "context":{"matter_open":"2024-05-26","matter_close":"2025-11-29","matter_budget":64063.0,"approved_timekeepers":["Oliver Tavares","Dmitri Ashdown","Peter Zielinski","Katya Castellanos","Clara Galbraith","Helena Nakamura","Ingrid Quillen","Victor Castellanos","Marcus Voss"],"invoice_received_date":"2025-09-03"},
+ "expected_findings":[
+  {"rule_id":"RS-05-R01","rule_type":"ApprovedRate","scope":"line","line_refs":[4],"consequence":"Reduce"},
+  {"rule_id":"RS-05-R01","rule_type":"ApprovedRate","scope":"line","line_refs":[9],"consequence":"Reduce"},
+  {"rule_id":"RS-05-R02","rule_type":"TimeIncrement","scope":"line","line_refs":[5],"consequence":"Reduce"}
+ ],
+ "seeded_violations":3
+}

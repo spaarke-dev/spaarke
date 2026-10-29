@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="161" project="ebilling-r1">
+  <metadata>
+    <title>Calibration report from corrections and the evaluation set</title>
+    <phase>7 Evaluation and rollout (WP7) — wave W7-1</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Analysis and a report under notes/; a scoring harness under the project folder; no src change. Recommendations are applied by 162, not here.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Data analysis that extends 005's scoring harness with a fixed method (bins per field, rates, threshold sweep).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P7-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>002, 049, 101</deps>
+    <tags>evaluation, ai</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+  </metadata>
+
+  <prompt>Produce the D-47 calibration report: for each extracted and coded field, how well the combined confidence (and its four signals) predicts correctness, measured on the evaluation set run through the dev pipeline and on the structured correction records captured in review; then recommend the reliability threshold, signal weights and caps in the eBilling settings, with the expected effect on NFR-06 (zero rejections from misread values) and on review load.</prompt>
+
+  <role>SPAARKE AI engineer. Expert in confidence calibration, evaluation methodology and Dataverse querying; careful about cost and about which outcomes count as labels.</role>
+
+  <goal>notes/calibration-report.md exists with, per field: bin table (confidence band, count, accuracy), the rate of wrong values at or above the current threshold, and a reliability curve; a threshold sweep showing misread-caused rejections and the share of fields flagged for review; a recommended threshold, weights and caps with reasoning; the data sources and their counts; the harness under projects/ebilling-r1/notes/calibration/ re-runs it.</goal>
+
+  <context>
+    <background>D-47: combined confidence per field from four signals (analyzer confidence, arithmetic consistency, reference-data match, model self-report as minor input); only this score gates rejection (FR-26). Settings (025): sprk_ebillingsetting columns sprk_reliabilitythreshold (seeded 0.90), sprk_weightanalyzer, sprk_weightarithmetic, sprk_weightreferencematch, sprk_weightselfreport, sprk_arithmeticfailcap, sprk_referencemissingcap — seeded provisionally and flagged for this task. Calculator: 046 (CombinedConfidenceCalculator, pure). Per-field confidence stored on lines in sprk_extractionconfidence and sprk_codingconfidence (010). Corrections (027 / 101): sprk_invoicecorrection with sprk_fieldname, sprk_aivalue, sprk_finalvalue, sprk_aiconfidence, sprk_outcometype, sprk_islabel, sprk_sourcecode, sprk_sourceversion, lookups to sprk_invoice and sprk_invoiceline — queried per Action / analyzer code and version (FR-31 acceptance). Only Corrected and Confirmed-individually outcomes are labels (sprk_islabel); Accepted in bulk is never a label. Evaluation set and ground truth: 002 (notes/evaluation-set/manifest.md, ground-truth/*.json; real documents under notes/evaluation-set/local/, git-ignored). 005's scoring harness (notes/spikes/) already does field matching and calibration bins — reuse it. Submission routes for the run: 044's internal route POST /api/finance/{matters|projects|workassignments}/{id}/invoice-submissions.</background>
+    <relevant-files>
+      <file role="output">projects/ebilling-r1/notes/calibration-report.md</file>
+      <file role="output">projects/ebilling-r1/notes/calibration/ (harness: query, scoring, threshold sweep; committed; no real document content)</file>
+      <file role="read">projects/ebilling-r1/notes/spikes/ (005 scoring harness)</file>
+      <file role="read">projects/ebilling-r1/notes/evaluation-set/manifest.md</file>
+      <file role="read">projects/ebilling-r1/tasks/046-resolution-combined-confidence.poml</file>
+      <file role="read">projects/ebilling-r1/tasks/027-correction-record-schema.poml</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="002" status="pending">Evaluation set with ground truth</dependency>
+      <dependency task="049" status="pending">Processing job writes per-field confidence</dependency>
+      <dependency task="101" status="pending">Structured correction capture</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="D-81">Measure BOTH the preview primary analyzer and the GA fallback analyzer (kept in step under D-81) against NFR-04 / NFR-06, reported separately (never pooled), so the owner can confirm the preview exception or fall back to GA.</constraint>
+    <constraint source="project">No src/** change. Harness and outputs stay under projects/ebilling-r1/notes/; settings are not changed here (162 applies any change).</constraint>
+    <constraint source="FR-31, D-64">Only label outcomes (sprk_islabel true: Corrected, Confirmed individually) count as ground truth from corrections; bulk-accepted and unreviewed values are reported as counts only.</constraint>
+    <constraint source="D-47">Report each signal's contribution as well as the combined score; recommend weights and caps within 025's valid ranges (0-1); self-report may never raise a score above analyzer confidence.</constraint>
+    <constraint source="ADR-015, project CLAUDE.md">The report and harness contain no narrative text, names or amounts from real documents — field names, ids, counts and rates only. Real documents stay under notes/evaluation-set/local/.</constraint>
+    <constraint source="project">Results are split by Action / analyzer code and version (sprk_sourcecode, sprk_sourceversion) and never pooled across versions.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/spec.md (Processing Pipeline step 2, FR-26, FR-31, D-47)</file>
+      <file>projects/ebilling-r1/notes/decisions-log.md (D-47, D-64)</file>
+      <file>projects/ebilling-r1/notes/extraction-spike.md (005 method and baseline calibration)</file>
+      <file>.claude/skills/dataverse-mcp-usage/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Read 005's harness and extraction-spike.md; state the method (bins, matching rules) in the report before running anything.</step>
+    <step order="1">Cost estimate: pages and lines to run through dev (analyzer and coding calls) times current unit prices; record it in the report.</step>
+    <step order="2">Run the evaluation set (or the subset agreed in the cost escalation) through the dev pipeline via the internal submission route; collect per-field combined confidence and signals; score against ground truth.</step>
+    <step order="3">Query sprk_invoicecorrection per code and version; join to field confidence; compute the same bins from labels.</step>
+    <step order="4">Threshold sweep 0.70-0.99: misread-caused rejections (NFR-06) and share of fields flagged for review, per source.</step>
+    <step order="5">Write recommendations: threshold, weights, caps, and per-field notes (fields whose confidence is not predictive); hand to 162.</step>
+    <step order="6">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+    <step order="7">Record deviations (subset size, sources missing) in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the step 1 estimate exceeds the cost the owner accepted for the 005 spike, STOP and present a smaller stratified subset (largest invoices and bundled PDFs kept) for approval.</trigger>
+    <trigger>If fewer than 30 label corrections exist in dev, say so in the report and base recommendations on the evaluation set only; do not fabricate or bulk-generate review outcomes.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="pwsh">harness</tool>
+    <tool name="dataverse-mcp">read_query on sprk_invoicecorrection and sprk_invoiceline</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ebilling-r1/notes/calibration-report.md</output>
+    <output type="code">projects/ebilling-r1/notes/calibration/ (harness)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">calibration-report.md has, for every header field and for line date, timekeeper, hours, rate, amount and task code: a bin table with counts and accuracy, and the rate of wrong values at or above the current threshold.</criterion>
+    <criterion testable="true">The threshold sweep reports misread-caused rejections and flagged share at each step; the recommended threshold yields zero misread-caused rejections on the evaluation set or the report says no threshold does.</criterion>
+    <criterion testable="true">Recommended weights and caps lie in 0-1, and the reasoning cites the per-signal results.</criterion>
+    <criterion testable="true">Correction-based results use only sprk_islabel = true rows and are split by code and version; counts of bulk-accepted and unreviewed rows are reported separately.</criterion>
+    <criterion testable="true">Re-running the harness reproduces the report's tables from the recorded run ids.</criterion>
+    <criterion testable="true">No real-document text, names or amounts appear in committed files (grep check recorded in notes).</criterion>
+  </acceptance-criteria>
+
+  <notes>P7-A runs with 160 (tests only), so no file overlap. 162 consumes the recommendations and applies settings changes.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

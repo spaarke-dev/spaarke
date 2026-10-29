@@ -6,7 +6,8 @@ namespace Spaarke.ArchTests;
 /// <summary>
 /// unified-access-control-r2 task 036 option C (owner 2026-10-20): no handler or filter file of the <c>/api/v1/external</c>
 /// plane calls a token-taking (OBO) question of <c>CallerRecordAccessProbe</c> — <c>GetCallerRightsAsync</c>,
-/// <c>GetCallerRightsForRecordsAsync</c>, <c>GetCallerRightsForAuthorizationGateAsync</c>, <c>CallerHoldsPrivilegeAsync</c>,
+/// <c>GetCallerRightsForRecordsAsync</c>, <c>GetCallerRightsForRecordsOrUnknownAsync</c> (ebilling-r1 081),
+/// <c>GetCallerRightsForAuthorizationGateAsync</c>, <c>CallerHoldsPrivilegeAsync</c>,
 /// <c>GetCallerSystemUserIdAsync</c> — or any other OBO entry point the BFF has (the MSAL exchange itself, the Graph
 /// <c>ForUser*</c> clients, the SpeFileStore <c>*AsUserAsync</c> methods, the OBO Dataverse client
 /// <c>IDataverseUserClient</c>, <c>GrantExternalAccessEndpoint.ProbeGrantorCeilingAsync</c>), or reads the caller's bearer
@@ -70,7 +71,7 @@ public class ExternalPlaneNoOboGuardTests
     private static readonly (Regex Pattern, string Why)[] Forbidden =
     {
         (new Regex(
-                @"\b(GetCallerRightsAsync|GetCallerRightsForRecordsAsync|GetCallerRightsForAuthorizationGateAsync|CallerHoldsPrivilegeAsync|GetCallerSystemUserIdAsync)\b",
+                @"\b(GetCallerRightsAsync|GetCallerRightsForRecordsAsync|GetCallerRightsForRecordsOrUnknownAsync|GetCallerRightsForAuthorizationGateAsync|CallerHoldsPrivilegeAsync|GetCallerSystemUserIdAsync)\b",
                 RegexOptions.CultureInvariant),
             "a token-taking (OBO) CallerRecordAccessProbe question — use GetPrincipalRightsAppOnlyOrUnknownAsync / "
             + "PrincipalHoldsPrivilegeAppOnlyOrUnknownAsync with the resolved systemuser (ExternalProjectDataEndpoints.CallerRightsReader)"),
@@ -448,6 +449,7 @@ public class ExternalPlaneNoOboGuardTests
     [InlineData("return (entitySet, recordId, ct) => probe.GetCallerRightsAsync(token, entitySet, recordId, ct);")]
     [InlineData("return (privilege, ct) => probe.CallerHoldsPrivilegeAsync(token, privilege, ct);")]
     [InlineData("var rights = await probe.GetCallerRightsForRecordsAsync(token, \"sprk_projects\", ids, ct);")]
+    [InlineData("var rights = await probe.GetCallerRightsForRecordsOrUnknownAsync(token, targets, ct);")]
     [InlineData("var rights = await probe.GetCallerRightsForAuthorizationGateAsync(token, \"sprk_projects\", id, ct);")]
     [InlineData("var me = await probe.GetCallerSystemUserIdAsync(token, ct);")]
     [InlineData("Func<string?, string, Guid, CancellationToken, Task<AccessRights>> ask = probe.GetCallerRightsAsync;")]

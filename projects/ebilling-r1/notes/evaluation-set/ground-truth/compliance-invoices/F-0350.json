@@ -1,0 +1,30 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0350",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0350","generator_id":"gen_eval_set.py@1 F-0350","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0350.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-02"},
+ "header":{"firm":"Ravenscroft & Yardley LLP","firm_invoice_number":"INV-2025-97788","invoice_date":"2026-06-03","billing_period_start":"2026-05-01","billing_period_end":"2026-05-31","firm_matter_reference":"81063-0040","po_number":"PO-4559714","fees_total":4241.0,"expenses_total":37.06,"adjustments_total":0.0,"total_due":4278.06,"currency":"USD"},
+ "timekeepers":[{"name":"Cyrus Eriksen","title":"Paralegal","rate":180.0,"billed_as":"CE"},{"name":"Dmitri Lindqvist","title":"Paralegal","rate":155.0,"billed_as":"DL"},{"name":"Elena Galbraith","title":"Senior Associate","rate":340.0,"billed_as":"EG"},{"name":"Yusuf Sandoval","title":"Associate","rate":320.0,"billed_as":"YS"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-05-04","timekeeper":"DL","timekeeper_name":"Dmitri Lindqvist","timekeeper_title":"Paralegal","title":"Para","hours":0.2,"rate":155.0,"amount":31.0,"narrative":"Draft settlement term sheet for the lease dispute","codes":["L160","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-05-06","timekeeper":"YS","timekeeper_name":"Yusuf Sandoval","timekeeper_title":"Associate","title":"Assoc","hours":0.8,"rate":320.0,"amount":256.0,"narrative":"Plan strategy for upcoming phase of the regulatory inquiry with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-05-08","timekeeper":"DL","timekeeper_name":"Dmitri Lindqvist","timekeeper_title":"Paralegal","title":"Para","hours":0.4,"rate":155.0,"amount":62.0,"narrative":"Update document review protocol and coding panel for the customs audit","codes":["L140","A110"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-05-12","timekeeper":"YS","timekeeper_name":"Yusuf Sandoval","timekeeper_title":"Associate","title":"Assoc","hours":1.1,"rate":320.0,"amount":352.0,"narrative":"Review and revise requests for production based on client comments","codes":["L210","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-05-14","timekeeper":"EG","timekeeper_name":"Elena Galbraith","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.1,"rate":340.0,"amount":714.0,"narrative":"Conference with client regarding budget variance for the construction contract","codes":["L150","A106"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-05-14","timekeeper":"DL","timekeeper_name":"Dmitri Lindqvist","timekeeper_title":"Paralegal","title":"Para","hours":0.2,"rate":155.0,"amount":31.0,"narrative":"Prepare monthly status report to client regarding the customs audit","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-05-14","timekeeper":"DL","timekeeper_name":"Dmitri Lindqvist","timekeeper_title":"Paralegal","title":"Para","hours":0.8,"rate":155.0,"amount":124.0,"narrative":"Research standard for provisional remedies concerning the data incident","codes":["L220","A102"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-05-19","timekeeper":"DL","timekeeper_name":"Dmitri Lindqvist","timekeeper_title":"Paralegal","title":"Para","hours":1.8,"rate":155.0,"amount":279.0,"narrative":"Draft motion for preliminary injunction in the construction contract","codes":["L220","A103"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-05-21","timekeeper":"EG","timekeeper_name":"Elena Galbraith","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.6,"rate":340.0,"amount":544.0,"narrative":"Attend case management conference in the customs audit","codes":["L230","A109"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2026-05-22","timekeeper":"CE","timekeeper_name":"Cyrus Eriksen","timekeeper_title":"Paralegal","title":"Para","hours":2.6,"rate":180.0,"amount":468.0,"narrative":"Update document review protocol and coding panel for the employment claim","codes":["L140","A110"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2026-05-22","timekeeper":"DL","timekeeper_name":"Dmitri Lindqvist","timekeeper_title":"Paralegal","title":"Para","hours":2.8,"rate":155.0,"amount":434.0,"narrative":"Review privilege log entries before service","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2026-05-25","timekeeper":"YS","timekeeper_name":"Yusuf Sandoval","timekeeper_title":"Associate","title":"Assoc","hours":2.0,"rate":320.0,"amount":640.0,"narrative":"Update document review protocol and coding panel for the supply agreement","codes":["L140","A110"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"fee","date":"2026-05-28","timekeeper":"EG","timekeeper_name":"Elena Galbraith","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.9,"rate":340.0,"amount":306.0,"narrative":"Draft motion for summary judgment in the warranty claim","codes":["L210","A103"],"page":1,"narrative_style":"clear"},
+  {"n":14,"line_type":"expense","date":"2026-05-22","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":37.06,"amount":37.06,"narrative":"Long distance conference call charges","codes":["E105"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["354 Elm Court","Portland","Tax ID 32-7570144"],"template":"T17","pages":2},
+ "rule_set_id":"RS-02",
+ "context":{"matter_open":"2025-09-26","matter_close":"2026-08-29","matter_budget":42112.0,"approved_timekeepers":["Elena Galbraith","Cyrus Eriksen","Dmitri Lindqvist","Katya Rosenthal","Yusuf Sandoval"],"invoice_received_date":"2026-06-04"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

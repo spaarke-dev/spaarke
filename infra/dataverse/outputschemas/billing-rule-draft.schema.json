@@ -1,0 +1,186 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://spaarke.com/schemas/analysisaction/billing-rule-draft.schema.json",
+  "title": "Billing Rule Draft (BILLING-RULE-DRAFT@v1) - Output Schema (billing-rule-draft)",
+  "description": "Output schema for sprk_analysisaction sprk_actioncode='billing-rule-draft' (ebilling-r1 task 075, FR-27, D-27, D-52). Deployed by scripts/Deploy-ActionMirrors.ps1 as the sprk_outputschemajson sidecar of infra/dataverse/actions/billing-rule-draft.action.json. It MUST stay in step with IInvoiceAi.DraftRulesAsync's parser (InvoiceAiOutputParser.ParseDraftRules in Services/Ai/PublicContracts/InvoiceAi.cs) and the result DTOs (InvoiceAiContracts.cs: BillingRuleDraftResult, BillingRuleProposal, BillingRuleNotConverted); tests/integration/contract/Catalog/BillingRuleDraftActionContractTests.cs pins them together, and pins ruleType to the names of BillingRuleCatalogue.Types (the eleven of task 070 plus AddedFee and Discount, task 115) and the parameter members to the properties of their billing-*.schema.json files. Azure OpenAI Structured Outputs compatible: additionalProperties:false, object-level required arrays listing every property, no anyOf/oneOf. Because Structured Outputs cannot carry a per-type union, 'parameters' is ONE object holding every parameter any rule type has; each member is nullable and a member the chosen type does not use (or the clause does not state) is null. BillingRuleDraftJobHandler removes the nulls, adds the type member and validates the result against the chosen type's schema, so a member that does not belong to the type is refused there, not here.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["proposals", "notConverted"],
+  "$comment-required": "Object-level required arrays only - property-level boolean 'required' is FORBIDDEN (OpenAiFunctionSchemaValidator).",
+  "properties": {
+    "proposals": {
+      "type": "array",
+      "description": "One entry per proposed rule. Empty when the text states no rule a rule type can check.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ruleType", "parameters", "consequence", "clauseQuote", "clauseLocation"],
+        "properties": {
+          "ruleType": {
+            "type": "string",
+            "enum": [
+              "ApprovedTimekeeper",
+              "ApprovedRate",
+              "TimeIncrement",
+              "DailyHoursCap",
+              "NonBillableActivity",
+              "ExpenseRule",
+              "InvoiceAge",
+              "CoreRecordWindow",
+              "Duplicate",
+              "RequiredData",
+              "AiObservation",
+              "AddedFee",
+              "Discount"
+            ],
+            "description": "The chosen rule type, copied exactly from the ruleTypes list."
+          },
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "tolerancePercent",
+              "incrementHours",
+              "maxHoursPerDay",
+              "codes",
+              "nonReimbursableCodes",
+              "maxAmountPerItem",
+              "maxAgeDays",
+              "graceDays",
+              "matchFields",
+              "fields",
+              "observation",
+              "minConfidence",
+              "feeKind",
+              "allowance",
+              "feeCodes",
+              "capAmount",
+              "capPercent",
+              "afterDays",
+              "discountPercent"
+            ],
+            "properties": {
+              "tolerancePercent": {
+                "type": ["number", "null"],
+                "description": "ApprovedRate: percent over the approved rate still accepted, 0 to 100. Discount: percent over the discounted rate still accepted, 0 to 100 (null when the text states none)."
+              },
+              "incrementHours": {
+                "type": ["number", "null"],
+                "description": "TimeIncrement: the increment in hours, more than 0 and at most 1 (0.1 = a tenth of an hour)."
+              },
+              "maxHoursPerDay": {
+                "type": ["number", "null"],
+                "description": "DailyHoursCap: the most hours one timekeeper may bill per day, more than 0 and at most 24."
+              },
+              "codes": {
+                "type": ["array", "null"],
+                "items": { "type": "string" },
+                "description": "NonBillableActivity: the activity or task codes that are not billable, copied as written."
+              },
+              "nonReimbursableCodes": {
+                "type": ["array", "null"],
+                "items": { "type": "string" },
+                "description": "ExpenseRule: the expense codes that are not reimbursable, copied as written."
+              },
+              "maxAmountPerItem": {
+                "type": ["number", "null"],
+                "description": "ExpenseRule: the most one expense item may be, in the invoice currency."
+              },
+              "maxAgeDays": {
+                "type": ["integer", "null"],
+                "description": "InvoiceAge: the most days a line may be dated before the invoice date."
+              },
+              "graceDays": {
+                "type": ["integer", "null"],
+                "description": "CoreRecordWindow: days of grace around the record's open and close dates, 0 or more."
+              },
+              "matchFields": {
+                "type": ["array", "null"],
+                "items": { "type": "string" },
+                "description": "Duplicate: the fields that must all match for a duplicate, from firmInvoiceNumber, timekeeper, lineDate, hours, narrative, amount."
+              },
+              "fields": {
+                "type": ["array", "null"],
+                "items": { "type": "string" },
+                "description": "RequiredData: the data every invoice or line must have, from firmInvoiceNumber, invoiceDate, billingPeriodStart, billingPeriodEnd, timekeeper, lineDate, narrative, taskCode, activityCode, expenseCode."
+              },
+              "observation": {
+                "type": ["string", "null"],
+                "description": "AiObservation: blockBilling or vagueDescription."
+              },
+              "minConfidence": {
+                "type": ["number", "null"],
+                "description": "AiObservation: the confidence, more than 0 and at most 1, from which the observation counts."
+              },
+              "feeKind": {
+                "type": ["string", "null"],
+                "description": "AddedFee: lateFee, administrativeFee, interest or other."
+              },
+              "allowance": {
+                "type": ["string", "null"],
+                "description": "AddedFee: cap (the only allowance that can be checked). A clause that forbids the fee (notAllowed) or allows it only after a number of days (afterDays) goes to notConverted."
+              },
+              "feeCodes": {
+                "type": ["array", "null"],
+                "items": { "type": "string" },
+                "description": "AddedFee: the expense codes of the lines that carry the fee, copied as written."
+              },
+              "capAmount": {
+                "type": ["number", "null"],
+                "description": "AddedFee: the most the fee may total on one invoice, in the invoice currency. Null when the cap is a percent."
+              },
+              "capPercent": {
+                "type": ["number", "null"],
+                "description": "AddedFee: the most the fee may total, as a percent (more than 0, at most 100) of the invoice's other charges. Null when the cap is an amount. A rate on an overdue balance over time ('1.5% per month') is not this: that clause goes to notConverted."
+              },
+              "afterDays": {
+                "type": ["integer", "null"],
+                "description": "AddedFee: days after the due date from which the fee is allowed. Not checked today: leave null and use notConverted."
+              },
+              "discountPercent": {
+                "type": ["number", "null"],
+                "description": "Discount: the agreed discount off the standard (rack) rate, in percent, more than 0 and less than 100."
+              }
+            }
+          },
+          "consequence": {
+            "type": "string",
+            "enum": ["Reject", "Flag", "SuggestAdjustment"],
+            "description": "What the text says happens when the rule is broken: Reject, Flag, or SuggestAdjustment. Flag when the text states none."
+          },
+          "clauseQuote": {
+            "type": "string",
+            "description": "The clause copied word for word from the document, no longer than about 600 characters."
+          },
+          "clauseLocation": {
+            "type": ["string", "null"],
+            "description": "Section, heading or page as the document shows it, or null."
+          }
+        }
+      }
+    },
+    "notConverted": {
+      "type": "array",
+      "description": "One entry per clause that states a billing requirement but could not be converted. Empty when every such clause became a proposal.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["text", "location", "reason"],
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "The clause copied word for word, no longer than about 600 characters."
+          },
+          "location": {
+            "type": ["string", "null"],
+            "description": "Section, heading or page as the document shows it, or null."
+          },
+          "reason": {
+            "type": "string",
+            "description": "One plain sentence for an administrator: why the clause could not be converted."
+          }
+        }
+      }
+    }
+  }
+}

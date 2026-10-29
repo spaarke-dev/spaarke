@@ -14,10 +14,15 @@ import type { MessageBarProps } from '@fluentui/react-components';
 import { StatusBadge } from '../StatusBadge';
 import type { StatusBadgeTone } from '../StatusBadge';
 import { CONSOLE_STATE_BADGES } from './consoleStatus';
-import type { ConsoleState, RecordClass } from './consoleStatus';
+import type { ConsoleState, ConsoleStatusOverride, RecordClass } from './consoleStatus';
 
 export interface StatusBarProps {
   state: ConsoleState;
+  /**
+   * Replaces the label and tone the Console table gives `state` (the bar intent follows the override tone). Use it for
+   * outcomes the Console has no state for; `state` is then only echoed in `data-state`. Absent: output is unchanged.
+   */
+  statusOverride?: ConsoleStatusOverride;
   /** Decision Record id, e.g. "DR-0042". */
   recordId?: string;
   recordClass?: RecordClass | null;
@@ -62,6 +67,7 @@ const useStyles = makeStyles({
 export const StatusBar = React.forwardRef<HTMLDivElement, StatusBarProps>(function StatusBar(
   {
     state,
+    statusOverride,
     recordId,
     recordClass,
     decidedBy,
@@ -76,7 +82,9 @@ export const StatusBar = React.forwardRef<HTMLDivElement, StatusBarProps>(functi
   ref
 ) {
   const styles = useStyles();
-  const badge = CONSOLE_STATE_BADGES[state];
+  const mapped = CONSOLE_STATE_BADGES[state];
+  const badge = statusOverride ?? mapped;
+  const badgeDescription = statusOverride ? statusOverride.description : mapped.description;
   const when = decidedOn && !Number.isNaN(new Date(decidedOn).getTime()) ? new Date(decidedOn).toLocaleString() : null;
   const left =
     typeof openItemsLeft === 'number'
@@ -96,7 +104,9 @@ export const StatusBar = React.forwardRef<HTMLDivElement, StatusBarProps>(functi
     left,
   ].filter((p): p is string => !!p);
 
-  const intent = STATE_INTENT_OVERRIDE[state] ?? TONE_TO_INTENT[badge.tone];
+  const intent = statusOverride
+    ? TONE_TO_INTENT[badge.tone]
+    : (STATE_INTENT_OVERRIDE[state] ?? TONE_TO_INTENT[badge.tone]);
 
   return (
     <MessageBar
@@ -110,7 +120,11 @@ export const StatusBar = React.forwardRef<HTMLDivElement, StatusBarProps>(functi
       data-intent={intent}
     >
       <MessageBarBody className={styles.body}>
-        <StatusBadge label={badge.label} tone={badge.tone} ariaLabel={`${badge.label}. ${badge.description}`} />
+        <StatusBadge
+          label={badge.label}
+          tone={badge.tone}
+          ariaLabel={badgeDescription ? `${badge.label}. ${badgeDescription}` : badge.label}
+        />
         {parts.length > 0 && <span className={styles.meta}>{parts.join(' · ')}</span>}
       </MessageBarBody>
     </MessageBar>

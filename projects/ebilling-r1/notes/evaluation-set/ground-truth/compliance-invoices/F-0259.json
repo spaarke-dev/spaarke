@@ -1,0 +1,31 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0259",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0259","generator_id":"gen_eval_set.py@1 F-0259","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0259.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Tennant & Whitcombe LLP","firm_invoice_number":"INV-2026-53866","invoice_date":"2025-09-02","billing_period_start":"2025-08-01","billing_period_end":"2025-08-31","firm_matter_reference":"74759-0011","po_number":"PO-4583532","fees_total":8054.5,"expenses_total":5074.49,"adjustments_total":0.0,"total_due":13128.99,"currency":"USD"},
+ "timekeepers":[{"name":"Gregory Kowalczyk","title":"Of Counsel","rate":725.0,"billed_as":"Gregory Kowalczyk"},{"name":"Marcus Nakamura","title":"Associate","rate":455.0,"billed_as":"Marcus Nakamura"},{"name":"Mei Rosenthal","title":"Paralegal","rate":250.0,"billed_as":"Mei Rosenthal"},{"name":"Priya Hargrove","title":"Associate","rate":465.0,"billed_as":"Priya Hargrove"},{"name":"Yusuf Lindqvist","title":"Associate","rate":500.0,"billed_as":"Yusuf Lindqvist"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-08-13","timekeeper":"Gregory Kowalczyk","timekeeper_name":"Gregory Kowalczyk","timekeeper_title":"Of Counsel","title":"O/C","hours":2.4,"rate":725.0,"amount":1740.0,"narrative":"Plan strategy for upcoming phase of the employment claim with team","codes":["L120","A101"],"page":2,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-08-08","timekeeper":"Marcus Nakamura","timekeeper_name":"Marcus Nakamura","timekeeper_title":"Associate","title":"Assoc","hours":2.4,"rate":455.0,"amount":1092.0,"narrative":"Plan strategy for upcoming phase of the warranty claim with team","codes":["L120","A101"],"page":2,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-08-15","timekeeper":"Marcus Nakamura","timekeeper_name":"Marcus Nakamura","timekeeper_title":"Associate","title":"Assoc","hours":1.1,"rate":455.0,"amount":500.5,"narrative":"Revise complaint after review by lead counsel","codes":["L430","A104"],"page":2,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-08-15","timekeeper":"Marcus Nakamura","timekeeper_name":"Marcus Nakamura","timekeeper_title":"Associate","title":"Assoc","hours":1.1,"rate":455.0,"amount":500.5,"narrative":"Revise complaint after review by lead counsel","codes":["L430","A104"],"page":2,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-08-11","timekeeper":"Mei Rosenthal","timekeeper_name":"Mei Rosenthal","timekeeper_title":"Paralegal","title":"Para","hours":0.9,"rate":250.0,"amount":225.0,"narrative":"Ran conflict check for new party","codes":["L120","A110"],"page":2,"narrative_style":"clerical"},
+  {"n":6,"line_type":"fee","date":"2025-08-06","timekeeper":"Priya Hargrove","timekeeper_name":"Priya Hargrove","timekeeper_title":"Associate","title":"Assoc","hours":0.1,"rate":465.0,"amount":46.5,"narrative":"Prepare fact witness for testimony regarding the insurance coverage issue","codes":["L410","A101"],"page":2,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-08-07","timekeeper":"Yusuf Lindqvist","timekeeper_name":"Yusuf Lindqvist","timekeeper_title":"Associate","title":"Assoc","hours":2.7,"rate":500.0,"amount":1350.0,"narrative":"Plan strategy for upcoming phase of the employment claim with team","codes":["L120","A101"],"page":2,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-08-21","timekeeper":"Yusuf Lindqvist","timekeeper_name":"Yusuf Lindqvist","timekeeper_title":"Associate","title":"Assoc","hours":2.7,"rate":500.0,"amount":1350.0,"narrative":"Prepare trial notebook and demonstrative exhibits for the construction contract","codes":["L440","A101"],"page":2,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-08-26","timekeeper":"Yusuf Lindqvist","timekeeper_name":"Yusuf Lindqvist","timekeeper_title":"Associate","title":"Assoc","hours":2.5,"rate":500.0,"amount":1250.0,"narrative":"Revise witness list after review by lead counsel","codes":["L430","A104"],"page":2,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-08-21","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":865.0,"rate":0.31,"amount":268.15,"narrative":"Photocopies - 865 pages","codes":["E101"],"page":2,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-08-26","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":4806.34,"amount":4806.34,"narrative":"Consulting expert fees","codes":["E119"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["868 Federal Plaza","Denver","Tax ID 15-7244086"],"template":"T10","pages":2},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2024-05-17","matter_close":"2025-11-29","matter_budget":77515.0,"approved_timekeepers":["Mei Rosenthal","Priya Hargrove","Yusuf Lindqvist","Marcus Nakamura","Gregory Kowalczyk","Priya Zielinski"],"invoice_received_date":"2025-09-18"},
+ "expected_findings":[
+  {"rule_id":"RS-01-R03","rule_type":"NonBillableActivity","scope":"line","line_refs":[5],"consequence":"Disallow"},
+  {"rule_id":"RS-01-R05","rule_type":"ExpenseRule","scope":"line","line_refs":[10],"consequence":"Reduce"},
+  {"rule_id":"RS-01-R07","rule_type":"Duplicate","scope":"line","line_refs":[4],"consequence":"Disallow","related_line_refs":[3]}
+ ],
+ "seeded_violations":3
+}

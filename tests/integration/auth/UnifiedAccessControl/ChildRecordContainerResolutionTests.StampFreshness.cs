@@ -352,18 +352,19 @@ public partial class ChildRecordContainerResolutionTests
         world.Reads("businessunit").Should().Be(0);
     }
 
-    [Fact(DisplayName = "Task 156: a root type the source CANNOT carry is the row's own direct link — an email under an invoice with its own work assignment is not stale")]
+    [Fact(DisplayName = "Task 156: a root type the source CANNOT carry is the row's own direct link — an email under a budget with its own work assignment is not stale")]
     public async Task RootTypeTheSourceCannotCarry_IsNotPartOfTheComparison()
     {
-        // An invoice names a project or matter, never a work assignment: the email's work assignment cannot be a copy of
-        // the invoice, so it is not compared — only the matter copy is, and it is fresh.
+        // A budget names a project or matter, never a work assignment: the email's work assignment cannot be a copy of
+        // the budget, so it is not compared — only the matter copy is, and it is fresh. (ebilling-r1 task 013: this used an
+        // invoice until the invoice gained sprk_regardingworkassignment.)
         var world = new World()
             .WithRow("sprk_communication", ChildId,
             [
-                ("sprk_regardinginvoice", "sprk_invoice", IntermediateId), ("sprk_regardingmatter", "sprk_matter", MatterId),
+                ("sprk_regardingbudget", "sprk_budget", IntermediateId), ("sprk_regardingmatter", "sprk_matter", MatterId),
                 ("sprk_regardingworkassignment", "sprk_workassignment", WorkAssignmentId),
             ], pairId: IntermediateId.ToString())
-            .WithRow("sprk_invoice", IntermediateId, [("sprk_matter", "sprk_matter", MatterId)])
+            .WithRow("sprk_budget", IntermediateId, [("sprk_matter", "sprk_matter", MatterId)])
             .WithRoot("sprk_matter", MatterId, isSecure: false, containerId: null)
             .WithRoot("sprk_workassignment", WorkAssignmentId, isSecure: true, RootContainer)
             .WithBusinessUnit(BusinessUnitContainer);

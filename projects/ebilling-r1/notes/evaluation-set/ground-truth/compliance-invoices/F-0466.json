@@ -1,0 +1,27 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0466",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0466","generator_id":"gen_eval_set.py@1 F-0466","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0466.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-04"},
+ "header":{"firm":"Oakhurst and Vance LLP","firm_invoice_number":"INV-2025-83491","invoice_date":"2026-01-01","billing_period_start":"2025-12-01","billing_period_end":"2025-12-31","firm_matter_reference":"27673-0007","po_number":"PO-4528320","fees_total":7621.25,"expenses_total":576.6,"adjustments_total":0.0,"total_due":8197.85,"currency":"USD"},
+ "timekeepers":[{"name":"Beatrix Eriksen","title":"Associate","rate":375.0,"billed_as":"BE"},{"name":"Farah Wickham","title":"Paralegal","rate":210.0,"billed_as":"FW"},{"name":"Gregory Esposito","title":"Partner","rate":735.0,"billed_as":"GE"},{"name":"Oliver Halloran","title":"Senior Associate","rate":435.0,"billed_as":"OH"},{"name":"Peter Voss","title":"Partner","rate":650.0,"billed_as":"PV"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-12-01","timekeeper":"OH","timekeeper_name":"Oliver Halloran","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.5,"rate":435.0,"amount":1087.5,"narrative":"Conference with client expert regarding rebuttal report","codes":["L340","A106"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-12-08","timekeeper":"OH","timekeeper_name":"Oliver Halloran","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.75,"rate":435.0,"amount":1196.25,"narrative":"Prepare monthly status report to client regarding the regulatory inquiry","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-12-08","timekeeper":"BE","timekeeper_name":"Beatrix Eriksen","timekeeper_title":"Associate","title":"Assoc","hours":2.0,"rate":375.0,"amount":750.0,"narrative":"Research case law supporting motion to compel","codes":["L240","A102"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-12-09","timekeeper":"BE","timekeeper_name":"Beatrix Eriksen","timekeeper_title":"Associate","title":"Assoc","hours":2.75,"rate":375.0,"amount":1031.25,"narrative":"Draft protective order and supporting memorandum","codes":["L240","A103"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-12-09","timekeeper":"FW","timekeeper_name":"Farah Wickham","timekeeper_title":"Paralegal","title":"Para","hours":1.75,"rate":210.0,"amount":367.5,"narrative":"Prepare responses and objections to reply brief","codes":["L310","A103"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-12-12","timekeeper":"FW","timekeeper_name":"Farah Wickham","timekeeper_title":"Paralegal","title":"Para","hours":0.75,"rate":210.0,"amount":157.5,"narrative":"Meet and confer with counsel for Quarry Lane Partners regarding discovery dispute","codes":["L350","A107"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-12-16","timekeeper":"PV","timekeeper_name":"Peter Voss","timekeeper_title":"Partner","title":"Ptr","hours":1.0,"rate":650.0,"amount":650.0,"narrative":"Update document review protocol and coding panel for the data incident","codes":["L140","A110"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-12-22","timekeeper":"FW","timekeeper_name":"Farah Wickham","timekeeper_title":"Paralegal","title":"Para","hours":0.75,"rate":210.0,"amount":157.5,"narrative":"Conference with client expert regarding rebuttal report","codes":["L340","A106"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-12-23","timekeeper":"BE","timekeeper_name":"Beatrix Eriksen","timekeeper_title":"Associate","title":"Assoc","hours":2.5,"rate":375.0,"amount":937.5,"narrative":"Research authority for interrogatory responses","codes":["L250","A102"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-12-26","timekeeper":"GE","timekeeper_name":"Gregory Esposito","timekeeper_title":"Partner","title":"Ptr","hours":1.75,"rate":735.0,"amount":1286.25,"narrative":"Review documents produced by Redstone Mining for responsiveness","codes":["L320","A104"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-12-23","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":576.6,"amount":576.6,"narrative":"Airfare to Dallas for deposition","codes":["E110"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["662 Market Street","Portland","Tax ID 19-6431878"],"template":"T01","pages":1},
+ "rule_set_id":"RS-04",
+ "context":{"matter_open":"2024-10-14","matter_close":"2026-03-31","matter_budget":57791.0,"approved_timekeepers":["Peter Voss","Farah Wickham","Oliver Halloran","Gregory Esposito","Beatrix Eriksen"],"invoice_received_date":"2026-01-10"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

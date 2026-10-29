@@ -377,6 +377,51 @@ public class ActionSeamTests
             Times.Never);
     }
 
+    // ── Invoice-family refusal (ebilling-r1 #2081 follow-up): the stable code is printed ONCE ────────────────────────────
+
+    /// <summary>The refusal text the guard builds already carries its code in parentheses, so the seam must not prefix it again.</summary>
+    private const string ReadFailedMessage =
+        "The invoice-family core-record rule refused this write (invoice_family_read_failed); nothing was written.";
+
+    [Theory]
+    [InlineData(false)] // a plain rename: used to be let through unread, creating an orphan row when the id was stale
+    [InlineData(true)] // a lookup write: used to be refused, but with the code printed twice
+    public async Task UpdateRecordAsync_AnInvoiceFamilyRefusal_PrintsTheCodeOnce_AndPinsTheExactMessage(bool writesALookup)
+    {
+        // The guard cannot read the stored row, so it fails closed: a rename runs in a scope with no IGenericEntityService. A
+        // lookup write needs one for its entity set (uac-r2 #2091 round 4, merged 2026-10-18), so it gets one whose row read
+        // faults. A fresh scope per CreateScope: the core disposes each one it opens.
+        var services = new ServiceCollection();
+        if (writesALookup)
+        {
+            var unreadable = new Mock<IGenericEntityService>(MockBehavior.Strict);
+            unreadable.Setup(e => e.GetEntitySetNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string table, CancellationToken _) => table + "s");
+            unreadable.Setup(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new TimeoutException("socket"));
+            services.AddSingleton(unreadable.Object);
+        }
+
+        var provider = services.BuildServiceProvider();
+        _scopeFactoryMock.Setup(f => f.CreateScope()).Returns(() => provider.CreateScope());
+
+        var result = await CreateSeam().UpdateRecordAsync(new UpdateRecordRequest
+        {
+            EntityLogicalName = "sprk_invoice",
+            RecordId = Guid.NewGuid(),
+            LegacyFields = writesALookup ? null : new Dictionary<string, string?> { ["sprk_name"] = "Renamed" },
+            Lookups = writesALookup ? [new ActionLookup("sprk_matter", "sprk_matter", Guid.NewGuid().ToString())] : null,
+        }, CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.Error.Should().Be(ReadFailedMessage);
+        System.Text.RegularExpressions.Regex.Matches(result.Error!, "invoice_family_read_failed").Count.Should().Be(1);
+        _fieldMappingMock.Verify(
+            s => s.UpdateRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()),
+            Times.Never);
+    }
+
     // ── UpdateRecord: a proposal a real person confirmed (#2257 with #2253) ───────────────────
 
     private static readonly Guid ConfirmingUser = Guid.Parse("22570000-0000-4000-8000-00000000a0c1");
@@ -454,7 +499,10 @@ public class ActionSeamTests
             ConfirmedProposal(table, Guid.NewGuid(), column, value, user: null), CancellationToken.None);
 
         result.Success.Should().BeFalse();
-        result.Error.Should().StartWith(code);
+        // Master merge: the seam prints the stable code once (ebilling-r1 #2081 follow-up); a refusal that already ends with
+        // "(code)" is not prefixed again, so the code is asserted by that form, exactly once.
+        result.Error.Should().Contain($"({code})");
+        System.Text.RegularExpressions.Regex.Matches(result.Error!, System.Text.RegularExpressions.Regex.Escape(code)).Count.Should().Be(1);
         _fieldMappingMock.Verify(s => s.UpdateRecordFieldsAsync(
             It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(),
             It.IsAny<Guid?>()), Times.Never);

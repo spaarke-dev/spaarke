@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="052" project="ebilling-r1">
+  <metadata>
+    <title>CreateInvoiceWizard rewired to the internal entry point</title>
+    <phase>2 Submission and extraction (WP2)</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Replaces a client-side create with the shared submission component and server routes; the override decision is server-enforced (105).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Frontend rewire onto an existing component (051) and existing routes (044, 105).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P4-C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>044, 051, 105</deps>
+    <tags>frontend, code-page, fluent-ui</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Rewire the internal CreateInvoiceWizard onto the shared InvoiceSubmission component (051) and the internal submission route (044): the user selects firm and core record, uploads the PDF and sees the result. On a blocking failure the user chooses Override (reason required; offered only when the server says the caller holds the eBilling Override privilege; calls 105) or Return to firm. Delete the client-side sprk_invoice creation (FR-19, D-19, D-24, ADR-002).</prompt>
+
+  <role>SPAARKE frontend developer. Expert in Fluent UI v9, wizard code pages and the shared component library. Follow ADRs strictly.</role>
+
+  <goal>CreateInvoiceWizard renders the shared submission flow against the internal routes with firm + core-record selection; Override and Return actions appear per server signals; no client code creates sprk_invoice; the code page builds and deploys through the existing wizard deploy script (deployment itself is 112's).</goal>
+
+  <context>
+    <background>Spec FR-19 (acceptance: user without the privilege sees no Override option and the server refuses an override call, 403; override writes a Decision Record — server side, 105). Today the real wizard lives in the shared library: src/client/shared/Spaarke.UI.Components/src/components/CreateInvoiceWizard/CreateInvoiceWizard.tsx:491 calls invoiceService.createInvoice (invoiceService.ts:160), which creates sprk_invoice client-side through createRecord (:9 header comment, :123-126) — the path FR-17 forbids. The code page src/solutions/CreateInvoiceWizard/src/main.tsx is a thin host using useWizardPageBootstrap (authenticatedFetch, bffBaseUrl, initialAssociation). Other references: Spaarke.Communication.Components/src/logic/actions/launchCreate.ts, Spaarke.AI.Widgets/src/widgets/workspace/CreateAnalysisWizardWidget.tsx, CreateRecordWizard. Open owner question F-7 (can a non-privileged user Return a blocked internal submission?) belongs to 104 / 105.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateInvoiceWizard/CreateInvoiceWizard.tsx (compose InvoiceSubmission; internal callbacks)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateInvoiceWizard/invoiceService.ts (remove createInvoice and the client create path; keep only what the new flow needs)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateInvoiceWizard/CreateInvoiceStep.tsx, formTypes.ts, index.ts</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateInvoiceWizard/__tests__/ (invoiceService.resolver.test.ts covers the removed create path — delete or rewrite; update the other two)</file>
+      <file role="modify">src/solutions/CreateInvoiceWizard/src/main.tsx (only if the props change)</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/InvoiceSubmission/ (051)</file>
+      <file role="canonical-reference">.claude/patterns/webresource/code-page-wizard-wrapper.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="044" status="required">Internal routes POST /api/finance/{matters|projects|workassignments}/{id}/invoice-submissions and GET /api/finance/invoice-submissions/{id}.</dependency>
+      <dependency task="051" status="required">Shared InvoiceSubmission component.</dependency>
+      <dependency task="105" status="required">Override route, its privilege check and the server signal of whether the caller may override.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="D-91 (owner, 2026-10-16)">The internal channel also requires the firm invoice number at submission (shared Details step from 051).</constraint>
+    <constraint source="ADR-002 / FR-17">No client path creates sprk_invoice or sprk_invoicesubmission; the wizard previews and calls the server only. grep for createRecord of sprk_invoice in src/client must find nothing after this task.</constraint>
+    <constraint source="FR-19 / D-24">Override is offered only when the server signal from 105 says the caller holds the privilege; the reason field is mandatory before the call; the server remains authoritative (a 403 is shown, never bypassed). Return to firm calls the server route that 104 / 105 provide.</constraint>
+    <constraint source="ADR-021 / ADR-012">Fluent v9 only, theme tokens, shared components; no new npm package (NFR-12).</constraint>
+    <constraint source="ADR-050">Any reason prompt uses the canonical modal shell (FormModal), not a hand-built dialog.</constraint>
+    <constraint source="wizard dialog">CreateInvoiceWizard is a wizard dialog code page (code-page-wizard-wrapper pattern): it does not register the Navigator side pane. Build with npm install --legacy-peer-deps --no-audit --no-fund.</constraint>
+    <constraint source="other consumers">launchCreate.ts, CreateAnalysisWizardWidget.tsx and CreateRecordWizard keep working (props compatible or updated in this task).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Wizard code pages and Fluent v9</topic>
+    <files>
+      <file>.claude/patterns/webresource/code-page-wizard-wrapper.md</file>
+      <file>.claude/patterns/ui/modal-shell.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-050-canonical-modal-shell.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/constraints/webresource.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context and rigor">Declare rigor STANDARD. Read 044, 051 and 105 notes for the final routes, component props and the override signal.</step>
+    <step order="1">Recompose CreateInvoiceWizard: firm picker (active organizations), core-record step (keep the existing association step and initialAssociation / lockAssociation behaviour), then the shared submission flow with internal-route callbacks via authenticatedFetch and bffBaseUrl.</step>
+    <step order="2">Blocking failure: show findings summary; Override (only with the server signal; FormModal with mandatory reason; calls 105) and Return to firm.</step>
+    <step order="3">Follow-on cards (WizardFollowOns): keep only those that can bind to the resulting invoice id; drop the rest and record which.</step>
+    <step order="4">Delete invoiceService.createInvoice and its resolver test; update the remaining tests (jest): firm and record selection, submit, Rejected with and without override signal, 403 on override shown.</step>
+    <step order="5">Build the shared library and the code page; run the ui-tests below against a local or dev BFF.</step>
+    <step order="6">Update TASK-INDEX.md: change this task's status cell to `✅ [done]`.</step>
+    <step order="7">Record deviations (dropped follow-ons, removed tests) in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If 105 provides no server signal for "may this caller override" (the client would have to guess from roles), STOP and ask 105's owner to add one rather than reading roles client-side.</trigger>
+    <trigger>If no server route exists for Return to firm on a blocked internal submission (owner question F-7 unresolved in 104 / 105), STOP and escalate instead of inventing a client-side status change.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>The current wizard (CreateInvoiceWizard.tsx, invoiceService.ts) creates invoices client-side; 051's component and 044 / 105 routes provide the server path.</existing>
+    <extension>The wizard is extended in place (same component name and code page) rather than replaced, so existing launchers keep working; only the client-side create is removed.</extension>
+    <cost-of-doing-nothing>FR-19 and ADR-002 fail: internal users keep creating sprk_invoice without checks, totals or the rejection rule, and there is no override path.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Internal submission">
+      <steps><step>Open the Create Invoice wizard from a matter as an internal user</step><step>Select a firm, keep the matter, upload a sample PDF</step></steps>
+      <expected>Processing, then Accepted with tracking number; the invoice is created by the server (In Review); no console errors.</expected>
+    </test>
+    <test name="Override without privilege">
+      <steps><step>As a user without the eBilling Override privilege, submit an invoice that fails a blocking rule</step></steps>
+      <expected>No Override option is shown; Return to firm is available per F-7's outcome.</expected>
+    </test>
+    <test name="Override with privilege">
+      <steps><step>As a user with the privilege, choose Override</step><step>Try to confirm with an empty reason, then with a reason</step></steps>
+      <expected>Empty reason is refused in the form; with a reason the server accepts and the result shows Accepted (overridden).</expected>
+    </test>
+    <test name="Dark mode (ADR-021)">
+      <steps><step>Switch Dataverse to dark theme and repeat the internal submission</step></steps>
+      <expected>Every step, the findings summary and the FormModal use theme tokens with readable contrast; no hard-coded colours.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">npm install --legacy-peer-deps --no-audit --no-fund ; npm test (shared library) ; npm run build (src/solutions/CreateInvoiceWizard)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">CreateInvoiceWizard/* in the shared library; src/solutions/CreateInvoiceWizard/src/main.tsx if props change</output>
+    <output type="test">Updated CreateInvoiceWizard __tests__</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The wizard submits through the internal route and shows the server result; the user selects firm and core record.</criterion>
+    <criterion testable="true">Negative (ADR-002): grep in src/client finds no createRecord of sprk_invoice and no invoiceService.createInvoice.</criterion>
+    <criterion testable="true">Negative (FR-19): without the server's override signal no Override option renders; a 403 from the override call is shown and nothing changes client-side.</criterion>
+    <criterion testable="true">Override requires a non-empty reason before the call is made.</criterion>
+    <criterion testable="true">launchCreate.ts, CreateAnalysisWizardWidget.tsx and CreateRecordWizard compile and their tests pass.</criterion>
+    <criterion testable="true">Every ui-test above passes, including dark mode.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+    <criterion testable="true">Shared library tests exit 0; the code page builds; no new npm package.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-19, D-19, D-24, ADR-002. Deployment of the code page (scripts/Deploy-WizardCodePages.ps1, web resource sprk_createinvoicewizard) is task 112's. Test deletion: follow docs/adr/ADR-038-testing-strategy.md and list the deleted test in notes.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load every file in knowledge/files before Step 1. Follow task-execute for rigor, checkpoints and quality gates.</protocol>
+  </execution>
+</task>

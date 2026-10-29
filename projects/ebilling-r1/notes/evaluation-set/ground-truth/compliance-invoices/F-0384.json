@@ -1,0 +1,27 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0384",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0384","generator_id":"gen_eval_set.py@1 F-0384","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0384.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-06"},
+ "header":{"firm":"Quimby and Whitcombe LLP","firm_invoice_number":"INV-2026-87582","invoice_date":"2026-01-04","billing_period_start":"2025-12-01","billing_period_end":"2025-12-31","firm_matter_reference":"31823-0003","po_number":"PO-4526784","fees_total":4252.0,"expenses_total":94.08,"adjustments_total":0.0,"total_due":4346.08,"currency":"USD"},
+ "timekeepers":[{"name":"Aisha Dunleavy","title":"Partner","rate":440.0,"billed_as":"Aisha Dunleavy"},{"name":"Aisha Halloran","title":"Associate","rate":200.0,"billed_as":"Aisha Halloran"},{"name":"Cyrus Brennan","title":"Associate","rate":190.0,"billed_as":"Cyrus Brennan"},{"name":"Ivan Nwosu","title":"Of Counsel","rate":390.0,"billed_as":"Ivan Nwosu"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-12-11","timekeeper":"Aisha Dunleavy","timekeeper_name":"Aisha Dunleavy","timekeeper_title":"Partner","title":"Ptr","hours":1.0,"rate":440.0,"amount":440.0,"narrative":"Telephone conference with opposing counsel regarding settlement terms","codes":["L160","A107"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-12-25","timekeeper":"Aisha Dunleavy","timekeeper_name":"Aisha Dunleavy","timekeeper_title":"Partner","title":"Ptr","hours":2.8,"rate":440.0,"amount":1232.0,"narrative":"Review privilege log entries before service","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-12-05","timekeeper":"Aisha Halloran","timekeeper_name":"Aisha Halloran","timekeeper_title":"Associate","title":"Assoc","hours":2.6,"rate":200.0,"amount":520.0,"narrative":"Draft settlement term sheet for the licensing dispute","codes":["L160","A103"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-12-16","timekeeper":"Aisha Halloran","timekeeper_name":"Aisha Halloran","timekeeper_title":"Associate","title":"Assoc","hours":1.5,"rate":200.0,"amount":300.0,"narrative":"Telephone conference with opposing counsel regarding settlement terms","codes":["L160","A107"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-12-31","timekeeper":"Aisha Halloran","timekeeper_name":"Aisha Halloran","timekeeper_title":"Associate","title":"Assoc","hours":2.3,"rate":200.0,"amount":460.0,"narrative":"Telephone conference with opposing counsel regarding settlement terms","codes":["L160","A107"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-12-23","timekeeper":"Cyrus Brennan","timekeeper_name":"Cyrus Brennan","timekeeper_title":"Associate","title":"Assoc","hours":2.6,"rate":190.0,"amount":494.0,"narrative":"Plan strategy for upcoming phase of the warranty claim with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-12-26","timekeeper":"Cyrus Brennan","timekeeper_name":"Cyrus Brennan","timekeeper_title":"Associate","title":"Assoc","hours":2.6,"rate":190.0,"amount":494.0,"narrative":"Analyze exposure and damages model for the licensing dispute","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-12-09","timekeeper":"Ivan Nwosu","timekeeper_name":"Ivan Nwosu","timekeeper_title":"Of Counsel","title":"O/C","hours":0.8,"rate":390.0,"amount":312.0,"narrative":"Research pleading standards applicable to the distribution agreement","codes":["L210","A102"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2025-12-10","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":378.0,"rate":0.1,"amount":37.8,"narrative":"Photocopies - 378 pages","codes":["E101"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-12-23","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":48.0,"rate":0.67,"amount":32.16,"narrative":"Mileage to courthouse","codes":["E109"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-12-30","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":201.0,"rate":0.12,"amount":24.12,"narrative":"Photocopies - 201 pages","codes":["E101"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["919 Commerce Avenue","Dallas","Tax ID 63-7429784"],"template":"T03","pages":2},
+ "rule_set_id":"RS-06",
+ "context":{"matter_open":"2024-09-07","matter_close":"2026-03-31","matter_budget":42384.0,"approved_timekeepers":["Anders Dunleavy","Priya Sandoval","Cyrus Brennan","Ivan Nwosu","Hannah Tavares","Aisha Halloran","Aisha Dunleavy"],"invoice_received_date":"2026-01-17"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

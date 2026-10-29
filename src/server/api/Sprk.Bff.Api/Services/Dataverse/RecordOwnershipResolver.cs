@@ -1586,6 +1586,19 @@ public sealed class RecordOwnerUnresolvedException : InvalidOperationException
         Reason = resolution.Reason;
     }
 
+    /// <summary>
+    /// A refusal that is not about the owner, thrown on the same "throw" contract so every writer that already catches this
+    /// type reports it unchanged: <paramref name="message"/> is used verbatim (it must be safe to surface) and is also the
+    /// <see cref="Reason"/>. ebilling-r1 task 026 fix-round-2: the invoice-family guard on the generic update paths.
+    /// </summary>
+    public RecordOwnerUnresolvedException(string entityLogicalName, string refusalCode, string message)
+        : base(message)
+    {
+        EntityLogicalName = entityLogicalName;
+        RefusalCode = refusalCode;
+        Reason = message;
+    }
+
     /// <summary>The resolution's reason — what is wrong, for the caller's ProblemDetails detail.</summary>
     public string? Reason { get; }
 

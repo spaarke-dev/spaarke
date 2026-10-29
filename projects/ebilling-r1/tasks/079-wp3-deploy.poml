@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="079" project="ebilling-r1">
+  <metadata>
+    <title>Deploy WP3 to dev: Procedure and Stored File schema, rule types, storage settings, solution sync, BFF and SPA via SPA-r3</title>
+    <phase>3 Rules (WP3) — Procedures and files (EB-D-148), wave P3-G</phase>
+    <gate>Every dependency done; the owner's OK before each live step (listed in the live-step constraint).</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deployment and smoke verification of already-reviewed tasks; edits only SpaarkeMaster source (additive) and the forms/views spec script; no new code.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Prescriptive deploy procedure with existing scripts and skills; judgment points are escalation triggers.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3-G</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Writes to shared dev (Dataverse, app settings, the BFF and SPA through SPA-r3) and edits SpaarkeMaster source, which only serial deploy tasks edit.</parallel-reason>
+    <deps>053, 080, 081, 082, 083, 085, 086, 088, 089, 090, 091, 092, 093, 094, 098, 099, 115, 116, 117</deps>
+    <tags>deploy, dataverse, solution, bff-api, code-page, coordination</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+  </metadata>
+
+  <prompt>Deploy WP3 to dev in a fixed order — schema checks, storage settings, secure-family verification, SpaarkeMaster sync and form entries, then the BFF and the external SPA through SPA-r3, then the Rule Review page — and smoke-test the Procedure model end to end, recording evidence in notes/079-wp3-deploy.md.</prompt>
+
+  <role>SPAARKE platform developer. Expert in the dataverse-deploy, code-page-deploy and solution-sync procedures, and in coordinating shared-dev deploys with SPA-r3.</role>
+
+  <goal>Dev runs the WP3 build: schema of 080, 088 and 115 present and synced into SpaarkeMaster; the file store reachable; the BFF and SPA deployed by SPA-r3 from a build verified by content; every new route answers as specified; a real guideline is published as a Procedure whose rules cite their clauses; evidence recorded.</goal>
+
+  <context>
+    <background>Model: projects/ebilling-r1/notes/procedure-and-file-model.md sections 4, 5.3, 6, 7, 9.1-9.3; breakdown notes/replan-eb-d-148.md row 079. Project CLAUDE.md section 5 (dev only; deploys only inside deploy tasks; scripts/Import-SolutionScoped.ps1 is the only solution import path) and section 6 gotchas of 2026-10-17 (shared dev's BFF and external SPA are deployed only by SPA-r3 from its branch; every dev BFF deploy must contain 015, checked by content, not ancestry: notes/015-retire-invoicestatus.md section 3.5). Route lists, config keys and smoke recipes are in the task notes of 081, 089, 090, 093, 094 and 099. 093 retires the four /api/v1/external/invoices/{id}/documents routes: BFF then SPA back to back (model 9.3). Forms and views on dev go through scripts/ebilling/Deploy-EbillingFormsViews.ps1; source sync follows 029's export-to-temp procedure (053 step 9).</background>
+    <relevant-files>
+      <file role="modify">src/dataverse/solutions/SpaarkeMaster/** (additive: WP3 tables, columns, choices, field-security entries, statuscode value, the Billing-tab entries, the Rule Review sitemap subarea and rule-set command)</file>
+      <file role="modify">scripts/ebilling/Deploy-EbillingFormsViews.ps1 (spec only: sprk_billingfirm and sprk_billingresponsible on the Billing tab of each FilingCores main form)</file>
+      <file role="output">projects/ebilling-r1/notes/079-wp3-deploy.md</file>
+      <file role="read">scripts/ebilling/Deploy-EbillingProcedureSchema.ps1, Deploy-EbillingStoredFileSchema.ps1, Deploy-EbillingAddedFeeDiscountOptions.ps1, Deploy-EbillingRuleTypeOptions.ps1, Deploy-EbillingRuleRejectionReasonSchema.ps1</file>
+      <file role="read">scripts/Set-SecureRecordOwnerRolePrivileges.ps1, scripts/Set-ChildRecordCreatorPersonSchema.ps1</file>
+      <file role="read">scripts/solution-authoring/Test-SolutionCompleteness.ps1, Export-SpaarkeMasterSource.ps1; scripts/Import-SolutionScoped.ps1</file>
+      <file role="read">scripts/Deploy-WebResourceInline.ps1, scripts/Deploy-ActionMirrors.ps1, scripts/dataverse/Seed-PlaybookConsumers.ps1, src/solutions/RuleReview/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project CLAUDE.md section 6 (2026-10-17)">This task never runs scripts/Deploy-BffApi.ps1 or deploy-external-spa.yml itself. SPA-r3 merges the agreed commit into its branch and deploys the BFF, then the SPA, from that branch. Before any smoke, read the live BFF version (/healthz or the version endpoint) and verify the deployed commit BY CONTENT (git show sha:path): it contains 015's markers (notes/015 section 3.5) and each WP3 marker named in the deps' notes (at least: the step 0 flag in FinanceAuthorizationFilter (099), the file store service (090), the firm file routes (093), the resolver (082)). A commit missing any marker is refused.</constraint>
+    <constraint source="project CLAUDE.md section 5, owner directive">Live steps, each only after the owner's OK recorded in the notes: (a) any schema script run that writes (only if a verify finds an item missing); (b) the file-store app settings on spaarke-bff-dev; (c) Deploy-EbillingFormsViews.ps1 for real; (d) the Import-SolutionScoped.ps1 real import; (e) Set-SecureRecordOwnerRolePrivileges.ps1 / Set-ChildRecordCreatorPersonSchema.ps1 -Apply, only if -Verify fails; (f) the request to SPA-r3 to deploy; (g) the smoke test data (one plan, listed records, approved together). Read-only steps need no OK.</constraint>
+    <constraint source="task 026 fix-round-1, 053">BINDING order: schema, storage settings and the secure family on dev BEFORE the BFF; the BFF before the SPA (093). A BFF whose readers or lineage name a column, table or role row dev lacks must not deploy.</constraint>
+    <constraint source="project CLAUDE.md section 3 (pipeline), 029">SpaarkeMaster edits are additive only, by export-to-temp and copying only WP3 eBilling files; Import-SolutionScoped.ps1 -PlanOnly before the real import; no version bump of another project's components. No form, view or subgrid for sprk_procedure, sprk_procedureversion, sprk_procedureassignment or sprk_storedfile (their UI waits for the prototype, O-14; Stored Files have no subgrid, model 5.1). No Rule Set subgrid on a core-record main form (uac-r2 round 2 item 081.2).</constraint>
+    <constraint source="D-114 (owner)">The Rule Review page (sprk_rulereviewpage, 077) gets a "Rule Review" subarea in the Spaarke Administration sitemap and a command on the sprk_ruleset main form that opens it for that rule set; both go in through Import-SolutionScoped.ps1.</constraint>
+    <constraint source="task 090 notes section 12, uac-r2 round 1 K2">HARD precondition for StoredFileReconcileJob in ANY environment: the job runs whenever eBilling is enabled and Finance__FileStore__BlobEndpoint is set, so the file-store app settings (live step b) are set only on a BFF whose deployed commit contains F4 (task 090's merge of sprk_storedfile into InheritedAccessPermission.AccessTables, ParentLineage.cs). Verify it BY CONTENT (git show sha:src/server/api/Sprk.Bff.Api/Services/Dataverse/ParentLineage.cs names StoredFileSchema.Entity in AccessTables) before writing the endpoint; without it, an app-only generic writer could re-point sprk_blobpath or a parent lookup and the job would delete by it.</constraint>
+    <constraint source="root CLAUDE.md section 9, project CLAUDE.md section 5">No secrets in the repo or notes; app setting values written are endpoints and container names only, never a key or SAS; no Key Vault change. Never delete the owner-created containers or evaluation-set documents.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/skills/bff-deploy/SKILL.md (read for the health and hash checks; the deploy itself is SPA-r3's)</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>projects/ebilling-r1/tasks/053-wp2-deploy.poml (step 9 sync procedure)</file>
+      <file>projects/ebilling-r1/notes/015-retire-invoicestatus.md (section 3.5)</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Preconditions: every dependency ✅ in TASK-INDEX.md; git merge-base --is-ancestor f292ad119 HEAD; dotnet build and dotnet test green; record the commit SHA.</step>
+    <step order="2">Schema verify (read-only): second -WhatIf runs of Deploy-EbillingProcedureSchema.ps1, Deploy-EbillingStoredFileSchema.ps1, Deploy-EbillingAddedFeeDiscountOptions.ps1, Deploy-EbillingRuleTypeOptions.ps1 and Deploy-EbillingRuleRejectionReasonSchema.ps1 each report nothing to create. Anything missing: live step (a).</step>
+    <step order="3">Storage (live step b): confirm 091's containers and container-scope roles by az read; set the file-store app settings 090 defines on spaarke-bff-dev; record names only.</step>
+    <step order="4">Secure family: Set-SecureRecordOwnerRolePrivileges.ps1 -Verify and Set-ChildRecordCreatorPersonSchema.ps1 -Verify pass for the tables 086 and 089 registered (assignment rows, record-scoped rule sets and their policies and versions, invoice Stored Files). Failure: -WhatIf, live step (e), -Verify again.</step>
+    <step order="5">Forms and source: add the Billing-tab entries to the Deploy-EbillingFormsViews.ps1 spec; -WhatIf, then live step (c). Run Test-SolutionCompleteness.ps1; export to a temp folder; copy only the WP3 files (step 2's tables, columns, choices, field-security entries, the Superseded statuscode value, 115's options, the Billing-tab form XML, the D-114 sitemap subarea and command); Import-SolutionScoped.ps1 -PlanOnly, then live step (d).</step>
+    <step order="6">Action and Binding: Deploy-ActionMirrors.ps1 for billing-rule-draft and Seed-PlaybookConsumers.ps1 if a read shows them missing.</step>
+    <step order="7">BFF and SPA (live step f): ask SPA-r3 to merge the step 1 commit and deploy the BFF, then the SPA. Verify the live commit by content (constraint above) and /healthz Healthy.</step>
+    <step order="8">Code page: in src/solutions/RuleReview run npm install --legacy-peer-deps --no-audit --no-fund and npm run build; deploy with Deploy-WebResourceInline.ps1; publish only that web resource.</step>
+    <step order="9">Route smoke: every route added by 081, 089, 090, 093, 094 and 099: unauthenticated 401; billing admin the expected 2xx; a non-admin write 403; a flagged-external test systemuser 403 on /review and the same 404 on /invoice-submissions/{id} for a real and a made-up id (099); the four retired /documents routes 404 (093).</step>
+    <step order="10">End-to-end (live step g): create a Procedure (Guideline, All records) and Version 1 with an evaluation-set OCG uploaded as its file; draft its rules; in Rule Review accept three proposals and edit one; publish Version 1. Read back: each policy version names Version 1 and reads Published, with clause quote and location. Submit one firm invoice on a matter through the SPA: its findings cite those policy versions, its PDF is a Stored File (Invoice PDF, Firm-visible Yes, Servable) listed on the firm file route; an internal user downloads it through the internal route; the flagged-external user is refused there.</step>
+    <step order="11">Override smoke: exclude one rule on a second matter, then submit one new invoice on each matter (no re-check of an existing invoice: that is ebilling-r2's): the excluded rule gives no finding on the second matter's invoice and still gives one on the first's.</step>
+    <step order="12">Run 077's ui-tests against dev (including dark mode); record results.</step>
+    <step order="13">Record evidence (SHAs, verify outputs, status codes, record ids, screenshot paths) in notes/079-wp3-deploy.md; update TASK-INDEX.md: this task's status cell to "✅ [done]"; record deviations.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any script, verify or health check fails, STOP; do not retry blindly or deploy by another route.</trigger>
+    <trigger>If the live BFF commit lacks any marker named in the content constraint, STOP and tell SPA-r3; do not smoke-test a build that is not ours.</trigger>
+    <trigger>If any smoke route returns 500, a non-admin or flagged-external call succeeds, or a published rule lacks a clause citation, STOP and report before the next step.</trigger>
+    <trigger>If a SpaarkeMaster change is not additive, or touches another project's components, STOP and ask the owner.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="pwsh">Verify, forms, sync and import scripts</tool>
+    <tool name="az">Storage reads, app settings</tool>
+    <tool name="npm">Rule Review build</tool>
+    <tool name="dataverse-mcp">Read-query verification</tool>
+    <tool name="ui-test">Browser checks</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ebilling-r1/notes/079-wp3-deploy.md</output>
+    <output type="code">src/dataverse/solutions/SpaarkeMaster/** (additive WP3 entries); scripts/ebilling/Deploy-EbillingFormsViews.ps1 (spec)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The notes record the owner's OK, with date, before each live step (a)-(g) that ran.</criterion>
+    <criterion testable="true">Step 2's five scripts report nothing to create on dev; both secure-family -Verify runs pass before the BFF deploy (negative: no BFF deploy was requested while either failed).</criterion>
+    <criterion testable="true">Test-SolutionCompleteness shows no WP3 drift after the sync; Import-SolutionScoped.ps1 -PlanOnly and the real import succeed; no form, view or subgrid exists for the four new tables, and no core-record main form gained a Rule Set subgrid.</criterion>
+    <criterion testable="true">The deployed BFF commit is recorded with the content check's output; /healthz is Healthy; the SPA was deployed after the BFF.</criterion>
+    <criterion testable="true">Every route of step 9 returned the stated status (recorded per route), including the identical 404 for a real and a made-up submission id.</criterion>
+    <criterion testable="true">Step 10: the published policy versions name Procedure Version 1, read Published and carry clause quote and location; the firm invoice's PDF is a Servable Firm-visible Stored File listed on the firm route; the flagged-external user is refused on the internal file route.</criterion>
+    <criterion testable="true">Step 11: the excluded rule gives no finding on the second matter's new invoice and still gives one on the first's.</criterion>
+    <criterion testable="true">077's ui-tests pass in dev, including dark mode.</criterion>
+  </acceptance-criteria>
+
+  <notes>084 (UI), 095-097, 113 and 114 are not in this deploy (breakdown row 079); 112 deploys what follows. Shared dev: agree the window with SPA-r3 and other projects deploying spaarke-bff-dev. Record the deployed package size for the cumulative NFR-12 view.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

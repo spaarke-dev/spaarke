@@ -32,6 +32,13 @@ public sealed class FileIndexingService : IFileIndexingService
     private readonly RecordContainerResolver _containerResolver;
 
     /// <summary>
+    /// The <see cref="FileIndexingResult.SkipReason"/> for a file in a container that is never indexed. This service skips no container
+    /// since ebilling-r1 task 092 retired <c>Finance:EbillingOutputContainerId</c> (export files are Stored Files, never SPE documents);
+    /// the reason stays part of the skip contract the indexing callers report through.
+    /// </summary>
+    public const string NonIndexedContainerReason = "container_not_indexed";
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="FileIndexingService"/> class.
     /// </summary>
     /// <param name="speFileOperations">File operations for SPE access.</param>

@@ -1,0 +1,29 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0583",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0583","generator_id":"gen_eval_set.py@1 F-0583","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0583.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Pryce & Ambrose LLP","firm_invoice_number":"INV-2026-00193","invoice_date":"2025-08-02","billing_period_start":"2025-07-01","billing_period_end":"2025-07-31","firm_matter_reference":"61721-0021","po_number":"PO-4583990","fees_total":4797.0,"expenses_total":8673.97,"adjustments_total":0.0,"total_due":13470.97,"currency":"USD"},
+ "timekeepers":[{"name":"Cyrus Zielinski","title":"Paralegal","rate":170.0,"billed_as":"CZ"},{"name":"Dmitri Santoro","title":"Of Counsel","rate":485.0,"billed_as":"DS"},{"name":"Hector Halloran","title":"Associate","rate":300.0,"billed_as":"HH"},{"name":"Helena Abernathy","title":"Associate","rate":295.0,"billed_as":"HA"},{"name":"Jordan Brennan","title":"Associate","rate":295.0,"billed_as":"JB"},{"name":"Leila Ashdown","title":"Partner","rate":510.0,"billed_as":"LA"},{"name":"Victor Santoro","title":"Paralegal","rate":160.0,"billed_as":"VS"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-07-01","timekeeper":"HA","timekeeper_name":"Helena Abernathy","timekeeper_title":"Associate","title":"Assoc","hours":0.4,"rate":295.0,"amount":118.0,"narrative":"Research appealability issues in the distribution agreement","codes":["L510","A102"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-07-01","timekeeper":"HH","timekeeper_name":"Hector Halloran","timekeeper_title":"Associate","title":"Assoc","hours":1.9,"rate":300.0,"amount":570.0,"narrative":"Review court docket and calendar of pending deadlines for the construction contract","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-07-01","timekeeper":"CZ","timekeeper_name":"Cyrus Zielinski","timekeeper_title":"Paralegal","title":"Para","hours":0.9,"rate":170.0,"amount":153.0,"narrative":"Review court docket and calendar of pending deadlines for the construction contract","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-07-03","timekeeper":"JB","timekeeper_name":"Jordan Brennan","timekeeper_title":"Associate","title":"Assoc","hours":1.3,"rate":295.0,"amount":383.5,"narrative":"Attend and present oral argument in the data incident","codes":["L530","A109"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-07-08","timekeeper":"VS","timekeeper_name":"Victor Santoro","timekeeper_title":"Paralegal","title":"Para","hours":0.7,"rate":160.0,"amount":112.0,"narrative":"Prepare monthly status report to client regarding the employment claim","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-07-09","timekeeper":"LA","timekeeper_name":"Leila Ashdown","timekeeper_title":"Partner","title":"Ptr","hours":2.2,"rate":510.0,"amount":1122.0,"narrative":"Prepare for oral argument in the lease dispute","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-07-09","timekeeper":"JB","timekeeper_name":"Jordan Brennan","timekeeper_title":"Associate","title":"Assoc","hours":1.9,"rate":295.0,"amount":560.5,"narrative":"Prepare case assessment memorandum regarding the construction contract and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-07-10","timekeeper":"HA","timekeeper_name":"Helena Abernathy","timekeeper_title":"Associate","title":"Assoc","hours":1.1,"rate":295.0,"amount":324.5,"narrative":"Attend and present oral argument in the employment claim","codes":["L530","A109"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-07-14","timekeeper":"LA","timekeeper_name":"Leila Ashdown","timekeeper_title":"Partner","title":"Ptr","hours":1.4,"rate":510.0,"amount":714.0,"narrative":"Attend and present oral argument in the lease dispute","codes":["L530","A109"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-07-29","timekeeper":"VS","timekeeper_name":"Victor Santoro","timekeeper_title":"Paralegal","title":"Para","hours":2.5,"rate":160.0,"amount":400.0,"narrative":"Draft appellate brief in the vendor agreement","codes":["L520","A103"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-07-30","timekeeper":"DS","timekeeper_name":"Dmitri Santoro","timekeeper_title":"Of Counsel","title":"O/C","hours":0.7,"rate":485.0,"amount":339.5,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-07-04","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":6306.38,"amount":6306.38,"narrative":"Consulting expert fees","codes":["E119"],"page":2,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2025-07-08","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":2367.59,"amount":2367.59,"narrative":"Consulting expert fees","codes":["E119"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["798 Union Square","Boston","Tax ID 79-7586993"],"template":"T05","pages":2},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2024-09-09","matter_close":"2025-10-29","matter_budget":78883.0,"approved_timekeepers":["Cyrus Zielinski","Dmitri Santoro","Leila Ashdown","Victor Santoro","Hector Halloran","Helena Abernathy","Jordan Brennan"],"invoice_received_date":"2025-08-06"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

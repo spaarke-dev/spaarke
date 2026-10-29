@@ -1,0 +1,112 @@
+{
+  "gpt-5.4-mini/A": {
+    "lines": 499,
+    "predicted": 499,
+    "task_top1": 66.1,
+    "task_phase_top1": 74.3,
+    "conf_ge_090": {
+      "n": 299,
+      "wrong": 65,
+      "wrong_rate": 21.7
+    },
+    "conf_lt_090_accuracy": 48.0,
+    "calls": 20,
+    "failed_calls": 0,
+    "latency_per_call_p50_s": 3.5,
+    "latency_per_call_p90_s": 5.2,
+    "latency_per_line_ms": 156.0,
+    "cost_per_line_usd": 0.000185,
+    "cost_per_1000_lines_usd": 0.185,
+    "tokens": {
+      "prompt_tokens": 47685,
+      "completion_tokens": 12536,
+      "reasoning_tokens": 4180,
+      "cached_tokens": 0
+    }
+  },
+  "gpt-5.6-luna/A": {
+    "lines": 499,
+    "predicted": 499,
+    "task_top1": 65.7,
+    "task_phase_top1": 75.6,
+    "conf_ge_090": {
+      "n": 331,
+      "wrong": 86,
+      "wrong_rate": 26.0
+    },
+    "conf_lt_090_accuracy": 49.4,
+    "calls": 20,
+    "failed_calls": 0,
+    "latency_per_call_p50_s": 3.9,
+    "latency_per_call_p90_s": 5.3,
+    "latency_per_line_ms": 168.0,
+    "cost_per_line_usd": 4.7e-5,
+    "cost_per_1000_lines_usd": 0.047,
+    "tokens": {
+      "prompt_tokens": 47685,
+      "completion_tokens": 11608,
+      "reasoning_tokens": 3264,
+      "cached_tokens": 0
+    }
+  },
+  "gpt-5.4-mini/B": {
+    "lines": 460,
+    "predicted": 460,
+    "task_top1": 63.9,
+    "task_phase_top1": 74.1,
+    "activity_top1": 75.2,
+    "conf_ge_090": {
+      "n": 318,
+      "wrong": 86,
+      "wrong_rate": 27.0
+    },
+    "conf_lt_090_accuracy": 43.7,
+    "calls": 19,
+    "failed_calls": 0,
+    "latency_per_call_p50_s": 5.8,
+    "latency_per_call_p90_s": 7.0,
+    "latency_per_line_ms": 241.0,
+    "cost_per_line_usd": 0.000255,
+    "cost_per_1000_lines_usd": 0.255,
+    "tokens": {
+      "prompt_tokens": 51018,
+      "completion_tokens": 20785,
+      "reasoning_tokens": 10220,
+      "cached_tokens": 21760
+    }
+  },
+  "gpt-5.6-luna/B": {
+    "lines": 460,
+    "predicted": 460,
+    "task_top1": 61.7,
+    "task_phase_top1": 71.7,
+    "activity_top1": 76.1,
+    "conf_ge_090": {
+      "n": 343,
+      "wrong": 107,
+      "wrong_rate": 31.2
+    },
+    "conf_lt_090_accuracy": 41.0,
+    "calls": 19,
+    "failed_calls": 0,
+    "latency_per_call_p50_s": 5.8,
+    "latency_per_call_p90_s": 7.2,
+    "latency_per_line_ms": 251.0,
+    "cost_per_line_usd": 6.7e-5,
+    "cost_per_1000_lines_usd": 0.067,
+    "tokens": {
+      "prompt_tokens": 51018,
+      "completion_tokens": 17033,
+      "reasoning_tokens": 6571,
+      "cached_tokens": 0
+    }
+  },
+  "agreement/A": {
+    "models_agree": 88.0,
+    "accuracy_when_agree": 69.9
+  },
+  "agreement/B": {
+    "models_agree": 90.9,
+    "accuracy_when_agree": 66.7
+  }
+}

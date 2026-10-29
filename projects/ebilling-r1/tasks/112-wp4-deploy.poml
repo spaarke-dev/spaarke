@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="112" project="ebilling-r1">
+  <metadata>
+    <title>Deploy WP4 to dev</title>
+    <phase>4 Review and approval (WP4) — wave W4-5</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deployment and smoke verification of already-reviewed tasks; the only source edits are additive SpaarkeMaster entries allowed to deploy tasks by the project CLAUDE.md.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Prescriptive deploy procedure using existing scripts and skills.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Writes to the shared dev environment (BFF app service, Dataverse rows, web resources) and to SpaarkeMaster source.</parallel-reason>
+    <deps>052, 100, 101, 102, 103, 104, 105, 106, 107, 110, 111, 079</deps>
+    <tags>deploy, bff, code-page</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Deploy WP4 to dev — the BFF with review, corrections, adjustments, approval, reject / return, override, context and related-work routes; any WP4 Dataverse configuration (the override privilege, the approver refresh job); the Invoice Review page; the rewired CreateInvoiceWizard — add the navigation entries, then smoke-test every route and review and approve a real invoice end to end in dev.</prompt>
+
+  <role>SPAARKE platform developer. Expert in the bff-deploy, code-page-deploy and dataverse-deploy procedures and dev smoke verification.</role>
+
+  <goal>Dev runs WP4: every new route answers 401 unauthenticated and the expected status authorized, the authorization negatives return 403, one invoice is reviewed and approved in dev with exactly one Decision Record per decision, NFR-02 is measured, and evidence is recorded.</goal>
+
+  <context>
+    <background>Spec WP4 (FR-31 – FR-37), success criterion 4, NFR-02 (3 s p90), project CLAUDE.md section 5 (dev only; deploys only inside named deploy tasks; scripts/Deploy-BffApi.ps1 for the BFF; scripts/Import-SolutionScoped.ps1 is the only solution import path) and the 2026-10-15 rule (projects/ebilling-r1/CLAUDE.md:126): deploy tasks may add sitemap / navigation entries for the pages they deploy, plus columns or tables their phase added after 029, using 029's export-to-temp procedure (029: scripts/solution-authoring/Export-SpaarkeMasterSource.ps1, copy only eBilling files or hunks). Pattern: 079-wp3-deploy.poml. Web resources: scripts/Deploy-WebResourceInline.ps1 (DataverseUrl, WebResourceName, FilePath). CreateInvoiceWizard is web resource sprk_createinvoicewizard (scripts/Deploy-WizardCodePages.ps1:46). Invoice Review web resource name from 110's notes (directional sprk_invoicereviewpage).</background>
+    <relevant-files>
+      <file role="read">scripts/Deploy-BffApi.ps1</file>
+      <file role="read">scripts/Deploy-WebResourceInline.ps1</file>
+      <file role="read">scripts/Deploy-WizardCodePages.ps1</file>
+      <file role="read">scripts/solution-authoring/Export-SpaarkeMasterSource.ps1</file>
+      <file role="read">scripts/Import-SolutionScoped.ps1</file>
+      <file role="read">src/solutions/InvoiceReview/</file>
+      <file role="read">src/solutions/CreateInvoiceWizard/</file>
+      <file role="modify">src/dataverse/solutions/SpaarkeMaster/ (additive: sitemap / command entries for the Invoice Review page; WP4 Dataverse components only)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="100-107, 110, 111, 052" status="pending">All WP4 tasks and the CreateInvoiceWizard rewire complete and merged to the branch</dependency>
+      <dependency task="079" status="pending">WP3 deployed to dev</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project CLAUDE.md section 5">Dev only. No production or customer environment. No secrets in the repo or notes.</constraint>
+    <constraint source=".claude/skills/bff-deploy/SKILL.md">Deploy the BFF only with scripts/Deploy-BffApi.ps1 and its hash verification; never trust a success message alone.</constraint>
+    <constraint source="projects/ebilling-r1/CLAUDE.md:126">SpaarkeMaster edits are additive and limited to navigation entries for the pages deployed here and WP4 Dataverse components; export to a temp folder and copy only those files or hunks; unrelated dev drift is listed in notes, never copied. Import only through Import-SolutionScoped.ps1 (-PlanOnly first).</constraint>
+    <constraint source="project">Deploy CreateInvoiceWizard alone with Deploy-WebResourceInline.ps1, not Deploy-WizardCodePages.ps1 (that script deploys every wizard whose local dist exists, which can push stale unrelated builds).</constraint>
+    <constraint source="D-142, uac-r2 2026-10-20">The 105 override carrier is a WP4 Dataverse component: copy into SpaarkeMaster the table sprk_ebillingoverride (Entities/sprk_ebillingoverride) and, in the Spaarke Core User role (Roles), only the prvWritesprk_ebillingoverride privilege at Global (dev applied it 2026-10-20). Before any import, check that the Core User role in source holds it, so an import does not drop it from dev. No dedicated "eBilling Override" role exists.</constraint>
+    <constraint source="project">No destructive Dataverse change; -WhatIf first where a script supports it. Never delete owner-created containers or evaluation-set documents.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>projects/ebilling-r1/CLAUDE.md (sections 3 and 5)</file>
+      <file>projects/ebilling-r1/tasks/029-wp1-apply-and-export.poml (export-to-temp procedure)</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Preconditions: every dependency shows ✅ in TASK-INDEX.md; git merge-base --is-ancestor f292ad119 HEAD succeeds; dotnet build and dotnet test green on the branch; record the commit SHA.</step>
+    <step order="2">WP4 Dataverse configuration: read 103 and 105 notes; apply any WP4 script they name (override role / privilege per 105's chosen mechanism; refresh-job schedule per 103) with -WhatIf first, then for real; verify by Dataverse read query.</step>
+    <step order="3">BFF: run scripts/Deploy-BffApi.ps1 against spaarke-bff-dev; confirm hash verification passed and /healthz is healthy; confirm the eBilling flag is on in dev; record the deployed package size.</step>
+    <step order="4">Invoice Review page: in src/solutions/InvoiceReview run npm install --legacy-peer-deps --no-audit --no-fund and npm run build; deploy the single HTML file with Deploy-WebResourceInline.ps1; publish customizations.</step>
+    <step order="5">CreateInvoiceWizard: build src/solutions/CreateInvoiceWizard the same way; deploy its dist HTML with Deploy-WebResourceInline.ps1 as sprk_createinvoicewizard; publish.</step>
+    <step order="6">Navigation: in dev, add the Invoice Review entry (invoice form or view command, or sitemap subarea — as 110 / 111 notes require) inside SpaarkeMaster; export to temp with Export-SpaarkeMasterSource.ps1 and copy only those hunks and any WP4 components from step 2 into src/dataverse/solutions/SpaarkeMaster/; run Import-SolutionScoped.ps1 -PlanOnly and confirm only those components are listed.</step>
+    <step order="7">Verify 029's "Invoices to review" view lists a test invoice for its eligible approver and not for another user.</step>
+    <step order="8">Route smoke: for every route added by 100–107 call once unauthenticated (expect 401) and once authorized (expect 200); approve as a non-eligible user with invoice access (expect 403 ebilling.approver.not_eligible); override as a user without the privilege (expect 403). Record status codes per route.</step>
+    <step order="9">End-to-end: submit a real evaluation-set invoice; open it in the Invoice Review page; correct one misread value, reduce one flagged line with a reason, accept the rest, add an invoice adjustment, approve. Verify totals match I-1, the invoice is Approved, and each decision wrote exactly one Decision Record (read query). Return a second invoice to the firm and verify Returned to Firm and one Decision Record.</step>
+    <step order="10">NFR-02: open a 150-line invoice and the context pane ten times each; record p90 (target under 3 s).</step>
+    <step order="11">Run the 108–111 ui-tests against dev (including dark mode, with the PDF page light) and the 052 ui-tests; record results.</step>
+    <step order="12">Record evidence (commit SHA, script outputs summarised, status codes, record ids, timings, screenshot paths, solution files changed) in projects/ebilling-r1/notes/112-wp4-deploy.md.</step>
+    <step order="13">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+    <step order="14">Record deviations in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any deploy script fails or hash verification fails, STOP; do not retry blindly or deploy by another route. Report the output.</trigger>
+    <trigger>If any smoke route returns 500, a non-eligible approve or an unprivileged override succeeds, STOP and report — do not continue to the end-to-end step.</trigger>
+    <trigger>If the navigation change needs anything beyond additive sitemap / command / form entries and WP4 components (a removal, a change to an existing component, or a non-eBilling component), STOP and ask the main session.</trigger>
+    <trigger>If any decision writes zero or more than one Decision Record, or NFR-02 p90 exceeds 3 s, STOP and report with the measurements.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="pwsh">deploy scripts</tool>
+    <tool name="npm">build</tool>
+    <tool name="dataverse-mcp">read_query verification</tool>
+    <tool name="ui-test">browser checks</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ebilling-r1/notes/112-wp4-deploy.md</output>
+    <output type="code">src/dataverse/solutions/SpaarkeMaster/ (additive navigation and WP4 entries only)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Deploy-BffApi.ps1 completed with hash verification passed; /healthz healthy after deploy; package size recorded.</criterion>
+    <criterion testable="true">Every new WP4 route returns 401 unauthenticated and 200 authorized; non-eligible approve and unprivileged override return 403 (recorded per route).</criterion>
+    <criterion testable="true">The Invoice Review page and CreateInvoiceWizard are deployed and reachable from the app navigation; Import-SolutionScoped.ps1 -PlanOnly lists only the eBilling components added here.</criterion>
+    <criterion testable="true">One invoice was reviewed and approved in dev end to end with totals matching I-1 and exactly one Decision Record per decision; one invoice was returned to the firm.</criterion>
+    <criterion testable="true">NFR-02 p90 under 3 s for page open and context pane, recorded.</criterion>
+    <criterion testable="true">108–111 and 052 ui-tests pass in dev, including dark mode.</criterion>
+    <criterion testable="true">SpaarkeMaster source holds the sprk_ebillingoverride table and prvWritesprk_ebillingoverride at Global in the Spaarke Core User role (D-142); a dev read after the import still shows the privilege at Global.</criterion>
+    <criterion testable="true">Evidence recorded in notes/112-wp4-deploy.md.</criterion>
+  </acceptance-criteria>
+
+  <notes>Shared dev environment: coordinate timing with other projects deploying spaarke-bff-dev. 052's notes name Deploy-WizardCodePages.ps1 for its page; this task deploys only sprk_createinvoicewizard with Deploy-WebResourceInline.ps1 (see constraint). Publish-size was measured per task; record the deployed size here for the cumulative NFR-12 view.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

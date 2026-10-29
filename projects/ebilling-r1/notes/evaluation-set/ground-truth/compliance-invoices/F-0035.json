@@ -1,0 +1,31 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0035",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0035","generator_id":"gen_eval_set.py@1 F-0035","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0035.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-05"},
+ "header":{"firm":"Quimby and Vance LLP","firm_invoice_number":"INV-2025-08340","invoice_date":"2025-04-01","billing_period_start":"2025-03-01","billing_period_end":"2025-03-31","firm_matter_reference":"94622-0025","po_number":"PO-4564837","fees_total":1588.75,"expenses_total":19.8,"adjustments_total":0.0,"total_due":1608.55,"currency":"USD"},
+ "timekeepers":[{"name":"Beatrix Zielinski","title":"Associate","rate":315.0,"billed_as":"BZ"},{"name":"Clara Hargrove","title":"Associate","rate":295.0,"billed_as":"CH"},{"name":"Farah Kowalczyk","title":"Paralegal","rate":140.0,"billed_as":"FK"},{"name":"Hector Quillen","title":"Associate","rate":245.0,"billed_as":"HQ"},{"name":"Imani Ramanathan","title":"Legal Assistant","rate":130.0,"billed_as":"IR"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2024-11-12","timekeeper":"FK","timekeeper_name":"Farah Kowalczyk","timekeeper_title":"Paralegal","title":"Para","hours":0.9,"rate":140.0,"amount":126.0,"narrative":"Prepare monthly status report to client regarding the insurance coverage issue","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2024-11-24","timekeeper":"HQ","timekeeper_name":"Hector Quillen","timekeeper_title":"Associate","title":"Assoc","hours":0.3,"rate":245.0,"amount":73.5,"narrative":"Research authority for complaint","codes":["L250","A102"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-03-06","timekeeper":"CH","timekeeper_name":"Clara Hargrove","timekeeper_title":"Associate","title":"Assoc","hours":0.7,"rate":385.0,"amount":269.5,"narrative":"Analyze key documents for deposition preparation","codes":["L320","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-03-11","timekeeper":"HQ","timekeeper_name":"Hector Quillen","timekeeper_title":"Associate","title":"Assoc","hours":0.25,"rate":245.0,"amount":61.25,"narrative":"Review and summarize deposition transcript of Bluepine Holdings witness","codes":["L330","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-03-20","timekeeper":"BZ","timekeeper_name":"Beatrix Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":2.7,"rate":315.0,"amount":850.5,"narrative":"Prepare case assessment memorandum regarding the construction contract and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-03-21","timekeeper":"FK","timekeeper_name":"Farah Kowalczyk","timekeeper_title":"Paralegal","title":"Para","hours":1.0,"rate":140.0,"amount":140.0,"narrative":"Analyze key documents for deposition preparation","codes":["L320","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-03-21","timekeeper":"IR","timekeeper_name":"Imani Ramanathan","timekeeper_title":"Legal Assistant","title":"LA","hours":0.4,"rate":170.0,"amount":68.0,"narrative":"Analyze exposure and damages model for the data incident","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"expense","date":"2025-03-13","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":11.15,"amount":11.15,"narrative":"Postage - certified mail","codes":["E108"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2025-03-17","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":8.65,"amount":8.65,"narrative":"Postage - certified mail","codes":["E108"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["959 Commerce Avenue","Houston","Tax ID 81-6953420"],"template":"T17","pages":2},
+ "rule_set_id":"RS-05",
+ "context":{"matter_open":"2024-06-20","matter_close":"2025-06-29","matter_budget":31434.0,"approved_timekeepers":["Farah Kowalczyk","Imani Ramanathan","Hector Yilmaz","Aisha Eriksen","Hector Quillen","Dalia Zielinski","Clara Hargrove","Anders Carmichael","Beatrix Zielinski"],"invoice_received_date":"2025-04-05"},
+ "expected_findings":[
+  {"rule_id":"RS-05-R01","rule_type":"ApprovedRate","scope":"line","line_refs":[3],"consequence":"Reduce"},
+  {"rule_id":"RS-05-R01","rule_type":"ApprovedRate","scope":"line","line_refs":[7],"consequence":"Reduce"},
+  {"rule_id":"RS-05-R02","rule_type":"TimeIncrement","scope":"line","line_refs":[4],"consequence":"Reduce"},
+  {"rule_id":"RS-05-R08","rule_type":"InvoiceAge","scope":"line","line_refs":[1],"consequence":"Disallow"},
+  {"rule_id":"RS-05-R08","rule_type":"InvoiceAge","scope":"line","line_refs":[2],"consequence":"Disallow"}
+ ],
+ "seeded_violations":5
+}

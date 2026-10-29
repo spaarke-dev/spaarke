@@ -1,0 +1,28 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0396",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0396","generator_id":"gen_eval_set.py@1 F-0396","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0396.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-06"},
+ "header":{"firm":"Stanhope & Vance LLP","firm_invoice_number":"INV-2025-67655","invoice_date":"2025-08-04","billing_period_start":"2025-07-01","billing_period_end":"2025-07-31","firm_matter_reference":"76955-0013","po_number":"PO-4511900","fees_total":3432.0,"expenses_total":2043.35,"adjustments_total":0.0,"total_due":5475.35,"currency":"USD"},
+ "timekeepers":[{"name":"Daniel Kowalczyk","title":"Paralegal","rate":115.0,"billed_as":"Kowalczyk, D."},{"name":"Emeka Kowalczyk","title":"Partner","rate":390.0,"billed_as":"Kowalczyk, E."},{"name":"Farah Nakamura","title":"Partner","rate":330.0,"billed_as":"Nakamura, F."},{"name":"Gideon Marchetti","title":"Senior Associate","rate":300.0,"billed_as":"Marchetti, G."},{"name":"Yusuf Brennan","title":"Associate","rate":235.0,"billed_as":"Brennan, Y."}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-07-04","timekeeper":"Kowalczyk, D.","timekeeper_name":"Daniel Kowalczyk","timekeeper_title":"Paralegal","title":"Para","hours":0.7,"rate":115.0,"amount":80.5,"narrative":"Draft appellate brief in the data incident","codes":["L520","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-07-28","timekeeper":"Kowalczyk, E.","timekeeper_name":"Emeka Kowalczyk","timekeeper_title":"Partner","title":"Ptr","hours":1.9,"rate":390.0,"amount":741.0,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-07-30","timekeeper":"Kowalczyk, E.","timekeeper_name":"Emeka Kowalczyk","timekeeper_title":"Partner","title":"Ptr","hours":2.6,"rate":390.0,"amount":1014.0,"narrative":"Attend and present oral argument in the employment claim","codes":["L530","A109"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-07-29","timekeeper":"Nakamura, F.","timekeeper_name":"Farah Nakamura","timekeeper_title":"Partner","title":"Ptr","hours":0.4,"rate":330.0,"amount":132.0,"narrative":"Prepare monthly status report to client regarding the regulatory inquiry","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-07-28","timekeeper":"Marchetti, G.","timekeeper_name":"Gideon Marchetti","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.2,"rate":300.0,"amount":360.0,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-07-02","timekeeper":"Brennan, Y.","timekeeper_name":"Yusuf Brennan","timekeeper_title":"Associate","title":"Assoc","hours":1.0,"rate":235.0,"amount":235.0,"narrative":"Draft notice of appeal and docketing statement for the distribution agreement","codes":["L510","A103"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-07-14","timekeeper":"Brennan, Y.","timekeeper_name":"Yusuf Brennan","timekeeper_title":"Associate","title":"Assoc","hours":1.5,"rate":235.0,"amount":352.5,"narrative":"Prepare for oral argument in the insurance coverage issue","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-07-15","timekeeper":"Brennan, Y.","timekeeper_name":"Yusuf Brennan","timekeeper_title":"Associate","title":"Assoc","hours":1.2,"rate":235.0,"amount":282.0,"narrative":"Prepare case assessment memorandum regarding the regulatory inquiry and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-07-21","timekeeper":"Brennan, Y.","timekeeper_name":"Yusuf Brennan","timekeeper_title":"Associate","title":"Assoc","hours":1.0,"rate":235.0,"amount":235.0,"narrative":"Review court docket and calendar of pending deadlines for the data incident","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-07-07","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":708.6,"amount":708.6,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":2,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-07-18","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":424.0,"rate":0.14,"amount":59.36,"narrative":"Photocopies - 424 pages","codes":["E101"],"page":2,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-07-21","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1275.39,"amount":1275.39,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["419 Union Square","Dallas","Tax ID 87-4363386"],"template":"T24","pages":2},
+ "rule_set_id":"RS-06",
+ "context":{"matter_open":"2024-11-25","matter_close":"2025-10-29","matter_budget":46901.0,"approved_timekeepers":["Gideon Marchetti","Emeka Kowalczyk","Yusuf Brennan","Farah Nakamura","Daniel Kowalczyk"],"invoice_received_date":"2025-08-08"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

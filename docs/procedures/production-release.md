@@ -111,7 +111,7 @@ SpaarkeMaster contains **383 confirmed components** across these categories:
 | Category | Entities |
 |----------|----------|
 | **Core** | sprk_matter, sprk_project, sprk_event, sprk_document, sprk_organization, sprk_communication |
-| **Financial** | sprk_invoice, sprk_invoicelineitem, sprk_billingevent, sprk_budget, sprk_budgetbucket, sprk_spendsignal, sprk_spendsnapshot |
+| **Financial** | sprk_invoice, sprk_billingevent, sprk_budget, sprk_budgetbucket, sprk_spendsignal, sprk_spendsnapshot |
 | **Events/Tasks** | sprk_event, sprk_eventset, sprk_eventtodo, sprk_eventlog, sprk_workassignment |
 | **AI/Analysis** | sprk_analysis, sprk_analysisaction, sprk_analysisplaybook, sprk_analysischatmessage, sprk_analysisoutput, sprk_analysisworkingversion, sprk_playbooknode, sprk_playbooknoderun, sprk_playbookrun |
 | **AI Configuration** | sprk_aiactiontype, sprk_aichatcontextmap, sprk_aichatmessage, sprk_aichatsummary, sprk_aiknowledgedeployment, sprk_aiknowledgesource, sprk_aiknowledgetype, sprk_aimodeldeployment, sprk_aioutputtype, sprk_airetrievalmode, sprk_aiskilltype, sprk_aitooltype, sprk_analysisknowledge, sprk_analysisskill, sprk_analysistool |

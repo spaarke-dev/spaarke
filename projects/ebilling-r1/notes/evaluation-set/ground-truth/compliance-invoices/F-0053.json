@@ -1,0 +1,38 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0053",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0053","generator_id":"gen_eval_set.py@1 F-0053","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0053.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-05"},
+ "header":{"firm":"Ravenscroft Beckett PC","firm_invoice_number":"INV-2026-11242","invoice_date":"2025-09-04","billing_period_start":"2025-08-01","billing_period_end":"2025-08-31","firm_matter_reference":"19736-0034","po_number":null,"fees_total":7735.5,"expenses_total":3186.37,"adjustments_total":0.0,"total_due":10921.87,"currency":"USD"},
+ "timekeepers":[{"name":"Clara Okafor","title":"Senior Associate","rate":395.0,"billed_as":"CO"},{"name":"Cyrus Galbraith","title":"Legal Assistant","rate":110.0,"billed_as":"CG"},{"name":"Hannah Ashdown","title":"Partner","rate":460.0,"billed_as":"HA"},{"name":"Ingrid Fairweather","title":"Associate","rate":285.0,"billed_as":"IF"},{"name":"Nadia Rosenthal","title":"Paralegal","rate":160.0,"billed_as":"NR"},{"name":"Samuel Eriksen","title":"Partner","rate":465.0,"billed_as":"SE"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-08-04","timekeeper":"NR","timekeeper_name":"Nadia Rosenthal","timekeeper_title":"Paralegal","title":"Para","hours":2.3,"rate":160.0,"amount":368.0,"narrative":"Review court docket and calendar of pending deadlines for the supply agreement","codes":[],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-08-07","timekeeper":"IF","timekeeper_name":"Ingrid Fairweather","timekeeper_title":"Associate","title":"Assoc","hours":0.8,"rate":285.0,"amount":228.0,"narrative":"Review and revise interrogatory responses based on client comments","codes":["L210","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-08-07","timekeeper":"NR","timekeeper_name":"Nadia Rosenthal","timekeeper_title":"Paralegal","title":"Para","hours":2.3,"rate":160.0,"amount":368.0,"narrative":"Correspondence with consulting expert regarding scope of analysis","codes":["L130","A108"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-08-07","timekeeper":"IF","timekeeper_name":"Ingrid Fairweather","timekeeper_title":"Associate","title":"Assoc","hours":1.0,"rate":285.0,"amount":285.0,"narrative":"Telephone conference with client regarding selection of expert for the regulatory inquiry","codes":["L130","A106"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-08-08","timekeeper":"CG","timekeeper_name":"Cyrus Galbraith","timekeeper_title":"Legal Assistant","title":"LA","hours":0.6,"rate":110.0,"amount":66.0,"narrative":"Draft motion for preliminary injunction in the insurance coverage issue","codes":["L220","A103"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-08-08","timekeeper":"SE","timekeeper_name":"Samuel Eriksen","timekeeper_title":"Partner","title":"Ptr","hours":0.8,"rate":465.0,"amount":372.0,"narrative":"Review court docket and calendar of pending deadlines for the warranty claim","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-08-11","timekeeper":"HA","timekeeper_name":"Hannah Ashdown","timekeeper_title":"Partner","title":"Ptr","hours":2.2,"rate":460.0,"amount":1012.0,"narrative":"Draft settlement term sheet for the employment claim","codes":["L160","A103"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-08-13","timekeeper":"NR","timekeeper_name":"Nadia Rosenthal","timekeeper_title":"Paralegal","title":"Para","hours":1.8,"rate":160.0,"amount":288.0,"narrative":"Analyze exposure and damages model for the supply agreement","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-08-21","timekeeper":"HA","timekeeper_name":"Hannah Ashdown","timekeeper_title":"Partner","title":"Ptr","hours":2.2,"rate":460.0,"amount":1012.0,"narrative":"Ran conflict check for new party","codes":["L220","A110"],"page":1,"narrative_style":"clerical"},
+  {"n":10,"line_type":"fee","date":"2025-08-21","timekeeper":"IF","timekeeper_name":"Ingrid Fairweather","timekeeper_title":"Associate","title":"Assoc","hours":0.7,"rate":285.0,"amount":199.5,"narrative":"Update document review protocol and coding panel for the regulatory inquiry","codes":["L140","A110"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-08-25","timekeeper":"CO","timekeeper_name":"Clara Okafor","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.5,"rate":395.0,"amount":987.5,"narrative":"Prepare monthly status report to client regarding the warranty claim","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2025-08-26","timekeeper":"SE","timekeeper_name":"Samuel Eriksen","timekeeper_title":"Partner","title":"Ptr","hours":3.9,"rate":465.0,"amount":1813.5,"narrative":"Correspondence with consulting expert regarding scope of analysis; Update document review protocol and coding panel for the distribution agreement; Draft pretrial brief in the construction contract.","codes":["L150","A106"],"page":1,"narrative_style":"block_billed"},
+  {"n":13,"line_type":"fee","date":"2025-08-29","timekeeper":"HA","timekeeper_name":"Hannah Ashdown","timekeeper_title":"Partner","title":"Ptr","hours":1.6,"rate":460.0,"amount":736.0,"narrative":"Telephone conference with client regarding selection of expert for the licensing dispute","codes":["L130","A106"],"page":1,"narrative_style":"clear"},
+  {"n":14,"line_type":"expense","date":"2025-08-07","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":3044.26,"amount":3044.26,"narrative":"Consulting expert fees","codes":["E119"],"page":1,"narrative_style":"clear"},
+  {"n":15,"line_type":"expense","date":"2025-08-11","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":101.0,"rate":0.15,"amount":15.15,"narrative":"Photocopies - 101 pages","codes":["E101"],"page":1,"narrative_style":"clear"},
+  {"n":16,"line_type":"expense","date":"2025-08-11","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":2.0,"rate":59.3,"amount":118.6,"narrative":"Working meal during deposition preparation","codes":["E111"],"page":1,"narrative_style":"clear"},
+  {"n":17,"line_type":"expense","date":"2025-08-22","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":76.0,"rate":0.11,"amount":8.36,"narrative":"Photocopies - 76 pages","codes":["E101"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["128 Elm Court","Atlanta","Tax ID 43-5636656"],"template":"T08","pages":2},
+ "rule_set_id":"RS-05",
+ "context":{"matter_open":"2024-05-12","matter_close":"2025-11-29","matter_budget":68687.0,"approved_timekeepers":["Samuel Eriksen","Hannah Ashdown","Nadia Rosenthal","Cyrus Galbraith","Clara Okafor","Ingrid Fairweather"],"invoice_received_date":"2025-09-04"},
+ "expected_findings":[
+  {"rule_id":"RS-05-R03","rule_type":"AiObservation","scope":"line","line_refs":[12],"consequence":"Reduce"},
+  {"rule_id":"RS-05-R04","rule_type":"NonBillableActivity","scope":"line","line_refs":[9],"consequence":"Disallow"},
+  {"rule_id":"RS-05-R07","rule_type":"RequiredData","scope":"line","line_refs":[1],"consequence":"Reject"},
+  {"rule_id":"RS-05-R07","rule_type":"RequiredData","scope":"invoice","line_refs":[],"consequence":"Reject"}
+ ],
+ "seeded_violations":4
+}

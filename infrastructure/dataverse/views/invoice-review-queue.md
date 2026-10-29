@@ -90,14 +90,12 @@ When a document IS an invoice:
 
 1. Open the document record
 2. Verify/correct the following fields:
-   - **Matter** (`sprk_matterid`) - Required
-   - **Project** (`sprk_projectid`) - Optional
+   - **Matter** (`sprk_matterid`) - Required: the submission's core record. A document already filed under another matter, project or
+     work assignment is refused (409 `ebilling.submission.document_core_record_mismatch`); an unfiled document is allowed (D-139).
    - **Vendor Organization** (`sprk_vendororgid`) - Required
-   - **Invoice Number** (if hint is incorrect)
-   - **Invoice Date** (if hint is incorrect)
-   - **Total Amount** (if hint is incorrect)
+   - **Invoice Number** - Required: the firm's own invoice number (never defaulted from the hint, D-91)
 
-3. Call the **Confirm Invoice** endpoint:
+3. Call the **Confirm Invoice** endpoint (needs eBilling enabled):
    ```http
    POST /api/finance/invoice-review/confirm
    Content-Type: application/json
@@ -105,15 +103,22 @@ When a document IS an invoice:
    {
      "documentId": "{guid}",
      "matterId": "{guid}",
-     "projectId": "{guid|null}",
-     "vendorOrgId": "{guid}"
+     "vendorOrgId": "{guid}",
+     "invoiceNumber": "{firm invoice number}",
+     "notes": "{optional}"
    }
    ```
 
-4. Result:
-   - Creates `sprk_invoice` record with `sprk_status = ToReview`
-   - Enqueues `InvoiceExtractionJob` to extract billing details
-   - Document removed from review queue (`sprk_invoicereviewstatus` updated)
+4. Result (ebilling-r1 050a, D-134):
+   - Creates ONE internal invoice submission for the document (no second copy of the file) and enqueues
+     `InvoiceSubmissionProcessing`; the job creates `sprk_invoice`, links the document to it and re-files it under the invoice.
+   - The vendor must be one of the matter's assigned law firms (403 `ebilling.submission.firm_not_linked`).
+   - Answers `202 {submissionId, jobId, trackingNumber, statusUrl}`; a retry for the same document returns the same submission, unless
+     that submission already ended Failed or Rejected (409 `ebilling.submission.submission_already_ended`, D-139).
+   - A document already rejected as not an invoice, or rejected while the confirm runs, is 409
+     `sdap.finance.invoice_review.review_decision_changed`; the reject stands.
+   - The request's `invoiceDate` and `totalAmount` are ignored: the submission job reads them from the document.
+   - Document removed from review queue (`sprk_invoicereviewstatus` = ConfirmedInvoice)
 
 ### 3. Reject Non-Invoice
 

@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="089" project="ebilling-r1">
+  <metadata>
+    <title>Assignment and override service (pin, exclude, change rule, removal preview); secure-child registration; K-2 pin test</title>
+    <phase>3 Rules (WP3) — Procedure model (EB-D-148), wave W3-C</phase>
+    <gate>081 merged; 080 schema live on dev (incl. sprk_createdbyperson on all four tables); owner OK for the live probes and -Apply runs; uac-r2 reviews every edit to its files</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Caller-checked writes on Secure records, a new secure child table and record-scoped rule sets joining the secure family, the shared ownership census and live role changes on dev: auth and tenant-isolation code.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security and tenant isolation across uac-r2- and ontology-owned files with binding review conditions from both.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3-C</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits the uac-r2 files and census test listed below, which 081 and 086 also edit. Run /conflict-check before the PR.</parallel-reason>
+    <deps>080, 081</deps>
+    <tags>bff, api, auth, security, tenant-isolation, rules, testing</tags>
+    <estimated-effort>4 days</estimated-effort>
+  </metadata>
+
+  <prompt>Build the assignment and override service of notes/procedure-and-file-model.md section 6 (assign, pin, exclude a Procedure or rule, change a rule into the record's record-scoped set, remove an override behind 081's preview rules), caller-checked per 5.1. In the same change register sprk_procedureassignment and record-scoped rule sets (with their policies and versions) as secure children (5.2), rewrite the census waiver and guard, restore the NFR-05 depth list and add the K-2 pin test.</prompt>
+
+  <role>SPAARKE platform developer. Expert in IRecordOwnershipResolver, the uac-r2 secure child model, the ownership census and the Finance authorization filter.</role>
+
+  <goal>Overrides are written only through this service after step 0 and the caller checks; rows are owned through the resolver; a Secure record's assignments and record rules live behind its wall; the census, lineage, role set, creator-person set and client child list agree.</goal>
+
+  <context>
+    <background>Model 5.1 (rows; writes checked as the caller; census waiver; depth list; CIAM, K-1), 5.2 (census table, lineage edges, census guard controls, K-2, delete lists), 6.1-6.5 (sources, overrides, determinism, I-A1), 15 answer 2 (removal warning text and counting). The pre-EB-D-148 081 POML (git history: 081-ruleset-scope-service-ownership.poml) holds the secure-family mechanics that still apply (refusal probe 0x80040299, the #2084 shape; $SolutionHomes). Today: SecureChildLineage (Services/Access/SecureChildLineage.cs:175-178) files sprk_policy under sprk_matter and sprk_policyversion under sprk_policy; the census waives RuleSetService's policy creates (RecordOwnerAssignmentCensusTests.cs:126, RuleSetServicePolicyWaiver); the access-conferring registry is MembershipOptions.AccessConferringRoles (Services/Ai/Membership/MembershipOptions.cs, seeded by MembershipOptionsDefaults) and sprk_organization is an identity table (:257). uac-r2's delete lists: core-record-delete-design.md on origin/work/unified-access-control-r2.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Finance/Procedures/ProcedureAssignmentService.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Finance/ProcedureAssignmentEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Access/SecureChildLineage.cs; Services/Dataverse/RecordOwnershipResolver.cs (OwnershipParentEntities only); Services/Dataverse/RecordCreatorPerson.cs; scripts/Set-ChildRecordCreatorPersonSchema.ps1 + tests/scripts/Set-ChildRecordCreatorPersonSchema.Tests.ps1; config/secure-record-owner-role.json; Infrastructure/Dataverse/SecureBuRoleDepthAssertion.cs; src/client/shared/Spaarke.UI.Components/src/utils/adapters/bffChildWriteAdapter.ts (all uac-r2)</file>
+      <file role="modify">tests/Spaarke.ArchTests/RecordOwnerAssignmentCensusTests.cs, RuleSetServiceNoMatterScopeGuardTests.cs, SecureFamilyConsistencyTests.cs, SecureChildNewCommandAgreementTests.cs (read), RouteAuthorizationGuardTests.Ledger.cs; tests/unit/domain/Access/SecureChildLineageTests.cs; tests/integration/auth/UnifiedAccessControl/SecureBuRoleDepthAssertionTests.cs</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/Procedures/ProcedureAssignmentServiceTests.cs; tests/Spaarke.ArchTests/BillingLookupsConferNoAccessTests.cs (K-2)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs, EndpointMappingExtensions.cs (shared append points)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="model 5.1 (F1-c), 5.3">Every route in ProcedureAssignmentEndpoints.cs carries 099's step-0 flag. Then, as the caller: Write and AppendTo on the named core record through the Record path with FinanceDenial.UniformNotFound; Read on the Procedure (or on the rule's policy); the billing-admin privilege (BillingAdminAuthorization, fail closed). The core record id comes from the route; the type is fixed per route from the core-record list (InvoiceFamilyCoreRecordGuard's FilingCores), never from a free string.</constraint>
+    <constraint source="model 5.1">Rows are created as the application, owner from ResolveOwnerAsync(RecordOwnershipContext.ForParents(RecordOwnershipContext.ParentsOf(row), caller) with { RequestedBy = caller }), creator person = the caller. Record-scoped sprk_ruleset parent = its core record; its sprk_policy parent = the set; its sprk_policyversion parent = the policy. A resolver refusal writes nothing (RecordOwnerRefused).</constraint>
+    <constraint source="model 6.2, 6.5 (I-A1)">Assignment modes: Follow latest (default), Pinned (a Procedure Version of that Procedure), Excluded. A second row for the same Procedure on the same record (same distance) → 409 assignment.duplicate. Rule-level rows follow the same rule.</constraint>
+    <constraint source="model 6.3">Exclude rule: row with rule, reason and an optional Firm. Change rule for this record: ONE BFF operation writing (1) an Exclude row for the base rule and (2) a record rule: a copy of the base rule's current parameters, edited, validated by PolicyVersionValidator and published immutable in the record's record-scoped set (created on first use; sprk_scope Record (100000002) for all firms, Firm record (100000003) with sprk_firm = F for one firm), storing "based on" = the base rule's policy version. A failure of either write undoes the other. A firm-named base rule can be changed only for its own firm (400). Record-rule codes use the new ontology D-13 key ontology-r1 gives.</constraint>
+    <constraint source="model 6.3 (remove), 15 answer 2">Remove an override: the row is deleted. For a changed-rule override the record rule is also switched Off (sprk_enabled No) and its open Signals close PolicyRetired through 081's shared selection method, behind a read-only preview: "Removing this override will close the rule it changed and remove pending decisions on active invoices." plus "N open invoices you can see are affected.", counted exactly as 081 counts (caller-readable only; no count on a rights fault); the result's count is caller-scoped. Other removals close nothing and re-check nothing.</constraint>
+    <constraint source="model 5.2 (one change), F4-a">In this PR: lineage edges sprk_procedureassignment → core lookups, sprk_ruleset → core lookups, sprk_policy → sprk_ruleset (CitationLookups for the assignment: procedure, pinned version, excluded policy); OwnershipParentEntities gains both tables; OWNERSHIP_CHILD_TABLES gains both; role JSON rows with live refusal-probe evidence; RecordCreatorPerson.StampedChildTables and the script ($SolutionHomes) for sprk_procedureassignment, sprk_ruleset, sprk_policy, sprk_policyversion; census entries. Procedure rule sets (sprk_procedure set, no record lookup) are NOT secure children.</constraint>
+    <constraint source="model 5.1, 5.2 (census guard, ontology O1, F3-e)">RuleSetServicePolicyWaiver is rewritten: every record-scoped sprk_ruleset writer and its sprk_policy / sprk_policyversion creates route through IRecordOwnershipResolver; the waiver remains only for Procedure rule sets. RuleSetServiceNoMatterScopeGuardTests is kept or narrowed so it still fails any sprk_matter write on a policy row.</constraint>
+    <constraint source="model 5.1 (depth list)">NFR-05: a SEPARATE non-throwing list beside SecureBuRoleDepthAssertion.GuardedPrivileges (unchanged) covers sprk_procedureassignment, sprk_ruleset, sprk_policy, sprk_policyversion and sprk_storedfile; an unresolved privilege name is a finding naming it.</constraint>
+    <constraint source="model 5.2 K-2">sprk_billingfirm and sprk_billingresponsible are not in the access-conferring registry and no grant or share path reads them; ExternalModuleRegistry gains none of the new tables.</constraint>
+    <constraint source="project">Not in this task: the resolver and its precedence (082); the 6.6 read models (084); the O-17 sweep that retires record-scoped sets whose record is gone (model 5.2, not assigned in the re-plan; raise it to the main session); delete code (uac-r2's planner and 080's cascade).</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md, ADR-010">Concrete service in AddFinanceModule; publish-size delta; no package; no new HIGH CVE.</constraint>
+    <constraint source="uac-r2 2026-10-21 (round 113 item 3; task 191)">Procedures are internal-only. Flagged-external systemusers on dev hold the same roles as internal users (Spaarke Basic User, Spaarke Console User, Spaarke Office Add In User) through their business unit's default team. So until uac-r2 task 191 lands, this task adds NO role privilege on sprk_procedure, sprk_procedureversion or sprk_procedureassignment without uac-r2's agreement; all access goes through the BFF.</constraint>
+    <constraint source="uac-r2 2026-10-23 (090 round 2)">090 already stamps sprk_createdbyperson on sprk_ruleset and sprk_procedureassignment (RecordCreatorPerson.StampedChildTables, the schema script's gate), so the creator column is trustworthy before this task's registration relies on it. The registration here is the first real create path for procedure assignments and record-scoped rule sets (today's sets are ClientDefault or Firm only) and is binding in full: SecureChildLineage, the RecordOwnershipResolver ownership parent (record-scoped set and assignment: the core record they name; Procedure-owned sets are not secure children), config/secure-record-owner-role.json with Read depth, the census entry, and a Restrict delete behaviour on the core-record lookups (uac Q10).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/notes/procedure-and-file-model.md (sections 5.1, 5.2, 6, 15)</file>
+      <file>projects/ebilling-r1/tasks/081-procedure-version-service.poml</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Owner routed with parents" location="RateCardImportService.ImportAsync (ResolveOwnerAsync with ForParents, Services/Finance/RateCardImportService.cs:200-211)">ForParents with RequestedBy; refusal writes nothing.</pattern>
+      <pattern name="Role row with probe evidence" location="config/secure-record-owner-role.json (sprk_policy and sprk_policyversion entries)">Reason plus verbatim refusal.</pattern>
+      <pattern name="Reconciler test fixture" location="tests/unit/Sprk.Bff.Api.Tests/Services/Access/SecureChildReconcilerGateDecisionRecordTests.cs">Copy for version → policy → ruleset → core.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Merge origin/master; read notes/080 and 081; confirm sprk_createdbyperson exists on all four tables; read sprk_procedureassignment's and sprk_ruleset's OwnershipType live (must be UserOwned).</step>
+    <step order="1">ProcedureAssignmentService and endpoints: assign, pin, exclude, exclude rule, change rule, remove with preview; authorization; ledger entry.</step>
+    <step order="2">Secure child registration in one change; census rewrite and guards; NFR-05 list; K-2 test.</step>
+    <step order="3">With the owner's OK: live refusal probes for both tables, Set-SecureRecordOwnerRolePrivileges.ps1 -WhatIf / -Apply / -Verify, creator-person script dry run / -Apply / -Verify, live NFR-05 run. Notices to uac-r2 before and after.</step>
+    <step order="4">dotnet build and test; Pester pin; client package test for OWNERSHIP_CHILD_TABLES; publish-size delta; /conflict-check.</step>
+    <step order="5">Reviews: uac-r2 (registration, authorization) and ontology-r1 (census guard, record-rule codes). Record both.</step>
+    <step order="6">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+    <step order="7">Record deviations, probe evidence and -Apply / -Verify output in projects/ebilling-r1/notes/089-assignment-override-service.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any part of the secure-child registration cannot land in the same PR as the rest, STOP: a subset fails SecureFamilyConsistencyTests, SecureChildNewCommandAgreementTests or the census.</trigger>
+    <trigger>If a refusal probe's create SUCCEEDS, delete the probe row, record it and STOP; ask uac-r2.</trigger>
+    <trigger>If the live NFR-05 run reports a non-admin role whose Read on a listed table reaches the Secure business unit, STOP and raise 🔔 Human Input Required.</trigger>
+    <trigger>If the owner has not given the OK for the probes and -Apply runs, do not run them; finish the code, do not open the PR, report.</trigger>
+    <trigger>If "the billing privilege" of model 5.1 is meant to be another privilege than BillingAdminAuthorization's, or ontology-r1 has not given the record-rule code key, STOP and ask.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No service writes assignments or overrides (model 3.3 answers the table's overlap); RuleSetService writes rule sets without record scope.</existing>
+    <extension>Registration extends existing lists. A new service because these writes are caller-checked against the record, which RuleSetService's admin routes are not; it reuses RuleSetService's validation and 081's close.</extension>
+    <cost-of-doing-nothing>No record can be pinned to a 2025 rate card, waive a rule or change one (O-4, O-10), and a record-specific rule on a Secure record would sit outside its wall (uac-r2 F1-a).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">build, test</tool>
+    <tool name="pwsh">Set-SecureRecordOwnerRolePrivileges.ps1, Set-ChildRecordCreatorPersonSchema.ps1 (owner OK); Invoke-Pester</tool>
+    <tool name="npm">the Spaarke.UI.Components test holding OWNERSHIP_CHILD_TABLES</tool>
+    <tool name="dataverse-mcp">live metadata reads; refusal probes (owner OK)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">ProcedureAssignmentService.cs, ProcedureAssignmentEndpoints.cs and the uac-r2 files above</output>
+    <output type="test">ProcedureAssignmentServiceTests.cs, BillingLookupsConferNoAccessTests.cs and the ArchTests above</output>
+    <output type="docs">projects/ebilling-r1/notes/089-assignment-override-service.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Each route refuses a flagged-external caller, no systemuser row and a flag-read fault (negative); a caller without Write or AppendTo on the record gets the same 404 as for a non-existent record (byte-identical); without Read on the Procedure, or without the billing-admin privilege, the write is refused and nothing is written.</criterion>
+    <criterion testable="true">Assign, pin, exclude and exclude-rule each write one row owned through the resolver with parents [the core record] and creator person = the caller; a Secure record's rows are owned by its Secure team; a second row for the same Procedure on the same record is 409 assignment.duplicate.</criterion>
+    <criterion testable="true">Change rule: one Exclude row plus one Published record rule in a record-scoped set with the right scope (Record, or Firm record with sprk_firm); the set's owner parents are [core record], the policy's [the set], the version's [the policy]; a second change reuses the set; a failure of the second write leaves neither; a firm-named base rule changed for another firm is refused 400; an invalid edited rule is refused by PolicyVersionValidator.</criterion>
+    <criterion testable="true">Remove: deleting a plain override closes no Signal; removing a changed-rule override switches the record rule Off and closes its open Signals through 081's shared method; the preview shows the removal warning with a caller-scoped count (3 affected, caller can Read 2 → "2 open invoices you can see are affected"), and a rights fault shows no count.</criterion>
+    <criterion testable="true">Census guard, must fire: a record-scoped rule-set create or a record-rule policy create that bypasses IRecordOwnershipResolver fails. Must not fire: a Procedure rule-set create and a Procedure-scoped policy create pass. Seeding proof recorded.</criterion>
+    <criterion testable="true">SecureFamilyConsistencyTests, SecureChildNewCommandAgreementTests, the creator-person agreement test and Pester pin, SecureChildLineageTests and a reconciler test (version → policy → ruleset → core, secure and unsecure) pass; removing either table from any one list fails its test (seeding proof).</criterion>
+    <criterion testable="true">NFR-05: GuardedPrivileges and its pin are unchanged; the separate list covers the five tables; a missing privilege name gives exactly one finding naming it; the live run on dev is recorded with no finding.</criterion>
+    <criterion testable="true">K-2: a test fails if the access-conferring registry holds any billing* column on a core table, and shows AccessConferringOnly resolution confers nothing through sprk_billingfirm or sprk_billingresponsible; ExternalModuleRegistry holds none of the new tables.</criterion>
+    <criterion testable="true">Notes record the probe refusals, -Apply / -Verify outputs, the owner's OK with dates and both reviews; publish-size delta; no package; no new HIGH CVE; /conflict-check run.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Two adversarial-review passes (auth, tenant isolation). Role rows and creator-person columns must be live on dev before 079 deploys the BFF; 079 re-runs both -Verify runs. 086 registers invoice Stored Files on the same files afterwards. spaarke-prototype 2026-10-21: answer questions h-j of notes/084-prototype-questions.md (removal-preview read, the typed parameter schema per rule type for change-rule, the request shapes of pin, exclude and change) in this task's notes, and send the path to spaarke-prototype. ontology-r1 080 review 2026-10-21: sprk_procedureversion.sprk_procedure is an alternate-key column and cannot be field-secured, so this task pins (test over the role privileges) that no non-BFF role holds Create or Write on sprk_procedureversion or sprk_procedureassignment. 080 PARENTAL LIMIT (2026-10-21, uac-r2 ACCEPT): Dataverse allows one parental (Delete = Cascade) relationship per table, so sprk_procedureassignment's three core lookups are RemoveLink and sprk_excludedpolicy is its only Cascade. The write validator's 'exactly one core lookup' rule applies to writes only. A stored row with zero core lookups is a sweep candidate, never a validation fault that makes it unreadable or stops a resolver run or the sweep.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

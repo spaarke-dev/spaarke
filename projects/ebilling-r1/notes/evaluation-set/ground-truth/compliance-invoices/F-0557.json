@@ -1,0 +1,26 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0557",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0557","generator_id":"gen_eval_set.py@1 F-0557","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0557.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-05"},
+ "header":{"firm":"Calloway and Yardley LLP","firm_invoice_number":"2026016863","invoice_date":"2025-06-03","billing_period_start":"2025-05-01","billing_period_end":"2025-05-31","firm_matter_reference":"75550-0027","po_number":"PO-4514797","fees_total":2763.5,"expenses_total":1146.55,"adjustments_total":0.0,"total_due":3910.05,"currency":"USD"},
+ "timekeepers":[{"name":"Anders Carmichael","title":"Partner","rate":545.0,"billed_as":"Anders Carmichael"},{"name":"Dmitri Blackwood","title":"Associate","rate":250.0,"billed_as":"Dmitri Blackwood"},{"name":"Emeka Hargrove","title":"Associate","rate":290.0,"billed_as":"Emeka Hargrove"},{"name":"Gideon Hargrove","title":"Legal Assistant","rate":125.0,"billed_as":"Gideon Hargrove"},{"name":"Gregory Kowalczyk","title":"Associate","rate":310.0,"billed_as":"Gregory Kowalczyk"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-05-02","timekeeper":"Gregory Kowalczyk","timekeeper_name":"Gregory Kowalczyk","timekeeper_title":"Associate","title":"Assoc","hours":0.2,"rate":310.0,"amount":62.0,"narrative":"Draft settlement term sheet for the supply agreement","codes":["L160","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-05-05","timekeeper":"Gregory Kowalczyk","timekeeper_name":"Gregory Kowalczyk","timekeeper_title":"Associate","title":"Assoc","hours":0.6,"rate":310.0,"amount":186.0,"narrative":"Attend case management conference in the construction contract","codes":["L230","A109"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-05-12","timekeeper":"Dmitri Blackwood","timekeeper_name":"Dmitri Blackwood","timekeeper_title":"Associate","title":"Assoc","hours":2.1,"rate":250.0,"amount":525.0,"narrative":"Review and organize incoming production from Harbor Point Capital for matter file","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-05-13","timekeeper":"Emeka Hargrove","timekeeper_name":"Emeka Hargrove","timekeeper_title":"Associate","title":"Assoc","hours":1.8,"rate":290.0,"amount":522.0,"narrative":"Review and organize incoming production from Orchard Row Brands for matter file","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-05-21","timekeeper":"Emeka Hargrove","timekeeper_name":"Emeka Hargrove","timekeeper_title":"Associate","title":"Assoc","hours":0.4,"rate":290.0,"amount":116.0,"narrative":"Conference with client regarding budget variance for the distribution agreement","codes":["L150","A106"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-05-28","timekeeper":"Anders Carmichael","timekeeper_name":"Anders Carmichael","timekeeper_title":"Partner","title":"Ptr","hours":2.0,"rate":545.0,"amount":1090.0,"narrative":"Draft requests for production in the lease dispute","codes":["L210","A103"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-05-30","timekeeper":"Gideon Hargrove","timekeeper_name":"Gideon Hargrove","timekeeper_title":"Legal Assistant","title":"LA","hours":2.1,"rate":125.0,"amount":262.5,"narrative":"Prepare updated litigation budget for the warranty claim","codes":["L150","A103"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"expense","date":"2025-05-01","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1015.64,"amount":1015.64,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2025-05-02","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":2.0,"rate":47.71,"amount":95.42,"narrative":"Overnight courier to Meridian Foods counsel","codes":["E107"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-05-19","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":35.49,"amount":35.49,"narrative":"Long distance conference call charges","codes":["E105"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["194 Elm Court","Boston","Tax ID 47-4165080"],"template":"T02","pages":2},
+ "rule_set_id":"RS-05",
+ "context":{"matter_open":"2024-01-17","matter_close":"2025-08-29","matter_budget":40640.0,"approved_timekeepers":["Gregory Kowalczyk","Gideon Hargrove","Helena Thornbury","Emeka Hargrove","Anders Carmichael","Farah Tavares","Dmitri Blackwood"],"invoice_received_date":"2025-06-19"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

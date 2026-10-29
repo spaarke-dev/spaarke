@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="019" project="ebilling-r1">
+  <metadata>
+    <title>Policy store extensions, sprk_ruleset, visible-to-firms flag</title>
+    <phase>1 Data model (WP1)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>New idempotent schema script on a shared (ontology-owned) store plus one new table; no BFF code.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Columns fixed by spec FR-09 and design.md 5.1; the only judgment (collision with ontology names) is an escalation, not a choice.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P1-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>dataverse, schema, coordination</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Extend the shared policy store for billing rules (FR-09, D-26, D-66): add domain and rule-set lookup to sprk_policy, clause reference and consequence to sprk_policyversion, and create sprk_ruleset (domain, name, source document, scope client default or firm, visible-to-firms flag, status, effective dates), via scripts/ebilling/Deploy-EbillingPolicyStoreSchema.ps1 run against dev. The store is ontology-owned: check for collisions first and record ontology-r1's review.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Dataverse metadata Web API and in coordinating changes to a store another project owns.</role>
+
+  <goal>In dev the columns and table below exist; a second script run makes no change; existing ontology policy rows and readers behave exactly as before; docs/data-model/sprk_ruleset.md records every column and value; ontology-r1's review is in task notes.</goal>
+
+  <context>
+    <background>sprk_policy (UserOwned; solution source 2026-10-15): sprk_name, sprk_policycode, sprk_shortname, sprk_lane (Decide / Do), sprk_severity (Info / Warning / Critical), sprk_subjecttype (Matter … Invoice, Document), sprk_worktype, sprk_matter, sprk_tenant, sprk_enabled, sprk_priority, sprk_countstowardsuppression, sprk_currentversion, sprk_retiredreason; statuscode Active / Inactive / Retired. sprk_policyversion: sprk_policy, sprk_versionnumber, sprk_ruletype (local choice Threshold / Switch / Existence, mirrored by Services/Signals/RuleType.cs — the 11 billing values are task 070's, not this task's), sprk_rulebody, sprk_inforcefrom / sprk_inforceto, sprk_proposedaction (text), sprk_messagetemplate, sprk_decisionplan, sprk_confidencethreshold, sprk_authoredby, sprk_shortheadline; statuscode Active / Inactive. design.md 5.1 names: sprk_domain (Billing, Ontology, later Docketing — D-26), sprk_ruleset lookup, sprk_clausereference (quote + location), sprk_consequence. No docs/data-model file exists for either policy table. Ontology readers of sprk_policy: Services/Signals (SignalReevaluationJob, PolicyScopeResolver, SignalWriter, DecisionCommitService, DecisionPlanService and others).</background>
+    <relevant-files>
+      <file role="new">scripts/ebilling/Deploy-EbillingPolicyStoreSchema.ps1</file>
+      <file role="new">docs/data-model/sprk_ruleset.md (rule set + the new policy columns)</file>
+      <file role="modify">docs/data-model/INDEX.md (one row)</file>
+      <file role="read">src/dataverse/solutions/SpaarkeMaster/Entities/sprk_Policy/Entity.xml, sprk_PolicyVersion/Entity.xml</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Signals/RuleType.cs, PolicyVersionValidator.cs, PolicyScopeResolver.cs, SignalReevaluationJob.cs</file>
+      <file role="read">projects/spaarke-ontology-platform-r1/notes/ontology-component-model.md</file>
+      <file role="read">scripts/Deploy-ChartDefinitionEntity.ps1 (exemplar: new entity), scripts/Apply-DoLanePolicies.ps1 (current policy writer)</file>
+    </relevant-files>
+    <dependencies>none</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-09 / design.md 5.1">sprk_policy: sprk_domain (choice on a new global option set sprk_policydomain: Billing, Ontology, Docketing — Docketing reserved, unused in R1) and sprk_ruleset (lookup → sprk_ruleset, Delete = RemoveLink). sprk_policyversion: sprk_clausereference (multiline text, the verbatim clause quote), sprk_clauselocation (text 200: section and page) and sprk_consequence (local choice Reject submission, Flag, Suggest adjustment). Domain and rule set sit on the policy (stable across versions); clause and consequence on the version (immutable once published).</constraint>
+    <constraint source="spec FR-09 / FR-28 / D-66">sprk_ruleset (new, UserOwned like sprk_policy): sprk_name, sprk_domain (sprk_policydomain), sprk_sourcedocument (→ sprk_document), sprk_scope (local choice Client default / Firm), sprk_firm (→ sprk_organization; set only when scope is Firm — enforced by 076, not schema), sprk_visibletofirms (two-option, default No), sprk_effectivefrom / sprk_effectiveto (date-only), sprk_notconverted (multiline text, JSON: guideline text the draft Action could not convert — 075), status on statuscode — statecode 0: Draft, Published; statecode 1: Retired.</constraint>
+    <constraint source="FR-27 / FR-28 (coverage for 075 / 076)">sprk_policyversion: sprk_proposalstatus local choice Proposed, Accepted, Rejected (empty on ontology rows). The predecessor of a version is its sibling under the same sprk_policy with the next-lower sprk_versionnumber — no new link column.</constraint>
+    <constraint source="project / ontology-r1">Additive only on the two policy tables: no relabel, delete or renumber of any existing column or option (sprk_ruletype values stay Threshold 100000000, Switch 100000001, Existence 100000002). No backfill of existing policy rows (domain empty = Ontology) unless ontology-r1 agrees in writing. Do NOT edit src/dataverse/solutions/SpaarkeMaster/** (029 syncs). No plugins, business rules or calculated columns (ADR-002).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>.claude/constraints/plugins.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Collision check: read dev metadata for sprk_policy and sprk_policyversion; search dev global option sets, SpaarkeMaster source, projects/spaarke-ontology-platform-r1 and src/server for sprk_domain, sprk_policydomain, sprk_ruleset, sprk_clausereference, sprk_clauselocation, sprk_consequence, sprk_proposalstatus, sprk_visibletofirms. Record results.</step>
+    <step order="2">Overlap check: record whether sprk_proposedaction or sprk_lane already carries the meaning of consequence, and how each Services/Signals reader of sprk_policy selects rows (does any read all policies regardless of subject type, so it would load billing rows?). Hand the reader list to task 070 in task notes.</step>
+    <step order="3">Send the planned column list and steps 1-2 results to ontology-r1 for review; record the answer.</step>
+    <step order="4">Write the script (-EnvironmentUrl, -WhatIf, check-then-create, global option set first, new entity, columns, relationships, statuscode values, summary, publish), modelled on scripts/Deploy-ChartDefinitionEntity.ps1 and the dataverse-create-schema skill.</step>
+    <step order="5">Run with -WhatIf, then for real, then again (no change); record output and every numeric option / statuscode value in task notes (070, 073, 075, 076, 130 read them).</step>
+    <step order="6">Verify: metadata read of every column and value; existing ontology policy rows read unchanged; dotnet test --filter on the Signals unit tests passes (no reader behaviour change).</step>
+    <step order="7">Write docs/data-model/sprk_ruleset.md (rule set, the new policy columns, the D-66 visibility rule) and the INDEX.md row.</step>
+    <step order="8">Update TASK-INDEX.md: change this task's status cell to ✅ [done].</step>
+    <step order="9">If any deviations from plan, document in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any planned name already exists with another meaning, or ontology-r1 has planned the same column under another name, STOP and present both to the owner and ontology-r1; do not create a second column for one meaning.</trigger>
+    <trigger>If sprk_proposedaction or sprk_lane already means "consequence", STOP and ask ontology-r1 whether to reuse it instead of adding sprk_consequence.</trigger>
+    <trigger>If an ontology reader would load billing policies once they exist (step 2), record it for 070 — do not change Signals code here.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>sprk_policy / sprk_policyversion exist (ontology-owned) and are extended, not duplicated; grep of SpaarkeMaster and src finds no sprk_ruleset or rule-group table (spec section 11 row "sprk_ruleset — sprk_policy category / scope").</existing>
+    <extension>The policy tables are extended with domain, rule-set, clause and consequence columns. sprk_ruleset cannot be a policy column: a guideline is published, scoped to a client default or a firm, cited and made visible to firms as a unit.</extension>
+    <cost-of-doing-nothing>Billing rules cannot be told apart from ontology rules, an OCG cannot be published or assigned as a unit (FR-28), findings cannot cite the clause (D-66, FR-38) and the reject consequence (073) has no storage.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="pwsh">Schema script</tool>
+    <tool name="dataverse-mcp">Metadata reads and collision search</tool>
+    <tool name="dotnet">Signals unit tests (no-regression check)</tool>
+  </tools>
+
+  <outputs>
+    <output type="script">scripts/ebilling/Deploy-EbillingPolicyStoreSchema.ps1</output>
+    <output type="docs">docs/data-model/sprk_ruleset.md, docs/data-model/INDEX.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A dev metadata read shows every listed column on sprk_policy, sprk_policyversion and sprk_ruleset with the stated type, target and values, and sprk_ruleset statuscode Draft / Published (statecode 0) and Retired (statecode 1).</criterion>
+    <criterion testable="true">sprk_visibletofirms defaults to No; a rule set created without it set reads No.</criterion>
+    <criterion testable="true">A second script run reports no created item and makes no write.</criterion>
+    <criterion testable="true">No existing policy column, option or row changed: sprk_ruletype still has exactly Threshold, Switch, Existence with the same values; the Signals unit tests pass; no file under src/dataverse/solutions/SpaarkeMaster/ changed.</criterion>
+    <criterion testable="true">Task notes record the collision search, the overlap and reader inventory for 070, every numeric value, and ontology-r1's review (FR-09 acceptance).</criterion>
+  </acceptance-criteria>
+
+  <notes>Schema applied to dev 2026-10-15 and a second run made no change (see projects/ebilling-r1/notes/019-policy-store-ruleset.md). Open: ontology-r1's written review (acceptance 5) and the Signals unit-test run. The billing/ontology reader inventory for 070 is in the notes. Shared append point: docs/data-model/INDEX.md (one row). D-66 says the flag defaults on for billing guidelines and rate cards and off for internal procedures; the column default is No (fail closed) and 076 sets the initial value from the source kind at create. The billing sprk_ruletype values are 070's. sprk_proposalstatus and sprk_notconverted are additions beyond the brief so that 075 / 076 have storage for proposal state and the not-converted list (both of their escalation triggers name 019). Admin forms and views are 029's.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in knowledge files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

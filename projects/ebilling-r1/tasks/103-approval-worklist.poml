@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="103" project="ebilling-r1">
+  <metadata>
+    <title>Approval: eligible approvers, worklist, approve</title>
+    <phase>4 Review and approval (WP4) — wave W4-2</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Decides who may approve payment of an invoice (authorization) and freezes the approved total; a wrong resolution lets a non-eligible user approve or hides an invoice from its approvers.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-cutting design: approver resolution from role choices and assignment fields, re-resolution without a change event, I-2 with the open F-2 question, idempotent Decision Record and lifecycle sequencing.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P4-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>100, 021, 024, 025, 074</deps>
+    <tags>bff, api, auth, signals</tags>
+    <estimated-effort>3 days</estimated-effort>
+  </metadata>
+
+  <prompt>Resolve eligible approvers for an invoice from its core record's sprk_billingapproverrole (empty = the settings default for the core type), keep them current on the approval portion so the "Invoices to review" view lists the invoice for each of them, and add the approve operation: any one eligible approver approves (I-2 enforced), status moves to Approved through 014, the approved total is frozen on the portion, and exactly one Decision Record names who decided.</prompt>
+
+  <role>SPAARKE platform developer. Expert in authorization design, Dataverse relationships and idempotent multi-step writes.</role>
+
+  <goal>EligibleApproverResolver, InvoiceApprovalService and InvoiceApprovalEndpoints.cs (GET approval state, POST approve), a refresh path for eligible approvers, and tests including a seeding proof that a non-eligible caller gets 403.</goal>
+
+  <context>
+    <background>Spec FR-35 (acceptance: non-eligible user 403; approve with a Flagged line refused; second approval after the first is a no-op), FR-11 (eligible approvers resolved at acceptance and re-resolved when assignment fields or the role field change before a decision), FR-14 (empty role = settings default; test per core type), I-2, FR-30, D-33 / D-40 / D-54, spec Assumptions (re-resolution event-driven with a recheck when an approver opens the invoice). 024: global choice options map to assignment fields (Assigned Attorney 1 / 2, Assigned Paralegal 1 / 2, Assigned To Internal, Assigned To External, Assigned To); exact column names in 024's notes. 021: sprk_invoiceapproval (sprk_approvalstatus, sprk_approvedamount, sprk_eligibleresolvedon, sprk_decidedby → contact, sprk_decidedon, sprk_decisionrecord) and N:N sprk_invoiceapproval_eligibleapprover_contact; assignment fields target contact; contact.sprk_systemuser links to the user. 025: IEbillingSettingsReader default approver roles per core type. Caller identity: Services/Identity/SystemUserIdentityResolver.cs:33 (ResolveSystemUserIdAsync from the token oid). Lifecycle: 014 (Transitioned / AlreadyInTarget / Refused). Decision Record: 074's recorder (approve action). Correction rows: 027. The "Invoices to review" view is built by 029 on the N:N. No Dataverse change event for assignment fields exists in the BFF (grep finds none); scheduled-job precedent: Services/Access/SecureChildReconciliationJob.cs:85, registered with AddScheduledJob at Infrastructure/DI/ExternalAccessModule.cs:643.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Finance/EligibleApproverResolver.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceApprovalService.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Finance/EligibleApproverRefreshJob.cs (IScheduledJob; see escalation)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Finance/InvoiceApprovalEndpoints.cs</file>
+      <file role="modify">049's approval-portion creation (file named in 049's notes): one call to the resolver at acceptance — treat as a shared append point</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs (shared append point)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs:376-377 (shared append point)</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/EligibleApproverResolverTests.cs</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/InvoiceApprovalServiceTests.cs</file>
+      <file role="new">tests/integration/contract/Api/Finance/InvoiceApprovalEndpointsAuthorizationContractTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="100" status="pending">Route conventions, policy key "ebilling.invoice.decide", line statuses</dependency>
+      <dependency task="021" status="pending">sprk_invoiceapproval and the eligible-approver N:N</dependency>
+      <dependency task="024" status="pending">sprk_billingapproverrole columns (names in its notes)</dependency>
+      <dependency task="025" status="pending">Settings default approver roles</dependency>
+      <dependency task="074" status="pending">Approve action and recorder</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="074 ontology-r1 review K1/K3 (2026-10-17)">Recording billing Decision Records through BillingDecisionRecorder (074) brings two caller obligations.
+- (1) Exactly-once. The writer is exactly-once only for retries made one after another; two concurrent calls with one decision id can both write, and a duplicate in an append-only ledger is permanent. So:
+  - this task names its serialisation mechanism as an acceptance criterion. Examples: the job claims IIdempotencyService keyed by the decision id; an endpoint does a RowVersion-conditional status update and records only after it succeeds;
+  - it adds a test for the concurrent same-id case.
+- (2) Decider identity:
+  - derive the deciding user from the authenticated principal, never from request input;
+  - check invoice access through the UAC filter before recording;
+  - pass no contact id. The recorder looks the contact up itself, as DecisionCommitService does; 074's fix round removes that parameter.</constraint>
+    <constraint source="FR-35, root CLAUDE.md section 6">Eligibility is resolved live from the core record at every approve call (authoritative); the stored N:N is for the view only and never grants approval. Non-eligible caller: 403 ebilling.approver.not_eligible, nothing written.</constraint>
+    <constraint source="I-2">Approve refused (409 ebilling.approve.lines_open, with counts) while any line is Pending or Flagged.</constraint>
+    <constraint source="FR-35, FR-30">Exactly one Decision Record per approval, attributed to the approver whose transition succeeded. A second approve after Approved is a no-op (200, current state, no record). Recover a failure between transition and record on retry by the same approver; tests cover it.</constraint>
+    <constraint source="FR-35">Approved total frozen: the portion stores the approved total and decider at approval; 100 / 101 / 102 refuse writes once the invoice is not In Review.</constraint>
+    <constraint source="FR-14">Empty role field: settings default for that core type (Matter, Project, Work Assignment). An assignment field with no contact or a contact without sprk_systemuser contributes nobody; zero eligible approvers is logged and surfaced (state flag), never a fallback to "anyone".</constraint>
+    <constraint source="ADR-036, ADR-052">Any periodic refresh is an IScheduledJob, never a hand-rolled timer.</constraint>
+    <constraint source="ADR-001, ADR-008, ADR-019">Route conventions from 100; GET uses "finance.read", approve uses "ebilling.invoice.decide" plus the service eligibility check.</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">Placement BFF (B1 caller identity, B4 live request; refresh job B2 Dataverse-heavy domain code); publish-size delta; no new HIGH CVE; no package.</constraint>
+    <constraint source="074 fix-round adversarial pass (2026-10-18), caller obligations of BillingDecisionRecorder">Callers that record billing decisions through BillingDecisionRecorder must:
+- Derive the resolved Signal ids and the policy version id server-side, from the decision's own invoice and lines. Never take them from the request. The writer accepts any existing Signal or policy version (074 review K-2).
+- Record before mutating, or run the recorder's reads first. Its refusals that depend on Dataverse reads (unknown policy version, missing Signal, undetermined subject, contact read fault) happen after Preflight, so a caller that changes invoice status first can be left with a changed status and no Decision Record (K-3).
+- Serialise decisions per invoice (one at a time per invoice). The recorder's "already recorded" check and its create are not atomic (K-4).
+- Build Values the same way on every attempt (same types, same decimal scale), so that an honest retry hashes to the same content (K-5, unless 074's follow-up normalises decimals).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/spec.md (FR-11, FR-14, FR-30, FR-35, I-2, Assumptions)</file>
+      <file>projects/ebilling-r1/notes/decisions-log.md (D-33, D-40, D-54)</file>
+      <file>c:\code_files\spaarke-prototype\projects\ebilling.r1\README.md (F-2; header "Awaiting: J. Smith, A. Lee")</file>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Read 021, 024, 025 and 074 notes; resolve the F-2 and refresh escalations below before coding the approve route.</step>
+    <step order="1">EligibleApproverResolver: invoice → core record (type, id) → role values or settings default → assignment-field contacts → systemusers; returns contacts, users, display names; also writes the N:N diff and sprk_eligibleresolvedon (add / remove only what changed).</step>
+    <step order="2">Wire the resolver into 049's approval-portion creation (acceptance time), into GET approval (recheck on open) and into the refresh job.</step>
+    <step order="3">GET /api/finance/invoices/{invoiceId}/approval: eligible approver names, canApprove (caller eligible and I-2 satisfied), open-line counts, status, decided by / on. 104 reuses the same eligibility for reject / return.</step>
+    <step order="4">POST .../approve (decision id): eligibility, I-2, F-2 handling of undecided Clean lines, 014 transition, portion update, 074 record — in an order that keeps exactly-once semantics.</step>
+    <step order="5">Verify in dev that 029's "Invoices to review" view lists the invoice for each eligible approver and not for another user; record evidence.</step>
+    <step order="6">Tests: resolver per core type with role set and with empty role (settings default); contact without user ignored; approve happy path; Flagged / Pending refused; non-eligible 403; second approve no-op; retry after partial failure writes one record; contract tests 401 / 403 / disabled.</step>
+    <step order="7">Seeding proof (non-eligible approver guard): remove the service eligibility check, show the 403 test fails, restore; record in notes.</step>
+    <step order="8">dotnet build and dotnet test green; publish-size delta and vulnerable-package check recorded.</step>
+    <step order="9">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+    <step order="10">Record deviations (F-2 answer, refresh cadence, D-64 finalisation rule) in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Owner decided D-72 (F-2): approve is allowed with undecided Clean lines; it sets them Accepted and writes Accepted in bulk correction rows (islabel false), and any AI-sourced field of an individually decided line with no correction row gets Unreviewed.</trigger>
+    <trigger>Owner decided D-78: live check at approve (mandatory) and recheck on GET, plus either EligibleApproverRefreshJob over In Review portions (cadence in notes, e.g. 15 minutes) or the lower-overhead alternative (a stale flag plus a manual refresh action); choose one and record which and why. Event-driven re-resolution is out (it would need a Dataverse-side trigger, ADR-002).</trigger>
+    <trigger>If 049's file must be edited and 105 has an uncommitted change in it, re-read and add only this task's call; if the change cannot be a single call, STOP and coordinate.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Spec section 11 row "sprk_invoiceapproval" (021) and "Review / approval / export / rule endpoints"; grep finds no approver resolution from sprk_billingapproverrole and no approve route; Signals Decision Record gate fields hold history, not pending eligibility.</existing>
+    <extension>Resolver and service are new because no service reads approver roles; endpoints in their own file (P4-B no overlap); the refresh job uses the existing ADR-036 host rather than a new mechanism.</extension>
+    <cost-of-doing-nothing>No invoice can be approved, eligible approvers never see it in their view, and FR-11, FR-14, FR-35 and success criterion 4 fail.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">build, test</tool>
+    <tool name="dataverse MCP / Web API">dev evidence for the view</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Services/Finance/EligibleApproverResolver.cs; InvoiceApprovalService.cs; EligibleApproverRefreshJob.cs; Api/Finance/InvoiceApprovalEndpoints.cs</output>
+    <output type="test">EligibleApproverResolverTests.cs; InvoiceApprovalServiceTests.cs; InvoiceApprovalEndpointsAuthorizationContractTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Routes return 401 unauthenticated, 503 ebilling.disabled when off; approve returns 403 ebilling.approver.not_eligible for a caller with invoice access who is not eligible; seeding proof recorded.</criterion>
+    <criterion testable="true">For each core type, a record with roles set resolves the users in the selected assignment fields; a record with an empty role resolves the settings default for its type.</criterion>
+    <criterion testable="true">Approve with a Flagged or Pending line is 409 with counts; with none, the invoice becomes Approved, the portion stores approved amount, decider and time, and one Decision Record names the approver.</criterion>
+    <criterion testable="true">A second approve (same or another eligible approver) is a no-op with no new Decision Record; a retry after a failure between transition and record yields exactly one record.</criterion>
+    <criterion testable="true">Changing a core record's assignment field before a decision changes the stored eligible approvers on the next refresh or GET, and the approve check uses the live value immediately.</criterion>
+    <criterion testable="true">Dev evidence: the "Invoices to review" view shows the invoice for each eligible approver and not for a non-eligible user.</criterion>
+    <criterion testable="true">dotnet build 0 errors; all tests green.</criterion>
+    <criterion testable="true">Publish-size delta measured against a fresh master build and recorded in task notes; no new HIGH CVE.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Parallel group P4-B: own files, except shared append points FinanceModule.cs, EndpointMappingExtensions.cs and 049's portion-creation file (105 may also touch 049 — re-read immediately before editing; run /conflict-check before the PR). In-app approver notification is completed by 132 from the stored approvers; no notification code here. The refresh job may need a sprk_backgroundjob row in dev; 112 seeds it.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>
