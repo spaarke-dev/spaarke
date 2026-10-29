@@ -27,17 +27,13 @@
   - Check the file name, the email subject on the document and on the communication, and filing to the chosen matter (#2412).
   - Then close #2412/#2416 and set ISS-027/028 to Closed.
   - Offer to correct the owner's 10-28 test record (comm 12f1f3f8…, doc 536204ff…) only if they ask.
-- **ebilling 094** changed the from-email contract (now 97c793670b; uac-r2 is re-checking). When 094 merges to work, update `invoiceSubmissionMessages.ts` and the service.
-  - Already mapped on master: `email_save_failed`, `document_unavailable`, `record_unavailable`, `failed` (confirm they are in the permanent/retryable sets).
-  - **Missing; add these:**
-    - `earlier_attempt_being_removed`: 503, retryable, "finishing an earlier attempt, try again shortly".
-    - `source_changed`: §9 outcome, re-attempt allowed, "the email changed; submit it again".
-    - `source_forbidden`: 403, step 1.
-    - `COMMUNICATION_REFILE_FORBIDDEN`: 403, step A.
-    - `storage_not_configured`: 422, permanent; it never follows a filing.
-  - The race-loser 409 says the filing is kept. In every refusal case, nothing is filed.
-  - I've acknowledged both messages to ebilling.
-- Cleanup later (Remove-WorktreeSafe): C:\wt2412, C:\wt2412m, C:\wt2416, C:\wt2416c.
+- **ebilling 094 merged into work/ebilling-r1** (094 head 600079fd11; contract unchanged since 97c793670b). The client for its codes is in **PR #2448 DRAFT**: `task/word-133-094-codes`, **C:\wt133d**, e480113b0c.
+  - Every 094 row has a sentence. email_save_failed, document_unavailable and source_communication_mismatch are permanent; storage_not_configured is a plain refusal.
+  - A detail ending in the pinned sentence sets `filingKept`. The code is `errorCode ?? reasonCode ?? extensions.code`.
+  - jest 176/176; 18 new assertions fail on master's source.
+  - **Next:** the adversarial review is running. Fix what it finds, then `gh pr ready 2448` and `gh pr merge 2448 --auto --merge` (inert: `?action=submitInvoice` only).
+  - Told ebilling (2026-10-29) about a contract gap: step A's 403 COMMUNICATION_REFILE_FORBIDDEN carries its code only under `extensions.code`, which §6's client rule misses. Asked for (a) errorCode on that 403 or (b) an amended rule. Their reply is pending.
+- Cleanup later (Remove-WorktreeSafe): C:\wt2412, C:\wt2412m, C:\wt2416, C:\wt2416c; C:\wt133d after #2448 merges.
 
 ## ⚡ Quick Recovery (READ THIS FIRST)
 
