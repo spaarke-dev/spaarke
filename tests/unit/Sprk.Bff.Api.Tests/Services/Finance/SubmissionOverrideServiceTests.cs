@@ -2449,6 +2449,23 @@ public class SubmissionOverrideServiceTests
         w.Log.Entries.Should().Contain(e => e.Level == LogLevel.Warning && e.Message.Contains("nothing is re-closed", StringComparison.Ordinal));
     }
 
+    [Fact(DisplayName = "ontology-r1 ask 2: a repeat the writer refuses to read logs the refusal warning exactly once")]
+    public async Task Repeat_WhenTheWriterRefusesTheStoredSet_LogsTheRefusalWarningOnce()
+    {
+        var (w, _, onInvoice, _, _, _, _) = await SignalWorldAsync();
+        w.CloseFault = id => id == onInvoice ? new TimeoutException("dataverse") : null;
+        ShouldBeUnavailable(await w.OverrideAsync());
+        w.CloseFault = _ => null;
+        w.FindFault = new DecisionRecordRefusedException(DecisionRecordRefusalReason.ReviewInvalid, "more than one record matches the key");
+        w.Log.Entries.Clear();
+
+        var repeat = await w.OverrideAsync();
+
+        repeat.Kind.Should().Be(BlockedDecisionKind.AlreadyDecided);
+        w.Log.Entries.Count(e => e.Level == LogLevel.Warning && e.Message.Contains("decision_review_invalid", StringComparison.Ordinal))
+            .Should().Be(1, "the refusal reason is logged once, not by the filter and again by the handler");
+    }
+
     [Theory(DisplayName = "105 F2: a clean close is unchanged: Decided, then a repeat is AlreadyDecided with every Signal closed once and no second record")]
     [InlineData("override")]
     [InlineData("return")]
@@ -2538,6 +2555,32 @@ public class SubmissionOverrideServiceTests
         result.StatusCode.Should().Be(409);
         result.ErrorCode.Should().Be(BlockedSubmissionErrors.RecordRefused);
         w.AssertNothingWritten();
+    }
+
+    [Theory(DisplayName = "#2455: an invoice naming two core records (never the first found) is refused with record_refused, and nothing is written")]
+    [InlineData("override")]
+    [InlineData("return")]
+    public async Task Decision_WhenTheInvoiceNamesTwoCoreRecords_AndThereAreSignals_IsRefused_AndNothingIsWritten(string verb)
+    {
+        var (w, _, _, _, _, _, _) = await SignalWorldAsync();
+        w.Invoice!["sprk_project"] = new EntityReference("sprk_project", Guid.NewGuid());
+
+        var result = await Decide(w, verb);
+
+        result.StatusCode.Should().Be(409);
+        result.ErrorCode.Should().Be(BlockedSubmissionErrors.RecordRefused);
+        w.AssertNothingWritten();
+    }
+
+    [Fact(DisplayName = "#2455: control: an invoice naming exactly one core record is decided and its Signals closed as before")]
+    public async Task Decision_WhenTheInvoiceNamesOneCoreRecord_AndThereAreSignals_IsDecided()
+    {
+        var (w, _, onInvoice, _, _, _, _) = await SignalWorldAsync();
+
+        var result = await w.OverrideAsync();
+
+        result.Kind.Should().Be(BlockedDecisionKind.Decided);
+        w.ClosedBy.Should().ContainKey(onInvoice);
     }
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════════

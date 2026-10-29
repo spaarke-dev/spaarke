@@ -999,7 +999,12 @@ public sealed class SubmissionOverrideService
     private BlockedDecisionResult RecordRefusal(Guid submissionId, Guid invoiceId, DecisionRecordRefusedException ex)
     {
         _logger.LogWarning("Submission {SubmissionId}: the Decision Record was refused ({Reason})", submissionId, ex.Reason);
-        return ex.Reason switch
+        return RefusalOf(submissionId, invoiceId, ex);
+    }
+
+    /// <summary>What a refused Decision Record answers; logs nothing (a catch filter asks it, and the handler logs once).</summary>
+    private static BlockedDecisionResult RefusalOf(Guid submissionId, Guid invoiceId, DecisionRecordRefusedException ex) =>
+        ex.Reason switch
         {
             DecisionRecordRefusalReason.ReviewInvalid => BlockedDecisionResult.Refuse(submissionId, StatusCodes.Status409Conflict,
                 BlockedSubmissionErrors.DecisionConflict,
@@ -1012,7 +1017,6 @@ public sealed class SubmissionOverrideService
             _ => BlockedDecisionResult.Refuse(submissionId, StatusCodes.Status503ServiceUnavailable, BlockedSubmissionErrors.RecordUnavailable,
                 "The decision could not be recorded right now. Nothing was changed. Try again.", invoiceId),
         };
-    }
 
     /// <summary>
     /// Best effort: tell the notification seam the held submission was decided. An override is Accepted (task 132 notifies the eligible
@@ -1252,10 +1256,10 @@ public sealed class SubmissionOverrideService
                 return denied.StatusCode == StatusCodes.Status503ServiceUnavailable ? 1 : 0;
             }
         }
-        catch (DecisionRecordRefusedException ex) when (RecordRefusal(submissionId, invoiceId, ex).StatusCode != StatusCodes.Status503ServiceUnavailable)
+        catch (DecisionRecordRefusedException ex) when (RefusalOf(submissionId, invoiceId, ex).StatusCode != StatusCodes.Status503ServiceUnavailable)
         {
             // Permanent: the writer refused to read the stored set (more than one record under the key, or a set that cannot be read). A repeat
-            // does not change it, so the repeat's answer stands. A lookup that merely faulted (503 in RecordRefusal) falls to the next catch.
+            // does not change it, so the repeat's answer stands. A lookup that merely faulted (503 in RefusalOf) falls to the next catch. The filter logs nothing; this handler logs the refusal once.
             _logger.LogWarning("Submission {SubmissionId}: the repeat could not use the stored Signals ({Reason}); nothing is re-closed", submissionId, ex.Reason);
             return 0;
         }
@@ -1270,9 +1274,9 @@ public sealed class SubmissionOverrideService
         return await HumanDecisionSignalClose.CloseSetAsync(_closeActed, set, recordId, decider, _logger, ct).ConfigureAwait(false);
     }
 
-    /// <summary>The invoice's core record (the line decisions' rule, <see cref="InvoiceLineDecisionService.CoreOf"/>).</summary>
+    /// <summary>The invoice's ONE core record (approve's rule, <see cref="EligibleApproverResolver.SingleCoreOf"/>); null when it names none or several (fail closed, never the first found).</summary>
     private static DecisionCoreRecord? CoreOf(Entity invoice) =>
-        InvoiceLineDecisionService.CoreOf(invoice) is { } core ? new DecisionCoreRecord(core.Entity, core.Id) : null;
+        EligibleApproverResolver.SingleCoreOf(InvoiceReviewReadService.InvoiceEntity, invoice) is { } core ? new DecisionCoreRecord(core.Entity, core.Id) : null;
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════════
     // Reads and helpers

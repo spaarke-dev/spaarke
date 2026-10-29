@@ -655,6 +655,51 @@ public sealed class InvoiceAdjustmentServiceTests
         w.CreateCount.Should().Be(0);
     }
 
+    [Fact(DisplayName = "#2455: an invoice naming no core record is refused as owner-unresolved, and nothing is written or asked")]
+    public async Task AnInvoiceNamingNoCoreRecord_IsRefusedOwnerUnresolved_AndWritesNothing()
+    {
+        var w = new World();
+        w.Invoice.Attributes.Remove("sprk_project");
+
+        var result = await w.Service().AddAsync(Add(w), CancellationToken.None);
+
+        result.Status.Should().Be(AdjustmentStatus.OwnerUnresolved);
+        result.Code.Should().Be(AdjustmentCodes.OwnerUnresolved);
+        AssertNothingWritten(w);
+    }
+
+    [Fact(DisplayName = "#2455: an invoice naming two core records is refused as owner-unresolved (never the first found), and nothing is written or asked")]
+    public async Task AnInvoiceNamingTwoCoreRecords_IsRefusedOwnerUnresolved_AndWritesNothing()
+    {
+        var w = new World();
+        w.Invoice["sprk_matter"] = new EntityReference("sprk_matter", Guid.NewGuid());
+
+        var result = await w.Service().AddAsync(Add(w), CancellationToken.None);
+
+        result.Status.Should().Be(AdjustmentStatus.OwnerUnresolved);
+        result.Code.Should().Be(AdjustmentCodes.OwnerUnresolved);
+        AssertNothingWritten(w);
+    }
+
+    [Fact(DisplayName = "#2455: control: an invoice naming exactly one core record is applied as before")]
+    public async Task AnInvoiceNamingOneCoreRecord_IsApplied()
+    {
+        var w = new World();
+
+        var result = await w.Service().AddAsync(Add(w), CancellationToken.None);
+
+        result.Status.Should().Be(AdjustmentStatus.Applied);
+        w.CreateCount.Should().Be(1);
+    }
+
+    private static void AssertNothingWritten(World w)
+    {
+        w.CreateCount.Should().Be(0);
+        w.DeactivationCount.Should().Be(0);
+        w.TotalsWriteCount.Should().Be(0);
+        w.Ownership.Verify(o => o.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     [Fact(DisplayName = "194b R3b-2: the Adjustment line asks its own question (ForChild): sprk_billingevent, the invoice primary, then the core record")]
     public async Task TheAdjustmentLine_AsksTheRowsOwnQuestion_InvoicePrimary()
     {

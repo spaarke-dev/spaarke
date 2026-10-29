@@ -455,7 +455,7 @@ public sealed class InvoiceAdjustmentService
         }
 
         // ── The row: the invoice's core record and resolver fields (013), its owner (uac-r2), the firm. ──
-        var core = InvoiceLineDecisionService.CoreOf(invoice);
+        var core = EligibleApproverResolver.SingleCoreOf(InvoiceReviewReadService.InvoiceEntity, invoice);
         if (core is null)
         {
             return new AdjustmentResult(AdjustmentStatus.OwnerUnresolved, AdjustmentCodes.OwnerUnresolved, "The invoice names no single core record.");
