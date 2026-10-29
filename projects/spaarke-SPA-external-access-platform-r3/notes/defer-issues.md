@@ -767,3 +767,39 @@ MSAL's account list is shared across clients in the tab. The CIAM plane has no a
 
 - `src/server/api/Sprk.Bff.Api/Services/ExternalAccess/ExternalAccessRemovalSweep.cs` (`RunAsync`)
 - `src/server/api/Sprk.Bff.Api/Services/ExternalAccess/IdentityLinkReconciliationJob.cs` (`RunRemovalSweepAsync`, heartbeat)
+
+### ISS-021 — The shared DataGrid sorts Money columns as text
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-29 |
+| **Source** | R3 task 002 adversarial review B (owner grid columns) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2446 |
+
+**Description**
+
+A Money value reaches the browser as `{ value: n }`, and `DataGrid` `compare` sorts on the formatted label as text ("$1,000.00" before "$200.00"). It affects the Invoices grid's `sprk_totalamount` today, and `sprk_totalamount_base` after task 002. Fix: compare `.value` numerically when both sides carry it. The code is shared UI, so it is filed rather than changed in R3.
+
+**Entry-points**
+
+- `src/client/shared/Spaarke.UI.Components/src/components/DataGrid/DataGrid.tsx` (`compare`, ~1160-1174)
+
+### ISS-022 — DataGrid Export to Excel writes Money and option-set cells as raw values
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-29 |
+| **Source** | R3 task 002 adversarial review B (owner grid columns) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2447 |
+
+**Description**
+
+The CSV export uses the raw value, not `@formattedValues`. A Money cell is exported as `{"value":1234.5}`, and option-set and status cells are exported as raw values. It affects all six external SPA grids. Fix: use `formattedLabelOf` first, and unwrap `{ value }`. The code is shared UI, so it is filed rather than changed in R3.
+
+**Entry-points**
+
+- `src/client/shared/Spaarke.UI.Components/src/components/DataGrid/commandBar/csvExport.ts` (~64-78), `commandBar/defaults.ts:228`
