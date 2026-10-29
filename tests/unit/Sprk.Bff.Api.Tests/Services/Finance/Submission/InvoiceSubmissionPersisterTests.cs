@@ -1003,11 +1003,16 @@ public class InvoiceSubmissionPersisterTests
     private static readonly DateTime EarlierOld = new(2026, 9, 1, 0, 0, 0, DateTimeKind.Utc);
     private static readonly DateTime EarlierNew = new(2026, 9, 20, 0, 0, 0, DateTimeKind.Utc);
 
-    /// <summary>An invoice the firm sent earlier under the same invoice number (filed under the matter unless told otherwise).</summary>
+    /// <summary>
+    /// An invoice the firm sent earlier under the same invoice number (filed under the matter unless told otherwise). Every invoice has its
+    /// approval row except an automatic rejection (049 creates it Rejected with none): pass <c>approval: false</c> for that.
+    /// </summary>
     private static Entity EarlierInvoice(
-        Guid id, int status, DateTime createdOn, Guid? firm = null, string number = "INV-100", string core = "sprk_matter", Guid? coreId = null) =>
+        Guid id, int status, DateTime createdOn, Guid? firm = null, string number = "INV-100", string core = "sprk_matter", Guid? coreId = null,
+        bool approval = true) =>
         new("sprk_invoice", id)
         {
+            [Store.HasApprovalMarker] = approval,
             ["statuscode"] = new OptionSetValue(status),
             ["createdon"] = createdOn,
             ["sprk_vendororg"] = new EntityReference("sprk_organization", firm ?? Firm),
@@ -1068,6 +1073,43 @@ public class InvoiceSubmissionPersisterTests
         var (afterReturned, _) = await PersistWithEarlierAsync(
             EarlierInvoice(Earlier1, InvoiceStatusCodes.ReturnedToFirm, EarlierOld), EarlierInvoice(Earlier2, InvoiceStatusCodes.Rejected, EarlierNew));
         Target(afterReturned.Transactions.Single()[0]).Attributes.Should().NotContainKey("sprk_supersedesinvoice");
+    }
+
+    [Fact(DisplayName = "104 D-43 F1-b SEEDED: an AUTOMATIC rejection (Rejected, no approval row) newer than the Returned invoice does not hide it - the resubmission is linked to the Returned one")]
+    public async Task AutomaticRejection_AfterAReturnedInvoice_DoesNotHideIt()
+    {
+        var (store, result) = await PersistWithEarlierAsync(
+            EarlierInvoice(Earlier1, InvoiceStatusCodes.ReturnedToFirm, EarlierOld),
+            EarlierInvoice(Earlier2, InvoiceStatusCodes.Rejected, EarlierNew, approval: false));
+
+        result.Status.Should().Be(SubmissionPersistStatus.Committed);
+        Target(store.Transactions.Single()[0]).GetAttributeValue<EntityReference>("sprk_supersedesinvoice").Id.Should().Be(Earlier1);
+    }
+
+    [Fact(DisplayName = "104 D-43 F1-b SEEDED: a HUMAN rejection (Rejected with its approval row) newer than the Returned invoice still blocks the link")]
+    public async Task HumanRejection_AfterAReturnedInvoice_BlocksTheLink()
+    {
+        var (store, _) = await PersistWithEarlierAsync(
+            EarlierInvoice(Earlier1, InvoiceStatusCodes.ReturnedToFirm, EarlierOld),
+            EarlierInvoice(Earlier2, InvoiceStatusCodes.Rejected, EarlierNew, approval: true));
+
+        Target(store.Transactions.Single()[0]).Attributes.Should().NotContainKey("sprk_supersedesinvoice");
+    }
+
+    [Fact(DisplayName = "104 D-43 F1-b: several automatic rejections are all walked past; with only automatic rejections before it, nothing is linked")]
+    public async Task SeveralAutomaticRejections_AreWalkedPast()
+    {
+        var third = Guid.Parse("10400000-0000-4000-8000-000000000003");
+        var (linked, _) = await PersistWithEarlierAsync(
+            EarlierInvoice(Earlier1, InvoiceStatusCodes.ReturnedToFirm, EarlierOld),
+            EarlierInvoice(Earlier2, InvoiceStatusCodes.Rejected, EarlierNew.AddDays(1), approval: false),
+            EarlierInvoice(third, InvoiceStatusCodes.Rejected, EarlierNew.AddDays(2), approval: false));
+        Target(linked.Transactions.Single()[0]).GetAttributeValue<EntityReference>("sprk_supersedesinvoice").Id.Should().Be(Earlier1);
+
+        var (none, _) = await PersistWithEarlierAsync(
+            EarlierInvoice(Earlier1, InvoiceStatusCodes.Rejected, EarlierOld, approval: false),
+            EarlierInvoice(Earlier2, InvoiceStatusCodes.Rejected, EarlierNew, approval: false));
+        Target(none.Transactions.Single()[0]).Attributes.Should().NotContainKey("sprk_supersedesinvoice");
     }
 
     [Fact(DisplayName = "104 D-43 (escalation 3): two Returned predecessors resolve to the most recent by created on - the chain case, deterministic")]
@@ -2522,6 +2564,24 @@ public class InvoiceSubmissionPersisterTests
         /// <summary>Task 104: a fault on that read.</summary>
         public Exception? EarlierInvoiceFault { get; init; }
 
+        /// <summary>Marks an earlier invoice that has its approval row (the store answers the approval read from it).</summary>
+        public const string HasApprovalMarker = "test_hasapproval";
+
+        private static bool IsEarlierApprovalQuery(QueryExpression q) =>
+            q.EntityName == InvoiceSubmissionPersister.ApprovalEntity
+            && q.Criteria.Conditions.Any(c => c.AttributeName == InvoiceSubmissionPersister.ApprovalInvoice && c.Operator == ConditionOperator.In);
+
+        private EntityCollection AnswerEarlierApprovals(QueryExpression q)
+        {
+            var ids = q.Criteria.Conditions.Single().Values.Cast<Guid>().ToHashSet();
+            return new EntityCollection(EarlierInvoices
+                .Where(i => ids.Contains(i.Id) && i.GetAttributeValue<bool>(HasApprovalMarker))
+                .Select(i => new Entity(InvoiceSubmissionPersister.ApprovalEntity, Guid.NewGuid())
+                {
+                    [InvoiceSubmissionPersister.ApprovalInvoice] = new EntityReference("sprk_invoice", i.Id),
+                }).ToList());
+        }
+
         private static bool IsEarlierInvoiceQuery(QueryExpression q) =>
             q.EntityName == "sprk_invoice"
             && q.Criteria.Conditions.Any(c => c.AttributeName == "sprk_vendororg")
@@ -2679,6 +2739,13 @@ public class InvoiceSubmissionPersisterTests
             entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
                 .Returns((QueryExpression q, CancellationToken _) =>
                 {
+                    if (IsEarlierApprovalQuery(q))
+                    {
+                        return EarlierInvoiceFault is { } approvalFault
+                            ? Task.FromException<EntityCollection>(approvalFault)
+                            : Task.FromResult(AnswerEarlierApprovals(q));
+                    }
+
                     if (IsEarlierInvoiceQuery(q))
                     {
                         EarlierInvoiceQueries.Add(q);

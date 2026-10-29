@@ -544,7 +544,10 @@ public sealed class InvoiceRejectReturnService
                 }
             }
 
-            return new InvoiceDecisionResult(InvoiceDecisionOutcome.AlreadyDecided, "ok", DecisionId: decisionId, DecisionRecordId: recordId);
+            // The derived decision id names a record only when this verb's record is on the portion (or the caller owns the decision). An invoice
+            // 105 returned, or another approver's unfinished decision, has no such record, so no id is handed out for it.
+            return new InvoiceDecisionResult(InvoiceDecisionOutcome.AlreadyDecided, "ok",
+                DecisionId: complete || claimant ? decisionId : null, DecisionRecordId: complete ? recordId : null);
         }
 
         // The claimant's repeat: rebuild the decision from what the claim froze (the hash ignores facts and time, so it matches a first write).
@@ -572,7 +575,10 @@ public sealed class InvoiceRejectReturnService
 
         var decision = BuildDecision(verb, decisionId, invoice, portion.Id, caller, reason, decidedOn, signals.Set);
         _logger.LogInformation("{Verb} of invoice {InvoiceId}: completing the caller's interrupted decision.", Label(verb), invoiceId);
-        return await FinishAsync(verb, invoiceId, portion.Id, decision, portionStatus, recordId, decidedBy!.Id, signals.Set, ct).ConfigureAwait(false);
+        // F1-a: once a record exists the request's reason no longer matters. The record the writer holds (found through the stored set) is
+        // finished as it is: its stored set is closed and the portion is linked to it; RecordAsync is never asked again with new content.
+        return await FinishAsync(verb, invoiceId, portion.Id, decision, portionStatus, recordId ?? signals.StoredRecordId, decidedBy!.Id, signals.Set, ct)
+            .ConfigureAwait(false);
     }
 
     /// <summary>After the transition: the portion as decided (re-asserting the decider), the record, the Signals, the link. Each step is idempotent.</summary>
@@ -598,9 +604,13 @@ public sealed class InvoiceRejectReturnService
         if (recordId is { } existing && existing != Guid.Empty)
         {
             var notClosed = await HumanDecisionSignalClose.CloseSetAsync(_closeActed, signals, existing, decider, _logger, ct).ConfigureAwait(false);
-            return notClosed > 0
-                ? Incomplete(verb, invoiceId, decision.DecisionId, "signals", $"{notClosed} Signals not closed")
-                : Decided(verb, invoiceId, decision.DecisionId, existing);
+            if (notClosed > 0)
+            {
+                return Incomplete(verb, invoiceId, decision.DecisionId, "signals", $"{notClosed} Signals not closed");
+            }
+
+            // The record may exist without its link (a repeat that found it through the stored set): the link is written here, idempotently.
+            return await LinkAsync(verb, invoiceId, approvalId, decision.DecisionId, existing, ct).ConfigureAwait(false);
         }
 
         BillingDecisionRecordResult recorded;
@@ -622,18 +632,24 @@ public sealed class InvoiceRejectReturnService
             return Incomplete(verb, invoiceId, decision.DecisionId, "signals", $"{failedCloses} Signals not closed");
         }
 
+        return await LinkAsync(verb, invoiceId, approvalId, decision.DecisionId, recorded.RecordId, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>The portion to its Decision Record; the last step, so Decided is answered only once it is written. Idempotent.</summary>
+    private async Task<InvoiceDecisionResult> LinkAsync(Verb verb, Guid invoiceId, Guid approvalId, Guid decisionId, Guid recordId, CancellationToken ct)
+    {
         try
         {
             await _entities.UpdateAsync(EligibleApproverResolver.ApprovalEntity, approvalId,
-                new Dictionary<string, object> { [InvoiceApprovalService.PortionRecord] = new EntityReference(InvoiceReviewReadService.DecisionRecordEntity, recorded.RecordId) }, ct)
+                new Dictionary<string, object> { [InvoiceApprovalService.PortionRecord] = new EntityReference(InvoiceReviewReadService.DecisionRecordEntity, recordId) }, ct)
                 .ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            return Incomplete(verb, invoiceId, decision.DecisionId, "link", ex.GetType().Name);
+            return Incomplete(verb, invoiceId, decisionId, "link", ex.GetType().Name);
         }
 
-        return Decided(verb, invoiceId, decision.DecisionId, recorded.RecordId);
+        return Decided(verb, invoiceId, decisionId, recordId);
     }
 
     private InvoiceDecisionResult Decided(Verb verb, Guid invoiceId, Guid decisionId, Guid recordId)
@@ -714,7 +730,7 @@ public sealed class InvoiceRejectReturnService
     // ── D-122: the invoice's Signals ──
 
     private sealed record SignalRead(
-        InvoiceSubmissionAfterSteps.ResolvedSignalSet Set, IReadOnlyList<(string Entity, Guid Id)> Subjects, InvoiceDecisionResult? Failure);
+        InvoiceSubmissionAfterSteps.ResolvedSignalSet Set, IReadOnlyList<(string Entity, Guid Id)> Subjects, InvoiceDecisionResult? Failure, Guid? StoredRecordId = null);
 
     /// <summary>The Open or Acknowledged Signals on the invoice and its lines, created at or before <paramref name="decidedOnUtc"/>, ordered by id (the record's hash).</summary>
     private async Task<SignalRead> ReadSignalsAsync(Verb verb, Guid invoiceId, DateTime decidedOnUtc, CancellationToken ct)
@@ -771,7 +787,8 @@ public sealed class InvoiceRejectReturnService
                     stored.SetReadAtUtc ?? DateTime.MinValue,
                     stored.Signals.Select(s => new InvoiceSubmissionAfterSteps.ResolvedSignal(s.SignalId, s.PolicyCode)).ToList()),
                 stored.Signals.Count > 0 ? [(InvoiceReviewReadService.InvoiceEntity, invoiceId)] : [],
-                null);
+                null,
+                StoredRecordId: stored.RecordId);
         }
 
         return await ReadSignalsAsync(verb, invoiceId, decidedOnUtc, ct).ConfigureAwait(false);
@@ -913,8 +930,11 @@ public sealed class InvoiceRejectReturnService
     {
         _logger.LogError("{Verb} of invoice {InvoiceId}: the {Step} step failed after the status moved ({Detail}); the same approver repeats the call to finish it.",
             Label(verb), invoiceId, step, detail);
-        return new InvoiceDecisionResult(InvoiceDecisionOutcome.Incomplete, InvoiceRejectReturnCodes.Incomplete,
-            $"The invoice was {Past(verb)} but a later step did not finish. Repeat the call to complete it.", DecisionId: decisionId, FailedStep: step);
+        // The transition step's outcome is unknown (a timeout can land after the commit), so it is not claimed as done.
+        var message = step == "transition"
+            ? $"The invoice may have been {Past(verb)}; the outcome is not known. Repeat the call to find out and complete it."
+            : $"The invoice was {Past(verb)} but a later step did not finish. Repeat the call to complete it.";
+        return new InvoiceDecisionResult(InvoiceDecisionOutcome.Incomplete, InvoiceRejectReturnCodes.Incomplete, message, DecisionId: decisionId, FailedStep: step);
     }
 
     // ── Locks ──

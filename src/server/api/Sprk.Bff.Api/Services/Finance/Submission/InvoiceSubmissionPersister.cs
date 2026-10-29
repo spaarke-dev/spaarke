@@ -959,9 +959,11 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
     }
 
     /// <summary>
-    /// D-43 (task 104): the invoice this submission's invoice supersedes. The MOST RECENT earlier invoice (by created on, then id) for the same
-    /// firm and firm invoice number, whatever its status; it is the predecessor only when it is Returned to Firm. A Rejected (or any other)
-    /// most-recent invoice is never linked. The two invoices must regard the same single core record (<see cref="InvoiceFamilyCoreRecordGuard"/>
+    /// D-43 (task 104): the invoice this submission's invoice supersedes. Walking back from the MOST RECENT earlier invoice (by created on, then
+    /// id) for the same firm and firm invoice number, AUTOMATIC rejections are skipped (049 creates them Rejected with no approval row: nobody
+    /// decided them, and they must not hide the Returned invoice the firm is correcting); the first invoice that is not one is the predecessor,
+    /// and only when it is Returned to Firm. A human-Rejected (a Rejected invoice that has its approval row), or any other, most-recent invoice
+    /// is never linked. The two invoices must regard the same single core record (<see cref="InvoiceFamilyCoreRecordGuard"/>
     /// refuses a supersedes link across core records), else no link. Read app-only: a firm resubmitting must not be able to learn, from a
     /// refusal, that an invoice it cannot read exists. Throws on a read fault (the caller retries).
     /// </summary>
@@ -978,7 +980,6 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         {
             ColumnSet = new ColumnSet(["statuscode", "createdon", .. EligibleApproverResolver.CoreLookupColumns(InvoiceReviewService.InvoiceEntity)]),
             Criteria = new FilterExpression(LogicalOperator.And),
-            TopCount = 2,
             NoLock = true,
         };
         query.Criteria.AddCondition(InvoiceVendorOrg, ConditionOperator.Equal, submission.FirmId);
@@ -986,8 +987,13 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         query.AddOrder("createdon", OrderType.Descending);
         query.AddOrder(InvoiceReviewService.InvoiceEntity + "id", OrderType.Descending);
 
-        var previous = (await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault(e => e.Id != invoiceId);
-        if (previous is null || previous.GetAttributeValue<OptionSetValue>("statuscode")?.Value != InvoiceStatusCodes.ReturnedToFirm)
+        var earlier = (await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.Where(e => e.Id != invoiceId).ToList();
+
+        // The Rejected ones are told apart in ONE read: a human rejection (104) keeps its approval row, an automatic one (049) never had one.
+        var rejected = earlier.Where(e => StatusOfInvoice(e) == InvoiceStatusCodes.Rejected).Select(e => e.Id).ToList();
+        var withApproval = rejected.Count == 0 ? [] : await ReadInvoicesWithApprovalAsync(rejected, ct).ConfigureAwait(false);
+        var previous = earlier.FirstOrDefault(e => StatusOfInvoice(e) != InvoiceStatusCodes.Rejected || withApproval.Contains(e.Id));
+        if (previous is null || StatusOfInvoice(previous) != InvoiceStatusCodes.ReturnedToFirm)
         {
             return null;
         }
@@ -1003,6 +1009,24 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         }
 
         return previous.Id;
+    }
+
+    private static int? StatusOfInvoice(Entity invoice) => invoice.GetAttributeValue<OptionSetValue>("statuscode")?.Value;
+
+    /// <summary>The ids among <paramref name="invoiceIds"/> that have an approval row (one read). A fault throws (the caller retries).</summary>
+    private async Task<HashSet<Guid>> ReadInvoicesWithApprovalAsync(IReadOnlyList<Guid> invoiceIds, CancellationToken ct)
+    {
+        var query = new QueryExpression(ApprovalEntity)
+        {
+            ColumnSet = new ColumnSet(ApprovalInvoice),
+            Criteria = new FilterExpression(LogicalOperator.And),
+            NoLock = true,
+        };
+        query.Criteria.AddCondition(ApprovalInvoice, ConditionOperator.In, invoiceIds.Cast<object>().ToArray());
+        return (await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities
+            .Select(a => a.GetAttributeValue<EntityReference>(ApprovalInvoice)?.Id ?? Guid.Empty)
+            .Where(id => id != Guid.Empty)
+            .ToHashSet();
     }
 
     private async Task<Entity?> ReadSubmissionAsync(Guid submissionId, CancellationToken ct)

@@ -117,6 +117,20 @@ public sealed class InvoiceRejectReturnServiceTests
         FinanceBaseValues.CountedInvoiceStatuses.Should().NotContain(w.InvoiceStatus, "actual spend counts Approved, Sent to AP and Paid only (D-103)");
         FinanceBaseValues.PendingInvoiceStatuses.Should().NotContain(w.InvoiceStatus, "pending spend counts In Review only (D-104)");
         FinanceBaseValues.CountedInvoiceStatuses.Should().NotContain([InvoiceStatusCodes.Rejected, InvoiceStatusCodes.ReturnedToFirm]);
+
+        // The sets are what the rollup queries are BUILT from (BuildGroupedSpendFetchXml / BuildGroupedPendingSpendFetchXml): the statuses the
+        // decision lands on appear in neither query, so a decided invoice drops out of actual and pending spend.
+        foreach (var part in Enum.GetValues<FinanceBaseValues.SpendAmountPart>())
+        {
+            var counted = FinanceBaseValues.BuildGroupedSpendFetchXml("sprk_matter", part, [Guid.NewGuid()]);
+            var pending = FinanceBaseValues.BuildGroupedPendingSpendFetchXml("sprk_matter", part, [Guid.NewGuid()]);
+            foreach (var query in new[] { counted, pending })
+            {
+                query.Should().NotContain($">{w.InvoiceStatus}<", "the decided status is in neither rollup query");
+            }
+
+            pending.Should().Contain($">{InvoiceStatusCodes.InReview}<", "pending spend still counts In Review");
+        }
     }
 
     // ── FR-36: the reason ──
@@ -362,6 +376,8 @@ public sealed class InvoiceRejectReturnServiceTests
         var result = await w.ReturnAs(AliceUser);
 
         result.Outcome.Should().Be(InvoiceDecisionOutcome.AlreadyDecided);
+        result.DecisionId.Should().BeNull("104's derived id names no record on an invoice 105 returned; none is handed out");
+        result.DecisionRecordId.Should().BeNull();
         w.Writes.Should().Be(0);
         RecordsOfEither(w).Should().BeEmpty();
         (await w.RejectAs(AliceUser)).Outcome.Should().Be(InvoiceDecisionOutcome.NotInReview);
@@ -446,6 +462,15 @@ public sealed class InvoiceRejectReturnServiceTests
         failed.Outcome.Should().Be(InvoiceDecisionOutcome.Incomplete);
         failed.Code.Should().Be("ebilling.invoice.decision_incomplete");
         w.InvoiceStatus.Should().Be(InvoiceStatusOf(kind), "the transition happened");
+        if (step == "transition-after-commit")
+        {
+            failed.FailedStep.Should().Be("transition");
+            failed.Detail.Should().Contain("may have been", "a failed transition call has an unknown outcome and is not worded as done");
+        }
+        else
+        {
+            failed.Detail.Should().NotContain("may have been");
+        }
 
         // Another approver in between: a no-op that records nothing (the claimant's record is the claimant's).
         (await Decide(w, kind, BobUser)).Outcome.Should().Be(InvoiceDecisionOutcome.AlreadyDecided);
@@ -733,18 +758,42 @@ public sealed class InvoiceRejectReturnServiceTests
         w.Portion.GetAttributeValue<DateTime>("sprk_decidedon").Should().Be(Now.UtcDateTime, "the decision time frozen by the claim");
     }
 
-    [Fact(DisplayName = "104 K-5: the reason is part of the record's content - a repeat with a different reason after the record exists never writes a second record")]
-    public async Task RepeatWithAnotherReason_NeverWritesASecondRecord()
+    [Theory(DisplayName = "104 F1-a SEEDED: once the record exists the request's reason no longer matters - a repeat with ANOTHER reason finishes the closes and the link, writes NO second record, and the stored record keeps the first reason")]
+    [InlineData(InvoiceDecisionKind.Reject, "signals")]
+    [InlineData(InvoiceDecisionKind.Reject, "link")]
+    [InlineData(InvoiceDecisionKind.Return, "signals")]
+    [InlineData(InvoiceDecisionKind.Return, "link")]
+    public async Task RepeatWithAnotherReason_FinishesTheClosesAndTheLink_WithoutASecondRecord(InvoiceDecisionKind kind, string failingStep)
     {
         var w = new ApprovalWorld();
-        w.FaultsOnce["link"] = new InvalidOperationException("dataverse down");
-        (await w.ReturnAs(AliceUser, "First reason")).Outcome.Should().Be(InvoiceDecisionOutcome.Incomplete);
+        var closes = w.AddInvoiceSignal("EB-DUP");
+        var fails = w.AddInvoiceSignal("EB-TOTAL");
+        if (failingStep == "signals")
+        {
+            w.CloseFailsOnce[fails] = SignalAutomatedCloseOutcome.ChangedSinceRead;
+        }
+        else
+        {
+            w.FaultsOnce["link"] = new InvalidOperationException("dataverse down");
+        }
 
-        var repeat = await w.ReturnAs(AliceUser, "A different reason");
+        var first = await Decide(w, kind, AliceUser, "First reason");
+        first.Outcome.Should().Be(InvoiceDecisionOutcome.Incomplete);
+        first.FailedStep.Should().Be(failingStep);
+        w.Portion.Contains("sprk_decisionrecord").Should().BeFalse("not linked yet");
 
-        w.RecordsOf("return-to-firm").Should().ContainSingle();
-        w.RecordsOf("return-to-firm").Single().GetAttributeValue<string>("sprk_reason").Should().Be("First reason");
-        repeat.Outcome.Should().Be(InvoiceDecisionOutcome.Incomplete, "the writer refuses the same decision id with different content; the approver repeats with the original reason");
-        repeat.FailedStep.Should().Be("record");
+        var repeat = await Decide(w, kind, AliceUser, "A different reason");
+
+        repeat.Outcome.Should().Be(InvoiceDecisionOutcome.Decided, "the record exists; its content is not asked again");
+        var record = w.RecordsOf(ActionOf(kind)).Should().ContainSingle("a repeat never writes a second record").Subject;
+        record.GetAttributeValue<string>("sprk_reason").Should().Be("First reason", "the stored record keeps the first reason");
+        w.Portion.GetAttributeValue<EntityReference>("sprk_decisionrecord").Id.Should().Be(repeat.DecisionRecordId!.Value, "the link is written");
+        w.Portion.GetAttributeValue<OptionSetValue>("sprk_approvalstatus").Value.Should().Be(PortionStatusOf(kind));
+        w.SignalStatus(closes).Should().Be(SignalWriter.SignalStatusResolved);
+        w.SignalStatus(fails).Should().Be(SignalWriter.SignalStatusResolved, "the stored set is closed in full");
+        w.Transitions.Should().Be(1);
+
+        (await Decide(w, kind, AliceUser, "Yet another reason")).Outcome.Should().Be(InvoiceDecisionOutcome.AlreadyDecided);
+        w.RecordsOf(ActionOf(kind)).Should().ContainSingle();
     }
 }

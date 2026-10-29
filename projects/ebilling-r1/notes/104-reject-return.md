@@ -31,9 +31,11 @@ Order (nothing is written before the claim):
 11. 014 transition to Rejected or Returned to Firm. Only `Transitioned` continues. `Refused` clears the claim and is 409; `AlreadyInTarget` is a no-op; an exception is 503 incomplete.
 12. Finish: portion status, then the Decision Record (`reject-invoice` / `return-to-firm`, reason in `Reason` and `Values.reason`), then the Signal closes with the failed count acted on (Incomplete at step `signals`, before the link), then the link. Every step is idempotent; a fault is 503 `ebilling.invoice.decision_incomplete` with `failedStep`.
 
-**Repeat.** The claimant (matched by the caller's own contact) completes what is missing; the record answers AlreadyRecorded, so there is never a second record. Anyone else gets a no-op. A repeat with a different reason cannot rewrite the record: it stays Incomplete at `record` (test `RepeatWithAnotherReason_NeverWritesASecondRecord`).
+**Repeat.** The claimant (matched by the caller's own contact) completes what is missing; the record answers AlreadyRecorded, so there is never a second record. Anyone else gets a no-op. Once the record exists the request's reason no longer matters (fix round, F1-a): the repeat finds the stored record through the stored set, closes that set, writes the portion-to-record link and answers Decided. The stored record keeps the first reason (test `RepeatWithAnotherReason_FinishesTheClosesAndTheLink_WithoutASecondRecord`).
 
-**Resubmission linkage (D-43).** On an accepted submission (not AutoRejected), the persister looks for the most recent earlier invoice with the same firm (`sprk_vendororg`) and trimmed firm invoice number (top 2, ordered by created on then id, excluding the new invoice). It links `sprk_supersedesinvoice` only if that invoice is Returned to Firm and its single core record equals the new invoice's. A Rejected, Approved, In Review or Cancelled predecessor is never linked. A read fault is a Retry (`ebilling.submission.supersedes_read_failed`) with nothing persisted.
+**Resubmission linkage (D-43).** On an accepted submission (not AutoRejected), the persister reads the earlier invoices with the same firm (`sprk_vendororg`) and trimmed firm invoice number (ordered by created on then id, excluding the new invoice; no top count). It walks back past AUTOMATIC rejections (F1-b) and takes the first invoice that is not one as the predecessor. It links `sprk_supersedesinvoice` only if that predecessor is Returned to Firm and its single core record equals the new invoice's. A human-Rejected, Approved, In Review or Cancelled predecessor is never linked.
+
+An automatic rejection is told apart by its **approval row**: 049 creates an AutoRejected invoice Rejected with no `sprk_invoiceapproval`, while every other invoice, a human-Rejected one included, keeps its row (read for the Rejected candidates in one `In` query). The approval row was chosen over the submission's status because the submission is Rejected for both an automatic rejection and a Blocked one, and the row is on the invoice side of the same read. A read fault is a Retry (`ebilling.submission.supersedes_read_failed`) with nothing persisted.
 
 ## Decisions applied
 
@@ -46,7 +48,7 @@ Order (nothing is written before the claim):
 
 1. **Held is refused (409).** The POML does not say; D-101 puts the way out in 105. Easy to change if the operator wants rejection of a held invoice allowed.
 2. **Two prior Returned invoices.** I applied the POML's stated default (the most recent by created on) and did not stop: a chain of returns is not ambiguous. Test `TwoReturnedPredecessors_TheMostRecentIsLinked`.
-3. **Most recent earlier invoice is not Returned, an older one is.** Not linked (the literal rule). The older Returned invoice was resubmitted once already, so the firm is working from a later invoice.
+3. **Most recent earlier invoice is not Returned, an older one is.** Not linked when the newer one is a human decision or another status (the literal rule: the firm is working from a later invoice). An automatic rejection in between is walked past (F1-b).
 4. **Cross-core predecessor.** No link, a warning logged.
 5. **AutoRejected resubmissions are not linked.** They have no approval path and no invoice to review.
 6. **The decision id derives from the portion**, not a request id (as in 103).
@@ -110,7 +112,8 @@ Self-review at FULL depth; the operator's adversarial review follows.
 |---|---|---|
 | `FinishAsync` branch for an existing record (link present, portion not decided) is defensive: this service writes the status before the link, so it is unreachable from its own writes. It had no test and the failed-count guard there was unseeded. | F-class | Fixed: test `FailedClose_OverAnExistingRecord_IsIncomplete` and its seed. |
 | After a record and its link exist, a later Signal close is not retried (the call is complete). | K3 | Known limit, same as 103. |
-| A repeat with a different reason is Incomplete at `record` and never rewrites the record. | K3 | Intended (the record is immutable). |
+| A repeat with a different reason was Incomplete at `record` on every attempt (the repeat rebuilt the decision from the new reason and asked the writer again). | F1 | Fixed (fix round): the stored record is finished as it is. |
+| An automatic rejection newer than a Returned invoice hid it from the D-43 walk. | F1 | Fixed (fix round): automatic rejections are skipped. |
 | A claimed portion whose claimant never repeats blocks other approvers (K1) and leaves the invoice decided with no record. | K2 | Known limit, same as 103 (the coordinator files the sweep). |
 | Duplicated helpers with `InvoiceApprovalService` (lock acquire/release, caller contact, Signals read/replay, filing check, claim release), about 150 lines. | K4 | Known limit. A shared helper is a consolidation follow-up once both are stable; extracting now would touch 103's reviewed code. |
 | `InvoiceRejectReturnService.cs` is about 985 lines. | none | Cohesive: one decision flow (two verbs) with its repeat path. |
@@ -124,3 +127,13 @@ Self-review at FULL depth; the operator's adversarial review follows.
 3. The live evidence step was not run (nothing live per the brief).
 4. A reviewer who is eligible but lacks Write on the invoice gets 403 from the route filter before eligibility is asked (same as 103).
 5. The older-Returned-invoice case (judgement call 3).
+
+### Known limits recorded in the fix round (no code)
+
+- A resubmission filed on a corrected core record is not linked (the core-record guard refuses a supersedes link across core records).
+- A Blocked resubmission is linked at creation, as an accepted one is (it is created In Review with its approval).
+- Two resubmissions persisted at once can both link to the same Returned to Firm invoice (the same race as Duplicate detection).
+- The repeat path treats a null portion status as completable (bad data only; the first call refuses it as `status_unknown`).
+- The claimant's completion does not re-check eligibility, as 103: the claim proved eligibility at decision time.
+- `DecidedInvoice_IsExcludedFromTheRollupSets` now also builds the actual and pending rollup queries from the sets (`BuildGroupedSpendFetchXml`, `BuildGroupedPendingSpendFetchXml`) and asserts the decided status is in neither.
+- The predecessor read has no top count (a firm and number are a handful of rows); a single `RetrieveMultiple` is not paged, fine below 5,000 rows.
