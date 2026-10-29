@@ -267,6 +267,7 @@ Sources: **design** = [`design.md`](../design.md) §8 (D-1..D-12, §8.0c) and §
 - The owner asked for Basic User to be set "to what it needs to be". Live (669 privileges) already lacks the policy, policyversion and ruleset Reads, and has no depth differences from master's XML. So no change was made (security-roles §19).
 - The owner does not believe they edited the role on 10-22. The cause stays unexplained.
 - The leftover AppendTo on `sprk_policy` and `sprk_policyversion` (Console User, depth 4) is outside D-185, which covered only Read. It is left as is (uac-r2 observation, no write path).
+- **Customer stamps (added 2026-10-29, customer-provisioning):** D-189 covers spaarkedev1 only. Published stamps run SpaarkeMaster 1.2.3.1 (`736ed4d648`), which already contains Basic User `prvReadsprk_Policy` at Deep (added `49ef71b852`, D-110). So the 1.2.4.0 upgrade REMOVES it from every stamp. It is a real D-185 removal on Basic User, not a net-zero change. The upgrade also ADDS `prvAppendsprk_Policy` and `prvAppendsprk_PolicyVersion` (Deep) to Ontology Administrator (task 101). Checked after each stamp upgrade by customer-provisioning's `Test-RolePrivilegeExpectations.ps1` (`spaarkemaster-1.2.4.0.json`).
 
 ## D-190 — DI-126 accepted as a known limit (owner, 2026-10-26)
 
