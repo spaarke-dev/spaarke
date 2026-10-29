@@ -45,3 +45,6 @@ Owner direction 2026-10-20: "070-071-072 - yes proceed".
   - after that, the account resolves as a ContactOnly workforce principal with 0 roots (a new contact with no grants).
 - **Test artifact:** that new contact is probably the Dewey Cheatham admin account registering itself. Remove it after testing if it should not stay.
 - **Still to run:** Tracy Cheatham (workforce contact) and Ralph Dewey (licensed user) in Teams desktop, web and mobile.
+- **Tracy Cheatham in Teams (owner: pass):** 16:56:48–16:57:04Z, resolved to her existing WorkforceHome contact (10 resolutions, no second contact, no denials).
+- **Ralph Dewey in Teams (owner: pass):** 16:58:10–16:58:28Z, resolved through the stored home link to the licensed systemuser (6 resolutions, no profile form).
+- No `/api/v1/external/*` errors after 16:51:10Z. Every error in the 45-minute window was the registration-without-email sequence above.
