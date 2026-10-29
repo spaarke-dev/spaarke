@@ -223,7 +223,8 @@ public static class InternalShareEndpoints
             .WithSummary("Share a record with an internal user at one access level")
             .WithDescription(
                 "Creates or changes a system user's POA share on the record so it carries exactly the level's rights " +
-                "(View Only, Collaborate or Full Access), then reads the stored rights back. Requires Write and Share on the record.")
+                "(View Only, Collaborate or Full Access), then reads the stored rights back. An optional expiryDate dates the paired " +
+                "workforce-app grant only; the share has no end date (expiryNotApplied). Requires Write and Share on the record.")
             .Produces<ShareRecordWithUserResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -295,8 +296,15 @@ public static class InternalShareEndpoints
         CancellationToken ct,
         [FromServices] IOptionsMonitor<WorkforceIdentityOptions>? workforceIdentity = null,
         [FromServices] ContactInternalUserShare? pairedGrant = null,
-        [FromServices] IAccessibleRecordSetService? accessibleRecords = null)
+        [FromServices] IAccessibleRecordSetService? accessibleRecords = null,
+        [FromServices] TimeProvider? timeProvider = null)
     {
+        // Task 193 G4a (B-F3): the requested date dates the paired workforce-app grant only (the share has no end date). A past
+        // one is refused before anything is written, exactly as /grant refuses it.
+        if (GrantExternalAccessEndpoint.ValidateRequestedExpiry(
+                request.ExpiryDate, ExternalGrantLifecycle.TodayUtc(timeProvider ?? TimeProvider.System), httpContext) is { } expiryProblem)
+            return expiryProblem;
+
         var shared = await InternalUserShareCore.ShareAsync(
             request, recordShare, dataverseClient, participations, cache, callerAccessProbe, secureChildShares,
             noAccessGuard, relatedRoots, assignedAccess, accessNotifier, httpContext, logger, ct, workforceIdentity);
@@ -311,17 +319,24 @@ public static class InternalShareEndpoints
             return shared.Result;
 
         var workforceApp = await pairedGrant.GrantPairedForUserAsync(
-            confirmed.SystemUserId, root.Type, root.Id, request.AccessLevel!.Value, dataverseClient, participations,
-            accessibleRecords, callerAccessProbe, httpContext, logger, ct);
+            confirmed.SystemUserId, root.Type, root.Id, request.AccessLevel!.Value, request.ExpiryDate, dataverseClient,
+            participations, accessibleRecords, callerAccessProbe, httpContext, logger, ct);
 
+        // The share has no end date: a requested one is reported as not applied to it, never silently (as /grant does).
+        var expiryNotApplied = request.ExpiryDate is not null ? true : (bool?)null;
         if (shared.ChildrenIncomplete)
         {
             if (shared.Result is Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult { ProblemDetails: { } problem })
+            {
                 problem.Extensions["workforceApp"] = workforceApp;
+                if (expiryNotApplied is not null)
+                    problem.Extensions["expiryNotApplied"] = true;
+            }
+
             return shared.Result;
         }
 
-        return TypedResults.Ok(confirmed.Response with { WorkforceApp = workforceApp });
+        return TypedResults.Ok(confirmed.Response with { WorkforceApp = workforceApp, ExpiryNotApplied = expiryNotApplied });
     }
 
     // =========================================================================

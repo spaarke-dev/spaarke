@@ -17,11 +17,18 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// as a contact grant's level. The share ends at EXACTLY this level: sharing again at another level replaces it, and
 /// replaces any rights outside the three levels (such as a provisioning creator's Share right).
 /// </param>
+/// <param name="ExpiryDate">
+/// Optional (task 193 G4a). The share itself has no end date, so this date never applies to it (the answer then says
+/// <c>expiryNotApplied: true</c>). It dates the colleague's paired WORKFORCE-APP grant (<see cref="WorkforceAppAccess.Until"/>),
+/// as on any grant: omitted, that grant gets today + 90 days (or keeps the date an existing grant carries). A date before
+/// today is refused (400, nothing written).
+/// </param>
 public record ShareRecordWithUserRequest(
     string? RecordType,
     Guid? RecordId,
     Guid? SystemUserId,
-    ExternalAccessLevel? AccessLevel);
+    ExternalAccessLevel? AccessLevel,
+    DateOnly? ExpiryDate = null);
 
 /// <summary>Response for a share whose stored rights were confirmed.</summary>
 /// <param name="SystemUserId">The person the record is shared with.</param>
@@ -50,6 +57,10 @@ public record ShareRecordWithUserRequest(
 /// workforce-app access was given too (a contact grant on the contact that represents them, paired with the share), until
 /// when, and — when it was not — why. Absent otherwise. Additive.
 /// </param>
+/// <param name="ExpiryNotApplied">
+/// Task 193 G4a: <c>true</c> when the request carried an <c>ExpiryDate</c>: the SHARE has no end date (the date applied to
+/// the paired workforce-app grant only, see <paramref name="WorkforceApp"/>). Absent when no date was sent. Additive.
+/// </param>
 public record ShareRecordWithUserResponse(
     Guid SystemUserId,
     ExternalAccessLevel? AccessLevel,
@@ -58,7 +69,9 @@ public record ShareRecordWithUserResponse(
     bool Narrowed,
     bool NotificationFailed = false,
     [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
-    WorkforceAppAccess? WorkforceApp = null);
+    WorkforceAppAccess? WorkforceApp = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    bool? ExpiryNotApplied = null);
 
 /// <summary>
 /// Task 193 G1 (owner F1-b and decision (a), 2026-10-28): what "Add person" did about an internal colleague's WORKFORCE-APP

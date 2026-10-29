@@ -259,7 +259,7 @@ public sealed class ContactInternalUserShare
     /// Task 193 G1 (owner decision 2): the paired workforce-app grant for a colleague picked DIRECTLY (/share-user), after
     /// <see cref="InternalUserShareCore"/> confirmed the share: the ONE contact that represents the user
     /// (<see cref="ContactUserRepresentation.ResolveContactForUserAsync"/>, kept only where the forward rule agrees) is granted
-    /// through the grant core. No contact, several, one that also represents someone else, or a read that fails: only the
+    /// through the grant core, dated <paramref name="expiryDate"/> (task 193 G4a; omitted, today + 90 as any grant). No contact, several, one that also represents someone else, or a read that fails: only the
     /// share stands, and the answer says why. Never throws (but for cancellation).
     /// </summary>
     internal async Task<WorkforceAppAccess> GrantPairedForUserAsync(
@@ -267,6 +267,7 @@ public sealed class ContactInternalUserShare
         ExternalGrantRootType rootType,
         Guid rootId,
         ExternalAccessLevel level,
+        DateOnly? expiryDate,
         DataverseWebApiClient dataverseClient,
         ExternalParticipationService participations,
         IAccessibleRecordSetService accessibleRecords,
@@ -294,7 +295,7 @@ public sealed class ContactInternalUserShare
                 return WorkforceAppAccess.NotGiven(RepresentsSeveralUsersReasonCode);
             case UserContactStatus.One:
                 return await GrantPairedAsync(
-                        contact.ContactId!.Value, systemUserId, rootType, rootId, level, expiryDate: null, firmOrganizationId: null,
+                        contact.ContactId!.Value, systemUserId, rootType, rootId, level, expiryDate, firmOrganizationId: null,
                         dataverseClient, participations, accessibleRecords, callerAccessProbe, httpContext, logger, ct)
                     .ConfigureAwait(false);
             case UserContactStatus.None:

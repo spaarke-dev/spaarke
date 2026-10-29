@@ -611,13 +611,13 @@ public class ContactGrantSharesInternalUserTests
 
     // ── Task 193 G1 (owner F1-b; decisions 1, 2, (a), (iii)): the paired workforce-app grant ───────────────────────────
 
-    private Task<IResult> ShareUser(Guid user, ExternalAccessLevel level = ExternalAccessLevel.Collaborate) =>
+    private Task<IResult> ShareUser(Guid user, ExternalAccessLevel level = ExternalAccessLevel.Collaborate, DateOnly? expiry = null) =>
         InternalShareEndpoints.ShareAsync(
-            new ShareRecordWithUserRequest("matter", _matter, user, level),
+            new ShareRecordWithUserRequest("matter", _matter, user, level, expiry),
             _h.Shares, _h.Grants, _h.Participations, _h.Cache.Mock.Object, new InternalUserShareTests.StubCallerRightsProbe(EveryRight),
             _h.Children, _h.Guard, TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(), _h.Materializer,
             _h.Notifier, InternalUserShareCoreTests.Rig.Caller(), NullLogger<Program>.Instance, CancellationToken.None,
-            _h.WorkforceIdentity, Decision(), _h.AccessibleRecords);
+            _h.WorkforceIdentity, Decision(), _h.AccessibleRecords, _h.Time);
 
     private void ShareOnly(IResult result, Guid user, string reason)
     {
@@ -753,7 +753,41 @@ public class ContactGrantSharesInternalUserTests
         grant.ExpiresDate.Should().Be(ExternalGrantLifecycle.DefaultExpiry(Today));
         _h.Grants.PairedUsers[grant.Id].Should().Be(user);
         body.WorkforceApp.Should().Be(new WorkforceAppAccess(true, null, ExternalGrantLifecycle.DefaultExpiry(Today), grant.Id));
+        body.ExpiryNotApplied.Should().BeNull("no expiry was sent");
         _h.Emails.InviteUrls.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Task 193 G4a (B-F3): a date sent with /share-user dates the paired workforce-app grant (as /grant's date does); the share
+    /// has no end date, and the answer says so.
+    /// </summary>
+    [Fact]
+    public async Task G4a_ShareUser_WithAnExpiry_DatesThePairedGrant_AndSaysTheShareHasNone()
+    {
+        var (contact, user) = Colleague();
+
+        var result = await ShareUser(user, expiry: Today.AddDays(30));
+
+        var body = result.Should().BeOfType<Ok<ShareRecordWithUserResponse>>().Subject.Value!;
+        _h.Shares.MaskOf(MatterTable, _matter, DataversePrincipalRef.User(user)).Should().Be(CollaborateMask);
+        var grant = _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle().Subject;
+        grant.ExpiresDate.Should().Be(Today.AddDays(30));
+        body.WorkforceApp.Should().Be(new WorkforceAppAccess(true, null, Today.AddDays(30), grant.Id));
+        body.ExpiryNotApplied.Should().BeTrue("the SHARE has no end date");
+    }
+
+    /// <summary>Task 193 G4a (B-F3): a past date is refused before anything is written, as /grant refuses it.</summary>
+    [Fact]
+    public async Task G4a_ShareUser_WithAPastExpiry_Is400_AndWritesNothing()
+    {
+        var (_, user) = Colleague();
+
+        var result = await ShareUser(user, expiry: Today.AddDays(-1));
+
+        Status(result).Should().Be(StatusCodes.Status400BadRequest);
+        ReasonCode(result).Should().Be(GrantExternalAccessEndpoint.ExpiryInPastReasonCode);
+        _h.Shares.MaskOf(MatterTable, _matter, DataversePrincipalRef.User(user)).Should().BeNull("nothing was shared");
+        _h.Grants.Creates.Should().BeEmpty();
     }
 
     [Fact]
