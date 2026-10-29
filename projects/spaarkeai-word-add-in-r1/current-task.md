@@ -14,7 +14,7 @@
 - Offer to correct the owner's 10-28 test record (comm 12f1f3f8…, doc 536204ff…) only if they ask.
 - **ebilling 094 client: #2448 MERGED** at 5119519679 (2026-10-29 14:48Z; inert, `?action=submitInvoice` only). C:\wt133d removed.
   - Every 094 row in §6 and §9 has a sentence. `filingKept`: the top-level field first, then the pinned sentence. Code = `errorCode ?? reasonCode`, plus `extensions.code` on a 403 only.
-  - ebilling's contract fix is on task/ebill-095-errorcode @ d7218072fb: step A's 403 gets a top-level `errorCode`; `filingKept: true` goes on every refusal after step A filed (including reasonCode-only answers and Office pass-throughs); sweep list received. I checked their contract diff: it matches #2448. **Waiting on ebilling for:** the work sha after the integration merge, and the notice when 095's routes answer on dev (then slice C, with the owner's go).
+  - ebilling's contract fix is on task/ebill-095-errorcode @ d7218072fb: step A's 403 gets a top-level `errorCode`; `filingKept: true` goes on every refusal after step A filed (including reasonCode-only answers and Office pass-throughs); sweep list received. I checked their contract diff: it matches #2448. The fix is in work at 842110e6ab (verified: d7218072fb and #2448 are both ancestors, contract unchanged). **Waiting on ebilling for:** the dev notice. It needs #1911 to reach master, then an SPA-r3 dev BFF deploy (after uac's 194b hold clears), then the owner's OK to switch ebilling on in dev settings. Slice C follows, with the owner's go.
 - Cleanup later (Remove-WorktreeSafe): C:\wt2412, C:\wt2412m, C:\wt2416, C:\wt2416c.
 
 ## ⚡ Quick Recovery (READ THIS FIRST)
