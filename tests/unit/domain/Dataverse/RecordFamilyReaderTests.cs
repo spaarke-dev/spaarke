@@ -605,9 +605,11 @@ public class RecordFamilyReaderTests
         // A work assignment filed under an invoice and a matter.
         var invoice = Record(Invoice, ("sprk_matter", matter));
         var assignment = Record(WorkAssignment, ("sprk_regardinginvoice", invoice), ("sprk_regardingmatter", matter));
-        var assignmentHeld = new Dictionary<string, Guid> { ["sprk_regardinginvoice"] = invoice, ["sprk_regardingmatter"] = matter };
-        var assignment194b = SecureRootInheritance.TypedLookupsOf(WorkAssignment)
-            .Where(l => assignmentHeld.ContainsKey(l.Column)).Select(l => assignmentHeld[l.Column]).First();
+        // 194b's own ordering since UAC #2451 (owner ruling 2026-10-29: a work assignment's owner follows its matter).
+        // Before #2451, OrderedParentsOf ordered a work assignment's lookups by column name and picked the invoice.
+        var assignment194b = RecordOwnershipContext.OrderedParentsOf(
+            Row(WorkAssignment, assignment, ("sprk_regardinginvoice", Invoice, invoice), ("sprk_regardingmatter", Matter, matter)))
+            .First().RecordId;
 
         // A project, whose one filing column is its regarding pair (RootLookupOrder).
         var project = Record(Project);
