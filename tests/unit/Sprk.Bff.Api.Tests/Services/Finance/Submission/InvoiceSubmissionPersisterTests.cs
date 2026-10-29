@@ -1735,6 +1735,27 @@ public class InvoiceSubmissionPersisterTests
         store.InvoiceExists.Should().BeTrue();
     }
 
+    [Fact(DisplayName = "094 undo (uac-r2 F3, must fire): the withdraw write faults - the undo is held with NOTHING deleted: no approval, line, blob or row, and the invoice intact (never a Servable row left without its approval, lines or blob)")]
+    public async Task Undo_TheWithdrawFaults_HoldsWithNothingDeleted()
+    {
+        var store = new Store();
+        var outcome = AsSource(await new ProcessorHarness().RunAsync(), store);
+        (await store.Build().PersistAsync(outcome, null)).Status.Should().Be(SubmissionPersistStatus.Committed);
+        store.CopyStatus.Should().Be(StoredFileStatus.Servable);
+        var copy = store.SourceCopy!;
+        store.WithdrawFault = new HttpRequestException("Dataverse unavailable");
+
+        var result = await store.Gate!.UndoAsync(SourceSubmission, SubmissionReasonCodes.SourceCheckFailed, CancellationToken.None);
+
+        result.Status.Should().Be(SubmissionCommitGateStatus.UndoHeld);
+        store.WithdrawFault.Should().BeNull("the withdraw was attempted");
+        store.Deletes.Should().BeEmpty("held at the withdraw: no approval or line delete");
+        store.UndoTransactions.Should().BeEmpty("no row or invoice delete");
+        store.CopyBlobExists.Should().BeTrue("no blob delete");
+        store.Files.Dataverse.Rows.Should().ContainKey(copy.Spec.FileId);
+        store.InvoiceExists.Should().BeTrue();
+    }
+
     [Fact(DisplayName = "094 undo (uac-r2 F4-1, order): the file rows are withdrawn BEFORE the approval delete and every line delete - a completed undo of a COMMITTED, Servable copy finds the copy Removed at each one")]
     public async Task Undo_WithdrawsTheFileRows_BeforeTheApprovalDelete()
     {
@@ -2576,6 +2597,29 @@ public class InvoiceSubmissionPersisterTests
 
         /// <summary>Fix round: the next single-row delete of this table faults (one shot).</summary>
         public string? DeleteFault { get; set; }
+
+        /// <summary>
+        /// Review round 5 (uac-r2 F3): the next Stored File write that withdraws a row (status Removed, the undo's withdraw) faults (one
+        /// shot), as <see cref="DeleteFault"/> does for a delete. Every other Stored File write is the in-memory Dataverse's own.
+        /// </summary>
+        public Exception? WithdrawFault { get; set; }
+
+        public Store()
+        {
+            // Moq matches the latest setup first; once the fault is spent (or for any other write) the rig's own setup answers.
+            Files.Dataverse.Mock
+                .Setup(e => e.UpdateIfRowVersionMatchesAsync(
+                    StoredFileSchema.Entity, It.IsAny<Guid>(), It.IsAny<string>(),
+                    It.Is<Dictionary<string, object>>(fields => WithdrawFault != null && fields.ContainsKey(StoredFileSchema.Status)
+                        && ((OptionSetValue)fields[StoredFileSchema.Status]).Value == (int)StoredFileStatus.Removed),
+                    It.IsAny<CancellationToken>()))
+                .Returns(() =>
+                {
+                    var fault = WithdrawFault!;
+                    WithdrawFault = null;
+                    return Task.FromException(fault);
+                });
+        }
 
         /// <summary>Fix round: the next undo transaction faults and rolls back (one shot).</summary>
         public Exception? UndoTransactionFault { get; set; }
