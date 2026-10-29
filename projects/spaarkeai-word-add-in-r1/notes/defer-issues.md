@@ -1286,20 +1286,20 @@ Capture never carries `contentId` (`emailContentCapture.ts`, `OutlookAdapter.ts:
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Fixed, live on dev 2026-10-29 (BFF 136568cf70); owner re-test pending |
 | **Urgency** | now (owner go 2026-10-28) |
 | **Filed** | 2026-10-28 (owner's Outlook check on dev, found in passing; pre-existing) |
 | **GitHub Issue** | [#2412](https://github.com/spaarke-dev/spaarke/issues/2412) |
 
-The owner saved an email to CMRCL-464674 whose body carried a signed tracking token for another matter (PAT-942404). `AssociationStatusMapper` treated the save-pane choice (`ExplicitReferenceRung`, documented as authoritative) as one more 1.0 candidate. The result was Ambiguous, with no `sprk_regardingmatter` on the communication. The .eml Document was filed correctly. The communication is missing from the matter's Messages widget, and the pane shows no "Filed to" card. Fix: a caller-supplied regarding wins on its field; the conflicts stay in the provenance. Owner 2026-10-28: fix now in word-add-in-r1 (email-communication-intelligence is closed): PR #2417.
+The owner saved an email to CMRCL-464674 whose body carried a signed tracking token for another matter (PAT-942404). `AssociationStatusMapper` treated the save-pane choice (`ExplicitReferenceRung`, documented as authoritative) as one more 1.0 candidate. The result was Ambiguous, with no `sprk_regardingmatter` on the communication. The .eml Document was filed correctly. The communication is missing from the matter's Messages widget, and the pane shows no "Filed to" card. Fix: a caller-supplied regarding wins on its field; the conflicts stay in the provenance. Owner 2026-10-28: fix now in word-add-in-r1 (email-communication-intelligence is closed): PR #2417. Quick Save now saves unfiled when the engine declines to choose. Follow-up: #2421.
 
 ## ISS-028 — Outlook Save: a typed Document Name replaced the email's subject
 
 | Field | Value |
 |---|---|
-| **Status** | Fix in review |
+| **Status** | Fixed, live on dev 2026-10-29 (BFF 136568cf70 + add-in 5398af46b4); owner re-test pending |
 | **Urgency** | now (found in the same owner check) |
 | **Filed** | 2026-10-28 (owner's Outlook check on dev; pre-existing since the pane sent the typed name as `email.subject`) |
 | **GitHub Issue** | [#2416](https://github.com/spaarke-dev/spaarke/issues/2416) |
 
-The typed name became the .eml Subject header, sprk_emailsubject and sprk_documentdescription, and the communication's subject, name and thread. Fix: the server takes an optional `email.documentName` for the file name only (PR #2419). The client then sends the real subject plus `documentName` (PR #2420, draft). Release order: server first, then an R3 dev deploy, then the client merge.
+The typed name became the .eml Subject header, sprk_emailsubject and sprk_documentdescription, and the communication's subject, name and thread. Fix: the server takes an optional `email.documentName` for the file name only (PR #2419). The client then sends the real subject plus `documentName` (PR #2420). Release order: server first, then an R3 dev deploy, then the client merge. Review round 1 also fixed: a blank typed name gets the unique suffix; email Keep both stores a suffixed file and keeps the typed name; an id-less key includes the typed name.

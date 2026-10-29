@@ -22,7 +22,10 @@
     - 223 jest tests pass.
     - HOLD until the server is live on dev.
   - The scoped re-check was clean; the F4 doc fix is 39a8b88ce8. **#2419 MERGED at 136568cf70** (2026-10-28).
-- **Waiting on R3:** I asked R3 for a dev BFF deploy of origin/master at or after 136568cf70, carrying #2417 + #2419 (OK on content; the owner's go is given in R3's session). After it is live, mark #2420 ready and auto-merge it (the master push deploys the add-in). Then the owner re-tests one save with a typed name.
+- **LIVE on dev (2026-10-29):** BFF 136568cf70 since 02:23:53Z (R3; UAC gate passed, no night Office traffic, so UAC watches the next daytime window). #2420 merged at 5398af46b4 (03:05Z); add-in deploy run 40810178113 succeeded.
+- **Now:** the owner re-tests one Outlook save with a typed Document Name.
+  - Check the file name, the email subject on the document and on the communication, and filing to the chosen matter (#2412).
+  - Then close #2412/#2416 and set ISS-027/028 to Closed.
   - Offer to correct the owner's 10-28 test record (comm 12f1f3f8…, doc 536204ff…) only if they ask.
 - **ebilling 094** changed the from-email contract (now 97c793670b; uac-r2 is re-checking). When 094 merges to work, update `invoiceSubmissionMessages.ts` and the service.
   - Already mapped on master: `email_save_failed`, `document_unavailable`, `record_unavailable`, `failed` (confirm they are in the permanent/retryable sets).
