@@ -468,9 +468,10 @@ public sealed partial class SecureRootInheritance
     /// (<see cref="SecureParentsAnswer.WallsDecidable"/>). The container resolver refuses such a pair naming any root
     /// (a work assignment too). Its writers send the typed lookup and the same pair (the Create Work Assignment wizard —
     /// a matter, project, invoice or event — and the BFF).</para>
-    /// <para>Why not field security on the work assignment's pair too: the Create Work Assignment wizard and the Assign
-    /// Work follow-on create the row through <c>Xrm.WebApi</c> AS THE USER with the pair in the payload, which a secured
-    /// column would refuse.</para>
+    /// <para>Why not field security on the work assignment's pair too: it was written AS THE USER with the pair in the payload
+    /// when the Create Work Assignment wizard created the row through <c>Xrm.WebApi</c>, which a secured column would refuse.
+    /// The wizard now posts the same payload to the BFF (<c>workAssignmentService.ts</c>,
+    /// <c>/api/v1/child-records/sprk_workassignment</c>); securing the column is not part of that change.</para>
     /// </remarks>
     internal static readonly IReadOnlySet<string> BffManagedPairTables =
         new HashSet<string>(StringComparer.OrdinalIgnoreCase) { Project };

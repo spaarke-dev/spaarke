@@ -1430,8 +1430,11 @@ public sealed class DecisionRecordWriter
         {
             // Task 042 (security fails closed): the gate asks as the CONTENT of a communication (uac-r2's ContentOf shape). The resolver
             // applies KeepCreatorUnlessTargetIsTeamOwned to the FIRST parent it is asked about, which is the core when the communication has
-            // one: then the check is made against the CORE (team-owned, so the record resolves record-first over every parent, secure-if-any),
-            // not against the communication. With no core the first parent is the communication itself: if it is not team-owned the resolver
+            // one: then the check is made against the CORE, not against the communication. A core record is never content (owner decision
+            // 2026-10-29): it stays among the parents, the record resolves record-first over every parent (secure-if-any), and a work
+            // assignment with no owning team that is filed answers with its matter's (then project's) business unit, as every other path
+            // does; any other core record, and an unfiled work assignment, answers with its own business unit. The D-144 owner below never
+            // applies to a core. With no core the first parent is the communication itself: if it is not team-owned the resolver
             // reads ITS OWN filing (filed -> secure-if-any over what it is filed under; UNFILED -> E1, owner round 10 item 8: it keeps its
             // creator and its privacy rests on per-participant shares -> Unchanged). Task 149 / D-144 (owner decision): that Unchanged is
             // no longer a refusal. D-144 as amended (owner ruling on uac-r2 F1): a decision about an unfiled communication is owned by the

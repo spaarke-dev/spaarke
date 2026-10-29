@@ -147,7 +147,8 @@ public partial class SecureRootInheritanceWriterTests
     /// <summary>
     /// The owner the un-secure cascade gives <paramref name="workAssignment"/> (<c>UnsecureFollowingParentsAsync</c>): the
     /// ownership rule over the records it is filed under directly, as the cascade's own read names them
-    /// (<see cref="SecureParentsAnswer.DirectParents"/>), in that order.
+    /// (<see cref="SecureParentsAnswer.DirectParents"/>), asked as the cascade asks
+    /// (<see cref="SecureRootInheritance.UnsecureOwnerQuestionOf"/>).
     /// </summary>
     private async Task<Guid?> CascadeOwnerOf(Guid workAssignment)
     {
@@ -157,8 +158,7 @@ public partial class SecureRootInheritanceWriterTests
             maxDepth: SecureRootInheritance.MaxFilingDepth);
         ancestry.IsKnown.Should().BeTrue(ancestry.Unverifiable);
         var owner = await WorldResolver().ResolveOwnerAsync(
-            RecordOwnershipContext.ForParents(ancestry.DirectParents.Select(p =>
-                (RecordOwnershipParent?)new RecordOwnershipParent(p.Parent.Table, p.Parent.Id))),
+            SecureRootInheritance.UnsecureOwnerQuestionOf(SecureRootInheritance.WorkAssignment, ancestry.DirectParents.Select(p => p.Parent)),
             CancellationToken.None);
         return owner.OwningTeamId;
     }
@@ -289,5 +289,26 @@ public partial class SecureRootInheritanceWriterTests
         var unreadable = await Ask(@event);
         unreadable.Unverifiable.Should().NotBeNull("an unreadable intermediate is unverifiable, never \"under nothing\"");
         unreadable.Lookups.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "Owner decision 2026-10-29 must fire: a work assignment filed only under an event that belongs to a matter (unit A) and a project (unit B) is owned in unit A — on creation and on the un-secure cascade alike")]
+    public async Task WorkAssignmentPrimaryOwner_UnderOnlyAnEventOfAMatterInAAndAProjectInB_IsOwnedInA_OnCreationAndOnTheCascade()
+    {
+        TwoBusinessUnits();
+        var (matter, project, @event) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        _fixture.SeedMatter(matter, owningTeamId: UnitAMatterTeam, isSecure: false);
+        World.Add("sprk_project", project, ("owningteam", new EntityReference("team", UnitBEventTeam)), ("sprk_issecure", false));
+        World.Add("sprk_event", @event,
+            ("owningteam", new EntityReference("team", UnitBEventTeam)),
+            ("sprk_regardingmatter", new EntityReference("sprk_matter", matter)),
+            ("sprk_regardingproject", new EntityReference("sprk_project", project)));
+
+        var result = await CreateFiledWorkAssignmentThroughTheRoute(("sprk_RegardingEvent@odata.bind", $"/sprk_events({@event:D})"));
+
+        RouteStatus(result).Should().Be(StatusCodes.Status201Created, RouteDetail(result));
+        var (_, created, fields) = _writes.Should().ContainSingle().Subject;
+        BoundId(fields, "ownerid@odata.bind").Should().Be(UnitADefaultTeam, "creation ranks the matter first (RootLookupOrder)");
+        (await CascadeOwnerOf(created)).Should().Be(UnitADefaultTeam,
+            $"the un-secure cascade ranks as creation does: the matter's unit, never the project's ({UnitBDefaultTeam:D})");
     }
 }

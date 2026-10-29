@@ -1207,6 +1207,27 @@ public sealed partial class SecureRootInheritance
     }
 
     /// <summary>
+    /// The owner question the un-secure step asks for a record of <paramref name="logical"/> filed under
+    /// <paramref name="parents"/> (the matters and projects it is filed under, as its read names them). Owner decision
+    /// 2026-10-29: a work assignment's parents are keyed under its own matter and project columns
+    /// (<see cref="TypedFilingColumns"/>) and asked through the one builder (<c>RecordOwnershipContext.ForRow</c>), so they rank
+    /// as creation ranks them — matter, then project (<c>SecureChildLineage.RootLookupOrder</c>) — also when they are named
+    /// through an invoice or event that belongs to a matter and a project in different business units. Any other table (a
+    /// project: its pair's matter or project) is asked in the order named.
+    /// </summary>
+    internal static RecordOwnershipContext UnsecureOwnerQuestionOf(string logical, IEnumerable<SecureFilingParent> parents)
+    {
+        ArgumentNullException.ThrowIfNull(parents);
+        var named = parents.ToArray();
+        if (!TypedFilingColumns.TryGetValue(logical, out var typed) || typed.Count == 0)
+            return RecordOwnershipContext.ForParents(named.Select(p => (RecordOwnershipParent?)new RecordOwnershipParent(p.Table, p.Id)));
+
+        return RecordOwnershipContext.ForRow(logical, named.Select(p => KeyValuePair.Create(
+            typed.FirstOrDefault(t => string.Equals(t.ParentTable, p.Table, StringComparison.OrdinalIgnoreCase)).Column ?? p.Table,
+            (RecordOwnershipParent?)new RecordOwnershipParent(p.Table, p.Id))));
+    }
+
+    /// <summary>
     /// The un-secure step for one record: the owner the ownership rule gives a record filed under its (now ordinary) parents —
     /// their business unit's team (D-11, record-first) — and then the unsecure endpoint's own steps. Never the Secure Record
     /// Owners team (a parent still isolated would hand it to a memberless team with its shares gone — reachable by nobody):
@@ -1219,8 +1240,7 @@ public sealed partial class SecureRootInheritance
         try
         {
             owner = await _ownership.ResolveOwnerAsync(
-                RecordOwnershipContext.ForParents(parents.Select(p => (RecordOwnershipParent?)new RecordOwnershipParent(p.Parent.Table, p.Parent.Id))),
-                ct).ConfigureAwait(false);
+                UnsecureOwnerQuestionOf(logical, parents.Select(p => p.Parent)), ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {

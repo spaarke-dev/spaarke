@@ -1795,4 +1795,44 @@ public class SecureChildOrdinaryParentMoveTests
         public override ValueTask<AccessToken> GetTokenAsync(TokenRequestContext requestContext, CancellationToken cancellationToken)
             => throw new NotSupportedException("This double issues no HTTP.");
     }
+
+    // ── Owner decision 2026-10-29: the children of a FILED person-owned work assignment follow its matter ──────────────
+
+    private static readonly Guid CatalogWorkAssignment = Guid.Parse("4b000000-0000-4000-8000-000000194c02");
+
+    [Fact(DisplayName = "Owner decision 2026-10-29 must fire: under a FILED person-owned work assignment, the ordinary pass moves a default-team-owned Decision Record and event to its matter's unit; a user-owned row is reported, not moved")]
+    public async Task ChildrenOfAFiledPersonOwnedWorkAssignment_FollowItsMatter_AUserOwnedRowIsReported()
+    {
+        MatterMovedToB();
+        var someone = new EntityReference("systemuser", SecureChildShareWorld.SomeUser);
+        var (workAssignment, record, userEvent) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        _world.Add("sprk_workassignment", workAssignment, ("owninguser", someone), ("sprk_issecure", false),
+                ("sprk_regardingmatter", new EntityReference(Matter, MatterId)))
+            .Add("sprk_recordtype_ref", CatalogWorkAssignment, ("sprk_recordlogicalname", "sprk_workassignment"));
+        Row("sprk_event", EventId, TeamRef(GeneralTeam), ("sprk_regardingworkassignment", "sprk_workassignment", workAssignment));
+        Row("sprk_event", userEvent, someone, ("sprk_regardingworkassignment", "sprk_workassignment", workAssignment));
+        Row("sprk_decisionrecord", record, TeamRef(GeneralTeam),
+            ("sprk_workassignment", "sprk_workassignment", workAssignment),
+            ("sprk_regardingworkassignment", "sprk_workassignment", workAssignment),
+            ("sprk_corerecordtype", "sprk_recordtype_ref", CatalogWorkAssignment));
+        _world.Set("sprk_decisionrecord", record, "sprk_corerecordid", workAssignment.ToString("D"));
+        _world.Set("sprk_decisionrecord", record, "sprk_regardingrecordid", workAssignment.ToString("D"));
+        _world.Set("sprk_decisionrecord", record, "sprk_steps", JsonSerializer.Serialize(new
+        {
+            reviewId = Guid.NewGuid().ToString("D"), resolvedSignalIds = Array.Empty<string>(), steps = Array.Empty<object>(),
+        }));
+
+        var report = await Reconciler().ReconcileOrdinaryParentMoveAsync(
+            "sprk_workassignment", workAssignment, SecureChildReconcileMode.Apply, maxWrites: 200, CancellationToken.None);
+
+        report.Status.Should().Be(SecureChildReconcileStatus.Completed, report.Detail);
+        _world.OwnerOf("sprk_event", EventId).Should().Be(DataversePrincipalRef.Team(TeamB),
+            "the work assignment belongs to its matter: its default-team child follows the matter to B");
+        _world.OwnerOf("sprk_decisionrecord", record).Should().Be(DataversePrincipalRef.Team(TeamB),
+            "a Decision Record whose core is the work assignment follows the matter too");
+        _world.OwnerOf("sprk_event", userEvent).Should().Be(DataversePrincipalRef.User(SecureChildShareWorld.SomeUser));
+        _world.OwnerWrites.Should().NotContain(w => w.Id == userEvent);
+        report.Changes.Should().ContainSingle(c => c.Id == userEvent).Which.Should().Match<SecureChildRowChange>(c =>
+            c.Outcome == SecureChildRowOutcome.Untouched && c.TargetTeamId == TeamB && c.Detail!.Contains("owned by a user"));
+    }
 }
