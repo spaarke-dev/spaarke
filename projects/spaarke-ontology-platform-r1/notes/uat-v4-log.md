@@ -91,6 +91,28 @@ Raw findings as the owner reported them. Each becomes a refinement below once tr
 | 114 | Uploaded document bound to `sprk_relatedworkassignment`, not `sprk_workassignment`. | [162](../tasks/162-wizard-document-lookup-exact-column.poml) |
 | Q | Action steps as configuration, and an AI agent that configures the wizard. | New project spaarke-ontology-platform-r2 (D-183) |
 
+## Round 1 re-check — 2026-10-28 (owner, dev BFF `de38296499`, as testuser1 / Spaarke Core User)
+
+| Check | Result | Follow-up |
+|---|---|---|
+| 1 Worklist loads (163, D-185) | ✅ Power Apps' own "Some components of this app require you to sign in" bar shows. It is the browser's sign-in cookie (the silent sign-in got AADSTS50058 on first load), not the worklist. | — |
+| 2 Decision wizard (158) | ✅ Loads with the matter link (side-pane lookups and the matter link opening a modal above the wizard: still to confirm). ❌ **Double load:** a "Loading" dialog opens, closes, and a second dialog opens with the steps. | [165](../tasks/165-decision-wizard-one-dialog.poml) |
+| 3 Assign Task (159) | ✅ Two Task events (`sprk_eventtype_ref` `124f5fc9…`) created on dev by the BFF for the owner's no-budget matters. | — |
+| 4 Create budget (161) | ✅ as built: the fee/scope item on a no-budget matter offers Create budget. Gap: "Matter has no active budget" items offer only Assign Task, because the v2 plan has no budget action. | D-192, [166](../tasks/166-no-budget-policy-v3-create-budget.poml) |
+| 5 Uploads (162) | ✅ Documents save to the newly created record (owner's item 6; record type to confirm: WA, invoice, project). ❌ Creating a **project** as Core User fails: there is no AppendTo on `sprk_organization`, AppendTo on `contact` is user-level only, and the message shows `{0}..{6}`. Not ontology code. | uac-r2, [#2382](https://github.com/spaarke-dev/spaarke/issues/2382) (DI-130). **Fixed 2026-10-28** (#2394, roles live on dev, -Verify PASS): the owner re-checks project create as Core User |
+| 6 Budget inquiry composer (160) | ⬜ Not yet tested. Corrected 2026-10-28: the owner's item 6 was the uploads check. | — |
+
+## Round 2 feedback — 2026-10-28 (owner, dev BFF `e56a3a51d4`, Console `b445886fed`)
+
+| # | Feedback | Result / follow-up |
+|---|---|---|
+| 1 | The decision wizard opens with no "two screens" | ✅ 165 verified by the owner |
+| 2 | Assign Task: add a "Send email notification" checkbox. When ticked, send a template email to the Assigned To contact with the matter link, What to do and Due, and also raise a model-driven app notification for that user | New request. Facts being gathered (reuse of the email and notification paths) |
+| 3 | Recording a decision is slow (20–30 s) | Under diagnosis (telemetry plus the commit path) |
+| 4 | The lane titles "Decide" and "Do" aren't descriptive enough. The card list should expand and collapse, default collapsed, with the title, the Start review / Work through these button and the metric cards always shown | New request. Facts being gathered |
+| 5 | Create budget makes a budget with no auto-generated budget number. Two currency fields exist: `sprk_currency` (text, required, left blank) and `transactioncurrencyid`. Why is `sprk_currency` needed? | Under investigation (schema owner, readers) |
+| 6 | Add `sprk_budgetcategory`, `sprk_budgetyear`, `sprk_budgetstartdate`, `sprk_budgetenddate`, `sprk_budgetperiod` and Currency to the Create budget step. Currency defaults from the record's business unit Default Currency (`transactioncurrencyid`) | New request, after 5 |
+
 ## Owner completion statement
 
 (not yet given)

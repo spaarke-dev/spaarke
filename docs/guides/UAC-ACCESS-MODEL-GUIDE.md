@@ -45,6 +45,7 @@ and the code disagree, the code is right and this guide must be fixed.
 | Standing grant (contact / organization) | `sprk_standinggrant` + baseline level `sprk_accesspermissiongrant` |
 | No Access list | `sprk_noaccessentry` (subject: contact, organization or systemuser; object: a record) |
 | Secure business unit / owner team | `Secure Record` / `Secure Record Owners` (config `SecureRecord:BusinessUnitName`, `SecureRecord:OwnerTeamName`) |
+| Restricted-content owner team | `Spaarke Restricted Content Owners`, one per customer top business unit (config `RestrictedContent:OwnerTeamName`; must equal `teamName` in `config/restricted-content-owner-role.json`, which `scripts/Set-CustomerOwnerTeams.ps1` creates — a different name finds no team and every ordinary hard-deny write is refused, `OwnerTeamNotFound`) |
 | Who may manage access | Write **and** Share on the record, checked as the caller (`DelegationRuleFilter`) |
 | Default grant expiry | Today + 90 days (Date Only, UTC) |
 | Make Secure / Remove Secure | `POST /api/v1/external-access/provision-project` / `POST /api/v1/external-access/unsecure-project` |
@@ -375,10 +376,12 @@ Assigned-To automatic grants are not limited by anyone's role.
 
 | Role | What it holds (UAC-relevant) | Purpose |
 |---|---|---|
-| **Spaarke Core User** | Create, Read, Write, Delete, Assign, Append, AppendTo at Deep on matter, project, work assignment and document; **Share** at Deep on matter, project and work assignment (not document); Read on the grant table; no privilege on `sprk_noaccessentry` | The ordinary internal user; can manage access |
-| **Spaarke Basic User** | Read and AppendTo at Deep on matter, project, work assignment and document; Read on the grant table; no Write or Share | Default role for B2B guest users; cannot manage access |
-| **Spaarke Access Administrator** | Create, Read, Write, Append, AppendTo on `sprk_noaccessentry` at Global | Authors No Access entries; assigned together with a role that holds Share |
+| **Spaarke Core User** | Create, Read, Write, Delete, Assign, Append, AppendTo at Deep on matter, project, work assignment and document; **Share** at Deep on matter, project and work assignment (not document); Read on the grant table; no privilege on `sprk_noaccessentry`; Read and Share only on `sprk_contactorganization`; AppendTo at its Read depth on every table the create wizards link (`config/core-user-wizard-linking-role.json`) | The ordinary internal user; can manage access |
+| **Spaarke Basic User** | Read and AppendTo at Deep on matter, project, work assignment and document; Read on the grant table; Read and Share only on `sprk_contactorganization`; no Write or Share | Default role for B2B guest users; cannot manage access |
+| **Spaarke Access Administrator** | Create, Read, Write, Append, AppendTo on `sprk_noaccessentry` at Global; Create, Read, Write, Append on `sprk_contactorganization` at Global | Authors No Access entries; adds and ends contact-organization memberships (no other Spaarke role writes them); assigned together with a role that holds Share |
 | **Secure Record Owner** | User (Basic) depth on the secure table set | Held only by the Secure Record Owners team; created by provisioning, not in the solution |
+| **Restricted Content Owner** | Read at User (Basic) depth on exactly the five hard-deny tables (`config/restricted-content-owner-role.json`) | Created once in the root business unit (Dataverse copies it into every unit); each customer unit's copy is held only by that unit's memberless Spaarke Restricted Content Owners team. Set up per customer unit by `scripts/Set-CustomerOwnerTeams.ps1`, not in the solution |
+| **Customer Configuration Owner** | Read at User (Basic) depth on exactly the declared customer configuration tables (`sprk_aisearchindex`, `sprk_fieldmappingprofile`, `sprk_fieldmappingrule`; `config/customer-configuration-owner-role.json`) | Created once in the root business unit; each customer unit's copy is held only by that unit's memberless Spaarke Customer Configuration Owners team, so Dataverse accepts the team as the owner of the customer's configuration rows. Set up by the same run of `scripts/Set-CustomerOwnerTeams.ps1`, not in the solution |
 
 Partners are contacts, not systemusers, and hold no Dataverse role.
 
@@ -420,6 +423,24 @@ least as strict as the matter.
 - **Ownership**: a child created through Spaarke is owned by the default owner team of its parent's business unit (with
   no parent, the acting user's business unit). If any parent is Secure, it is owned by the Secure Record Owners team. If
   the owner cannot be decided, the write is refused.
+- **Hard-deny tables** (`sprk_storedfile`, `sprk_procedureassignment`, `sprk_ruleset`, `sprk_policy`,
+  `sprk_policyversion`; owner rounds 131 and 136): where the answer would be a business unit's default team, the row is
+  owned instead by the memberless **Spaarke Restricted Content Owners** team of the **customer's top business unit**: from
+  the answer's business unit, Spaarke walks up to the root's direct child (the customer unit provisioning H10 creates, a
+  sibling of Secure Record) and uses the team there. The root holds only Spaarke product data, so customer rows never go
+  there. A Secure answer still goes to Secure Record Owners. A row its author keeps (the ontology save, a publish that
+  binds no owner, an author-owned row that is re-filed) keeps its author. The write is refused
+  (`record_owner_restricted_content_team_unresolved`) when the answer is in the root itself (an unfiled row created by a
+  user homed in the root, or one filed under a record owned there), when the top unit is Secure Record, when the parent
+  chain cannot be read or loops, and when the team in that unit is missing, there are two, or it has a member. The BFF
+  finds the team by name: `RestrictedContent:OwnerTeamName` (default `Spaarke Restricted Content Owners`) must equal the
+  `teamName` the setup script creates from `config/restricted-content-owner-role.json`. Set one without the other and no
+  team is found: every ordinary hard-deny write is refused (`OwnerTeamNotFound`, fail closed). The reconciler's ordinary
+  pass leaves an author-owned row, or one owned by a non-default team, where it is and reports it, without refusing it; a
+  hard-deny row owned by a non-default team other than the restricted-content team is always reported, by id.
+- **A Decision Record** is also filed under the subject of every Signal it resolved (the ids its `sprk_steps` lists). A
+  Secure pass reaches it through those Signals even when it lies outside the record's own family, so it moves into
+  isolation, or out, with them.
 
 ### Documents and files
 
@@ -448,19 +469,26 @@ the family; a service request is a core record of its own.
 ## 7. What happens to the family when a parent is reassigned to a new business unit or owner?
 
 **Short answer.** For an ordinary (non-Secure) record, **the children follow it**, within about two minutes plus the
-run, once the owner has turned the switch on (task 194, #2339). Dataverse itself is configured not to cascade Assign,
+run, once the owner has turned the switch on (`SecureChild:Reconciliation:OrdinaryMovesWritesEnabled`; task 194, #2339). Dataverse itself is configured not to cascade Assign,
 Reparent or Share from matter, project or work assignment to any Spaarke child, so the BFF does it: the two-minute
 `secure-child-reconciliation` job lists every ordinary matter, project, work assignment and service request changed since
 its last run (an MDA Assign changes the record's `modifiedon`), walks its children and re-owns each child that a business unit's default
-team owns to the owner `RecordOwnershipResolver` answers now (rule I-6). Until the switch is on, the job only reports
-the moves it would make.
+team owns to the owner `RecordOwnershipResolver` answers now (rule I-6), asking each child the same question its writer
+asked when it was created (task 194b). Until the switch is on, the job only reports the moves it would make.
 
 What moves, and what does not:
 
 - **Moved:** every child (and grandchild — a To Do under an event under the matter) owned by a business unit's default
   owner team, to the default team of its primary parent's business unit. A child filed under several records in
-  different business units takes the resolver's answer for its first (primary) parent, the same answer a new child would
-  get. Each move is a conditional write (it is refused if the row changed since it was read), logged with the previous
+  different business units takes the resolver's answer for its primary parent, the same answer a new child would get.
+  The primary is fixed per table, never the order the columns come back in: a document's parent document, then its
+  matter, project or work assignment, then the rest; a To Do's record regarding; a budget revision's budget, then its
+  matter. A contact is never a parent, so a document filed only to a contact is unfiled. When the primary parent is
+  itself a child row that a user (not a team) owns and that is filed, its own filing decides the business unit, not its
+  creator's: the resolver looks through it to what it is filed under, in that row's own primary order, up to 4 levels.
+  A loop back to a row already looked through, or a fifth level, leaves the business unit undecided: the child is then
+  refused (`primaryUndecided`) and reported, never moved, unless one of its parents is Secure, which is still decided
+  over every parent. An unfiled user-owned primary keeps its own business unit. Each move is a conditional write (it is refused if the row changed since it was read), logged with the previous
   owner, and read back.
 - **Never moved by this job:** a Secure child (owned by the Secure Record Owners team or any team in the Secure Record
   business unit), and nothing is moved into or out of isolation — that is the Secure pass's (§10). A child the rule would
@@ -499,8 +527,12 @@ Spaarke does not use plugins (ADR-002), so the re-own is the scheduled job's.
 **Switches** (app settings): `SecureChild:Reconciliation:OrdinaryMovesWritesEnabled` (default `false`, report-only;
 turned on only after UAC reads a report-only run and the owner gives the go), `SecureChild:Reconciliation:MaxOrdinaryMovesPerRun`
 (default 200 owner writes a run) and the shared `SecureChild:Reconciliation:MaxRootsPerRun` (50 records a run). The
-recent-changes emergency stop (`RecentChangesWritesEnabled = false`) stops it too. A record not finished in one run is
-carried to the next. Each run's report is `ResultJson.ordinaryMoves`. **Older moves:** besides its one-hour window, each
+recent-changes emergency stop (`RecentChangesWritesEnabled = false`) stops it too. Each run spends at most about 60
+seconds on this pass, checked between records (one large record's own walk is not cut short). A record not finished in
+one run is carried to the next; carried records run least-recently-tried first, and every run advances at least one
+record, so one large record cannot hold the others back. A report-only run carries nothing, so it resumes after the last
+record the previous report-only run reached (`ResultJson.ordinaryMoves.reportCursor`) and wraps around; that cursor is
+kept in memory, so after a restart the report starts again from the first record. Each run's report is `ResultJson.ordinaryMoves`. **Older moves:** besides its one-hour window, each
 App Service instance sweeps every ordinary record once (50 a run, then it stops), and sweeps again when the switch is
 turned on, so a reassignment made before this job existed, or before a restart, is corrected too
 (`ResultJson.ordinaryMoves.sweep`).
@@ -693,6 +725,33 @@ teams.)
 |---|---|---|
 | **Secure Record Owners** (named, non-default, in the Secure Record business unit) | Every Secure record, its family, and the grant rows on it | **None, ever** — that is what makes the record reachable only by shares. Spaarke refuses to add anyone to a team in that business unit. |
 | A business unit's **default owner team** | Ordinary records, children created through Spaarke, grant rows on ordinary records, contacts created by registration (the customer business unit's team) | Everyone in the business unit (managed by the platform) |
+| **Spaarke Restricted Content Owners** (named, non-default, one in EACH customer's top business unit; never the root) | Ordinary rows of the five hard-deny tables (stored files, procedure assignments, rule sets, rules, rule versions) under that customer unit | **None, ever.** Its copy of the role holds Read at Basic on those five tables only. |
+| **Spaarke Customer Configuration Owners** (named, non-default, one in EACH customer's top business unit; never the root) | The customer's configuration rows of the declared tables (AI Search indexes, field-mapping profiles and rules). Seeders will own new rows to this team; until then an operator re-owns them | **None, ever.** Its copy of the role holds Read at Basic on those tables only. |
+
+**Customer configuration rows** (R4b-3b, field-mapping #2399) are owned in the customer's top business unit, never the
+root, which holds only Spaarke product data. Dataverse refuses to assign a row to a principal whose roles lack Read on
+the table (`0x80040299`), and the unit's default team is not an acceptable owner (a role on it reaches every member of
+the unit), so the owner is this second memberless team. The BFF does not resolve it. Field-mapping's seeder (its task
+004) and provisioning's H12b seeder (FR-39) will own new configuration rows to this team; until they ship, no seeder does,
+so the rows stay with the seeding identity and an operator re-owns them to this team after setup. Users keep reading the rows through their own roles: Spaarke Core User holds Read on these tables at
+Deep, which reaches the rows for a user homed in the customer's top unit or above it (the root); a user homed in a unit
+below it does not reach them.
+
+**The hard-deny tables' ordinary rows sit in the customer's top business unit** (the team's unit;
+`RestrictedContentOwnerTeam.CustomerTopBusinessUnitAsync`), whichever unit below it the answer came from. Dataverse depth
+then decides who reaches them: Business Unit (Local) depth reaches them for a holder homed in that unit; Deep (Parent:
+Child) for a holder homed in that unit or above it (the root); Global for everyone. A holder homed in a unit BELOW the
+customer's top unit does not reach them with Deep or Business Unit depth. So two rules follow:
+- **No user-facing (non-admin) role may hold Read on these tables at a depth that reaches the team's rows.** That is no
+  Global Read, no Deep Read held by a user homed in the customer's top unit or the root, and no Business Unit Read held
+  by a user homed in the customer's top unit. Customer users are homed in that unit (H11), so in practice: no Business
+  Unit, Deep or Global Read on these five tables for a user-facing role. Unified-access-control-r2 task 191 must never
+  grant such a depth on them.
+- **Administrator roles are the exception, and they depend on where the admin is homed.** Spaarke Ontology Administrator
+  holds its rule and rule-version privileges at Deep, not Global. An Ontology Administrator homed in the customer's top
+  unit (or above it, in the root) reads, publishes and retires the rules the restricted-content team owns; one homed in a
+  child unit of it does not, and would no longer see those rules on their admin tab. On dev today the only holder is
+  homed in the root, so nothing breaks. No role was changed for this.
 
 Other ways teams matter:
 

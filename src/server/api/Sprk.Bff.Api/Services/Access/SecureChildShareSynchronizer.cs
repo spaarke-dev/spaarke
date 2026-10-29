@@ -612,7 +612,22 @@ public sealed class SecureChildShareSynchronizer
     /// <see cref="SecureChildShareSyncStatus.Incomplete"/>. Removing access is never the unsafe direction, so nothing is
     /// re-checked before a revoke.</para>
     /// </remarks>
-    public async Task<SecureChildMirrorRemoval> RemoveMirrorAsync(string childLogicalName, Guid childId, CancellationToken ct)
+    public Task<SecureChildMirrorRemoval> RemoveMirrorAsync(string childLogicalName, Guid childId, CancellationToken ct) =>
+        RemoveMirrorAsync(childLogicalName, childId, heldInIsolation: false, ct);
+
+    /// <summary>
+    /// UAC task 194b fix round R (A2): takes the mirrored shares off ONE child a pass that may release HOLDS in isolation (the
+    /// rule gives it an ordinary team, but <c>SecureChildReconciler</c> keeps it on the Secure Record owner team: K3, F1-d).
+    /// The record that isolated it no longer makes it secure, so its sharees lose access through it, exactly as a released
+    /// child's do (<see cref="RemoveMirrorAsync(string, Guid, CancellationToken)"/>); unlike a released child it stays on the
+    /// Secure team, readable by nobody until a Full Access holder or the next pass places it — an under-share, never an
+    /// over-share. A child no longer owned by the Secure team is not touched (another write placed it; the next pass decides it).
+    /// </summary>
+    public Task<SecureChildMirrorRemoval> RemoveHeldMirrorAsync(string childLogicalName, Guid childId, CancellationToken ct) =>
+        RemoveMirrorAsync(childLogicalName, childId, heldInIsolation: true, ct);
+
+    private async Task<SecureChildMirrorRemoval> RemoveMirrorAsync(
+        string childLogicalName, Guid childId, bool heldInIsolation, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(childLogicalName);
         if (!SecureChildLineage.Children.TryGetValue(childLogicalName, out var table))
@@ -637,7 +652,16 @@ public sealed class SecureChildShareSynchronizer
             var team = await ResolveSecureOwnerTeamAsync(_dataverse, _configuration, ct).ConfigureAwait(false);
             if (team.Refusal is { } refusal)
                 return new SecureChildMirrorRemoval(SecureChildShareSyncStatus.Failed, 0, refusal);
-            if (team.TeamId is { } secureTeam && owningTeam == secureTeam)
+            if (heldInIsolation && (team.TeamId is not { } heldBy || owningTeam != heldBy))
+            {
+                _logger.LogWarning(
+                    "[SECURE-CHILD-SHARES] {Child} was held in isolation but is no longer owned by the Secure Record owner team; " +
+                    "its shares are NOT removed here (the next pass decides it).", child);
+                return new SecureChildMirrorRemoval(
+                    SecureChildShareSyncStatus.Incomplete, 0, $"{child} is no longer owned by the Secure Record owner team");
+            }
+
+            if (!heldInIsolation && team.TeamId is { } secureTeam && owningTeam == secureTeam)
             {
                 _logger.LogWarning(
                     "[SECURE-CHILD-SHARES] {Child} is still owned by the Secure Record owner team, so it is still isolated: its " +
@@ -1265,7 +1289,7 @@ public sealed class SecureChildShareSynchronizer
     internal static async Task<(Guid? TeamId, string? Refusal)> ResolveSecureOwnerTeamAsync(
         IGenericEntityService dataverse, IConfiguration configuration, CancellationToken ct)
     {
-        var secureBu = await ResolveSecureBusinessUnitAsync(dataverse, configuration, ct).ConfigureAwait(false);
+        var secureBu = await SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync(dataverse, configuration, ct).ConfigureAwait(false);
         if (secureBu.Ambiguous)
             return (null, "more than one business unit carries the Secure Record name");
         if (secureBu.Id is not { } secureBuId)
@@ -1280,25 +1304,6 @@ public sealed class SecureChildShareSynchronizer
         if (teams.Count > 1)
             return (null, "more than one Secure Record owner team carries the configured name");
         return teams.Count == 0 || teams[0].Id == Guid.Empty ? (null, null) : (teams[0].Id, null);
-    }
-
-    /// <summary>
-    /// WHICH business unit is the Secure Record BU, by id: the one named by <c>SecureRecord:BusinessUnitName</c>, read with
-    /// TOP 2 — <c>RecordOwnershipResolver.ResolveSecureBusinessUnitAsync</c>'s rule. Two matches are <c>Ambiguous</c> (the
-    /// caller refuses); none means this environment has no Secure Record BU, so no business unit is it. A Dataverse fault
-    /// propagates. Step 1 of <see cref="ResolveSecureOwnerTeamAsync"/>, and on its own the guard of
-    /// <see cref="SecureChildReconciler.ReownOrdinaryRowAsync"/> (UAC task 183), which refuses a row or a team in that
-    /// business unit — ANY team there, so the guard holds once each secure family has its own owner team (task 178).
-    /// </summary>
-    internal static async Task<(Guid? Id, bool Ambiguous)> ResolveSecureBusinessUnitAsync(
-        IGenericEntityService dataverse, IConfiguration configuration, CancellationToken ct)
-    {
-        var buQuery = new QueryExpression("businessunit") { ColumnSet = new ColumnSet("businessunitid"), TopCount = 2, NoLock = true };
-        buQuery.Criteria.AddCondition("name", ConditionOperator.Equal, SecureRecordOwnerTeam.BusinessUnitName(configuration));
-        var businessUnits = (await dataverse.RetrieveMultipleAsync(buQuery, ct).ConfigureAwait(false)).Entities;
-        if (businessUnits.Count > 1)
-            return (null, true);
-        return businessUnits.Count == 0 || businessUnits[0].Id == Guid.Empty ? (null, false) : (businessUnits[0].Id, false);
     }
 
     /// <summary>
