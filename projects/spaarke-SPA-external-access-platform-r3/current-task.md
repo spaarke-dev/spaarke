@@ -35,6 +35,8 @@
 - uac-r2: approved #2450; 194b hold OPEN.
 - ontology-r1: task 168 round 3 (`CallerPrincipalResolver` ComposeAsync lifts) reviewed and APPROVED by R3 (no findings); they filed DI-137 #2458.
 - ebilling: told the `sprk_invoicestatus` removal SHA `929dc42d31`.
+- ebilling (~18:00Z): wants the next dev BFF to carry master with #1911 (ebilling-r1; merge pending, CI hang). R3 told them to apply `Ebilling:Enabled=true` + Finance settings THEMSELVES, AFTER R3's UAC 30-min gate passes, with their own owner go (`StoredFileReconcileEnabled` stays false). R3 to message them: deployed commit/ProductVersion after readback, and "gate passed". Whether to wait for #1911 is the owner's call.
+- field-mapping (17:4xZ): asked that the next dev candidate be master ≥ `b86381d4c4` (W7: #2442 RecordFamilyReader, #2459 GET /api/v1/records/{table}/{id}/family, MetadataService Redis key v1→v2, census 133→134). That SHA contains `2cd0f62e2c`, so it is under the UAC hold. Told them; after readback send them the ProductVersion/commit for their task 076 (GET-only Family check; they may ask for a rollback, which is the owner's call).
 
 ## Standing rules (verify against project CLAUDE.md)
 - **DEPLOY HOLD (UAC):** no dev BFF from master ≥ `2cd0f62e2c` until UAC clears it.
