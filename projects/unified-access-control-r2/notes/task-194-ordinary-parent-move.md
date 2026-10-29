@@ -128,3 +128,845 @@ assignments, 6 service requests = 117 roots → 117 ÷ 50 = 3 runs × 2 minutes 
   catch-up sweep (F4-a) walks every root again, handing the documents off anew.
 - Each changed ordinary root is walked in full (one query per lineage table per level, plus resolver reads per row), so
   a burst of edits to large matters is bounded only by `MaxRootsPerRun` (50).
+
+## 194b: one deterministic ownership question per existing row
+
+**Defect (found in the post-deploy report-only gate).** The ordinary-moves pass, the secure pass and `ReparentAsync` took
+an existing row's primary parent from the order Dataverse returned its lookup attributes. That order is not the writer's
+order, so the reconciler could plan a move to a different team than the row's writer chose (49 of 52 planned moves on dev).
+
+**A. A fixed primary per table, shared by the writers and the reconciler.**
+- `RecordOwnershipContext.InPrimaryOrder` ranks a row's ownership lookups by its table's `SecureChildLineage` declaration
+  order (the order is now meaningful and stated in the class remarks); `OrderedParentsOf(row)` uses it.
+- `sprk_signal` / `sprk_decisionrecord`: `ForExistingRowAsync` asks the writer's question: core
+  (`sprk_corerecordtype` + `sprk_corerecordid`, the catalog read through `CoreAncestorResolver.CoreTableOfRecordTypeAsync`),
+  then the subject (`SignalWriter.SubjectEntityOf`), then the subject's core-ancestor stamps re-derived through
+  `CoreAncestorResolver.ResolveStampsAsync` (read-only), then the row's other lookups. Parity tests compare the FULL ordered
+  parent list against `SignalWriter.OwnershipContextOf` and `DecisionRecordWriter.OwnershipContextOf`.
+- A Signal or Decision Record with NO core record is reported, never moved: its owner is its To Do assignee's team (D-134),
+  kept by `TodoAssigneeOwnerReconciliationJob`. An unknown core type or an unreadable catalog row is Undetermined (Failed,
+  never a guess).
+- `sprk_analysis`: its document first. `sprk_analysisoutput`: its analysis. `sprk_document`: parent document, then core
+  lookups (matter, project, work assignment), then `sprk_related*`.
+- Used by `SecureChildReconciler` (`ContextFor`, both passes) and both `ReparentAsync` paths. Secure-if-any is still read
+  over every parent.
+
+**B. Look through a user-owned FILED primary child (I-6).** In `ResolveFromParentsAsync`, a primary that is a child-table
+row (`IsReparentableChild`) with no owning team and with a filing answers with that filing (the same look-through the
+content-row rule already used, generalised, not duplicated). Bounded by `MaxLineageDepth`; past it the resolver REFUSES
+(`ParentUnresolved`), never "ordinary". A core record (matter, project, work assignment, service request) is a root and
+is never looked through. An unfiled user-owned primary keeps its own unit. `SignalWriter`'s check is unchanged.
+
+Create-time writers whose answer B changes (only when the primary is a user-owned, filed child): analysis create/promote
+(`AnalysisEndpoints`, `AppOnlyAnalysisService`) for a user-owned filed document; the
+attachment child (`EmailAttachmentProcessor`) of a user-owned filed parent document; a no-core Signal or Decision Record
+whose subject is a user-owned filed child and that has no assignee; content-row chains deeper than one level. Isolation is
+never relaxed: the look-through keeps the original parents in the secure-if-any set (same set or a superset).
+
+**C. Time slice.** `SecureChildReconciliationJob.OrdinaryTimeSlice` (60 s), checked between roots like
+`RefileTimeSlice`. Roots not reached are carried (recent) or held by the sweep cursor (swept); none is dropped.
+`ResultJson.ordinaryMoves.timeSliceReached` and the summary log report it.
+
+**Dev measurement (read-only, 2026-10-27).**
+- `sprk_signal`: 191 with a core (164 matter, 6 project, 21 work assignment): every one already in its core's business
+  unit, so 0 differ from the 194b answer (= SignalWriter's). 13 with no core: now reported, not decided.
+- `sprk_decisionrecord`: 24 with a core (18 matter, 1 project, 1 service request, 4 work assignment): 0 differ. 3 with no
+  core: reported.
+- `sprk_analysis`: none has a user-owned document (B changes nothing on dev). 69 user-owned analyses sit in a different
+  unit from their document; user-owned rows are reported, not moved, before and after.
+- `sprk_document`: no child of a user-owned parent document; the 7 children in another unit from their (team-owned)
+  parent are user-owned (reported). 14 team-owned documents name both a matter (BU1) and a communication in another unit:
+  before 194b their answer depended on attribute order (the communication's unit when read first); after, the matter
+  decides, which is where they already are.
+- `sprk_event`: 2 name both a matter and a project; the matter now decides.
+
+**Fix round, slice 1 (adversarial review at 3fc7ef2b4f: F1-a, F4, K2, To Do parity of F3).**
+- F1-a: a regarding-pair host table ranks its SUBJECT (the lookup that repeats `sprk_regardingrecordid`,
+  `RecordOwnershipContext.SubjectColumnOf`, through `SignalWriter.SubjectEntityOf`) by its writer's rule. `sprk_todo`: the
+  subject, then `sprk_regardingdocument`, then `sprk_regardingcommunication`, then the lineage order (OfficeService: "the
+  record regarding first, then the document or email"). `sprk_signal` / `sprk_decisionrecord`: the typed core lookups, then
+  the subject, then the lineage order. Before, a To Do regarding a matter and created from an unfiled email took the email's
+  unit. `ReparentAsync` reads the pair from the row as it stands; a change that moves the subject lookup without the pair
+  (the pair is not part of `RecordReparent`) falls back to the carrier and lineage order for that one decision, and the
+  reconciler re-asks with the row's pair afterwards.
+- F4: `RecordOwnershipContext.ForChild` lists its parents primary first, then in the table's primary order, and with no
+  explicit primary takes the first of that order; `OwnedChildWrite.ParentsOf` (create_record, `BudgetInquiryExecutor`,
+  `RecordCreationService`) orders the payload's lookups the same way, reading the pair from the body.
+- K2: `RecordThreadFiling.ParentsOf` uses `OrderedParentsOf`.
+- Parity (F3, To Do): `TodoOwnershipParityTests` drives the Office route, `TodoGenerationService` and
+  `InquiryReplyTodoCreator` and compares the writer's full ordered parent list with the reconciler's question.
+- Dev (read-only, 2026-10-27): 69 To Dos; 2 carry a document beside a matter, both in the matter's unit; none names two
+  record lookups. 0 To Do answers change under F1-a.
+
+**Fix round, slice 2 (F1-b, F1-c, F1-d, K3, K5, F2, Signal and Decision Record parity of F3).**
+- F1-c: the assignee rule (`ExistingRowOwnership.NoCoreOwnerRule`) is set only for a no-core row whose subject is a To Do
+  AND that `TodoAssigneeOwnerReconciliationJob` selects: `SelectsAsync`, the job's own steps extracted as shared statics
+  (`ClassifyToDoAsync`, `KeepsRowsOf`, `HasLiveCoreStamp`, `IsOwnedByUser`), which the job's `DecideRowAsync` also calls. Every
+  other no-core row is decided over `[subject, ..rest]`, as its writer decided it. A To Do read that faults, or no links, makes
+  the row undetermined.
+- F1-d: a Decision Record's question appends every resolved Signal's ownership lookups (the job's
+  `ResolvedSignalSubjectsAsync`, extracted; a fault makes it undetermined). One never-out predicate,
+  `RecordOwnershipContext.DecisionRecordHeldInIsolation`, has three callers: a root's secure pass on a move OUT of a row
+  isolated at the pass's start (Unsecure included: held, reported Untouched with the reason; NOT the child pass after an
+  F3-permitted re-file, `AfterRefileAsync`, whose release ontology task 144 criterion 3 pins — open question for the
+  coordinator), the ordinary pass at its isolated /
+  Secure-BU check (reported), and `ReparentAsync` after the owner is resolved and before the F3 check or any write
+  (refused `ParentUndetermined`, logged). A move into isolation is never held.
+- K3: the secure pass never moves a job-kept no-core row OUT of a start-isolated position (held, reported with the job's
+  rule); a move IN still happens.
+- F1-b: an undetermined row in the secure pass is resolved over the parents it stores; a Secure answer moves it IN (or keeps
+  it isolated: secure-if-any over a subset that is secure is secure over the whole). Any other answer still fails.
+- K5: `ExistingRowReads` caches the catalog row by record type and the stamps by subject for one pass.
+- F3: parity goes through the real writers: `SignalWriter.OwnershipOfAsync` (core through `PickStampAsync`, and the owner)
+  and `DecisionRecordWriter.OwnershipParentsForAsync` (the write's own filing and owner step: the regarding builder, the derived cores, `SignalSubjects`).
+- F2 count (read-only, dev, 2026-10-27): 13 no-core Signals (2 event subjects, 11 To Do subjects; 2 of the To Dos filed under
+  an unfiled user-owned event) and 3 no-core Decision Records (unfiled communications). 0 writer answers change under B. B
+  stays: it lives in the resolver (`ResolveFromParentsAsync`), so the writers' no-core contexts and the reconciler's no-core
+  question make the same choice from one place (pinned by the owner-equality parity test).
+- Reparent limit: no isolation decision depends on the fallback order. Secure-if-any reads every parent and every
+  un-team-owned parent's filing (`ReadUnownedChildLineageAsync`) regardless of order; the order only picks the ordinary team,
+  and a primary look-through past its bound refuses.
+
+**Fix round, slice 3 (analysis, attachment and .eml parity of F3).** The three remaining parity tests call the writers'
+own builders, in `WriterBuilderOwnershipParityTests`: `AppOnlyAnalysisService.OwnershipOfNewAnalysis` (now also used by the
+`AnalysisEndpoints` create route and `AnalysisResultPersistence`), `AnalysisEndpoints.OwnershipOfPromotedAnalysis`,
+`EmailAttachmentProcessor.OwnershipOfAttachmentDocument`, `IncomingCommunicationProcessor.ArchivedEmlDocument` (the archive row
+with its lookups and owner) and `IncomingAssociationResolver.OwnershipContextOf` (the static tail of
+`OwnershipContextForNewRecordAsync`: the communication's question, which the archive's owner comes from). No answer changes.
+
+**Fix round R, run R1 (A1, A2; ontology answer (c)).**
+- A1: a Decision Record's existing-row question takes its Signal subjects from `sprk_steps.resolvedSignalIds` (written once
+  at create, never truncated), not from the Signals' `sprk_decisionrecord` link: `DecisionCommitService.ResolvedSignalSubjectsOfRecordAsync`
+  reads the listed Signals by id, in any state, in pages of `ResolvedSignalReadPage` (100; no 5,000 cap, verifier K1), and
+  applies `KnownSignalSubjectsOf`, the rule `SignalSubjectsOf` now delegates to (each Signal's subject only, stored order,
+  de-duplicated). The question is `ExistingRowOwnership.Incomplete` (decided over what is known) when `sprk_steps` is missing
+  or unparseable or has no `resolvedSignalIds`, a listed Signal is unreadable or gone, or a subject table cannot be derived.
+- `DecisionRecordHeldInIsolation` takes the question's incompleteness and holds only then. It is one predicate with the same
+  callers, in every pass: `refileChildPass` is removed. `ReparentAsync` passes `ReparentQuestionIncomplete`, because a
+  re-file asks about its own lookups, so its behaviour is unchanged until R2 (A5). The FK reader is the To Do job's own again.
+- A2: a row held in isolation by a pass that may release (F1-d or K3) loses its mirror through
+  `SecureChildShareSynchronizer.RemoveHeldMirrorAsync` and stays on the Secure team. A removal that does not complete marks
+  the row failed for the next pass. The report lists `HeldInIsolation`; `SecureChildPassSummary` carries `held` and
+  `heldRecords` (at most 50, with why) on the Unsecure and provisioning responses. Holding does not make a pass incomplete.
+- Ontology criterion 3's seed now writes the Decision Record's `sprk_steps` as `DecisionRecordWriter` does; its assertions and
+  wording are unchanged.
+- Dev count (read-only, 2026-10-27): 28 Decision Records, all 28 list `resolvedSignalIds`: 0 lack the key, and 0 of those are
+  Secure-owned (2 records are Secure-owned overall).
+
+**Known gaps (not 194b).**
+- A gate Decision Record on an unfiled communication is owned by the communication's user (D-144); the reconciler asks it as
+  a plain row (keep-creator), so it is never moved.
+
+## Fix round R, runs R2–R5 (history and decisions)
+
+**R2 (09db6130b3 … 72a15de9ed).**
+- A3: a user-owned primary child that loops (an event and its communication filed under each other, two documents) no
+  longer runs to `MaxLineageDepth` and refuses. The look-through carries the primaries it has seen; on a revisit or at the
+  bound it decides secure-if-any over the parents it holds. Only an answer that would be ordinary refuses.
+- A4: a second never-out check in the re-file settle. Dropped in R3 (coordinator: A5 makes it unreachable).
+- A5: `ReparentAsync` refuses a generic re-file of a Signal or a Decision Record before anything is read or written
+  (`WriterOwnedFilingRefusal`). Only their writers file them. Dev: 0 field-mapping profiles, playbook nodes or configs
+  name either table.
+- A6: `TodoAssigneeOwnerReconciliationJob` reads a Decision Record's resolved Signals from `sprk_steps.resolvedSignalIds`
+  (the resolver's one source), not from the Signals' link. It never writes an ordinary owner on part of the question.
+
+**R3 (1c69bd74cb … 454e0f848d).**
+- A4 and `ReparentAsync`'s unreachable Decision Record never-out branch removed.
+- B1: `IncomingAssociationResolver.OwnershipContextOf` orders the writes and the stamps together, keyed by the lookup each
+  is written to, in `sprk_communication`'s order. **Deviation, accepted:** the brief asked for the writes ordered "before
+  the stamps"; ordering both together is what the reconciler reads. Dev: 6 communications hold a matter and a project, 0
+  in different business units.
+- B2: the Compose copy asks its inherited links in `sprk_document`'s order.
+
+**R3b (e25cb27461 … 87a185061f): one builder.**
+- `RecordOwnershipContext.ForRow(table, column → parent, pairId)` is the one builder of a child row's question. It orders
+  through `InPrimaryOrder`, the order the reconciler reads the written row in. `ForChild` routes through it.
+- **Decision 2 (coordinator): the table's order wins.** An explicit caller-named primary ("regarding first") gives way to
+  the table's order: `TaskActionCore`, Office, `TodoGenerationService`, `InquiryReplyTodoCreator`. The CommunicationService
+  secure-links copy loses its "first secure link" override too.
+- Two behaviour changes follow decision 2:
+  - an event asks its stamped matter before its regarding project (the owner was asked over the regarding lookup alone);
+  - a budget revision asks its budget before its matter. The theory
+    `ReviseBudget_TheRevisionIsOwnedByTheTeamTheOwnershipRuleNames` was updated from matter-first to budget-first.
+- Decision 1: contexts that are not about a child row's owner are out of scope: `ContentOf`, `GateDecisionRecordSharing`,
+  the secure-root cascade, the To Do job's own parent list. They are the guard's permanent exemptions.
+- The closed opt-out: `ForParentsInWriterOrder`, used only by `SignalWriter` and `DecisionRecordWriter`, whose order is their
+  table's rule. `WriterOrderOptOutAllowListTests` fails on any other caller and on a stale entry.
+- `SecureChildLineage`: the comment now says a service request IS an ordinary ownership and filing parent
+  (`FilingParentOf`); only the Secure lineage map leaves it out.
+
+**R4 (bb09c42cda): real-column keying.** Every extra parent is keyed under the real column that files it, so `ForRow`
+ranks it as the reconciler does:
+- a message's thread filing is keyed under `sprk_communicationthread`, which `sprk_communication`'s order ranks after the
+  message's own lookups (`RecordThreadFiling.FilingLookupsOf`);
+- a project's ADR-024 pair parent is keyed under `sprk_regardingrecordid`.
+- **`RootLookupOrder` deviation, approved by the coordinator.** The pair needs a rank on `sprk_project`, which is a root.
+  Adding `sprk_project` to `SecureChildLineage.Children` would have made projects reconciled children. A separate
+  `SecureChildLineage.RootLookupOrder` ranks it instead. After the master merge (R5), `RecordFamilyEdgesGuardTests` (which
+  reads `Children`) passes unchanged.
+- **Repair attribute-order defect, found and fixed.** `RecordCreationService` Repair asked a row's parents in the order
+  Dataverse returned its attributes: the #2339 class. It now asks through `ForRow` (`OwnerQuestionOf`), the same question
+  Create and the reconciler ask. Dev: 0 rows affected (Repair has no live caller; K-c).
+
+**R4-2 (defdadbb8e … e75511f6ec).**
+- Spend signals: `SignalEvaluationService` asks once per firing snapshot over the matter and the snapshot
+  (`ForRow("sprk_spendsignal", …)`, matter before snapshot). A refused snapshot writes no signal for that snapshot.
+- **Office communication defect, fixed.** An email-derived document is written with its association AND
+  `sprk_relatedcommunication`, but the save and the upload worker asked about the association alone. A secure
+  communication beside an ordinary association was seen only by the reconciler's next pass. The save now resolves the
+  communication first (the capture's id, or a read by Message-ID) and asks over both
+  (`OfficeDocumentPersistence.DocumentOwnershipOf`). A failed read refuses the save. The worker asks the same question
+  over the payload's communication. (V-fix 4 changed the failed read's code from OFFICE_022 to OFFICE_014; see below.)
+- **Contact ruling (coordinator): the reconciler is right.** A contact is never an ownership parent; people lookups are
+  never family. A document filed to a contact is filed only by its communication, and is unfiled when that is empty.
+  `AssociationTargetOwnershipOf` was removed. Dev: 0 documents hold `sprk_relatedcontact`.
+
+**R4-3 (d92dec5a0e): B4.**
+- Carried roots run least-recently-attempted first.
+- The time slice never stops a group (listed, swept) before its first root, so every run advances at least one root of
+  each group.
+- A report-only run resumes after the last root the previous report-only run reached (`ordinaryMoves.reportCursor`),
+  wrapping around. The cursor is cleared when a run reaches every root, and by a writing run.
+
+**R5.**
+- Merged `origin/master` (9280a282d3): field-mapping 070 `RecordFamilyEdges`, and 037's copied Assigned To default. The
+  default is still applied in `OwnedChildWrite.CreateAsync` before the caller check, the secure-root plan, the
+  `OwnershipOf` / `ForRow` question and the create.
+- One Secure Record business-unit lookup (6666ab5d5e, round-130 rule 3):
+  `SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync`, beside `IsInSecureBusinessUnit`. The private copy in
+  `RecordOwnershipResolver` and the copy in `SecureChildShareSynchronizer` are gone. No behaviour change: the resolver
+  passes its logger, so its ambiguity error log stays.
+
+**V-fix (after both verifiers on bd5208d0b5).**
+- **1, isolation: a task regarding an ownership parent that `sprk_event` cannot file is refused** (79edcf637e).
+  `TaskActionCore` dropped such a regarding (no column for it) and asked about no parent, so the task landed in the acting
+  user's team even under a Secure document, To Do, agreement or billing event. Now `TaskActionCore.RegardingRefusalOf`
+  refuses it, fail closed, with `task_regarding_not_filable`: the playbook node fails (`ValidationFailed`), the ad-hoc
+  route answers 422 `CREATE_TASK_FAILED` naming the code, and nothing is written. A regarding type that is not an
+  ownership parent and has no column (for example `systemuser`) still creates the task unfiled. The other `ForChild`
+  callers were checked for the same lost-target pattern; none loses its primary:
+  - Office To Do: every `TodoRegardingMap` column it asks about is written.
+  - `InquiryReplyTodoCreator`: the matter is written through `ApplyResolverFieldsAsync`.
+  - `TodoGenerationService`: the builder throws on an unmapped type; the content source is the permanent exemption above.
+  - `CommunicationService` secure copy: its links are written as columns.
+- **2, isolation: the ordinary pass never writes on an incomplete question** (fed2e4ac08). A Decision Record (not
+  isolated: an isolated one is reported held, R4b-2b F4) whose resolved Signals cannot all be read now gets `Failed` (with the reason) in `DecideOrdinaryRowCoreAsync` when the answer
+  is ordinary, instead of an owner computed from part of its parents. A question that is secure on what it could read is
+  still reported for the secure pass.
+- **3, parity: `sprk_canonicaldocument` in the writers' question: STOPPED, not changed.** Task 146's comment in
+  `ComposeCreateOnSavePromoter` (~:252) gives the reason Compose excludes the link: "a byte-identical canonical is not a
+  parent; following it could hand the saver's own document to another record's team". Task 148 R5 recorded the
+  remaining difference as an under-share only. Including the link as an ownership parent would make an ordinary copy
+  take the canonical's business unit (the saver's document handed to another business unit's team), and the link is
+  severed when the copy diverges, so the question would change after the fact. Reported to the coordinator for a
+  decision (for example: the canonical counts for secure-if-any only, never as the ordinary primary).
+- **4, behaviour: a transient communication read on an Office save is retryable** (5b5ffee272). A failed read of the
+  email's communication now answers 502 `OFFICE_014` (`DataverseError`, `retryable: true`), which the add-in's
+  `errorMessages.ts` already treats as recoverable. `OFFICE_022` stays for a real owner refusal (403, not recoverable).
+- **5, performance: per-pass lookup cache** (cb18593a6e). Each reconcile pass shares a `RecordOwnerLookupCache`
+  (`RecordOwnershipContext.LookupCache`): the Secure Record business unit (primed from the ordinary pass's own read) and
+  each business unit's default owner team are read once per pass, not per row. The cache lives exactly as long as the
+  pass, and only answers are kept. Test shape (12 events under a moved matter): Secure Record business-unit reads 14 → 2
+  (the pass's fixed setup reads), default-team reads 12 → 1, so 2 reads saved per row; on verifier B's dev shape (about
+  180 reads per root) that removes 2 of each row's reads. Not cached, on purpose: `ReownOrdinaryRowCoreAsync`'s
+  pre-write guard still reads the Secure Record business unit fresh before each write.
+- **6, guard: builders matched by metadata identity** (8333a22a19). See the guard baseline below.
+- **7, test: the event writer is compared with its written row** (cc8365fd81). `EventOwnershipContextTests` runs the real
+  handler and compares its question with `OrderedParentsOf` over the Web API body it wrote. No hand-written list.
+
+### Known limits accepted in R (recorded, not filed separately unless listed under "Issues to file")
+
+- **Capture before refusal (R4-2, widened by V-fix).** The Office save runs the email capture before the owner question,
+  so every email or attachment save that is then refused, for any reason (an unreadable communication, now a retryable
+  OFFICE_014, or an owner refusal, OFFICE_022), has already captured the email. The capture is best-effort and idempotent
+  on the Message-ID, as mailbox intake would make it, so a retry does not duplicate it.
+- **Email saved to an Event or To Do association (V-fix).** `sprk_document`'s primary order
+  (`SecureChildLineage.DocumentPrimaryRank`) ranks the parent document, then the matter, project or work assignment, then
+  the other links in declaration order. An email saved to an Event or To Do association therefore takes its business
+  unit from the communication (`sprk_relatedcommunication`), not from the event or To Do, when the two are in different
+  ordinary business units. Writer and reconciler agree (one order). Secure-if-any reads both. Dev: 0 rows.
+- **CommunicationService case 2 (R3b-2).** The outbound secure-links copy, when all its links are ordinary and in
+  different business units, is now owned by `sprk_document`'s primary (for example the project) rather than the first
+  link named. With any secure link it is the Secure team in either order (proven through the real resolver). Dev: 0
+  rows (25 email-attachment documents carry `sprk_relatedcommunication`, none carries a record link).
+- **In-memory report-only cursor (coordinator ruling, R4).** `ordinaryMoves.reportCursor` lives in the job singleton,
+  like every window the job keeps. The job has no durable state store, and none is added. A restart starts the report-only
+  window from its first root.
+- **5 dev documents (data only).** Email-derived documents whose communication sits under a different ordinary matter
+  than the document's own association: `dc70ebdf`, `fe41f0c5`, `0342f0c5`, `0742f0c5`, `73910392`. None of the matters
+  is secure. Under the ordinary rule the document's own lookups decide, in the table's order.
+
+### The guard baseline (`ChildRowOwnershipBuilderGuardTests`)
+
+Since V-fix 6, `RecordOwnershipContext`'s own builders are exempt by metadata identity (each pinned by its signature), not
+by name, so a new overload that shares a builder's name is scanned like any other caller (control:
+`Detector_ExemptsABuilderByIdentity_NotByName`). **Remaining guard K:** the exemptions and the ratchet below are still
+matched by (type, method) NAME, and the guard sees only how a question is BUILT: it cannot check that the columns a
+writer hands `ForRow` are the columns it writes (`ForRow` semantics cannot be scanned from IL). The per-writer parity
+tests (`OrderedParentsOf(written)` against the writer's question) carry that.
+
+Permanent exemptions (not a child row's owner in a table's order):
+- `RecordOwnershipContext.ContentOf`
+- `GateDecisionRecordSharing.AskOwnerAsync`
+- `SecureRootInheritance.UnsecureFollowingParentsAsync`
+- `TodoAssigneeOwnerReconciliationJob.ParentsAnswerAsync`
+- `SecureChildReconciler.Pass.ContextFor` (the reference question)
+- `SecureChildReconciler.PlaceCascadeRowsAsync`
+- `TodoGenerationService.CreateTodoAsync` (no column holds a standalone to-do's content source)
+- `GrantExternalAccessEndpoint.ResolveGrantOwnerAsync`
+- `ExternalIntakeEndpoints.SubmitServiceRequestAsync`
+- `RecordOwnershipResolver.ResolveReparentOwnerAsync`
+- `OntologyAdminAuthoringService.CheckVersionOwnerAsync` (a secure-if-any gate that binds no owner)
+
+Ratchet (single-parent sites, so order decides nothing; move to `ForRow` when touched):
+
+| Site | Reason |
+|---|---|
+| `ExternalProjectDataEndpoints.ResolveChildOwnerAsync` | Single parent: the route's root |
+| `AnalysisResultPersistence.PersistReviewMemoAsync` | Single parent: the analysis |
+| `AnalysisResultPersistence.StoreDocumentProfileOutputsAsync` | Single parent: the analysis |
+| `AppOnlyAnalysisService.ExecutePlaybookAnalysisAsync` | Single parent: the analysis |
+| `InvoiceReviewService.CreateInvoiceRecordAsync` | Single parent: the matter (the vendor organisation is not an ownership parent) |
+| `SpendSnapshotService.ResolveSnapshotOwnerAsync` | Single parent: the matter OR the project, one per path |
+
+### Dev finding: budget revision `e4e5dbe6-8fbf-f111-aaaf-0022482913fc` (read-only, 2026-10-28)
+
+**Facts:**
+- The revision is owned by a USER (the developer account), in the root business unit.
+- Its budget `0f7f39b7` and its matter `b68299c6` (REAL-2026-123456.02, not secure) are owned by the default team of
+  Spaarke Business Unit 1.
+- The audit shows how it got there:
+  - the matter has been owned in BU 1 since 2026-09-09;
+  - the revision was created on 2026-10-03 by the ontology R1 task-005 seed script, a direct Dataverse create under the
+    developer's own identity, outside the BFF, so Dataverse made the creator its owner;
+  - the budget, also user-owned, was assigned to BU 1's default team by hand on 2026-10-21 under the same identity. The
+    revision was not.
+
+**What this branch's ordinary pass plans for it (report-only):**
+- When it walks the matter (recent window or sweep), the rule answers BU 1's default team: the budget first, then the
+  matter, both in BU 1.
+- The row is user-owned and that team is in another business unit, so the pass reports it ("owned by a user, and the rule
+  gives it a team in another business unit: reported, not moved", the I-6 interim) and does not move it. Writing runs
+  behave the same.
+
+**Verdict: bad seed data, not a defect.** No product path created or re-owned the row. A product-created revision
+(`DecisionActionExecutors` revise-budget) is asked through `ForRow` and owned by the team the rule names. To clean it up,
+assign the row to BU 1's default team by hand. It is the same class as the 69 user-owned analyses above.
+
+### V-fix 3: a copy's canonical is a Secure-only parent (coordinator ruling 2026-10-28, as built)
+
+**The rule.** An editable copy's link to the byte-identical canonical it was saved as (`sprk_document.sprk_canonicaldocument`)
+counts for secure-if-any only: a copy of Secure content is Secure, and an ordinary canonical never decides the copy's
+business unit. It is never the primary and never in `OrderedParentsOf`.
+
+**One definition.** `RecordOwnershipResolver.SecureOnlyLookups` sits beside `CitationLookups` with the opposite rule (a
+citation counts for nothing; a Secure-only parent counts for secure-if-any). It is read through `IsSecureOnlyParent` by:
+- the writers' question (`RecordOwnershipContext.ForRow`; `RecordOwnershipContext.SecureOnlyParents`);
+- the reconciler's question (`ForExistingRowAsync`, through `SecureOnlyParentsOf(row)`; `SecureChildReconciler.ContextFor`);
+- the re-file (`ReparentAsync`: the Secure-only columns leave the primary order and go to `SecureOnlyParents`; the F3
+  after-set includes them, so keeping a Secure canonical is never read as leaving its secure root).
+
+**The answer.** `SecureDecisionAsync` (the one secure-if-any block, now shared) reads the Secure-only parents' facts with the
+ordered ones. An unreadable one is refused (`ParentUnresolved`), as any named parent is. With no other parent, a Secure
+canonical answers the Secure team; otherwise the row takes the unfiled answer (the caller's team, or KeepCreator in the
+reconciler), never the canonical's business unit. The look-through of a primary parent follows ordered parents only
+(`withSecureOnly: false`); the lineage walks read the Secure-only parents too.
+
+**What it removes.** The reconciler's "unfiled copy takes the canonical's business unit" path (task 146's case): the link
+was a lineage parent at the lowest rank, so on an unfiled copy it became the primary.
+
+**Writers.**
+- *Compose* (`ComposeCreateOnSavePromoter`): the canonical is added to the question under its own column; the upsert is
+  owned as that answer says.
+- *Office* (option a; `OfficeDocumentPersistence.ResolveEditableContentIdentityAsync`, `DocumentOwnershipOf(...,
+  canonicalDocumentId)`): no new DI dependency and no re-own after create. **Deviation from "before its owner question":**
+  the identity (quickXorHash) can only be read from the uploaded item, and the owner question runs before the upload so a
+  refusal writes nothing. So the first question stays where it is, and a SECOND question, with the canonical, is asked after
+  the upload and before the create. Its answer owns the create, which links exactly the canonical that question named (the
+  identity is passed into the create, not re-resolved). A refusal of the second question writes no document, removes the
+  upload when nothing references it, records the job Failed (`OwnerUnresolved`) and answers `OFFICE_022`. Word `.docx`
+  saves are stamped with their own record id, so they never link; only unstampable bytes can.
+
+**Known limit (recorded; no mechanism built, per the ruling).** A diverged copy stays isolated. Graduate-on-divergence
+clears `sprk_canonicaldocument` with a plain update, which is no re-file and asks no owner. A copy made Secure by its Secure
+canonical therefore stays in the Secure team after its content diverges, until a re-file asks again without the link (the
+same outcome as an authorized user copying content out of a Secure record) or the root is unsecured.
+
+### R4b-2: the hard-deny tables' restricted-content owner team (owner round 131, the 086 ruling; as built)
+
+**The set.** `RecordOwnershipResolver.RestrictedContentTableSet`: `sprk_storedfile`, `sprk_procedureassignment`, `sprk_ruleset`,
+`sprk_policy`, `sprk_policyversion`, read through `IsRestrictedContentTable`. The question names its row's table in
+`RecordOwnershipContext.ChildEntityLogicalName`, filled by `ForRow` (so `ForChild`), `ForExistingRowAsync`, the re-file
+(`ResolveReparentOwnerAsync`) and the reconciler's `ContextFor`. The builder guard flags a hand-set value.
+
+**The answer.** One ordinary exit (`OrdinaryExitAsync`) wraps both default-team answers: the primary's business unit and the
+acting user's. For a hard-deny row it answers the restricted-content owner team, recording the default team it replaced
+(`RecordOwnerResolution.InPlaceOfDefaultTeamId`). It is a normal team answer, so the census and the writers' team-only
+contracts are unchanged. Secure-if-any, the not-isolated refusal and the Secure-team answer are unchanged, and so is any
+answer that keeps the creator (`KeepCreator`: the reconciler's unfiled rows).
+
+**The team.** `Infrastructure/Dataverse/RestrictedContentOwnerTeam`, matched by name like `SecureRecordOwnerTeam.IdentifyAsync`
+but on the SDK seam the resolver reads through:
+- `RestrictedContent:OwnerTeamName`, default "Spaarke Restricted Content Owners";
+- an Owner team (`teamtype = 0`), `isdefault = false`, exactly one;
+- in the ROOT business unit (`parentbusinessunitid` null, exactly one root);
+- no `teammembership` row.
+
+It fails closed: `record_owner_restricted_content_team_unresolved`, logged as an Error with the status and member count (no
+names), never the default team. A Dataverse fault propagates. It is identified once per pass through `RecordOwnerLookupCache`,
+and the reconcile report carries it (`SecureChildReconcileReport.RestrictedContentOwnerTeam`: status and `MembersFound`).
+
+**Rule 1: the creator is kept where the writer keeps it.**
+- *Ontology save* (`SavePolicyAsync`): asks no question, binds no owner (unchanged; existing test
+  `Save_IsUnchanged_ItNeverAsksTheResolver_AndBindsNoOwner`).
+- *Ontology publish* (`PublishVersionAsync`): its question is hand-built, names no table and binds no owner on an ordinary
+  answer. So it is never answered with, or refused for, the restricted-content team (`RestrictedContentOwnerTests`).
+- *The ordinary pass today, for a user-owned (author-owned) `sprk_policy` / `sprk_policyversion` row:* never written.
+  - It is not reported when the author's business unit is the business unit of the rule's answer (the matter's).
+  - Otherwise it is reported Untouched with the I-6 detail ("owned by a user, and the rule gives it a team in another
+    business unit").
+  - A row owned by a non-default team is treated the same way.
+
+  Kept: those comparisons now use the business unit of the default team the restricted-content team replaced, not the root
+  business unit.
+
+**The reconciler.**
+- An Unsecure moves an isolated hard-deny row to the restricted-content team. The move is read back and counted Changed.
+- The ordinary pass expects that team: a row it owns is AlreadyCorrect (no I-6 report), and a row still on a business unit's
+  default team moves to it.
+- Make Secure (provisioning, the sweep) is unchanged.
+- An unusable team refuses the row: it stays isolated and the report carries the member check.
+
+**For R4b-3 / 191.** These rows sit in the ROOT business unit. A Deep or Global Read on these tables would therefore reach every
+one of them, so task 191 must never grant BU-depth or Deep Read on them.
+
+**Noticed, not changed.**
+- `SecureChildReconciler.AfterRefileAsync` re-owns a USER-owned row to the resolver's team after a re-file. For a hard-deny
+  row that is now the restricted-content team (before: the default team). No writer re-files these tables on this branch.
+- `TodoAssigneeOwnerReconciliationJob.IsConfigurationRefusal` does not list the new code. That job never asks about these
+  tables.
+
+### R4b-2b: ontology re-check findings at cfa7bbe421 (as built)
+
+**F1: a Decision Record outside the root's lineage, reached through a Signal it resolved.** A Decision Record's question (c)
+asks about the subject of every Signal it resolved, which no lineage lookup names. So the walk missed it: E2 filed under
+Secure matter X left a Decision Record about E1 (core M1, ordinary) ordinary while its question was Secure (D-123), and an
+Unsecure of X never released one isolated only by E2 (criterion 3).
+- `SecureChildReconciler.LoadDescendantsAsync` now runs `AddDecisionRecordsResolvingAsync` after each level. Every Decision
+  Record that resolved a Signal the level reached joins that level, unless the pass already holds it, and its own lineage is
+  walked below it. It is decided like any row of the pass, with its full (c) question (`ForExistingRowAsync`). Its Signal
+  subjects are its parents in `AncestorsInPass`, so it is re-decided when E2 moves. Every pass does this: Make Secure, the
+  sweep, Unsecure, the pass after a re-file and the ordinary pass.
+- **Two reads, unioned.**
+  - The records whose `sprk_steps` lists the Signal id. This is a `LIKE '%{id:D}%'` match, OR'd and chunked at
+    `DescendantConditionsPerQuery` (200). It reads the same ids the question reads; `DecisionRecordWriter` writes them in
+    `D` form (:1996).
+  - The record the Signal's own `sprk_decisionrecord` link names. The link is already on the Signal row, so this is one
+    `id IN (…)` read per chunk. It covers a record whose steps the text match cannot see, such as an id stored in another
+    `Guid` form, which the parser accepts.
+- **Why not the link alone.** The link can miss. `DecisionCommitService` links a Signal only when the commit closes it
+  itself. A Signal someone else closed during the review returns Warn `closed_during_review`: it is listed in
+  `resolvedSignalIds` and never linked.
+- A false text match (the id appearing elsewhere in a record's steps) only adds a record to the pass. That record is decided
+  by its own question, so its answer is the same as it would be anywhere.
+- `RecordFamilyEdges` remarks: the comment now says the walk reaches such a record from the Signal, not through an edge.
+- **Tests.** In `SecureChildOrdinaryParentMoveTests`:
+  - the E1/E2 case in both directions: Make Secure moves it IN; Unsecure releases it to its core's team;
+  - the link branch: steps listing the id in `N` form, plus the link;
+  - a must-not-fire control: a record listing no Signal of the pass is not read into it.
+
+**F3.** `AnUnsecure_ReleasesACompleteAllOrdinaryDecisionRecord`: an Unsecure releases an isolated Decision Record whose
+question is complete and all ordinary. Its listed Signal is about an ordinary event. The record is Changed, has no held
+entry, and loses its mirror.
+
+**F4: what happens to a Decision Record (corrects the wording in the V-fix notes and the R4b-2 summary).**
+
+| Pass | Owned now | Question | Answer | Outcome |
+|---|---|---|---|---|
+| Ordinary pass | ordinary | incomplete | ordinary | `Failed` with the reason; nothing written; the root is carried |
+| Ordinary pass | in isolation | incomplete | ordinary | `Untouched`, reported with the F1-d detail; the pass stays Completed |
+| Unsecure, or another pass that may release | in isolation | incomplete | ordinary | `Untouched` + `HeldInIsolation`; its mirror comes off; the pass stays Completed |
+| Any pass | in isolation | complete | ordinary | Leaves isolation like any row (Unsecure; F3) |
+| Any secure pass | ordinary | either | Secure | Moves IN; a move into isolation is never held |
+
+- "Failed and carried, never re-owned" applies only to row 1: a non-isolated incomplete record in the ordinary pass.
+- "A Decision Record is never moved out" was wrong. Only an incomplete record is held; a complete one moves out.
+- `ReportHeldDecisionRecordAsync` now logs a Warning when the rule gives no team (refused or unowned). The Warning carries
+  the outcome and refusal code, no names, and the row stays where it is. This is a log line only, so it has no test.
+
+**Also noticed (coordinator items).**
+1. *Re-file of an author-owned hard-deny row.* The R4b-2 note placed this in `AfterRefileAsync`; that was wrong.
+   `AfterRefileAsync`'s descendant pass never writes a user-owned ordinary row. Only gate Decision Records are re-owned
+   from a user there. The write was in the re-file itself: `ReparentAsync`'s settle re-owned a user-owned row to the
+   answer, which for a hard-deny row is now the restricted-content team.
+   - Now the settle keeps the author, and writes nothing, when the row is owned by a user and the answer is the content
+     team (`InPlaceOfDefaultTeamId` set). It answers `Unchanged` with `AuthorKeptRestrictedContentReason`. This matches
+     the ordinary pass.
+   - A Secure answer still takes the row into isolation. A user-owned row of any other table is still re-owned to the
+     default team.
+   - `KeepCreatorUnlessTargetIsTeamOwned` does not fit: it keys on the target parent's owner, not on the row's. The new
+     check reuses the R4b-2 marker instead of adding a rule.
+   - The row's author is read in the same committed read (`RowOwnership.OwningUser`).
+   - Tests in `RestrictedContentOwnerTests`: keeps its author (fires); still goes Secure (control); another table is still
+     re-owned (control).
+2. *`TodoAssigneeOwnerReconciliationJob.IsConfigurationRefusal`.* Left unchanged: the job cannot reach the new code. It asks
+   `ForUserTeam` and `ForParents`, neither of which names a table (`ChildEntityLogicalName` is null). Its rows are Signals and
+   Decision Records, neither in the hard-deny set.
+3. The Secure safeguard in the ordinary exit is unchanged (coordinator: fine as it is).
+
+### R4b-3: the restricted-content owner team and role (definitions and docs; no live writes)
+
+> **HELD (coordinator, 2026-10-28).** The owner ruled that the Spaarke root business unit holds only Spaarke product data:
+> customer records belong in the CUSTOMER's top business unit (H10's `customerBusinessUnitId`, a sibling of Secure Record).
+> So this team moves there. Everything below is the root-unit version as built. The R4b-2 root-unit check, the config,
+> the script and the docs change with the revised brief, which also carries the ontology re-check items F2 (an
+> author-owned policy row goes Incomplete when the team cannot be resolved) and F3 (five missing tests).
+>
+> **Superseded by R4b-2c below** (the team in the customer's top business unit; F2 and F3 done).
+
+**Built.**
+- `config/restricted-content-owner-role.json` is the ONE definition, in the same structure as
+  `secure-record-owner-role.json`:
+  - team `Spaarke Restricted Content Owners`, which equals `RestrictedContentOwnerTeam.DefaultOwnerTeamName`;
+  - role `Restricted Content Owner`;
+  - `businessUnit: root`;
+  - Read at Basic on the five hard-deny tables. Each entry gives its reason and its evidence: metadata privilege names
+    and ids read on spaarkedev1 on 2026-10-28. No probe refusal is recorded, because a probe is a write and waits for
+    the owner's go.
+- `scripts/Set-RestrictedContentOwnerTeam.ps1`, modelled on `Set-SecureRecordOwnerRolePrivileges.ps1`:
+  - Dry run by default. `-Verify` exits 1 on drift. `-Apply` with `-Verify` is refused. Every read pages to the end and
+    fails closed: exit 1, nothing decided. It uses the operator's az CLI identity, with no secrets.
+  - **Drift:**
+    - team or role missing;
+    - the team not teamtype 0, a default team, or outside the root unit;
+    - any member;
+    - any other role on the team;
+    - the role, or any of its business-unit copies, assigned to another team or a user;
+    - a declared privilege missing or at another depth;
+    - any privilege outside the file.
+  - **`-Apply`** creates the team (root unit, teamtype 0, the operator as administrator) and the role (root unit) if
+    either is missing. It adds the five at Basic, narrows a wrong depth (removes it, then adds it at Basic), strips every
+    other privilege of this role (the platform injects some, setup guide 5.4), assigns the role, and reads everything
+    back against the same drift check. It removes a member only from a team it created in the same run (the create's
+    own side effect).
+  - It refuses, before writing anything, drift an owner decides: members, wrong type or unit, default team, other roles,
+    other assignees.
+- `tests/Spaarke.ArchTests/RestrictedContentOwnerRoleGuardTests`:
+  - the live file gives no finding: Read, Basic, root; the tables are exactly `RecordOwnershipResolver.RestrictedContentTables`;
+    each privilege name is its own table's Read; names unique; a reason and evidence on every entry; no per-entry
+    depth or access field; the team name equals the code default.
+  - must-fire controls: an extra privilege (Write), an extra table, a raised depth (the file's, one entry's), a duplicate
+    privilege name, another team name, another business unit, a missing table, another access type.
+  - Perturbations: live file at Local → 1 red; no duplicate check → 1 red; no hard-deny check → 2 red.
+
+**Dev dry run (spaarkedev1, read-only, 2026-10-28).** Root BU `Spaarke` (06fbf21c-1872-f011-b4cb-7c1e52671ad0). No team
+named `Spaarke Restricted Content Owners`; no role `Restricted Content Owner` in the root unit. Plan:
+1. create the team in the root unit (teamtype 0, no members);
+2. create the role in the root unit;
+3. add Read at Basic: `prvReadsprk_Policy`, `prvReadsprk_PolicyVersion`, `prvReadsprk_StoredFile`, `prvReadsprk_ruleset`,
+   `prvReadsprk_procedureassignment`;
+4. strip everything else on the role;
+5. assign the role to the team;
+6. read back.
+
+`-Verify` today exits 1 (TEAM MISSING, ROLE MISSING). The drift checks were also exercised read-only with a scratch
+config naming the root unit's default team and `Basic User`. They report the default team, its 176 members, its 3
+other roles, the role's other assignee, and missing and outside privileges, and `-Apply` would refuse. Nothing was
+applied: `-Apply` waits for the owner's go.
+
+**Provisioning.** `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`:
+- §7.11 has a callout: H7b does not create the team yet; it is a manual step;
+- §12.2 has "Phase 5d", the script's three modes, before Phase 6 deploys a BFF with the rule.
+
+Without it every ordinary write to these tables is refused (`record_owner_restricted_content_team_unresolved`). Moving
+it into H7b (customer-provisioning-orchestration-r1) is that project's call.
+
+**191.** These rows sit in the ROOT business unit. No user-facing (non-admin) role may hold Read on these tables at
+Local, Deep or Global depth: a root-unit user with Local or Deep Read, or anyone with Global, would read them all. Task
+191 must never grant such a depth on them. This is recorded in `UAC-ACCESS-MODEL-GUIDE.md` (owner teams) as well.
+
+**Ontology dependency (ontology condition, 2026-10-28).**
+- Spaarke Ontology Administrator holds its policy and policy-version privileges at Deep, not Global. So a rule owned by
+  the root-unit content team is readable and editable only by admins homed in the root unit.
+- Live today the only holder is in the root unit, so nothing breaks. An Ontology Administrator homed in a child unit
+  would lose those rules from their admin tab, and could not publish or retire them.
+- Recorded here and in `UAC-ACCESS-MODEL-GUIDE.md`; no ontology guide exists in `docs/guides`. No role was changed.
+
+**Docs.**
+- `docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md`, I-6: the hard-deny exception, the walk reaching a Decision
+  Record through its Signals, and the setup script.
+- `docs/guides/UAC-ACCESS-MODEL-GUIDE.md`: the role table, the ownership rules and the owner-team table.
+
+### R4b-2c: the team lives in the customer's top business unit (owner round 136; as built)
+
+> Supersedes the root-unit parts of R4b-2 and R4b-3 above. The owner's ruling: the Spaarke root business unit holds only
+> Spaarke product data. Customer records, configured or working, belong to the customer's own top business unit, the direct
+> child of the root that provisioning H10 creates (`customerBusinessUnitId`, a sibling of Secure Record).
+
+**The rule as built (`RestrictedContentOwnerTeam`, `RecordOwnershipResolver.OrdinaryExitAsync`).**
+- The ordinary answer is a business unit's default team: the primary parent's unit, or the acting user's. The exit now takes
+  that unit (both call sites pass it).
+- `CustomerTopBusinessUnitAsync` walks up from that unit to the root's direct child, reading `businessunit.parentbusinessunitid`
+  by id. It uses a visited set and a bound of 32 levels.
+- `IdentifyAsync(top, secureBu)` refuses a top unit that is the Secure Record unit. It then finds the named non-default Owner
+  team IN that unit (TOP 2) and reads its members (TOP 5).
+- Fail closed, each a named status, refusal `record_owner_restricted_content_team_unresolved`, and one Error log carrying the
+  status and the business-unit ids (no user, no name):
+
+  | Status | When |
+  |---|---|
+  | `AnswerIsRootBusinessUnit` | the answer's unit is the root itself |
+  | `CustomerBusinessUnitIsSecureRecord` | the top unit is Secure Record |
+  | `ParentChainUnreadable` | a unit on the walk is gone |
+  | `ParentChainLoops` | a unit is met twice, or the bound is passed |
+  | `OwnerTeamNotFound` / `OwnerTeamAmbiguous` / `OwnerTeamHasMembers` | the team in the top unit |
+  | `SecureBusinessUnitAmbiguous` | defensive only: every entry point refuses an ambiguous Secure unit before the exit |
+
+- A Dataverse fault propagates, as the resolver's other reads do.
+- Per pass (`RecordOwnerLookupCache`): the outcome per ANSWER unit (the walk) and the identity per CUSTOMER unit (the team).
+  `RestrictedContentOwnerTeams` lists each distinct outcome; the reconciler report carries that list (it was one identity).
+- `InPlaceOfDefaultTeamId` still names the replaced default team, so the ordinary pass's business-unit comparison is
+  unchanged: it compares with the answer's own unit, not the customer's top unit.
+- The derived rule was kept. No reason was found for a configured business-unit id instead. H10 records the unit, H4b
+  writes it as `ExternalAccess__CustomerBusinessUnitId`, and the walk derives the same unit from the data. It also covers an
+  environment with several customer units (dev has four direct children besides Secure Record) without a per-unit setting.
+
+**F2 (`SecureChildReconciler.DecideOrdinaryRowCoreAsync`).** On that refusal, a row the ordinary pass never moves is now
+reported Untouched with a detail, not Refused. Those rows are a user-owned row (the I-6 detail) and a row owned by a team
+that is not a default team. Picked over "decide Stay before asking", which would have duplicated the Stay decisions above
+the ask. With the team absent, an author-owned policy and a non-default-team policy leave the pass Completed. A
+default-team policy is still Refused, and the pass is Incomplete.
+
+**`ReparentAsync`: author wins (R4b-2d, owner round 137 rule 1).** The same refusal used to hit `ReparentAsync` for a
+user-owned hard-deny row whose answer is the content team: it was refused before the write, and the settle threw
+`RecordOwnerUnsettledException`. Both points now return Unchanged with `AuthorKeptRestrictedContentReason` when the row
+has an owning user (one predicate, `AuthorKeepsRestrictedContent`). The change is written and nothing throws. A row owned
+by a team, a default team included, still refuses when the team cannot be used. Tests in `RestrictedContentOwnerTests`:
+- the team missing before the write (author-owned): Unchanged, the change written, no assignment;
+- the team becoming unusable before the settle (author-owned): no throw, Unchanged, no assignment;
+- must fire: a default-team-owned row with the team missing is refused and the change is not written.
+
+**F3 tests (`SecureChildOrdinaryParentMoveTests`).**
+- (a) An over-match: the steps mention Signal B outside `resolvedSignalIds`. The record is read into the pass and stays at its
+  core's team.
+- (b) The discovery in the ordinary pass: the record is read in, and stays AlreadyCorrect at its core's team while E2
+  follows the matter to B.
+- (c) A fault in the steps read (new world helper `FailingLikeReadsOf`) or in the link read: the pass is Failed and nothing
+  is written.
+- (d) A Signal linked under a found record (only through `sprk_signal.sprk_decisionrecord`) is walked below it. It is decided
+  by its own question: a Decision Record is not an ownership parent (`OwnershipParentEntities`), so the link files nothing.
+- (e) 250 Signals: two text-match reads of at most 200 each, and the record resolving the last Signal is found.
+
+**Config, script, guard.**
+- `businessUnit` is `customer`.
+- `Set-RestrictedContentOwnerTeam.ps1` takes a mandatory `-CustomerBusinessUnitName` or `-CustomerBusinessUnitId`. It
+  refuses the root, Secure Record and a unit that is not a direct child of the root.
+- The role is created once in the root, because Dataverse copies a root role into every unit. Each customer unit's copy is
+  assigned to that unit's team.
+- An assignment counts as allowed only for a team of that name in a customer top unit holding that unit's copy.
+- `-Verify` lists other customer top units that lack the team, as information only.
+- The guard requires `customer`, and must fire on `root`.
+
+**Dev, read-only (2026-10-28).**
+
+| Business unit | Parent | Enabled users (humans) | Matters | Projects | Work assignments | Hard-deny rows |
+|---|---|---|---|---|---|---|
+| Spaarke (root) | — | 172 (14) | 5 | 6 | 25 | 6 policies + 9 versions, all user-owned |
+| Spaarke Business Unit 1 (`customerBusinessUnitId`) | root | 2 (2) | 57 | 19 | 5 | 0 |
+| Secure Record | root | 0 | 2 | 3 | 2 | 0 |
+| Spaarke Demo / Spaarke Dev 1 / Spaarke Test 1 | root | 0 | 0 | 0 | 0 | 0 |
+
+Stored files, rule sets and procedure assignments: 0 rows anywhere.
+
+**What would be refused on dev.** Any ordinary hard-deny write whose answer is in the root:
+- a row filed under one of the root's 5 matters, 6 projects or 25 work assignments (or under a root-owned policy);
+- an unfiled create by one of the root's 172 users, through a writer that asks with the table and does not keep its creator.
+
+None runs today:
+- the ontology save asks no question (waiver);
+- the publish asks a hand-built question that names no table;
+- the reconciler leaves the 15 user-owned policy rows (F2);
+- no writer for the other three tables runs yet.
+
+The ebilling writers are the first that would hit it.
+
+**Smallest dev arrangement (proposed; the owner approves).**
+1. Run the script against Spaarke Business Unit 1: dry run, `-Apply`, `-Verify`. It creates the team there and creates the
+   role once in the root.
+2. Before ebilling's writers run on dev, either home their users in Business Unit 1, or file their rows under Business
+   Unit 1 records. Moving the root-owned matters, projects and work assignments is an owner decision; nothing needs to move
+   for today's writers.
+3. Demo, Dev 1 and Test 1 hold no users and no records, so they need no team until they do.
+4. The Ontology Administrator holder is homed in the root, and Deep from the root covers Business Unit 1, so that admin
+   keeps working.
+
+**Dry run (read-only, spaarkedev1, 2026-10-28).**
+- The run found the root `Spaarke`, Secure Record, and the customer unit `Spaarke Business Unit 1`
+  (`cb15f587-baa0-f111-aaac-000d3a99d1d7`). It reported TEAM MISSING and ROLE MISSING.
+- INFO: Demo, Dev 1 and Test 1 lack the team.
+- Plan:
+  1. create the team in Business Unit 1;
+  2. create the role in the root;
+  3. add the five Read privileges at Basic;
+  4. strip any other privilege;
+  5. assign the Business Unit 1 copy;
+  6. read back.
+- `-CustomerBusinessUnitName Spaarke` refuses (the root). `'Secure Record'` refuses. `-Verify` exits 1 on the two missing
+  items.
+
+**Later (not this run).** Run a live report-only pass on dev against a root with more than one Signal below it. It proves
+Dataverse accepts the steps text-match OR query (`sprk_steps like '%<id>%'`, up to 200 per query). Record its duration and
+the Decision Record count, and compare them with a direct query of the same records.
+
+### R4b-3b: the customer configuration owner team (field-mapping #2399, owner shape A; as built)
+
+A second declared, memberless team in each customer top business unit: `Spaarke Customer Configuration Owners`, holding
+that unit's copy of the role `Customer Configuration Owner` (created once in the root). The role holds Read at Basic on
+exactly `sprk_aisearchindex`, `sprk_fieldmappingprofile` and `sprk_fieldmappingrule` (field-mapping's list) and nothing else.
+No BFF resolver change: seeders own customer configuration rows to this team (field-mapping task 004 owns that seeder).
+- `config/customer-configuration-owner-role.json` is the role's one definition; its `tables` array is the declared list.
+- `scripts/Set-RestrictedContentOwnerTeam.ps1` is renamed `scripts/Set-CustomerOwnerTeams.ps1` and generalised to the
+  declared role files (`$DeclaredRoleFiles`): one run sets up both teams in the named customer unit. It keeps the
+  refusals (root, Secure Record, not a direct child of the root), refuses two files that declare the same team, role or
+  table, refuses owner-decision drift in EITHER team before writing anything, and `-Verify` fails on drift or members in
+  either team. Older mentions of the old name above are history.
+- `RestrictedContentOwnerRoleGuardTests` checks each declared role against its own exact table set: the hard-deny tables
+  for the restricted-content role, `CustomerConfigurationTables` (the guard's declared array, kept equal to the JSON) for
+  the configuration role. A configuration table may never be a hard-deny table, an ownership parent or a secure-child
+  table. The two files declare different teams, roles and tables, and the script names both files. 14 configuration
+  must-fire controls (Write on each new table, another table's Read privilege on each, tables outside the set, a missing
+  declared table, raised depths, another access, team name, business unit) plus one restricted-content control (a
+  configuration table added).
+- Dev (read-only, 2026-10-28): the three tables are UserOwned; their Read privileges are prvReadsprk_AISearchIndex,
+  prvReadsprk_FieldMappingProfile and prvReadsprk_FieldMappingRule. A re-own would move 11 index, 7 profile and 40 rule rows
+  to BU1's team, all user-owned in the root today. Spaarke Core User holds Read on all three at Deep. BU1 has no child
+  unit; 2 enabled users are homed in it, both holding BU1's Core User copy, so they read the rows after the re-own (they
+  do not reach them in the root today). The 5 enabled holders of Core User homed in the root read them before and after.
+- The dry run for BU1 found both teams and both roles missing (a 12-step plan); the root and Secure Record are refused;
+  `-Verify` exits 1 with 4 findings. The live apply waits for the owner's go.
+
+**Round 138 (no code change in 194b).** Task 196b will make the Unsecure root pass KEEP its children's mirrors. That
+supersedes items 3a and 3a′ as built on this branch: a child the Unsecure pass touches loses its mirror (A2's held row,
+the F4 table's Unsecure row). They stay as they are here until 196b lands.
+
+### R4b-4: two security reviews of cfa7bbe421..12aeb8742a (as built)
+
+Server (pass A):
+- **A-F1, a crash path.** `DecideOrdinaryRowCoreAsync` read the default team a hard-deny answer replaced
+  (`InPlaceOfDefaultTeamId`, for the row's report) outside the row's try/catch. A Dataverse fault there escaped
+  `Pass.RunAsync`, `ReconcileOrdinaryParentMoveAsync` and the job's ordinary-moves run (documented "never throws"),
+  skipping the rest of the run, the settle and the cursor saves, in report-only too. Fix: the read has its own try; a
+  fault fails that row ("its owner could not be decided") and the pass goes on. A default-team-owned row now moves before
+  that read, so it never makes it. Every other await R4b added to the decision code was checked: the resolver call and the
+  answer's team read sit in the row's try; `ReportHeldDecisionRecordAsync` has its own; the Decision Record discovery
+  (`AddDecisionRecordsResolvingAsync`) is part of the walk, whose reads throw by design and are handled as a walk fault.
+  Tests: `RestrictedContentReconcileTests` (a user-owned policy fails alone, the default-team policy beside it still
+  moves); `SecureChildOrdinaryParentMoveTests` job theory, report-only and write (the run finishes, `failed` = 1, the
+  other row decided, the sweep cursor saved, the settle section present, the root carried when writing). All red before.
+- **A-F2, an unpinned condition.** `RestrictedContentOwnerTeam`'s `teamtype = 0`. Both test worlds (`OwnershipDirectory`,
+  `SecureChildShareWorld`) now seed an access team (1) and a group team (2) with the restricted-content name in the
+  customer unit, before the real team. Mutation (condition dropped): 23 tests red (OwnerTeamAmbiguous), restored.
+- **A-K1, a silent row.** A hard-deny row owned by a non-default team other than the restricted-content team, in the
+  answer's own unit, was Untouched with no detail and never reached the report. Still never moved (only default teams
+  move); it now carries "a hard-deny row owned by team {id}, which is not the restricted-content owner team ({id}) and not
+  a business unit's default team: reported, not moved" (ids only), whatever the team's unit. The member check was not
+  added (every such team is reported, with or without members). A user owner is its author (K3), so a user-owned row
+  keeps the report it had (rule 1). Tests: must-fire (same unit with a member, and another unit; no team name in the
+  detail) and a must-not-fire control (an ordinary table's non-default-team row in the answer's unit stays unreported).
+
+Setup, guard and docs (pass B):
+- **B-F1, fail open.** `Set-CustomerOwnerTeams.ps1` carried on when no unit matched `-SecureBusinessUnitName`, so with a
+  non-default `SecureRecord:BusinessUnitName` Secure Record was accepted as a customer unit. It now refuses no match and
+  more than one, and refuses if the Secure unit is ever counted among the customer top units. Pester
+  `tests/scripts/Set-CustomerOwnerTeams.Tests.ps1` (mocked Dataverse; any write fails the test): red on the old script.
+  Not in a CI workflow yet (CI runs named Pester files only); run with Pester 5.
+- **B-F3, one-way guard.** The guard matched each file name as a substring of the script. It now reads
+  `$DeclaredRoleFiles` as the script runs it (block and line comments dropped, one assignment) and asserts it EQUALS the
+  declared file set. Mutations of the live script: (A) an extra file and (E) the configuration entry commented out are red
+  on the new guard and green on the old one. The script's comment now states the equality.
+- **B-K1.** Both role names are pinned (`Restricted Content Owner`, `Customer Configuration Owner`); neither may equal the
+  Secure Record owner role's name. Mutation `roleName` = "System Administrator": red on the new guard, green on the old.
+- **B-K4.** A dry run whose drift -Apply refuses now exits 1 with the OWNER DECISION NEEDED summary (Pester must-fire red on
+  the old script; the plain-plan control exits 0 on both).
+- **B-K3.** `RestrictedContent:OwnerTeamName` is documented (UAC guide quick reference and hard-deny paragraph; the Secure
+  Record setup guide's configuration rows): it must equal the script's `teamName`, or every ordinary hard-deny write is
+  refused (`OwnerTeamNotFound`).
+- **Docs.** The deployment guide's step is now §12.2 "Phase 7a", after Phase 7 (H10 creates the unit) and before Phase 8.
+  It says the BFF deployed in Phase 6 refuses ordinary hard-deny writes until this step's `-Verify` exits 0; §7.11 agrees.
+  The seeder claim is future tense everywhere (both guides, the script, the configuration file): field-mapping's seeder
+  (task 004) and provisioning's H12b seeder (FR-39) will own new configuration rows to the team; until they ship the rows
+  stay with the seeding identity and an operator re-owns them after setup. The "Phase 5d" and "seeders own" wording above
+  is history.
+- **Dev (read-only, spaarkedev1, 2026-10-28, no -Apply).** BU1 dry run: the same 12-step plan, exit 0 (no owner-decision
+  drift). `-CustomerBusinessUnitName 'Secure Record' -SecureBusinessUnitName 'Nonexistent'`: refused, exit 1 (the old
+  script accepted Secure Record as the customer unit and printed a plan, exit 0). The root and Secure Record are still
+  refused (exit 1).
+- **Publish size** (Release, BFF only, against 12aeb8742a): +620 bytes total, +512 bytes `Sprk.Bff.Api.dll`.
+
+**R4b-4b (re-check follow-ups).** The script's second Secure-unit check on the customer top units could not fire (the
+line above filters it out) and is deleted. Phase 7a states its precondition: the Secure Record unit exists (H7b; the
+interim sequence has no step that creates it, so SECURE-PROJECT-ENVIRONMENT-SETUP.md §3-§5 by hand). The guard now fails on
+any write of `$DeclaredRoleFiles` other than its one array literal (`+=`, a reassignment, a scoped name, `Set-Variable`, the
+`variable:` drive, a collection method, `[ref]`): five must-fire and four must-not-fire controls (a commented write, a
+read, a comparison). A live `+=` append is red on the new guard and green on the R4b-4 one. The owner-teams Pester file
+runs in CI (`ci-standalone-checks.yml`, job `owner-teams-script-tests`, ubuntu-latest); it passes on Pester 5.7.1 and 6.2.0.
+
+Known limits, accepted:
+- **K2.** The restricted-content team's member check is read once per pass and cached; a member added mid-pass is seen
+  by the next pass.
+- **K3.** "Author" means the current owning user; the reconciler does not compare it with the creator.
+- **K4.** An Unsecure does not return a hard-deny row to its pre-secure author; it goes to the restricted-content team.
+  This belongs to task 196b.
+- **K5.** The live proof of the `sprk_steps` LIKE read (the Decision Record discovery) is pending.
+- **K6.** The ontology publish question names no table.
+- **K7.** One Error log per refused row (no aggregation).
+
+### Issues to file (issue-ready text; the coordinator files them)
+
+**K-a: Undetermined rows from bad data block their own root's Unsecure.**
+- *Context.* The secure pass cannot ask some rows their writer's question (`ExistingRowOwnership.Undetermined`). Examples
+  are a Signal or Decision Record whose subject's core-ancestor stamps are ambiguous (conflicting matter columns), or whose
+  core record type is not a core table in the record-type catalog. Such a row moves INTO isolation when the parents it
+  stores are secure (F1-b). Any other answer leaves it as it is and marks it Failed.
+- *Impact.* On Unsecure, a Failed row makes the child pass incomplete, so `POST …/unsecure` answers 500
+  `sdap.unsecure.children_incomplete` on every retry until the data is corrected. The row stays isolated (fail closed).
+  Since B4 it no longer starves other roots of the reconciliation job.
+- *Proposed fix.* Report these rows with a stable reason code on the Unsecure response (a new
+  `failedRecords` list beside `heldRecords`; today only the per-table `failed` count shows them). Add an admin repair path, or a report-only list in the census job, so an operator can correct the
+  stamps or catalog row. Decide with the owner whether Unsecure may complete with such rows held in isolation (as A2 does
+  for held Decision Records).
+- *Acceptance.* A root with one undetermined child: Unsecure reports the row and its reason. After the data is fixed, the
+  next Unsecure completes.
+
+**K-b: The ordinary-moves time slice does not bound a single root's walk.**
+- *Context.* `SecureChildReconciliationJob.OrdinaryTimeSlice` (60 s) is checked between roots. One root's walk (one query
+  per lineage table per level, plus resolver reads per row) runs to the end, bounded only by `MaxOrdinaryMovesPerRun`
+  (writes) and the root's size.
+- *Impact.* A very large ordinary root can make one run long. Other roots are not starved (B4: least-recently-attempted
+  order, at least one root per group per run), but that run's report and the next tick are delayed.
+- *Proposed fix.* Check the slice between lineage levels or between pages of a root's walk, and carry the root
+  (Incomplete) when the slice is spent mid-walk. The carry and the least-recently-attempted order already resume it.
+- *Acceptance.* A root whose walk exceeds the slice stops at the next level boundary, is carried, and completes over later
+  runs. The slice holds within one level's cost.
+
+**K-c: `RecordCreationService` Repair has no live caller.**
+- *Context.* `RecordCreationService.RepairAsync` and its owner step `RepairOwnerAsync` (field-mapping-server-write-path-r1
+  task 016; `RecordCreationService.cs` ~:878–897) are not reached by any endpoint or job. R4 fixed its owner question (the
+  table's order through `ForRow`, the attribute-order defect above), but nothing exercises it in production.
+- *Impact.* Code and tests to maintain with no behaviour behind them. A later caller would inherit rules (task 016's
+  fail-closed cross-BU escalation, the mapping gate) that were never run live.
+- *Proposed fix.* field-mapping decides: wire Repair to its intended route (FR-09), or delete it and its tests.
+- *Acceptance.* Either a live caller with an integration test, or the code removed and the census and guard entries
+  updated.
+
+**K4: An undetermined Signal or Decision Record blocks its root's Unsecure.**
+- *Context.* A Signal or Decision Record whose question cannot be asked because a READ faulted (a catalog or stamp read,
+  the To Do assignee check), as opposed to bad data (K-a), is Failed in the secure pass unless its stored parents are
+  secure. This is narrower since A1/A2: a Decision Record with an incomplete `resolvedSignalIds` question is held in
+  isolation and reported, not failed.
+- *Impact.* The root's Unsecure answers `sdap.unsecure.children_incomplete` until a retry finds the read healthy. The row
+  stays isolated (fail closed).
+- *Proposed fix.* Retry the faulted reads once inside the pass. If they still fail, report the row as held with a
+  retryable reason, so the caller sees "retry" rather than a generic incomplete.
+- *Acceptance.* An injected one-off read fault on a root's Signal: Unsecure completes on the in-pass retry. A persistent
+  fault: Unsecure reports the row as retryable, and nothing leaves isolation.

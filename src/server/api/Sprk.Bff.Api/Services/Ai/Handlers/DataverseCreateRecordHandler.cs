@@ -708,7 +708,7 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
             return Error(tool, denied, DataverseUserClientErrorCodes.AccessDenied, startedAt);
 
         var owner = await _ownership.ResolveOwnerAsync(
-            Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForParents(parents, CallerObjectId(context), me.SystemUserId),
+            OwnedChildWrite.OwnershipOf(tablename, item, CallerObjectId(context), me.SystemUserId), // 194b R (B3): the one builder
             ct).ConfigureAwait(false);
         if (owner.IsRefused || owner.IsSecureOwner)
         {
