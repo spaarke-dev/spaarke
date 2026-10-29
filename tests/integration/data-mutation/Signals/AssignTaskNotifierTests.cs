@@ -49,6 +49,7 @@ public sealed class AssignTaskNotifierTests
     private static readonly Guid AssignerOid = Guid.Parse("c1680000-0000-4000-8000-000000000005");
     private static readonly Guid AssignerUser = Guid.Parse("c1680000-0000-4000-8000-000000000006");
     private static readonly Guid PortalOid = Guid.Parse("c1680000-0000-4000-8000-000000000007");
+    private static readonly Guid OtherMatter = Guid.Parse("c1680000-0000-4000-8000-000000000008");
     private const string Address = "pat.assignee@firm.example";
     private const string EnvironmentUrl = "https://org.crm.dynamics.com";
     private const string PortalUrl = "https://portal.spaarke.test";
@@ -89,6 +90,12 @@ public sealed class AssignTaskNotifierTests
         public bool? Restricted { get; set; } = false;
         public AccessRights? PortalRights { get; set; } = AccessRights.None;
 
+        /// <summary>Per-record grants overriding <see cref="PortalRights"/> (a re-filed task's new record).</summary>
+        public Dictionary<Guid, AccessRights?> PortalRightsByRecord { get; } = new();
+
+        /// <summary>Records whose No Access wall stops the user (overrides <see cref="Wall"/>).</summary>
+        public HashSet<Guid> WalledRecords { get; } = new();
+
         /// <summary>The portal events list's per-row verdict on the task (true listed, false withheld, null undecided).</summary>
         public bool? PortalListsTask { get; set; } = true;
         public List<string> GateQuestions { get; } = new();
@@ -106,6 +113,9 @@ public sealed class AssignTaskNotifierTests
         public Guid? TaskAssignee { get; set; } = Contact;
         public int TaskState { get; set; }
 
+        /// <summary>The task's core filing lookups as Dataverse holds them NOW (only returned when the read selects them).</summary>
+        public Dictionary<string, EntityReference?> TaskFiling { get; } = new() { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", Matter) };
+
         public Harness()
         {
             var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["ExternalAccess:PortalUrl"] = PortalUrl }).Build();
@@ -116,7 +126,9 @@ public sealed class AssignTaskNotifierTests
                 .Returns((string entity, Guid id, Guid user, CancellationToken _) =>
                 {
                     GateQuestions.Add($"wall {entity} {id} {user}");
-                    return WallThrows ? Task.FromException<SecureShareWallOutcome>(new TimeoutException("dataverse")) : Task.FromResult(Wall);
+                    return WallThrows
+                        ? Task.FromException<SecureShareWallOutcome>(new TimeoutException("dataverse"))
+                        : Task.FromResult(WalledRecords.Contains(id) ? SecureShareWallOutcome.Walled : Wall);
                 });
             Gate.Setup(g => g.TaskRightsAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((Guid user, Guid task, CancellationToken _) =>
@@ -134,7 +146,7 @@ public sealed class AssignTaskNotifierTests
                 .ReturnsAsync((Guid contact, string table, Guid id, CancellationToken _) =>
                 {
                     GateQuestions.Add($"grants {contact} {table} {id}");
-                    return PortalRights;
+                    return PortalRightsByRecord.TryGetValue(id, out var byRecord) ? byRecord : PortalRights;
                 });
             Gate.Setup(g => g.PortalListsTaskAsync(It.IsAny<ContactBindingRow>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((ContactBindingRow contact, Guid task, CancellationToken _) =>
@@ -181,12 +193,19 @@ public sealed class AssignTaskNotifierTests
             Entities.Setup(e => e.RetrieveAsync("contact", Contact, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(() => new Entity("contact", Contact) { ["emailaddress1"] = ContactEmail });
             Entities.Setup(e => e.RetrieveAsync("sprk_event", TaskId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(() => new Entity("sprk_event", TaskId)
+                .ReturnsAsync((string _, Guid _, string[] columns, CancellationToken _) =>
                 {
-                    ["sprk_description"] = TaskDescription,
-                    ["sprk_duedate"] = TaskDue,
-                    ["sprk_assignedto"] = TaskAssignee is { } a ? new EntityReference("contact", a) : null,
-                    ["statecode"] = new OptionSetValue(TaskState),
+                    var row = new Entity("sprk_event", TaskId)
+                    {
+                        ["sprk_description"] = TaskDescription,
+                        ["sprk_duedate"] = TaskDue,
+                        ["sprk_assignedto"] = TaskAssignee is { } a ? new EntityReference("contact", a) : null,
+                        ["statecode"] = new OptionSetValue(TaskState),
+                    };
+                    // Dataverse returns only the columns asked for: a re-read that does not select the filing reads none.
+                    foreach (var (column, value) in TaskFiling)
+                        if (columns.Contains(column)) row[column] = value;
+                    return row;
                 });
             Entities.Setup(e => e.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "sprk_communication"), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(() => new EntityCollection(AlreadyRecorded ? [new Entity("sprk_communication", Guid.NewGuid())] : []));
@@ -672,6 +691,89 @@ public sealed class AssignTaskNotifierTests
         var (system, _) = h.SystemSends.Should().ContainSingle().Which;
         system.Body.Should().Contain(System.Net.WebUtility.HtmlEncode(PortalLink)).And.NotContain("main.aspx").And.NotContain("Acme");
         h.Bells.Should().BeEmpty();
+    }
+
+    // ── Fix round 2, review K2: the job follows the task's CURRENT filing, not the queued record ──────────────────────────
+
+    [Fact]
+    public async Task TheJob_ATaskReFiledToARecordTheExternalContactCannotSee_GetsNoEmail_MustNotFire()
+    {
+        var h = new Harness();
+        h.MakeExternal();
+        h.PortalRightsByRecord[OtherMatter] = AccessRights.None; // a grant on the queued matter only
+        h.TaskFiling["sprk_regardingmatter"] = new EntityReference("sprk_matter", OtherMatter);
+
+        (await h.Handler().ProcessAsync(Job(Payload()), CancellationToken.None)).Status.Should().Be(JobStatus.Completed, "a refusal is final");
+
+        h.SystemSends.Should().BeEmpty();
+        h.GateQuestions.Should().Equal($"grants {Contact} sprk_matter {OtherMatter}");
+    }
+
+    [Fact]
+    public async Task TheJob_ATaskReFiledToARecordTheInternalUserIsWalledOff_GetsNoEmail_MustNotFire()
+    {
+        var h = new Harness();
+        h.WalledRecords.Add(OtherMatter);
+        h.TaskFiling["sprk_regardingmatter"] = null;
+        h.TaskFiling["sprk_regardingproject"] = new EntityReference("sprk_project", OtherMatter);
+
+        (await h.Handler().ProcessAsync(Job(Payload()), CancellationToken.None)).Status.Should().Be(JobStatus.Completed);
+
+        h.SystemSends.Should().BeEmpty();
+        h.GateQuestions.Should().Contain($"wall sprk_project {OtherMatter} {LinkedUser}");
+    }
+
+    [Fact]
+    public async Task TheJob_ATaskReFiledToARecordTheContactCanSee_LinksThatRecord_NotTheQueuedOne()
+    {
+        var h = new Harness();
+        h.MakeExternal();
+        h.PortalRightsByRecord[OtherMatter] = AccessRights.Read;
+        h.TaskFiling["sprk_regardingmatter"] = new EntityReference("sprk_matter", OtherMatter);
+
+        (await h.Handler().ProcessAsync(Job(Payload()), CancellationToken.None)).Status.Should().Be(JobStatus.Completed);
+
+        var (system, _) = h.SystemSends.Should().ContainSingle().Which;
+        system.Body.Should().Contain(System.Net.WebUtility.HtmlEncode($"{PortalUrl}/?customer={CustomerKey}&record=matter:{OtherMatter:D}"))
+            .And.NotContain(Matter.ToString("D"));
+    }
+
+    [Fact]
+    public async Task TheJob_ATaskStillFiledToTheQueuedRecord_AndAlsoToAnotherRoot_StaysAboutTheQueuedRecord()
+    {
+        var h = new Harness();
+        h.MakeExternal();
+        h.TaskFiling["sprk_regardingproject"] = new EntityReference("sprk_project", OtherMatter);
+
+        (await h.Handler().ProcessAsync(Job(Payload()), CancellationToken.None)).Status.Should().Be(JobStatus.Completed);
+
+        h.SystemSends.Should().ContainSingle().Which.Request.Body.Should().Contain(System.Net.WebUtility.HtmlEncode(PortalLink));
+        h.GateQuestions.Should().Equal($"grants {Contact} sprk_matter {Matter}", $"portal {Contact} {TaskId}");
+    }
+
+    [Fact]
+    public async Task TheJob_ATaskReFiledUnderSeveralOtherRecords_GetsNoEmail_MustNotFire()
+    {
+        var h = new Harness();
+        h.TaskFiling["sprk_regardingmatter"] = new EntityReference("sprk_matter", OtherMatter);
+        h.TaskFiling["sprk_regardingproject"] = new EntityReference("sprk_project", Guid.NewGuid());
+
+        (await h.Handler().ProcessAsync(Job(Payload()), CancellationToken.None)).Status.Should().Be(JobStatus.Completed);
+
+        h.SystemSends.Should().BeEmpty();
+        h.GateQuestions.Should().BeEmpty("which record the email is about cannot be told, so the gate is not asked");
+    }
+
+    [Fact]
+    public async Task TheJob_ATaskNoLongerFiledUnderAnyRecord_IsNotEmailedToAnExternalContact_MustNotFire()
+    {
+        var h = new Harness();
+        h.MakeExternal();
+        h.TaskFiling["sprk_regardingmatter"] = null;
+
+        (await h.Handler().ProcessAsync(Job(Payload()), CancellationToken.None)).Status.Should().Be(JobStatus.Completed);
+
+        h.SystemSends.Should().BeEmpty("an external grant names a record; a task under none has no portal page");
     }
 
     [Fact]

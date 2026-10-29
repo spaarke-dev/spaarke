@@ -151,6 +151,37 @@ public class AssignTaskNotifier
     /// <summary>The table the Assign Task executor creates.</summary>
     internal const string TaskTable = "sprk_event";
 
+    /// <summary>The task's core filing lookups (<see cref="Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver.CoreAncestorLookups"/>):
+    /// the executor files a task under its core through <c>sprk_regarding{type}</c>, which is one of these for every core type.</summary>
+    internal static readonly string[] FilingColumns =
+        Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver.CoreAncestorLookups.Select(l => l.LookupAttribute).ToArray();
+
+    /// <summary>
+    /// The record a task is filed under NOW (review K2), from its <see cref="FilingColumns"/>: the <paramref name="queued"/> record
+    /// while its lookup still names it (a task also filed to another root stays about the record it was assigned on); otherwise the
+    /// one core it is filed under, or null when it is filed under none. False when it is filed under several others: which record
+    /// the email is about cannot be told.
+    /// </summary>
+    internal static bool TryCurrentFiling(Entity task, DecisionCoreRecord? queued, out DecisionCoreRecord? current)
+    {
+        ArgumentNullException.ThrowIfNull(task);
+        var filed = FilingColumns
+            .Select(task.GetAttributeValue<EntityReference>)
+            .Where(r => r is not null && r.Id != Guid.Empty && !string.IsNullOrEmpty(r.LogicalName))
+            .Select(r => new DecisionCoreRecord(r!.LogicalName, r.Id))
+            .Distinct()
+            .ToList();
+
+        if (queued is not null && filed.Any(r => r.Id == queued.Id && string.Equals(r.Entity, queued.Entity, StringComparison.OrdinalIgnoreCase)))
+        {
+            current = queued;
+            return true;
+        }
+
+        current = filed.Count == 1 ? filed[0] : null;
+        return filed.Count <= 1;
+    }
+
     /// <summary>The <c>appnotification</c> category (icon "assignment").</summary>
     internal const string Category = "assignment";
 
@@ -271,9 +302,10 @@ public class AssignTaskNotifier
     }
 
     /// <summary>
-    /// The system-mailbox send the fallback job runs: re-reads the task (still active, still assigned to the payload's contact), asks
-    /// the recipient gate again (D-199 Q2: never someone it refuses), and sends from <c>Communication:DefaultMailbox</c> unless an
-    /// email for the task was already recorded. Throws on a send or read fault (the job decides retry or poison).
+    /// The system-mailbox send the fallback job runs: re-reads the task (still active, still assigned to the payload's contact, and
+    /// the record it is filed under NOW), asks the recipient gate again about that record (D-199 Q2: never someone it refuses), and
+    /// sends from <c>Communication:DefaultMailbox</c> unless an email for the task was already recorded. Throws on a send or read
+    /// fault (the job decides retry or poison).
     /// </summary>
     internal async Task<AssignTaskSystemEmailOutcome> SendFromSystemMailboxAsync(AssignTaskEmailPayload payload, CancellationToken ct)
     {
@@ -286,7 +318,8 @@ public class AssignTaskNotifier
         try
         {
             task = await _entities.RetrieveAsync(
-                TaskTable, payload.TaskId, ["sprk_description", "sprk_duedate", "sprk_assignedto", "statecode"], ct).ConfigureAwait(false);
+                TaskTable, payload.TaskId, ["sprk_description", "sprk_duedate", "sprk_assignedto", "statecode", .. FilingColumns], ct)
+                .ConfigureAwait(false);
         }
         catch (Exception ex) when (RecordContainerResolver.IsRecordNotFound(ex))
         {
@@ -303,7 +336,23 @@ public class AssignTaskNotifier
             return AssignTaskSystemEmailOutcome.NothingToSend;
         }
 
-        var core = payload.CoreEntity is { } entity && payload.CoreId is { } id && id != Guid.Empty ? new DecisionCoreRecord(entity, id) : null;
+        // The record the task is filed under NOW (review K2): the gate and the link follow a re-filing, never the queued record.
+        var queued = payload.CoreEntity is { } entity && payload.CoreId is { } id && id != Guid.Empty ? new DecisionCoreRecord(entity, id) : null;
+        if (!TryCurrentFiling(task, queued, out var core))
+        {
+            _logger.LogInformation(AssignTaskNotifierEvents.SystemEmailJob,
+                "[ASSIGN-TASK-NOTIFY] task {TaskId} was re-filed and is now under several records; which one the email is about cannot " +
+                "be told, so no email.", payload.TaskId);
+            return AssignTaskSystemEmailOutcome.NotAllowed;
+        }
+
+        if (!Equals(core, queued))
+        {
+            _logger.LogInformation(AssignTaskNotifierEvents.SystemEmailJob,
+                "[ASSIGN-TASK-NOTIFY] task {TaskId} was re-filed since it was queued (now {Entity} {RecordId}); the gate and the link use that.",
+                payload.TaskId, core?.Entity, core?.Id);
+        }
+
         var recipient = await _gate.DecideAsync(payload.AssigneeContactId, core, payload.TaskId, payload.AssignedByObjectId, ct).ConfigureAwait(false);
         switch (recipient.Refusal)
         {
