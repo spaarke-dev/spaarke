@@ -25,6 +25,9 @@ namespace Spaarke.ArchTests;
 /// removes a row from them.</item>
 /// <item><b>Ownership-parent lineage (UAC-r2 ruling, 2026-10-28).</b> Every SecureChildLineage lookup whose target is an
 /// ownership parent (and is not a citation) is a registry row or a baselined disagreement.</item>
+/// <item><b>Output lookups (#2427).</b> A row's OUTPUT lookup is declared once, in <c>RecordOwnershipResolver.OutputLookups</c>
+/// (never an ownership parent); its baseline line is derived from that set, and a hand-written line for a lookup to an
+/// ownership parent the resolver would still offer fails.</item>
 /// </list>
 /// Each guard ships with must-fire and must-not-fire controls over synthetic data. Source only: static tables, no DI.
 /// </summary>
@@ -37,19 +40,22 @@ public class RecordFamilyEdgesGuardTests
     // ------------------------------------------------------------------------------------------------------------------
 
     /// <summary>
-    /// The known disagreements at task 070, each with its one-line reason. UAC-r2 works these down; a line that no longer
-    /// describes a disagreement fails (<see cref="ParityProblems"/>).
+    /// The known disagreements at task 070, each with its one-line reason: the hand-written lines
+    /// (<see cref="HandWrittenDisagreements"/>) plus one line per OUTPUT lookup, derived from
+    /// <c>RecordOwnershipResolver.OutputLookupColumns</c> (#2427, <see cref="OutputBaselines"/>). UAC-r2 works these down; a line
+    /// that no longer describes a disagreement fails (<see cref="ParityProblems"/>).
     /// </summary>
-    internal static readonly IReadOnlyDictionary<string, string> KnownDisagreements = new Dictionary<string, string>(StringComparer.Ordinal)
+    internal static readonly IReadOnlyDictionary<string, string> KnownDisagreements = WithOutputBaselines(HandWrittenDisagreements());
+
+    /// <summary>The hand-written baseline. An output lookup is never written here: it is derived from the resolver's set.</summary>
+    private static Dictionary<string, string> HandWrittenDisagreements() => new(StringComparer.Ordinal)
     {
         // SecureChildLineage keeps every lookup on purpose (an extra lookup can only narrow a sharee mirror); these are
-        // the ones its own remarks say are not filing.
+        // the ones its own remarks say are not filing. An OUTPUT (sprk_analysis.sprk_outputfileid) is derived, not listed.
         [Only("SecureChildLineage", "sprk_document.sprk_currentversionid -> sprk_fileversion")] =
             "a document's current version, not its filing (SecureChildLineage remarks)",
         [Only("SecureChildLineage", "sprk_document.sprk_canonicaldocument -> sprk_document")] =
             "a document's canonical copy, not its filing (SecureChildLineage remarks)",
-        [Only("SecureChildLineage", "sprk_analysis.sprk_outputfileid -> sprk_document")] =
-            "an analysis's output file, not its filing (SecureChildLineage remarks)",
 
         // CoreAncestorResolver's stamp sources are the intermediates a stamp is COPIED from, not every filing lookup.
         [Extra("CoreAncestorResolver.StampSourceColumns", "sprk_analysis.sprk_documentid -> sprk_document")] =
@@ -544,6 +550,181 @@ public class RecordFamilyEdgesGuardTests
             .OrderBy(k => k, StringComparer.Ordinal)
             .ToArray();
     }
+
+    // ------------------------------------------------------------------------------------------------------------------
+    // 5. An OUTPUT lookup is declared once, in the resolver, and its baseline derives from it (#2427)
+    // ------------------------------------------------------------------------------------------------------------------
+
+    /// <summary>The reason every derived output baseline carries.</summary>
+    internal const string OutputReason =
+        "the row's output, not its filing: never an ownership parent (RecordOwnershipResolver.IsOutput, #2427)";
+
+    [Fact(DisplayName = "#2427: every output lookup is a SecureChildLineage lookup to an ownership parent, and no output baseline is hand-written")]
+    public void OutputLookups_AreTheOneSourceOfTheOutputBaselines()
+    {
+        var problems = OutputBaselineProblems(RecordOwnershipResolver.OutputLookupColumns, LineageLookups(), HandWrittenDisagreements());
+
+        Assert.True(
+            problems.Count == 0,
+            "A lookup that names a row's OUTPUT (not its filing) is declared once, in RecordOwnershipResolver.OutputLookups, "
+            + "which keeps it out of every ownership-parent offer; its SecureChildLineage baseline here is derived from that set. "
+            + "Add the output to OutputLookups (and its lookup to SecureChildLineage), never a hand-written baseline line:\n"
+            + string.Join("\n", problems));
+    }
+
+    [Fact(DisplayName = "#2427: the analysis's output file is a derived baseline line")]
+    public void KnownDisagreements_CarryTheDerivedOutputBaseline()
+    {
+        var key = Only("SecureChildLineage", "sprk_analysis.sprk_outputfileid -> sprk_document");
+
+        Assert.Contains(("sprk_analysis", "sprk_outputfileid"), RecordOwnershipResolver.OutputLookupColumns);
+        Assert.Equal(OutputReason, KnownDisagreements[key]);
+        Assert.DoesNotContain(key, HandWrittenDisagreements().Keys);
+    }
+
+    [Fact(DisplayName = "#2427: output control — an output with no SecureChildLineage lookup fails (must fire)")]
+    public void OutputBaselineProblems_AnOutputWithNoLineageLookup_Fires()
+    {
+        var problems = OutputBaselineProblems(
+            new[] { ("sprk_child", "sprk_output") }, Array.Empty<(string, string, string)>(), new Dictionary<string, string>());
+
+        Assert.Equal(new[] { "NO LINEAGE LOOKUP: sprk_child.sprk_output" }, problems);
+    }
+
+    [Fact(DisplayName = "#2427: output control — an output whose target is no ownership parent fails (must fire)")]
+    public void OutputBaselineProblems_AnOutputToANonParent_Fires()
+    {
+        var problems = OutputBaselineProblems(
+            new[] { ("sprk_child", "sprk_version") }, new[] { ("sprk_child", "sprk_version", "sprk_fileversion") },
+            new Dictionary<string, string>());
+
+        Assert.Equal(new[] { "NOT AN OWNERSHIP PARENT: sprk_child.sprk_version -> sprk_fileversion" }, problems);
+    }
+
+    [Fact(DisplayName = "#2427: output control — a hand-written output baseline not in the set fails (must fire)")]
+    public void OutputBaselineProblems_AHandWrittenUndeclaredOutput_Fires()
+    {
+        var key = Only("SecureChildLineage", "sprk_child.sprk_output -> sprk_document");
+
+        var problems = OutputBaselineProblems(
+            Array.Empty<(string, string)>(), new[] { ("sprk_child", "sprk_output", "sprk_document") },
+            new Dictionary<string, string> { [key] = "seeded: an output" });
+
+        Assert.Equal(new[] { "UNDECLARED: " + key }, problems);
+    }
+
+    [Fact(DisplayName = "#2427: output control — a hand-written line for a declared output fails (must fire)")]
+    public void OutputBaselineProblems_AHandWrittenLineForADeclaredOutput_Fires()
+    {
+        var key = Only("SecureChildLineage", "sprk_child.sprk_output -> sprk_document");
+
+        var problems = OutputBaselineProblems(
+            new[] { ("sprk_child", "sprk_output") }, new[] { ("sprk_child", "sprk_output", "sprk_document") },
+            new Dictionary<string, string> { [key] = "seeded: an output" });
+
+        Assert.Equal(new[] { "HAND-WRITTEN: " + key }, problems);
+    }
+
+    [Fact(DisplayName = "#2427: output control — a declared output derives its line; Secure-only, citation and non-parent lines pass (must not fire)")]
+    public void OutputBaselineProblems_DeclaredSecureOnlyCitationOrNonParent_DoesNotFire()
+    {
+        var lineage = new[]
+        {
+            ("sprk_child", "sprk_output", "sprk_document"), // declared below
+            ("sprk_document", "sprk_canonicaldocument", "sprk_document"), // Secure-only (RecordOwnershipResolver.IsSecureOnlyParent)
+            ("sprk_signal", "sprk_policy", "sprk_policy"), // a citation (RecordOwnershipResolver.IsCitation)
+            ("sprk_document", "sprk_currentversionid", "sprk_fileversion"), // not an ownership parent
+        };
+        var handWritten = new Dictionary<string, string>
+        {
+            [Only("SecureChildLineage", "sprk_document.sprk_canonicaldocument -> sprk_document")] = "seeded",
+            [Only("SecureChildLineage", "sprk_signal.sprk_policy -> sprk_policy")] = "seeded",
+            [Only("SecureChildLineage", "sprk_document.sprk_currentversionid -> sprk_fileversion")] = "seeded",
+        };
+        var outputs = new[] { ("sprk_child", "sprk_output") };
+
+        Assert.Empty(OutputBaselineProblems(outputs, lineage, handWritten));
+        Assert.Equal(
+            new Dictionary<string, string> { [Only("SecureChildLineage", "sprk_child.sprk_output -> sprk_document")] = OutputReason },
+            OutputBaselines(outputs, lineage).Baselines);
+    }
+
+    /// <summary><paramref name="handWritten"/> with every derived output baseline added (<see cref="OutputBaselines"/>). A
+    /// hand-written line for a declared output is kept as written and reported by <see cref="OutputBaselineProblems"/>.</summary>
+    private static IReadOnlyDictionary<string, string> WithOutputBaselines(Dictionary<string, string> handWritten)
+    {
+        foreach (var (key, reason) in OutputBaselines(RecordOwnershipResolver.OutputLookupColumns, LineageLookups()).Baselines)
+            handWritten.TryAdd(key, reason);
+        return handWritten;
+    }
+
+    /// <summary>
+    /// #2427: the baseline line of each output lookup in <paramref name="outputs"/> (its SecureChildLineage lookup, "in
+    /// SecureChildLineage, not in the registry", with <see cref="OutputReason"/>), and the outputs that cannot have one: no
+    /// SecureChildLineage lookup, or a target that is no ownership parent (the resolver would never offer it anyway).
+    /// </summary>
+    internal static (IReadOnlyDictionary<string, string> Baselines, IReadOnlyList<string> Problems) OutputBaselines(
+        IEnumerable<(string Table, string Column)> outputs,
+        IEnumerable<(string Child, string Column, string Target)> lineage)
+    {
+        var lookups = lineage.ToArray();
+        var baselines = new Dictionary<string, string>(StringComparer.Ordinal);
+        var problems = new List<string>();
+        foreach (var (table, column) in outputs)
+        {
+            var match = lookups.FirstOrDefault(l => Same(l.Child, table) && Same(l.Column, column));
+            if (match.Target is null)
+            {
+                problems.Add($"NO LINEAGE LOOKUP: {table.Trim().ToLowerInvariant()}.{column.Trim().ToLowerInvariant()}");
+                continue;
+            }
+
+            var key = Key(match.Child, match.Column, match.Target);
+            if (!RecordOwnershipResolver.IsOwnershipParent(match.Target))
+            {
+                problems.Add("NOT AN OWNERSHIP PARENT: " + key);
+                continue;
+            }
+
+            baselines[Only("SecureChildLineage", key)] = OutputReason;
+        }
+
+        return (baselines, problems);
+    }
+
+    /// <summary>
+    /// #2427, both directions: an output in <paramref name="outputs"/> with no baseline line (<see cref="OutputBaselines"/>'
+    /// problems); and a HAND-WRITTEN "in SecureChildLineage, not in the registry" line for a lookup to an ownership parent (not
+    /// a citation) that either duplicates a declared output's derived line ("HAND-WRITTEN"), or that the resolver does not
+    /// keep out of the primary — neither a declared output nor a Secure-only parent ("UNDECLARED": the resolver would offer
+    /// it as a parent).
+    /// </summary>
+    internal static IReadOnlyList<string> OutputBaselineProblems(
+        IEnumerable<(string Table, string Column)> outputs,
+        IEnumerable<(string Child, string Column, string Target)> lineage,
+        IReadOnlyDictionary<string, string> handWritten)
+    {
+        var declared = outputs.ToArray();
+        var lookups = lineage.ToArray();
+        var problems = OutputBaselines(declared, lookups).Problems.ToList();
+        foreach (var (child, column, target) in lookups.Where(l =>
+                     RecordOwnershipResolver.IsOwnershipParent(l.Target) && !RecordOwnershipResolver.IsCitation(l.Child, l.Column)))
+        {
+            var key = Only("SecureChildLineage", Key(child, column, target));
+            if (!handWritten.ContainsKey(key))
+                continue;
+
+            if (declared.Any(o => Same(o.Table, child) && Same(o.Column, column)))
+                problems.Add("HAND-WRITTEN: " + key);
+            else if (!RecordOwnershipResolver.IsSecureOnlyParent(child, column))
+                problems.Add("UNDECLARED: " + key);
+        }
+
+        return problems.OrderBy(p => p, StringComparer.Ordinal).ToArray();
+    }
+
+    private static bool Same(string left, string right) =>
+        string.Equals(left.Trim(), right.Trim(), StringComparison.OrdinalIgnoreCase);
 
     private static IReadOnlyList<string> Flatten(IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> view) =>
         view.SelectMany(t => t.Value.Select(l => Key(t.Key, l.Key, l.Value))).OrderBy(s => s, StringComparer.Ordinal).ToArray();
