@@ -59,6 +59,14 @@ internal sealed class ApprovalWorld
     public readonly Mock<IGenericEntityService> Entities = new();
     public readonly Mock<IFieldMappingDataverseService> Records = new();
     public readonly Mock<IIdentityNormalizationService> Identity = new();
+
+    /// <summary>EB-D-171: the identity the APPROVAL resolves the caller's own contact through (fault key <c>caller-identity</c>); the recorder's
+    /// identity is <see cref="Identity"/> (fault key <c>identity</c>), so a test can fault one without the other.</summary>
+    public readonly Mock<IIdentityNormalizationService> CallerIdentity = new();
+
+    /// <summary>Each user's OWN linked contact, as the identity service answers it. A user not listed has no contact.</summary>
+    public readonly Dictionary<Guid, Guid> ContactOfUser = new() { [AliceUser] = Alice, [BobUser] = Bob, [CarolUser] = Carol };
+
     public readonly Mock<IRecordOwnershipResolver> Ownership = new();
     public readonly Mock<IInvoiceLifecycleService> Lifecycle = new();
     public readonly Mock<IEbillingSettingsReader> Settings = new();
@@ -69,6 +77,19 @@ internal sealed class ApprovalWorld
         new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance, null!, null!) { CallBase = false };
 
     public EbillingSettings SettingsValue { get; set; } = new();
+
+    /// <summary>The caller's rights per entity set, answered only for <see cref="CallerToken"/> (EB-D-172: AppendTo on the core, Write on the invoice).</summary>
+    public Func<string, Guid, AccessRights> Rights { get; set; } = (_, _) => AccessRights.Read | AccessRights.Write | AccessRights.Append | AccessRights.AppendTo;
+
+    /// <summary>F4: the caller's decide right (Write on the invoice) as the GET asks it.</summary>
+    public bool CanDecide { get; set; } = true;
+
+    /// <summary>Every close the approval asked of the Signal writer, and which record closed each Signal.</summary>
+    public readonly List<(Guid SignalId, Guid RecordId, SignalAutomatedCloseOutcome Outcome)> Closes = [];
+    public readonly Dictionary<Guid, Guid> ClosedBy = new();
+
+    /// <summary>A Signal whose next close fails once: ChangedSinceRead is answered, any other value throws a timeout (recorded as that value).</summary>
+    public readonly Dictionary<Guid, SignalAutomatedCloseOutcome> CloseFailsOnce = new();
 
     /// <summary>Called with the claim's fields before the conditional portion write (a test parks two approvals here).</summary>
     public Func<Task>? BeforeClaim { get; set; }
@@ -123,7 +144,32 @@ internal sealed class ApprovalWorld
         Identity.Setup(i => i.ResolveAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .Returns((Guid user, CancellationToken _) => TakeFault("identity") is { } fault
                 ? Task.FromException<PersonIdentity>(fault)
-                : Task.FromResult(new PersonIdentity(user, ContactId: Guid.NewGuid())));
+                : Task.FromResult(new PersonIdentity(user, ContactId: ContactOfUser.TryGetValue(user, out var c) ? c : Guid.NewGuid())));
+        CallerIdentity.Setup(i => i.ResolveAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Returns((Guid user, CancellationToken _) => TakeFault("caller-identity") is { } fault
+                ? Task.FromException<PersonIdentity>(fault)
+                : Task.FromResult(new PersonIdentity(user, ContactId: ContactOfUser.TryGetValue(user, out var c) ? c : null)));
+
+        // F3: the recorder's filing read (the core-ancestor resolver reads the invoice by id).
+        Entities.Setup(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .Returns((string table, Guid id, string[] _, CancellationToken _) =>
+            {
+                if (TakeFault("stamps") is { } fault)
+                {
+                    return Task.FromException<Entity>(fault);
+                }
+
+                lock (Gate)
+                {
+                    return Task.FromResult(Rows.TryGetValue((table, id), out var row) ? Copy(row) : new Entity(table, id));
+                }
+            });
+
+        // EB-D-172: the caller's rights, asked as the caller (only the caller's own token holds any).
+        Entities.Setup(e => e.GetEntitySetNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string table, CancellationToken _) => table + "s");
+        Probe.Setup(p => p.GetCallerRightsAsync(It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string? token, string set, Guid id, CancellationToken _) => token == CallerToken ? Rights(set, id) : AccessRights.None);
         Ownership.Setup(o => o.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(RecordOwnerResolution.Owned(Guid.Parse("03000000-0000-4000-8000-0000000000f0")));
 
@@ -276,6 +322,63 @@ internal sealed class ApprovalWorld
         ["sprk_outcomereasoncode"] = SubmissionReasonCodes.Blocked,
     });
 
+    /// <summary>An Open (or <paramref name="status"/>) Signal on the INVOICE, filed as the Signal writer files one (dedupe key, pair id, subject
+    /// lookup, created on). The writer's harness holds it too, so the record's resolved-Signal checks find it.</summary>
+    public Guid AddInvoiceSignal(string policyCode = "EB-DUP", int status = SignalWriter.SignalStatusOpen, DateTime? createdOn = null)
+    {
+        var id = Guid.NewGuid();
+        var lookup = SignalWriter.RegardingLookupByEntity["sprk_invoice"];
+        Put(new Entity("sprk_signal", id)
+        {
+            ["sprk_dedupekey"] = SignalWriter.BuildDedupeKey(policyCode, "sprk_invoice", InvoiceId.ToString("D"), 1),
+            ["sprk_signalstatus"] = new OptionSetValue(status),
+            ["sprk_regardingrecordid"] = InvoiceId.ToString("D"),
+            [lookup] = new EntityReference("sprk_invoice", InvoiceId),
+            ["createdon"] = createdOn ?? Now.UtcDateTime.AddHours(-1),
+        });
+        H.Rows[("sprk_signal", id)] = new Entity("sprk_signal", id)
+        {
+            ["sprk_regardingrecordid"] = InvoiceId.ToString("D"),
+            [lookup] = new EntityReference("sprk_invoice", InvoiceId),
+        };
+        return id;
+    }
+
+    public int SignalStatus(Guid signalId) => Row("sprk_signal", signalId).GetAttributeValue<OptionSetValue>("sprk_signalstatus").Value;
+
+    /// <summary>The app-identity close as the Signal writer behaves: Open/Acknowledged → Resolved Acted by the record; a repeat by the same
+    /// record → AlreadyClosedByThisRecord; resolved otherwise → LeftAsIs. Every call is recorded.</summary>
+    public Task<SignalAutomatedCloseOutcome> CloseAsync(
+        Guid signalId, Guid recordId, DateTime setReadAtUtc, string policyCode, Guid? decidedBy, CancellationToken ct)
+    {
+        lock (Gate)
+        {
+            SignalAutomatedCloseOutcome outcome;
+            if (CloseFailsOnce.Remove(signalId, out var failure))
+            {
+                Closes.Add((signalId, recordId, failure));
+                return failure == SignalAutomatedCloseOutcome.ChangedSinceRead
+                    ? Task.FromResult(failure)
+                    : Task.FromException<SignalAutomatedCloseOutcome>(new TimeoutException("the close timed out"));
+            }
+
+            if (ClosedBy.TryGetValue(signalId, out var by))
+            {
+                outcome = by == recordId ? SignalAutomatedCloseOutcome.AlreadyClosedByThisRecord : SignalAutomatedCloseOutcome.LeftAsIs;
+            }
+            else
+            {
+                ClosedBy[signalId] = recordId;
+                Rows[("sprk_signal", signalId)]["sprk_signalstatus"] = new OptionSetValue(SignalWriter.SignalStatusResolved);
+                WriteLog.Add("close:sprk_signal");
+                outcome = SignalAutomatedCloseOutcome.Closed;
+            }
+
+            Closes.Add((signalId, recordId, outcome));
+            return Task.FromResult(outcome);
+        }
+    }
+
     public void Put(Entity row)
     {
         lock (Gate)
@@ -351,8 +454,21 @@ internal sealed class ApprovalWorld
         (_, _, _, _, _, _) => Task.FromResult(SignalAutomatedCloseOutcome.Closed),
         NullLogger<InvoiceLineDecisionService>.Instance);
 
-    public InvoiceApprovalService Service() => new(
-        Entities.Object, Resolver(), LineService(), Totals(), Lifecycle.Object, Recorder(), Locks, Log, Clock);
+    /// <summary>F3: the core-ancestor resolver over this world's rows (every invoice root column exists).</summary>
+    public CoreAncestorResolver CoreAncestors() => new(
+        Entities.Object,
+        (_, _) => Task.FromResult<IReadOnlySet<string>>(new HashSet<string>(
+            CoreAncestorResolver.IntermediateRootColumns.Values.SelectMany(c => c.Select(x => x.Column)), StringComparer.OrdinalIgnoreCase)),
+        NullLogger<CoreAncestorResolver>.Instance);
+
+    /// <param name="canDecide">The decide check (F4); the contract host passes the REAL one over its authorization stack. Default: <see cref="CanDecide"/>.</param>
+    public InvoiceApprovalService Service(Func<InvoiceContextService.InvoiceCaller, Guid, CancellationToken, Task<bool>>? canDecide = null) => new(
+        Entities.Object, Resolver(), LineService(), Totals(), Lifecycle.Object, Recorder(), Locks, CallerIdentity.Object, CoreAncestors(), Probe.Object,
+        CloseAsync, canDecide ?? ((_, _, _) => Task.FromResult(CanDecide)), Log, Clock);
+
+    /// <summary>The GET as the endpoint calls it for <paramref name="user"/> (the decide right asked with the caller's own token).</summary>
+    public Task<InvoiceApprovalStateDto?> GetAs(Guid? user) =>
+        Service().GetAsync(InvoiceId, user, new InvoiceContextService.InvoiceCaller("oid", CallerToken), CancellationToken.None);
 
     public Task<ApprovalResult> ApproveAs(Guid user) => Service().ApproveAsync(InvoiceId, user, CallerToken, CancellationToken.None);
 
@@ -370,13 +486,37 @@ internal sealed class ApprovalWorld
 
         lock (Gate)
         {
-            var rows = Rows.Values
+            // The Decision Records live in the writer's harness (F2 asks which lines have one).
+            var source = query.EntityName == InvoiceReviewReadService.DecisionRecordEntity ? H.Created.AsEnumerable() : Rows.Values;
+            var rows = source
                 .Where(r => r.LogicalName == query.EntityName && Matches(r, query.Criteria) && query.LinkEntities.All(link => Joins(r, link)))
-                .Select(Copy)
+                .Select(r => WithLinkColumns(Copy(r), query.LinkEntities))
                 .Take(query.TopCount ?? int.MaxValue)
                 .ToList();
             return Task.FromResult(new EntityCollection(rows) { MoreRecords = false });
         }
+    }
+
+    /// <summary>A link's requested columns come back as <c>alias.column</c> aliased values, as Dataverse returns them.</summary>
+    private Entity WithLinkColumns(Entity row, IEnumerable<LinkEntity> links)
+    {
+        foreach (var link in links.Where(l => l.EntityAlias is not null && l.Columns is { Columns.Count: > 0 }))
+        {
+            var from = row.Contains(link.LinkFromAttributeName) ? row[link.LinkFromAttributeName] : null;
+            var id = from switch { EntityReference r => r.Id, Guid g => g, _ => Guid.Empty };
+            if (!Rows.TryGetValue((link.LinkToEntityName, id), out var target))
+            {
+                continue;
+            }
+
+            foreach (var column in link.Columns.Columns.Where(target.Contains))
+            {
+                var value = target[column] is EntityReference r ? new EntityReference(r.LogicalName, r.Id) : target[column];
+                row[link.EntityAlias + "." + column] = new AliasedValue(link.LinkToEntityName, column, value);
+            }
+        }
+
+        return row;
     }
 
     private bool Joins(Entity row, LinkEntity link)

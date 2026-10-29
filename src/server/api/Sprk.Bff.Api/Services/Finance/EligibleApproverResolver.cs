@@ -17,6 +17,8 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.Ai.Membership;
+using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance.Models;
 using Sprk.Bff.Api.Services.Finance.Submission;
 
@@ -40,9 +42,13 @@ public sealed record EligibleApproverSet(
     /// <summary>No one may approve: logged by the resolver and surfaced by GET as a state flag (FR-14).</summary>
     public bool NoEligibleApprover => Approvers.Count == 0;
 
-    /// <summary>The caller's entry (the first by contact id when two contacts link to the same user); null when the user is not eligible.</summary>
-    public EligibleApprover? For(Guid systemUserId) =>
-        systemUserId == Guid.Empty ? null : Approvers.Where(a => a.SystemUserId == systemUserId).OrderBy(a => a.ContactId).FirstOrDefault();
+    /// <summary>
+    /// EB-D-171: the entry for the CALLER'S OWN contact (<see cref="IIdentityNormalizationService"/>'s binding, the one the Decision Record
+    /// writer uses); null when that contact is not an eligible assignment contact. <c>contact.sprk_systemuser</c> is not secured or audited,
+    /// so it never makes anyone eligible: it is display data for the stored set and the view only.
+    /// </summary>
+    public EligibleApprover? ForContact(Guid? callerContactId) =>
+        callerContactId is not { } contact || contact == Guid.Empty ? null : Approvers.FirstOrDefault(a => a.ContactId == contact);
 }
 
 /// <summary>What a store of the set changed on the approval portion.</summary>
@@ -61,7 +67,8 @@ public sealed record EligibleApproverSync(int Added, int Removed, bool Stamped)
 /// contact and a contact with no user each contribute nobody. An unknown core type resolves nobody (fail closed). A read fault throws: the
 /// caller decides (approve answers 503, GET reports "unavailable", the job counts it).</para>
 /// <para><b>The stored set never grants.</b> The N:N exists for the "Invoices to review" view (029). Approve resolves live every time
-/// (<see cref="ResolveAsync"/>); <see cref="SyncAsync"/> only mirrors the result.</para>
+/// (<see cref="ResolveAsync"/>); <see cref="SyncAsync"/> only mirrors the result. The caller is matched by THEIR OWN contact (EB-D-171,
+/// <see cref="EligibleApproverSet.ForContact"/>), never by a contact's <c>sprk_systemuser</c>.</para>
 /// <para><b>Sync.</b> The N:N is diffed against the live set: only the missing contacts are associated and only the stale ones
 /// disassociated, with <c>sprk_eligibleresolvedon</c>, in ONE transaction. <c>sprk_eligibleresolvedon</c> is written when the set changed or
 /// was never stamped, so a refresh run that finds nothing new writes nothing.</para>
@@ -243,14 +250,14 @@ public sealed class EligibleApproverResolver
     {
         var invoiceQuery = new QueryExpression(InvoiceReviewReadService.InvoiceEntity)
         {
-            ColumnSet = new ColumnSet("statuscode", "sprk_matter", "sprk_project", "sprk_regardingworkassignment"),
+            ColumnSet = new ColumnSet(["statuscode", .. CoreLookupColumns(InvoiceReviewReadService.InvoiceEntity)]),
             Criteria = new FilterExpression(LogicalOperator.And),
             TopCount = 1,
         };
         invoiceQuery.Criteria.AddCondition(InvoiceReviewReadService.InvoiceEntity + "id", ConditionOperator.Equal, invoiceId);
         var invoice = (await _entities.RetrieveMultipleAsync(invoiceQuery, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
         if (invoice?.GetAttributeValue<OptionSetValue>("statuscode")?.Value != InvoiceStatusCodes.InReview
-            || InvoiceLineDecisionService.CoreOf(invoice) is not { } core)
+            || SingleCoreOf(InvoiceReviewReadService.InvoiceEntity, invoice) is not { } core)
         {
             return false;
         }
@@ -266,6 +273,26 @@ public sealed class EligibleApproverResolver
         await SyncAsync(portions[0].Id, set, portions[0].GetAttributeValue<DateTime?>(ResolvedOnColumn), ct).ConfigureAwait(false);
         return true;
     }
+
+    /// <summary>
+    /// The row's ONE core record (013, <see cref="InvoiceFamilyCoreRecordGuard.CoreRecordLookups"/>): exactly one of the table's core lookups is
+    /// set. None or several is null (fail closed: never the first one found). <paramref name="alias"/> reads the lookups off a link entity's
+    /// aliased columns (the refresh job reads the invoice's through its link).
+    /// </summary>
+    internal static (string Entity, Guid Id)? SingleCoreOf(string table, Entity row, string? alias = null)
+    {
+        var found = InvoiceFamilyCoreRecordGuard.CoreRecordLookups[table]
+            .Select(l => (l.CoreEntity, Ref: alias is null
+                ? row.GetAttributeValue<EntityReference>(l.Column)
+                : row.GetAttributeValue<AliasedValue>(alias + "." + l.Column)?.Value as EntityReference))
+            .Where(x => x.Ref is not null && x.Ref.Id != Guid.Empty)
+            .ToList();
+        return found.Count == 1 ? (found[0].CoreEntity, found[0].Ref!.Id) : null;
+    }
+
+    /// <summary>The core lookup columns of a table (<see cref="InvoiceFamilyCoreRecordGuard.CoreRecordLookups"/>).</summary>
+    internal static string[] CoreLookupColumns(string table) =>
+        InvoiceFamilyCoreRecordGuard.CoreRecordLookups[table].Select(l => l.Column).ToArray();
 
     /// <summary>The approval portions of an invoice (R1: one per invoice).</summary>
     internal async Task<IReadOnlyList<Entity>> ReadPortionsAsync(Guid invoiceId, CancellationToken ct)

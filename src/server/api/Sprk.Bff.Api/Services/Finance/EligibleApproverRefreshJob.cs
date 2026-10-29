@@ -19,7 +19,6 @@ using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Spaarke.Scheduling;
 using Sprk.Bff.Api.Configuration;
-using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance.Submission;
 
 namespace Sprk.Bff.Api.Services.Finance;
@@ -126,9 +125,9 @@ public sealed class EligibleApproverRefreshJob : IScheduledJob
         counts.Examined++;
         if (CoreOf(portion) is not { } core)
         {
-            // 013 guarantees exactly one core lookup per portion; a row without one cannot be resolved (and is never "anyone").
+            // 013 guarantees exactly one core lookup per invoice; an invoice without one cannot be resolved (and is never "anyone").
             counts.NoCoreRecord++;
-            _logger.LogWarning("Eligible approver refresh: approval {ApprovalId} names no single core record; skipped.", portion.Id);
+            _logger.LogWarning("Eligible approver refresh: the invoice of approval {ApprovalId} names no single core record; skipped.", portion.Id);
             return;
         }
 
@@ -162,29 +161,28 @@ public sealed class EligibleApproverRefreshJob : IScheduledJob
         }
     }
 
-    /// <summary>The portion's one core record (013: exactly one of the regarding trio).</summary>
-    internal static (string Entity, Guid Id)? CoreOf(Entity portion)
-    {
-        var found = InvoiceFamilyCoreRecordGuard.CoreRecordLookups[EligibleApproverResolver.ApprovalEntity]
-            .Select(l => (l.CoreEntity, Ref: portion.GetAttributeValue<EntityReference>(l.Column)))
-            .Where(x => x.Ref is not null && x.Ref.Id != Guid.Empty)
-            .ToList();
-        return found.Count == 1 ? (found[0].CoreEntity, found[0].Ref!.Id) : null;
-    }
+    /// <summary>The link alias the invoice's columns come back under.</summary>
+    internal const string InvoiceAlias = "inv";
+
+    /// <summary>
+    /// The core record of the portion's INVOICE (K3: the invoice is the record approve and GET resolve from, so the three agree; the portion's
+    /// own regarding trio is a copy that can drift). Exactly one of the invoice's core lookups (013); none or several is null.
+    /// </summary>
+    internal static (string Entity, Guid Id)? CoreOf(Entity portion) =>
+        EligibleApproverResolver.SingleCoreOf(InvoiceReviewReadService.InvoiceEntity, portion, InvoiceAlias);
 
     private async Task<List<Entity>> ReadPendingPortionsAsync(IGenericEntityService entities, RefreshCounts counts, CancellationToken ct)
     {
-        var columns = InvoiceFamilyCoreRecordGuard.CoreRecordLookups[EligibleApproverResolver.ApprovalEntity].Select(l => l.Column)
-            .Append(EligibleApproverResolver.ResolvedOnColumn)
-            .ToArray();
         var query = new QueryExpression(EligibleApproverResolver.ApprovalEntity)
         {
-            ColumnSet = new ColumnSet(columns),
+            ColumnSet = new ColumnSet(EligibleApproverResolver.ResolvedOnColumn),
             Criteria = new FilterExpression(LogicalOperator.And),
             PageInfo = new PagingInfo { Count = PageSize, PageNumber = 1 },
         };
         query.Criteria.AddCondition(EligibleApproverResolver.ApprovalStatus, ConditionOperator.Equal, InvoiceSubmissionPersister.ApprovalStatusPending);
         var invoice = query.AddLink(InvoiceReviewReadService.InvoiceEntity, EligibleApproverResolver.ApprovalInvoice, InvoiceReviewReadService.InvoiceEntity + "id");
+        invoice.EntityAlias = InvoiceAlias;
+        invoice.Columns = new ColumnSet(EligibleApproverResolver.CoreLookupColumns(InvoiceReviewReadService.InvoiceEntity));
         invoice.LinkCriteria.AddCondition("statuscode", ConditionOperator.Equal, InvoiceStatusCodes.InReview);
         query.AddOrder(EligibleApproverResolver.ApprovalEntity + "id", OrderType.Ascending);
 

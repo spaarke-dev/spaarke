@@ -19,11 +19,12 @@ namespace Sprk.Bff.Api.Api.Finance;
 /// (<c>RequireEbillingEnabled</c>, ADR-018) follows the authorization filter and never replaces it.</para>
 /// <para><b>Nothing is trusted from the request.</b> Approve takes no body: the decider is the caller's <c>systemuserid</c> resolved from the
 /// caller's own token, and the decision id is derived from the approval portion so every attempt by every approver is one decision.</para>
-/// <para><b>Status codes (approve).</b> 200 approved or already approved (a second approve is a no-op); 401; 403 (route, not eligible, identity
-/// unproven, or the bulk accept's Signal rights); 404 uniform; 409 (lines open with counts, held, not In Review, no or ambiguous approval portion,
-/// already decided, approval changed, another decision in progress, totals or transition refused); 500 (no core record, a decision the writer
-/// refuses); 503 <c>ebilling.disabled</c>, <c>ebilling.approval.unavailable</c> (nothing changed) or <c>ebilling.approval.incomplete</c>
-/// (approve again to finish).</para>
+/// <para><b>Status codes (approve).</b> 200 approved or already approved (a second approve is a no-op); 401; 403 (route, not eligible by the
+/// caller's own contact or no contact (EB-D-171), identity unproven, or the rights to close the invoice's or the bulk accept's Signals); 404
+/// uniform; 409 (lines open with counts, held, not In Review, no or ambiguous approval portion, unknown approval status, already decided,
+/// approval changed or claimed by another approver, another person's unrecorded line decision, another decision in progress, totals or
+/// transition refused); 500 (no single core record, a decision the writer refuses); 503 <c>ebilling.disabled</c>,
+/// <c>ebilling.approval.unavailable</c> (nothing changed) or <c>ebilling.approval.incomplete</c> (approve again to finish).</para>
 /// </remarks>
 public static class InvoiceApprovalEndpoints
 {
@@ -78,7 +79,7 @@ public static class InvoiceApprovalEndpoints
         InvoiceApprovalStateDto? state;
         try
         {
-            state = await service.GetAsync(invoiceId, caller, ct);
+            state = await service.GetAsync(invoiceId, caller, DecideCaller(httpContext), ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -103,7 +104,7 @@ public static class InvoiceApprovalEndpoints
             InvoiceApprovalStateDto? state = null;
             try
             {
-                state = await service.GetAsync(invoiceId, caller, ct);
+                state = await service.GetAsync(invoiceId, caller, DecideCaller(httpContext), ct);
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
@@ -116,6 +117,12 @@ public static class InvoiceApprovalEndpoints
 
         return ToProblem(result, httpContext);
     }
+
+    /// <summary>F4: the caller's own identity and token, so <c>canApprove</c> asks the decide right (Write on the invoice) of Dataverse as the
+    /// caller, as the review read's <c>canDecide</c>. A missing token reaches the service as null and answers no (fail closed).</summary>
+    private static InvoiceContextService.InvoiceCaller DecideCaller(HttpContext httpContext) => new(
+        CallerResolution.ResolveObjectId(httpContext.User) ?? string.Empty,
+        TokenHelper.ExtractBearerTokenOrNull(httpContext));
 
     /// <summary>Maps a refused or unfinished approve to one HTTP status and one stable code (ADR-019).</summary>
     internal static IResult ToProblem(ApprovalResult result, HttpContext httpContext) => result.Outcome switch

@@ -43,7 +43,10 @@ public sealed class EligibleApproverResolverTests
         set.FromDefault.Should().BeFalse();
         set.Roles.Should().Equal(BillingApproverRole.AssignedAttorney2, BillingApproverRole.AssignedToInternal);
         set.Approvers.Select(a => (a.ContactId, a.SystemUserId, a.Name)).Should().Equal((Bob, BobUser, "Bob Brown"), (Carol, CarolUser, "Carol Clark"));
-        set.For(AliceUser).Should().BeNull("Assigned Attorney 1 is not a selected role on this record");
+        set.ForContact(Alice).Should().BeNull("Assigned Attorney 1 is not a selected role on this record");
+        set.ForContact(Carol).Should().NotBeNull();
+        set.ForContact(null).Should().BeNull("no contact is nobody");
+        set.ForContact(Guid.Empty).Should().BeNull();
     }
 
     [Theory(DisplayName = "103 FR-14 / D-54: on every core type, an empty role resolves the settings default FOR THAT TYPE")]
@@ -123,7 +126,7 @@ public sealed class EligibleApproverResolverTests
 
         set.Approvers.Should().BeEmpty("Dan has no user, Bob is inactive, Paralegal 2 is empty");
         set.NoEligibleApprover.Should().BeTrue();
-        set.For(BobUser).Should().BeNull();
+        set.ForContact(Bob).Should().BeNull();
         w.ResolverLog.Entries.Should().Contain(e => e.Level == LogLevel.Warning && e.Message.Contains("no eligible approver"));
     }
 
@@ -229,6 +232,43 @@ public sealed class EligibleApproverResolverTests
         result.Success.Should().BeTrue();
         result.ProcessedItems.Should().Be(1);
         w.StoredApprovers.Should().BeEquivalentTo([Alice, Carol]);
+    }
+
+    [Fact(DisplayName = "103 K3: the job resolves from the INVOICE's core record, not the portion's copy of it (approve and GET read the invoice)")]
+    public async Task Job_ReadsTheCoreFromTheInvoice()
+    {
+        var w = new ApprovalWorld();
+        // The portion's own stamp has drifted to another project whose only assignee is Carol; the invoice still names CoreId (Alice, Bob).
+        var drifted = Guid.NewGuid();
+        w.Put(new Entity("sprk_project", drifted) { ["sprk_assignedattorney1"] = new EntityReference("contact", Carol) });
+        w.Portion[Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver.StampColumnFor("sprk_project")] = new EntityReference("sprk_project", drifted);
+
+        var result = await Job(w).ExecuteAsync(Context(), CancellationToken.None);
+
+        result.ProcessedItems.Should().Be(1);
+        w.StoredApprovers.Should().BeEquivalentTo([Alice, Bob], "the invoice's core record decides, as it does for approve and GET");
+    }
+
+    [Fact(DisplayName = "103 F3: the job skips a portion whose invoice names two core records (never picks one)")]
+    public async Task Job_TwoCoreLookupsOnTheInvoice_IsSkipped()
+    {
+        var w = new ApprovalWorld();
+        w.Invoice["sprk_matter"] = new EntityReference("sprk_matter", Guid.NewGuid());
+
+        var result = await Job(w).ExecuteAsync(Context(), CancellationToken.None);
+
+        result.ProcessedItems.Should().Be(0);
+        w.Writes.Should().Be(0);
+    }
+
+    [Fact(DisplayName = "103 F3: 049's acceptance step stores nothing for an invoice that names two core records")]
+    public async Task RefreshInvoice_TwoCoreLookups_StoresNothing()
+    {
+        var w = new ApprovalWorld();
+        w.Invoice["sprk_matter"] = new EntityReference("sprk_matter", Guid.NewGuid());
+
+        (await w.Resolver().RefreshInvoiceAsync(w.InvoiceId, CancellationToken.None)).Should().BeFalse();
+        w.Writes.Should().Be(0);
     }
 
     [Fact(DisplayName = "103: the job skips a portion whose invoice is no longer In Review, and does nothing when eBilling is off")]

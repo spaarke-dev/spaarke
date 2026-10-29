@@ -781,9 +781,13 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
     /// line) and by 100's line decisions (the decided lines only, no invoice). The caller reads its clock BEFORE calling. K3 (ontology-r1):
     /// the subject is the ROW's (<see cref="StoredSignalSetCheck.RowSubjectOf"/>); an open row whose dedupe-key subject differs from its
     /// regarding row is skipped with one Warning, so a row whose rights were not asked is never closed.
+    /// <para>Task 103 (EB-D-172): <paramref name="createdOnOrBefore"/>, when given, keeps only Signals created at or before it (a row with no
+    /// <c>createdon</c> is skipped). Approve bounds its set by its frozen decision time, so a repeat that must re-derive the set before the
+    /// record stored it never widens it to a Signal raised after the decision.</para>
     /// </summary>
     internal static async Task<IReadOnlyList<(ResolvedSignal Signal, string SubjectEntity, Guid SubjectId)>> ReadOpenSignalsAsync(
-        IGenericEntityService entities, Guid? invoiceId, IReadOnlyCollection<Guid> lineIds, ILogger logger, CancellationToken ct)
+        IGenericEntityService entities, Guid? invoiceId, IReadOnlyCollection<Guid> lineIds, ILogger logger, CancellationToken ct,
+        DateTime? createdOnOrBefore = null)
     {
         if (invoiceId is null && lineIds.Count == 0)
         {
@@ -791,7 +795,10 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         }
 
         // K2 (notes 13c): a single RetrieveMultiple with no paging, fine below 5,000 Signals per invoice.
-        var query = new QueryExpression(SignalEntity) { ColumnSet = new ColumnSet([.. StoredSignalSetCheck.SubjectColumns, "sprk_signalstatus"]), NoLock = true };
+        string[] columns = createdOnOrBefore is null
+            ? [.. StoredSignalSetCheck.SubjectColumns, "sprk_signalstatus"]
+            : [.. StoredSignalSetCheck.SubjectColumns, "sprk_signalstatus", "createdon"];
+        var query = new QueryExpression(SignalEntity) { ColumnSet = new ColumnSet(columns), NoLock = true };
         query.Criteria.FilterOperator = LogicalOperator.Or;
         if (invoiceId is { } invoice)
         {
@@ -815,6 +822,11 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         {
             if (row.Id == Guid.Empty
                 || row.GetAttributeValue<OptionSetValue>("sprk_signalstatus")?.Value is not (SignalWriter.SignalStatusOpen or SignalWriter.SignalStatusAcknowledged))
+            {
+                continue;
+            }
+
+            if (createdOnOrBefore is { } bound && (row.GetAttributeValue<DateTime?>("createdon") is not { } created || created > bound))
             {
                 continue;
             }

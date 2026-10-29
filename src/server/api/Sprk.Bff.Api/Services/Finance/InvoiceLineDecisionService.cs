@@ -314,6 +314,19 @@ public sealed class InvoiceLineDecisionService
     }
 
     /// <summary>
+    /// Task 103 (F2): completes the approval's bulk accept over lines it already wrote (they left Clean, so <see cref="AcceptCleanHeldAsync"/>
+    /// no longer chooses them). The documented repeat of an Incomplete bulk decision: the same decision id over those lines, Bulk, Accept, so
+    /// the same values, the same correction row ids ("Accepted in bulk") and only the missing records. The caller holds <see cref="LockKeyFor"/>.
+    /// </summary>
+    internal Task<LineDecisionResult> CompleteBulkAcceptHeldAsync(
+        Guid invoiceId, Guid decisionId, IReadOnlyList<Guid> lineIds, Guid deciderSystemUserId, string? callerBearerToken, CancellationToken ct)
+    {
+        var command = new LineDecisionCommand(
+            invoiceId, decisionId, LineDecisionAction.Accept, null, lineIds.Select(id => new LineDecisionLine(id)).ToList(), deciderSystemUserId, Bulk: true, callerBearerToken);
+        return ShapeError(command, acceptClean: false) is { } invalid ? Task.FromResult(invalid) : ApplyAsync(command, acceptClean: false, ct);
+    }
+
+    /// <summary>
     /// Task 103 (D-72): every AI-sourced field of a decided Fee or Expense line (Accepted, Reduced, Disallowed) that has no correction row yet
     /// gets one "Unreviewed" row (<c>sprk_islabel</c> false), attributed to the approver. Fields that already have a row (Accepted in bulk,
     /// Corrected, Confirmed individually) are left alone. Row ids are deterministic per (<paramref name="scopeId"/>, line, field), so a repeat

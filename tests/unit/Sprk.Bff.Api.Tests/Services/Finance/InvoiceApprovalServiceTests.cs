@@ -1,8 +1,10 @@
 using FluentAssertions;
 using Moq;
 using Microsoft.Xrm.Sdk;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Models;
+using Sprk.Bff.Api.Services.Signals;
 using Xunit;
 using static Sprk.Bff.Api.Tests.Services.Finance.ApprovalWorld;
 
@@ -15,9 +17,11 @@ namespace Sprk.Bff.Api.Tests.Services.Finance;
 /// </summary>
 /// <remarks>
 /// <para><b>Seeding proof (task 103 acceptance).</b> <c>NotEligible_Is403_AndWritesNothing</c> fails when the eligibility check in
-/// <see cref="InvoiceApprovalService"/> (the <c>set.For(caller) is not { } approver</c> refusal) is removed: Carol, who has Write but is not
+/// <see cref="InvoiceApprovalService"/> (the <c>set.ForContact(...) is not { } approver</c> refusal) is removed: Carol, who has Write but is not
 /// eligible, then approves. <c>NoEligibleApprover_NobodyMayApprove</c> and <c>EligibilityReadFault_FailsClosed</c> fail when the refusal falls
-/// back to "anyone". Recorded in <c>projects/ebilling-r1/notes/103-approval-worklist.md</c>.</para>
+/// back to "anyone". EB-D-171: <c>ContactSpoof_SystemUserLinkNeverGrants</c> fails when eligibility is matched on the contact's
+/// <c>sprk_systemuser</c> again. EB-D-172: <c>NoCloseRights_IsRefused_AndWritesNothing</c> fails when the close authorization is removed.
+/// Recorded in <c>projects/ebilling-r1/notes/103-approval-worklist.md</c>.</para>
 /// </remarks>
 public sealed class InvoiceApprovalServiceTests
 {
@@ -208,8 +212,8 @@ public sealed class InvoiceApprovalServiceTests
         w.Transitions.Should().Be(0);
     }
 
-    [Fact(DisplayName = "103: a refused 014 transition is 409 and records nothing")]
-    public async Task TransitionRefused_RecordsNothing()
+    [Fact(DisplayName = "103 K2: a refused 014 transition is 409, records nothing, and clears the claim it wrote (so nobody is blocked by it)")]
+    public async Task TransitionRefused_RecordsNothing_AndClearsTheClaim()
     {
         var w = new ApprovalWorld();
         w.AddLine(InvoiceLineStatus.Accepted, approved: 100m);
@@ -222,6 +226,431 @@ public sealed class InvoiceApprovalServiceTests
         result.Code.Should().Be("ebilling.approve.refused");
         w.ApproveRecords.Should().BeEmpty();
         w.Portion.GetAttributeValue<OptionSetValue>("sprk_approvalstatus").Value.Should().Be(InvoiceApprovalService.PortionPending);
+        w.Portion.Contains("sprk_decidedby").Should().BeFalse("K2: the claim is cleared");
+        w.Portion.Contains("sprk_decidedon").Should().BeFalse();
+        w.Portion.Contains("sprk_approvedamount").Should().BeFalse();
+        w.WriteLog.Count(e => e == "claim:sprk_invoiceapproval").Should().Be(2, "the claim, then its conditional clear");
+
+        // Another approver is not blocked by the refused attempt (K1 would refuse a live claim).
+        w.Lifecycle.Setup(l => l.TransitionAsync(w.InvoiceId, InvoiceLifecycleStatus.Approved, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new InvoiceTransitionResult(InvoiceTransitionOutcome.Transitioned, InvoiceLifecycleStatus.Approved, InvoiceLifecycleStatus.InReview, null));
+        (await w.ApproveAs(BobUser)).Outcome.Should().Be(ApprovalOutcome.Approved);
+    }
+
+    [Fact(DisplayName = "103 K2: the clear is conditional on the version just read - a portion changed since is left alone")]
+    public async Task TransitionRefused_ClaimChangedSince_IsNotCleared()
+    {
+        var w = new ApprovalWorld();
+        w.AddLine(InvoiceLineStatus.Accepted, approved: 100m);
+        w.Lifecycle.Setup(l => l.TransitionAsync(w.InvoiceId, InvoiceLifecycleStatus.Approved, It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                // Someone else's write lands on the portion between the claim and the refusal: it is no longer our claim.
+                w.Portion["sprk_decidedby"] = new EntityReference("contact", Bob);
+                return Task.FromResult(new InvoiceTransitionResult(InvoiceTransitionOutcome.Refused, InvoiceLifecycleStatus.Approved, InvoiceLifecycleStatus.InReview, "invoice-lifecycle.transition-not-allowed"));
+            });
+
+        (await w.ApproveAs(AliceUser)).Code.Should().Be("ebilling.approve.refused");
+
+        w.Portion.GetAttributeValue<EntityReference>("sprk_decidedby").Id.Should().Be(Bob, "a claim that is not ours is never cleared");
+    }
+
+    // ── EB-D-171: eligible only by the caller's OWN contact ──
+
+    [Fact(DisplayName = "103 EB-D-171 SEEDED: a contact whose sprk_systemuser points at the caller does NOT make the caller eligible; nothing is written")]
+    public async Task ContactSpoof_SystemUserLinkNeverGrants()
+    {
+        var w = new ApprovalWorld();
+        w.AddLine(InvoiceLineStatus.Clean, extraction: Extraction);
+        // Eve is the assigned attorney; someone set her contact's sprk_systemuser to Carol's user. Carol's own contact is Carol (not assigned).
+        var eve = Guid.NewGuid();
+        w.Put(Contact(eve, "Eve Evans", CarolUser));
+        w.Core["sprk_assignedattorney1"] = new EntityReference("contact", eve);
+
+        var result = await w.ApproveAs(CarolUser);
+
+        result.Outcome.Should().Be(ApprovalOutcome.NotEligible);
+        result.Code.Should().Be("ebilling.approver.not_eligible");
+        AssertNothingWritten(w);
+        w.Corrections.Should().BeEmpty();
+
+        var state = (await w.GetAs(CarolUser))!;
+        state.CallerEligible.Should().BeFalse("the stored or listed contact never grants");
+        state.CanApprove.Should().BeFalse();
+        state.EligibleApprovers.Should().Contain("Eve Evans", "the set may list the contact for display");
+    }
+
+    [Fact(DisplayName = "103 EB-D-171: the real assignee's OWN contact makes them eligible, whatever that contact's user link says")]
+    public async Task OwnContact_Grants()
+    {
+        var w = new ApprovalWorld();
+        w.AddLine(InvoiceLineStatus.Accepted, approved: 100m);
+        // Alice's contact's user link was edited to name Bob's user: the identity service still resolves Alice's user to Alice's contact.
+        w.Put(Contact(Alice, "Alice Adams", BobUser));
+        w.Core["sprk_assignedtointernal"] = new EntityReference("contact", Dan);
+
+        (await w.ApproveAs(BobUser)).Outcome.Should().Be(ApprovalOutcome.NotEligible, "Bob's own contact is not assigned");
+        var result = await w.ApproveAs(AliceUser);
+
+        result.Outcome.Should().Be(ApprovalOutcome.Approved);
+        w.Portion.GetAttributeValue<EntityReference>("sprk_decidedby").Id.Should().Be(Alice);
+    }
+
+    [Fact(DisplayName = "103 EB-D-171 SEEDED fail-closed: a caller with no resolvable contact is 403 not_eligible; an identity fault is 503; neither writes")]
+    public async Task UnresolvableIdentity_FailsClosed()
+    {
+        var w = new ApprovalWorld();
+        w.AddLine(InvoiceLineStatus.Clean, extraction: Extraction);
+        w.ContactOfUser.Remove(AliceUser);
+
+        var none = await w.ApproveAs(AliceUser);
+
+        none.Outcome.Should().Be(ApprovalOutcome.NotEligible);
+        none.Code.Should().Be("ebilling.approver.not_eligible");
+        AssertNothingWritten(w);
+
+        var faulted = new ApprovalWorld();
+        faulted.AddLine(InvoiceLineStatus.Clean, extraction: Extraction);
+        faulted.FaultsOnce["caller-identity"] = new InvalidOperationException("dataverse down");
+
+        var unknown = await faulted.ApproveAs(AliceUser);
+
+        unknown.Outcome.Should().Be(ApprovalOutcome.Unavailable);
+        unknown.FailedStep.Should().Be("identity");
+        AssertNothingWritten(faulted);
+        faulted.Corrections.Should().BeEmpty();
+    }
+
+    // ── EB-D-172: approve closes the invoice-level Signals ──
+
+    [Fact(DisplayName = "103 EB-D-172: approve stores the invoice's open Signals (created by the decision time) with its record and closes them as Acted by it")]
+    public async Task Approve_ClosesTheInvoiceSignals()
+    {
+        var w = new ApprovalWorld();
+        w.AddLine(InvoiceLineStatus.Accepted, approved: 100m);
+        var open = w.AddInvoiceSignal("EB-DUP");
+        var acknowledged = w.AddInvoiceSignal("EB-TOTAL", SignalWriter.SignalStatusAcknowledged);
+        var resolved = w.AddInvoiceSignal("EB-OLD", SignalWriter.SignalStatusResolved);
+        var later = w.AddInvoiceSignal("EB-LATE", createdOn: Now.UtcDateTime.AddMinutes(5));
+
+        var result = await w.ApproveAs(AliceUser);
+
+        result.Outcome.Should().Be(ApprovalOutcome.Approved);
+        var stored = (await w.Recorder().FindStoredResolvedSetAsync("approve-invoice", w.InvoiceId, result.DecisionId!.Value))!;
+        stored.RecordId.Should().Be(result.DecisionRecordId!.Value);
+        stored.Signals.Select(s => s.SignalId).Should().BeEquivalentTo([open, acknowledged]);
+        stored.Signals.Single(s => s.SignalId == acknowledged).PolicyCode.Should().Be("EB-TOTAL");
+        w.ClosedBy.Keys.Should().BeEquivalentTo([open, acknowledged]);
+        w.ClosedBy.Values.Should().OnlyContain(id => id == result.DecisionRecordId);
+        w.SignalStatus(open).Should().Be(SignalWriter.SignalStatusResolved);
+        w.SignalStatus(resolved).Should().Be(SignalWriter.SignalStatusResolved, "untouched");
+        w.SignalStatus(later).Should().Be(SignalWriter.SignalStatusOpen, "raised after the decision time: not this decision's");
+    }
+
+    [Fact(DisplayName = "103 EB-D-172 SEEDED: a caller without the rights to close the invoice's Signals is refused (403) and NOTHING is written")]
+    public async Task NoCloseRights_IsRefused_AndWritesNothing()
+    {
+        var w = new ApprovalWorld();
+        w.AddLine(InvoiceLineStatus.Clean, extraction: Extraction);
+        var signal = w.AddInvoiceSignal();
+        // Write on the invoice but no AppendTo on the core record.
+        w.Rights = (set, _) => set == "sprk_projects" ? AccessRights.Read | AccessRights.Write : AccessRights.Read | AccessRights.Write | AccessRights.AppendTo;
+
+        var result = await w.ApproveAs(AliceUser);
+
+        result.Outcome.Should().Be(ApprovalOutcome.Forbidden);
+        result.Code.Should().Be("ebilling.decision.not_authorized");
+        AssertNothingWritten(w);
+        w.Corrections.Should().BeEmpty("not even the Clean lines are accepted");
+        w.Closes.Should().BeEmpty();
+        w.SignalStatus(signal).Should().Be(SignalWriter.SignalStatusOpen);
+    }
+
+    [Theory(DisplayName = "103 EB-D-172 (#1911 F2): a close that fails (a timeout or a change since the read) is Incomplete at 'signals', never Approved; the repeat finishes the closes with NO second record")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task FailedClose_IsIncomplete_AndTheRepeatFinishesIt(bool timeout)
+    {
+        var w = new ApprovalWorld();
+        w.AddLine(InvoiceLineStatus.Accepted, approved: 100m);
+        var closes = w.AddInvoiceSignal("EB-DUP");
+        var fails = w.AddInvoiceSignal("EB-TOTAL");
+        // LeftAsIs marks "throw a timeout" in the world's fake; ChangedSinceRead is answered as is.
+        w.CloseFailsOnce[fails] = timeout ? SignalAutomatedCloseOutcome.LeftAsIs : SignalAutomatedCloseOutcome.ChangedSinceRead;
+
+        var first = await w.ApproveAs(AliceUser);
+
+        first.Outcome.Should().Be(ApprovalOutcome.Incomplete);
+        first.Code.Should().Be("ebilling.approval.incomplete");
+        first.FailedStep.Should().Be("signals");
+        w.ApproveRecords.Should().ContainSingle();
+        w.SignalStatus(closes).Should().Be(SignalWriter.SignalStatusResolved, "the other close still ran");
+        w.SignalStatus(fails).Should().Be(SignalWriter.SignalStatusOpen);
+        w.Portion.Contains("sprk_decisionrecord").Should().BeFalse("not linked until the closes are done");
+
+        var repeat = await w.ApproveAs(AliceUser);
+
+        repeat.Outcome.Should().Be(ApprovalOutcome.Approved);
+        w.ApproveRecords.Should().ContainSingle("the repeat finds the record; it never writes a second");
+        repeat.DecisionRecordId.Should().Be(w.ClosedBy[closes]);
+        w.SignalStatus(fails).Should().Be(SignalWriter.SignalStatusResolved, "the remaining close is finished");
+        w.ClosedBy[fails].Should().Be(w.ClosedBy[closes], "closed by the same record");
+        w.Closes.Where(c => c.SignalId == closes).Select(c => c.Outcome)
+            .Should().Equal(SignalAutomatedCloseOutcome.Closed, SignalAutomatedCloseOutcome.AlreadyClosedByThisRecord);
+        w.Portion.GetAttributeValue<EntityReference>("sprk_decisionrecord").Id.Should().Be(repeat.DecisionRecordId!.Value);
+        w.Transitions.Should().Be(1);
+    }
+
+    [Fact(DisplayName = "103 EB-D-172 (#1911 F2): when every close succeeds the approve is Approved and linked")]
+    public async Task CleanClose_IsApproved()
+    {
+        var w = new ApprovalWorld();
+        w.AddLine(InvoiceLineStatus.Accepted, approved: 100m);
+        var signal = w.AddInvoiceSignal();
+
+        var result = await w.ApproveAs(AliceUser);
+
+        result.Outcome.Should().Be(ApprovalOutcome.Approved);
+        result.Code.Should().Be("ok");
+        w.SignalStatus(signal).Should().Be(SignalWriter.SignalStatusResolved);
+        w.Portion.GetAttributeValue<EntityReference>("sprk_decisionrecord").Id.Should().Be(result.DecisionRecordId!.Value);
+    }
+
+    [Fact(DisplayName = "103 EB-D-172: with no invoice Signal, no rights are asked")]
+    public async Task NoSignals_NoRightsAsked()
+    {
+        var w = new ApprovalWorld();
+        w.AddLine(InvoiceLineStatus.Accepted, approved: 100m);
+        w.Rights = (_, _) => AccessRights.None;
+
+        (await w.ApproveAs(AliceUser)).Outcome.Should().Be(ApprovalOutcome.Approved);
+        w.Probe.Invocations.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "103 EB-D-172: the claimant's repeat after the record closes the STORED set - nothing twice, and a Signal raised since stays open")]
+    public async Task Replay_AfterTheRecord_UsesTheStoredSet()
+    {
+        var w = new ApprovalWorld();
+        w.AddLine(InvoiceLineStatus.Accepted, approved: 100m);
+        var first = w.AddInvoiceSignal();
+        w.FaultsOnce["link"] = new InvalidOperationException("dataverse down");
+
+        (await w.ApproveAs(AliceUser)).Outcome.Should().Be(ApprovalOutcome.Incomplete);
+        w.ClosedBy.Keys.Should().Equal(first);
+
+        // Raised before the decision time but only now visible (a late writer): the stored set never widens to it.
+        var since = w.AddInvoiceSignal("EB-LATE", createdOn: Now.UtcDateTime.AddMinutes(-30));
+        var retried = await w.ApproveAs(AliceUser);
+
+        retried.Outcome.Should().Be(ApprovalOutcome.Approved);
+        w.ApproveRecords.Should().ContainSingle();
+        w.Closes.Where(c => c.SignalId == first).Select(c => c.Outcome)
+            .Should().Equal(SignalAutomatedCloseOutcome.Closed, SignalAutomatedCloseOutcome.AlreadyClosedByThisRecord);
+        w.SignalStatus(since).Should().Be(SignalWriter.SignalStatusOpen, "not in the stored set");
+        w.Closes.Should().NotContain(c => c.SignalId == since);
+    }
+
+    [Fact(DisplayName = "103 EB-D-172: the claimant's repeat BEFORE the record re-derives the set with the frozen decision time - a Signal raised after it is never added")]
+    public async Task Replay_BeforeTheRecord_IsBoundedByTheFrozenTime()
+    {
+        var w = new ApprovalWorld();
+        w.AddLine(InvoiceLineStatus.Accepted, approved: 100m);
+        var first = w.AddInvoiceSignal();
+        w.FaultsOnce["identity"] = new InvalidOperationException("dataverse down"); // the recorder's contact read: no record written
+
+        (await w.ApproveAs(AliceUser)).Outcome.Should().Be(ApprovalOutcome.Incomplete);
+        w.ApproveRecords.Should().BeEmpty();
+        w.Closes.Should().BeEmpty();
+
+        w.Clock.Advance(TimeSpan.FromMinutes(10));
+        var after = w.AddInvoiceSignal("EB-LATE", createdOn: Now.UtcDateTime.AddMinutes(5));
+        var retried = await w.ApproveAs(AliceUser);
+
+        retried.Outcome.Should().Be(ApprovalOutcome.Approved);
+        var stored = (await w.Recorder().FindStoredResolvedSetAsync("approve-invoice", w.InvoiceId, retried.DecisionId!.Value))!;
+        stored.Signals.Select(s => s.SignalId).Should().Equal(first);
+        w.SignalStatus(after).Should().Be(SignalWriter.SignalStatusOpen);
+        w.Portion.GetAttributeValue<DateTime>("sprk_decidedon").Should().Be(Now.UtcDateTime, "the decision time frozen by the claim");
+    }
+
+    // ── F2: a failed bulk accept is completed, never skipped ──
+
+    [Theory(DisplayName = "103 F2 SEEDED: after the bulk accept failed past its line write, approving again completes it - the line records exist and the corrections are 'Accepted in bulk'")]
+    [InlineData("identity")]
+    [InlineData("totals")]
+    [InlineData("tx:corrections")]
+    public async Task RetryAfterAFailedBulkAccept_CompletesIt(string step)
+    {
+        var w = new ApprovalWorld();
+        var clean = w.AddLine(InvoiceLineStatus.Clean, 300m, extraction: Extraction);
+        w.AddLine(InvoiceLineStatus.Accepted, 700m, approved: 700m);
+        w.FaultsOnce[step] = new InvalidOperationException("dataverse down");
+
+        var failed = await w.ApproveAs(AliceUser);
+
+        failed.Outcome.Should().Be(ApprovalOutcome.Incomplete);
+        failed.FailedStep.Should().Be("accept-clean");
+        failed.CommittedLineIds.Should().Equal(clean.Id);
+        w.Row("sprk_billingevent", clean.Id).GetAttributeValue<OptionSetValue>("sprk_linestatus").Value.Should().Be((int)InvoiceLineStatus.Accepted);
+        w.InvoiceStatus.Should().Be(InvoiceStatusCodes.InReview);
+
+        var retried = await w.ApproveAs(AliceUser);
+
+        retried.Outcome.Should().Be(ApprovalOutcome.Approved);
+        var lineRecord = w.H.Created.Where(r => r.GetAttributeValue<string>("sprk_actioncode") == "accept-line").Should().ContainSingle().Subject;
+        lineRecord.GetAttributeValue<EntityReference>("sprk_regardinginvoiceline").Id.Should().Be(clean.Id);
+        (await w.Recorder().FindStoredResolvedSetAsync("accept-line", clean.Id, InvoiceApprovalService.AcceptCleanDecisionIdFor(w.ApprovalId)))
+            .Should().NotBeNull("recorded under the approval's bulk decision id");
+        var bulk = w.Corrections.Where(r => r.GetAttributeValue<EntityReference>("sprk_invoiceline").Id == clean.Id).ToList();
+        bulk.Should().HaveCount(7).And.OnlyContain(r => r.GetAttributeValue<OptionSetValue>("sprk_outcometype").Value == 100000002, "Accepted in bulk");
+        w.ApproveRecords.Should().ContainSingle();
+    }
+
+    [Fact(DisplayName = "103 F2: an Accepted line decided by ANOTHER person and not recorded is 409 until it is recorded; nothing is written")]
+    public async Task AnotherPersonsUnrecordedLine_Is409()
+    {
+        var w = new ApprovalWorld();
+        var line = w.AddLine(InvoiceLineStatus.Accepted, approved: 100m);
+        line["sprk_reviewedby"] = new EntityReference("systemuser", BobUser);
+
+        var result = await w.ApproveAs(AliceUser);
+
+        result.Outcome.Should().Be(ApprovalOutcome.Conflict);
+        result.Code.Should().Be("ebilling.approve.decision_incomplete");
+        result.CommittedLineIds.Should().Equal(line.Id);
+        AssertNothingWritten(w);
+    }
+
+    [Fact(DisplayName = "103 F2: lines decided individually (recorded) are not re-decided by approve")]
+    public async Task RecordedLines_AreLeftAlone()
+    {
+        var w = new ApprovalWorld();
+        var line = w.AddLine(InvoiceLineStatus.Clean, extraction: Extraction);
+        var decided = await w.LineService().DecideAsync(
+            new LineDecisionCommand(w.InvoiceId, Guid.NewGuid(), LineDecisionAction.Accept, null, [new LineDecisionLine(line.Id)], BobUser, Bulk: false, CallerToken),
+            CancellationToken.None);
+        decided.IsApplied.Should().BeTrue();
+
+        (await w.ApproveAs(AliceUser)).Outcome.Should().Be(ApprovalOutcome.Approved);
+        w.H.Created.Where(r => r.GetAttributeValue<string>("sprk_actioncode") == "accept-line").Should().ContainSingle("Bob's record only");
+    }
+
+    // ── F3: exactly one core record ──
+
+    [Fact(DisplayName = "103 F3 SEEDED: an invoice with two core lookups is refused before anything is written (approve, and GET says not eligible)")]
+    public async Task TwoCoreLookups_AreRefused()
+    {
+        var w = new ApprovalWorld();
+        w.AddLine(InvoiceLineStatus.Clean, extraction: Extraction);
+        w.Invoice["sprk_matter"] = new EntityReference("sprk_matter", Guid.NewGuid());
+
+        var result = await w.ApproveAs(AliceUser);
+
+        result.Outcome.Should().Be(ApprovalOutcome.Failed);
+        result.Code.Should().Be("ebilling.approval.core_unresolved");
+        AssertNothingWritten(w);
+        w.Corrections.Should().BeEmpty();
+
+        var state = (await w.GetAs(AliceUser))!;
+        state.EligibilityUnavailable.Should().BeTrue();
+        state.CanApprove.Should().BeFalse();
+    }
+
+    [Fact(DisplayName = "103 F3: the recorder's filing read runs before the claim - a fault is 503 and nothing is written")]
+    public async Task FilingReadFault_IsUnavailable()
+    {
+        var w = new ApprovalWorld();
+        w.AddLine(InvoiceLineStatus.Clean, extraction: Extraction);
+        w.FaultsOnce["stamps"] = new InvalidOperationException("dataverse down");
+
+        var result = await w.ApproveAs(AliceUser);
+
+        result.Outcome.Should().Be(ApprovalOutcome.Unavailable);
+        result.FailedStep.Should().Be("filing");
+        AssertNothingWritten(w);
+        w.Corrections.Should().BeEmpty();
+    }
+
+    // ── F4, K1, K3, K4 ──
+
+    [Fact(DisplayName = "103 F4: GET canApprove is false without the decide right (Write on the invoice), even for an eligible approver")]
+    public async Task Get_CanApproveNeedsTheDecideRight()
+    {
+        var w = new ApprovalWorld();
+        w.AddLine(InvoiceLineStatus.Accepted, approved: 100m);
+        w.CanDecide = false;
+
+        var state = (await w.GetAs(AliceUser))!;
+
+        state.CallerEligible.Should().BeTrue();
+        state.CanApprove.Should().BeFalse();
+
+        var noCaller = (await w.Service().GetAsync(w.InvoiceId, AliceUser, null, CancellationToken.None))!;
+        noCaller.CanApprove.Should().BeFalse("no caller to ask is no");
+    }
+
+    [Fact(DisplayName = "103 K1: another approver's unfinished claim is 409 claimed and nothing is written over it; the claimant's own repeat proceeds")]
+    public async Task ClaimedByAnother_Is409()
+    {
+        var w = new ApprovalWorld();
+        w.AddLine(InvoiceLineStatus.Accepted, approved: 100m);
+        w.Portion["sprk_decidedby"] = new EntityReference("contact", Bob);
+        w.Portion["sprk_decidedon"] = Now.UtcDateTime.AddMinutes(-1);
+
+        var result = await w.ApproveAs(AliceUser);
+
+        result.Outcome.Should().Be(ApprovalOutcome.Conflict);
+        result.Code.Should().Be("ebilling.approval.claimed");
+        w.Writes.Should().Be(0);
+        w.Transitions.Should().Be(0);
+        w.Portion.GetAttributeValue<EntityReference>("sprk_decidedby").Id.Should().Be(Bob);
+
+        (await w.ApproveAs(BobUser)).Outcome.Should().Be(ApprovalOutcome.Approved, "the claimant completes it");
+    }
+
+    [Fact(DisplayName = "103 K3 SEEDED: the approved amount is in the record's Values, so a repeat with a different frozen amount is refused, never answered as recorded")]
+    public async Task ApprovedAmount_IsCoveredByTheHash()
+    {
+        var w = new ApprovalWorld();
+        w.AddLine(InvoiceLineStatus.Accepted, approved: 100m);
+        w.FaultsOnce["link"] = new InvalidOperationException("dataverse down");
+        (await w.ApproveAs(AliceUser)).Outcome.Should().Be(ApprovalOutcome.Incomplete);
+        w.ApproveRecords.Should().ContainSingle();
+
+        w.Portion["sprk_approvedamount"] = new Money(999m);
+        var retried = await w.ApproveAs(AliceUser);
+
+        retried.Outcome.Should().Be(ApprovalOutcome.Incomplete);
+        retried.FailedStep.Should().Be("record");
+        w.ApproveRecords.Should().ContainSingle("the writer refuses other content under the same id");
+    }
+
+    [Theory(DisplayName = "103 K4: a portion with no or an unknown status is refused (409 status_unknown), never treated as Pending; GET shows Unknown")]
+    [InlineData(null)]
+    [InlineData(999)]
+    public async Task UnknownPortionStatus_IsRefused(int? status)
+    {
+        var w = new ApprovalWorld();
+        w.AddLine(InvoiceLineStatus.Accepted, approved: 100m);
+        if (status is { } s)
+        {
+            w.Portion["sprk_approvalstatus"] = new OptionSetValue(s);
+        }
+        else
+        {
+            w.Portion.Attributes.Remove("sprk_approvalstatus");
+        }
+
+        var result = await w.ApproveAs(AliceUser);
+
+        result.Outcome.Should().Be(ApprovalOutcome.Conflict);
+        result.Code.Should().Be("ebilling.approval.status_unknown");
+        w.Writes.Should().Be(0);
+        w.Transitions.Should().Be(0);
+
+        var state = (await w.GetAs(AliceUser))!;
+        state.Status.Should().Be("Unknown");
+        state.CanApprove.Should().BeFalse();
     }
 
     [Fact(DisplayName = "103 K-4: another decision holding the invoice's lock is Busy; a lock fault is Unavailable; neither writes")]
@@ -440,7 +869,7 @@ public sealed class InvoiceApprovalServiceTests
         w.AddLine(InvoiceLineStatus.Accepted, approved: 100m);
         w.AddLine(InvoiceLineStatus.Clean);
 
-        var state = (await w.Service().GetAsync(w.InvoiceId, AliceUser, CancellationToken.None))!;
+        var state = (await w.GetAs(AliceUser))!;
 
         state.Status.Should().Be("Pending");
         state.EligibleApprovers.Should().Equal("Alice Adams", "Bob Brown");
@@ -453,7 +882,7 @@ public sealed class InvoiceApprovalServiceTests
 
         // An assignment change shows on the next GET, both live and in the stored set.
         w.Core["sprk_assignedattorney1"] = new EntityReference("contact", Carol);
-        var after = (await w.Service().GetAsync(w.InvoiceId, AliceUser, CancellationToken.None))!;
+        var after = (await w.GetAs(AliceUser))!;
         after.CallerEligible.Should().BeFalse();
         after.CanApprove.Should().BeFalse();
         w.StoredApprovers.Should().BeEquivalentTo([Bob, Carol]);
@@ -467,7 +896,7 @@ public sealed class InvoiceApprovalServiceTests
         w.Hold();
         w.Core["sprk_billingapproverrole"] = new OptionSetValueCollection([new OptionSetValue((int)BillingApproverRole.AssignedParalegal1)]);
 
-        var state = (await w.Service().GetAsync(w.InvoiceId, AliceUser, CancellationToken.None))!;
+        var state = (await w.GetAs(AliceUser))!;
 
         state.OpenLines.Should().Be(new ApprovalOpenLinesDto(0, 1));
         state.Held.Should().BeTrue();
@@ -482,7 +911,7 @@ public sealed class InvoiceApprovalServiceTests
         w.AddLine(InvoiceLineStatus.Accepted, approved: 100m);
         await w.ApproveAs(AliceUser);
 
-        var state = (await w.Service().GetAsync(w.InvoiceId, BobUser, CancellationToken.None))!;
+        var state = (await w.GetAs(BobUser))!;
         state.Status.Should().Be("Approved");
         state.ApprovedAmount.Should().Be(1000m, "the billed total (1,000) less no adjustments, frozen at approval");
         state.DecidedOn.Should().Be(Now.UtcDateTime);
@@ -490,10 +919,10 @@ public sealed class InvoiceApprovalServiceTests
         state.CanApprove.Should().BeFalse();
 
         w.FaultsOnce["read:contact"] = new InvalidOperationException("dataverse down");
-        var faulted = (await w.Service().GetAsync(w.InvoiceId, BobUser, CancellationToken.None))!;
+        var faulted = (await w.GetAs(BobUser))!;
         faulted.EligibilityUnavailable.Should().BeTrue();
         faulted.CallerEligible.Should().BeFalse();
 
-        (await w.Service().GetAsync(Guid.NewGuid(), BobUser, CancellationToken.None)).Should().BeNull("an unknown invoice is the uniform 404");
+        (await w.Service().GetAsync(Guid.NewGuid(), BobUser, null, CancellationToken.None)).Should().BeNull("an unknown invoice is the uniform 404");
     }
 }

@@ -1,4 +1,4 @@
-// ebilling-r1 task 103 (FR-35, FR-11, FR-30, I-2; D-40, D-72, D-78, D-100; notes 103-approval-worklist.md).
+// ebilling-r1 task 103 (FR-35, FR-11, FR-30, I-2; D-40, D-72, D-78, D-100, D-122; EB-D-171, EB-D-172; notes 103-approval-worklist.md).
 //
 // Component Justification (CLAUDE.md §11):
 //   (1) Existing — InvoiceLifecycleService moves the status (014) but checks no approver; BillingDecisionRecorder records a decision (074) but
@@ -15,7 +15,12 @@ using System.Data;
 using System.Globalization;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
+using Spaarke.Core.Auth;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Ai.Membership;
+using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Signals;
@@ -63,6 +68,19 @@ public static class InvoiceApprovalCodes
     public const string PortionAmbiguous = "ebilling.approval.ambiguous";
     public const string AlreadyDecided = "ebilling.approval.already_decided";
     public const string Changed = "ebilling.approval.changed";
+
+    /// <summary>409 (K1): another person's approve claimed the portion and has not finished; only that person's repeat completes it.</summary>
+    public const string Claimed = "ebilling.approval.claimed";
+
+    /// <summary>409 (K4): the portion's status is none of Pending, Approved, Rejected, Returned; it is never treated as approvable.</summary>
+    public const string StatusUnknown = "ebilling.approval.status_unknown";
+
+    /// <summary>409 (F2): a line was decided by another person whose decision is not recorded yet; they repeat it, then approve.</summary>
+    public const string LineDecisionIncomplete = "ebilling.approve.decision_incomplete";
+
+    /// <summary>403 (EB-D-172): closing the invoice's Signals needs the caller's rights, and the caller does not hold them.</summary>
+    public const string NotAuthorized = LineDecisionCodes.NotAuthorized;
+
     public const string TransitionRefused = "ebilling.approve.refused";
     public const string TotalsRefused = LineDecisionCodes.TotalsRefused;
     public const string Busy = LineDecisionCodes.Busy;
@@ -80,11 +98,13 @@ public sealed record ApprovalOpenLinesDto(int Pending, int Flagged)
 }
 
 /// <summary>The approval state the Invoice Review page shows (GET, and the body of a 200 approve).</summary>
-/// <param name="Status"><c>Pending</c>, <c>Approved</c>, <c>Rejected</c>, <c>Returned</c>, or <c>None</c> when the invoice has no portion.</param>
+/// <param name="Status"><c>Pending</c>, <c>Approved</c>, <c>Rejected</c>, <c>Returned</c>, <c>Unknown</c>, or <c>None</c> when the invoice has no portion.</param>
 /// <param name="EligibleApprovers">The display names of the people who may approve (live), e.g. "Awaiting: J. Smith, A. Lee".</param>
 /// <param name="NoEligibleApprover">Nobody may approve: the core record's roles name no assigned person linked to a user (FR-14).</param>
 /// <param name="EligibilityUnavailable">The live resolution failed; <paramref name="CallerEligible"/> is false until it succeeds.</param>
-/// <param name="CanApprove">The caller is eligible, the invoice is In Review and not held, no line is Pending or Flagged, the portion is Pending.</param>
+/// <param name="CallerEligible">The caller's OWN contact (EB-D-171) is one of the eligible approvers.</param>
+/// <param name="CanApprove">The caller is eligible and holds Write on the invoice, the invoice is In Review and not held, no line is Pending or
+/// Flagged, the portion is Pending.</param>
 /// <param name="UndecidedCleanLines">Clean lines an approve accepts in bulk (D-72).</param>
 public sealed record InvoiceApprovalStateDto(
     Guid InvoiceId,
@@ -117,26 +137,42 @@ public sealed record ApprovalResult(
 
 /// <summary>
 /// Approves an invoice (FR-35): any one eligible approver (D-40), I-2 enforced, undecided Clean lines accepted in bulk (D-72), the status moved to
-/// Approved through 014, the approved total frozen on the portion, and exactly one Decision Record naming who decided (074, D-100).
+/// Approved through 014, the approved total frozen on the portion, the invoice's open Signals closed (D-122, EB-D-172), and exactly one Decision
+/// Record naming who decided (074, D-100).
 /// </summary>
 /// <remarks>
 /// <para><b>Authorization.</b> The route has already proven Write on the invoice as the caller (<c>ebilling.invoice.decide</c>). Eligibility is
-/// resolved LIVE from the core record on every call (<see cref="EligibleApproverResolver.ResolveAsync"/>); the stored N:N never grants. A caller who
-/// is not eligible gets <see cref="ApprovalOutcome.NotEligible"/> before anything is written. The decider is the caller's <c>systemuserid</c> from
-/// the authenticated principal; no contact id, Signal id or policy version is taken from the request.</para>
+/// resolved LIVE from the core record on every call (<see cref="EligibleApproverResolver.ResolveAsync"/>); the stored N:N never grants. The caller
+/// is eligible only when the caller's OWN contact (<see cref="IIdentityNormalizationService.ResolveAsync"/>, the recorder's rule) is one of the
+/// eligible assignment contacts (EB-D-171): a contact's <c>sprk_systemuser</c> column is editable and never grants. A caller with no resolvable
+/// contact gets <see cref="ApprovalOutcome.NotEligible"/>, a caller whose identity could not be read <see cref="ApprovalOutcome.Unavailable"/>,
+/// both before anything is written. The decider is the caller's <c>systemuserid</c> from the authenticated principal; no contact id, Signal id
+/// or policy version is taken from the request.</para>
 /// <para><b>Exactly once (074 K-1 / K-4), three layers.</b> (1) Two processing locks, the invoice-decision lock shared with 104 / 105
-/// (<see cref="SubmissionOverrideService.LockKey"/>) and the line-decision lock (<see cref="InvoiceLineDecisionService.LockKeyFor"/>), so one
-/// decision runs per invoice. (2) The CLAIM: before the transition, the portion's decider, time and approved amount are written conditional on
-/// the portion's row version as read; a concurrent approve that read the same version gets 409 <c>ebilling.approval.changed</c> and writes
-/// nothing else. (3) Only the call whose 014 transition answered Transitioned writes the portion as Approved and records; AlreadyInTarget is a
-/// no-op. The decision id is DERIVED from the portion (<see cref="DecisionIdFor"/>), so every attempt by anyone uses one id and the writer's
-/// same-id check refuses a second, different record.</para>
-/// <para><b>Order and recovery (074 K-3).</b> Every permanent refusal the writer can give is checked before the first write: the subject has one
-/// core record, the decision passes <see cref="BillingDecisionRecorder.Preflight"/>, and approve resolves no Signal and names no policy version.
-/// The remaining record refusals are transient (a read fault). So the order is: accept Clean → Unreviewed rows → totals → claim → transition →
-/// portion Approved → record → link. A failure after the transition answers 503 <c>ebilling.approval.incomplete</c>; the CLAIMANT repeating the
-/// approve finds the invoice Approved and completes the portion, the record (same id, same content: the hash ignores facts and time) and the link.
-/// Anyone else gets a 200 no-op and no record.</para>
+/// (<see cref="SubmissionOverrideService.LockKey"/>) and the line-decision lock (<see cref="InvoiceLineDecisionService.LockKeyFor"/>, the
+/// per-invoice <see cref="InvoiceLineDecisionService.LockKeyPrefix"/> key every line decision takes), so one decision runs per invoice. (2) The
+/// CLAIM: before the transition, the portion's decider, time and approved amount are written conditional on the portion's row version as read,
+/// and only when the portion names no decider or the caller's own contact (K1); a concurrent approve that read the same version gets 409
+/// <c>ebilling.approval.changed</c>, another person's unfinished claim 409 <c>ebilling.approval.claimed</c>, and nothing else is written. A
+/// refused transition clears the claim again (K2). (3) Only the call whose 014 transition answered Transitioned writes the portion as Approved
+/// and records; AlreadyInTarget is a no-op. The decision id is DERIVED from the portion (<see cref="DecisionIdFor"/>), so every attempt by
+/// anyone uses one id and the writer's same-id check refuses a second, different record.</para>
+/// <para><b>Signals (D-122, EB-D-172).</b> The decision resolves every Open or Acknowledged Signal whose subject is the INVOICE, created at or
+/// before the decision time (the line Signals are their lines' decisions'). The set is derived server-side, the caller's close rights are
+/// asked as the caller BEFORE any write (<see cref="HumanDecisionSignalClose.AuthorizeAsync"/>: AppendTo on the core record, Write on the
+/// invoice), and the set is stored WITH the record (<c>ResolvedSignalIds</c> and the read time and policy codes in the facts). After the record
+/// the set is closed as Acted naming the approver, before the link; a close that failed (a fault or a change since the read) answers 503
+/// <c>ebilling.approval.incomplete</c> at step <c>signals</c>, and the claimant's repeat finishes the remaining closes under the same record (no
+/// second record), then links. A repeat closes the set stored with the record
+/// (<see cref="BillingDecisionRecorder.FindStoredResolvedSetAsync"/>), never a fresh read; before the record exists it re-derives the set with
+/// the decision time frozen by the claim as the bound, so a Signal raised after the decision is never added.</para>
+/// <para><b>Order and recovery (074 K-3).</b> Every permanent refusal the writer can give is checked before the first write: the invoice names
+/// exactly one core record (<see cref="InvoiceFamilyCoreRecordGuard.CoreRecordLookups"/>) and the recorder's filing read derives exactly that one
+/// (<see cref="CoreAncestorResolver.ResolveStampsAsync"/>), the Signal close is authorized, and the decision passes
+/// <see cref="BillingDecisionRecorder.Preflight"/>. The order is: complete an earlier attempt's bulk accept (F2) → accept Clean → Unreviewed rows
+/// → totals → claim → transition → portion Approved → record → Signals → link. A failure after the transition answers 503
+/// <c>ebilling.approval.incomplete</c>; the CLAIMANT repeating the approve finds the invoice Approved and completes the portion, the record (same
+/// id, same content: the hash ignores facts and time), the Signals and the link. Anyone else gets a 200 no-op and no record.</para>
 /// </remarks>
 public sealed class InvoiceApprovalService
 {
@@ -153,12 +189,15 @@ public sealed class InvoiceApprovalService
     internal const string PortionDecidedBy = "sprk_decidedby";
     internal const string PortionRecord = "sprk_decisionrecord";
 
+    /// <summary>The line-decision codes whose record proves a line's decision is recorded (F2).</summary>
+    private static readonly string[] LineActionCodes = ["accept-line", "reduce-line", "disallow-line"];
+
     /// <summary>Long enough for the accept-Clean, the totals and the record; a lock that outlives a crash expires by itself.</summary>
     internal static readonly TimeSpan LockDuration = TimeSpan.FromMinutes(5);
 
     private static readonly string[] InvoiceColumns =
     [
-        "statuscode", InvoiceTotalsService.InvoiceBilledTotal, "sprk_matter", "sprk_project", "sprk_regardingworkassignment",
+        "statuscode", InvoiceTotalsService.InvoiceBilledTotal, .. EligibleApproverResolver.CoreLookupColumns(InvoiceReviewReadService.InvoiceEntity),
     ];
 
     private readonly IGenericEntityService _entities;
@@ -168,6 +207,11 @@ public sealed class InvoiceApprovalService
     private readonly IInvoiceLifecycleService _lifecycle;
     private readonly BillingDecisionRecorder _recorder;
     private readonly IIdempotencyService _locks;
+    private readonly IIdentityNormalizationService _identity;
+    private readonly CoreAncestorResolver _coreAncestors;
+    private readonly CallerRecordAccessProbe _probe;
+    private readonly HumanDecisionSignalClose.CloseActed _closeActed;
+    private readonly Func<InvoiceContextService.InvoiceCaller, Guid, CancellationToken, Task<bool>> _canDecide;
     private readonly ILogger<InvoiceApprovalService> _logger;
     private readonly TimeProvider _time;
 
@@ -179,11 +223,22 @@ public sealed class InvoiceApprovalService
         IInvoiceLifecycleService lifecycle,
         BillingDecisionRecorder recorder,
         IIdempotencyService locks,
+        IIdentityNormalizationService identity,
+        CoreAncestorResolver coreAncestors,
+        CallerRecordAccessProbe probe,
+        SignalWriter signals,
+        AuthorizationService authorization,
         ILogger<InvoiceApprovalService> logger)
-        : this(entities, resolver, lines, totals, lifecycle, recorder, locks, logger, null)
+        : this(
+            entities, resolver, lines, totals, lifecycle, recorder, locks, identity, coreAncestors, probe,
+            (signals ?? throw new ArgumentNullException(nameof(signals))).CloseActedByDecisionAsync,
+            DecideCheck(authorization ?? throw new ArgumentNullException(nameof(authorization)), logger),
+            logger,
+            null)
     {
     }
 
+    /// <summary>The seam the unit tests use: the Signal writer's close and the caller's decide right are passed as calls (100's pattern).</summary>
     internal InvoiceApprovalService(
         IGenericEntityService entities,
         EligibleApproverResolver resolver,
@@ -192,6 +247,11 @@ public sealed class InvoiceApprovalService
         IInvoiceLifecycleService lifecycle,
         BillingDecisionRecorder recorder,
         IIdempotencyService locks,
+        IIdentityNormalizationService identity,
+        CoreAncestorResolver coreAncestors,
+        CallerRecordAccessProbe probe,
+        HumanDecisionSignalClose.CloseActed closeActed,
+        Func<InvoiceContextService.InvoiceCaller, Guid, CancellationToken, Task<bool>> canDecide,
         ILogger<InvoiceApprovalService> logger,
         TimeProvider? time)
     {
@@ -202,9 +262,20 @@ public sealed class InvoiceApprovalService
         _lifecycle = lifecycle ?? throw new ArgumentNullException(nameof(lifecycle));
         _recorder = recorder ?? throw new ArgumentNullException(nameof(recorder));
         _locks = locks ?? throw new ArgumentNullException(nameof(locks));
+        _identity = identity ?? throw new ArgumentNullException(nameof(identity));
+        _coreAncestors = coreAncestors ?? throw new ArgumentNullException(nameof(coreAncestors));
+        _probe = probe ?? throw new ArgumentNullException(nameof(probe));
+        _closeActed = closeActed ?? throw new ArgumentNullException(nameof(closeActed));
+        _canDecide = canDecide ?? throw new ArgumentNullException(nameof(canDecide));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _time = time ?? TimeProvider.System;
     }
+
+    /// <summary>F4: the decide right (Write on the invoice) asked of Dataverse as the caller, as the review read's <c>canDecide</c>.</summary>
+    internal static Func<InvoiceContextService.InvoiceCaller, Guid, CancellationToken, Task<bool>> DecideCheck(AuthorizationService authorization, ILogger logger) =>
+        async (caller, invoiceId, ct) => await CallerReadCheck.CheckAsync(
+            authorization, caller, FinanceAuthorizationFilter.InvoiceEntitySet, "ebilling.invoice.decide", invoiceId, logger, "Invoice approval", ct)
+            .ConfigureAwait(false) == CallerReadOutcome.Readable;
 
     /// <summary>The approval's one decision id: derived from the portion, so every attempt by every approver uses the same id (074: "103: from the
     /// approval portion").</summary>
@@ -217,9 +288,11 @@ public sealed class InvoiceApprovalService
 
     /// <summary>
     /// The approval state for the caller, with the D-78 recheck: eligibility is resolved live and, while the portion is Pending on an invoice In
-    /// Review, mirrored onto the stored set (best effort). Null when the invoice does not exist (uniform 404). Throws on a read fault.
+    /// Review, mirrored onto the stored set (best effort). <paramref name="caller"/> is asked for the decide right (F4); without it
+    /// <c>canApprove</c> is false. Null when the invoice does not exist (uniform 404). Throws on a read fault.
     /// </summary>
-    public async Task<InvoiceApprovalStateDto?> GetAsync(Guid invoiceId, Guid? callerSystemUserId, CancellationToken ct)
+    public async Task<InvoiceApprovalStateDto?> GetAsync(
+        Guid invoiceId, Guid? callerSystemUserId, InvoiceContextService.InvoiceCaller? caller, CancellationToken ct)
     {
         var invoice = await ReadInvoiceAsync(invoiceId, ct).ConfigureAwait(false);
         if (invoice is null)
@@ -233,7 +306,7 @@ public sealed class InvoiceApprovalService
         var held = await IsHeldAsync(invoiceId, ct).ConfigureAwait(false);
 
         EligibleApproverSet? set = null;
-        if (InvoiceLineDecisionService.CoreOf(invoice) is { } core)
+        if (EligibleApproverResolver.SingleCoreOf(InvoiceReviewReadService.InvoiceEntity, invoice) is { } core)
         {
             try
             {
@@ -263,7 +336,29 @@ public sealed class InvoiceApprovalService
             }
         }
 
-        return State(invoice, portion, lines, held, set, eligibilityUnavailable: set is null, callerSystemUserId, resolvedOn);
+        // EB-D-171: eligible only by the caller's own contact. Best effort here: a read fault shows "not eligible"; approve refuses it.
+        var callerEligible = false;
+        if (set is not null && callerSystemUserId is { } user && user != Guid.Empty)
+        {
+            var contact = await CallerContactAsync(invoiceId, user, ct).ConfigureAwait(false);
+            callerEligible = contact.Failure is null && set.ForContact(contact.ContactId) is not null;
+        }
+
+        // F4: canApprove also needs the decide right (Write on the invoice), asked as the caller; "could not answer" is no.
+        var canDecide = false;
+        if (callerEligible && caller is not null)
+        {
+            try
+            {
+                canDecide = await _canDecide(caller, invoiceId, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogWarning("Approval state of invoice {InvoiceId}: the caller's decide right could not be read ({ExceptionType}).", invoiceId, ex.GetType().Name);
+            }
+        }
+
+        return State(invoice, portion, lines, held, set, eligibilityUnavailable: set is null, callerEligible, canDecide, resolvedOn);
     }
 
     // ── POST approve ──
@@ -343,7 +438,7 @@ public sealed class InvoiceApprovalService
         // ── Already approved (a second approve, or the claimant completing an interrupted one). ──
         if (portionStatus == PortionApproved || invoiceStatus == InvoiceStatusCodes.Approved)
         {
-            return await CompleteOrNoOpAsync(invoice, portion, caller, decisionId, ct).ConfigureAwait(false);
+            return await CompleteOrNoOpAsync(invoice, portion, caller, callerBearerToken, decisionId, ct).ConfigureAwait(false);
         }
 
         if (portionStatus is PortionRejected or PortionReturned)
@@ -351,19 +446,26 @@ public sealed class InvoiceApprovalService
             return new ApprovalResult(ApprovalOutcome.Conflict, InvoiceApprovalCodes.AlreadyDecided, "The invoice was already decided.");
         }
 
+        // ── K4: only a Pending portion is approvable; an unknown (or missing) status is refused, never assumed Pending. ──
+        if (portionStatus != PortionPending)
+        {
+            _logger.LogWarning("Approve of invoice {InvoiceId}: the approval status {Status} is not recognised; nothing changed.", invoiceId, portionStatus);
+            return new ApprovalResult(ApprovalOutcome.Conflict, InvoiceApprovalCodes.StatusUnknown, "The approval record's status is not recognised.");
+        }
+
         if (invoiceStatus != InvoiceStatusCodes.InReview)
         {
             return new ApprovalResult(ApprovalOutcome.NotInReview, InvoiceApprovalCodes.NotInReview, "Only an invoice In Review can be approved.");
         }
 
-        // ── 074 K-3: the subject has one core record (the writer's filing check), before anything is written. ──
-        if (InvoiceLineDecisionService.CoreOf(invoice) is not { } core)
+        // ── F3 / 074 K-3: the invoice names exactly one core record (013's lookups), before anything is written. ──
+        if (EligibleApproverResolver.SingleCoreOf(InvoiceReviewReadService.InvoiceEntity, invoice) is not { } core)
         {
-            _logger.LogError("Approve of invoice {InvoiceId}: the invoice names no core record; nothing changed.", invoiceId);
-            return new ApprovalResult(ApprovalOutcome.Failed, InvoiceApprovalCodes.CoreUnresolved, "The invoice names no core record.");
+            _logger.LogError("Approve of invoice {InvoiceId}: the invoice names no single core record; nothing changed.", invoiceId);
+            return new ApprovalResult(ApprovalOutcome.Failed, InvoiceApprovalCodes.CoreUnresolved, "The invoice names no single core record.");
         }
 
-        // ── FR-35: eligibility, LIVE from the core record. The stored N:N never grants. ──
+        // ── FR-35, EB-D-171: eligibility, LIVE from the core record, by the caller's OWN contact. The stored N:N never grants. ──
         EligibleApproverSet set;
         try
         {
@@ -374,11 +476,25 @@ public sealed class InvoiceApprovalService
             return Unavailable(invoiceId, "eligibility", ex);
         }
 
-        if (set.For(caller) is not { } approver)
+        var callerContact = await CallerContactAsync(invoiceId, caller, ct).ConfigureAwait(false);
+        if (callerContact.Failure is { } identityFailure)
         {
-            _logger.LogWarning("Approve of invoice {InvoiceId}: the caller is not an eligible approver ({Eligible} eligible); nothing changed.",
-                invoiceId, set.Approvers.Count);
+            return identityFailure;
+        }
+
+        if (set.ForContact(callerContact.ContactId) is not { } approver)
+        {
+            _logger.LogWarning("Approve of invoice {InvoiceId}: the caller is not an eligible approver ({Eligible} eligible, caller contact {Resolved}); nothing changed.",
+                invoiceId, set.Approvers.Count, callerContact.ContactId is null ? "unresolved" : "resolved");
             return new ApprovalResult(ApprovalOutcome.NotEligible, InvoiceApprovalCodes.NotEligible, "You are not an eligible approver of this invoice.");
+        }
+
+        // ── K1: another person's unfinished claim is theirs to complete; nothing is written over it. ──
+        if (portion.GetAttributeValue<EntityReference>(PortionDecidedBy) is { } claimedBy && claimedBy.Id != Guid.Empty && claimedBy.Id != approver.ContactId)
+        {
+            _logger.LogWarning("Approve of invoice {InvoiceId}: the approval is claimed by another approver's unfinished approve; nothing changed.", invoiceId);
+            return new ApprovalResult(ApprovalOutcome.Conflict, InvoiceApprovalCodes.Claimed,
+                "Another approver's approval of this invoice has not finished. They complete it by approving again.");
         }
 
         // ── FR-20: a blocked submission holds the invoice from approval until it is decided. ──
@@ -405,6 +521,32 @@ public sealed class InvoiceApprovalService
                 $"{open.Pending} lines are still being processed and {open.Flagged} are flagged; decide them before approving.", OpenLines: open);
         }
 
+        var decidedOn = Seconds(_time.GetUtcNow());
+
+        // ── EB-D-172: the invoice's open Signals created by the decision time, derived server-side; the close authorized BEFORE any write. ──
+        var signals = await ReadInvoiceSignalsAsync(invoiceId, decidedOn.UtcDateTime, ct).ConfigureAwait(false);
+        if (signals.Failure is { } signalFailure)
+        {
+            return signalFailure;
+        }
+
+        if (await AuthorizeCloseAsync(invoiceId, core, signals.Set, callerBearerToken, ct).ConfigureAwait(false) is { } denied)
+        {
+            return denied;
+        }
+
+        // ── F3: the recorder files the record by the invoice's derived core stamp; it must be exactly the core above, before any write. ──
+        if (await CheckFilingAsync(invoiceId, core, ct).ConfigureAwait(false) is { } filing)
+        {
+            return filing;
+        }
+
+        // ── F2: an earlier attempt's bulk accept whose lines were written but not recorded is completed first (never skipped). ──
+        if (await CompleteEarlierBulkAcceptAsync(invoiceId, approvalId, caller, callerBearerToken, lineRows, ct).ConfigureAwait(false) is { } bulkIncomplete)
+        {
+            return bulkIncomplete;
+        }
+
         // ── D-72 (F-2): undecided Clean lines are accepted in bulk ("Accepted in bulk" rows, not labels). The caller holds the line lock. ──
         if (CleanCount(lineRows) > 0)
         {
@@ -415,8 +557,6 @@ public sealed class InvoiceApprovalService
                 return FromLineResult(accepted, invoiceId, "accept-clean", lineDecisionId);
             }
         }
-
-        var decidedOn = Seconds(_time.GetUtcNow());
 
         // ── D-72: Unreviewed rows for the AI-sourced fields of individually decided lines that no reviewer touched. ──
         var unreviewed = await _lines.WriteUnreviewedAsync(invoiceId, approvalId, caller, ApproverRole, decidedOn.UtcDateTime, ct).ConfigureAwait(false);
@@ -442,7 +582,7 @@ public sealed class InvoiceApprovalService
         }
 
         var approvedAmount = totals.ApprovedTotal;
-        var decision = BuildDecision(decisionId, invoice, approvalId, caller, approvedAmount, decidedOn);
+        var decision = BuildDecision(decisionId, invoice, approvalId, caller, approvedAmount, decidedOn, signals.Set);
         try
         {
             _recorder.Preflight(decision);
@@ -491,6 +631,7 @@ public sealed class InvoiceApprovalService
         {
             case InvoiceTransitionOutcome.Refused:
                 _logger.LogWarning("Approve of invoice {InvoiceId}: the transition was refused ({Reason}).", invoiceId, transition.Reason);
+                await ReleaseClaimAsync(invoiceId, approvalId, approver.ContactId, decidedOn, ct).ConfigureAwait(false);
                 return new ApprovalResult(ApprovalOutcome.Conflict, InvoiceApprovalCodes.TransitionRefused, transition.Reason);
             case InvoiceTransitionOutcome.AlreadyInTarget:
                 // Another approve moved it first (only possible when the lock was defeated): it records, this call does not.
@@ -498,32 +639,35 @@ public sealed class InvoiceApprovalService
                 return new ApprovalResult(ApprovalOutcome.AlreadyApproved, "ok", DecisionId: decisionId);
         }
 
-        return await FinishAsync(invoiceId, approvalId, decision, PortionPending, recordId: null, approver.ContactId, ct).ConfigureAwait(false);
+        return await FinishAsync(invoiceId, approvalId, decision, PortionPending, recordId: null, approver.ContactId, signals.Set, ct).ConfigureAwait(false);
     }
 
     /// <summary>
-    /// The invoice is already Approved (or the portion is). The claimant (the person the portion names, by the user linked to that contact)
-    /// completes what is missing: the portion status, the record (same id and content) and the link. Anyone else gets a no-op, and at most the
-    /// portion's status is aligned (no attribution changes).
+    /// The invoice is already Approved (or the portion is). The claimant (the person the portion names, matched by the caller's OWN contact,
+    /// EB-D-171) completes what is missing: the portion status, the record (same id and content), the Signals and the link. Anyone else gets a
+    /// no-op, and at most the portion's status is aligned (no attribution changes).
     /// </summary>
-    private async Task<ApprovalResult> CompleteOrNoOpAsync(Entity invoice, Entity portion, Guid caller, Guid decisionId, CancellationToken ct)
+    private async Task<ApprovalResult> CompleteOrNoOpAsync(
+        Entity invoice, Entity portion, Guid caller, string? callerBearerToken, Guid decisionId, CancellationToken ct)
     {
         var invoiceId = invoice.Id;
         var decidedBy = portion.GetAttributeValue<EntityReference>(PortionDecidedBy);
         var recordId = portion.GetAttributeValue<EntityReference>(PortionRecord)?.Id;
         var portionStatus = StatusOf(portion);
-
-        bool claimant;
-        try
-        {
-            claimant = decidedBy is not null && decidedBy.Id != Guid.Empty && await UserOfContactAsync(decidedBy.Id, ct).ConfigureAwait(false) == caller;
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-        {
-            return Unavailable(invoiceId, "read", ex);
-        }
-
         var complete = portionStatus == PortionApproved && recordId is { } r && r != Guid.Empty;
+
+        var claimant = false;
+        if (!complete && decidedBy is not null && decidedBy.Id != Guid.Empty)
+        {
+            var callerContact = await CallerContactAsync(invoiceId, caller, ct).ConfigureAwait(false);
+            if (callerContact.Failure is { } failure)
+            {
+                return failure;
+            }
+
+            claimant = callerContact.ContactId == decidedBy.Id;
+        }
+
         if (complete || !claimant || InvoiceStatus(invoice) != InvoiceStatusCodes.Approved)
         {
             if (!complete && !claimant && portionStatus == PortionPending && decidedBy is not null && InvoiceStatus(invoice) == InvoiceStatusCodes.Approved)
@@ -544,20 +688,41 @@ public sealed class InvoiceApprovalService
         }
 
         // The claimant's repeat: rebuild the decision from what the claim froze (the hash ignores facts and time, so it matches a first write).
+        if (EligibleApproverResolver.SingleCoreOf(InvoiceReviewReadService.InvoiceEntity, invoice) is not { } core)
+        {
+            _logger.LogError("Approve of invoice {InvoiceId}: the invoice names no single core record; the approval cannot be completed.", invoiceId);
+            return new ApprovalResult(ApprovalOutcome.Failed, InvoiceApprovalCodes.CoreUnresolved, "The invoice names no single core record.");
+        }
+
         var decidedOn = portion.GetAttributeValue<DateTime?>(PortionDecidedOn) is { } on
             ? new DateTimeOffset(DateTime.SpecifyKind(on, DateTimeKind.Utc))
             : Seconds(_time.GetUtcNow());
+
+        // EB-D-172: the set stored with the record when it exists; otherwise re-derived with the frozen decision time as the bound (never widened).
+        var signals = await ReplaySignalsAsync(invoiceId, decisionId, decidedOn.UtcDateTime, ct).ConfigureAwait(false);
+        if (signals.Failure is { } signalFailure)
+        {
+            return signalFailure;
+        }
+
+        if (await AuthorizeCloseAsync(invoiceId, core, signals.Set, callerBearerToken, ct).ConfigureAwait(false) is { } denied)
+        {
+            return denied;
+        }
+
         var amount = portion.GetAttributeValue<Money>(PortionAmount)?.Value ?? 0m;
-        var decision = BuildDecision(decisionId, invoice, portion.Id, caller, amount, decidedOn);
+        var decision = BuildDecision(decisionId, invoice, portion.Id, caller, amount, decidedOn, signals.Set);
         _logger.LogInformation("Approve of invoice {InvoiceId}: completing the caller's interrupted approval.", invoiceId);
-        return await FinishAsync(invoiceId, portion.Id, decision, portionStatus, recordId, decidedBy!.Id, ct).ConfigureAwait(false);
+        return await FinishAsync(invoiceId, portion.Id, decision, portionStatus, recordId, decidedBy!.Id, signals.Set, ct).ConfigureAwait(false);
     }
 
-    /// <summary>After the transition: the portion as Approved (re-asserting the decider), the record, the link. Each step is idempotent.</summary>
+    /// <summary>After the transition: the portion as Approved (re-asserting the decider), the record, the Signals, the link. Each step is idempotent.</summary>
     private async Task<ApprovalResult> FinishAsync(
-        Guid invoiceId, Guid approvalId, BillingDecision decision, int portionStatus, Guid? recordId, Guid deciderContactId, CancellationToken ct)
+        Guid invoiceId, Guid approvalId, BillingDecision decision, int? portionStatus, Guid? recordId, Guid deciderContactId,
+        InvoiceSubmissionAfterSteps.ResolvedSignalSet signals, CancellationToken ct)
     {
         var amount = decision.Facts["approvedAmount"] is decimal d ? d : 0m;
+        var decider = decision.Decider.SystemUserId ?? Guid.Empty;
         if (portionStatus != PortionApproved)
         {
             try
@@ -574,7 +739,10 @@ public sealed class InvoiceApprovalService
 
         if (recordId is { } existing && existing != Guid.Empty)
         {
-            return Approved(invoiceId, decision.DecisionId, existing);
+            var notClosed = await HumanDecisionSignalClose.CloseSetAsync(_closeActed, signals, existing, decider, _logger, ct).ConfigureAwait(false);
+            return notClosed > 0
+                ? Incomplete(invoiceId, decision.DecisionId, "signals", $"{notClosed} Signals not closed")
+                : Approved(invoiceId, decision.DecisionId, existing);
         }
 
         BillingDecisionRecordResult recorded;
@@ -585,6 +753,15 @@ public sealed class InvoiceApprovalService
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             return Incomplete(invoiceId, decision.DecisionId, "record", (ex as DecisionRecordRefusedException)?.Reason.ToString() ?? ex.GetType().Name);
+        }
+
+        // ── D-122: the stored set, closed as Acted by the record (a repeat: AlreadyClosedByThisRecord). A close that failed (a fault or a
+        //    change since the read) leaves the approve Incomplete at "signals" BEFORE the link, so the claimant's repeat comes back through
+        //    here: the record answers AlreadyRecorded (no second record) and the remaining closes run over the same stored set. ──
+        var failedCloses = await HumanDecisionSignalClose.CloseSetAsync(_closeActed, signals, recorded.RecordId, decider, _logger, ct).ConfigureAwait(false);
+        if (failedCloses > 0)
+        {
+            return Incomplete(invoiceId, decision.DecisionId, "signals", $"{failedCloses} Signals not closed");
         }
 
         try
@@ -606,11 +783,293 @@ public sealed class InvoiceApprovalService
         return new ApprovalResult(ApprovalOutcome.Approved, "ok", DecisionId: decisionId, DecisionRecordId: recordId);
     }
 
+    /// <summary>
+    /// K2: a refused transition leaves no claim behind. The portion is re-read and, while it still holds THIS call's claim (our contact and
+    /// our decision time), the claim fields are cleared conditional on the version just read, so a later writer's change is never undone.
+    /// Best effort: a failure only warns (the claimant's own repeat writes the claim again).
+    /// </summary>
+    private async Task ReleaseClaimAsync(Guid invoiceId, Guid approvalId, Guid contactId, DateTimeOffset decidedOn, CancellationToken ct)
+    {
+        try
+        {
+            var current = (await _resolver.ReadPortionsAsync(invoiceId, ct).ConfigureAwait(false)).FirstOrDefault(p => p.Id == approvalId);
+            var ours = current is not null
+                && current.GetAttributeValue<EntityReference>(PortionDecidedBy)?.Id == contactId
+                && current.GetAttributeValue<DateTime?>(PortionDecidedOn) is { } on
+                && DateTime.SpecifyKind(on, DateTimeKind.Utc) == decidedOn.UtcDateTime
+                && StatusOf(current) == PortionPending;
+            if (!ours || !current!.TryGetAttributeValue<long>("versionnumber", out var version) || version <= 0)
+            {
+                return;
+            }
+
+            await _entities.UpdateIfRowVersionMatchesAsync(
+                EligibleApproverResolver.ApprovalEntity, approvalId, version.ToString(CultureInfo.InvariantCulture),
+                new Dictionary<string, object> { [PortionDecidedBy] = DBNull.Value, [PortionDecidedOn] = DBNull.Value, [PortionAmount] = DBNull.Value },
+                ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("Approve of invoice {InvoiceId}: the claim of a refused approval could not be cleared ({ExceptionType}).", invoiceId, ex.GetType().Name);
+        }
+    }
+
+    // ── EB-D-171: the caller's own contact ──
+
+    private sealed record CallerContact(Guid? ContactId, ApprovalResult? Failure);
+
+    /// <summary>
+    /// The caller's OWN linked contact, by the recorder's rule (<see cref="IIdentityNormalizationService.ResolveAsync"/>: the user's primary
+    /// contact, else the contact bound to their Entra oid). Null contact: the caller has none (not eligible). A failed read is Unavailable:
+    /// the answer is unknown, so nothing is written either way.
+    /// </summary>
+    private async Task<CallerContact> CallerContactAsync(Guid invoiceId, Guid caller, CancellationToken ct)
+    {
+        try
+        {
+            var identity = await _identity.ResolveAsync(caller, ct).ConfigureAwait(false);
+            if (identity.ContactId is { } contact && contact != Guid.Empty)
+            {
+                return new CallerContact(contact, null);
+            }
+
+            if (identity.ContactUnreadable)
+            {
+                _logger.LogWarning("Approve of invoice {InvoiceId}: the caller's linked contact could not be read ({Faults}); nothing was changed.", invoiceId, identity.Faults);
+                return new CallerContact(null, new ApprovalResult(ApprovalOutcome.Unavailable, InvoiceApprovalCodes.Unavailable,
+                    "Your eligibility could not be checked; nothing was changed. Try again.", FailedStep: "identity"));
+            }
+
+            return new CallerContact(null, null);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            return new CallerContact(null, Unavailable(invoiceId, "identity", ex));
+        }
+    }
+
+    // ── EB-D-172: the invoice's Signals ──
+
+    private sealed record SignalRead(InvoiceSubmissionAfterSteps.ResolvedSignalSet Set, ApprovalResult? Failure);
+
+    /// <summary>The invoice-level Open or Acknowledged Signals created at or before <paramref name="decidedOnUtc"/>, ordered by id (the record's hash).</summary>
+    private async Task<SignalRead> ReadInvoiceSignalsAsync(Guid invoiceId, DateTime decidedOnUtc, CancellationToken ct)
+    {
+        var setReadAt = _time.GetUtcNow().UtcDateTime;
+        try
+        {
+            var open = await InvoiceSubmissionAfterSteps.ReadOpenSignalsAsync(
+                _entities, invoiceId, [], _logger, ct, createdOnOrBefore: decidedOnUtc).ConfigureAwait(false);
+            var signals = open
+                .Where(s => s.SubjectEntity == InvoiceReviewReadService.InvoiceEntity && s.SubjectId == invoiceId)
+                .Select(s => s.Signal).DistinctBy(s => s.Id).OrderBy(s => s.Id).ToList();
+            return new SignalRead(new InvoiceSubmissionAfterSteps.ResolvedSignalSet(setReadAt, signals), null);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            return new SignalRead(new InvoiceSubmissionAfterSteps.ResolvedSignalSet(DateTime.MinValue, []), Unavailable(invoiceId, "signals", ex));
+        }
+    }
+
+    /// <summary>The claimant's repeat: the set stored with the record (never re-read); with no record yet, re-derived under the frozen bound.</summary>
+    private async Task<SignalRead> ReplaySignalsAsync(Guid invoiceId, Guid decisionId, DateTime decidedOnUtc, CancellationToken ct)
+    {
+        DecisionRecordWriter.BillingStoredResolvedSet? stored;
+        try
+        {
+            stored = await _recorder.FindStoredResolvedSetAsync(ApproveActionCode, invoiceId, decisionId, ct).ConfigureAwait(false);
+        }
+        catch (DecisionRecordRefusedException ex)
+        {
+            _logger.LogWarning("Approve of invoice {InvoiceId}: the stored Signal set could not be read ({Reason}); nothing changed.", invoiceId, ex.Reason);
+            return new SignalRead(
+                new InvoiceSubmissionAfterSteps.ResolvedSignalSet(DateTime.MinValue, []),
+                ex.Reason == DecisionRecordRefusalReason.ReviewInvalid
+                    ? new ApprovalResult(ApprovalOutcome.Failed, InvoiceApprovalCodes.DecisionInvalid, ex.Reason.ToString())
+                    : new ApprovalResult(ApprovalOutcome.Unavailable, InvoiceApprovalCodes.Unavailable, "The approval could not be checked; nothing was changed. Try again.", FailedStep: "signals"));
+        }
+
+        if (stored is not null)
+        {
+            return new SignalRead(
+                new InvoiceSubmissionAfterSteps.ResolvedSignalSet(
+                    stored.SetReadAtUtc ?? DateTime.MinValue,
+                    stored.Signals.Select(s => new InvoiceSubmissionAfterSteps.ResolvedSignal(s.SignalId, s.PolicyCode)).ToList()),
+                null);
+        }
+
+        return await ReadInvoiceSignalsAsync(invoiceId, decidedOnUtc, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>FR-51 when the approval closes at least one Signal: AppendTo on the core record and Write on the invoice, asked as the caller.</summary>
+    private async Task<ApprovalResult?> AuthorizeCloseAsync(
+        Guid invoiceId, (string Entity, Guid Id) core, InvoiceSubmissionAfterSteps.ResolvedSignalSet set, string? callerBearerToken, CancellationToken ct)
+    {
+        if (set.Signals.Count == 0)
+        {
+            return null;
+        }
+
+        DecisionCallerRefusal refusal;
+        try
+        {
+            refusal = await HumanDecisionSignalClose.AuthorizeAsync(
+                _entities, _probe, callerBearerToken, new DecisionCoreRecord(core.Entity, core.Id), invoiceId,
+                [(InvoiceReviewReadService.InvoiceEntity, invoiceId)], _logger, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            return Unavailable(invoiceId, "signal-rights", ex);
+        }
+
+        switch (refusal)
+        {
+            case DecisionCallerRefusal.None:
+                return null;
+            case DecisionCallerRefusal.Unavailable:
+                return new ApprovalResult(ApprovalOutcome.Unavailable, InvoiceApprovalCodes.Unavailable,
+                    "The approval could not be checked; nothing was changed. Try again.", FailedStep: "signal-rights");
+            default:
+                _logger.LogWarning("Approve of invoice {InvoiceId}: the caller may not close its {Count} Signals ({Refusal}); nothing changed.",
+                    invoiceId, set.Signals.Count, refusal);
+                return new ApprovalResult(ApprovalOutcome.Forbidden, InvoiceApprovalCodes.NotAuthorized,
+                    "You do not have permission to record a decision that resolves this invoice's findings.");
+        }
+    }
+
+    // ── F3: the recorder's filing read ──
+
+    /// <summary>
+    /// The writer files the record by the invoice's derived core stamp and refuses any answer but exactly one. Asked here, before any write, so
+    /// a refusal leaves nothing behind: a fault is Unavailable, any other answer (none, several, or a different core) is Failed.
+    /// </summary>
+    private async Task<ApprovalResult?> CheckFilingAsync(Guid invoiceId, (string Entity, Guid Id) core, CancellationToken ct)
+    {
+        CoreAncestorResult derived;
+        try
+        {
+            derived = await _coreAncestors.ResolveStampsAsync(InvoiceReviewReadService.InvoiceEntity, invoiceId, ct, CoreAncestorIntent.ReadOnly).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            return Unavailable(invoiceId, "filing", ex);
+        }
+
+        if (!derived.Succeeded && !derived.IsPermanent)
+        {
+            _logger.LogWarning("Approve of invoice {InvoiceId}: the invoice's core record could not be derived ({Error}); nothing changed.", invoiceId, derived.Error);
+            return new ApprovalResult(ApprovalOutcome.Unavailable, InvoiceApprovalCodes.Unavailable, "The approval could not be completed; nothing was changed. Try again.", FailedStep: "filing");
+        }
+
+        if (derived.Stamps is [var own] && string.Equals(own.EntityType, core.Entity, StringComparison.OrdinalIgnoreCase) && own.RecordId == core.Id)
+        {
+            return null;
+        }
+
+        _logger.LogError("Approve of invoice {InvoiceId}: the invoice's derived core record ({Status}, {Count} stamps) is not its one core lookup; nothing changed.",
+            invoiceId, derived.Status, derived.Stamps.Count);
+        return new ApprovalResult(ApprovalOutcome.Failed, InvoiceApprovalCodes.CoreUnresolved, "The invoice names no single core record.");
+    }
+
+    // ── F2: an earlier attempt's bulk accept ──
+
+    /// <summary>
+    /// F2: an approve whose bulk accept wrote its lines and then failed (totals, corrections or records) leaves Accepted lines with no line
+    /// Decision Record. Those the CALLER decided (<c>sprk_reviewedby</c>) are completed now under the approval's bulk decision id
+    /// (<see cref="AcceptCleanDecisionIdFor"/>): same values, the "Accepted in bulk" correction rows, the missing records. One decided by
+    /// another person is theirs to repeat: 409 until it is recorded. A line with no reviewer is not a decision this service can complete
+    /// and is left alone. Null when nothing is outstanding.
+    /// </summary>
+    private async Task<ApprovalResult?> CompleteEarlierBulkAcceptAsync(
+        Guid invoiceId, Guid approvalId, Guid caller, string? callerBearerToken, IReadOnlyList<Entity> lineRows, CancellationToken ct)
+    {
+        var accepted = lineRows
+            .Where(l => l.GetAttributeValue<OptionSetValue>(InvoiceTotalsService.LineStatus)?.Value == (int)InvoiceLineStatus.Accepted
+                && l.GetAttributeValue<OptionSetValue>(InvoiceTotalsService.LineCostType)?.Value is (int)InvoiceLineCostType.Fee or (int)InvoiceLineCostType.Expense
+                && l.GetAttributeValue<EntityReference>(InvoiceReviewReadService.LineReviewedBy) is { } by && by.Id != Guid.Empty)
+            .ToList();
+        if (accepted.Count == 0)
+        {
+            return null;
+        }
+
+        HashSet<Guid> recorded;
+        try
+        {
+            recorded = await ReadRecordedLinesAsync(accepted.Select(l => l.Id).ToList(), ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            return Unavailable(invoiceId, "read", ex);
+        }
+
+        var unrecorded = accepted.Where(l => !recorded.Contains(l.Id)).ToList();
+        if (unrecorded.Count == 0)
+        {
+            return null;
+        }
+
+        var others = unrecorded.Where(l => l.GetAttributeValue<EntityReference>(InvoiceReviewReadService.LineReviewedBy).Id != caller).Select(l => l.Id).ToList();
+        if (others.Count > 0)
+        {
+            _logger.LogWarning("Approve of invoice {InvoiceId}: {Count} lines were decided by another person and not recorded; nothing changed.", invoiceId, others.Count);
+            return new ApprovalResult(ApprovalOutcome.Conflict, InvoiceApprovalCodes.LineDecisionIncomplete,
+                "A line decision on this invoice has not finished. Its reviewer repeats it, then the invoice can be approved.", CommittedLineIds: others);
+        }
+
+        var lineDecisionId = AcceptCleanDecisionIdFor(approvalId);
+        var ids = unrecorded.Select(l => l.Id).ToList();
+        _logger.LogInformation("Approve of invoice {InvoiceId}: completing the earlier bulk accept over {Count} lines.", invoiceId, ids.Count);
+        for (var offset = 0; offset < ids.Count; offset += InvoiceLineDecisionService.MaxLinesPerRequest)
+        {
+            var chunk = ids.Skip(offset).Take(InvoiceLineDecisionService.MaxLinesPerRequest).ToList();
+            var result = await _lines.CompleteBulkAcceptHeldAsync(invoiceId, lineDecisionId, chunk, caller, callerBearerToken, ct).ConfigureAwait(false);
+            if (!result.IsApplied)
+            {
+                return FromLineResult(result, invoiceId, "accept-clean", lineDecisionId);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>The lines among <paramref name="lineIds"/> that have a line-decision record (accept, reduce or disallow; any decision id).</summary>
+    private async Task<HashSet<Guid>> ReadRecordedLinesAsync(IReadOnlyList<Guid> lineIds, CancellationToken ct)
+    {
+        var found = new HashSet<Guid>();
+        for (var offset = 0; offset < lineIds.Count; offset += InvoiceLineDecisionService.MaxLinesPerRequest)
+        {
+            var query = new QueryExpression(InvoiceReviewReadService.DecisionRecordEntity)
+            {
+                ColumnSet = new ColumnSet("sprk_regardinginvoiceline"),
+                Criteria = new FilterExpression(LogicalOperator.And),
+                PageInfo = new PagingInfo { PageNumber = 1, Count = 5000 },
+                NoLock = true,
+            };
+            query.Criteria.AddCondition("sprk_regardinginvoiceline", ConditionOperator.In,
+                lineIds.Skip(offset).Take(InvoiceLineDecisionService.MaxLinesPerRequest).Cast<object>().ToArray());
+            query.Criteria.AddCondition("sprk_actioncode", ConditionOperator.In, LineActionCodes.Cast<object>().ToArray());
+            query.AddOrder(InvoiceReviewReadService.DecisionRecordEntity + "id", OrderType.Ascending);
+            foreach (var row in await InvoiceReviewReadService.ReadPagedAsync(_entities, query, ct).ConfigureAwait(false))
+            {
+                if (row.GetAttributeValue<EntityReference>("sprk_regardinginvoiceline") is { } line && line.Id != Guid.Empty)
+                {
+                    found.Add(line.Id);
+                }
+            }
+        }
+
+        return found;
+    }
+
     // ── Builders ──
 
-    private static BillingDecision BuildDecision(Guid decisionId, Entity invoice, Guid approvalId, Guid caller, decimal approvedAmount, DateTimeOffset decidedOn)
+    private static BillingDecision BuildDecision(
+        Guid decisionId, Entity invoice, Guid approvalId, Guid caller, decimal approvedAmount, DateTimeOffset decidedOn,
+        InvoiceSubmissionAfterSteps.ResolvedSignalSet signals)
     {
-        // Ids and amounts only (ADR-015). Values null on every attempt (074 K-5); no Signal is resolved and no policy version named (K-2).
+        // Ids and amounts only (ADR-015). K3: the approved amount is in Values, so the record's hash covers what was approved (074 K-5: the
+        // same key and a normalised decimal on every attempt). No policy version is named (K-2).
         var facts = new Dictionary<string, object?>
         {
             ["invoiceId"] = invoice.Id,
@@ -618,6 +1077,12 @@ public sealed class InvoiceApprovalService
             ["approvedAmount"] = approvedAmount,
             ["billedAmount"] = invoice.GetAttributeValue<Money>(InvoiceTotalsService.InvoiceBilledTotal)?.Value,
         };
+        if (signals.SetReadAtUtc != DateTime.MinValue)
+        {
+            // D-122: what the close needs beside the ids (the record's ResolvedSignalIds): when the set was read and each policy code.
+            facts[DecisionRecordWriter.BillingResolvedSetFact] = InvoiceLineDecisionService.SetFact(signals);
+        }
+
         return new BillingDecision(
             decisionId,
             ApproveActionCode,
@@ -625,6 +1090,8 @@ public sealed class InvoiceApprovalService
             BillingDecider.Human(caller, ApproverRole),
             facts,
             "Approved",
+            Values: new Dictionary<string, object?> { ["approvedAmount"] = approvedAmount },
+            ResolvedSignalIds: signals.Signals.Count > 0 ? signals.Signals.Select(s => s.Id).ToList() : null,
             Written: [new DecisionRecordRef(InvoiceReviewReadService.InvoiceEntity, invoice.Id), new DecisionRecordRef(EligibleApproverResolver.ApprovalEntity, approvalId)],
             DecidedOn: decidedOn);
     }
@@ -638,11 +1105,12 @@ public sealed class InvoiceApprovalService
 
     private static DateTimeOffset Seconds(DateTimeOffset now) => new(now.Ticks - (now.Ticks % TimeSpan.TicksPerSecond), TimeSpan.Zero);
 
-    private InvoiceApprovalStateDto State(
+    private static InvoiceApprovalStateDto State(
         Entity invoice, Entity? portion, IReadOnlyList<Entity> lines, bool held, EligibleApproverSet? set, bool eligibilityUnavailable,
-        Guid? caller, DateTime? resolvedOn)
+        bool callerEligible, bool canDecide, DateTime? resolvedOn)
     {
-        var status = portion is null ? "None" : StatusOf(portion) switch
+        var portionStatus = portion is null ? null : StatusOf(portion);
+        var status = portion is null ? "None" : portionStatus switch
         {
             PortionPending => "Pending",
             PortionApproved => "Approved",
@@ -651,8 +1119,7 @@ public sealed class InvoiceApprovalService
             _ => "Unknown",
         };
         var open = OpenLines(lines);
-        var callerEligible = set is not null && caller is { } user && set.For(user) is not null;
-        var decided = portion is not null && StatusOf(portion) != PortionPending;
+        var decided = portionStatus is PortionApproved or PortionRejected or PortionReturned;
         return new InvoiceApprovalStateDto(
             invoice.Id,
             portion?.Id,
@@ -661,7 +1128,7 @@ public sealed class InvoiceApprovalService
             NoEligibleApprover: set is not null && set.NoEligibleApprover,
             EligibilityUnavailable: eligibilityUnavailable,
             CallerEligible: callerEligible,
-            CanApprove: callerEligible && portion is not null && StatusOf(portion) == PortionPending
+            CanApprove: callerEligible && canDecide && portionStatus == PortionPending
                 && InvoiceStatus(invoice) == InvoiceStatusCodes.InReview && !held && open.Total == 0,
             OpenLines: open,
             UndecidedCleanLines: CleanCount(lines),
@@ -696,8 +1163,8 @@ public sealed class InvoiceApprovalService
         l.GetAttributeValue<OptionSetValue>(InvoiceTotalsService.LineStatus)?.Value == (int)InvoiceLineStatus.Clean
         && l.GetAttributeValue<OptionSetValue>(InvoiceTotalsService.LineCostType)?.Value is (int)InvoiceLineCostType.Fee or (int)InvoiceLineCostType.Expense);
 
-    private static int StatusOf(Entity portion) =>
-        portion.GetAttributeValue<OptionSetValue>(EligibleApproverResolver.ApprovalStatus)?.Value ?? PortionPending;
+    /// <summary>The portion's status; null when it has none (K4: never read as Pending).</summary>
+    private static int? StatusOf(Entity portion) => portion.GetAttributeValue<OptionSetValue>(EligibleApproverResolver.ApprovalStatus)?.Value;
 
     private static int? InvoiceStatus(Entity invoice) => invoice.GetAttributeValue<OptionSetValue>("statuscode")?.Value;
 
@@ -723,10 +1190,10 @@ public sealed class InvoiceApprovalService
         LineDecisionStatus.Forbidden => new(ApprovalOutcome.Forbidden, result.Code, result.Detail, FailedStep: step),
         LineDecisionStatus.Busy or LineDecisionStatus.Changed or LineDecisionStatus.TotalsRefused or LineDecisionStatus.NotInReview
             or LineDecisionStatus.LineNotDecidable => new(ApprovalOutcome.Conflict, result.Code, result.Detail, FailedStep: step),
-        LineDecisionStatus.InvoiceNotFound => new(ApprovalOutcome.InvoiceNotFound, result.Code),
+        LineDecisionStatus.InvoiceNotFound or LineDecisionStatus.LineNotFound => new(ApprovalOutcome.InvoiceNotFound, result.Code),
         LineDecisionStatus.OwnerUnresolved or LineDecisionStatus.InvalidRequest => new(ApprovalOutcome.Failed, result.Code, result.Detail, FailedStep: step),
-        // The lines were written and a later line step failed: the caller completes the line decision (lines/decisions with these ids and
-        // this decision id), then approves again. The invoice is still In Review.
+        // The lines were written and a later line step failed: the caller's next approve completes the bulk accept (F2) before anything
+        // else. The invoice is still In Review.
         LineDecisionStatus.Incomplete => new(ApprovalOutcome.Incomplete, result.Code, result.Detail, FailedStep: step,
             CommittedLineIds: result.CommittedLineIds, LineDecisionId: lineDecisionId),
         _ => new(ApprovalOutcome.Unavailable, InvoiceApprovalCodes.Unavailable, result.Detail, FailedStep: step),
@@ -797,19 +1264,5 @@ public sealed class InvoiceApprovalService
         }
 
         return (await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.Count > 0;
-    }
-
-    /// <summary>The user linked to a contact (<c>contact.sprk_systemuser</c>); empty when none.</summary>
-    private async Task<Guid> UserOfContactAsync(Guid contactId, CancellationToken ct)
-    {
-        var query = new QueryExpression(EligibleApproverResolver.ContactEntity)
-        {
-            ColumnSet = new ColumnSet(EligibleApproverResolver.ContactSystemUser),
-            Criteria = new FilterExpression(LogicalOperator.And),
-            TopCount = 1,
-        };
-        query.Criteria.AddCondition(EligibleApproverResolver.ContactEntity + "id", ConditionOperator.Equal, contactId);
-        var contact = (await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
-        return contact?.GetAttributeValue<EntityReference>(EligibleApproverResolver.ContactSystemUser)?.Id ?? Guid.Empty;
     }
 }

@@ -286,6 +286,22 @@ public sealed class InvoiceApprovalEndpointsAuthorizationContractTests
         json["undecidedCleanLines"]!.GetValue<int>().Should().Be(1);
     }
 
+    [Fact(DisplayName = "103 F4: an eligible approver with only Read on the invoice gets canApprove false; with Write, true")]
+    public async Task Get_CanApprove_NeedsWriteOnTheInvoice()
+    {
+        await using var host = await Host.StartAsync();
+        host.Access.Grant(InvoiceSet, host.World.InvoiceId, AccessRights.Read);
+        host.World.AddLine(InvoiceLineStatus.Accepted);
+
+        var readOnly = JsonNode.Parse(await (await host.SendAsync("GET", "approval")).Content.ReadAsStringAsync())!;
+        readOnly["callerEligible"]!.GetValue<bool>().Should().BeTrue();
+        readOnly["canApprove"]!.GetValue<bool>().Should().BeFalse("approve would be refused by its Write filter");
+
+        host.GrantAll();
+        var writer = JsonNode.Parse(await (await host.SendAsync("GET", "approval")).Content.ReadAsStringAsync())!;
+        writer["canApprove"]!.GetValue<bool>().Should().BeTrue();
+    }
+
     [Fact]
     public async Task Get_InvoiceGoneAfterTheCheck_Returns404Uniform()
     {
@@ -345,7 +361,9 @@ public sealed class InvoiceApprovalEndpointsAuthorizationContractTests
             builder.Services.AddSingleton<CallerRecordAccessProbe>(host.Probe);
 
             // The REAL approval service and everything under it, over the in-memory Dataverse.
-            builder.Services.AddScoped(_ => host.World.Service());
+            // F4: canApprove asks the decide right through the REAL authorization stack, as the caller.
+            builder.Services.AddScoped(sp => host.World.Service(InvoiceApprovalService.DecideCheck(
+                sp.GetRequiredService<AuthorizationService>(), Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance)));
 
             builder.WebHost.UseTestServer();
             host._app = builder.Build();
