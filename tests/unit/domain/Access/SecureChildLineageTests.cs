@@ -138,6 +138,37 @@ public class SecureChildLineageTests
     }
 
     /// <summary>
+    /// UAC-r2 ruling on RecordFamilyEdges (2026-10-28): a submission's core record is its ownership primary, even when the
+    /// invoice it produced (and its submitted PDF) is set. A row read with the lineage's columns, in their order, names the
+    /// core record first; the invoice is an output, not the submission's filing.
+    /// </summary>
+    [Fact]
+    public void TheInvoiceSubmission_OwnershipPrimaryIsItsCoreRecord_EvenWithItsInvoiceSet()
+    {
+        var lineage = SecureChildLineage.Children["sprk_invoicesubmission"].Lookups;
+        lineage.Keys.Take(4).Should().Equal(
+            "sprk_regardingmatter", "sprk_regardingproject", "sprk_regardingworkassignment", "sprk_document");
+
+        var matter = Guid.NewGuid();
+        var values = new Dictionary<string, Microsoft.Xrm.Sdk.EntityReference>
+        {
+            ["sprk_regardingmatter"] = new("sprk_matter", matter),
+            ["sprk_document"] = new("sprk_document", Guid.NewGuid()),
+            ["sprk_invoice"] = new("sprk_invoice", Guid.NewGuid()),
+            ["sprk_reportdocument"] = new("sprk_document", Guid.NewGuid()),
+        };
+        var row = new Microsoft.Xrm.Sdk.Entity("sprk_invoicesubmission", Guid.NewGuid());
+        foreach (var column in lineage.Keys.Where(values.ContainsKey))
+            row[column] = values[column]; // as a read projected by the lineage's columns returns them
+
+        var context = RecordOwnershipContext.ForParents(RecordOwnershipContext.ParentsOf(row));
+
+        context.TargetEntityLogicalName.Should().Be("sprk_matter");
+        context.TargetRecordId.Should().Be(matter);
+        context.Parents.Select(p => p.EntityLogicalName).Should().Contain("sprk_invoice", "the invoice stays a lineage parent");
+    }
+
+    /// <summary>
     /// The mirror follows the ownership resolver: every table it treats as a reparentable child is mirrored, except
     /// <c>sprk_servicerequest</c>, which the resolver treats as a root of its own.
     /// </summary>

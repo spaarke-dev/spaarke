@@ -151,12 +151,15 @@ internal static class SecureChildLineage
         // (EntityDefinitions(<table>)/ManyToOneRelationships). Each names its core record through the CoreAncestorLookups
         // trio; the vendor organization, the submitter / decider contact and the issuing organization are identities, not
         // parents.
+        // A submission's core record comes first, then its submitted PDF, so a row read with these columns names its core
+        // record as its ownership primary; the invoice and the report it produced, and the submission it resubmits, follow
+        // (UAC-r2 ruling on RecordFamilyEdges, 2026-10-28: outputs and a peer, not its filing).
         T("sprk_invoicesubmission", "sprk_invoicesubmissions",
-            new[]
+            Regarding(Matter, Project, WorkAssignment).Concat(new[]
             {
-                ("sprk_invoice", "sprk_invoice"), ("sprk_document", "sprk_document"), ("sprk_reportdocument", "sprk_document"),
+                ("sprk_document", "sprk_document"), ("sprk_invoice", "sprk_invoice"), ("sprk_reportdocument", "sprk_document"),
                 ("sprk_resubmissionof", "sprk_invoicesubmission"),
-            }.Concat(Regarding(Matter, Project, WorkAssignment)).ToArray()),
+            }).ToArray()),
         // Its sprk_decisionrecord lookup is left out: a Decision Record is stamped outside the access taxonomy and nothing is
         // filed under one but a Signal (CoreAncestorResolver.StampedOutsideAccessTaxonomy, uac-r2's condition 3).
         T("sprk_invoiceapproval", "sprk_invoiceapprovals",
