@@ -71,6 +71,162 @@ public sealed class AssignTaskRecipientGateSeamTests
     private static ContactBindingRow ExternalContact() =>
         new(Contact, 0, PortalOid.ToString("D"), (int)IdentityPlaneMarker.External, Email: Address);
 
+    // ── WallAsync: the REAL guard, asked AsFlagged ───────────────────────────────────────────────────────────────────────
+
+    private static (SecureShareNoAccessGuard Guard, GrantPolicyTestDoubles.FlagStubParticipationService Flags) WalledUser()
+    {
+        var flags = new GrantPolicyTestDoubles.FlagStubParticipationService(defaultFlags: RootRecordFlags.None);
+        var denyList = new GrantPolicyTestDoubles.SeamNoAccessListReader();
+        var identity = new InMemoryContactIdentityStore();
+        identity.AddContact(LinkedContact);
+        identity.AddSystemUser(User, UserOid, "ada@customer.example", primaryContactId: LinkedContact);
+        denyList.DenySystemUserOnRecord(User, Matter);
+        return (new SecureShareNoAccessGuard(flags, denyList, identity, AssignedAccessTestDoubles.NoFilingRows(),
+            NullLogger<SecureShareNoAccessGuard>.Instance), flags);
+    }
+
+    [Fact]
+    public async Task WallAsync_AUserOnASecureMattersNoAccessList_IsWalled()
+    {
+        var (guard, flags) = WalledUser();
+        flags.Flags[Matter] = new RootRecordFlags(IsSecure: true, IsRestricted: false);
+
+        (await Gate(guard: guard).WallAsync("sprk_matter", Matter, User, CancellationToken.None))
+            .Should().Be(SecureShareWallOutcome.Walled);
+    }
+
+    [Fact]
+    public async Task WallAsync_AsksAsFlagged_SoAnEntryOnANonSecureMatter_DoesNotWall()
+    {
+        // AsFlagged: the record's own (effective) Secure flag decides whether its list applies (Q4). Asked as BeingSecured, the
+        // same entry would wall the user off an ordinary matter.
+        var (guard, flags) = WalledUser();
+        flags.Flags[Matter] = new RootRecordFlags(IsSecure: false, IsRestricted: false);
+
+        (await Gate(guard: guard).WallAsync("sprk_matter", Matter, User, CancellationToken.None))
+            .Should().Be(SecureShareWallOutcome.NotSecure);
+    }
+
+    [Fact]
+    public async Task WallAsync_AnUnreadableFlag_IsUnverifiable()
+    {
+        var (guard, flags) = WalledUser();
+        flags.Flags[Matter] = RootRecordFlags.Unreadable;
+
+        (await Gate(guard: guard).WallAsync("sprk_matter", Matter, User, CancellationToken.None))
+            .Should().Be(SecureShareWallOutcome.Unverifiable);
+    }
+
+    // ── TaskRightsAsync: Dataverse's answer for the user, on the sprk_events set ──────────────────────────────────────────
+
+    private static Mock<CallerRecordAccessProbe> Probe(AccessRights? onTask)
+    {
+        var probe = new Mock<CallerRecordAccessProbe>(
+            new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance, null!, null!);
+        // Only the task table's ENTITY SET is answered: any other name (the logical name, another table) reads as unanswered.
+        probe.Setup(p => p.GetPrincipalRightsAppOnlyOrUnknownAsync(User, "sprk_events", TaskId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(onTask);
+        return probe;
+    }
+
+    [Fact]
+    public async Task TaskRightsAsync_AsksTheProbe_ForTheUser_OnTheSprkEventsEntitySet()
+    {
+        var probe = Probe(AccessRights.Read | AccessRights.Write);
+
+        (await Gate(probe: probe.Object).TaskRightsAsync(User, TaskId, CancellationToken.None))
+            .Should().Be(AccessRights.Read | AccessRights.Write);
+        probe.Verify(p => p.GetPrincipalRightsAppOnlyOrUnknownAsync(User, "sprk_events", TaskId, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task TaskRightsAsync_AnUnansweredProbe_IsNull()
+    {
+        (await Gate(probe: Probe(null).Object).TaskRightsAsync(User, TaskId, CancellationToken.None)).Should().BeNull();
+    }
+
+    // ── RestrictedAsync: the effective flag read, fail closed (review item 3) ─────────────────────────────────────────────
+
+    [Theory]
+    [InlineData("restricted", true)]
+    [InlineData("standard", false)]
+    [InlineData("unreadable", null)]
+    [InlineData("absent", null)]
+    [InlineData("throws", null)]
+    public async Task RestrictedAsync_OnAMatter_ReadsItsEffectiveFlags_AndAnythingUnreadIsNull(string state, bool? expected)
+    {
+        var flags = new GrantPolicyTestDoubles.FlagStubParticipationService(defaultFlags: RootRecordFlags.None);
+        switch (state)
+        {
+            case "restricted": flags.Flags[Matter] = new RootRecordFlags(IsSecure: false, IsRestricted: true); break;
+            case "unreadable": flags.Flags[Matter] = RootRecordFlags.Unreadable; break;
+            case "absent": flags.Absent[Matter] = true; break;
+            case "throws": flags.ThrowOnRead = true; break;
+        }
+
+        (await Gate(participations: flags).RestrictedAsync("sprk_matter", Matter, CancellationToken.None)).Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData("sprk_servicerequest", true)]
+    [InlineData("sprk_budget", true)]
+    [InlineData("sprk_invoice", true)]
+    [InlineData("sprk_servicerequest", false)]
+    [InlineData("sprk_budget", false)]
+    public async Task RestrictedAsync_OnATableWithNoAccessFlags_IsNull_NotStandard_AndIsNotRead_MustNotFire(string table, bool readAnswersEmpty)
+    {
+        // The production read answers EMPTY for such a table (it carries no flags and is not walked to its parent); that was read
+        // as "not Restricted", so a user flagged external passed on a record whose matter is Restricted. Whatever a reader would
+        // answer, such a table's Restricted state is unknown here: it is never asked.
+        var flags = new GrantPolicyTestDoubles.FlagStubParticipationService(defaultFlags: RootRecordFlags.None);
+        if (readAnswersEmpty) flags.Absent[Matter] = true;
+
+        (await Gate(participations: flags).RestrictedAsync(table, Matter, CancellationToken.None)).Should().BeNull();
+        flags.Reads.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task DecideAsync_AUserFlaggedExternal_OnARecordWithNoAccessFlags_IsUnverified_AndGetsNoEmail_MustNotFire()
+    {
+        var flags = new GrantPolicyTestDoubles.FlagStubParticipationService(defaultFlags: RootRecordFlags.None);
+        var record = Guid.NewGuid();
+        flags.Absent[record] = true; // the production shape: nothing comes back for a table with no flag columns
+        var identities = new Mock<IContactIdentityStore>();
+        identities.Setup(i => i.GetContactAsync(Contact, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(ContactLookup.Of(new ContactBindingRow(Contact, 0, null, null, Email: Address)));
+        var links = new AssignedAccessTestDoubles.FakeAssignedAccessStore();
+        links.UsersByLink.GetOrAdd(Contact, _ => new List<AssignedLinkCandidate>())
+            .Add(new AssignedLinkCandidate(User, Contact, Guid.NewGuid(), false, 0, null, true));
+        var gate = new Mock<AssignTaskRecipientGate>(identities.Object, links, flags, null!, null!, null!, null!,
+            NullLogger<AssignTaskRecipientGate>.Instance) { CallBase = true };
+        gate.Setup(g => g.WallAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(SecureShareWallOutcome.NotSecure);
+        gate.Setup(g => g.TaskRightsAsync(User, TaskId, It.IsAny<CancellationToken>())).ReturnsAsync(AccessRights.Read);
+
+        var refused = await gate.Object.DecideAsync(Contact, new DecisionCoreRecord("sprk_servicerequest", record), TaskId, null, CancellationToken.None);
+        refused.Should().Be(AssignTaskRecipient.Refused(AssignTaskRefusal.Unverified));
+
+        // The control: the same user on a Standard matter is let through.
+        var allowed = await gate.Object.DecideAsync(Contact, new DecisionCoreRecord("sprk_matter", Matter), TaskId, null, CancellationToken.None);
+        allowed.Should().Be(AssignTaskRecipient.ForInternal(User));
+    }
+
+    // ── ContactRightsAsync: the portal's grant composition for the contact ──────────────────────────────────────────────
+
+    [Theory]
+    [InlineData(false, true, AccessRights.Read)]
+    [InlineData(true, true, AccessRights.Read)]
+    [InlineData(false, false, AccessRights.None)]
+    [InlineData(true, false, null)]
+    public async Task ContactRightsAsync_ReadsTheGrantTable_AndAMissingRecordInACappedSet_IsNull(bool capped, bool granted, AccessRights? expected)
+    {
+        var sets = Grants(capped, granted ? new[] { Matter } : Array.Empty<Guid>());
+
+        (await Gate(accessibleSet: sets.Object).ContactRightsAsync(Contact, AccessibleRecordSetService.MatterEntity, Matter, CancellationToken.None))
+            .Should().Be(expected);
+        sets.Verify(s => s.ComposeForCiamContactAsync(Contact, AccessibleRecordSetService.MatterEntity, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
     // ── PortalListsTaskAsync: THE events list's per-row rule (review item 1) ─────────────────────────────────────────────
 
     /// <summary>The events list for the matter, as the portal serves it to the contact (the same principal composition).</summary>

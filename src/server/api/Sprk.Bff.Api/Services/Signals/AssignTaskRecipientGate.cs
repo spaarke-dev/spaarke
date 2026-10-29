@@ -369,15 +369,23 @@ public class AssignTaskRecipientGate
     internal virtual Task<AccessRights?> TaskRightsAsync(Guid userId, Guid taskId, CancellationToken ct) =>
         _probe.GetPrincipalRightsAppOnlyOrUnknownAsync(userId, TaskEntitySet, taskId, ct);
 
-    /// <summary>Whether the record is Restricted, itself or through a parent (the effective flags <c>/share-user</c> reads); null
-    /// when it could not be read.</summary>
+    /// <summary>Whether a matter, project or work assignment is Restricted, its own flag or one folded from what it is filed under
+    /// (the effective flags <c>/share-user</c> reads); null when it could not be read. Null for any other table too: only those
+    /// three carry the flags, and the effective read answers nothing for another table without walking to its parent, so its
+    /// Restricted state is not known here (fail closed).</summary>
     internal virtual async Task<bool?> RestrictedAsync(string entity, Guid recordId, CancellationToken ct)
     {
+        if (!ExternalParticipationService.IsFlagBearingRootType(entity))
+        {
+            _logger.LogWarning(AssignTaskNotifierEvents.EmailSkipped,
+                "[ASSIGN-TASK-NOTIFY] {Entity} {RecordId} carries no access flags, so whether it is Restricted cannot be read.",
+                entity, recordId);
+            return null;
+        }
+
         try
         {
             var flags = await _participations.GetEffectiveRootRecordFlagsAsync(entity, new[] { recordId }, ct).ConfigureAwait(false);
-            if (flags.Count == 0)
-                return false; // a table with no flag columns: no veto applies (a static fact, not a failed read)
             return flags.TryGetValue(recordId, out var f) && !f.IsUnreadable ? f.IsRestricted : null;
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
