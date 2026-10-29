@@ -71,7 +71,13 @@ Order (nothing is written before the claim):
 
 ## Gate
 
-See the task report for the counts (build, broad unit filter, ArchTests, integration project).
+| Check | Result |
+|---|---|
+| BFF build | 0 errors, 0 warnings |
+| Touched suites (`InvoiceRejectReturnServiceTests`, `InvoiceRejectReturnEndpointsAuthorizationContractTests`, `InvoiceSubmissionPersisterTests`, all `InvoiceSubmission*`) | 72 service tests, 44 contract tests; `InvoiceSubmission*` 889 / 0 |
+| Broad filter (`Finance\|Billing\|Signals\|Invoice\|Submission\|Decision\|Approv\|Reject\|Return\|Ownership`) | First run: 13,971 passed, 4 failed, 14 skipped. The 4 were `InvoiceSubmissionProcessingFlowTests` (049 E), whose store threw on the new `sprk_invoice` supersedes read; the store now answers it (fixed in `ff3f499569`), and the 4 pass in the rerun of `InvoiceSubmission*` |
+| Full ArchTests | 1,858 / 0 (after the three ratchet entries) |
+| `Sprk.Bff.Api.IntegrationTests` | 199 passed, 0 failed, 8 skipped (pre-existing skips) |
 
 ## BFF hygiene (§10) and placement
 
