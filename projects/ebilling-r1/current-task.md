@@ -12,8 +12,11 @@
 | **Next action** | (1) Push work when the gate passes. (2) When R3 says "gate passed, you can go", set the dev app settings (below), then notify word-add-in and run the 015 dev column delete. (3) When the 101 review and B2 report back, fix any F findings, then merge task/ebill-101-corrections into work. |
 
 ## Running agents
-- **ebill-101a-review** (opus, adversarial): reviewing 842110e6ab..8086bd39ef (101 Part A + EB-D-175/176).
-- **ebill-101-b2** (opus): B2 re-evaluation, Signals, findings patch, status, totals, timekeeper and date corrections, `lineFindings` in the read model. Pushes to task/ebill-101-corrections.
+- **ebill-101-b2a** (sonnet): the shared Signal lifecycle helper, the per-entry findings builders, the seam running on a repeat (503 Incomplete). It also has the Part A review's F2 (refused rule version → lines Flagged `rules.not_checked`, the EB-D-175 principle) and F3 (no Action provenance on NoNarrative lines).
+- **ebill-101-b2d** (sonnet): `lineFindings[]` in the review read model (this also closes Part A review F1).
+- Then **B2b** (opus): re-evaluation before and after, Signals (D-122, episode n+1), the findings patch, line status. **Correction to my earlier brief (D-126):** a code correction on a Pending line of an uncoded invoice IS the re-code path. Re-derive that line's status, and close the invoice-level coding hold once no line is uncoded. Still never change a line a reviewer has already decided.
+- Then **B2c** (sonnet): timekeeper and date corrections (`timekeeper_mismatch` 400), totals, currency (a finding in `sprk_findingsjson` only, no Signal). Then the full gate on the combined tip.
+- Part A review: done. F1 → B2d, F2/F3 → B2a. K: the currency skip doc comment; the Action version is a hard-coded constant (D-64); #2455's two callers.
 
 ## 101 branch state (task/ebill-101-corrections @ 33eba7f446)
 - Part A: 2e4eede999, dfdc3f3a09, b66b3b5230. EB-D-175/176: 8086bd39ef. B1: 33eba7f446 (adversarial review done, F fixed; B2 seam `InvoiceCorrectionService.OnValueWrittenAsync`).
