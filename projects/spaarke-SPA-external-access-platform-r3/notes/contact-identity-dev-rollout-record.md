@@ -62,3 +62,10 @@
 - Owner go; OKs from UAC, ontology, word-add-in, field-mapping, ebilling (provisioning standing).
 - Readback 02:23:53Z: ProductVersion `1.0.0+136568cf701b68fe8b4132fe2223185a45f8f7a2`, healthz 200, healthz/dataverse 200, `/api/me` anonymous 401.
 - Rollback: `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261029T021735Z` (`e56a3a51d4`). Deploy worktree `C:\wtbffe-136`.
+- UAC server gate (02:24–02:54Z): PASS.
+  - Health: no 403s or 5xx.
+  - Ordinary moves: report-only, moved=0.
+  - Proof reads: the dev proofs pass.
+  - Pre-existing: ACME 0x80072560 (#2163); SECURE-CENSUS steady at 292 per 30 minutes; Redis lease renewal failures, filed by UAC as #2431.
+  - No Office or identity traffic at night; UAC watches the next daytime window.
+- After-notices were sent about 03:00Z to ontology, word-add-in (which then releases #2420), field-mapping, ebilling and provisioning.
