@@ -439,7 +439,7 @@ public static class GrantExternalAccessEndpoint
         // The grantee comes from the SAME key the upsert writes, so the checks judge exactly the row that would be
         // written (an OrganizationId beside a ContactId is the contact's firm — a deny subject, not the grantee).
         var check = await CheckGrantAsync(
-            GrantGrantee.ForKey(key, request.OrganizationId), request.AccessLevel, rootType, rootId, ceiling,
+            GrantGrantee.ForKey(key, request.OrganizationId), request.AccessLevel, rootType, rootId, ceiling, today,
             dataverseClient, participations, accessibleRecords, identityStore, logger, ct, contactIssuer);
         if (check.Refusal is { } refusal)
             return GrantUpsertOutcome.Refused(refusal);
@@ -848,7 +848,8 @@ public static class GrantExternalAccessEndpoint
     /// <para><b>Order.</b> (1) The record's access policy (task 138) — first, so a caller learns nothing more about a
     /// record whose policy refuses this grantee kind. (2) The ceiling: none → 403; otherwise the request is capped
     /// (NARROW, not refuse — owner Q1). (3) Never-lower: when the cap narrowed the request and an active row on the
-    /// key holds a HIGHER level, refuse 409 — an explicit request for a lower level (not narrowed) is a deliberate
+    /// key that still gives access on <paramref name="today"/> holds a HIGHER level (a lapsed row confers nothing, task 193
+    /// G4a), refuse 409 — an explicit request for a lower level (not narrowed) is a deliberate
     /// downgrade by a Write-holder and is allowed, as before. (4) The No Access list, through the read path's own
     /// veto code (<see cref="IAccessibleRecordSetService.CheckGranteeNoAccessAsync"/>): an entry refuses 422
     /// (<see cref="GrantPolicyDecision.GranteeDenied"/>); a check that could not be completed refuses 503
@@ -862,6 +863,7 @@ public static class GrantExternalAccessEndpoint
         ExternalGrantRootType rootType,
         Guid rootId,
         GrantCeiling ceiling,
+        DateOnly today,
         DataverseWebApiClient dataverseClient,
         ExternalParticipationService participations,
         IAccessibleRecordSetService accessibleRecords,
@@ -956,7 +958,10 @@ public static class GrantExternalAccessEndpoint
                 return GrantCheck.Refused(GrantPolicyDecision.WouldLowerExisting(granted), requestedLevel);
             }
         }
-        else if (narrowed && existing.Any(row => (row.AccessLevel ?? 0) > (int)granted))
+        // Task 193 G4a (B-F5): only a row that still gives access counts. A LAPSED higher row confers nothing, so a narrowed
+        // re-add over it lowers no one's access: it is written at the granted level and dated as any re-add.
+        else if (narrowed && existing.Any(row => (row.AccessLevel ?? 0) > (int)granted
+                                                 && ExternalParticipationService.ConfersAccessOn(row.ExpiresDate, today)))
         {
             logger.LogWarning(
                 "[EXT-GRANT] Refused: {Key} already holds a level above {Granted}, and the request was narrowed to it " +

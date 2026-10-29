@@ -738,6 +738,49 @@ public class ContactGrantSharesInternalUserTests
         _h.Grants.PairedUsers[existing.Id].Should().Be(user);
     }
 
+    /// <summary>
+    /// Task 193 G4a (B-F5): a LAPSED higher grant confers nothing, so it does not block a narrowed re-add (never-lower counts
+    /// only rows that still give access). The colleague's workforce-app access is restored at the granted level with a valid
+    /// date, on the same row, paired with them.
+    /// </summary>
+    [Fact]
+    public async Task G4a_Grant_Narrowed_OverALapsedHigherGrant_RestoresIt_AndTheColleagueIsVisible()
+    {
+        var (contact, user) = Colleague();
+        var lapsed = _h.Grants.Seed(ExternalGrantRootType.Matter, _matter, contact, null, (int)ExternalAccessLevel.FullAccess,
+            Today.AddDays(-5));
+        const AccessRights collaborateOnly = AccessRights.Read | AccessRights.Write | AccessRights.Append
+                                             | AccessRights.AppendTo | AccessRights.Share; // no Delete
+
+        var result = await Grant(contact, ExternalAccessLevel.FullAccess, callerRights: collaborateOnly);
+
+        var body = result.Should().BeOfType<Ok<GrantAccessResponse>>().Subject.Value!;
+        body.WorkforceApp.Should().Be(new WorkforceAppAccess(true, null, ExternalGrantLifecycle.DefaultExpiry(Today), lapsed.Id),
+            "the lapsed grant gave nothing, so restoring it lowers no one's access");
+        var row = _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle().Subject;
+        row.AccessLevel.Should().Be((int)ExternalAccessLevel.Collaborate);
+        _h.Grants.PairedUsers[lapsed.Id].Should().Be(user);
+    }
+
+    /// <summary>The must-not-fire twin: a LIVE higher grant still refuses the narrowed re-add; only the share stands.</summary>
+    [Fact]
+    public async Task G4a_Grant_Narrowed_OverALiveHigherGrant_StillNeverLowersIt()
+    {
+        var (contact, _) = Colleague();
+        var live = _h.Grants.Seed(ExternalGrantRootType.Matter, _matter, contact, null, (int)ExternalAccessLevel.FullAccess,
+            Today.AddDays(40));
+        const AccessRights collaborateOnly = AccessRights.Read | AccessRights.Write | AccessRights.Append
+                                             | AccessRights.AppendTo | AccessRights.Share; // no Delete
+
+        var result = await Grant(contact, ExternalAccessLevel.FullAccess, callerRights: collaborateOnly);
+
+        result.Should().BeOfType<Ok<GrantAccessResponse>>().Subject.Value!.WorkforceApp
+            .Should().Be(WorkforceAppAccess.NotGiven(ExternalGrantLifecycle.WouldLowerExistingReasonCode));
+        _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle()
+            .Which.AccessLevel.Should().Be((int)ExternalAccessLevel.FullAccess, "a live higher grant is never lowered");
+        _h.Grants.PairedUsers.Should().NotContainKey(live.Id);
+    }
+
     // ── /share-user: the reverse lookup (decision 2) ─────────────────────────────────────────────────────────────────
 
     [Fact]
