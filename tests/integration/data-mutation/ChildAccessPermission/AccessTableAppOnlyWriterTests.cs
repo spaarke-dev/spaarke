@@ -81,6 +81,11 @@ public class AccessTableAppOnlyWriterTests
         [
             "sprk_externalobjectid", "sprk_externalobjectidkey", "sprk_identityplane", "sprk_externaltenantid",
             "sprk_externalinvitedon", "sprk_externalinvitecodehash", "sprk_standinggrant", "sprk_accesspermissiongrant",
+
+            // ISS-005: the removed marker, the invite stamp and the identity-collision record.
+            "sprk_externalaccessremovedon", "sprk_externalinvitedemailhash", "sprk_externalinvitedtenantid",
+            "sprk_identitycollisionon", "sprk_identitycollisionoid", "sprk_identitycollisionplane",
+            "sprk_identitycollisionreason", "sprk_identitycollisionparties",
         ],
         ["sprk_organization"] = ["sprk_standinggrant", "sprk_accesspermissiongrant"],
         ["systemuser"] =
@@ -544,6 +549,10 @@ public class AccessTableAppOnlyWriterTests
             (SubjectStandingGrantReader.ContactEntity, ContactBindingDecision.ExternalTenantIdColumn),
             (SubjectStandingGrantReader.ContactEntity, ContactBindingDecision.ExternalInvitedOnColumn),
             (SubjectStandingGrantReader.ContactEntity, ContactBindingDecision.ExternalInviteCodeHashColumn),
+            (SubjectStandingGrantReader.ContactEntity, ContactBindingDecision.ExternalAccessRemovedOnColumn),
+            (SubjectStandingGrantReader.ContactEntity, ContactBindingDecision.ExternalInvitedEmailHashColumn),
+            (SubjectStandingGrantReader.ContactEntity, ContactBindingDecision.ExternalInvitedTenantIdColumn),
+            .. DataverseContactIdentityStore.CollisionColumns.Select(c => (SubjectStandingGrantReader.ContactEntity, c)),
             (SubjectStandingGrantReader.ContactEntity, SubjectStandingGrantReader.StandingGrantAttribute),
             (SubjectStandingGrantReader.ContactEntity, SubjectStandingGrantReader.BaselineAttribute),
             (SubjectStandingGrantReader.OrganizationEntity, SubjectStandingGrantReader.StandingGrantAttribute),
@@ -594,7 +603,7 @@ public class AccessTableAppOnlyWriterTests
     [InlineData("contact", "emailaddress1")]
     [InlineData("contact", "sprk_containerid")]
     [InlineData("contact", "sprk_isexternal")]
-    [InlineData("contact", "sprk_identitycollisionon")]
+    [InlineData("contact", "jobtitle")] // was sprk_identitycollisionon, an access column since ISS-005
     [InlineData("contact", "sprk_externalobjectidx")]
     [InlineData("sprk_organization", "sprk_name")]
     [InlineData("sprk_organization", "sprk_externalobjectid")]
@@ -733,17 +742,75 @@ public class AccessTableAppOnlyWriterTests
     public async Task AnImpersonatedUpdate_OfAnAccessTable_IsNotAskedTheAppOnlyRefusal()
     {
         // A user's own write runs as that user, so Dataverse's privileges decide it (the refusal is for app-only writers).
+        // #2257: only a proposal that user confirmed (ActionSeam's apply) is a user's own write; a playbook payload written
+        // AS its runner is still refused (UpdateRecordNodeExecutorRunIdentityTests, OutputMappingRunIdentityTests).
         var user = Guid.Parse("22510000-0000-0000-0000-00000000e4ee");
         await Core().UpdateAsync(
             new UpdateRecordActionInput(
                 "sprk_externalrecordaccess", Row, FieldMappings: null,
                 LegacyFields: new Dictionary<string, string?> { ["sprk_name"] = "x" },
-                Lookups: null, ImpersonateSystemUserId: user),
+                Lookups: null, ImpersonateSystemUserId: user, PayloadSource: UpdateRecordPayloadSource.ConfirmedProposal),
             CancellationToken.None);
 
         _writes.Verify(w => w.UpdateRecordFieldsAsync(
             "sprk_externalrecordaccess", Row, It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), user),
             Times.Once);
+    }
+
+    // ── ISS-005: the removed marker and the invite stamp are the BFF's typed writers' ────────────────────────────
+
+    /// <summary>The contact columns only the removal and invite writers set, each cleared (a null) by the payload.</summary>
+    public static TheoryData<string> RemovalAndInviteStampColumns() => new()
+    {
+        ContactBindingDecision.ExternalAccessRemovedOnColumn,
+        ContactBindingDecision.ExternalInvitedEmailHashColumn,
+        ContactBindingDecision.ExternalInvitedTenantIdColumn,
+    };
+
+    [Theory]
+    [MemberData(nameof(RemovalAndInviteStampColumns))]
+    public async Task APlaybookUpdate_ClearingTheRemovedMarkerOrTheInviteStamp_IsRefused_AndNothingIsWritten(string column)
+    {
+        var act = () => Core().UpdateAsync(
+            new UpdateRecordActionInput(
+                "contact", Row, FieldMappings: null,
+                LegacyFields: new Dictionary<string, string?> { ["jobtitle"] = "x", [column] = null },
+                Lookups: null),
+            CancellationToken.None);
+
+        var refusal = (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which;
+        refusal.RefusalCode.Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode);
+        _writes.Invocations.Should().BeEmpty("the refusal comes before anything is written");
+    }
+
+    [Theory]
+    [MemberData(nameof(RemovalAndInviteStampColumns))]
+    public async Task AnOutputMapping_ClearingTheRemovedMarkerOrTheInviteStamp_IsRefused_AndNothingIsWritten(string column)
+    {
+        var act = () => Handler().UpdateAsync(
+            "contact", Row, new Dictionary<string, object?> { ["jobtitle"] = "x", [column] = null },
+            ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
+            .Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode);
+        _writes.Invocations.Should().BeEmpty("the refusal comes before anything is written");
+    }
+
+    [Fact]
+    public async Task APlaybookUpdate_AndAnOutputMapping_OfAnOrdinaryContactColumn_AreWritten()
+    {
+        await Core().UpdateAsync(
+            new UpdateRecordActionInput(
+                "contact", Row, FieldMappings: null, LegacyFields: new Dictionary<string, string?> { ["jobtitle"] = "Counsel" },
+                Lookups: null),
+            CancellationToken.None);
+        await Handler().UpdateAsync(
+            "contact", Row, new Dictionary<string, object?> { ["jobtitle"] = "Counsel" },
+            ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
+
+        _writes.Verify(w => w.UpdateRecordFieldsAsync(
+            "contact", Row, It.Is<Dictionary<string, object?>>(f => f.Count == 1 && f.ContainsKey("jobtitle")),
+            It.IsAny<CancellationToken>(), null), Times.Exactly(2));
     }
 
     // ── Output mapping (DataverseUpdateHandler, app-only) ────────────────────────────────────────────────────────

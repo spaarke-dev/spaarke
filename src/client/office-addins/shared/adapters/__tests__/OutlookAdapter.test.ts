@@ -445,6 +445,22 @@ describe('OutlookAdapter', () => {
         expect(importance).toBe('normal');
       });
     });
+
+    describe('getSentDate (task 132)', () => {
+      it('returns dateTimeCreated, not dateTimeModified (which moves when the item is read, moved or flagged)', () => {
+        const item = mockReadItem as unknown as { dateTimeCreated: Date; dateTimeModified: Date };
+        const original = { created: item.dateTimeCreated, modified: item.dateTimeModified };
+        const created = new Date('2026-09-03T14:05:00Z');
+        item.dateTimeCreated = created;
+        item.dateTimeModified = new Date('2026-10-03T08:00:00Z');
+        try {
+          expect(adapter.getSentDate()).toEqual(created);
+        } finally {
+          item.dateTimeCreated = original.created;
+          item.dateTimeModified = original.modified;
+        }
+      });
+    });
   });
 
   describe('compose mode operations', () => {

@@ -220,6 +220,63 @@ describe('/me refusals are not defaulted to a stand-in user', () => {
     SLOW
   );
 
+  const OWNER_UNCONFIGURED = 'sdap.access.registration_owner_unconfigured';
+  const ownerUnconfiguredBody = (field: 'reasonCode' | 'errorCode') =>
+    JSON.stringify({
+      status: 500,
+      title: 'Internal Server Error',
+      detail: 'Sign-in is not configured for this organization. Nothing was created; contact your administrator.',
+      [field]: OWNER_UNCONFIGURED,
+    });
+
+  it.each(['reasonCode', 'errorCode'] as const)(
+    'a 500 whose ProblemDetails %s is registration_owner_unconfigured rethrows a typed error - no default workspace (ISS-005, #1673)',
+    async field => {
+      await load();
+      nextStatus = 500;
+      refusalBody = ownerUnconfiguredBody(field);
+      const { fetchMeEntitlements, OwnerUnconfiguredError } = await import('../src/api/me-client');
+      await expect(fetchMeEntitlements(false)).rejects.toBeInstanceOf(OwnerUnconfiguredError);
+    },
+    SLOW
+  );
+
+  it.each([
+    [500, JSON.stringify({ status: 500, reasonCode: 'sdap.access.some_other_failure' })],
+    [503, 'service unavailable'],
+    [502, JSON.stringify({ status: 502, reasonCode: 7 })],
+  ] as const)(
+    'any other 5xx keeps the plane-default fallback: %s with body %s',
+    async (status, body) => {
+      await load();
+      nextStatus = status;
+      refusalBody = body;
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const { fetchMeEntitlements } = await import('../src/api/me-client');
+        const me = await fetchMeEntitlements(false);
+        expect(me).toEqual({ displayName: '', email: '', plane: 'ciam', entitlements: ['assigned-work'] });
+      } finally {
+        warn.mockRestore();
+      }
+    },
+    SLOW
+  );
+
+  it(
+    'a 403 carrying the owner-unconfigured code is still a plain 403 (only a 5xx is the owner-unconfigured case)',
+    async () => {
+      await load();
+      nextStatus = 403;
+      refusalBody = ownerUnconfiguredBody('reasonCode');
+      const { fetchMeEntitlements, OwnerUnconfiguredError } = await import('../src/api/me-client');
+      const err = await fetchMeEntitlements(false).catch((e: unknown) => e);
+      expect(err).not.toBeInstanceOf(OwnerUnconfiguredError);
+      expect(err).toMatchObject({ statusCode: 403 });
+    },
+    SLOW
+  );
+
   it(
     'a 4xx other than 401/403 rejects - the plane defaults are for server failures only',
     async () => {
@@ -300,6 +357,37 @@ describe('/me refusals are not defaulted to a stand-in user', () => {
     SLOW
   );
 
+  it(
+    'WorkspaceHomePage: a registration_owner_unconfigured 500 from /me shows the fixed message in the denied state - no widgets, no server text (ISS-005, #1673)',
+    async () => {
+      await load();
+      nextStatus = 500;
+      refusalBody = JSON.stringify({
+        status: 500,
+        title: 'Internal Server Error',
+        detail: 'SERVER-DETAIL-MUST-NOT-APPEAR',
+        reasonCode: 'sdap.access.registration_owner_unconfigured',
+        errorCode: 'sdap.access.registration_owner_unconfigured',
+      });
+      const { WorkspaceHomePage } = await import('../src/pages/WorkspaceHomePage');
+      render(React.createElement(WorkspaceHomePage, { teamsHost: false }));
+      const denied = await screen.findByTestId('bff-access-denied');
+      expect(denied.textContent).toContain(
+        'Sign-in is not configured for this organization. Contact your administrator.'
+      );
+      expect(document.body.textContent).not.toContain('SERVER-DETAIL-MUST-NOT-APPEAR');
+      // The title agrees with the sentence: not "Access denied" above a "not configured" message.
+      expect(denied.textContent).toContain('Sign-in is not set up yet');
+      expect(denied.textContent).not.toContain('Access denied');
+      // No workspace: no shell tabs, no Quick Start, and no request beyond /me itself.
+      expect(screen.queryAllByRole('tab')).toHaveLength(0);
+      expect(screen.queryByText(/quick start/i)).toBeNull();
+      expect(fetchUrls).toEqual(['https://contoso-bff.test/api/v1/external/me/entitlements']);
+      expect(document.body.textContent).not.toMatch(MOCK_IDENTITY);
+    },
+    SLOW
+  );
+
   it.each([
     [401, 'bff-access-signin'],
     [403, 'bff-access-denied'],
@@ -329,6 +417,8 @@ describe('/me refusals are not defaulted to a stand-in user', () => {
       const { WorkspaceHomePage } = await import('../src/pages/WorkspaceHomePage');
       render(React.createElement(WorkspaceHomePage, { teamsHost: false }));
       const denied = await screen.findByTestId('bff-access-denied');
+      expect(denied.textContent).toContain('Access denied'); // a real refusal keeps its title
+      expect(denied.textContent).not.toContain('Sign-in is not set up yet');
       expect(denied.textContent?.includes(detail)).toBe(showsDetail);
       expect(denied.textContent?.includes('You do not have access to this workspace')).toBe(!showsDetail);
     },

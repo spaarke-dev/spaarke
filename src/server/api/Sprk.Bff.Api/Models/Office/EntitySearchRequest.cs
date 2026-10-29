@@ -4,7 +4,8 @@ namespace Sprk.Bff.Api.Models.Office;
 
 /// <summary>
 /// Request model for searching association targets (entities) in the Office add-in.
-/// Supports typeahead search for Matters, Projects, Invoices, Accounts, and Contacts.
+/// Supports typeahead search for Matters, Projects, Invoices, Accounts, and Contacts, plus Work Assignments when asked
+/// for by name (task 133).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -30,7 +31,8 @@ public record EntitySearchRequest
     /// Entity types to search. If null or empty, searches all supported types.
     /// </summary>
     /// <remarks>
-    /// Valid values: Matter, Project, Invoice, Account, Contact
+    /// Valid values: Matter, Project, Invoice, Account, Contact, WorkAssignment. WorkAssignment is searched only when
+    /// asked for by name (task 133); an empty or all-invalid list searches the other five, as before.
     /// </remarks>
     /// <example>["Matter", "Account"]</example>
     public string[]? EntityTypes { get; init; }
@@ -68,5 +70,15 @@ public enum AssociationEntityType
     Account,
 
     /// <summary>Contact entity (contact - standard Dataverse).</summary>
-    Contact
+    Contact,
+
+    /// <summary>
+    /// Work assignment entity (sprk_workassignment). word-add-in-r1 task 133: the Outlook Invoice view's core-record
+    /// picker finds work assignments through <c>GET /api/office/search/entities?type=WorkAssignment</c>.
+    /// This enum is used ONLY by that search and its response: <c>POST /api/office/save</c> validates its target type
+    /// from its own list (OfficeEndpoints.ValidateSaveRequest) and quick-create parses its own
+    /// <see cref="QuickCreateEntityType"/>, so neither changes. It is searched only when requested by name
+    /// (see OfficeSearchService.DefaultSearchTypes).
+    /// </summary>
+    WorkAssignment
 }

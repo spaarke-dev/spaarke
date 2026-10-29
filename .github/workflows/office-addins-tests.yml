@@ -131,6 +131,9 @@ on:
       # imports it. It is a leaf module with no imports of its own, so the exact
       # file is the precise filter — nothing else in that package reaches here.
       - 'src/client/shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts'
+      # Task 133: the Outlook Invoice view renders ebilling's shared InvoiceAttachmentMarking through an exact
+      # alias (jest.config.js, webpack.config.js) to this folder's index; `InvoiceView.test.tsx` renders it.
+      - 'src/client/shared/Spaarke.Communication.Components/src/components/InvoiceAttachmentMarking/**'
       # (ci-gated-suites.txt needs no entry — 'src/client/office-addins/**' covers it.)
       - '.github/workflows/office-addins-tests.yml'
       # ── SERVER PATHS, added by task 070 ────────────────────────────────────
@@ -177,6 +180,7 @@ on:
       - 'src/solutions/webresources/sprk_bff_auth.js'
       - 'src/dataverse/solutions/SpaarkeMaster/WebResources/sprk_/scripts/bff_auth.js'
       - 'src/client/shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts'
+      - 'src/client/shared/Spaarke.Communication.Components/src/components/InvoiceAttachmentMarking/**'
       - '.github/workflows/office-addins-tests.yml'
       # Mirrors the pull_request server paths above (task 070) so a direct push to
       # master over the same surface is covered identically. Keep the two lists in

@@ -104,9 +104,13 @@
 //           Graph UPN alt-key check inside GraphRestUserProvisioner.CreateUserAsync.
 //
 // TASK 232 (D2, G10 — Model 1 guests usable; owner 2026-10-07: pay-as-you-go):
-//   A Model 1 run takes only B2BGuest (UserProvisioningIntake). Guests get NO
-//   licence — Spaarke pays for their access pay-as-you-go on the stamp
-//   subscription (operator prerequisite PRQ-C-11). Before inviting anyone H11
+//   A Model 1 run takes only B2BGuest (UserProvisioningIntake). Each guest gets
+//   the Power Apps Plan 2 Trial licence (H11UserProvisioningOptions:GuestLicenseSkuId;
+//   owner 2026-10-16, T186 L51 — Dataverse will not add an unlicensed guest),
+//   assigned after the guest joins the environment security group and before the
+//   Dataverse step; a blank SKU is refused before anyone is invited. Pay-as-you-go
+//   on the stamp subscription (operator prerequisite PRQ-C-11) still covers
+//   Dataverse capacity, not user access. Before inviting anyone H11
 //   reads the environment's security group (intake environmentSecurityGroupId,
 //   PRQ-C-10) and refuses one not named sprk-{customerId}-users or not a security
 //   group — the group is what keeps another customer's guests out of this
@@ -446,6 +450,16 @@ public sealed class H11UserProvisioningHandler : IProvisioningHandler
                 cancellationToken).ConfigureAwait(false);
         }
 
+        // Owner 2026-10-16 (T186 L51): Dataverse will not add an unlicensed guest, so every guest is licensed — refuse a
+        // run with no guest SKU before anyone is invited.
+        if (string.IsNullOrWhiteSpace(_options.GuestLicenseSkuId))
+        {
+            return await FailAsync(run, etag, FailureClass.Resumable, H11Rejections.LicenseSkuNotConfigured,
+                "No guest licence SKU is configured (H11UserProvisioningOptions:GuestLicenseSkuId) — Dataverse does not add " +
+                "an unlicensed guest. Nothing was written (no invitation sent).",
+                cancellationToken).ConfigureAwait(false);
+        }
+
         // Every role resolved once, before anyone is invited: a missing role (the package is T218's) must not send
         // invitations or add anyone to the group first.
         var roleNames = _options.EffectiveGuestSecurityRoleNames;
@@ -547,8 +561,10 @@ public sealed class H11UserProvisioningHandler : IProvisioningHandler
 
         var verified = (B2BConsentVerificationResult.Verified)consentResult;
 
-        // Task 232: every guest has redeemed — add each to the environment security group, then make it a Dataverse
-        // user holding the configured role(s). Each step is idempotent, so a failed run resumes from the start.
+        // Task 232: every guest has redeemed — add each to the environment security group, give it the Power Apps Plan 2
+        // Trial licence (owner 2026-10-16, T186 L51: Dataverse will not add an unlicensed guest; pay-as-you-go, PRQ-C-11,
+        // still covers Dataverse capacity), then make it a Dataverse user holding the configured role(s). Each step is
+        // idempotent, so a failed run resumes from the start.
         var guestUsers = new List<ProvisionedUserRecord>(invited.Count);
         for (var i = 0; i < invited.Count; i++)
         {
@@ -562,6 +578,25 @@ public sealed class H11UserProvisioningHandler : IProvisioningHandler
                 return await FailAsync(run, etag, FailureClass.Resumable, H11Rejections.SecurityGroupMembershipFailed,
                     $"Adding the guest of usersJson entry {position} (Entra user {guest.UserId}) to the environment " +
                     $"security group failed: {membershipFailure.Diagnostic}",
+                    cancellationToken).ConfigureAwait(false);
+            }
+
+            LicenseAssignmentOutcome licence;
+            try
+            {
+                licence = await _userProvisioner.AssignGuestLicenseAsync(guest.UserId, tenantId, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex) when (IsFailureNotCallerCancellation(ex, cancellationToken))
+            {
+                licence = new LicenseAssignmentOutcome.Failure($"infrastructure error: {ex.GetType().Name}: {ex.Message}");
+            }
+
+            if (licence is LicenseAssignmentOutcome.Failure licenceFailure)
+            {
+                return await FailAsync(run, etag, FailureClass.Resumable, H11Rejections.LicenseAssignmentFailed,
+                    $"Assigning the guest licence (Power Apps Plan 2 Trial) to the guest of usersJson entry {position} " +
+                    $"(Entra user {guest.UserId}) failed: {licenceFailure.Diagnostic}",
                     cancellationToken).ConfigureAwait(false);
             }
 
@@ -584,6 +619,14 @@ public sealed class H11UserProvisioningHandler : IProvisioningHandler
                     $"already a user in business unit {elsewhere.BusinessUnitId}, neither the customer's unit {customerUnitId:D} " +
                     "nor the root. H11 never moves it (it may be the Secure Record unit, where no user may be): moving it is an " +
                     "owner decision; then resume.",
+                    cancellationToken).ConfigureAwait(false);
+            }
+            if (dataverseUser is DataverseGuestUserOutcome.Disabled disabled)
+            {
+                return await FailAsync(run, etag, FailureClass.QuarantineRequired, H11Rejections.GuestDisabled,
+                    $"The guest of usersJson entry {position} (Entra user {guest.UserId}, systemuser {disabled.SystemUserId}) is " +
+                    "a disabled Dataverse user, so they cannot use the environment. H11 wrote nothing and never re-enables a " +
+                    "user: enabling it is an owner decision; then resume.",
                     cancellationToken).ConfigureAwait(false);
             }
             if (dataverseUser is DataverseGuestUserOutcome.Failure userFailure)
@@ -731,8 +774,7 @@ public sealed class H11UserProvisioningHandler : IProvisioningHandler
         var completedAt = DateTimeOffset.UtcNow;
         var startedAt = completedAt - TimeSpan.FromMilliseconds(1);
 
-        run.Status = RunStatus.Running;
-        run.CurrentPhase = HandlerIdentifier; // Reconciler observes + fans out.
+        run.MarkPhaseSucceeded(HandlerIdentifier); // Reconciler observes + fans out.
         run.CompletedPhases.Add(new CompletedPhase
         {
             Phase = HandlerIdentifier,

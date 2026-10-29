@@ -69,7 +69,8 @@ export type DocumentIdentityOutcome =
       /**
        * Whether `relatedRecord === null` means "filed to NO record" (true / absent — the server read the document's
        * record slots, as the URL resolution does) or merely "the pane does not know" (`false` — a stamp-only
-       * resolution, which carries no record at all). Task 111: only a KNOWN-unfiled document is offered "File to
+       * resolution, which carries no record at all — or, task 132, a server answer that says the document IS filed to
+       * a record this caller may not see: `relatedRecordWithheld`). Task 111: only a KNOWN-unfiled document is offered "File to
        * record"; an unknown one must never be, or a document already filed (even to a slot the pane cannot read) is
        * filed a second time. A later server-side resolution of the stamp returns a record (or `null` with this
        * absent) and the consumers need no change.
@@ -134,6 +135,11 @@ interface BffDocumentIdentityResponse {
   documentName?: string | null;
   fileName?: string | null;
   relatedRecord?: BffRelatedRecord | null;
+  /**
+   * Task 132 (review F1): `true` only when the document IS filed to a record (through its communication) that this
+   * caller may not see — `relatedRecord` is then null although the document is not unfiled. Absent/null otherwise.
+   */
+  relatedRecordWithheld?: boolean | null;
   reason?: string | null;
 }
 
@@ -151,8 +157,17 @@ const RESOLVE_IDENTITY_ENDPOINT = '/api/documents/resolve-identity';
 const identityByIdEndpoint = (documentId: string): string =>
   `/api/documents/${encodeURIComponent(documentId)}/identity`;
 
-/** A resolved BFF identity response as the pane's outcome (shared by the URL and by-id reads). */
+/**
+ * A resolved BFF identity response as the pane's outcome. The ONE mapping every identity read goes through — the URL
+ * route, the by-id route and the email route — so a rule added here cannot drift between Word and Outlook.
+ *
+ * Task 132 (review F1): `relatedRecordWithheld` means the document is filed to a record this caller may not see, so a
+ * null `relatedRecord` is NOT "filed to nothing". It maps to the existing "record unknown" state
+ * (`relatedRecordKnown: false`): the pane says the filing record is not available and never offers "File to record",
+ * which would add a second parent. A record that came back always wins over the flag.
+ */
 function toResolvedOutcome(response: BffDocumentIdentityResponse): DocumentIdentityOutcome {
+  const recordWithheld = response.relatedRecordWithheld === true && !response.relatedRecord;
   return {
     kind: 'resolved',
     documentId: cleanGuid(response.documentId),
@@ -167,6 +182,7 @@ function toResolvedOutcome(response: BffDocumentIdentityResponse): DocumentIdent
           number: response.relatedRecord.number ?? null,
         }
       : null,
+    ...(recordWithheld ? { relatedRecordKnown: false } : {}),
   };
 }
 
@@ -505,6 +521,23 @@ export function applyDocumentIdentityOutcome(
 ): DocumentIdentityContext | undefined {
   if (outcome.kind !== 'resolved') {
     return prev;
+  }
+
+  // Task 132: an answer whose record is UNKNOWN (withheld or unreadable) says nothing about the record, so it never
+  // overwrites one this pane already knows for the same document (e.g. just set by "File to record").
+  const keepKnownRecord =
+    outcome.relatedRecordKnown === false &&
+    !outcome.relatedRecord &&
+    !!prev?.relatedRecord &&
+    !!prev.documentId &&
+    prev.documentId.toLowerCase() === outcome.documentId.toLowerCase();
+  if (keepKnownRecord) {
+    return {
+      ...prev,
+      documentId: outcome.documentId,
+      documentName: outcome.documentName,
+      fileName: outcome.fileName,
+    };
   }
 
   return {

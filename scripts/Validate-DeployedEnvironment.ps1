@@ -14,6 +14,9 @@
                                       + config); exit 0 required for H13 acceptance to pass.
                                       Per customer-provisioning-orchestration-r1 spec FR-35 +
                                       SC #17 + design.md H13. Added by r1 task 021.
+      6. Org Auditing  -  organization.isauditenabled = true and auditretentionperiodv2 = -1
+                          (Forever). H6 sets both (#2027); this catches an environment where
+                          auditing was turned off or shortened after provisioning.
 
     This is the capstone validation tool for the production environment setup project.
     Run this after deploying to any non-dev environment to catch configuration issues.
@@ -437,6 +440,49 @@ function Test-NamingConformance {
 }
 
 # ─────────────────────────────────────────────────────────────────────
+# Check 6: Org Auditing (#2027)
+# ─────────────────────────────────────────────────────────────────────
+# The per-table IsAuditEnabled flags SpaarkeMaster carries record nothing while the
+# organization switch is off, and audit history cannot be backfilled. H6 applies
+# isauditenabled = true and auditretentionperiodv2 = -1 (Forever, owner decision
+# 2026-10-18) and reads them back; this re-asserts both after deployment.
+
+function Test-OrgAuditing {
+    Write-TestHeader "CHECK 6: Org Auditing"
+
+    $apiUrl = "$DataverseUrl/api/data/v9.2/organizations?`$select=isauditenabled,auditretentionperiodv2"
+    $response = az rest --method GET --url $apiUrl --resource "$DataverseUrl" 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Add-TestResult -Group 'Org Auditing' -Test 'organization row readable' -Status 'Fail' `
+            -Message "Failed to query Dataverse: $($response | Out-String)"
+        return
+    }
+    $org = @(($response | Out-String | ConvertFrom-Json).value)
+    if ($org.Count -ne 1) {
+        Add-TestResult -Group 'Org Auditing' -Test 'organization row readable' -Status 'Fail' `
+            -Message "Expected one organization row, got $($org.Count)."
+        return
+    }
+
+    if ($org[0].isauditenabled -eq $true) {
+        Add-TestResult -Group 'Org Auditing' -Test 'isauditenabled = true' -Status 'Pass'
+    }
+    else {
+        Add-TestResult -Group 'Org Auditing' -Test 'isauditenabled = true' -Status 'Fail' `
+            -Message "Org auditing is '$($org[0].isauditenabled)': table and column audit flags record nothing. Turn it on (Power Platform admin center > Settings > Audit and logs, or resume H6)."
+    }
+
+    if ("$($org[0].auditretentionperiodv2)" -eq '-1') {
+        Add-TestResult -Group 'Org Auditing' -Test 'auditretentionperiodv2 = -1 (Forever)' -Status 'Pass'
+    }
+    else {
+        $shown = if ($null -eq $org[0].auditretentionperiodv2) { 'null' } else { $org[0].auditretentionperiodv2 }
+        Add-TestResult -Group 'Org Auditing' -Test 'auditretentionperiodv2 = -1 (Forever)' -Status 'Fail' `
+            -Message "Audit retention is $shown; the contract is -1 (Forever, #2027). Set it to Forever before audit rows age out."
+    }
+}
+
+# ─────────────────────────────────────────────────────────────────────
 # Execution
 # ─────────────────────────────────────────────────────────────────────
 
@@ -457,6 +503,7 @@ Test-BffApiHealth
 Test-CorsOrigin
 Test-DevValueLeakage
 Test-NamingConformance   # H13 acceptance gate — customer-provisioning-orchestration-r1 task 021
+Test-OrgAuditing         # #2027
 
 # ─────────────────────────────────────────────────────────────────────
 # Results Summary

@@ -26,6 +26,10 @@
  *     (`PLANE_DEFAULTS`, aligned with the server's defaults) with an EMPTY identity, plus a console.warn (the UAT tell
  *     that it fired). NFR-06: the module-data endpoints enforce Tier-1/Tier-2 server-side regardless of what this
  *     returns.
+ *   - EXCEPT a 5xx whose ProblemDetails `reasonCode` (or `errorCode`) is `sdap.access.registration_owner_unconfigured`
+ *     (ISS-005, #1673): the workforce first sign-in was refused because the organization's customer business unit setting
+ *     is missing and nothing was created. That is a configuration refusal, not an outage, so it REJECTS with
+ *     `OwnerUnconfiguredError` and the workspace shows its fixed "not configured" message in the denied state.
  *   - anything else REJECTS: a token-acquisition failure (TeamsWorkforceAuthError, BackendSelectionError, the
  *     redirect-in-progress Error), a network fault, or a 4xx other than 401/403. The caller was never answered by the
  *     BFF, so showing a default workspace would present modules for a caller the server has not seen. The workspace
@@ -36,6 +40,37 @@ import { bffApiCall } from '../auth/bff-client';
 import { isWorkforceHomePlaneActive } from '../auth/msal-auth';
 import { isDevMockEnabled } from '../dev-mock';
 import { ApiError } from '../types';
+
+/**
+ * The BFF's reason/error code when a workforce first sign-in is refused because the customer business unit setting is
+ * missing (ISS-005, #1673; the registration route answers with the same code).
+ */
+export const REGISTRATION_OWNER_UNCONFIGURED = 'sdap.access.registration_owner_unconfigured';
+
+/** The fixed sentence shown for that refusal. The server `detail` is deliberately NOT shown; this string is the contract. */
+export const OWNER_UNCONFIGURED_MESSAGE =
+  'Sign-in is not configured for this organization. Contact your administrator.';
+
+/** The title shown above it: the state is an unfinished set-up, not a permission problem ("Access denied" would contradict the sentence). */
+export const OWNER_UNCONFIGURED_TITLE = 'Sign-in is not set up yet';
+
+/** `/me` was refused with `registration_owner_unconfigured` (a 5xx that must NOT fall back to a default workspace). */
+export class OwnerUnconfiguredError extends Error {
+  constructor(public readonly statusCode: number) {
+    super(OWNER_UNCONFIGURED_MESSAGE);
+    this.name = 'OwnerUnconfiguredError';
+  }
+}
+
+/** True when a 5xx ApiError's ProblemDetails body names the owner-unconfigured code in `reasonCode` or `errorCode`. */
+function isOwnerUnconfigured(err: ApiError): boolean {
+  try {
+    const body = JSON.parse(err.message) as { reasonCode?: unknown; errorCode?: unknown } | null;
+    return body?.reasonCode === REGISTRATION_OWNER_UNCONFIGURED || body?.errorCode === REGISTRATION_OWNER_UNCONFIGURED;
+  } catch {
+    return false; // not a ProblemDetails body: an ordinary server failure
+  }
+}
 
 /** Identity plane — matches the caller's auth authority (ADR-028 dual-plane). */
 export type Plane = 'workforce' | 'ciam' | 'admin';
@@ -128,6 +163,8 @@ export async function fetchMeEntitlements(teamsHost: boolean): Promise<MeEntitle
     // with a 5xx, so degrade to the plane's default modules rather than leave the workspace tab-less. The console
     // warning is the UAT tell that this fired.
     if (err instanceof ApiError && err.statusCode >= 500) {
+      // A configuration refusal, not an outage: never a default workspace (ISS-005).
+      if (isOwnerUnconfigured(err)) throw new OwnerUnconfiguredError(err.statusCode);
       console.warn('[me] live /api/v1/external/me/entitlements failed — falling back to plane-derived defaults.', err);
       return PLANE_DEFAULTS[basePlane];
     }

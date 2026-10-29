@@ -15,6 +15,7 @@
  * @see IDataService — high-level data access abstraction (no IWebApi dependency)
  */
 
+import { describeWebApiCreateError } from '../../utils/webApiCreateError';
 import type { ICreateProjectFormState } from './projectFormTypes';
 import type { ILookupItem } from '../../types/LookupTypes';
 import type { IDataService } from '../../types/serviceInterfaces';
@@ -24,7 +25,7 @@ import {
   type IUserBuCascadeDefaults,
   type AuthenticatedFetchFn,
 } from '../../services/EntityCreationService';
-import { discoverNavProps, cleanGuid } from '../../services/PolymorphicResolverService';
+import { discoverNavProps, findNavProp, cleanGuid } from '../../services/PolymorphicResolverService';
 import { applyFieldMappings } from '../../services/FieldMappingService';
 import { syncAssignedAccess } from '../../services/assignedAccessSync';
 
@@ -49,36 +50,10 @@ export interface ICreateProjectResult {
 // Metadata discovery — find correct OData navigation property names
 // ---------------------------------------------------------------------------
 
-// Nav-prop discovery is provided by the shared `discoverNavProps`
-// (PolymorphicResolverService) — consolidated 2026-07-09 (task 011, Path A).
-// The local `NavPropEntry` shape below is structurally identical to the shared
-// `INavPropEntry` returned by `discoverNavProps`, so `_findNavProp` accepts it.
-
-interface NavPropEntry {
-  columnName: string;
-  navPropName: string;
-  referencedEntity: string;
-}
-
-/**
- * Find the navigation property name for a relationship that points to the given
- * referenced entity. More robust than matching by column name, since column names
- * can differ between entities (e.g. sprk_mattertype vs sprk_projecttyperef).
- *
- * When multiple relationships point to the same entity (e.g. two contact lookups),
- * use `columnHint` to disambiguate by matching a substring in the column name.
- */
-function _findNavProp(entries: NavPropEntry[], referencedEntity: string, columnHint?: string): string | undefined {
-  const matches = entries.filter(e => e.referencedEntity === referencedEntity);
-  if (matches.length === 0) return undefined;
-  if (matches.length === 1) return matches[0].navPropName;
-  // Multiple matches — use column hint to disambiguate
-  if (columnHint) {
-    const hinted = matches.find(e => e.columnName.includes(columnHint));
-    if (hinted) return hinted.navPropName;
-  }
-  return matches[0].navPropName;
-}
+// Nav-prop discovery AND resolution are the shared `discoverNavProps` / `findNavProp`
+// (PolymorphicResolverService) — consolidated 2026-07-09 (task 011, Path A); task 162 retired the
+// local `_findNavProp` copy so the exact-column-first rule lives in one place. `columnHint` below
+// disambiguates when several lookups point to the same entity (e.g. two contact lookups).
 
 // ---------------------------------------------------------------------------
 // ProjectService class
@@ -354,7 +329,7 @@ export class ProjectService {
     }
 
     for (const lk of lookups) {
-      const navProp = _findNavProp(navProps, lk.referencedEntity, lk.columnHint);
+      const navProp = findNavProp(navProps, lk.referencedEntity, lk.columnHint);
       if (navProp) {
         entity[`${navProp}@odata.bind`] = `/${lk.entitySet}(${cleanGuid(lk.guid)})`;
       } else {
@@ -408,12 +383,12 @@ export class ProjectService {
       };
     } catch (err) {
       console.error('[ProjectService] createRecord error:', err);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const errObj = err as any;
-      const message = errObj?.message || (err instanceof Error ? err.message : 'Unknown error');
+      // #2382: a privilege refusal becomes one plain sentence; the full error is logged above.
+      const described = describeWebApiCreateError(err, 'project');
+      const message = described.message;
       return {
         success: false,
-        errorMessage: `Failed to create project record: ${message}`,
+        errorMessage: described.isAccessDenied ? message : `Failed to create project record: ${message}`,
         warnings,
       };
     }

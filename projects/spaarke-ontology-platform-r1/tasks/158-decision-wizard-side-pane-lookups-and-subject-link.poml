@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="158" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Decision wizard: side-pane lookups for every Person and Lookup field, and a link to the subject record (D-182, UAT round 1)</title>
+    <phase>11 UAT</phase>
+    <gate>startable (D-182, owner 2026-10-22)</gate>
+    <status>in-progress</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies shared UI components and two hosts (.ts/.tsx).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>A host-injected callback through an existing context, following INavigationService; exact files known.</model-tier-reason>
+    <effort>high</effort>
+    <deps>105 (UAT round 1)</deps>
+    <tags>frontend,react,fluent-ui,testing</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+    <parallel-group>K</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Owner UAT round 1 (notes/uat-v4-log.md findings 1, 4 and 6): in the Console decision wizard, "Assign to" is an inline type-ahead dropdown, and "Budget to revise" and "Outside firm" likewise. The owner wants the standard Spaarke side-pane lookup. The wizard also shows the subject record (matter, project or other core record) as plain text, with no way to open it.</prompt>
+  <role>SPAARKE front-end engineer (shared UI library and the Console).</role>
+  <goal>Every Person and Lookup field in the decision wizard opens the platform side-pane lookup (Xrm.Utility.lookupObjects through a host-injected openLookup), and the subject record's name in *What was found* is a link that opens the record in a modal while the wizard keeps its place.</goal>
+
+  <context>
+    <background>D-182 in notes/decisions.md. Today `ParameterFields.tsx:189` routes Person and Lookup kinds to `LookupParameter`, which renders the inline `LookupField` (:115) fed by an injected search function. The shared library has no Xrm (ADR-012); the search comes from the hosts. `INavigationService.openLookup` (serviceInterfaces.ts:381) wraps Xrm.Utility.lookupObjects and `openRecordModal` (:335-352) opens a record in a platform dialog. Person maps to contacts today (`worklistLookup.ts:38`); assignees stay contacts (D-182). The pre-select rule for a single budget (D-18, `ParameterFields.tsx:77-90`) must keep working.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DecisionWizard/steps/ParameterFields.tsx (:77-90 prefill, :115 LookupField, :189 routing)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DecisionWizard/decisionItemContext.ts and DecisionWizard.tsx (props / context that carry the injected lookup)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DecisionWizard/steps/FoundStep.tsx:54-65 (subject rendered as `${coreLabel}: ${coreName}` in a Caption1)</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/worklistLookup.ts:38-66 (search per kind) and WorklistWorkspaceWidget.tsx:61 (host)</file>
+      <file>src/solutions/LegalWorkspace/src/sections/worklist.registration.ts:88 (host)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/types/serviceInterfaces.ts:335-390 (INavigationService.openRecordModal, openLookup, LookupOptions)</file>
+      <file>REFERENCE TO COPY for an openLookup call: src/client/pcf/RegardingResolver/RegardingResolver/RegardingResolverApp.tsx:194</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>INavigationService.openLookup and openRecordModal already exist; the wizard already takes an injected lookup search.</existing>
+    <extension>Adds two optional host-injected callbacks (openLookup, openRecord) to the wizard's existing injection point; no new service or interface.</extension>
+    <cost-of-doing-nothing>Reviewers pick people and budgets through a type-ahead that differs from every other Spaarke lookup, and cannot open the record they are deciding about (owner UAT round 1).</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="D-182">Every Person and Lookup parameter opens the side-pane lookup when the host provides openLookup. Single select. The chosen record fills the field exactly as the inline pick does today (same value shape sent to the commit route). When the host provides no openLookup (tests, a host without Xrm), the existing inline LookupField stays as the fallback.</constraint>
+    <constraint source="D-182">The lookup is scoped exactly as today's search: Person → contact; Lookup → the parameter's LookupEntity with the same filter (e.g. budgets: statecode 0 and the subject matter). Pass the filter to lookupObjects (filters / customFilter); do not widen it.</constraint>
+    <constraint source="D-18">A required Lookup with exactly one candidate is still pre-selected without opening anything.</constraint>
+    <constraint source="D-182">*What was found* renders the subject's name as a link (Fluent Link) that calls the injected openRecord with the subject's entity and id, opening it as a modal (openRecordModal). The wizard's typed values are kept. No link is rendered when the host provides no openRecord, or the subject has no id.</constraint>
+    <constraint source="ADR-012">No Xrm reference in Spaarke.UI.Components; only the hosts call Xrm.</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only; works in light and dark.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files.</step>
+    <step order="1">Failing tests first: a Person field with openLookup injected calls it with entity contact and fills the value; a budget Lookup passes its filter; without openLookup the inline field renders; a single candidate is pre-selected without calling openLookup; the subject renders as a link that calls openRecord with entity and id, and as text without openRecord.</step>
+    <step order="2">Add the two optional callbacks to the wizard's injection point and use them in ParameterFields and FoundStep.</step>
+    <step order="3">Wire both hosts to INavigationService (openLookup, openRecordModal).</step>
+    <step order="4">Deploy the Console (auto-deploys from master) and check on dev: Assign to, Budget to revise and Outside firm open the side pane; the matter link opens the matter in a modal above the wizard and closing it returns to the same step with values kept; light and dark. Also check: after the pane closes, the wizard is clickable again and keeps its values; the record modal opens above the wizard and closing it returns to the same step. If this fails, the fallback is to pass nonBlocking plus yieldToSidePane through WizardShell to SprkModal (an owner decision on the wizard's modality).</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a Person or Lookup parameter and a host with openLookup, when the user activates the field, then openLookup is called once with the parameter's entity and the same filter today's search uses, and the selected record becomes the field value in the shape the commit route already accepts.</criterion>
+    <criterion testable="true">Given no openLookup, the inline LookupField renders as today (must-not-fire).</criterion>
+    <criterion testable="true">Given a required Lookup with exactly one candidate, it is pre-selected and openLookup is not called.</criterion>
+    <criterion testable="true">Given a subject with entity and id and a host with openRecord, *What was found* shows the subject name as a link that calls openRecord(entity, id); without openRecord or id, plain text.</criterion>
+    <criterion testable="true">Cancelling the side pane leaves the field unchanged; Next stays disabled for an empty required field.</criterion>
+    <criterion testable="true">On dev (light and dark): the three fields open the side pane; the matter opens in a modal above the wizard and closing it keeps the step and values. Recorded in notes/uat-v4-log.md.</criterion>
+    <criterion testable="true">Test scope: the cases above. Anything beyond needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If the platform side pane or record dialog opens BEHIND the wizard's Fluent modal (stacking), STOP and report; do not hide or close the wizard to make room.</trigger>
+  </escalation>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/ui/record-modal-selection.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <notes>
+    Steps 1-3 implemented on branch task/158-wizard-lookups (see notes/task-158-notes.md). Step 4 (deploy and dev check, including the stacking escalation trigger) is pending and belongs to the main session after merge.
+    rework: none task 158
+  </notes>
+</task>

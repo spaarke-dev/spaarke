@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="264" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>External ID `removeUnverifiedEmailClaim` set by H3 and verified by H13 on every stamp BFF app (ISS-013 / #2001 from SPA-r3)</title>
+    <phase>Model 1 dedicated-stamp remediation — cross-project hand-off (accepted 2026-10-16)</phase>
+    <gate>post-T186 follow-up</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs in H3 (app registration) and H13 (trap T7); auth-relevant (email-bound contact registration).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Two small additions, each copying an existing pattern in the same file (acct optional claim in H3; T3 Graph read in H13).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches only Sprk.Provisioning.ControlPlane.* code, tests and the deployment guide.</parallel-reason>
+    <tags>provisioning, provisioning-handler, l2-controlplane, auth, model1-dedicated, testing</tags>
+    <deps>255</deps>
+  </metadata>
+
+  <prompt>Make every stamp's BFF app registration carry authenticationBehaviors.removeUnverifiedEmailClaim = true, set by H3 and verified by H13.</prompt>
+
+  <role>SPAARKE platform developer (L2 H3 and H13).</role>
+
+  <goal>
+    R3 task 047 binds a workforce sign-in to an existing contact by the token `email` claim
+    (`src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalRegistrationEndpoints.cs:253`,
+    `Infrastructure/ExternalAccess/ContactIdentityBinder.cs`). That is safe only when the BFF app registration has
+    `authenticationBehaviors.removeUnverifiedEmailClaim = true`; otherwise a user in an allowed customer directory with an
+    unverified-domain email equal to a contact's email can register as that contact. Today no stamp sets or checks it
+    (ACME's `spaarke-bff-api-acme` reads `authenticationBehaviors: null`). After this task H3 sets it on new and existing
+    registrations (get-before-set, read back) and H13 trap T7 fails a stamp whose BFF app does not carry it.
+  </goal>
+
+  <context>
+    <background>
+      Source: GitHub #2001 (SPA-r3 ISS-013); coordination note
+      `notes/coordination/2026-10-13-from-spa-r3-adr028-a9-workforce-signin.md` rows 6 and 9.
+      API surface, verified 2026-10-22: Microsoft Learn documents `authenticationBehaviors` as beta, but Graph **v1.0**
+      returns and accepts it (live read-only GET on the dev BFF app `1e40baad` returns `{"removeUnverifiedEmailClaim": true}`
+      via v1.0), and the control plane's Microsoft.Graph 6.5.0 (v1.0) SDK has
+      `Application.AuthenticationBehaviors.RemoveUnverifiedEmailClaim`. Use the v1.0 SDK; no beta call.
+      `authenticationBehaviors` is a complex type, so a PATCH replaces it whole: carry the current
+      `BlockAzureADGraphAccess` and `RequireClientServicePrincipal` values over unchanged.
+      The multitenant SPA client `5859e812` (Spaarke Workforce SPA) already has the flag (read 2026-10-22) — a one-time
+      operator setting, not per stamp; H3 never touches it.
+    </background>
+    <relevant-files>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/EntraAppReg/GraphAppRegistrationProvisioner.cs (reference: PlanAcctOptionalClaim + EnsureAcctOptionalClaimAsync, lines ~753-858; step (2c) in ProvisionAsync)</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/EntraAppReg/EntraAppRegRejectionCodes.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/CustomerIdentityT7Probe.cs (extend)</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/GraphAppRoleParityT3Probe.cs (reference: tenant-scoped Graph read, I5)</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Tests/** (existing PlanAcctOptionalClaim and CustomerIdentityT7Probe tests)</file>
+      <file>docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md (H3 and H13 T7 rows)</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="§11">Extend existing surface: a new ensure step in GraphAppRegistrationProvisioner and a new clause in T7. No new interface, gate, DI registration or rejection-code family beyond one H3 code.</constraint>
+    <constraint source="I5">The H13 Graph read is tenant-scoped to request.TenantId (the T3 pattern), never an ambient credential.</constraint>
+    <constraint source="owner">No live change in this task. ACME's BFF app is fixed separately with the owner's OK.</constraint>
+    <constraint source="H3">Only this customer's own app object is PATCHed; a registration already carrying true sends no PATCH.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">H3: internal static planner `PlanRemoveUnverifiedEmailClaim(AuthenticationBehaviors? current)` → null when already true, else a new object with RemoveUnverifiedEmailClaim = true and the other two values copied; `EnsureRemoveUnverifiedEmailClaimAsync` (fresh GET with replication retry, PATCH, read back with retry) as step (2d) after the acct claim; rejection code `appreg-unverified-email-claim-failed`; file-header paragraph.</step>
+    <step order="2">H13 T7: read the BFF app registration (`applications(appId='{BffAppRegId}')`, select authenticationBehaviors) in request.TenantId; Failed when not true (null, false, missing); InfraFault on a Graph read error or a blank BffAppRegId; header OUTCOMES updated.</step>
+    <step order="3">Unit tests: planner (null, false, true, other-values preserved); T7 pure decision for true / false / null. Update guide rows. dotnet test the control-plane tests.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">PlanRemoveUnverifiedEmailClaim returns null for current = { RemoveUnverifiedEmailClaim = true } and a PATCH body with true for null, false and an object with only other values set; BlockAzureADGraphAccess and RequireClientServicePrincipal are preserved.</criterion>
+    <criterion testable="true">H3 calls the ensure step for new and existing registrations; a write not observed on read back returns Failure with `appreg-unverified-email-claim-failed`.</criterion>
+    <criterion testable="true">T7 returns Failed for a BFF app with authenticationBehaviors null or removeUnverifiedEmailClaim false, Passed only when it is true and the existing Customer__Id / workforce-list clauses pass.</criterion>
+    <criterion testable="true">Negative: T7 never Passes when the Graph read fails (InfraFault, not Passed); no beta endpoint string appears in the change.</criterion>
+    <criterion testable="true">All Sprk.Provisioning.ControlPlane tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <note date="2026-10-22">Created from TASK-INDEX row 264. Live reads (read-only): ACME BFF b4882848 authenticationBehaviors null; dev BFF 1e40baad true; SPA client 5859e812 true.</note>
+    <note date="2026-10-22">Done (code + tests + guide; no live change). H3 step (2d) PlanRemoveUnverifiedEmailClaim +
+      EnsureRemoveUnverifiedEmailClaimAsync (v1.0 SDK; fresh GET, PATCH only when not true, read back;
+      appreg-unverified-email-claim-failed; other authenticationBehaviors values carried only when set — no explicit nulls,
+      wire bodies verified with the real Graph 6.5.0 serializer). H13 T7 third clause: tenant-scoped Graph v1.0 read of
+      applications(appId) — Failed on null / false / absent / 404; InfraFault on a read error or timeout, except that a
+      definite settings failure is still returned as Failed noting the unread clause; never Passed on a read failure. Guide:
+      H3 section (manual PATCH via a body file — PowerShell strips inline quotes for az.cmd; a run past H3 before T264 must set
+      it by hand: resume does not re-run H3), §9 T7 row, §12.3 check ($filter form — az.cmd breaks on a bare ")"; verified
+      live read-only on dev = true). ControlPlane.Tests 3152 passed, 0 failed, 1 skipped (pre-existing). Reviews: two
+      adversarial passes (auth): pass 1 → F1 remediation text "Resume H3" (impossible after H3's idempotency key), F1 guide
+      PATCH quoting + tenant note, K4 explicit nulls, K2 Graph error hid a settings failure — all fixed; pass 2 → F1 guide GET
+      quoting — fixed. Known limits: K1 T7 runs two sequential TrapVerifierTimeout budgets; K1 on the timeout + wrong-settings
+      path the "T7 probe FAILED" log line lacks the unread-clause note (the outcome carries it); K3 H3 step 2d's Graph calls
+      are not unit-tested (file precedent; the planner is). Class grep: the "Resume Hn" remediation pattern after an
+      idempotency-keyed handler — the H4b clause in T7 already says "a new run if its idempotency key is already recorded";
+      no other T7 match. Live follow-up (owner OK): ACME BFF b4882848 has authenticationBehaviors null — one-off PATCH.
+      rework: fix-round-2 task 264</note>
+    <note date="2026-10-23">Live (owner OK 2026-10-22): ACME BFF app b4882848 (object 88cfedd1) authenticationBehaviors null → PATCH v1.0 removeUnverifiedEmailClaim=true at 01:53 UTC; read back true. Every known stamp/client now carries it (dev 1e40baad, SPA 5859e812, ACME).</note>
+  </notes>
+</task>

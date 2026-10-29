@@ -23,6 +23,26 @@ internal static class FieldMappingColumns
         "sprk_fieldmappingprofileid,sprk_name,_sprk_sourcerecordtype_value,_sprk_targetrecordtype_value,"
         + "sprk_capabilitymode,sprk_defaultvalue,sprk_description,statecode";
 
+    /// <summary>The first value of the global option set <c>sprk_fieldmappingtypes</c> (Text = 100000000).</summary>
+    internal const int FieldTypeOptionSetBase = 100000000;
+
+    /// <summary>
+    /// Reads a stored <c>sprk_sourcefieldtype</c> / <c>sprk_targetfieldtype</c> as the engine's field type, 0..6 (Text,
+    /// Lookup, OptionSet, Number, DateTime, Boolean, Memo). <c>sprk_targetfieldtype</c> uses the global option set
+    /// <c>sprk_fieldmappingtypes</c> (100000000 + n, plus Currency 100000007), while older rows and the local
+    /// <c>sprk_sourcefieldtype</c> set hold the bare n. Both encodings are live on dev (#2281: 24 rules store 0/1, one
+    /// stores 100000001), so both are read here, once, for every consumer. Currency reads as Number: the engine already
+    /// writes a Money for a currency column from the column's metadata. Any other value is returned unchanged.
+    /// </summary>
+    internal static int NormalizeFieldType(int stored)
+    {
+        var type = stored >= FieldTypeOptionSetBase ? stored - FieldTypeOptionSetBase : stored;
+        return type == FieldTypeCurrency ? FieldTypeNumber : type;
+    }
+
+    private const int FieldTypeNumber = 3;
+    private const int FieldTypeCurrency = 7;
+
     /// <summary>Columns selected from <c>sprk_fieldmappingrule</c>, including <c>sprk_syncmode</c> (task 005, FR-05d).</summary>
     internal const string RuleSelect =
         "sprk_fieldmappingruleid,sprk_name,_sprk_fieldmappingprofile_value,sprk_sourcefield,sprk_sourcefieldtype,"

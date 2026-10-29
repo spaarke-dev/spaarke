@@ -357,6 +357,11 @@ public partial class RouteAuthorizationGuardTests
             + "Task 260 (ISS-014) adds the stamp's read-only secure-record isolation census behind the same role: it reads the "
             + "security directory (business units, roles, users, teams) as the BFF and returns only the scheduled job's result "
             + "(status, verdict, findings) — no business record is read or returned, nothing is written."),
+        new GovernedFile("Api/ExternalAccess/PersonAccessAdministrationEndpoints.cs", Scope.RouteLevelGate,
+            "POST /api/v1/external-access/remove-person and /reinstate-person: person-level removal and reinstatement of external "
+            + "access, behind AddExternalAccessAdministratorAuthorizationFilter (membership of the standing-grant administrators "
+            + "field security profile, direct or through a team; the caller from WhoAmI over their own token). Every refusal, "
+            + "fault or timeout is the same 403."),
         new GovernedFile("Api/UserEndpoints.cs", Scope.RouteLevelGate,
             "the caller's own profile and capabilities, read on behalf of the caller."),
         // Api/WorkAssignmentEndpoints.cs entry DELETED at the task-167 integration (2026-10-05): task 166 deleted the file
@@ -896,7 +901,14 @@ public partial class RouteAuthorizationGuardTests
     //
     // 131 + 130 -> 132 (2026-10-17, merge of master 1d435e695 into work/spaarke-SPA-external-access-platform-r3): master's 130
     // (129 + UAC 099a) plus external-access-r3's two (047 registration, 048 workforce link). No route added or removed here.
-    private const int ExpectedEndpointFileCount = 132;
+    //
+    // 132 -> 133 (2026-10-27, spaarke-SPA-external-access-platform-r3, contact identity hardening slice C3). An UPWARD move:
+    //
+    //   C3  +1  Api/ExternalAccess/PersonAccessAdministrationEndpoints.cs ADDED — POST /api/v1/external-access/remove-person
+    //           and /reinstate-person. GovernedFiles entry (RouteLevelGate), AdminMechanism
+    //           (AddExternalAccessAdministratorAuthorizationFilter) and AdminOnlyRoutes group added with it. The filter
+    //           consults CallerRecordAccessProbe (WhoAmI over the caller's token), so it passes Rule B as a decision service.
+    private const int ExpectedEndpointFileCount = 133;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision
@@ -1058,6 +1070,11 @@ public partial class RouteAuthorizationGuardTests
             "The Provisioning.KeylessProof APPLICATION role on an app-only token (KeylessProofAuthorizationFilter.cs IsAdmitted: "
             + "no scp, idtyp absent or 'app') — a machine credential H3 assigns only to the L2 Worker identity "
             + "(allowedMemberTypes Application, so no user can hold it). Customer-provisioning task 230b."),
+        new AdminMechanism("AddExternalAccessAdministratorAuthorizationFilter",
+            "Membership of the standing-grant administrators field security profile, direct or through a team "
+            + "(ExternalAccessAdministratorAuthority): the caller's systemuserid from WhoAmI over their own token, the profile "
+            + "resolved by its pinned name to exactly one id, one app-credential membership query; any fault, timeout, empty "
+            + "WhoAmI, or missing or ambiguous profile is the same 403. No cache. External-access-r3 slice C3."),
     };
 
     // =============================================================================================
@@ -1329,6 +1346,7 @@ public partial class RouteAuthorizationGuardTests
     private const string RagApiKeyCredential = "RequireAuthorization(AuthPolicies.RagApiKey)";
     private const string RegistrationApproverRole = "AddRegistrationAuthorizationFilter";
     private const string KeylessProofRole = "AddKeylessProofAuthorizationFilter";
+    private const string ExternalAccessAdministrator = "AddExternalAccessAdministratorAuthorizationFilter";
 
     private static readonly IReadOnlyList<AdminOnlyGroup> AdminOnlyRoutes = new[]
     {
@@ -1361,6 +1379,15 @@ public partial class RouteAuthorizationGuardTests
             {
                 "POST /api/platform/keyless-proof",
                 "POST /api/platform/secure-record-isolation-census",
+            }),
+        new AdminOnlyGroup("Api/ExternalAccess/PersonAccessAdministrationEndpoints.cs", ExternalAccessAdministrator,
+            "PERSON-LEVEL external-access administration: remove a person (marker, revoke every grant, evict caches, clear the "
+            + "invite state) and reinstate one (clear the marker only). The person is not a record the route names, so the "
+            + "authority is the standing-grant administrators profile, not a per-record right (slice C3).",
+            new[]
+            {
+                "POST /api/v1/external-access/remove-person",
+                "POST /api/v1/external-access/reinstate-person",
             }),
         new AdminOnlyGroup("Api/Ai/RagEndpoints.cs", RagApiKeyCredential,
             "enqueue-indexing is SERVICE AUTOMATION behind the RagApiKey machine credential (no user acts). The key "
@@ -1983,12 +2010,14 @@ public partial class RouteAuthorizationGuardTests
         new HandlerDecision("GET /api/v1/signals/worklist", "GetWorklistAsync", "IDataverseUserClient",
             new[] { "SignalReadService.ReadAsync" },
             "Ontology task 038: the handler's only I/O is SignalReadService.ReadAsync (SignalReadEndpoints.cs:60). It resolves the caller "
-            + "with WhoAmI AS THE CALLER (SignalReadService.cs:270, ResolveMineCallerAsync; WhoAmI at :813; unresolved: the single 403 at SignalReadEndpoints.cs:64), runs the "
-            + "worklist FetchXML as the caller (:515), keeps a row only when the caller's own batched read of its catalog-named core "
-            + "table returns its core id (:678; the table must be in CoreAncestorResolver.CoreRecordEntities), and keeps a Do-lane row "
-            + "only when the caller's own read of its subject, filtered to the caller's work, returns it (:732-733). Nothing app-only is "
+            + "with WhoAmI AS THE CALLER (SignalReadService.cs:310, ResolveMineCallerAsync; WhoAmI at :1035; unresolved: the single 403 at SignalReadEndpoints.cs:64), runs the "
+            + "worklist FetchXML as the caller (:333), keeps a row only when the caller's own batched read of its catalog-named core "
+            + "table returns its core id (:900; the table must be in CoreAncestorResolver.CoreRecordEntities), and keeps a Do-lane row "
+            + "only when the caller's own read of its subject, filtered to the caller's work, returns it (:954-955). Nothing app-only is "
             + "returned unless the caller's read admitted its row (the app-only secure-family placement only WITHHOLDS evidence detail, "
-            + "D-123); a fault is 503 (SignalReadEndpoints.cs:73), never a shorter list."),
+            + "D-123; the rule short name, work type and severity are read app-only from sprk_policy by id for the rows kept, D-185 task 163, "
+            + "so the worklist needs no caller Read on sprk_policy: configuration, not matter data); a fault is 503 (SignalReadEndpoints.cs:73), "
+            + "never a shorter list."),
         new HandlerDecision("GET /api/v1/ontology/admin/classification/categories", "ListCategoriesAsync", "IDataverseUserClient",
             new[] { "OntologyAdminClassificationService.ListAsync" },
             "Ontology task 103: the handler's only I/O is OntologyAdminClassificationService.ListAsync (OntologyAdminClassificationEndpoints.cs:111), "

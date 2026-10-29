@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="265" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>H13 T7 reads back ExternalAccess__CustomerBusinessUnitId on both slots (#2265)</title>
+    <phase>Model 1 dedicated-stamp remediation — cross-project hand-off (2026-10-22, uac-r2 + SPA-r3)</phase>
+    <gate>before any non-dev stamp run</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs (H13 trap T7) and tests; the setting decides the owner of every contact the BFF's external registration creates.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>One clause in an existing probe, copying the T7 Customer__Id / workforce-list clauses in the same file.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches only CustomerIdentityT7Probe.cs, its tests and the guide's T7 rows.</parallel-reason>
+    <tags>provisioning, provisioning-handler, l2-controlplane, auth, model1-dedicated, testing</tags>
+    <deps>264</deps>
+  </metadata>
+
+  <prompt>Make H13 trap T7 prove that both BFF slots carry ExternalAccess__CustomerBusinessUnitId equal to H10's customer business unit.</prompt>
+
+  <role>SPAARKE platform developer (L2 H13).</role>
+
+  <goal>
+    The BFF's external registration (`POST /api/v1/external/registration`) answers 500 `registration_owner_unconfigured`
+    without `ExternalAccess:CustomerBusinessUnitId`, and R3 (#1673) makes first-sign-in contact creates depend on it. H4b already
+    writes it to both slots from H10's `InterStepState.CustomerBusinessUnitId` (commit `faf36207d`), but nothing reads it back.
+    After this task T7 fails a stamp whose slots lack it or carry a different unit.
+  </goal>
+
+  <context>
+    <background>
+      Source: GitHub #2265 (uac-r2), R3 ISS-005 #1673. Write path: `PerEnvSourceCatalog.cs` source
+      `from-h10-output:customer_business_unit_id`, manifest entry (required), DAG H4b ← H10. The Secure Record BU is refused
+      structurally at H10 (`CustomerBusinessUnitIntake` refuses its name; the customer unit is a direct child of the root and a
+      sibling of the Secure Record unit), so T7 does not look the unit up in Dataverse.
+      The T7 probe already reads both slots' app settings (task 238, 255) and, since task 264, the BFF app registration.
+      `TrapVerificationRequest` does not carry the customer BU today: add it (H13 builds the request from the run;
+      `InterStepState.CustomerBusinessUnitId` is H10's output — declare the read in `HandlerRunInputs` if H13's reads are declared
+      there, and keep `RunContextContractTests` green; H13 is a DAG descendant of H10).
+    </background>
+    <relevant-files>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/CustomerIdentityT7Probe.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/IE2ETrapVerifier.cs (TrapVerificationRequest)</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/H13E2EAcceptanceGateHandler.cs (request construction)</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Reconciler/HandlerRunInputs.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Tests/Handlers/CustomerIdentityT7ProbeTests.cs</file>
+      <file>docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md (§9 T7 row, §12.3 check)</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="§11">Extend T7 and TrapVerificationRequest; no new probe, gate, interface or DI registration.</constraint>
+    <constraint source="run-context contract">Any new InterStepState read is declared in HandlerRunInputs; RunContextContractTests stay green; never a Gap to pass.</constraint>
+    <constraint source="owner">No live change. App-setting VALUES are never logged beyond the public GUIDs T7 already reports.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">Add `CustomerBusinessUnitId` to TrapVerificationRequest (optional, default ""), set it in H13 from the run's InterStepState, declare the read.</step>
+    <step order="2">T7 clause: both slots' `ExternalAccess__CustomerBusinessUnitId` parse as a GUID equal to the run's (case-insensitive GUID compare; `:` and `__` key forms as the existing clauses treat them); Failed when missing / blank / unparseable / different, or when the run has no H10 value. Header OUTCOMES updated.</step>
+    <step order="3">Tests (pure Evaluate path + ProbeAsync with the existing fakes); guide rows; dotnet test the control-plane tests.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">T7 Passes only when both slots carry the run's customer BU (and every existing clause passes).</criterion>
+    <criterion testable="true">Negative: T7 returns Failed for a slot missing the setting, a blank or non-GUID value, a different GUID, and a run with no InterStepState.CustomerBusinessUnitId.</criterion>
+    <criterion testable="true">RunContextContractTests and all Sprk.Provisioning.ControlPlane tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <note date="2026-10-22">Created from #2265. The write already exists (H4b, faf36207d); this is the read-back only.</note>
+    <note date="2026-10-22">Done (code + tests + guide; no live change). TrapVerificationRequest.CustomerBusinessUnitId, set
+      by H13 from InterStepState (HandlerRunInputs: H13 Output, required:false — T7 owns the verdict); T7 fourth clause
+      CheckCustomerBusinessUnit on both slots (FindSetting rules: case-insensitive name, GUID compare, ambiguous case-variants
+      fail); a run without H10's unit (blank / unparseable / all-zero) fails. The clause is in Evaluate, so a Graph read
+      failure (T264 SettingsVerdictOrDeferral) cannot hide it. Remediation: start a new run (a resume does not re-run a
+      completed H4b) or the one-line `az webapp config appsettings set`, then H13. Guide §9 T7 row, §12.3 checks, H4b note.
+      ControlPlane.Tests 3176 passed, 0 failed, 1 skipped (pre-existing); fail-before proof: 18 of 65 T7 tests fail with the
+      check stubbed. Review: one adversarial pass — nothing F-class (BFF binding checked on master: Guid? via BindConfiguration,
+      Linux App Service `__` form, no false pass); K3 remediation wording and K4 changelog order fixed. Second full pass not
+      run: no F-class finding, fixes are message text + doc order (re-verified by tests). Known limits: K1 T7 does not repeat
+      the BFF's Secure Record / default-owner-team checks (H10 structure; header says so); K2 a KV-reference or case-variant
+      duplicate value fails T7 although the BFF binds it (manual edits only); K3 the setting name is a literal here and in
+      manifest.yaml (a rename fails closed). ACME: its next run's H4b writes the setting before H13 (per-run idempotency), so
+      T7 does not fail there for this clause.
+      rework: fix-round-1 task 265</note>
+  </notes>
+</task>

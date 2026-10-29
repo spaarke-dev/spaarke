@@ -173,7 +173,7 @@ public static class ContactGrantEndpoints
         {
             outcome = await GrantExternalAccessEndpoint.CreateGrantAsync(
                 coreRequest, g.RootType, g.RootId, today, ceiling, callerOid: null,
-                dataverseClient, participations, accessibleRecords, ownership, ownerPrivileges, logger, ct, issuer);
+                dataverseClient, participations, accessibleRecords, identities, ownership, ownerPrivileges, logger, ct, issuer);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {

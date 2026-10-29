@@ -468,6 +468,28 @@ internal sealed partial class RecordCreationService
 
         // ── Step 3½ (task 018a, K-7): the adapter's post-mapping defaults, fill-only over what the caller and the mapping
         // supplied, merged with the mapped values so step 5 checks them the same way ─────────────────────────────────────
+        // Task 037 (FR-36): with the table's copied defaults (RecordTableRules.CopiedDefaultsFor), read off the row AS MAPPED,
+        // so they take this same path — filled only where the row leaves the column unset, checked at step 5 like any
+        // default, written in the create (step 11) and so read back by the "Assigned *" materialisation (step 12). A copy of a
+        // SERVER-set source names the same server-chosen record, so it is server-set too (steps 5 and 6 read the request's
+        // set), exactly as on the owned create (OwnedChildWrite.CreateAsync).
+        if (user is not null)
+        {
+            (defaults, var copied) = WithCopiedDefaults(table, rule, item, defaults);
+            var serverSetCopies = copied
+                .Where(c => request.ServerSetLookupColumns?.Contains(c.Source) == true)
+                .Select(c => c.Column)
+                .ToArray();
+            if (serverSetCopies.Length > 0)
+            {
+                request = request with
+                {
+                    ServerSetLookupColumns = new HashSet<string>(
+                        request.ServerSetLookupColumns!.Concat(serverSetCopies), StringComparer.OrdinalIgnoreCase),
+                };
+            }
+        }
+
         IReadOnlySet<string> defaultColumns = NoDefaultColumns;
         if (defaults.Count > 0 && user is not null)
         {
@@ -720,7 +742,8 @@ internal sealed partial class RecordCreationService
         {
             var pair = OwnedChildWrite.PairOf(item);
             var resolved = await ResolveOwnerOverAsync(
-                    table, parents, pair.InvalidId, pair.IdText, pair.TypeId, callerObjectId, callerSystemUserId, requestedBy, ct)
+                    table, OwnedChildWrite.LookupsOf(item).ToList(), pair.InvalidId, pair.IdText, pair.TypeId, callerObjectId,
+                    callerSystemUserId, requestedBy, ct)
                 .ConfigureAwait(false);
             if (resolved.Refusal is { } undetermined)
                 return (null, undetermined);
@@ -749,9 +772,15 @@ internal sealed partial class RecordCreationService
     /// name nothing. A pair whose record cannot be told is refused (<see cref="RecordOwnerRefusal.ParentUndetermined"/>),
     /// never read as "filed under nothing". A Dataverse fault propagates: each caller refuses it as the owner fault it is.
     /// </summary>
+    /// <remarks>UAC task 194b R4: through the one builder (<see cref="RecordOwnershipContext.ForRow"/>), every parent keyed under
+    /// the REAL column that files the row there — its lookups (<paramref name="filed"/>; on Repair also a message's thread filing,
+    /// under <c>sprk_communicationthread</c>), and the record a project's pair names under <c>sprk_regardingrecordid</c> — ranked
+    /// by the table's order, so Create, Repair and the reconciler ask the same ordered question. <paramref name="subjectPairId"/>
+    /// is the row's pair id as written when <paramref name="pairIdText"/> is not passed (Repair read the pair already).</remarks>
     private async Task<(RecordOwnerResolution? Owner, RecordCreationRefusal? Refusal)> ResolveOwnerOverAsync(
-        string table, IReadOnlyList<RecordOwnershipParent> parents, bool pairInvalidId, string? pairIdText, Guid? pairTypeId,
-        Guid? callerObjectId, Guid? callerSystemUserId, RecordRequester? requestedBy, CancellationToken ct)
+        string table, IReadOnlyList<KeyValuePair<string, RecordOwnershipParent?>> filed, bool pairInvalidId, string? pairIdText,
+        Guid? pairTypeId, Guid? callerObjectId, Guid? callerSystemUserId, RecordRequester? requestedBy, CancellationToken ct,
+        string? subjectPairId = null)
     {
         // Only where the pair files the row on its own (a project); elsewhere a malformed pair is not an owner question.
         var pairParent = pairInvalidId && SecureRootInheritance.PairNamesAParentOnItsOwn(table)
@@ -765,14 +794,29 @@ internal sealed partial class RecordCreationService
                 refused.Reason!) { OwnerDecision = refused });
         }
 
-        if (pairParent.Parent is { } named)
-            parents = [.. parents, named];
-
         var owner = await _ownership.ResolveOwnerAsync(
-            RecordOwnershipContext.ForParents(parents, callerObjectId, callerSystemUserId) with { RequestedBy = requestedBy },
+            OwnerQuestionOf(table, filed, pairParent.Parent, subjectPairId ?? pairIdText, callerObjectId, callerSystemUserId) with
+            {
+                RequestedBy = requestedBy,
+            },
             ct).ConfigureAwait(false);
         return (owner, null);
     }
+
+    /// <summary>
+    /// UAC task 194b R4: Step 7's question — the row's parents keyed by the column that files it there (<paramref name="filed"/>),
+    /// and the record a project's ADR-024 pair names (<paramref name="pairParent"/>) under <c>sprk_regardingrecordid</c>, which a
+    /// project's order ranks first (<c>SecureChildLineage.RootLookupOrder</c>) — through the one builder.
+    /// </summary>
+    internal static RecordOwnershipContext OwnerQuestionOf(
+        string table, IEnumerable<KeyValuePair<string, RecordOwnershipParent?>> filed, RecordOwnershipParent? pairParent,
+        string? subjectPairId, Guid? callerObjectId, Guid? callerSystemUserId) =>
+        RecordOwnershipContext.ForRow(
+            table,
+            pairParent is { } named
+                ? filed.Append(KeyValuePair.Create(SecureRootInheritance.PairIdColumn, (RecordOwnershipParent?)named))
+                : filed,
+            subjectPairId, callerObjectId, callerSystemUserId);
 
     /// <summary>
     /// Step 7's answer for a resolved owner, shared by Create and Repair (task 016): no owner is the resolver's refusal
@@ -876,7 +920,11 @@ internal sealed partial class RecordCreationService
             var threadParents = await RecordThreadFiling.ParentsAsync(_entities, table, RecordThreadFiling.ThreadOf(row), ct)
                 .ConfigureAwait(false);
             var parents = RecordOwnershipContext.ParentsOf(row).Concat(threadParents).Distinct().ToArray();
+            // UAC task 194b R4: the same parents keyed by the column that files the row there, for the one builder.
+            var keyed = RecordOwnershipContext.LookupsOf(row).Concat(RecordThreadFiling.FilingLookupsOf(threadParents)).ToList();
+            // (RecordThreadFiling.QuestionWithThreadFiling is this question without the pair; OwnerQuestionOf adds the pair.)
             var pairId = row.GetAttributeValue<string>(SecureRootInheritance.PairIdColumn);
+            var rowPairId = pairId;
             var pairType = row.GetAttributeValue<EntityReference>(SecureRootInheritance.PairTypeColumn)?.Id;
             filed = parents.Length > 0 || !string.IsNullOrWhiteSpace(pairId);
 
@@ -887,6 +935,7 @@ internal sealed partial class RecordCreationService
             if (pairParent.Parent is { } pairNamed)
             {
                 parents = [.. parents, pairNamed];
+                keyed.Add(KeyValuePair.Create(SecureRootInheritance.PairIdColumn, (RecordOwnershipParent?)pairNamed));
                 pairId = null;
             }
 
@@ -904,8 +953,8 @@ internal sealed partial class RecordCreationService
                     : null;
 
             var resolved = await ResolveOwnerOverAsync(
-                    table, parents, pairInvalidId: false, pairId, pairType, callerObjectId: null,
-                    callerSystemUserId: actingUser, requestedBy: null, ct)
+                    table, keyed, pairInvalidId: false, pairId, pairType, callerObjectId: null,
+                    callerSystemUserId: actingUser, requestedBy: null, ct, subjectPairId: rowPairId)
                 .ConfigureAwait(false);
             if (resolved.Refusal is { } undetermined)
             {

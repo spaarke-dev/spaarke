@@ -21,6 +21,7 @@
  * @see projects/visual-host-create-button-r1/notes/field-manifests/invoice.md
  */
 
+import { describeWebApiCreateError } from '../../utils/webApiCreateError';
 import { withBffChildWrites } from '../../utils/adapters/bffChildWriteAdapter';
 import type { ICreateInvoiceFormState } from './formTypes';
 import type { IDataService } from '../../types/serviceInterfaces';
@@ -271,12 +272,12 @@ export class InvoiceService {
       console.info('[InvoiceService] createRecord success, invoiceId:', invoiceId);
     } catch (err) {
       console.error('[InvoiceService] createRecord error:', err);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const errObj = err as any;
-      const message = errObj?.message || (err instanceof Error ? err.message : 'Unknown error');
+      // #2382: a privilege refusal becomes one plain sentence; the full error is logged above.
+      const described = describeWebApiCreateError(err, 'invoice');
+      const message = described.message;
       return {
         status: 'error',
-        errorMessage: `Failed to create invoice record: ${message}`,
+        errorMessage: described.isAccessDenied ? message : `Failed to create invoice record: ${message}`,
         warnings: [],
       };
     }
@@ -302,8 +303,9 @@ export class InvoiceService {
         try {
           const docNavProps = await discoverNavProps('sprk_document');
 
-          // Primary bind: the newly-created Invoice.
-          const invoiceNavProp = findNavProp(docNavProps, 'sprk_invoice', 'invoice');
+          // Primary bind: the newly-created Invoice, by the exact parent column `sprk_invoice`
+          // (sprk_document also has `sprk_relatedinvoice`; the Invoice form's Documents list reads the parent column).
+          const invoiceNavProp = findNavProp(docNavProps, 'sprk_invoice', 'sprk_invoice');
           if (!invoiceNavProp) {
             console.warn(
               '[InvoiceService] No nav-prop found on sprk_document for sprk_invoice — dual-bind incomplete.'
@@ -315,8 +317,9 @@ export class InvoiceService {
           const additionalBinds: IAdditionalBind[] = [];
           if (association?.recordId && association.entityType) {
             const hostEntitySet = _resolveEntitySet(association.entityType);
-            const hostHint = _resolveLookupHint(association.entityType);
-            const hostNavProp = findNavProp(docNavProps, association.entityType, hostHint);
+            // The host's parent column on sprk_document is `{entityType}` itself (sprk_matter, sprk_project); the
+            // `sprk_related{host}` column is the other lookup to the same entity. Exact column, never a fragment.
+            const hostNavProp = findNavProp(docNavProps, association.entityType, association.entityType);
             if (hostNavProp) {
               additionalBinds.push({
                 entitySet: hostEntitySet,
@@ -371,8 +374,6 @@ export class InvoiceService {
             uploadResult.errors.map(e => e.fileName).join(', ')
         );
       }
-    } else if (uploadedFiles.length > 0 && !this._containerId) {
-      warnings.push('File upload skipped -- no SPE container configured. Files can be added later.');
     }
 
     return {

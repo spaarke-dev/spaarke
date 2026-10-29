@@ -229,7 +229,7 @@ public class DocumentBffOwnedColumnAppOnlyWriterTests
             new UpdateRecordActionInput(
                 "sprk_document", Row, FieldMappings: null,
                 LegacyFields: new Dictionary<string, string?> { ["sprk_filepath"] = "https://example/x.pdf" },
-                Lookups: null, ImpersonateSystemUserId: user),
+                Lookups: null, ImpersonateSystemUserId: user, PayloadSource: UpdateRecordPayloadSource.ConfirmedProposal),
             CancellationToken.None);
 
         _writes.Verify(w => w.UpdateRecordFieldsAsync(

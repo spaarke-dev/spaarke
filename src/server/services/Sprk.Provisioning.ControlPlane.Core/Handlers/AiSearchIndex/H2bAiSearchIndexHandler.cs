@@ -532,8 +532,7 @@ public sealed class H2bAiSearchIndexHandler : IProvisioningHandler
         var completedAt = DateTimeOffset.UtcNow;
         var startedAt = completedAt - TimeSpan.FromMilliseconds(1);
 
-        run.Status = RunStatus.Running;
-        run.CurrentPhase = HandlerIdentifier; // Reconciler observes + fans out (H2b + H3 are wave-C parallel siblings).
+        run.MarkPhaseSucceeded(HandlerIdentifier); // Reconciler observes + fans out (H2b + H3 are wave-C parallel siblings).
         run.CompletedPhases.Add(new CompletedPhase
         {
             Phase = HandlerIdentifier,

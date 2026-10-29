@@ -148,7 +148,22 @@ internal static class RecordTableRules
             TableServerOwnedColumns = Columns(
                 "sprk_containerid", SecurableEntityRegistry.SecurityBusinessUnitAttribute, InheritedAccessPermission.Column),
             ForPerson = new ForPersonLookup("sprk_assignedtointernal", "contact"),
-            ServerDefaults = [ChatCallerIsTheForPerson("sprk_assignedtointernal")],
+            ServerDefaults =
+            [
+                ChatCallerIsTheForPerson("sprk_assignedtointernal"),
+                // Task 037 (spec FR-36, owner 2026-10-27, #2354; UAC-r2 conditions 1-4): Assigned To takes the new row's own
+                // Assigned To Internal. Both are CONTACT lookups (live metadata, spaarkedev1, 2026-10-27), so the reference
+                // is copied as-is: no contact/user conversion, never a name or email match. The ONE declaration: the
+                // owned create (OwnedChildWrite.CreateAsync) and RecordCreationService read it through CopiedDefaultsFor.
+                new ServerDefault(AssignedToDefaults.AssignedToAttribute,
+                    "every user-initiated server create of a work assignment (the child-records route, the chat create, " +
+                    "the record-creation service with a calling user)",
+                    "The new row's own sprk_assignedtointernal (after mapping), copied as-is, when the request leaves " +
+                    "sprk_assignedto unset (absent, no bind); a supplied value or an explicit null wins. Create only.")
+                {
+                    CopiedFrom = "sprk_assignedtointernal",
+                },
+            ],
         },
 
         // ── Children on the browser create route (ChildRecordEndpoints.CreateTables) ──────────────────────────────────
@@ -204,7 +219,15 @@ internal static class RecordTableRules
             // skips it too, task 040). sprk_accesspermission is NOT here: it stays fill-only at create.
             MappingProtectedColumns = Columns(Sprk.Bff.Api.Services.Access.AccessInheritance.Column),
         },
-        new RecordTableRule { Table = "sprk_budget", Kind = RecordTableKind.Child },
+        new RecordTableRule
+        {
+            Table = "sprk_budget",
+            Kind = RecordTableKind.Child,
+            // Task 167 (D-193): BUD-{SEQNUM:6}, set on the attribute in SpaarkeMaster Entities/sprk_Budget/Entity.xml. The platform fills
+            // it; no code sets it, and a field-mapping rule may not either.
+            MappingProtectedColumns = Columns("sprk_budgetnumber"),
+            AutonumberColumn = "sprk_budgetnumber",
+        },
         new RecordTableRule { Table = "sprk_kpiassessment", Kind = RecordTableKind.Child },
         new RecordTableRule
         {
@@ -262,6 +285,36 @@ internal static class RecordTableRules
     internal static RecordTableRule Get(string table) =>
         Find(table) ?? throw new KeyNotFoundException($"The record table rules registry has no entry for '{table}'.");
 
+    /// <summary>
+    /// Task 037 (FR-36): what <paramref name="rule"/>'s copied defaults (<see cref="ServerDefault.CopiedFrom"/>) come to on
+    /// the create row <paramref name="item"/> — one entry per copied default whose column the row leaves UNSET (absent: no
+    /// value, no bind and no clear; an explicit null is a value the caller chose and wins), with the lookup the row binds
+    /// in its source column, or <c>null</c> when the source is unset or cleared too (the column then stays blank). Pure:
+    /// the create paths apply the answer, each through its own checks, before the create and so before the "Assigned *"
+    /// materialisation that reads the created row. Never read by an update, the repair pass or a push (create only).
+    /// </summary>
+    internal static IReadOnlyList<CopiedDefaultFill> CopiedDefaultsFor(RecordTableRule? rule, DataverseWriteItemMapper.MappedItem item)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        if (rule is null)
+            return [];
+
+        var fills = new List<CopiedDefaultFill>();
+        foreach (var serverDefault in rule.ServerDefaults)
+        {
+            if (serverDefault.CopiedFrom is not { } source
+                || item.Columns.Contains(serverDefault.Column, StringComparer.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var bound = item.Lookups.FirstOrDefault(l => string.Equals(l.Column, source, StringComparison.OrdinalIgnoreCase));
+            fills.Add(new CopiedDefaultFill(serverDefault, bound));
+        }
+
+        return fills;
+    }
+
     /// <summary>The chat create's "for" person: the caller, when the item leaves the column unset (owner round 7 item 3).</summary>
     private static ServerDefault ChatCallerIsTheForPerson(string column) => new(column, "chat create (dataverse.create_record)",
         "The caller, when the item leaves it unset (DataverseCreateRecordHandler.WithForPersonAsync, owner round 7 item 3).");
@@ -293,7 +346,21 @@ internal sealed record ForPersonLookup(string Column, string RelatedTable);
 /// it today, and its rule. OWNER REVIEW: the paths differ today (the chat create names the caller, the Office create and
 /// the server writers apply their own precedence); task 013 decides the one default the unified service applies.
 /// </summary>
-internal sealed record ServerDefault(string Column, string Path, string Rule);
+internal sealed record ServerDefault(string Column, string Path, string Rule)
+{
+    /// <summary>
+    /// Task 037 (FR-36): the column of the SAME new row whose lookup this default copies, as-is, when the create leaves
+    /// <see cref="Column"/> unset; <c>null</c> for a default that only describes what a path fills (every other entry).
+    /// Applied by the create paths through <see cref="RecordTableRules.CopiedDefaultsFor"/>; create only.
+    /// </summary>
+    public string? CopiedFrom { get; init; }
+}
+
+/// <summary>
+/// Task 037: one copied default a create row leaves unset (<see cref="RecordTableRules.CopiedDefaultsFor"/>), and the lookup
+/// the row binds in its source column — <c>null</c> when the source is unset or cleared too.
+/// </summary>
+internal sealed record CopiedDefaultFill(ServerDefault Default, DataverseWriteItemMapper.MappedLookup? Source);
 
 /// <summary>A named exception to the default policy, with the reason it exists. The rationale is never empty.</summary>
 internal sealed record NamedRule

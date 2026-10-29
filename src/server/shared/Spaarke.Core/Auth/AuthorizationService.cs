@@ -149,7 +149,7 @@ public class AuthorizationService : IAuthorizationService
             return new AuthorizationResult
             {
                 IsAllowed = false,
-                ReasonCode = "sdap.access.error.system_failure",
+                ReasonCode = AuthorizationResult.SystemFailureReasonCode,
                 RuleName = "SystemError"
             };
         }
@@ -322,6 +322,12 @@ public class AuthorizationContext
 
 public class AuthorizationResult
 {
+    /// <summary>
+    /// The reason code of a fail-closed refusal caused by a FAULT in the access source (the evaluation threw), as opposed
+    /// to a decision. Callers that must tell an outage from a refusal compare against this.
+    /// </summary>
+    public const string SystemFailureReasonCode = "sdap.access.error.system_failure";
+
     public required bool IsAllowed { get; init; }
     public required string ReasonCode { get; init; }
     public required string RuleName { get; init; }

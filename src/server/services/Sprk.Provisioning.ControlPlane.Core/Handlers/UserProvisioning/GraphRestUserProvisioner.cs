@@ -45,17 +45,33 @@ public sealed class GraphRestUserProvisioner : IGraphUserProvisioner
     private readonly H11UserProvisioningOptions _options;
     private readonly ILogger<GraphRestUserProvisioner> _logger;
 
+    private readonly Func<string, TokenCredential> _credentialFactory;
+
+    /// <summary>Production constructor (typed HttpClient registration in Worker/Program.cs).</summary>
     public GraphRestUserProvisioner(
         HttpClient httpClient,
         IOptions<H11UserProvisioningOptions> options,
         ILogger<GraphRestUserProvisioner> logger)
+        : this(httpClient, options, logger,
+              tenantId => new DefaultAzureCredential(new DefaultAzureCredentialOptions { TenantId = tenantId }))
+    {
+    }
+
+    /// <summary>Test seam constructor — injects the credential factory so tests never touch the real chain.</summary>
+    internal GraphRestUserProvisioner(
+        HttpClient httpClient,
+        IOptions<H11UserProvisioningOptions> options,
+        ILogger<GraphRestUserProvisioner> logger,
+        Func<string, TokenCredential> credentialFactory)
     {
         ArgumentNullException.ThrowIfNull(httpClient);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(credentialFactory);
         _httpClient = httpClient;
         _options = options.Value;
         _logger = logger;
+        _credentialFactory = credentialFactory;
         _httpClient.Timeout = _options.GraphRequestTimeout;
     }
 
@@ -182,19 +198,16 @@ public sealed class GraphRestUserProvisioner : IGraphUserProvisioner
 
         try
         {
-            using var request = new HttpRequestMessage(
-                HttpMethod.Post, $"https://graph.microsoft.com/v1.0/users/{userId}/assignLicense")
+            // T186 audit: assignLicense on a user created moments ago 404s (or 400s "does not exist" / usage location)
+            // until Entra replicates it. Wait that out; a genuine licence error (no available licences, bad SKU) is not
+            // retried and fails as before.
+            var reply = await PostAssignLicenseAsync(
+                token, userId, payload, "assignLicense on the new user", cancellationToken).ConfigureAwait(false);
+            if (!reply.IsSuccess)
             {
-                Content = JsonContent.Create(payload),
-            };
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
-            using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode)
-            {
-                var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
                 return new LicenseAssignmentOutcome.Failure(
-                    $"POST /users/{userId}/assignLicense failed: {(int)response.StatusCode} {response.StatusCode}. " +
-                    $"Body: {Truncate(body, 300)}");
+                    $"POST /users/{userId}/assignLicense failed: {(int)reply.Status} {reply.Status}. " +
+                    $"Body: {Truncate(reply.Body, 300)}");
             }
 
             return new LicenseAssignmentOutcome.Success();
@@ -206,9 +219,142 @@ public sealed class GraphRestUserProvisioner : IGraphUserProvisioner
         }
     }
 
-    private static async Task<AccessToken> AcquireTokenAsync(string tenantId, CancellationToken cancellationToken)
+    /// <inheritdoc/>
+    public async Task<LicenseAssignmentOutcome> AssignGuestLicenseAsync(
+        string userId, string tenantId, CancellationToken cancellationToken)
     {
-        var credential = new DefaultAzureCredential(new DefaultAzureCredentialOptions { TenantId = tenantId });
+        ArgumentException.ThrowIfNullOrWhiteSpace(userId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
+
+        // Owner 2026-10-16 (T186 L51): Dataverse will not add an unlicensed guest. H11 refuses a B2BGuest run before
+        // inviting anyone when this is blank; this guards any other caller.
+        var skuId = _options.GuestLicenseSkuId?.Trim();
+        if (string.IsNullOrEmpty(skuId))
+        {
+            return new LicenseAssignmentOutcome.Failure(
+                "No guest licence SKU is configured (H11UserProvisioningOptions:GuestLicenseSkuId).");
+        }
+
+        AccessToken token;
+        try
+        {
+            token = await AcquireTokenAsync(tenantId, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return new LicenseAssignmentOutcome.Failure(
+                $"Graph token acquisition failed: {ex.GetType().Name}: {ex.Message}");
+        }
+
+        try
+        {
+            // The guest was invited and added to the group moments ago: the read waits out Entra replication.
+            var userUrl = $"https://graph.microsoft.com/v1.0/users/{userId}";
+            var read = await H11ReplicationRetry.RunAsync(
+                async ct =>
+                {
+                    using var request = new HttpRequestMessage(
+                        HttpMethod.Get, $"{userUrl}?$select=usageLocation,assignedLicenses");
+                    request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
+                    using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
+                    var text = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+                    return new H11ReplicationRetry.Reply(response.StatusCode, text);
+                },
+                H11ReplicationRetry.IsGraphObjectNotYetReplicated,
+                _options.ReplicationRetryCount, _options.ReplicationRetryDelay, _logger, "read of the guest's licences",
+                cancellationToken).ConfigureAwait(false);
+            if (!read.IsSuccess)
+            {
+                return new LicenseAssignmentOutcome.Failure(
+                    $"GET /users/{userId} failed: {(int)read.Status} {read.Status}. Body: {Truncate(read.Body, 300)}");
+            }
+
+            using var doc = JsonDocument.Parse(string.IsNullOrWhiteSpace(read.Body) ? "{}" : read.Body);
+            if (doc.RootElement.TryGetProperty("assignedLicenses", out var assigned)
+                && assigned.ValueKind == JsonValueKind.Array
+                && assigned.EnumerateArray().Any(l =>
+                    l.TryGetProperty("skuId", out var id)
+                    && id.ValueKind == JsonValueKind.String
+                    && string.Equals(id.GetString(), skuId, StringComparison.OrdinalIgnoreCase)))
+            {
+                _logger.LogInformation(
+                    "H11 guest already holds the guest licence — idempotent no-op (userId={UserId})", userId);
+                return new LicenseAssignmentOutcome.Success();
+            }
+
+            var hasUsageLocation = doc.RootElement.TryGetProperty("usageLocation", out var location)
+                                   && location.ValueKind == JsonValueKind.String
+                                   && !string.IsNullOrWhiteSpace(location.GetString());
+            if (!hasUsageLocation)
+            {
+                using var patch = new HttpRequestMessage(HttpMethod.Patch, userUrl)
+                {
+                    Content = JsonContent.Create(
+                        new Dictionary<string, object?> { ["usageLocation"] = _options.GuestUsageLocation }),
+                };
+                patch.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
+                using var patchResponse = await _httpClient.SendAsync(patch, cancellationToken).ConfigureAwait(false);
+                if (!patchResponse.IsSuccessStatusCode)
+                {
+                    var patchBody = await patchResponse.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+                    return new LicenseAssignmentOutcome.Failure(
+                        $"PATCH /users/{userId} (usageLocation) failed: {(int)patchResponse.StatusCode} " +
+                        $"{patchResponse.StatusCode}. Body: {Truncate(patchBody, 300)}");
+                }
+            }
+
+            var payload = new Dictionary<string, object?>
+            {
+                ["addLicenses"] = new[] { new Dictionary<string, object?> { ["skuId"] = skuId } },
+                ["removeLicenses"] = Array.Empty<string>(),
+            };
+            var reply = await PostAssignLicenseAsync(
+                token, userId, payload, "assignLicense on the guest", cancellationToken).ConfigureAwait(false);
+            if (!reply.IsSuccess)
+            {
+                return new LicenseAssignmentOutcome.Failure(
+                    $"POST /users/{userId}/assignLicense failed: {(int)reply.Status} {reply.Status}. " +
+                    $"Body: {Truncate(reply.Body, 300)}");
+            }
+
+            _logger.LogInformation("H11 assigned the guest licence (userId={UserId})", userId);   // D15: no UPN in logs
+            return new LicenseAssignmentOutcome.Success();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return new LicenseAssignmentOutcome.Failure(
+                $"POST /users/{userId}/assignLicense infrastructure error: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// <c>POST /users/{id}/assignLicense</c> with the T186-audit replication retry: a user created or invited moments
+    /// ago 404s (or 400s "does not exist" / usage location) until Entra replicates it. A genuine licence error (no
+    /// available licences, bad SKU) is not retried.
+    /// </summary>
+    private Task<H11ReplicationRetry.Reply> PostAssignLicenseAsync(
+        AccessToken token, string userId, Dictionary<string, object?> payload, string operation,
+        CancellationToken cancellationToken)
+        => H11ReplicationRetry.RunAsync(
+            async ct =>
+            {
+                using var request = new HttpRequestMessage(
+                    HttpMethod.Post, $"https://graph.microsoft.com/v1.0/users/{userId}/assignLicense")
+                {
+                    Content = JsonContent.Create(payload),
+                };
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
+                using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
+                var text = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+                return new H11ReplicationRetry.Reply(response.StatusCode, text);
+            },
+            H11ReplicationRetry.IsLicenseTargetNotYetReplicated,
+            _options.ReplicationRetryCount, _options.ReplicationRetryDelay, _logger, operation,
+            cancellationToken);
+
+    private async Task<AccessToken> AcquireTokenAsync(string tenantId, CancellationToken cancellationToken)
+    {
+        var credential = _credentialFactory(tenantId);
         return await credential.GetTokenAsync(new TokenRequestContext(GraphScope), cancellationToken)
             .ConfigureAwait(false);
     }

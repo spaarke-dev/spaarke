@@ -340,7 +340,7 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
                 // secure parent or of the record itself, refuses with nothing created.
                 var owned = await OwnedChildWrite.CreateAsync(
                     _dataverse, _ownership, _appOnly, tablename, forMapped, serverSet,
-                    CallerObjectId(context), cancellationToken, _rootFiling).ConfigureAwait(false);
+                    CallerObjectId(context), cancellationToken, _rootFiling, _logger).ConfigureAwait(false);
 
                 if (owned.PlanRefusal is { } rootRefusal)
                 {
@@ -618,6 +618,9 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
                 secured.ReasonCode ?? ToolErrorCodes.InternalError, startedAt);
         }
 
+        // Task 037 (fix round 1): what the row was WRITTEN with — a copied default the create filled (a work assignment's
+        // Assigned To) is reported as set, never as left blank.
+        var written = owned.WrittenColumns ?? item.Columns;
         return ToolResult.Ok(
             HandlerId, tool.Id, tool.Name,
             data: new
@@ -626,10 +629,10 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
                 tablename,
                 recordId = createdId.ToString("D"),
                 path = DataverseRecordCitations.RecordPath(tablename, createdId),
-                columnsSet = item.Columns,
-                columnCount = item.Columns.Count
+                columnsSet = written,
+                columnCount = written.Count
             },
-            summary: $"Created record {createdId:D} in '{tablename}' ({item.Columns.Count} columns set). It is owned by the " +
+            summary: $"Created record {createdId:D} in '{tablename}' ({written.Count} columns set). It is owned by the " +
                      "team of the record it is filed under (or the calling user's own team), checked against the calling " +
                      "user's permissions.",
             confidence: 1.0,
@@ -699,7 +702,7 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
             return Error(tool, denied, DataverseUserClientErrorCodes.AccessDenied, startedAt);
 
         var owner = await _ownership.ResolveOwnerAsync(
-            Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForParents(parents, CallerObjectId(context), me.SystemUserId),
+            OwnedChildWrite.OwnershipOf(tablename, item, CallerObjectId(context), me.SystemUserId), // 194b R (B3): the one builder
             ct).ConfigureAwait(false);
         if (owner.IsRefused || owner.IsSecureOwner)
         {

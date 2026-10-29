@@ -230,9 +230,18 @@ public sealed class GraphContainerProvisioner : ISpeContainerProvisioner
     {
         try
         {
-            using var activateTimeout = LinkedTimeout(cancellationToken);
-            await graph.Storage.FileStorage.Containers[containerId].Activate.PostAsync(
-                cancellationToken: activateTimeout.Token).ConfigureAwait(false);
+            // T186 audit: /activate seconds after the create can get 404 until the new container replicates — wait that
+            // out (bounded). Any other answer, and the last 404, falls to the failure paths below unchanged.
+            await SpeGraphRetry.RetryWhileAsync(
+                async attemptCt =>
+                {
+                    using var activateTimeout = LinkedTimeout(attemptCt);
+                    await graph.Storage.FileStorage.Containers[containerId].Activate.PostAsync(
+                        cancellationToken: activateTimeout.Token).ConfigureAwait(false);
+                    return true;
+                },
+                SpeGraphRetry.IsNotYetReplicated, _options.ReplicationRetryCount, _options.ReplicationRetryDelay,
+                _logger, "container activate", cancellationToken).ConfigureAwait(false);
 
             _logger.LogInformation(
                 "H8-B container activated: containerId={ContainerId} customerId={CustomerId}",
@@ -308,12 +317,42 @@ public sealed class GraphContainerProvisioner : ISpeContainerProvisioner
                 throw new InvalidOperationException("No owning business unit was resolved (Guid.Empty) — the container cannot be bound.");
             }
 
-            await WriteStampAsync(graph, containerId, businessUnitId, cancellationToken).ConfigureAwait(false);
+            // T186 audit: a container created seconds ago can answer 404 on the PATCH or the read-back until it
+            // replicates. Each is retried (bounded) while Graph says not-found; any other error, and the last 404,
+            // reach the failure path below exactly as before.
+            await SpeGraphRetry.RetryWhileAsync(
+                async attemptCt =>
+                {
+                    await WriteStampAsync(graph, containerId, businessUnitId, attemptCt).ConfigureAwait(false);
+                    return true;
+                },
+                SpeGraphRetry.IsNotYetReplicated, _options.ReplicationRetryCount, _options.ReplicationRetryDelay,
+                _logger, "business-unit stamp write", cancellationToken).ConfigureAwait(false);
 
-            using var readTimeout = LinkedTimeout(cancellationToken);
-            var container = await graph.Storage.FileStorage.Containers[containerId]
-                .GetAsync(config => config.QueryParameters.Select = new[] { "id", "customProperties" }, readTimeout.Token)
-                .ConfigureAwait(false);
+            // A 200 with NO stamp seconds after a successful PATCH is a stale replica, not a verdict: re-read (same
+            // bounded attempts) until the stamp is visible. A stamp that IS visible but names another unit (or is
+            // malformed) is a real conflict and is never retried.
+            FileStorageContainer? container;
+            try
+            {
+                container = await SpeGraphRetry.RetryWhileAsync(
+                    async attemptCt =>
+                    {
+                        using var readTimeout = LinkedTimeout(attemptCt);
+                        var read = await graph.Storage.FileStorage.Containers[containerId]
+                            .GetAsync(config => config.QueryParameters.Select = new[] { "id", "customProperties" }, readTimeout.Token)
+                            .ConfigureAwait(false);
+                        return IsStampVisible(read) ? read : throw new StampNotVisibleException(read);
+                    },
+                    ex => SpeGraphRetry.IsNotYetReplicated(ex) || ex is StampNotVisibleException,
+                    _options.ReplicationRetryCount, _options.ReplicationRetryDelay,
+                    _logger, "business-unit stamp read-back", cancellationToken).ConfigureAwait(false);
+            }
+            catch (StampNotVisibleException notVisible)
+            {
+                // Attempts ran out with the stamp still absent: the existing failed-bind path.
+                container = notVisible.Container;
+            }
 
             var stamped = ReadStamp(container);
             if (stamped == businessUnitId)
@@ -351,16 +390,31 @@ public sealed class GraphContainerProvisioner : ISpeContainerProvisioner
 
         try
         {
-            using var deleteTimeout = LinkedTimeout(CancellationToken.None);
-            await graph.Storage.FileStorage.Containers[containerId].DeleteAsync(cancellationToken: deleteTimeout.Token)
-                .ConfigureAwait(false);
+            // T186 review: this container was created by this run moments ago, so a 404 here is most likely the same
+            // replication lag the bind just ran into — not proof it is gone. The DELETE is retried while Graph says
+            // not-found (a DELETE is idempotent); if it still says not-found, the container stays on the run's record
+            // (Removed: false) so a resume binds or removes it instead of creating a second one and orphaning this one.
+            await SpeGraphRetry.RetryWhileAsync(
+                async attemptCt =>
+                {
+                    using var deleteTimeout = LinkedTimeout(attemptCt);
+                    await graph.Storage.FileStorage.Containers[containerId].DeleteAsync(cancellationToken: deleteTimeout.Token)
+                        .ConfigureAwait(false);
+                    return true;
+                },
+                SpeGraphRetry.IsNotYetReplicated, _options.ReplicationRetryCount, _options.ReplicationRetryDelay,
+                _logger, "unbound-container removal", CancellationToken.None).ConfigureAwait(false);
             return new SpeContainerBindOutcome.NotBound(failure + " The container was removed.", Removed: true);
         }
         catch (ODataError deleteEx) when (deleteEx.ResponseStatusCode == 404)
         {
-            // Already gone (an earlier removal, or an operator's) — nothing unbound remains, and a resume must not keep
-            // trying to bind a container that no longer exists.
-            return new SpeContainerBindOutcome.NotBound(failure + " The container no longer exists.", Removed: true);
+            _logger.LogWarning(
+                "H8 container {ContainerId}: removal kept answering 404. It was created by this run moments ago, so it is " +
+                "kept on the run's record rather than assumed gone.", containerId);
+            return new SpeContainerBindOutcome.NotBound(
+                failure + $" Removing it answered 404 on every attempt; container '{containerId}' is kept on the run's " +
+                "record (it may not have replicated yet) so a resume binds or removes it rather than creating another.",
+                Removed: false);
         }
         catch (Exception deleteEx)
         {
@@ -406,6 +460,41 @@ public sealed class GraphContainerProvisioner : ISpeContainerProvisioner
 
         using var timeout = LinkedTimeout(cancellationToken);
         await graph.RequestAdapter.SendNoContentAsync(requestInfo, errorMapping, timeout.Token).ConfigureAwait(false);
+    }
+
+    /// <summary>The read-back carried no stamp value yet (stale replica); thrown inside the retry, never escapes the bind.</summary>
+    private sealed class StampNotVisibleException(FileStorageContainer? container) : Exception("The stamp is not visible yet.")
+    {
+        public FileStorageContainer? Container { get; } = container;
+    }
+
+    /// <summary>
+    /// True when the read-back shows a non-empty stamp value (right or wrong); false when the property is missing or blank
+    /// — the only state worth re-reading. A present value in an unfamiliar shape counts as visible (not retried).
+    /// </summary>
+    private static bool IsStampVisible(FileStorageContainer? container)
+    {
+        var properties = container?.CustomProperties?.AdditionalData;
+        if (properties is null)
+        {
+            return false;
+        }
+
+        foreach (var (name, raw) in properties)
+        {
+            if (!string.Equals(name?.Trim(), Spaarke.Contracts.Spe.SpeContainerBusinessUnitBinding.PropertyName,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            return !(raw is Microsoft.Kiota.Abstractions.Serialization.UntypedObject node
+                && node.GetValue().TryGetValue("value", out var valueNode)
+                && valueNode is Microsoft.Kiota.Abstractions.Serialization.UntypedString text
+                && string.IsNullOrWhiteSpace(text.GetValue()));
+        }
+
+        return false;
     }
 
     /// <summary>The business unit the container's stamp names, or null when it carries none (or not one GUID).</summary>

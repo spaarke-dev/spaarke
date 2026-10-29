@@ -726,6 +726,9 @@ internal static class InheritedAccessPermission
         /// <summary>
         /// The BFF's application user (a System Administrator), acting for no person: the Update Record node and the action
         /// seam without an impersonated user, a playbook's output mapping, Repair, the profile output mapper. Every refusal.
+        /// Also every playbook write (the Update Record node, a playbook's output mapping) WHATEVER identity the run writes as
+        /// (#2257): a person-started run writes AS that person, but its payload is built by configuration or a model, not by
+        /// the runner, so it is asked every refusal too.
         /// </summary>
         AppOnly,
 
@@ -735,7 +738,8 @@ internal static class InheritedAccessPermission
         /// on every table, the owner and the creator) and the table-name check. Not <see cref="AccessTables"/>,
         /// <see cref="SecureRootColumns"/> or <see cref="AccessColumns"/>: what the person may write there is Dataverse's
         /// call (<c>sprk_accesspermission</c> on a matter stays editable by a Write holder;
-        /// <c>scripts/Set-SecureFlagFieldSecurity.ps1</c>).
+        /// <c>scripts/Set-SecureFlagFieldSecurity.ps1</c>). Only the field-mapping push may pass it (#2257 fix round 3;
+        /// enforced by ArchTest <c>RefuseAppOnlyWriteCallerIdentityGuardTests</c>).
         /// </summary>
         Caller,
     }
@@ -901,6 +905,13 @@ internal static class InheritedAccessPermission
     /// contact IS), its uniqueness mirror <c>sprk_externalobjectidkey</c> (a held mirror denies a bind),
     /// <c>sprk_identityplane</c>, <c>sprk_externaltenantid</c> (a WorkforceHome contact's directory), and the pending
     /// invite <c>sprk_externalinvitedon</c> / <c>sprk_externalinvitecodehash</c> (they open the email bind).</item>
+    /// <item><c>contact</c>, the removal and invite stamp (<c>ContactBindingDecision</c>; ISS-005): the removed marker
+    /// <c>sprk_externalaccessremovedon</c> (a removed contact neither binds nor is re-invited), and the latest invite's
+    /// <c>sprk_externalinvitedemailhash</c> / <c>sprk_externalinvitedtenantid</c> (they decide which sign-in the invite
+    /// binds). And the identity-collision record (<c>DataverseContactIdentityStore.CollisionColumns</c>,
+    /// <c>sprk_identitycollisionon</c>, <c>…oid</c>, <c>…plane</c>, <c>…reason</c>, <c>…parties</c>): field-secured, written
+    /// only by the binder's collision flagging, and trusted empty only after a proven read. Every contact column the typed
+    /// identity writers send is classified here or as ordinary data (<c>ContactAccessColumnGuardTests</c>).</item>
     /// <item><c>contact</c> and <c>sprk_organization</c>, the standing grant (<c>SubjectStandingGrantReader</c>):
     /// <c>sprk_standinggrant</c> and <c>sprk_accesspermissiongrant</c>, the standing term of the accessible set.</item>
     /// <item><c>systemuser</c>: the A9 home link <c>sprk_hometenantid</c> / <c>sprk_homeobjectid</c> (which user a home
@@ -959,6 +970,14 @@ internal static class InheritedAccessPermission
                 Sprk.Bff.Api.Infrastructure.ExternalAccess.ContactBindingDecision.ExternalTenantIdColumn,
                 Sprk.Bff.Api.Infrastructure.ExternalAccess.ContactBindingDecision.ExternalInvitedOnColumn,
                 Sprk.Bff.Api.Infrastructure.ExternalAccess.ContactBindingDecision.ExternalInviteCodeHashColumn,
+                Sprk.Bff.Api.Infrastructure.ExternalAccess.ContactBindingDecision.ExternalAccessRemovedOnColumn,
+                Sprk.Bff.Api.Infrastructure.ExternalAccess.ContactBindingDecision.ExternalInvitedEmailHashColumn,
+                Sprk.Bff.Api.Infrastructure.ExternalAccess.ContactBindingDecision.ExternalInvitedTenantIdColumn,
+                Sprk.Bff.Api.Infrastructure.ExternalAccess.DataverseContactIdentityStore.FlagOnColumn,
+                Sprk.Bff.Api.Infrastructure.ExternalAccess.DataverseContactIdentityStore.FlagOidColumn,
+                Sprk.Bff.Api.Infrastructure.ExternalAccess.DataverseContactIdentityStore.FlagPlaneColumn,
+                Sprk.Bff.Api.Infrastructure.ExternalAccess.DataverseContactIdentityStore.FlagReasonColumn,
+                Sprk.Bff.Api.Infrastructure.ExternalAccess.DataverseContactIdentityStore.FlagPartiesColumn,
                 Sprk.Bff.Api.Infrastructure.ExternalAccess.SubjectStandingGrantReader.StandingGrantAttribute,
                 Sprk.Bff.Api.Infrastructure.ExternalAccess.SubjectStandingGrantReader.BaselineAttribute,
             },
@@ -1030,13 +1049,15 @@ internal static class InheritedAccessPermission
 
     /// <summary>
     /// Task 189 fix round C (K5): an APP-ONLY generic writer never writes a document's <see cref="Column"/> or its
-    /// own-narrowing record (<see cref="AccessInheritance.Column"/>). These writers are the Update Record playbook node and
-    /// the action seam when they act for no person (<c>UpdateRecordActionCore</c>), and an AI output mapping
-    /// (<c>DataverseUpdateHandler</c>). A model or a configuration builds their payload, not a person. Only
+    /// own-narrowing record (<see cref="AccessInheritance.Column"/>). These writers are the Update Record playbook node
+    /// (<c>UpdateRecordActionCore</c>) and an AI output mapping (<c>DataverseUpdateHandler</c>) WHATEVER identity the run
+    /// writes as (#2257 fix round 1: a person's run writes AS that person, and is still asked), and the action seam when it
+    /// acts for no person. A model or a configuration builds their payload, not the person running it. Only
     /// <see cref="DecideDocument"/>'s writers keep the value at max(own, inherited). A payload that lowered it, or rewrote
     /// the record, would show a user's Restricted document to partners (D7, task 188). This is the same refusal
     /// <c>ChildRecordEndpoints.RootServerOwnedColumns</c> makes for a work assignment. A user's own write is not refused: the
-    /// form, the user-OBO chat tools, and an update impersonating its user all run as that user. The field-mapping push also
+    /// form, the user-OBO chat tools, and the action seam's apply of a proposal its impersonated user confirmed
+    /// (<c>UpdateRecordPayloadSource.ConfirmedProposal</c>) all run as that user. The field-mapping push also
     /// runs as its caller, but its rules are a configuration applied to every child it reaches, so it asks this too and
     /// skips such a rule on a document (the rest of the push applies; security pass 2).
     /// <para>Task 188 round 4e: the same writers never write a document's D7 link columns either
@@ -1058,11 +1079,15 @@ internal static class InheritedAccessPermission
     /// whatever the payload names; nor a secure root's secure flag, access columns or container
     /// (<see cref="SecureRootColumns"/>), refused with <see cref="AppOnlySecureRootWriteReasonCode"/> in the same forms. The
     /// table is matched trimmed and in any case. Out of scope, as for every code above: a write that impersonates its user
-    /// (the action seam's apply, which skips this refusal) runs under that user's own privileges, and the chat create tool
+    /// for a payload that user confirmed (the action seam's apply of a <c>UpdateRecordPayloadSource.ConfirmedProposal</c>,
+    /// which skips this refusal) runs under that user's own privileges, and the chat create tool
     /// checks the caller's own privileges before it writes. The field-mapping push also runs as its caller: it asks per rule
-    /// (above) as <see cref="WriteIdentity.Caller"/>, which does not ask these two (#2253 fix round 1, K2).</para>
+    /// (above) as <see cref="WriteIdentity.Caller"/>, which does not ask these two (#2253 fix round 1, K2). A person-started
+    /// playbook run that writes AS that person is not out of scope: its Update Record node and its output mapping ask as
+    /// <see cref="WriteIdentity.AppOnly"/> (#2257).</para>
     /// <para>#2253 fix round 1: nor, on a table that is not a secure root, a column an access decision reads
-    /// (<see cref="AccessColumns"/>: a contact's identity binding and standing grant, an organisation's standing grant, a
+    /// (<see cref="AccessColumns"/>: a contact's identity binding, removal and invite stamp, collision record and standing
+    /// grant, an organisation's standing grant, a
     /// user's home link, task-141 link, external flag, business unit, identity and eligibility, a team's owner-team
     /// predicates, a business unit's container, name and parent), refused with
     /// <see cref="AppOnlyAccessColumnWriteReasonCode"/>. Whatever the identity, a table that is not a bare identifier after

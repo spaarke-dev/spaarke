@@ -489,6 +489,16 @@ public sealed class DecisionCommitService
         // held (K7), so a cancellation can never strand a lock that was granted for its 10 minutes.
         var lockIds = new List<string> { LeaseId(tenantId, callerObjectId, review.ReviewId) };
         lockIds.AddRange(ids.Select(id => SignalLeaseId(tenantId, id)).OrderBy(id => id, StringComparer.Ordinal));
+        // Task 161 fix round 1 (K2a): a review that TAKES Create budget also holds the matter's budget lease, after the others in
+        // the same fixed order, so two commits on different Signals of one matter are serialized and the second one's recount sees
+        // the first one's budget (and refuses). Not taken (skipped, or not in the plan): no lease, and nothing else waits on it.
+        if (review.Actions?.Any(a => a is { Taken: true, Code: ResolvedDecisionPlan.CreateBudgetCode }) == true
+            && lanes[signalId] is { Outcome: SignalAccessOutcome.Allowed, CoreId: { } budgetMatterId } budgetCore
+            && string.Equals(budgetCore.CoreTable, "sprk_matter", StringComparison.OrdinalIgnoreCase))
+        {
+            lockIds.Add(BudgetLeaseId(tenantId, budgetMatterId));
+        }
+
         var held = new List<(string Id, string Token)>();
         try
         {
@@ -536,6 +546,9 @@ public sealed class DecisionCommitService
 
     /// <summary>The lock on one Signal: held by whichever review is committing it (any caller, any review id).</summary>
     internal static string SignalLeaseId(string tenantId, Guid signalId) => $"decision-signal:{tenantId}:{signalId:D}";
+
+    /// <summary>Task 161 fix round 1 (K2a): the lock on one matter's budget creation, held by whichever review is taking Create budget.</summary>
+    internal static string BudgetLeaseId(string tenantId, Guid matterId) => $"decision-budget:{tenantId}:{matterId:D}";
 
     /// <summary>K3: a review never started earlier than the plan-read window, so a resume or replay days later cannot reach back
     /// past it to re-close a system resolution.</summary>
@@ -953,7 +966,8 @@ public sealed class DecisionCommitService
         }
 
         var finishing = existingRecord is not null && resume is null;
-        var prepared = await PrepareAsync(review, rows, lanes, reviewStart, finishing ? existingRecord!.Id : null, ct).ConfigureAwait(false);
+        var createBudgetLanded = (resume?.Steps ?? []).Any(s => s.Key == $"action:{ResolvedDecisionPlan.CreateBudgetCode}" && s.Status == nameof(DecisionActionStatus.Done));
+        var prepared = await PrepareAsync(review, rows, lanes, reviewStart, finishing ? existingRecord!.Id : null, createBudgetLanded, resume is not null, ct).ConfigureAwait(false);
         if (prepared.Refusal is { } refusal)
             return refusal with { ReviewId = reviewId };
         var p = prepared.Ready!;
@@ -1227,7 +1241,7 @@ public sealed class DecisionCommitService
 
     private async Task<(DecisionCommitResult? Refusal, Prepared? Ready)> PrepareAsync(
         DecisionReview review, IReadOnlyList<SignalRow> rows, IReadOnlyDictionary<Guid, SignalAccessDecision> access,
-        DateTimeOffset reviewStart, Guid? linkedRecord, CancellationToken ct)
+        DateTimeOffset reviewStart, Guid? linkedRecord, bool createBudgetLanded, bool resumed, CancellationToken ct)
     {
         static (DecisionCommitResult?, Prepared?) No(string reason, string detail, string? action = null, DecisionCommitStatus status = DecisionCommitStatus.Refused) =>
             (new DecisionCommitResult { Status = status, ReasonCode = reason, Detail = detail, ActionCode = action }, null);
@@ -1303,6 +1317,36 @@ public sealed class DecisionCommitService
             // review's content hash (StoredRecord.Covers), so the review was matched against that plan when it was written. Without
             // the read, the plan it was matched against is the one without Mark complete.
             plan = plan.WithoutMarkComplete();
+        }
+
+        // Task 161 (D-180, D-17): a matter with no active budget is offered Create budget in place of Revise budget; the plan route
+        // applies the same substitution (SignalCoreRecordAccess.WithCreateBudgetWhenNoneAsync), recomputed here and never trusted from
+        // the client. "Has no budget" is the BFF's own count (F1-a), never the caller's read. A review that names Create budget when the
+        // matter now has a budget is refused with its own reason (one action is never silently converted into the other), and when the
+        // count cannot be read it is Unavailable (F1-b): a read that failed is not a change in the budgets. Exceptions: a review whose
+        // Create budget step already landed (a resume of a failed commit, or finishing a stored record) now sees a budget, which is the
+        // step's own effect; and a resume that SKIPPED Create budget writes nothing for it, so a budget somebody else made meanwhile
+        // changes nothing (K2b). Both keep the plan the review was taken under, without a read.
+        var namesCreateBudget = given.Any(a => a?.Code == ResolvedDecisionPlan.CreateBudgetCode);
+        var createBudgetTaken = given.Any(a => a?.Code == ResolvedDecisionPlan.CreateBudgetCode && a.Taken);
+        if (namesCreateBudget && given.All(a => a?.Code != ResolvedDecisionPlan.ReviseBudgetCode)
+            && (linkedRecord is not null || createBudgetLanded || (resumed && !createBudgetTaken)))
+        {
+            plan = plan.WithCreateBudgetInsteadOfRevise();
+        }
+        else if (SignalCoreRecordAccess.CanSubstituteCreateBudget(plan, access[primary.Id]))
+        {
+            var count = await _access.CountMatterBudgetsAsync(access[primary.Id], ct).ConfigureAwait(false);
+            if (count == MatterBudgetCount.None)
+            {
+                plan = plan.WithCreateBudgetInsteadOfRevise();
+            }
+            else if (namesCreateBudget)
+            {
+                return count == MatterBudgetCount.Unknown
+                    ? No(DecisionCommitReasons.SignalUnreadable, "Whether the matter has a budget could not be checked; nothing was done. Try again.", status: DecisionCommitStatus.Unavailable)
+                    : No(DecisionCommitReasons.ActionsDoNotMatchPlan, "The matter's budgets changed while you were deciding; reopen the item.");
+            }
         }
 
         // Every offered action exactly once, nothing else. An unknown code is refused, never defaulted (C-3).
@@ -1585,9 +1629,7 @@ public sealed class DecisionCommitService
     {
         try
         {
-            var row = await _entities.RetrieveAsync("sprk_recordtype_ref", recordTypeRefId, ["sprk_recordlogicalname"], ct).ConfigureAwait(false);
-            var table = row.GetAttributeValue<string>("sprk_recordlogicalname")?.Trim().ToLowerInvariant();
-            return (table is not null && CoreAncestorResolver.CoreRecordEntities.Contains(table, StringComparer.Ordinal) ? table : null, false);
+            return (await CoreAncestorResolver.CoreTableOfRecordTypeAsync(_entities, recordTypeRefId, ct).ConfigureAwait(false), false);
         }
         catch (Exception ex) when (IsNotFound(ex))
         {
@@ -1615,7 +1657,20 @@ public sealed class DecisionCommitService
     /// table cannot be derived (no subject lookup, or two, carry the pair id: task 141 review F3) is an UNKNOWN parent, never
     /// dropped: dropping it could leave a secure parent out of the answer. It refuses the record, as an unreadable parent does.</summary>
     /// <exception cref="DecisionRecordRefusedException">A Signal's subject is unknown (<see cref="DecisionRecordRefusalReason.OwnerRefused"/>).</exception>
-    internal static IReadOnlyList<DecisionRecordRef> SignalSubjectsOf(IEnumerable<SignalRow> rows)
+    internal static IReadOnlyList<DecisionRecordRef> SignalSubjectsOf(IEnumerable<SignalRow> rows) =>
+        KnownSignalSubjectsOf(rows)
+        ?? throw new DecisionRecordRefusedException(
+            DecisionRecordRefusalReason.OwnerRefused,
+            "A Signal the decision resolves names a subject whose table cannot be derived, so the Decision Record owner is unknown; nothing was written.",
+            RecordOwnerRefusal.ParentUndetermined);
+
+    /// <summary>
+    /// THE rule <see cref="SignalSubjectsOf"/> applies, shared with the ownership reconciler's question about an EXISTING Decision
+    /// Record (<see cref="ResolvedSignalSubjectsOfRecordAsync"/>, UAC task 194b fix round R, ontology answer (c)): each Signal's
+    /// SUBJECT, in the order given, de-duplicated; a Signal with no pair id adds none. <c>null</c> when a Signal's pair id is set
+    /// but its subject table cannot be derived (an unknown parent, never dropped).
+    /// </summary>
+    internal static IReadOnlyList<DecisionRecordRef>? KnownSignalSubjectsOf(IEnumerable<SignalRow> rows)
     {
         var subjects = new List<DecisionRecordRef>();
         foreach (var row in rows)
@@ -1623,18 +1678,112 @@ public sealed class DecisionCommitService
             if (row.SubjectId is not { } subjectId || subjectId == Guid.Empty)
                 continue;
             if (SubjectOf(row) is not { } subject)
-            {
-                throw new DecisionRecordRefusedException(
-                    DecisionRecordRefusalReason.OwnerRefused,
-                    "A Signal the decision resolves names a subject whose table cannot be derived, so the Decision Record owner is unknown; nothing was written.",
-                    RecordOwnerRefusal.ParentUndetermined);
-            }
+                return null;
 
             if (!subjects.Contains(subject))
                 subjects.Add(subject);
         }
 
         return subjects;
+    }
+
+    /// <summary>The Signal columns <see cref="ToRow"/> names a subject from: the pair id and the subject lookups (task 141).
+    /// No core or stamp column: the Decision Record's question adds each Signal's subject only.</summary>
+    private static readonly string[] SignalSubjectColumns =
+    [
+        "sprk_regardingrecordid",
+        .. SignalWriter.RegardingLookupByEntity.Values,
+    ];
+
+    /// <summary>How many Signal ids one read names: <see cref="ResolvedSignalSubjectsOfRecordAsync"/> reads them in pages of this
+    /// size, so a record that resolved any number of Signals is read whole (no page cap).</summary>
+    internal const int ResolvedSignalReadPage = 100;
+
+    /// <summary>
+    /// UAC task 194b fix round R (ontology answer (c)): the subjects of the Signals an EXISTING Decision Record resolved, asked the
+    /// way its writer asked them — the ids its <c>sprk_steps.resolvedSignalIds</c> lists (written once at create and never
+    /// truncated: <see cref="DecisionRecordWriter"/> refuses a memo that would not fit), each Signal read by id in whatever state
+    /// it is in now, and <see cref="KnownSignalSubjectsOf"/> over them in that stored order. Never the Signals'
+    /// <c>sprk_decisionrecord</c> link (a Signal closed during the review is not linked) and never a Signal's core or stamps.
+    /// </summary>
+    /// <param name="steps">The record's <c>sprk_steps</c>, as stored.</param>
+    /// <param name="entities">Reads the Signals.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The subjects, and why the question is INCOMPLETE when it is (<c>null</c> when whole): no <c>sprk_steps</c>, one
+    /// that does not parse or lists no <c>resolvedSignalIds</c>, a listed Signal that cannot be read or is gone, or one whose
+    /// subject table cannot be derived. An incomplete list holds the subjects that were read and derived.</returns>
+    internal static async Task<(IReadOnlyList<DecisionRecordRef> Subjects, string? Incomplete)> ResolvedSignalSubjectsOfRecordAsync(
+        string? steps, IGenericEntityService entities, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(entities);
+        if (string.IsNullOrWhiteSpace(steps))
+            return ([], "it has no sprk_steps, so the Signals it resolved are not known");
+        if (ResolvedSignalIdsOf(steps) is not { } listedIds)
+            return ([], "its sprk_steps does not list resolvedSignalIds, so the Signals it resolved are not known");
+
+        var ids = listedIds.Distinct().ToList();
+        var read = new Dictionary<Guid, SignalRow>();
+        try
+        {
+            foreach (var page in ids.Chunk(ResolvedSignalReadPage))
+            {
+                var query = new QueryExpression("sprk_signal") { ColumnSet = new ColumnSet(SignalSubjectColumns), NoLock = true };
+                query.Criteria.AddCondition("sprk_signalid", ConditionOperator.In, page.Cast<object>().ToArray());
+                var signals = await entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+                foreach (var signal in signals.Entities)
+                    read[signal.Id] = ToRow(signal.Id, signal);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            return ([], $"a Signal it resolved could not be read ({ex.GetType().Name})");
+        }
+
+        var listed = ids.Where(read.ContainsKey).Select(id => read[id]).ToList();
+        var derivable = listed.Where(r => r.SubjectId is not { } s || s == Guid.Empty || SubjectOf(r) is not null).ToList();
+        var subjects = KnownSignalSubjectsOf(derivable) ?? [];
+        if (listed.Count < ids.Count)
+            return (subjects, "a Signal it resolved no longer exists");
+        if (derivable.Count < listed.Count)
+            return (subjects, "a Signal it resolved names a subject whose table cannot be derived");
+        return (subjects, null);
+    }
+
+    /// <summary>
+    /// The Signal ids a Decision Record's <c>sprk_steps</c> lists under <c>resolvedSignalIds</c> (<see cref="DecisionRecordWriter"/>
+    /// writes it; an empty list is a record that resolved none, the gate's). <c>null</c> when the text does not parse, has no
+    /// such key, or names anything but Signal ids: the list is then not known.
+    /// </summary>
+    internal static IReadOnlyList<Guid>? ResolvedSignalIdsOf(string? steps)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(steps ?? "{}");
+            return ResolvedSignalIdsOf(document.RootElement);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static List<Guid>? ResolvedSignalIdsOf(JsonElement root)
+    {
+        if (root.ValueKind != JsonValueKind.Object
+            || !root.TryGetProperty("resolvedSignalIds", out var ids) || ids.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        var signals = new List<Guid>();
+        foreach (var id in ids.EnumerateArray())
+        {
+            if (id.ValueKind != JsonValueKind.String || !Guid.TryParse(id.GetString(), out var g))
+                return null;
+            signals.Add(g);
+        }
+
+        return signals;
     }
 
     /// <summary>D-129: the deciding caller's linked internal contact, through the identity service task 141 feeds (the user's
@@ -1749,20 +1898,7 @@ public sealed class DecisionCommitService
                 var root = steps.RootElement;
                 if (root.TryGetProperty("reviewHash", out var h) && h.ValueKind == JsonValueKind.String)
                     hash = h.GetString();
-                if (root.TryGetProperty("resolvedSignalIds", out var ids) && ids.ValueKind == JsonValueKind.Array)
-                {
-                    signals = [];
-                    foreach (var id in ids.EnumerateArray())
-                    {
-                        if (id.ValueKind != JsonValueKind.String || !Guid.TryParse(id.GetString(), out var g))
-                        {
-                            signals = null;
-                            break;
-                        }
-
-                        signals.Add(g);
-                    }
-                }
+                signals = ResolvedSignalIdsOf(root);
 
                 if (root.TryGetProperty("steps", out var list) && list.ValueKind == JsonValueKind.Array)
                 {

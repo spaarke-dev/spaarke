@@ -346,3 +346,123 @@ Criterion 89 (blank the writer client id, expect the writer-failure alert to fir
 - **Deploy:** R3 deployed master `a7b956fb55` at 02:17–02:18:52Z (ProductVersion `1.0.0+a7b956fb55d6…`). Its predecessor `f1b3dadcf5` is an ancestor, and it contains R3 077 `283466d40`. It adds field-mapping #2223/#2228 and UAC #2221. No ontology-owned file changes; the edits to `SecureChildShareSynchronizer`, `CoreAncestorRestamper` and `SecurableEntityRegistry` are additive. We gave OK before the deploy; the owner approved it in R3's session.
 - **Smoke:** PASS. Validate on Secure PAT-908068 (`5d46df87`) returns `valid:false` / `scope_matter_secured`; on Standard REAL-2026-123456.01 (`2444af6d`) it returns `valid:true`.
 - **Nightly sweep:** `[SIGNAL-EVALUATOR] heartbeat outcome=succeeded` at 02:30:29Z with policies=6 hits=142 written=0 closed=0, the same as 2026-10-21. Since 21:45:37Z the only 503xx trace is the heartbeat, with 0 Signals/Ontology/Gate exceptions.
+
+## 2026-10-26 — ebilling task 122 on dev: `sprk_invoicesubmission.sprk_findingsjson` field-secured (owner OK in ebilling's session + ontology PASS)
+
+- `Deploy-EbillingFormsViews.ps1 -FormsOnly`: removed the column from the submission "Information" form (c412f942); published `sprk_invoicesubmission` only.
+- `Set-EbillingFindingsJsonFieldSecurity.ps1`:
+  - The column is secured; "Spaarke BFF-Managed Field Writers" gets read, create and update; Readers has no row.
+  - The second run wrote nothing; `-Verify` exits 0.
+  - The masked window was 16.3 s, but the BFF app users hold System Administrator, so they were never masked.
+  - 0 submission rows carry findings; no role change.
+- **Ontology impact:** none. No ontology code reads the column; `mi-ontology-writer-dev` is not and must not be in the profile.
+
+## 2026-10-23 — dev BFF `58ffc37da3` (R3) + D-185 live order on spaarkedev1 (worklist config, POL-MATTER-NOBUDGET v2, Console User)
+
+- **BFF:** R3 deployed master `58ffc37da3` at 11:18:12Z (owner approved in R3's session). Ontology read-back at about 11:20Z: `Sprk.Bff.Api.dll` ProductVersion `1.0.0+58ffc37da303a6b169b9b6b3d4d1ad6539dfc94b`, `/healthz` 200. It carries 158, 159, 161, 162, 163, 164 (#2303), 160 + #2314 (#2313) and R3 077.
+- **(1) Worklist config** (owner approved in this session): `Apply-WorklistGridConfiguration.ps1`.
+  - `-WhatIf`: one UPDATE of row `…5010`.
+  - Apply at 11:20:10Z: UPDATED, READ-BACK OK.
+  - `-Verify -RequireRow`: IN SYNC. Lane counts: decide 56, do 84, closedToday 4, suppressed 0, closedEarlier 8.
+- **(2) POL-MATTER-NOBUDGET v2** (D-186): `Apply-DoLanePolicies.ps1 -DefinitionPath config/know-promotion.policies.json`, run 11:20:38Z.
+  - Created v2 `…6312` (plan `assign-task`; next steps `add-todo`, `assign-work`).
+  - Ended v1 `sprk_inforceto` 2026-10-22T00:00:00Z.
+  - Current version now points at v2. The enabled flag is unchanged (True).
+  - `-Verify -RequireRows`: all IN SYNC.
+- **(3) D-185 role change**: `RemovePrivilegeRole` on root-BU Spaarke Console User `51c924e2-bdbe-f111-a05b-3833c5e9614d`.
+  - Removed `prvReadsprk_Policy` (`eda1df58-…`, HTTP 204, 11:21:51Z) and `prvReadsprk_PolicyVersion` (`22640ee9-…`, HTTP 204, 11:21:53Z).
+  - Read-back: 21 → 19 privileges. Neither Read is left; `prvReadsprk_Signal` is kept.
+  - A first attempt at 11:21:18Z used the wrong payload (`PrivilegeId`). It was rejected with 0x80048d19, and the read-back confirmed nothing had changed. The working payload is `{"Privilege":{"@odata.type":"Microsoft.Dynamics.CRM.privilege","privilegeid":…}}`, as in `Remove-ConsoleSignalWriteAndDecisionRecordCreate.ps1:307`.
+  - Spaarke Basic User was not changed (see security-roles §19).
+- **uac-r2 server gate: PASS** (window 11:18:00–11:51:05Z):
+  - 77 requests: 0 403, 0 5xx; the 9 failures are all 401 probes.
+  - 0 `worklist_unavailable`, 0 `signal_unreadable`.
+  - No new exception class (one restart-class Redis lease exception at 11:21:20Z).
+  - Not covered: no traffic reached the worklist or the inquiry routes, so the owner's browser checks cover them.
+  - Evidence: `projects/unified-access-control-r2/notes/deploy-gate-2026-10-23-58ffc37da3.md`.
+
+## 2026-10-23 — Spaarke Core User: AppendTo on `sprk_eventtype_ref` (D-110, task 159), spaarkedev1
+
+- 00:32:20Z, root role `75e1b627-…`: `prvAppendTosprk_EventType_Ref` at Global. Read-back 784 → 785, exact. Details in security-roles.md §18. uac-r2 told on #1355.
+
+## 2026-10-23 — dev BFF `1fa0cf5cb8` (R3): ontology smoke; 157 now on dev
+
+- **Deploy:** R3 deployed master `1fa0cf5cb8` (ProductVersion `1.0.0+1fa0cf5cb88443d9a4279851e558495d71ec9169`); started ~23:58Z on 2026-10-22, new version first read at 00:00:36Z. Its ancestors include R3 077 `283466d40` and our **157** `aa3dc49897` (Duplicate earlier-invoice withholding is now live, latent until Duplicate Signals exist). Changes since our OK'd `f5bf481185`: field-mapping #2282 only (we reviewed it; fixes #2281).
+- **Smoke (~00:10Z):** PASS. Validate on Secure PAT-908068 (`5d46df87`) returns `valid:false` / `scope_matter_secured`; on Standard REAL-2026-123456.01 (`2444af6d`) it returns `valid:true`.
+- **Logs since 00:00:00Z:** no 503xx trace at Warning or above, no Signals/Ontology/Gate exceptions. The last `[SIGNAL-EVALUATOR]` heartbeat is 2026-10-22 02:30:29Z (succeeded); tonight's run is the next check.
+- **Owner check (via R3):** Create Work Assignment from a matter with `sprk_assignedattorney1` copies the attorney with no warning (#2281).
+
+## 2026-10-22 — dev BFF `1283c41817` (R3): ontology smoke
+
+- **Deploy:** R3 deployed master `1283c41817` (ProductVersion `1.0.0+1283c41817`, read via Kudu VFS) after `a7b956fb55`, with 25 commits between them. It contains R3 077 `283466d40` and no change under `Services/Signals`, `Services/Ontology` or `DecisionRecordWriter.cs`. It does **not** yet contain 157 (`aa3dc49897`, #2233), so 157 reaches dev with the next R3 deploy from master.
+- **Smoke (re-run 2026-10-22 ~13:35Z):** PASS. Validate on Secure PAT-908068 (`5d46df87`) returns `valid:false` / `scope_matter_secured`; on Standard REAL-2026-123456.01 (`2444af6d`) it returns `valid:true`.
+- **Logs since 12:50:18Z:** no 503xx trace at Warning or above, and no Signals/Ontology/Gate exceptions. The last `[SIGNAL-EVALUATOR]` heartbeat is still the 02:30:29Z run (succeeded; policies=6 hits=142); tonight's run is the next check.
+
+## 2026-10-22 — ebilling 088 Stored File schema on dev (owner OK in ebilling's session + ontology PASS)
+
+- **Run 1** stopped with exit 1. The field-permission service refused the BigInt `sprk_sourceversion` (0x8004f508), even though CanBeSecuredFor* read true. The script reverted that column to unsecured. The owner approved a retype: `sprk_sourceversion` becomes text 20 and `sprk_sizebytes` becomes Integer 0..2147483647. ebilling deleted the two empty BigInt columns; our read-only check confirmed 0 rows and 0 permission rows on them, and that 9 columns were already secured, including `sprk_filestatus`.
+- **Retype scoped check:** PASS on `44c1ef6a2d..5af7f6c879`. We reproduced the Pester runs (088 74/74, 080 85/85; Pester 3.4 under pwsh 7). -WhatIf creates 13, changes 6, skips 31.
+- **Run 2:** exit 0 (13 created, 6 changed, 31 skipped). **Run 3:** idempotent (39 skipped, no publish).
+- **Our independent read-back:**
+  - `sprk_storedfile` (SchemaName `sprk_StoredFile`, UserOwned, audited, primary `sprk_name` 400 required, 0 rows).
+  - 15 columns secured with Writers 444 / Readers 400 plus the platform's System Administrator row; `sprk_blobpath` has Writers only.
+  - Marker `sprk_document.sprk_restrictedbysubmission` secured, default No, 0 Yes rows.
+  - 6 relationships: RemoveLink ×4 (procedureversion, invoice, billingexport, createdbyperson) and Restrict ×2 (sourcedocument, sourcecommunication). All have NoCascade for assign/share/unshare/reparent and Related menu DoNotDisplay.
+  - `sprk_invoice` statuscode 659490005 Superseded at statecode 1, 0 invoices.
+
+## 2026-10-27 01:29:15Z — dev BFF `3ff2c04bf5` (R3 deploy, uac-r2 only)
+
+- Range from `bc99fc3e6b`: #2322 (census accepted exceptions), #2323 and #2324 (access-record proof sees team-held grants). No ontology file. Ontology OK given 2026-10-26.
+- R3 verified DLL ProductVersion `1.0.0+3ff2c04bf5a516a314e4aecae41b4308148c5627`. The 30-minute gate was clean: 0 5xx, 0 403, 0 `worklist_unavailable`, 0 `signal_unreadable`, 0 `access_record_hidden`. The census lines are unchanged (Console User and Ontology Administrator stay Critical until UAC §5.2; security-roles §20).
+- Rollback snapshot: `bc99fc3e6b` at `deploy/rollback/wwwroot-20261027T012731Z`.
+
+## 2026-10-27 — ebilling `Set-ChildRecordCreatorPersonSchema.ps1` on dev (`842c0be38d`, owner-approved for ebilling 081/090)
+
+- Ran dry run, -Apply and -Verify, all exit 0 (VERIFY PASS). It created or secured `sprk_createdbyperson` on procedure, procedureversion, policy, policyversion, ruleset and procedureassignment. Publish was entity-scoped: one PublishXml over the script's 35 child tables, including ours and the two policy tables.
+- Ontology tables were checked only, all OK: the writer profile's only member is `mi-ontology-writer-dev`; it holds field permission on `sprk_createdbyperson` for budgetrevision, decisionrecord and signal, and nothing else.
+- Policy tables: only the BFF-Managed Field Writers may set `sprk_createdbyperson`. Ontology authoring never references the column (checked on master and ebilling), so nothing breaks. The missing creator stamp is DI-128 (#2336).
+
+
+## 2026-10-28 — POL-MATTER-NOBUDGET v3 on spaarkedev1 (D-192, task 166)
+
+- **Approval and source:** owner approved in this session, after a clean `-WhatIf`. Source: docs `4e6f26c1f1` (PR #2385, reviewed).
+- **Command:** `Apply-DoLanePolicies.ps1 -DefinitionPath config/know-promotion.policies.json`, about 12:38Z.
+  - `-WhatIf`: create v3, end v2, move the pointer; no other write.
+  - Apply: created v3 `…6313` (plan `revise-budget`, `assign-task`; next steps `add-todo`, `assign-work`). Ended v2 `sprk_inforceto` at 2026-10-28T00:00:00Z (backdated to v3's `inForceFrom`; review K1, accepted). Current version now points at v3. The enabled flag is unchanged (True). READ-BACK OK.
+  - `-Verify -RequireRows`: policy, v1, v2 and v3 all IN SYNC (exit 0).
+- **Effect:**
+  - Open v2 Signals keep v2's plan (Assign Task only) until the next re-evaluation pass, nightly at 02:30Z. That pass closes them as Superseded and raises v3 Signals, which offer Create budget, then Assign Task.
+  - Matters whose v2 item was Acted are not re-raised (D-119).
+  - The job was not triggered manually.
+- **Re-evaluation run by hand (owner asked, 2026-10-28):**
+  - `POST /api/admin/jobs/signal-reevaluation/trigger` at 13:02:40Z → run `5414d2d6`, ManualAdmin; Succeeded at 13:04:02Z (82 s).
+  - Result: policiesEvaluated 6, hits 149, supersededClosed 54, reraised 54, written 2, unchanged 86. Zero refused, policyFailures, accessDenied and anomalies.
+  - Read-back, `sprk_signalstatus` (`statecode` stays Active by design): v2 has 56 Resolved (54 superseded, plus 2 Acted); v3 has 54 Open.
+
+## 2026-10-28 14:23Z — Console `b445886fed` on dev (task 165, docs→master #2391)
+- **What:** PR #2391 (docs→master, head `756aa0b866`) merged as `b445886fed`. All CI checks passed with none pending. Before merging, a merge-tree preview against master was clean, and master's 11 newer commits (field-mapping docs) overlap none of its files.
+- **Deploy:** `deploy-spaarke-ai.yml` run 40704903667, triggered by the push. It completed with success at 14:23:32Z. No BFF, external SPA or landing change.
+- **Contents:** an optional `WizardShell` `resetKey`; `DecisionWizard` stays one dialog (165). Also the POL-MATTER-NOBUDGET v3 config and tests (166, already applied) and notes.
+- **Notices:** before and after notices went to R3 and uac-r2. word-add-in had no objection and asked not to receive the after-notice.
+- **Dev BFF at the same time:** R3 deployed `e56a3a51d4`. R3's read-back at 14:11:58Z showed DLL `1.0.0+e56a3a51d4…` with `OrdinaryMovesWritesEnabled` off. Ontology gave its OK first. The decide-lane smoke runs after R3's after-notice.
+- **Owner:** reload with Ctrl+F5, then re-check check 2 (one dialog on open, on › and on record) and check 4 (Create budget on v3 items).
+
+## 2026-10-28 — dev BFF `e56a3a51d4` (R3): ontology decide-lane smoke
+- **Deploy:** R3. DLL `1.0.0+e56a3a51d431d924003948ce88ae85940eefbda8`, live from 14:11:58Z. The UAC server gate (14:11–14:41Z) passed. `OrdinaryMovesWritesEnabled` is off: the report-only pass shows moved=0 and writesAttempted=0. Rollback point: the `de38296499` snapshot.
+- **Smoke, run as the owner via az CLI against the BFF API:** PASS.
+  - `GET /api/v1/signals/worklist` returned 200 in 3.8 s, with the Decide lane populated.
+  - `GET /api/v1/signals/47dfaafa-…/decision-plan` returned 200 for a v3 item (`policyVersionId …6313`). Actions: `create-budget` (recommended, first), then `assign-task`. Next steps: `add-todo`, then `assign-work`. This is D-192, and it is check 4 on the server.
+  - **fm-037:** `POST /api/v1/child-records/sprk_workassignment` with `{sprk_name: "zz-fm037-ontology-smoke", sprk_assignedtointernal: contact 8e9918a9…}` returned 201 (id `57e37569-a2c2-4d50-a7a1-b889cf73b168`). Read back: `sprk_assignedto` = `sprk_assignedtointernal` = 8e9918a9…, and the row is team-owned (owneridtype 9). Assign Work rows created before the deploy (for example `10686fa6…`, 00:05Z) have `sprk_assignedto` empty.
+  - **Not exercised:** a real decision commit through Assign Work. Committing one would act on the owner's open UAT items, so the owner's re-check covers it.
+- **Test data:** `zz-fm037-ontology-smoke` (`57e37569-…`) was deleted on 2026-10-28 with the owner's OK. A query by name returns no rows.
+
+## 2026-10-28 — `sprk_budgetnumber` autonumber `BUD-{SEQNUM:6}` on spaarkedev1 (task 167, D-193, owner-approved schema change)
+- **Before:** `AutoNumberFormat` was empty and MaxLength was 20. Existing budget numbers (`B001`, `B002`, `B003-01`, and some blank) are not renumbered.
+- **Change:** a Web API `PUT EntityDefinitions(LogicalName='sprk_budget')/Attributes(LogicalName='sprk_budgetnumber')`.
+  - The body is the full `StringAttributeMetadata` with only `AutoNumberFormat` changed.
+  - Headers: `MSCRM.MergeLabels: true` and `MSCRM.SolutionUniqueName: SpaarkeMaster`. The repo source carries the same format in `SpaarkeMaster/Entities/sprk_Budget/Entity.xml`.
+  - Then `PublishXml` for `sprk_budget` only. There was no tenant-wide publish.
+- **Read-back:** `AutoNumberFormat = BUD-{SEQNUM:6}`, MaxLength 20.
+- **Proof of numbering:** comes with the next budget created (the owner's UAT). No test budget was created, because deleting one needs the owner's OK.
+- **Code:** PR #2403 merged to docs as `4f52d3641f`. It reaches dev with the next docs→master merge and R3's BFF deploy (currency default, budget fields, year rule). The autonumber works now for any create path.
+

@@ -75,6 +75,7 @@ public static class InviteAndGrantExternalUserEndpoint
         CiamUserProvisioningService ciamProvisioner,
         RegistrationEmailService emailService,
         ContactIdentityBinder binder,
+        InviteOrganizationResolver organizations,
         IConfiguration configuration,
         Sprk.Bff.Api.Configuration.CustomerIdentity customer,
         Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer assignedAccess,
@@ -84,15 +85,32 @@ public static class InviteAndGrantExternalUserEndpoint
         TimeProvider timeProvider,
         CancellationToken ct)
     {
-        // Task 185 slice F + §12 I-11: the CIAM provisioner constructs on a host without Ciam:* and validates at first use.
-        // This route needs CIAM for every request, so there it answers a 503 ProblemDetails with the same reason code /grant
-        // reports (ciam_not_configured), before anything is read or written: no contact, no account, no grant.
-        if (!ciamProvisioner.IsConfigured)
-            return InviteExternalUserEndpoint.CiamNotConfiguredResult(httpContext);
-
         // ── Validation ───────────────────────────────────────────────────────
+        // C5: the request's own shape is validated first, on every host, before any lookup: a malformed request is a 400
+        // whether or not this host has a CIAM configuration.
         if (string.IsNullOrWhiteSpace(request.Email))
             return ProblemDetailsHelper.ValidationError("Email is required.");
+
+        if (InviteExternalUserEndpoint.ValidateInvitedTenant(request.InvitedTenantId) is { } tenantProblem)
+            return tenantProblem;
+
+        if (InviteExternalUserEndpoint.ValidateNoInviteKindChoice(request.SendAsPortalAccount) is { } kindProblem)
+            return kindProblem;
+
+        // Task 185 slice F + §12 I-11: the CIAM provisioner constructs on a host without Ciam:* and validates at first use.
+        // A portal-account invite needs CIAM, so there it answers a 503 ProblemDetails with the same reason code /grant
+        // reports (ciam_not_configured), before anything else is read or written: no contact, no account, no grant. Slice
+        // B3: a work-account invite needs no CIAM, so on such a host the organisation is decided first and only a
+        // work-account invite goes on.
+        InviteOrganizationDecision? organizationWithoutCiam = null;
+        if (!ciamProvisioner.IsConfigured)
+        {
+            var (decided, withoutCiamProblem) = await InviteExternalUserEndpoint.DecideOrganizationWithoutCiamAsync(
+                organizations, request, httpContext, ct);
+            if (withoutCiamProblem is not null)
+                return withoutCiamProblem;
+            organizationWithoutCiam = decided;
+        }
 
         if (!Enum.IsDefined(typeof(ExternalAccessLevel), request.AccessLevel))
             return ProblemDetailsHelper.ValidationError(
@@ -125,6 +143,16 @@ public static class InviteAndGrantExternalUserEndpoint
             participations, grantRoot.Type, grantRoot.Id, GrantGranteeKind.Contact, logger, ct);
         if (!policy.IsAllowed)
             return GrantExternalAccessEndpoint.PolicyRefusalProblem(policy, httpContext);
+
+        // Slice B2: a work account (the email's organisation is a configured customer tenant) or a portal account, decided
+        // before any contact is read, onboarded or granted. A malformed domain is a 400; a lookup with no definite answer
+        // is a 503 with nothing written (retry).
+        var (organization, organizationProblem) = organizationWithoutCiam is not null
+            ? (organizationWithoutCiam, null)
+            : await InviteExternalUserEndpoint.DecideOrganizationAsync(organizations, request, httpContext, ct);
+        if (organizationProblem is not null)
+            return organizationProblem;
+        var workAccountTenantId = organization!.WorkAccountTenantId;
 
         // ── Task 139: the grantor ceiling, BEFORE onboarding ──────────────────
         // The caller's own rights on the record, re-probed as them (not trusted from the delegation filter). A probe
@@ -178,6 +206,13 @@ public static class InviteAndGrantExternalUserEndpoint
                 : InviteExternalUserEndpoint.LookupFailureResult(notProvisionable.Failure!, httpContext);
         }
 
+        // Slice B2: a work-account invite to a contact that already carries a sign-in is refused before any grant.
+        if (workAccountTenantId is not null
+            && InviteExternalUserEndpoint.WorkAccountNotProvisionable(invitee, request.Email, logger) is { Refusal: { } bound })
+        {
+            return InviteExternalUserEndpoint.RefusalResult(bound, httpContext);
+        }
+
         GrantGrantee preGrantee;
         switch (invitee.Action)
         {
@@ -211,7 +246,7 @@ public static class InviteAndGrantExternalUserEndpoint
         {
             preCheck = await GrantExternalAccessEndpoint.CheckGrantAsync(
                 preGrantee, requestedLevel, grantRoot.Type, grantRoot.Id, ceiling,
-                dataverseClient, participations, accessibleRecords, logger, ct);
+                dataverseClient, participations, accessibleRecords, binder.Store, logger, ct);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
@@ -283,6 +318,7 @@ public static class InviteAndGrantExternalUserEndpoint
         // ── Step 1: Onboard (idempotent CIAM provision) — reuse the invite core (task 025) ──
         Guid contactId;
         string onboardStatus;
+        string? writtenInviteStamp;
         bool? emailSent;
         string? emailErrorCode;
         try
@@ -290,7 +326,7 @@ public static class InviteAndGrantExternalUserEndpoint
             // The resolution the checks above judged — onboarding does not look the email up again.
             var outcome = await ExternalInviteService.ProvisionAsync(
                 request, dataverseClient, ciamProvisioner, emailService, binder, portalUrl,
-                InviteExternalUserEndpoint.InviteLinkCustomerKey(customer), logger, invitee, ct);
+                InviteExternalUserEndpoint.InviteLinkCustomerKey(customer), logger, invitee, ct, workAccountTenantId);
 
             // Task 141: a refused onboarding writes NO grant. Granting a contact an employee's work identity
             // owns would hand the employee's contact a CIAM grant it can never use — or worse, one it can.
@@ -308,11 +344,18 @@ public static class InviteAndGrantExternalUserEndpoint
                 return InviteExternalUserEndpoint.LookupFailureResult(failure, httpContext);
             }
 
-            (contactId, onboardStatus) = (outcome.ContactId, outcome.Status);
+            (contactId, onboardStatus, writtenInviteStamp) = (outcome.ContactId, outcome.Status, outcome.WrittenInviteStamp);
 
             // Adversarial pass 2, F2: an invite email that did not send is reported (the grant still proceeds), the same
             // way on the new-account and the existing-account branch (§12 I-10).
             (emailSent, emailErrorCode) = InviteExternalUserEndpoint.InviterVisibleEmail(outcome);
+
+            // Slice C2c: a contact that already has an account is due no invite email (the grant email below is its notice,
+            // reported as notificationFailed), so emailSent is false, never null, with its own code, as on /invite.
+            if (string.Equals(outcome.Status, InviteExternalUserEndpoint.AlreadyProvisionedStatus, StringComparison.Ordinal))
+            {
+                (emailSent, emailErrorCode) = (false, ContactBindingDecision.InviteContactAlreadyHasAccount);
+            }
         }
         catch (Exception ex)
         {
@@ -349,7 +392,7 @@ public static class InviteAndGrantExternalUserEndpoint
             // not happen.
             grantOutcome = await GrantExternalAccessEndpoint.CreateGrantAsync(
                 grantRequest, grantRoot.Type, grantRoot.Id, today, ceiling, callerSystemUserId,
-                dataverseClient, participations, accessibleRecords, ownership, ownerPrivileges, logger, ct,
+                dataverseClient, participations, accessibleRecords, binder.Store, ownership, ownerPrivileges, logger, ct,
                 reAddRestoresLapsed: true, resolvedOwnerTeamId: ownerTeamId);
 
             // Task 138: the core's own policy check refused (the record changed after the pre-check above) — or, since
@@ -361,7 +404,10 @@ public static class InviteAndGrantExternalUserEndpoint
                     "[EXT-INVITE-GRANT] Onboarded Contact {ContactId} but the grant core refused the grant: {ReasonCode}.",
                     contactId, refusal.ReasonCode);
                 return GrantExternalAccessEndpoint.PolicyRefusalProblem(
-                    refusal, httpContext, new Dictionary<string, object?> { ["contactId"] = contactId });
+                    refusal, httpContext,
+                    await WithUnsentInviteRetractedAsync(
+                        new Dictionary<string, object?> { ["contactId"] = contactId }, binder, contactId, writtenInviteStamp,
+                        logger));
             }
 
             accessRecordId = grantOutcome.AccessRecordId;
@@ -380,13 +426,14 @@ public static class InviteAndGrantExternalUserEndpoint
                     statusCode: StatusCodes.Status409Conflict,
                     title: "Grant did not take effect",
                     detail: warning,
-                    extensions: new Dictionary<string, object?>
-                    {
-                        ["traceId"] = httpContext.TraceIdentifier,
-                        ["reasonCode"] = "sdap.grant.expired_not_restored",
-                        ["accessRecordId"] = accessRecordId,
-                        ["contactId"] = contactId,
-                    });
+                    extensions: await WithUnsentInviteRetractedAsync(
+                        new Dictionary<string, object?>
+                        {
+                            ["traceId"] = httpContext.TraceIdentifier,
+                            ["reasonCode"] = "sdap.grant.expired_not_restored",
+                            ["accessRecordId"] = accessRecordId,
+                            ["contactId"] = contactId,
+                        }, binder, contactId, writtenInviteStamp, logger));
             }
         }
         catch (Exception ex)
@@ -400,11 +447,12 @@ public static class InviteAndGrantExternalUserEndpoint
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Internal Server Error",
                 detail: "The external user was onboarded but granting project access failed. Re-run the action to retry the grant.",
-                extensions: new Dictionary<string, object?>
-                {
-                    ["traceId"] = httpContext.TraceIdentifier,
-                    ["contactId"] = contactId
-                });
+                extensions: await WithUnsentInviteRetractedAsync(
+                    new Dictionary<string, object?>
+                    {
+                        ["traceId"] = httpContext.TraceIdentifier,
+                        ["contactId"] = contactId
+                    }, binder, contactId, writtenInviteStamp, logger));
         }
 
         logger.LogInformation(
@@ -429,6 +477,21 @@ public static class InviteAndGrantExternalUserEndpoint
                 == GrantNotificationOutcome.Failed;
         }
 
+        // Slice B3: a work-account stamp landed (no CIAM email was sent), and the grant is written, so the notice may name
+        // the record. Sent only here, after the grant: a refused or failed grant returned above, with no notice.
+        if (string.Equals(onboardStatus, InviteExternalUserEndpoint.WorkAccountInvitedStatus, StringComparison.Ordinal))
+        {
+            var record = new ExternalInviteService.WorkAccountNoticeRecord(
+                ExternalGrantRoot.LabelFor(grantRoot.Type),
+                await GrantAccessNotifier.ReadRecordNameAsync(dataverseClient, logger, grantRoot.Type, grantRoot.Id));
+            (onboardStatus, emailSent, emailErrorCode) = await ExternalInviteService.SendWorkAccountNoticeAsync(
+                    emailService, request.Email, portalUrl, InviteExternalUserEndpoint.InviteLinkCustomerKey(customer), record,
+                    contactId, logger, binder, writtenInviteStamp)
+                ? (onboardStatus, true, (string?)null)
+                // C5: the notice did not send, so the stamp was retracted: the invite is answered as not sent, never as made.
+                : (InviteExternalUserEndpoint.InviteNotSentStatus, false, GrantInviteStatus.EmailNotSentReasonCode);
+        }
+
         // Task 185 §12 I-10: the inviter is never told that the email already had a CIAM account (the log above keeps it).
         return TypedResults.Ok(new InviteAndGrantResponse(
             contactId, InviteExternalUserEndpoint.InviterVisibleStatus(onboardStatus), accessRecordId, portalUrl,
@@ -437,5 +500,36 @@ public static class InviteAndGrantExternalUserEndpoint
             NotificationFailed: notificationFailed,
             EmailSent: emailSent,
             EmailErrorCode: emailErrorCode));
+    }
+
+    /// <summary>The problem extension that reports what became of the invite a refused or failed grant left unsent.</summary>
+    internal const string PendingInviteExtension = "pendingInvite";
+
+    /// <summary>
+    /// Slice C2c: a pending invite exists only if its email went out. The work-account notice is sent only after the grant
+    /// is written, so when the grant is refused, confers nothing or fails AFTER this request wrote the stamp, the invite this
+    /// request wrote is retracted through <see cref="ExternalInviteService.RetractUnsentInviteAsync"/> (its own row version,
+    /// cleared only while the contact still carries this stamp: a newer invite is never cleared), and the next invite writes
+    /// and sends a new one. The outcome is reported in <see cref="PendingInviteExtension"/>: <c>retracted</c>,
+    /// <c>superseded</c> (a newer invite or a bind replaced it) or <c>retract_failed</c> (logged at Error; it may still be
+    /// pending). No stamp written (a portal-account invite, whose email was sent before the grant) adds nothing.
+    /// </summary>
+    private static async Task<Dictionary<string, object?>> WithUnsentInviteRetractedAsync(
+        Dictionary<string, object?> extensions, ContactIdentityBinder binder, Guid contactId, string? writtenInviteStamp,
+        ILogger logger)
+    {
+        var retract = await ExternalInviteService.RetractUnsentInviteAsync(binder, contactId, writtenInviteStamp, logger)
+            .ConfigureAwait(false);
+        if (retract is { } outcome)
+        {
+            extensions[PendingInviteExtension] = outcome switch
+            {
+                InviteRetractOutcome.Retracted => "retracted",
+                InviteRetractOutcome.Superseded => "superseded",
+                _ => "retract_failed",
+            };
+        }
+
+        return extensions;
     }
 }

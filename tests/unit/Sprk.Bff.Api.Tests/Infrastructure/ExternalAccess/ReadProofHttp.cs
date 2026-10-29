@@ -1,0 +1,137 @@
+using System.Net;
+using System.Text.Json;
+using System.Text.RegularExpressions;
+
+namespace Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess;
+
+/// <summary>
+/// A hand-written fake Dataverse Web API for the identity store's readability proof (testing.md B1 bans
+/// <c>Mock&lt;HttpMessageHandler&gt;</c>, not a fake; the same shape as <c>DataverseContactIdentityStoreTests.ScriptedHttp</c>).
+/// It answers by route, so a store's own sequence of reads is exercised as the store makes it:
+/// <list type="bullet">
+///   <item><c>WhoAmI</c>: the BFF's user (<see cref="Me"/>);</item>
+///   <item><c>roles?fetchXml=</c>: evaluates the query's role condition (by <c>name</c> or <c>roletemplateid</c>) against
+///     the roles the user holds (<see cref="Roles"/>), so it is the QUERY that decides;</item>
+///   <item><c>fieldpermissions?fetchXml=</c>: the asked-for columns the user's own (<see cref="DirectGrants"/>) or team
+///     (<see cref="TeamGrants"/>) profiles grant Read on, each row naming <see cref="GrantsTable"/>;</item>
+///   <item><c>contacts(id)</c> and <c>contacts?</c>: <see cref="ContactBody"/> and <see cref="ContactsBody"/>.</item>
+/// </list>
+/// With <see cref="ProofFaults"/> every proof read answers 503. Every request URI is recorded in <see cref="Requests"/>.
+/// A write (any method but GET) is answered <see cref="WriteStatus"/> and recorded, with its method, <c>If-Match</c> and
+/// body, in <see cref="Writes"/>.
+/// </summary>
+internal sealed class ReadProofHttp : IHttpClientFactory
+{
+    public static readonly Guid Me = Guid.Parse("cccccccc-0000-4000-8000-0000000000f1");
+
+    public List<(string Name, Guid Template)> Roles { get; } = new();
+
+    public HashSet<string> DirectGrants { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    public HashSet<string> TeamGrants { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The table each granted row names (<c>entityname</c>); default <c>contact</c>.</summary>
+    public string GrantsTable { get; set; } = "contact";
+
+    public bool ProofFaults { get; set; }
+
+    public string ContactBody { get; set; } = "{}";
+
+    /// <summary>The answer to a read of one contact (<c>contacts(id)</c>); default 200 with <see cref="ContactBody"/>. A 400
+    /// with a body naming a property the environment lacks is how Dataverse answers a <c>$select</c> of a column that is not
+    /// provisioned.</summary>
+    public HttpStatusCode ContactStatus { get; set; } = HttpStatusCode.OK;
+
+    public string ContactsBody { get; set; } = "{\"value\":[]}";
+
+    public List<string> Requests { get; } = new();
+
+    /// <summary>The answer to every write (default 204 No Content).</summary>
+    public HttpStatusCode WriteStatus { get; set; } = HttpStatusCode.NoContent;
+
+    /// <summary>Every write: method, URI, <c>If-Match</c> (null when absent) and body.</summary>
+    public List<(HttpMethod Method, string Uri, string? IfMatch, string Body)> Writes { get; } = new();
+
+    public int WhoAmICount => Requests.Count(r => r.EndsWith("/WhoAmI", StringComparison.Ordinal));
+
+    public HttpClient CreateClient(string name) => new(new Handler(this));
+
+    private (HttpStatusCode Code, string Body) Answer(string uri)
+    {
+        var path = Uri.UnescapeDataString(uri[(uri.IndexOf("/api/data/v9.2/", StringComparison.Ordinal) + "/api/data/v9.2/".Length)..]);
+        var proofRead = path == "WhoAmI" || path.StartsWith("roles?", StringComparison.Ordinal)
+            || path.StartsWith("fieldpermissions?", StringComparison.Ordinal);
+        if (proofRead && ProofFaults)
+        {
+            return (HttpStatusCode.ServiceUnavailable, "{\"error\":{\"message\":\"throttled\"}}");
+        }
+
+        if (path == "WhoAmI")
+        {
+            return (HttpStatusCode.OK, JsonSerializer.Serialize(new { UserId = Me }));
+        }
+
+        if (path.StartsWith("roles?", StringComparison.Ordinal))
+        {
+            var condition = Regex.Match(path, "<entity name=\"role\">.*?<filter><condition attribute=\"(\\w+)\" operator=\"eq\" value=\"([^\"]+)\" />");
+            var attribute = condition.Groups[1].Value;
+            var value = condition.Groups[2].Value;
+            var held = Roles.Where(r => attribute switch
+            {
+                "name" => r.Name == value,
+                "roletemplateid" => Guid.TryParse(value, out var t) && t == r.Template,
+                _ => false,
+            });
+            return (HttpStatusCode.OK, Values(held.Select(_ => (object)new { roleid = Guid.NewGuid() })));
+        }
+
+        if (path.StartsWith("fieldpermissions?", StringComparison.Ordinal))
+        {
+            var grants = path.Contains("teamprofiles", StringComparison.Ordinal) ? TeamGrants : DirectGrants;
+            var asked = Regex.Matches(path, "<value>([^<]+)</value>").Select(m => m.Groups[1].Value);
+            return (HttpStatusCode.OK, Values(asked.Where(grants.Contains)
+                .Select(c => (object)new { attributelogicalname = c, entityname = GrantsTable })));
+        }
+
+        if (path.StartsWith("contacts(", StringComparison.Ordinal))
+        {
+            return (ContactStatus, ContactBody);
+        }
+
+        if (path.StartsWith("contacts?", StringComparison.Ordinal))
+        {
+            return (HttpStatusCode.OK, ContactsBody);
+        }
+
+        return (HttpStatusCode.NotFound, "{}");
+    }
+
+    private static string Values(IEnumerable<object> rows) => JsonSerializer.Serialize(new { value = rows.ToArray() });
+
+    private sealed class Handler(ReadProofHttp owner) : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            var uri = request.RequestUri!.ToString();
+            lock (owner.Requests)
+            {
+                owner.Requests.Add(uri);
+            }
+
+            if (request.Method != HttpMethod.Get)
+            {
+                var sent = request.Content is null ? string.Empty : await request.Content.ReadAsStringAsync(ct);
+                var ifMatch = request.Headers.TryGetValues("If-Match", out var values) ? values.Single() : null;
+                lock (owner.Writes)
+                {
+                    owner.Writes.Add((request.Method, uri, ifMatch, sent));
+                }
+
+                return new HttpResponseMessage(owner.WriteStatus) { Content = new StringContent(string.Empty) };
+            }
+
+            var (code, body) = owner.Answer(uri);
+            return new HttpResponseMessage(code) { Content = new StringContent(body) };
+        }
+    }
+}

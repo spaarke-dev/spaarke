@@ -453,7 +453,7 @@ public sealed class CallerPrincipalResolver : ICallerPrincipalResolver
 /// <para>Task 141: resolution moved from <c>ExternalParticipationService</c> (the grant-data reader) to
 /// <see cref="ContactIdentityBinder"/>, which runs the one binding decision both planes share. Each deny now
 /// carries the decision's OWN code — ambiguity, collision, unreadable binding, inactive contact — instead of
-/// one <c>contact_not_found</c> for all of them, so the audit trail can tell an outage from a hijack attempt.</para>
+/// one <c>contact_not_found</c> for all of them, so the audit trail can tell an outage from an identity conflict.</para>
 /// <para>Task 135: before it this strategy built the principal from <c>ExternalParticipationService.GetGrantSetAsync</c>
 /// alone, on each grant's all-sources level: none of the three rules ran, so a contact on the No Access
 /// List, holding a grant on a Restricted record, or inheriting an organization grant on a Secure record kept
@@ -517,7 +517,11 @@ public sealed class CiamContactPrincipalStrategy : ICallerPrincipalStrategy
             _logger.LogWarning(
                 "[EXT-AUTH] Cannot resolve Dataverse Contact ({DenyCode}; oid present: {HasOid}, email present: {HasEmail})",
                 code, !string.IsNullOrEmpty(oid), !string.IsNullOrEmpty(email));
-            return CallerPrincipalResolution.Denied(ProblemDetailsHelper.Forbidden(code, CiamDenyDetail(code)));
+
+            // A person whose external access an administrator removed is answered exactly as one who is not invited; the
+            // log line above (and the binder's) keeps the specific code for operators.
+            var answer = code == ContactBindingDecision.DenyContactRemoved ? ContactBindingDecision.DenyContactNotInvited : code;
+            return CallerPrincipalResolution.Denied(ProblemDetailsHelper.Forbidden(answer, CiamDenyDetail(answer)));
         }
 
         var contactId = binding.ContactId!.Value;
@@ -661,6 +665,15 @@ public sealed class WorkforcePrincipalStrategy : ICallerPrincipalStrategy
         "You're signed in as a guest of the Spaarke directory. Sign in with your own organization's work account instead: "
         + "open the portal in a browser and choose your work or school account.";
 
+    /// <summary>
+    /// The ProblemDetails detail for <see cref="ContactBindingDecision.DenyContactNotInvited"/> on the workforce plane: the
+    /// email matches a record, but no current invitation names this sign-in. Never says which part of the invitation did not
+    /// match.
+    /// </summary>
+    internal const string WorkforceNotInvitedDetail =
+        "Your work account has not been invited to this workspace yet, or the invitation has expired. Ask the person who "
+        + "works with you here to invite you again.";
+
     private readonly IWorkforcePrincipalResolver _resolver;
     private readonly IAccessibleRecordSetService _accessibleSet;
     private readonly ILogger<WorkforcePrincipalStrategy> _logger;
@@ -721,12 +734,38 @@ public sealed class WorkforcePrincipalStrategy : ICallerPrincipalStrategy
                         }));
 
                 case WorkforceDenyReason.PrincipalNotResolved
+                    when resolution.DenyCode == ContactBindingDecision.DenyOwnerUnconfigured:
+                    // ISS-005 (#1673): the first sign-in could not create the caller's contact because no customer owner team
+                    // resolves (ExternalAccess:CustomerBusinessUnitId unset, the Secure Record unit, or not one default team).
+                    // The same answer the registration route gives for the same cause: 500, the same reason code, nothing created.
+                    _logger.LogError("[WF-AUTH] Denying request: {DenyCode}", resolution.DenyCode);
+                    return CallerPrincipalResolution.Denied(Results.Problem(
+                        statusCode: StatusCodes.Status500InternalServerError,
+                        title: "Internal Server Error",
+                        detail: "Sign-in is not configured for this organization. Nothing was created; contact your administrator.",
+                        extensions: new Dictionary<string, object?>
+                        {
+                            ["reasonCode"] = resolution.DenyCode,
+                            ["errorCode"] = resolution.DenyCode,
+                        }));
+
+                case WorkforceDenyReason.PrincipalNotResolved
                     when resolution.DenyCode == WorkforceMembershipTest.DenyGuestUseHomeSignin:
                     // #2128: the customer-tenant guest is told where to sign in instead. Same shape as the CIAM plane's
                     // contact_not_invited (ProblemDetailsHelper.Forbidden with a detail).
                     _logger.LogWarning("[WF-AUTH] Denying request: {DenyCode}", resolution.DenyCode);
                     return CallerPrincipalResolution.Denied(ProblemDetailsHelper.Forbidden(
                         WorkforceMembershipTest.DenyGuestUseHomeSignin, GuestUseHomeSignInDetail));
+
+                case WorkforceDenyReason.PrincipalNotResolved
+                    when resolution.DenyCode is ContactBindingDecision.DenyContactNotInvited
+                        or ContactBindingDecision.DenyContactRemoved:
+                    // The email bind needs a current invite naming this sign-in: the fix is a new invitation. Same shape as
+                    // the CIAM plane's contact_not_invited, so the SPA shows this detail. A person whose external access an
+                    // administrator removed gets this same answer; the log line keeps the specific code for operators.
+                    _logger.LogWarning("[WF-AUTH] Denying request: {DenyCode}", resolution.DenyCode);
+                    return CallerPrincipalResolution.Denied(ProblemDetailsHelper.Forbidden(
+                        ContactBindingDecision.DenyContactNotInvited, WorkforceNotInvitedDetail));
 
                 case WorkforceDenyReason.PrincipalNotResolved:
                 default:

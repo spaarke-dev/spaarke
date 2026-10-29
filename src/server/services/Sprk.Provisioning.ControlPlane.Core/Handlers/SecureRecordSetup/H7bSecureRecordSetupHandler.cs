@@ -368,8 +368,7 @@ public sealed class H7bSecureRecordSetupHandler : IProvisioningHandler
         CancellationToken cancellationToken)
     {
         var completedAt = _timeProvider.GetUtcNow();
-        run.Status = RunStatus.Running;
-        run.CurrentPhase = HandlerIdentifier;
+        run.MarkPhaseSucceeded(HandlerIdentifier);
         run.CompletedPhases.Add(new CompletedPhase
         {
             Phase = HandlerIdentifier,

@@ -99,6 +99,7 @@ public partial class ContactGrantAuthorizationTests
         var h = WireInviteSeams();
         _identities.Contacts[Colleague].InvitedOn = h.Time.GetUtcNow().AddDays(-3);
         _identities.Contacts[Colleague].InviteCodeHash = "v1.pending";
+        _identities.Contacts[Colleague].InvitedEmailHash = "v1:pending-stamp";
 
         var body = Ok<ContactGrantResponse>(await Grant(Request(ExternalAccessLevel.Collaborate), Ciam(ExternalAccessLevel.Collaborate)));
 

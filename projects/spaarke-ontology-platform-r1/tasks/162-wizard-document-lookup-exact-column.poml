@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="162" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Wizards bind an uploaded document to the parent through the exact lookup column, never the first of two (114 UAT round 1)</title>
+    <phase>5b Modal system</phase>
+    <gate>startable (owner UAT 2026-10-22; blocks closing 114)</gate>
+    <status>in-progress</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies shared client code (.ts) used by several wizards.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single shared helper plus its callers, with an exact contract and a reference implementation (matterService._resolveNavProp).</model-tier-reason>
+    <effort>high</effort>
+    <deps>114 (found there)</deps>
+    <tags>frontend,react,testing</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <parallel-group>K</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>The owner ran the in-app Create Work Assignment wizard on dev with a file. The new sprk_document got `sprk_relatedworkassignment` set and `sprk_workassignment` left empty, so the Work Assignment form's Documents list does not show it. Setting `sprk_workassignment` by hand makes it appear. On dev, sprk_document has TWO lookups to each of sprk_workassignment, sprk_matter, sprk_project and sprk_invoice (the parent column `sprk_X` and a newer `sprk_relatedX`). Code that picks "the first relationship to the parent" or matches a column hint as a substring binds to whichever Dataverse lists first.</prompt>
+  <role>SPAARKE front-end engineer (shared UI library).</role>
+  <goal>Every wizard that creates sprk_document rows for a new parent binds the parent through the parent column `sprk_{parent}` exactly (sprk_workassignment, sprk_project, sprk_invoice, sprk_matter), whatever order Dataverse returns the relationships in.</goal>
+
+  <context>
+    <background>Found in task 114 UAT round 1 (notes/uat-v4-log.md). Not a regression of the WizardShell migration: `_resolveDocNavProp` dates from d474e46df6 (2026-03-19); the ambiguity appeared when the `sprk_related*` lookups were added. Dev relationships (2026-10-22): sprk_document → sprk_workassignment {sprk_relatedworkassignment, sprk_workassignment}; → sprk_matter {sprk_relatedmatter, sprk_matter}; → sprk_project {sprk_relatedproject, sprk_project}; → sprk_invoice {sprk_relatedinvoice, sprk_invoice}. The model-driven forms' Documents lists use the parent column (owner check for work assignment).</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts:408-421 `findNavProp` (column hint matched with `includes`, then falls back to matches[0])</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateWorkAssignmentWizard/workAssignmentService.ts:79-86 `_resolveDocNavProp` (first match, no column) and :550-551 its call; :645 `findNavProp(navProps, 'sprk_workassignment', 'workassignment')`</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateInvoiceWizard/invoiceService.ts:306 `findNavProp(docNavProps, 'sprk_invoice', 'invoice')` and :319 the host lookup</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/projectService.ts:71 local `_findNavProp` and :357 its call</file>
+      <file>REFERENCE TO COPY: src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/matterService.ts:109 `_resolveNavProp(navPropMap, columnLogical)` (exact column → nav-prop) and :380 its document call</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>findNavProp (PolymorphicResolverService.ts:408) and three local copies already resolve nav-props; matterService resolves by exact column.</existing>
+    <extension>Extends findNavProp with an exact-column match ahead of the substring hint; no new helper.</extension>
+    <cost-of-doing-nothing>Documents uploaded in the Work Assignment wizard (and, depending on relationship order, the Invoice and Project wizards) do not appear on the parent's form.</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="owner 2026-10-22">The parent column is `sprk_{parent}` (sprk_workassignment, sprk_project, sprk_invoice, sprk_matter). Do not also set `sprk_related{parent}` in this task (the owner has not decided its role; record the question in task notes).</constraint>
+    <constraint source="project">findNavProp: when a hint is given, an entry whose columnName equals the hint (case-insensitive) wins; then the existing substring match; then the existing fallback. Callers that bind a document to its parent pass the full column name (e.g. 'sprk_workassignment'), not a fragment.</constraint>
+    <constraint source="project">`_resolveDocNavProp` in workAssignmentService.ts is removed; the call uses findNavProp with the exact column. The project wizard's local `_findNavProp` gets the same exact-first rule or is replaced by the shared findNavProp (one helper preferred).</constraint>
+    <constraint source="ADR-012">No Xrm in the shared library; nav-prop discovery stays as it is.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files.</step>
+    <step order="1">Write the failing tests first: findNavProp given both entries in either order and hint 'sprk_workassignment' returns the sprk_workassignment nav-prop; the work-assignment, invoice and project document binds use the parent column with the entries in both orders.</step>
+    <step order="2">Change findNavProp and the callers listed; remove `_resolveDocNavProp`.</step>
+    <step order="3">Search the shared library and src/solutions for any other document-to-parent bind by referenced entity alone (grep `referencedEntity ===` and `findNavProp(` on sprk_document nav-props) and list each in the notes with keep/fix.</step>
+    <step order="4">Build the shared library and the hosts that bundle these wizards; deploy per task 114's path; on dev, create a work assignment, an invoice and a project each with one file, and confirm the file shows on the parent's Documents list. Delete the test records (zz- prefix).</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given sprk_document nav-prop entries for both sprk_relatedworkassignment and sprk_workassignment in either order, when the work-assignment wizard binds an uploaded document, then it uses the sprk_workassignment nav-prop.</criterion>
+    <criterion testable="true">The same for the invoice wizard (sprk_invoice) and the project wizard (sprk_project), both orders.</criterion>
+    <criterion testable="true">findNavProp with a hint equal to a columnName returns that entry even when a different entry contains the hint as a substring and is listed first; with a fragment hint and one match it behaves as before (must-not-fire).</criterion>
+    <criterion testable="true">On dev, a file uploaded in each of the three wizards appears on the parent record's Documents list; recorded in notes/deploy-log.md with the environment named; test records deleted.</criterion>
+    <criterion testable="true">Test scope: the contract above, both relationship orders, and the unchanged single-match path. Anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If a parent's model-driven Documents list turns out to use `sprk_related{parent}` instead of `sprk_{parent}`, STOP and ask the owner which column is canonical.</trigger>
+  </escalation>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/uat-v4-log.md</file>
+    </files>
+  </knowledge>
+  <notes>
+    Code complete on branch task/162-doc-exact-column; steps 1-3 done (see notes/task-162-notes.md: keep/fix list, open owner question on the role of sprk_related{parent}, form/subgrid finding: all three Documents subgrids use sprk_{parent}, escalation did not fire). Step 4 (build hosts, deploy, dev check) is pending in the main session; status stays in-progress until the dev check is recorded in notes/deploy-log.md.
+  </notes>
+</task>
