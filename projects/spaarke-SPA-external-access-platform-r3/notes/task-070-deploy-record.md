@@ -35,3 +35,13 @@ Owner direction 2026-10-20: "070-071-072 - yes proceed".
 - Rollback: tag `external-spa-dev-rollback-28274e04e` → `gh workflow run deploy-external-spa.yml --ref external-spa-dev-rollback-28274e04e -f environment=dev`.
 - Owner smoke (pending): partner sign-in (normal window); the old failing path (company account → "not set up" → "choose a different sign-in" → Partner); Ralph Dewey workspace; UAC: on a ViewOnly project (the admin has 22; any but `b12496d1…`) upload / new to-do / new event hidden or disabled and no 403 in the network panel; on FullAccess `b12496d1…` they show; no new `useAccessLevel` console errors.
 
+
+## Teams live checks: progress 2026-10-29
+
+- **Spaarke tenant (unknown directory):** the package was uploaded and the app added. The tab shows "Your organization is not set up for Spaarke" as designed: the Teams startup reads the tenant first and makes no token request or backend call (`main.tsx` `bootstrapTeams`). Client not yet stated by the owner.
+- **Dewey Cheatham:** the Teams admin center refused `admin@…` with `INVALID_PRIVILEGE` (open, with the owner; roles to be checked as active). The app was nevertheless added in Teams, and the owner reports "the SPA workforce portal works". Server (App Insights):
+  - 16:44–16:49Z: one home account was refused registration five times (`registration_email_missing`: no email attribute; the form issue is ISS-023 / #2449);
+  - 16:51:12Z: `POST /registration` 201, a new WorkforceHome contact created (1 contact with an identity plane created since 16:00Z);
+  - after that, the account resolves as a ContactOnly workforce principal with 0 roots (a new contact with no grants).
+- **Test artifact:** that new contact is probably the Dewey Cheatham admin account registering itself. Remove it after testing if it should not stay.
+- **Still to run:** Tracy Cheatham (workforce contact) and Ralph Dewey (licensed user) in Teams desktop, web and mobile.
