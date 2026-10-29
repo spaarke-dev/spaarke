@@ -3,7 +3,7 @@
   <metadata>
     <title>Apply-DoLanePolicies.ps1 owns the policy and version rows it creates to the customer business unit's restricted-content team (D-197, UAC round 137)</title>
     <phase>11 UAT</phase>
-    <gate>blocked until uac-r2 R4b-2c (the customer-BU restricted-content owner team: name, lookup and fail-closed rules) is merged to master</gate>
+    <gate>startable: uac-r2 R4b-2c (`Infrastructure/Dataverse/RestrictedContentOwnerTeam.cs`: name, customer-top-unit walk, fail-closed rules) is on master in 194b, 2cd0f62e2c (2026-10-29). Copy its rule; dev team "Spaarke Restricted Content Owners" 16685363-43d3-f111-84e8-00224820fd20 in BU1 (uac-r2), for -WhatIf only</gate>
     <status>pending</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>An operator script (.ps1) and its Pester tests, with no BFF code. It modifies tests, so code-review and adr-check run.</rigor-reason>
