@@ -122,6 +122,9 @@ public static class SignalsModule
         // Task 168 (D-194): Assign Task's email (as the assigner, else the system mailbox from an ADR-004 job) and bell, after the record.
         // Scoped like AssignedAccessStore, which it takes; the handler is scoped because IIdempotencyService is. Unconditional (F.1): its
         // dependencies (CommunicationService, NotificationService, JobSubmissionService) are.
+        // Fix round (D-199): the ONE recipient gate the notifier and its job both ask. Scoped like AssignedAccessStore and
+        // SecureShareNoAccessGuard, which it takes; unconditional because they all are (AddExternalAccess).
+        services.AddScoped<AssignTaskRecipientGate>();
         services.AddScoped<AssignTaskNotifier>();
         services.AddScoped<IJobHandler, AssignTaskEmailJobHandler>();
         services.AddScoped<DecisionCommitService>();
