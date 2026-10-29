@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="170" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Faster decision commit: per-request caller identity and cached entity metadata (D-196, UAT round 2 item 3)</title>
+    <phase>11 UAT</phase>
+    <gate>startable (D-196). Changes in uac-r2-owned files need uac-r2's review before merge</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Touches access-probe code and a shared Dataverse client in Sprk.Bff.Api / Spaarke.Dataverse (.cs); security-adjacent (caller identity); modifies tests.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Caching near authorization code: a cache scoped wrong would cross callers. This needs judgment on scope and on which call sites to change.</model-tier-reason>
+    <effort>high</effort>
+    <deps>none</deps>
+    <tags>bff,api,performance,auth,testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+    <parallel-group>M</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Owner UAT round 2 (notes/uat-v4-log.md, 2026-10-28, item 3; D-196): recording a decision takes 20-30 s.
+    <ul>
+      <li><b>Measured</b> (App Insights operation `855d86446126417c11e942af2542d358`, 15:10:51Z, 24.0 s): 261 dependencies, all serial, with no throttling and no external services.</li>
+      <li>35 `WhoAmI` calls (3.0 s) and 29 `RetrievePrincipalAccess` calls (2.6 s).</li>
+      <li>About 30 `EntityDefinitions` metadata lookups (2.7 s, plus WCF `RetrieveEntityRequest`). `DataverseServiceClientImpl.GetEntitySetNameAsync` (`src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs:1459`) asks on every call. `DataverseWebApiService` (`:290`) has `_entitySetNameCache`. `IGenericEntityService` binds to the composite `IDataverseService` (`Infrastructure/DI/GraphModule.cs:140`), which takes the uncached path.</li>
+      <li>6 identical `sprk_recordtype_refs(id)` reads.</li>
+      <li>Three 400s on `systemusers(...)/Retrieve`.</li>
+    </ul>
+  </prompt>
+  <role>SPAARKE BFF engineer (performance, Dataverse access layer).</role>
+  <goal>The decision commit route issues `WhoAmI` at most once per request and repeats no `EntityDefinitions` lookup within the process for a table already resolved. Commit wall time on dev drops measurably (target: at least 5 s off the 24 s sample). Every access decision, ownership answer and write is unchanged.</goal>
+
+  <context>
+    <background>
+      Call sites from the measurement:
+      <ul>
+        <li>`Infrastructure/ExternalAccess/CallerRecordAccessProbe.cs:414` `GetCallerSystemUserIdAsync` (uac-r2-owned file, CLAUDE.md project §4).</li>
+        <li>`DecisionCommitService.cs:778, :930` (caller id), and `:816, :978, :1516, :1539, :1571` (`CallerMayDecideAsync` / `CallerHoldsOnAsync`).</li>
+        <li>`:1560, :1632` (entity-set and `sprk_recordtype_ref` reads).</li>
+      </ul>
+      Find the other `WhoAmI` and metadata callers on the commit path by tracing. The test harness can count calls through the fakes.
+    </background>
+    <relevant-files>
+      <file>src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs</file>
+      <file>src/server/shared/Spaarke.Dataverse/DataverseWebApiService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerRecordAccessProbe.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Signals/DecisionCommitService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/GraphModule.cs</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>`DataverseWebApiService._entitySetNameCache` (an existing cache for the same answer), and the request-scoped DI lifetime.</existing>
+    <extension>Give `DataverseServiceClientImpl.GetEntitySetNameAsync` the same kind of cache (or route it through the existing one). Memoise the caller's systemuserid per request. No new service unless a scoped holder is unavoidable, in which case justify it in the PR (CLAUDE.md §11).</extension>
+    <cost-of-doing-nothing>Every decision takes 20-30 s to record (owner UAT). About a third of that is repeated identical lookups.</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="security">The caller's systemuserid is memoised for ONE request and ONE caller identity. It never sits in a singleton or static keyed by anything a different caller could hit, and it is never shared across requests, users or app-only versus OBO clients. Prove both with tests: two callers in parallel, and app-only versus OBO. Access results (`RetrievePrincipalAccess`, privilege checks) are NOT cached in this task.</constraint>
+    <constraint source="metadata">The entity-set name and the `sprk_recordtype_ref` row are immutable metadata, so a process-wide cache keyed by logical name or id is allowed. Never cache a failure. Thread safety: `ConcurrentDictionary`.</constraint>
+    <constraint source="D-17 / fail closed">Commit order, the DR-last rule, the ownership resolution and every refusal path stay byte-for-byte the same in behaviour. All existing DecisionCommit and Signals tests pass unchanged.</constraint>
+    <constraint source="coordination">If `CallerRecordAccessProbe.cs` (uac-r2) must change, keep that change minimal and isolated in its own commit, and say so in the PR. The main session gets uac-r2's review before merge. Prefer memoising at a layer this project owns if that removes the same calls.</constraint>
+    <constraint source="400s">Find the source of the three 400s on `systemusers(...)/Retrieve` during the commit (file:line). Fix it if it is ours. If not, describe it in the notes for the main session to file. Do not suppress it.</constraint>
+    <constraint source="CLAUDE.md">Use `python`, never `python3`. Run the full ArchTests and filtered unit tests (never the unfiltered Sprk.Bff.Api.Tests). Measure the publish-size delta. No --no-verify, no bare stash, no sub-agents.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor and the reason. Work in `C:\wts-170` on `task/170-commit-latency` from `origin/docs/ontology-platform-design`.</step>
+    <step order="1">Write a failing test that counts `WhoAmI` and entity-metadata calls across one commit through the real commit service with counting fakes, recording the current counts. Add the isolation tests.</step>
+    <step order="2">Implement the two caches. Re-run the count test: `WhoAmI` at most 1 per request, and each entity-set lookup at most 1 per process. Run the commit and Signals suites, the full ArchTests and the size delta.</step>
+    <step order="3">Open a PR into `docs/ontology-platform-design` with the before and after call counts, and list the remaining sinks (access probes, serial per-Signal loops, preflight then execute re-reads) as proposals for uac-r2, with estimated savings.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">One commit issues at most one `WhoAmI` per caller identity per request, and no repeat entity-set metadata lookup for a table already resolved in the process (counted by test).</criterion>
+    <criterion testable="true">Must-not-fire: two concurrent requests from different callers each get their own systemuserid. The app-only and OBO identities are never mixed. A failed lookup is not cached.</criterion>
+    <criterion testable="true">Every existing DecisionCommit, Signals and ArchTests test passes unchanged. Commit order and refusal behaviour are unchanged.</criterion>
+    <criterion testable="true">Test scope: the stated contract plus the cases above. Anything beyond needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If the only way to remove the WhoAmI repeats is a cache whose scope can cross callers, or a change to access-check semantics, STOP and report.</trigger>
+  </escalation>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ontology-platform-r1/notes/decisions.md (D-17, D-196)</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+  <completion date="2026-10-28">
+    `CallerWhoAmIMemo` remembers only the caller's successful WhoAmI, for one request, in `HttpContext.Items`. Its key is SHA-256(normalised environment URL + newline + exact token), which was uac-r2's F1 condition. `CallerRecordAccessProbe` and `DataverseUserClient` share it. Access answers (RetrievePrincipalAccess, RUSOP, record reads) are still asked every time. An ended or recycled request is a miss and never throws. `DataverseServiceClientImpl` caches entity-set names per process for at most 15 minutes and never caches failures. ADR-009: path C (comply), per its "Allowed L1 Exceptions" rows (per-request `HttpContext.Items`; metadata at most 15 minutes, documented in code). No exception was needed.
+
+    Review: two Opus adversarial passes (isolation, then correctness) found no code defect. Their shared F4 was the unrecorded ADR-009 reasoning, now recorded as path C. Fix round `aad52ac62e`, `01fa8338f8`, `2eb18ffc67`. The Sonnet re-check found only K-class items; I closed its K2 and K4 in `b8a69ad28a` (the NullReferenceException case is tested, the notes match the code). uac-r2 reviewed its probe change and approved at `2eb18ffc67`. Its views on the further savings: P2 and P3 declined (access can change mid-request; TOCTOU), P4 acceptable if bounded and fail-closed.
+
+    Saving: the test proves 2 to 1 for the commit service's own identity questions. The production 35 to 1 is an estimate. Post-deploy done-when: one commit in App Insights shows at most 2 WhoAmI dependencies; record its wall time. The three RetrievePrincipalAccess 400s are DI-131 (#2405, field-mapping and uac-r2). PR #2404 merged to docs (`0f9fd108fa`).
+  </completion>
+</task>

@@ -15,6 +15,7 @@
  *   - searchContactsAsLookup, searchOrganizationsAsLookup, searchUsersAsLookup
  */
 
+import { describeWebApiCreateError } from '../../utils/webApiCreateError';
 import { withBffChildWrites, createRecordViaBffWithWarnings } from '../../utils/adapters/bffChildWriteAdapter';
 import type {
   ICreateWorkAssignmentFormState,
@@ -523,12 +524,12 @@ export class WorkAssignmentService {
       console.info('[WorkAssignmentService] create success, workAssignmentId:', workAssignmentId);
     } catch (err) {
       console.error('[WorkAssignmentService] createRecord error:', err);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const errObj = err as any;
-      const message = errObj?.message || (err instanceof Error ? err.message : 'Unknown error');
+      // #2382: a privilege refusal becomes one plain sentence; the full error is logged above.
+      const described = describeWebApiCreateError(err, 'work assignment');
+      const message = described.message;
       return {
         status: 'error',
-        errorMessage: `Failed to create work assignment record: ${message}`,
+        errorMessage: described.isAccessDenied ? message : `Failed to create work assignment record: ${message}`,
         warnings: [],
       };
     }

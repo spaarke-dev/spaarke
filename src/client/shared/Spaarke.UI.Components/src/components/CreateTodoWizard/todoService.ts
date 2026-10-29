@@ -21,6 +21,7 @@
  * @see .claude/adr/ADR-024-polymorphic-resolver-pattern.md
  */
 
+import { describeWebApiCreateError } from '../../utils/webApiCreateError';
 import { withBffChildWrites } from '../../utils/adapters/bffChildWriteAdapter';
 import type { ICreateTodoFormState, AssociationResult } from './formTypes';
 import type { IDataService } from '../../types/serviceInterfaces';
@@ -287,12 +288,12 @@ export class TodoService {
       );
     } catch (err) {
       console.error('[TodoService] createRecord error:', err);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const errObj = err as any;
-      const message = errObj?.message || (err instanceof Error ? err.message : 'Unknown error');
+      // #2382: a privilege refusal becomes one plain sentence; the full error is logged above.
+      const described = describeWebApiCreateError(err, 'to do');
+      const message = described.message;
       return {
         success: false,
-        errorMessage: `Failed to create to do: ${message}`,
+        errorMessage: described.isAccessDenied ? message : `Failed to create to do: ${message}`,
       };
     }
 

@@ -3,6 +3,7 @@
   <IsCustomizable>1</IsCustomizable>
   <IsAutoAssigned>0</IsAutoAssigned>
   <RolePrivileges>
+    <RolePrivilege name="prvAppendsprk_ContactOrganization" level="Global" />
     <RolePrivilege name="prvAppendsprk_noaccessentry" level="Global" />
     <RolePrivilege name="prvAppendToContact" level="Global" />
     <RolePrivilege name="prvAppendTosprk_noaccessentry" level="Global" />
@@ -10,6 +11,7 @@
     <RolePrivilege name="prvAppendTosprk_RecordType_Ref" level="Global" />
     <RolePrivilege name="prvAppendToUser" level="Global" />
     <RolePrivilege name="prvCreateSharePointData" level="Global" />
+    <RolePrivilege name="prvCreatesprk_ContactOrganization" level="Global" />
     <RolePrivilege name="prvCreatesprk_noaccessentry" level="Global" />
     <RolePrivilege name="prvReadPluginAssembly" level="Global" />
     <RolePrivilege name="prvReadPluginType" level="Global" />
@@ -18,8 +20,10 @@
     <RolePrivilege name="prvReadSdkMessageProcessingStepImage" level="Global" />
     <RolePrivilege name="prvReadSharePointData" level="Global" />
     <RolePrivilege name="prvReadSharePointDocument" level="Global" />
+    <RolePrivilege name="prvReadsprk_ContactOrganization" level="Global" />
     <RolePrivilege name="prvReadsprk_noaccessentry" level="Global" />
     <RolePrivilege name="prvWriteSharePointData" level="Global" />
+    <RolePrivilege name="prvWritesprk_ContactOrganization" level="Global" />
     <RolePrivilege name="prvWritesprk_noaccessentry" level="Global" />
   </RolePrivileges>
 </Role>

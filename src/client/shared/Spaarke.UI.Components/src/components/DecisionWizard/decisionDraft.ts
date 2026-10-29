@@ -229,9 +229,22 @@ export function parseMoney(value: string): number | null {
   return Number(text.replace(/,/g, ''));
 }
 
+/**
+ * Task 167 (D-193, review F4-4): a Text that is longer than the column holds (`maxLength`, declared by the catalog and enforced again
+ * by the executor), so the user hears it on the step and not as a refusal at Record decision. The message to show, or null. Measured
+ * on the trimmed value, which is what the step sends.
+ */
+export function lengthMessage(parameter: DecisionParameter, value: string): string | null {
+  if (parameter.maxLength == null || parameter.maxLength <= 0) return null;
+  return value.trim().length > parameter.maxLength
+    ? `${parameter.label} can be at most ${parameter.maxLength} characters.`
+    : null;
+}
+
 /** Whether one field is acceptable: a required field must be filled; a filled field must be well formed. */
 export function parameterValid(parameter: DecisionParameter, value: string): boolean {
   if (isBlank(value)) return !parameter.required;
+  if (lengthMessage(parameter, value) !== null) return false;
   switch (parameter.kind) {
     case 'Money':
       return parseMoney(value) !== null;
@@ -244,11 +257,33 @@ export function parameterValid(parameter: DecisionParameter, value: string): boo
   }
 }
 
+/**
+ * Task 167 (D-193): a Date that must not be earlier than another Date of the same step (`notBefore`, from the catalog: End date after
+ * Start date). The message to show on it, or null. Only two well-formed dates are compared (a half-typed one is the Date rule's to
+ * refuse), and the same day is fine.
+ */
+export function dateOrderMessage(
+  action: DecisionAction,
+  parameter: DecisionParameter,
+  draft: ItemDraft,
+  scope: StepScope
+): string | null {
+  if (!parameter.notBefore) return null;
+  const earlier = action.parameters.find(p => p.code === parameter.notBefore);
+  if (!earlier) return null;
+  const value = fieldValue(draft, scope, parameter.code).trim();
+  const limit = fieldValue(draft, scope, earlier.code).trim();
+  if (!ISO_DATE.test(value) || !ISO_DATE.test(limit)) return null;
+  // yyyy-MM-dd strings order the same way the dates do.
+  return value < limit ? `${parameter.label} cannot be before ${earlier.label}.` : null;
+}
+
 /** True when every parameter of the step is acceptable ("Next is disabled until required fields are valid"). */
 export function stepValid(action: DecisionAction, draft: ItemDraft, scope: StepScope): boolean {
   return (
-    action.parameters.every(p => parameterValid(p, fieldValue(draft, scope, p.code))) &&
-    composerRecipientsValid(action, draft, scope)
+    action.parameters.every(
+      p => parameterValid(p, fieldValue(draft, scope, p.code)) && dateOrderMessage(action, p, draft, scope) === null
+    ) && composerRecipientsValid(action, draft, scope)
   );
 }
 

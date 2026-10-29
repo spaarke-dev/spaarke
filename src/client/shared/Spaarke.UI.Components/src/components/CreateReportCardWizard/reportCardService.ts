@@ -34,6 +34,7 @@
  * @see projects/visual-host-create-button-r1/notes/field-manifests/reportcard.md
  */
 
+import { describeWebApiCreateError } from '../../utils/webApiCreateError';
 import { withBffChildWrites } from '../../utils/adapters/bffChildWriteAdapter';
 import type { ICreateReportCardFormState } from './formTypes';
 import type { IDataService } from '../../types/serviceInterfaces';
@@ -259,12 +260,12 @@ export class ReportCardService {
       console.info('[ReportCardService] createRecord success, reportCardId:', reportCardId);
     } catch (err) {
       console.error('[ReportCardService] createRecord error:', err);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const errObj = err as any;
-      const message = errObj?.message || (err instanceof Error ? err.message : 'Unknown error');
+      // #2382: a privilege refusal becomes one plain sentence; the full error is logged above.
+      const described = describeWebApiCreateError(err, 'report card');
+      const message = described.message;
       return {
         status: 'error',
-        errorMessage: `Failed to create report card record: ${message}`,
+        errorMessage: described.isAccessDenied ? message : `Failed to create report card record: ${message}`,
         warnings: [],
       };
     }
