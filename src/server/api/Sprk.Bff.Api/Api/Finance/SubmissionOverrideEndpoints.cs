@@ -24,7 +24,9 @@ namespace Sprk.Bff.Api.Api.Finance;
 /// <para><b>Inputs.</b> The submission id is the route; the only body field is <c>reason</c>. The decider is the authenticated caller, and the
 /// invoice, the findings and the decision id are all derived server-side; none comes from the request.</para>
 /// <para><b>Responses.</b> 200 with <see cref="BlockedDecisionResponse"/> (a repeat is 200 with <c>alreadyDecided</c> and writes nothing); refusals
-/// are ProblemDetails with <c>errorCode</c> (<see cref="BlockedSubmissionErrors"/>); 401 unauthenticated; 503 <c>ebilling.disabled</c> when off.</para>
+/// are ProblemDetails with <c>errorCode</c> (<see cref="BlockedSubmissionErrors"/>); 401 unauthenticated; 503 <c>ebilling.disabled</c> when off.
+/// 2026-10-29: a decision whose Signal close failed is 503 <c>ebilling.blocked.unavailable</c> (never 200): the decision stands and the repeat
+/// completes the close with no second Decision Record, answering 200 <c>alreadyDecided</c> once every close is done.</para>
 /// </remarks>
 public static class SubmissionOverrideEndpoints
 {
