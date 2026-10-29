@@ -823,7 +823,7 @@ The structured family entity (`sprk_securefamily`) is **not built now**; it is o
 - **Every BFF write path, not only creates (UAC-r2 condition 2).** An update or PATCH through the BFF that carries `sprk_ai_search_index` gets the same drop, so a client cannot repoint an existing record. Native form edits stay out of scope.
 - A dropped value that differs from the one the server applies is logged as `client_search_index_dropped`. This is the precedent of 018's `default_value_dropped`.
   - The log carries **ids only**: record, table, dropped index id, applied index id. No names or emails (UAC-r2 condition 4).
-- Alternative (UAC-r2's other shape): accept a client value only when it equals the owning BU's index, and refuse otherwise (400). **Recommended: drop.** No product surface lets a user choose an index on purpose, and a refusal would break today's wizards until (e) ships.
+- Alternative (UAC-r2's other shape): accept a client value only when it equals the owning BU's index, and refuse otherwise (400). **Decided (owner, 2026-10-29): drop.** No product surface lets a user choose an index on purpose, and a refusal would break today's wizards until (e) ships.
 - Not covered: native form edits of the lookup. Those are Dataverse's own role checks; out of scope, as for every native write (W5).
 
 ### 13.3b Business-unit moves (UAC-r2 condition 3)
@@ -863,15 +863,15 @@ Filed as a known limit (#2413). Not recomputed at a move.
 
 ### 13.5 Open questions
 
-1. **Owner:** drop or refuse for a client index (§13.3). Recommended: drop.
-2. **Owner and UAC-r2: are `sprk_aisearchindex` rows wanted in customer environments?** Provisioning's answer (2026-10-28): nothing creates them there. H2b creates the Azure AI Search index, not a Dataverse row, and ACME has 0 rows. The BFF's `DataverseAllowedIndexesProvider` falls back to appsettings.
+1. ~~Owner: drop or refuse for a client index (§13.3).~~ **Decided by the owner 2026-10-29: drop.**
+2. ~~Owner and UAC-r2: are `sprk_aisearchindex` rows wanted in customer environments?~~ **Decided by the owner 2026-10-29: (A) no rows in customer environments.** Dev keeps its rows (re-owned per §13.2 (b)). The allow-list fix below still ships (provisioning). Provisioning's answer (2026-10-28): nothing creates them there. H2b creates the Azure AI Search index, not a Dataverse row, and ACME has 0 rows. The BFF's `DataverseAllowedIndexesProvider` falls back to appsettings.
    - Without rows, FR-38 leaves the column empty on every customer record, and indexing uses the appsettings fallback.
    - If rows are wanted per customer, provisioning seeds them in H12a, owned by the team.
    - **Joint recommendation, provisioning + field-mapping (2026-10-28): (A) no rows in customer environments.**
      - H2b creates the same 7 canonical indexes on each stamp's own AI Search service. Isolation comes from the service endpoint, so a row adds only a target for the BU lookup.
      - Rows (B) pay off only when one customer needs different indexes per BU. They would add a second source of truth and a dependency on the owner team.
      - Fix needed either way (provisioning owns it): stamps set no `AiSearch__AllowedIndexes`. The allow-list is therefore empty (`AiSearchOptions.cs:103`), and every path that names an index returns 400 `INDEX_NOT_ALLOWED` on customer stamps (ACME). Provisioning's H4b will write the allow-list from the same `CanonicalIndexCatalog` H2b provisions. Live stamps need their owner's OK.
-     - Awaiting the owner's decision.
+     - Owner decided (A), 2026-10-29.
 3. **Owner (#2410):** Basic User reads rules but not profiles.
 4. **Dev arrangement (UAC-r2):** users homed in dev's root BU won't read team-owned rows in BU1 through Deep. That is the open dev-layout item, not routed around here.
 
