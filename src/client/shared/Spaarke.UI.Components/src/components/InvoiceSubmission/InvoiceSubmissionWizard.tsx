@@ -292,8 +292,8 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
   const [fileNotices, setFileNotices] = React.useState<IFileValidationError[]>([]);
 
   const handleFilesAccepted = React.useCallback((files: IUploadedFile[]) => {
+    if (files.length === 0) return;
     const [first, ...rest] = files;
-    if (!first) return;
     setFile(first);
     setFileNotices(
       rest.map(extra => ({
