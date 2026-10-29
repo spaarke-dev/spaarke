@@ -597,10 +597,10 @@ internal sealed class RecordFamilyReader
 
         /// <summary>
         /// Runs one batched child query for <paramref name="edge"/> over <paramref name="parentIds"/>, AS THE CALLER, rows in id
-        /// order, handing each to <paramref name="handle"/> until it answers stop. Each request asks for as many rows as
+        /// order, handing each to <paramref name="handle"/> until it answers stop. The first request asks for as many rows as
         /// <paramref name="needed"/> says plus one (at most <see cref="MaxRowsPerQuery"/>); a full page is followed by the next,
-        /// keyed by id (<c>{table}id gt</c> the last id read), until a page comes back short, so no row is ever out of reach (a
-        /// skipped row costs a read, never the walk). True when the walk must stop.
+        /// keyed by id (<c>{table}id gt</c> the last id read) and sized at <see cref="MaxRowsPerQuery"/>, until a page comes back short,
+        /// so no row is ever out of reach (a skipped row costs a read, never the walk). True when the walk must stop.
         /// </summary>
         private async Task<bool> ForEachChildAsync(Edge edge, string set, Guid[] parentIds, Func<int> needed, Func<Node, Task<bool>> handle)
         {
@@ -613,7 +613,10 @@ internal sealed class RecordFamilyReader
             Guid? after = null;
             while (true)
             {
-                var top = Math.Min(MaxRowsPerQuery, Math.Max(needed(), 1) + 1);
+                // Only the first request is sized to what is needed: the rows after it are read to the end of the edge, because
+                // PrimaryOfAsync skips every row filed under another parent, and a small page of skipped rows would cost a
+                // sequential query each.
+                var top = after is null ? Math.Min(MaxRowsPerQuery, Math.Max(needed(), 1) + 1) : MaxRowsPerQuery;
                 var page = after is { } last ? $"{filter} and {idColumn} gt {last:D}" : filter;
                 var rows = await QueryAsync(
                     edge.ChildTable,
@@ -793,7 +796,10 @@ internal sealed class RecordFamilyReader
             catch (DataverseForbiddenException ex) when (ex.IsMissingReadPrivilegeOn(table))
             {
                 _noReadPrivilege.Add(table);
-                _reader._logger.LogInformation(
+                // The record-type catalog holds no per-user data: losing it drops every project from the family, so it is a
+                // warning. Any other table is the caller's own role, which is information. Table names only.
+                _reader._logger.Log(
+                    table == RecordTypeTable ? LogLevel.Warning : LogLevel.Information,
                     "[RECORD-FAMILY] The caller holds no Read privilege on {Table}; it is read as no rows.", table);
                 return Array.Empty<Dictionary<string, JsonElement>>();
             }

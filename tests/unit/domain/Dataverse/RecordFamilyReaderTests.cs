@@ -436,7 +436,32 @@ public class RecordFamilyReaderTests
         withoutVersions.Truncated.Should().BeFalse("a table the caller may not read hides nothing the caller can read");
         withoutPolicies.Members.Select(m => m.Id).Should().BeEquivalentTo(new[] { matter, document });
         withoutPolicies.Members.Select(m => m.Id).Should().NotContain(version);
-        _dv.Calls.Count(c => c.EntitySet == "sprk_policies").Should().Be(2, "the refused table is asked once per read, not per level");
+    }
+
+    [Fact]
+    public async Task ReadAsync_RefusedTableQueriedInSeveralChunksOfOneRead_IsAskedOnceNotPerChunk()
+    {
+        // 51 documents give the file-version edge two chunks of parent ids (50 + 1) in ONE read: only the remembered refusal
+        // keeps the second chunk from asking again.
+        var matter = Record(Matter);
+        var documents = Enumerable.Range(0, RecordFamilyReader.ParentIdsPerQuery + 1)
+            .Select(_ => Record(Document, ("sprk_matter", matter))).ToList();
+        foreach (var document in documents)
+            Record(FileVersion, ("sprk_document", document));
+        RecordFamilyEdges.Of(FamilyKind.Filing).Should().Contain(e => e.ChildTable == FileVersion && e.ParentTable == Document);
+        var fileVersionSet = SecureChildLineage.Children[FileVersion].EntitySet;
+
+        var whenReadable = await ReadAsync(Matter, matter);
+        var readableCalls = _dv.Calls.Count(c => c.EntitySet == fileVersionSet);
+        _dv.Calls.Clear();
+        _dv.NoReadPrivilegeOn(FileVersion, "sprk_FileVersion");
+        var whenRefused = await ReadAsync(Matter, matter);
+
+        readableCalls.Should().Be(2, "the control: without a refusal both chunks are queried");
+        whenReadable.Members.Select(m => m.Table).Should().Contain(FileVersion);
+        whenRefused.Members.Select(m => m.Table).Should().NotContain(FileVersion);
+        whenRefused.Members.Select(m => m.Id).Should().BeEquivalentTo(documents.Append(matter));
+        _dv.Calls.Count(c => c.EntitySet == fileVersionSet).Should().Be(1, "the refused table is asked once per read, not per chunk");
     }
 
     [Fact]
@@ -518,6 +543,29 @@ public class RecordFamilyReaderTests
         all.Should().BeEquivalentTo(documents.Append(matter), "and every one is returned");
         _dv.Calls.Should().Contain(c => c.Query.Contains("sprk_documentid gt ", StringComparison.Ordinal),
             "a full request is followed by the next, keyed by id");
+    }
+
+    // ── Fix round 2: only the first request of an edge is sized to what is needed; the rest read to the end of the edge ──
+
+    [Fact]
+    public async Task ReadAsync_EdgeWithManyRowsFiledUnderAnotherParent_CostsAFewRequestsNotOnePerSmallPage()
+    {
+        var matter = Record(Matter);
+        // Agreements regarding the matter whose PRIMARY parent is a document outside the family: each is read and skipped.
+        var elsewhere = NewId();
+        const int skipped = 10 * RecordFamilyReader.MaxMembers;
+        for (var i = 0; i < skipped; i++)
+            Record(Agreement, ("sprk_regardingdocument", elsewhere), ("sprk_regardingmatter", matter));
+        var keptAgreement = Record(Agreement, ("sprk_regardingmatter", matter));
+
+        var read = await ReadAsync(Matter, matter);
+
+        read.Members.Select(m => m.Id).Should().BeEquivalentTo(new[] { matter, keptAgreement });
+        read.Truncated.Should().BeFalse();
+        var agreementRequests = _dv.Calls.Count(c => c.EntitySet == SecureChildLineage.Children[Agreement].EntitySet
+                                                     && c.Query.Contains("_sprk_regardingmatter_value eq", StringComparison.Ordinal));
+        agreementRequests.Should().BeLessThanOrEqualTo(3,
+            "the rows after the first request are read in full pages, not needed()+1 at a time");
     }
 
     // ── Fix round 1: the primary parent is UAC 194b's, compared through 194b's own pure members ──
