@@ -125,4 +125,17 @@ optional constructor argument (`onValueWritten`, null = the B1 no-op) so B2b wir
 seam-failure and 503-mapping tests in `InvoiceCorrectionServiceTests`; `SignalEpisodeLifecycleTests` (one-line justification: the reopen rule is the one new input to the extracted helper, and no 049 test reaches it).
 Seeded proof: the seam call guarded by `!rowExists || valueChanged` made the repeat test and the failure/repeat test fail; restored.
 
+### 10.1 Part A review fixes F2 and F3 (separate commit, `InvoiceSubmissionPersister`)
+
+- **F2, a refused rule version left lines Clean (fail-open).** A version the gate or its handler refused produced no finding, so the lines it should have checked were written Clean and the invoice could be
+  approved unseen. Now a line such a version applies to is written **Flagged** with a `lineFindings[]` entry `rules.not_checked` whose message names the rule type ("The ApprovedRate rule could not be checked
+  on this line."), no rule id and no value. The refusal is tied to lines through a new additive member `BillingEvaluationResult.RefusalScopes` (`BillingRuleRefusalScope`: version id, rule type, whether the
+  invoice subject selected it, the line indexes); it is a separate member so `BillingRuleRefusal` and its equality, which 072's tests pin, are untouched. When the invoice subject selected the version, or a
+  refusal has no scope, every line is flagged. Known over-flag: a refused client default whose type a valid firm version already covers still flags the lines (the evaluator does not say which refusals were
+  displaced); it fails safe and the reviewer accepts the lines. The stale comment "every check that can flag a line has run" now says a refused rule is flagged. With no refusal nothing changes
+  (must-not-fire test; the byte-identical pin is unaffected).
+- **F3, provenance named the coding Action for a line it never saw.** The line's `provenance` now carries the Action pair only when `coding is { Status: not NoNarrative }`; a `NotReturned` line was sent to the
+  Action and keeps it. The submission-level pair is unchanged (the invoice was coded).
+- Seeded proof: with the F2 flag condition removed and the F3 condition reverted, three tests failed (both F2 tests and the F3 test); restored.
+
 rework: none

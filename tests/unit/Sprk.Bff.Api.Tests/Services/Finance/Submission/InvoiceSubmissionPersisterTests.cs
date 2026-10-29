@@ -1062,6 +1062,126 @@ public class InvoiceSubmissionPersisterTests
         none.RootElement.GetProperty("findings")[0].TryGetProperty("suggestedAdjustment", out _).Should().BeFalse("must-not-fire: a rule that suggests nothing stores nothing");
     }
 
+    // ── 101 B2a F2: a refused rule version is a check that did not run - its lines are Flagged, never Clean ──
+
+    private static ProcessorHarness TwoLineHarness(params BillingRuleCandidate[] rules) => new()
+    {
+        Rules = rules,
+        Lines =
+        [
+            InvoiceSubmissionProcessorTests.FeeLine(),
+            InvoiceSubmissionProcessorTests.FeeLine() with { Narrative = InvoiceSubmissionProcessorTests.F<string?>("Reviewed the exhibits.") },
+        ],
+    };
+
+    /// <summary>Persists the outcome and returns its stored lines (in line order) and the stored findings JSON.</summary>
+    private static async Task<(List<Entity> Lines, JsonDocument Findings)> PersistLinesAsync(SubmissionEvaluationOutcome outcome)
+    {
+        var store = new Store();
+        await store.Build().PersistAsync(outcome, null);
+        var requests = store.Transactions.Single();
+        var lines = requests.Select(Target).Where(e => e.LogicalName == "sprk_billingevent").ToList();
+        return (lines, JsonDocument.Parse(Target(requests[^1]).GetAttributeValue<string>("sprk_findingsjson")));
+    }
+
+    private static int StatusOf(Entity line) => line.GetAttributeValue<OptionSetValue>("sprk_linestatus").Value;
+
+    private static IEnumerable<JsonElement> NotChecked(JsonDocument findings) =>
+        findings.RootElement.GetProperty(InvoiceSubmissionPersister.LineFindingsMember).EnumerateArray()
+            .Where(f => f.GetProperty("code").GetString() == InvoiceSubmissionPersister.LineFindingRulesNotChecked);
+
+    [Fact(DisplayName = "101 B2a F2: a rule version the gate refuses leaves its lines Flagged with a rules.not_checked finding naming the type, not Clean")]
+    public async Task ARefusedRuleVersion_FlagsItsLines_WithTheTypeNamedAndNoRuleId()
+    {
+        var outcome = await TwoLineHarness(Version("BILL-RATE", RuleType.ApprovedRate, body: "{\"type\":\"ApprovedRate\",\"unknownMember\":1}")).RunAsync();
+        outcome.Evaluation!.Refusals.Should().NotBeEmpty("the setup: the gate refused the version, so it produced no finding");
+        outcome.Evaluation.Findings.Should().BeEmpty();
+
+        var (lines, findings) = await PersistLinesAsync(outcome);
+        using (findings)
+        {
+            lines.Should().HaveCount(2);
+            lines.Select(StatusOf).Should().OnlyContain(s => s == InvoiceSubmissionPersister.LineStatusFlagged);
+            var entries = NotChecked(findings).ToList();
+            entries.Select(e => e.GetProperty("line").GetInt32()).Should().Equal(0, 1);
+            entries.Should().OnlyContain(e => e.GetProperty("message").GetString()!.Contains("ApprovedRate"));
+            entries.Should().NotContain(e => e.GetProperty("message").GetString()!.Contains("BILL-RATE"));
+            findings.RootElement.GetRawText().Should().NotContain(outcome.Evaluation.Refusals[0].PolicyVersionId.ToString("D"), "no rule id is stored for the finding");
+        }
+    }
+
+    [Fact(DisplayName = "101 B2a F2: a refusal scoped to one line flags that line only; a refusal with no scope flags every line")]
+    public async Task ARefusal_IsTiedToItsLines_OrFlagsEveryLineWhenItCannotBe()
+    {
+        var clean = await TwoLineHarness().RunAsync();
+        var refusal = new BillingRuleRefusal(Guid.NewGuid(), "BILL-RATE", Guid.NewGuid(), BillingEvaluationReasons.GateRefused);
+        var scoped = clean with
+        {
+            Evaluation = clean.Evaluation! with
+            {
+                Refusals = [refusal],
+                RefusalScopes = [new BillingRuleRefusalScope(refusal.PolicyVersionId, RuleType.ApprovedRate, false, [1])],
+            },
+        };
+        var unscoped = clean with { Evaluation = clean.Evaluation! with { Refusals = [refusal] } };
+
+        var (scopedLines, scopedFindings) = await PersistLinesAsync(scoped);
+        var (unscopedLines, unscopedFindings) = await PersistLinesAsync(unscoped);
+        using (scopedFindings)
+        using (unscopedFindings)
+        {
+            scopedLines.Select(StatusOf).Should().Equal(InvoiceSubmissionPersister.LineStatusClean, InvoiceSubmissionPersister.LineStatusFlagged);
+            NotChecked(scopedFindings).Select(e => e.GetProperty("line").GetInt32()).Should().Equal(1);
+
+            unscopedLines.Select(StatusOf).Should().OnlyContain(s => s == InvoiceSubmissionPersister.LineStatusFlagged);
+            NotChecked(unscopedFindings).Select(e => e.GetProperty("message").GetString()).Should().OnlyContain(m => m!.Contains("could not be checked"));
+        }
+    }
+
+    [Fact(DisplayName = "101 B2a F2 (must-not-fire): with no refusal the lines are Clean and no rules.not_checked finding is stored")]
+    public async Task WithNoRefusal_TheLinesStayClean_AndNoRulesNotCheckedFinding()
+    {
+        var outcome = await TwoLineHarness().RunAsync();
+        outcome.Evaluation!.Refusals.Should().BeEmpty();
+
+        var (lines, findings) = await PersistLinesAsync(outcome);
+        using (findings)
+        {
+            lines.Select(StatusOf).Should().OnlyContain(s => s == InvoiceSubmissionPersister.LineStatusClean);
+            NotChecked(findings).Should().BeEmpty();
+        }
+    }
+
+    // ── 101 B2a F3: the coding Action is attributed only to a line it was sent ──
+
+    [Fact(DisplayName = "101 B2a F3: a NoNarrative line (never sent to the model) stores no Action pair; a NotReturned line (sent) keeps it")]
+    public async Task Provenance_NoNarrativeLine_HasNoActionPair_ButANotReturnedLineKeepsIt()
+    {
+        var harness = new ProcessorHarness
+        {
+            Lines =
+            [
+                InvoiceSubmissionProcessorTests.FeeLine() with { Narrative = InvoiceSubmissionProcessorTests.F<string?>("Drafted the motion.") },
+                InvoiceSubmissionProcessorTests.FeeLine() with { Narrative = InvoiceSubmissionProcessorTests.F<string?>("   ") },
+            ],
+        };
+        harness.Coding.NotReturnedKeys = new HashSet<string> { "0" };
+        var outcome = await harness.RunAsync();
+
+        var (lines, findings) = await PersistLinesAsync(outcome);
+        using (findings)
+        {
+            var notReturned = ExtractionProvenance.ParseLine(lines[0].GetAttributeValue<string>("sprk_extractionconfidence"))!;
+            var noNarrative = ExtractionProvenance.ParseLine(lines[1].GetAttributeValue<string>("sprk_extractionconfidence"))!;
+            notReturned.ActionCode.Should().Be(LineCodingService.ActionCode, "the line was sent to the Action, which returned nothing usable");
+            notReturned.ActionVersion.Should().Be(LineCodingService.ActionVersion);
+            noNarrative.HasExtraction.Should().BeTrue("the analyzer pair is still the line's source");
+            noNarrative.ActionCode.Should().BeNull("a blank-narrative line was never sent to the model");
+            noNarrative.ActionVersion.Should().BeNull();
+            ExtractionProvenance.ParseSubmission(findings.RootElement.GetRawText())!.ActionCode.Should().Be(LineCodingService.ActionCode, "the invoice was coded, so the submission still names the Action");
+        }
+    }
+
     // ── 101 B2a: the per-entry builders leave the stored findings JSON byte-identical ──
 
     /// <summary>
