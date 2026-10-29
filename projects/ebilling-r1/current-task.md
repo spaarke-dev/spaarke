@@ -1,51 +1,40 @@
 # Current Task State
 
-> **Last Updated**: 2026-10-29 (context-handoff). Owner's request: commit/push → update from master → /conflict-check → /merge-to-master for work/ebilling-r1 (PR #1911). Steps 1–3 done. Step 4 (merge-to-master) is waiting on CI, the ontology-r1 review and the uac Q2 fix.
+> **Last Updated**: 2026-10-29 ~17:45Z (context-handoff). The owner's request: commit/push → update from master → /conflict-check → /merge-to-master for work/ebilling-r1 (PR #1911). Steps 1–3 are done. Step 4 (merge-to-master) is blocked on ONE CI failure, a hanging test (below). Both peer reviews have approved.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Work branch** | origin/work/ebilling-r1 = 66c49d5247 (PR #1911, draft, MERGEABLE). It carries master through d511a3297e (194b included), 094 @ 600079fd11 (uac READY), 098, the 194b writer fix 1028e5ccdd, the publish-lint and Pillow fix ba63082008, and the EB-D-170–172 log. Master is now 1e409b2ad2. The trial merge (merge-tree) is clean; master is not merged in yet. |
-| **Do not push to work** | Until ontology-r1 posts its review of ba63082008 (it asked for no pushes; it knows about 66c49d5247, which is docs only). If CI needs a fix, send ontology the new SHA first. |
-| **Running** | (1) Monitor on the #1911 checks. (2) Agent **ebill-storedfile-owner** (opus, worktree; branch task/ebill-storedfile-owner, pushes only that branch): the uac Q2 fix, StoredFileService.StageCreateFlipAsync ContentOf → ForRow(sprk_storedfile), plus the Q1 parity test, the no-core fallback pin and the hard-deny ArchTest. (3) Agent **ebill-095-errorcode** (sonnet, worktree; branch task/ebill-095-errorcode): step A's 403 gets a top-level `errorCode` (word-add-in gap), a sweep of the other problem-middleware paths, `filingKept: true` after filing, and contract §6 notes. Merge into work with the storedfile fix after the ontology review; tell word-add-in the sha. (4) Agent **ebill-103** (implementer, worktree agent-aad68f32362f173e0): the 103 fix round (EB-D-171 caller contact, EB-D-172 close Signals, F2–F4, K1–K4). |
-| **Next action** | When the storedfile fix is green: send uac the diff and wait for its re-check. After the ontology review: merge the fix branch plus master (1e409b2ad2+) into work, run the gate, push, and tell ontology the SHA. Then, with CI green and zero pending, put the full integration counts in the PR body, `gh pr ready 1911`, `gh pr merge 1911 --auto --merge`, and do the A.6 sync. |
+| **Work branch** | origin/work/ebilling-r1 = **842110e6ab** (PR #1911, draft, MERGEABLE, BLOCKED by CI). It integrates 102, 103 @ dca71dfbed, storedfile-owner @ d3eb47376a, 095-errorcode @ d7218072fb, master 3d54ac845d and signal-close @ 7354384779, plus 842110e6ab (the retirement guard's ExcludedFiles list replaces a split-string constant). Local gate at f78afac072: unit 12,562/0/14, ArchTests 1,858, integration 199/0/8 and 353/0/23, Client lint ok. Route ledger = 146. |
+| **Reviews** | **uac PASS** (storedfile Q1/Q2; 102's Adjustment ForChild 5e863d29bd). "#1911 can go ready from UAC". **ontology APPROVED** (PR comment; F2 closed on every caller incl. 103 approve; K1 closed). |
+| **BLOCKER** | CI run 40919752696, "Office Add-ins Tests (Gate)", job **"Server tests (office scope) (rest)"** was CANCELLED by its 20-min timeout: tests started 17:21:18, then no output for 16 min. A test in that leg's filter HANGS. The filter is in `.github/workflows/office-addins-tests.yml` ~:712 (namespaces Api.Ai.RecordSearch, Api.Documents, Services.Office, Services.Documents, Domain.Dataverse, Filters, Integration.Regression, Infrastructure.*, Auth.Office, ... see the file). It is not a required check, but our rule is zero fail. |
+| **Next action** | (1) Reproduce locally: `dotnet test tests/unit/Sprk.Bff.Api.Tests --filter "<the rest leg filter>" --blame-hang --blame-hang-timeout 3m` and find the hanging test. Suspect tests touched by the integration in those namespaces: EntityAccessFilter / Filters (095 FromEmailSubmissionBody), Integration.Regression, Domain.Dataverse (master merge), an approval-world lock fake. Fix it, push, tell no one unless the fix touches reviewed code. (2) Re-arm the CI monitor (the command below). (3) When all checks are terminal with zero fail: add the integration counts to the PR body, `gh pr ready 1911`, `gh pr merge 1911 --auto --merge`, watch it merge, then do the A.6 post-merge sync of the main checkout (ff-only; never reset). |
+| **CI monitor** | Use `gh pr checks 1911 --json name,bucket --jq '.[]\|"\(.bucket)\t\(.name)"'` and `grep -E` with `T=$'\t'`. NO bare jq, NO grep -P on this machine (memory: no-jq-use-gh-jq). The other checks on 842110e6ab were passing or pending at 17:40. |
 
-## PR #1911 merge checklist
-- [x] scoped-publish-lint: comments reworded; the StoredFile schema test drops the duplicate negative checks (ba63082008).
-- [x] Trivy: all alerts were the Pillow 12.3.0 pin in the eval-set generator; now 13.0.0 (ba63082008).
-- [ ] CI green, zero pending, CLEAN.
-- [ ] ontology-r1: PASS-WITH-FINDINGS (PR comment 6499284848). F2: the failed Signal-close count is dropped by 3 callers. Being fixed by agent **ebill-signal-close** (branch task/ebill-signal-close), plus K1 (SignalWriter:1054). 103 carries the same rule for the approve caller. ontology re-checks the fix diff only, so send it the SHA plus the range. Pushes to work are allowed again; batch them with the other fix branches.
-- [ ] uac: Q1 accepted with the parity test; Q2 fix re-checked.
-- [ ] PR body: full integration counts (ab1ca98f45: 199/0/8 and 353/0/23; update after the final gate).
+## After #1911 merges (on work, as a follow-up)
+- ontology asks (non-blocking): (1) the 105-override-server.md known limits must name the principal-change case: a repeat by a different person without Write on the Signal subjects gets 403, so only the original decider's retry completes the closes. (2) SubmissionOverrideService runs RecordRefusal twice in its catch filter, so the warning logs twice.
+- Tell word-add-in-r1 the master sha. Notify them again when 095 answers on dev (needs #1911 on master + SPA-r3's dev BFF deploy, which waits on uac's 194b hold, + the owner's OK to switch ebilling on in dev).
+- 015: delete the dev column only after the next dev BFF deploy (R3 will notify).
+- Mark 101/102/103 status in TASK-INDEX (102 and 103 are on work now; they complete when merged).
 
-## Task branches (not on work)
-
-| Task | Branch @ head | State |
-|---|---|---|
-| 101 | task/ebill-101-corrections (local, worktree agent-ae6eabaa0ec9d718e) | Waiting. Resume: rebase on work, persister prep (EB-D-170 provenance + Q2 Clean status for unflagged lines + an end-to-end persister → approve test), then build 101. |
-| 102 | task/ebill-102-adjustments @ 5ae2385531 | Done. Merge after 103; route ledger count reconciles to 145; check ForParents against 194b. |
-| 103 | task/ebill-103-approval @ 55d453e651 | Fix round done; gate green (broad 8,527/0/8; ArchTests 1,576). Scoped code-review + adr-check of ea3eb20269..55d453e651 running (agent ebill-103-review). Sweep follow-up filed as #2454. Merge after 102 (ledger 145), then flag the approve close to ontology for its Incomplete check. Q2 (Clean status) is left to 101. |
-| 086 / 092 / 089 | existing branches | Merge work, then the content-team writers and the 086 fix round (uac F3-1, K1–K5; adversarial K2–K6). |
+## Task branches / next work
+| Task | State |
+|---|---|
+| 101 | Waiting (worktree agent-ae6eabaa0ec9d718e, branch task/ebill-101-corrections). Resume: rebase on work. Persister prep (EB-D-170 provenance + Q2: unflagged lines are written Clean, with an end-to-end persister → approve test) + #2455 (line decisions and corrections use SingleCoreOf; CorrectionRow no-core throw). Then build 101. |
+| 086 / 092 / 089 | Merge work, then the content-team writers + the 086 fix round (uac F3-1, K1–K5; adversarial K2–K6). |
+| After 103 | 104, 150 (its export writer must pass `requestedBy` to CreateForAppAsync, or it fails closed), 152. After 101: 161. |
 
 ## Peers
-- uac-r2: Q1 accepted (parity test required); Q2 is a defect, take (b) before #1911 goes ready, then it re-checks the diff. #2427 OutputLookups sha to come. 194b dev-deploy notice to come.
-- ontology-r1: reviewing #1911 at ba63082008; will post a PR comment.
-- R3: `sprk_invoicestatus` is off the master external allow-list (#2450, merge 929dc42d31). In the integration merge of master (≥929dc42d31) into work:
-  - resolve ExternalAccessModule to master's version (no invoicestatus line);
-  - drop the TransitionalInvoiceStatusColumn constant and its uses in ExternalModuleColumnAllowListTests;
-  - remove the TransitionalExemptions machinery in InvoiceStatusRetirementGuardTests (the exemption list, ExpectedExemptFiles, the stale and never-grows tests and their controls), keeping the plain "no reference anywhere" guard.
-  - The dev column delete (015) waits for the next dev BFF deploy (after the uac 194b hold clears); R3 will notify.
-- word-add-in-r1: told that 094 is on work (2026-10-29). Notify again when dev is live.
-- Filed: #2426 (flaky ProvisionProject timeout test).
+- uac-r2: PASS on everything sent. #2427 OutputLookups sha to come; 194b dev-deploy notice to come.
+- ontology-r1: approved.
+- R3: `sprk_invoicestatus` off the master allow-list (#2450). It will notify when the dev BFF deploys.
+- word-add-in-r1: OK on the 095 contract fix; #2448 is on master. Owed: the master sha, then the dev notice.
+- field-mapping: told that stash 3067d28d24 is ours and fully superseded. **Owner decision pending: OK to drop it** (re-find its stash@{n} by sha first).
+- Filed: #2426 (flaky ProvisionProject test), #2454 (approval sweep), #2455 (CoreOf first-core / CorrectionRow throw).
 
-## Open items
-- #2455 filed: InvoiceLineDecisionService takes the first core lookup, and CorrectionRow `CoreOf(invoice)!.Value` throws on a missing core. Fold the fix into 101, which already edits corrections in that file: line decisions and corrections use `SingleCoreOf`.
-- Storedfile fix: task/ebill-storedfile-owner @ d3eb47376a. **uac PASS** (Q1+Q2 closed; #1911 may go ready from uac's side once it is merged). d3eb47376a adds uac's K pin (a source document becomes the primary under a no-core parent) and ontology's permanent D-197 exemption list (do not migrate CheckVersionOwnerAsync).
-- 103: task/ebill-103-approval @ dca71dfbed (review K1 test fixed). Ready to merge after 102. Task 150 note: CreateForAppAsync under a billing export now needs `requestedBy`; null fails closed (OwnerUnresolved).
-- 103 review K1 (the conditional-clear test never reaches the row-version check) was sent back to ebill-103 (resumed).
-- Mark 101/102/103 🔄 in TASK-INDEX.
-- Owner question still open: whether the R2 re-check button comes into R1.
+## Owner decisions this session (logged)
+EB-D-169 to EB-D-172 are in notes/decisions-log.md.
 
 ## Standing rules (see project CLAUDE.md)
-No bare git stash, no --no-verify. Live writes and role changes need the owner's OK; schema runs need notices. StoredFileReconcileJob is not enabled anywhere before F4 merges and DEF-044 is fixed. After merges: build the 5 test projects, then run the broad filter and ArchTests before pushing. Remove worktrees only with Remove-WorktreeSafe.ps1. Max 4 concurrent subagents. Scratchpad queue: scratchpad/queue.md.
+No bare git stash, no --no-verify. Live writes and role changes need the owner's OK; schema runs need notices. StoredFileReconcileJob is not enabled anywhere before F4 merges and DEF-044 is fixed. After merges: build the 5 test projects, then run the broad filter and ArchTests before pushing. Remove worktrees only with Remove-WorktreeSafe.ps1. Max 4 concurrent subagents. Every agent launch states a model.
