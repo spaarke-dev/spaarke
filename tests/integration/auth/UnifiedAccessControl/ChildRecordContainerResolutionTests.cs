@@ -1998,6 +1998,51 @@ public partial class ChildRecordContainerResolutionTests
         world.Reads("businessunit").Should().Be(0);
     }
 
+    [Fact(DisplayName = "ebilling-r1 (UAC-r2 ruling on RecordFamilyEdges): a work assignment filed under an invoice that is filed under that same work assignment refuses 409 (unverifiable) — the walk ends")]
+    public async Task WorkAssignment_FiledUnderAnInvoiceOfItself_Is409_AndTheWalkEnds()
+    {
+        // A row pair the BFF refuses at write (InvoiceFamilyCoreRecordGuard.WorkAssignmentCycleCode) but the model-driven app
+        // can still store: WA.sprk_regardinginvoice -> I and I.sprk_regardingworkassignment -> WA.
+        var invoice = Guid.Parse("eb1112ec-0000-0000-0000-0000000000a1");
+        var world = new World(securable: SecurableWithInvoice)
+            .WithChild("sprk_workassignment", intermediate: ("sprk_regardinginvoice", invoice), isSecure: false)
+            .WithRow("sprk_invoice", invoice,
+                lookups: [("sprk_regardingworkassignment", "sprk_workassignment", ChildId)])
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        var act = async () => await world.Resolver().ResolveForRecordAsync("sprk_workassignment", ChildId);
+
+        // Observed (2026-10-28): from the work-assignment side the walk refuses as UNVERIFIABLE ("filed under another record
+        // (sprk_regardinginvoice) ... cannot be verified"), not as the filing loop the invoice side names. Both are 409 and fail
+        // closed. UAC-r2: decide whether this side should answer the filing loop too.
+        var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+        ex.Code.Should().Be(RecordContainerResolver.AncestorUnverifiableCode);
+        ex.StatusCode.Should().Be(409);
+        world.Reads("sprk_invoice").Should().Be(1, "the invoice is read once, never followed round the loop");
+        world.Reads("sprk_workassignment").Should().Be(1, "the work assignment is read once, never followed round the loop");
+        world.Reads("businessunit").Should().Be(0);
+    }
+
+    [Fact(DisplayName = "ebilling-r1 (UAC-r2 ruling on RecordFamilyEdges): an invoice filed under a work assignment that is filed under that same invoice refuses 409 (filing loop) — the walk ends")]
+    public async Task Invoice_FiledUnderAWorkAssignmentOfItself_IsTheFilingLoop409()
+    {
+        var workAssignment = Guid.Parse("eb1112ec-0000-0000-0000-0000000000a2");
+        var world = new World(securable: SecurableWithInvoice)
+            .WithChild("sprk_invoice", regardingWorkAssignment: workAssignment)
+            .WithRoot("sprk_workassignment", workAssignment, isSecure: false, containerId: null,
+                intermediate: ("sprk_regardinginvoice", ChildId))
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        var act = async () => await world.Resolver().ResolveForRecordAsync("sprk_invoice", ChildId);
+
+        var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+        ex.Code.Should().Be(RecordContainerResolver.AncestorUnresolvedCode);
+        ex.StatusCode.Should().Be(409);
+        ex.Detail.Should().Contain("lead back to themselves", "the loop is named, not mistaken for a long chain");
+        world.Reads("sprk_workassignment").Should().BeLessThanOrEqualTo(1, "each record of the loop is read once, never followed round it");
+        world.Reads("businessunit").Should().Be(0);
+    }
+
     [Fact(DisplayName = "#1630 lock-step: every column the inheritance follows through an intermediate is one the storage resolver knows as that table's intermediate")]
     public void IntermediateFilingColumns_AreTheResolversIntermediateColumns()
     {
