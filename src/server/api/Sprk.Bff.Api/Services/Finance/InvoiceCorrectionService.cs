@@ -34,6 +34,10 @@ public enum CorrectionStatus
     /// <summary>A read or a write failed. The correction row may already be written; repeating the same request completes the value write
     /// without a second row.</summary>
     Unavailable,
+
+    /// <summary>The correction row and the value are written but the follow-through after them (the <c>OnValueWrittenAsync</c> seam) did not
+    /// finish. Repeating the same request writes no second row and runs the follow-through again.</summary>
+    Incomplete,
 }
 
 /// <summary>Stable ProblemDetails codes of the correction routes (ADR-019). Callers branch on these, never on a message.</summary>
@@ -45,6 +49,12 @@ public static class CorrectionCodes
     public const string LineChanged = LineDecisionCodes.LineChanged;
     public const string OwnerUnresolved = LineDecisionCodes.OwnerUnresolved;
     public const string Unavailable = "ebilling.correction.unavailable";
+
+    /// <summary>The correction is saved but the step after it did not finish; repeat the same request to complete it (503, with <c>failedStep</c>).</summary>
+    public const string Incomplete = "ebilling.correction.incomplete";
+
+    /// <summary>The <c>failedStep</c> of an <see cref="Incomplete"/> answer: the re-evaluation that follows a saved value.</summary>
+    public const string ReevaluationStep = "reevaluation";
     public const string ReviewerUnresolved = LineDecisionCodes.DeciderUnresolved;
 
     /// <summary>FR-22: the code is not in the line's resolved code set; nothing was written.</summary>
@@ -90,7 +100,7 @@ public sealed record CorrectionDto(
     DateTimeOffset? ReviewedOn);
 
 public sealed record CorrectionResult(
-    CorrectionStatus Status, string Code, string? Detail = null, CorrectionDto? Correction = null, bool AlreadyApplied = false)
+    CorrectionStatus Status, string Code, string? Detail = null, CorrectionDto? Correction = null, bool AlreadyApplied = false, string? FailedStep = null)
 {
     public bool IsApplied => Status == CorrectionStatus.Applied;
 }
@@ -222,8 +232,10 @@ public sealed class InvoiceCorrectionService
         IIdentityNormalizationService identity,
         ResolveApprovers approvers,
         ILogger<InvoiceCorrectionService> logger,
-        TimeProvider? time = null)
+        TimeProvider? time = null,
+        Func<CorrectionApplied, CancellationToken, Task>? onValueWritten = null)
     {
+        _onValueWritten = onValueWritten;
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _codeSets = codeSets ?? throw new ArgumentNullException(nameof(codeSets));
         _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
@@ -241,7 +253,11 @@ public sealed class InvoiceCorrectionService
     /// for the affected line(s), reconciles the Signals, patches <c>findings[]</c> / <c>signalPlan[]</c> in <c>sprk_findingsjson</c>, sets the
     /// line status Clean or Flagged and recomputes the totals. B1 leaves it empty: a correction in B1 does not change a line's status or Signals.
     /// </summary>
-    internal Task OnValueWrittenAsync(CorrectionApplied applied, CancellationToken ct) => Task.CompletedTask;
+    internal Task OnValueWrittenAsync(CorrectionApplied applied, CancellationToken ct) =>
+        _onValueWritten is null ? Task.CompletedTask : _onValueWritten(applied, ct);
+
+    /// <summary>B2a: the seam's body is passed in (the unit-test seam, and where B2b's re-evaluation is wired); null is the no-op of B1.</summary>
+    private readonly Func<CorrectionApplied, CancellationToken, Task>? _onValueWritten;
 
     // ── The write ──
 
@@ -610,7 +626,23 @@ public sealed class InvoiceCorrectionService
 
         _logger.LogInformation("Correction of {Field} on invoice {InvoiceId} line {LineId}: outcome {Outcome}, row written {RowWritten}, value changed {ValueChanged}.",
             spec.Name, command.InvoiceId, lineId, dto.Outcome, !rowExists, valueChanged);
-        await OnValueWrittenAsync(new CorrectionApplied(command.InvoiceId, lineId, spec.Name, dto.Outcome, valueChanged), ct).ConfigureAwait(false);
+
+        // The follow-through runs on EVERY successful pass, a repeat that wrote no second row included: a re-evaluation that failed after the first
+        // attempt is run again by the same request. A failure is never reported as success (503 Incomplete); the repeat completes it.
+        try
+        {
+            await OnValueWrittenAsync(new CorrectionApplied(command.InvoiceId, lineId, spec.Name, dto.Outcome, valueChanged), ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError("Correction of {Field} on invoice {InvoiceId}: saved, but the step after it failed ({ExceptionType}); the caller repeats the same request to finish it.",
+                spec.Name, command.InvoiceId, ex.GetType().Name);
+            return new CorrectionResult(
+                CorrectionStatus.Incomplete, CorrectionCodes.Incomplete,
+                "The correction was saved but a later step did not finish. Repeat the same request to complete it.",
+                FailedStep: CorrectionCodes.ReevaluationStep);
+        }
+
         return new CorrectionResult(CorrectionStatus.Applied, "ok", Correction: dto, AlreadyApplied: rowExists && !valueChanged);
     }
 

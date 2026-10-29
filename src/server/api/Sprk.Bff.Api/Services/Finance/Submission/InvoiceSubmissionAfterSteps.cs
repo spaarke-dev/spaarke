@@ -59,8 +59,8 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
     // ── Reason codes of this component (Retry / Refused) ──
     internal const string FindingsUnreadableCode = "ebilling.submission.findings_unreadable";
     internal const string InvoiceLinkMismatchCode = "ebilling.submission.invoice_link_mismatch";
-    internal const string SignalWriteSkippedCode = "ebilling.submission.signal_write_skipped";
-    internal const string SignalChangedCode = "ebilling.submission.signal_changed";
+    internal const string SignalWriteSkippedCode = SignalEpisodeLifecycle.SignalWriteSkippedCode;
+    internal const string SignalChangedCode = SignalEpisodeLifecycle.SignalChangedCode;
     internal const string SignalPlanMissingCode = "ebilling.submission.signal_plan_missing";
     internal const string NotProcessingCode = "ebilling.submission.not_processing";
     internal const string TerminalWriteConflictCode = "ebilling.submission.terminal_write_conflict";
@@ -102,8 +102,7 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
     private readonly IInvoiceTotalsService _totals;
     private readonly IEbillingNotificationSink _sink;
     private readonly ILogger<InvoiceSubmissionAfterSteps> _logger;
-    private readonly Func<SignalWriteRequest, CancellationToken, Task<SignalWriteResult>> _writeSignal;
-    private readonly Func<Guid, string, string, CancellationToken, Task<SignalCloseOutcome>> _supersedeSignal;
+    private readonly SignalEpisodeLifecycle _lifecycle;
     private readonly Func<Guid, Guid, DateTime, string, CancellationToken, Task<SignalAutomatedCloseOutcome>> _closeActed;
     private readonly TimeProvider _time;
     private readonly Func<BillingDecision, CancellationToken, Task<BillingDecisionRecordResult>> _record;
@@ -161,8 +160,7 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         _totals = totals ?? throw new ArgumentNullException(nameof(totals));
         _sink = sink ?? throw new ArgumentNullException(nameof(sink));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _writeSignal = writeSignal ?? throw new ArgumentNullException(nameof(writeSignal));
-        _supersedeSignal = supersedeSignal ?? throw new ArgumentNullException(nameof(supersedeSignal));
+        _lifecycle = new SignalEpisodeLifecycle(entities, writeSignal, supersedeSignal, logger);
         _closeActed = closeActed ?? throw new ArgumentNullException(nameof(closeActed));
         _time = time ?? TimeProvider.System;
         _record = record ?? throw new ArgumentNullException(nameof(record));
@@ -358,13 +356,13 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         var refusedSignals = new List<SignalWriteRefused>();
         foreach (var (request, fingerprint) in requests)
         {
-            // F1-3: a refusal the writer would repeat on every attempt (PermanentWriteRefusal, PermanentSkipCodes) is recorded and the run goes
+            // F1-3: a refusal the writer would repeat on every attempt (PermanentWriteRefusal, SignalEpisodeLifecycle.PermanentSkipCodes) is recorded and the run goes
             // on: one refused Signal never stops the others, the Decision Record or the terminal status. Any other exception (a Dataverse
             // read or write fault) still propagates, as before: the job retries, and every write here is idempotent.
             SignalStep step;
             try
             {
-                step = await WriteWithLifecycleAsync(request, fingerprint, submissionId, ct).ConfigureAwait(false);
+                step = await _lifecycle.WriteAsync(request, fingerprint, "Invoice submission", submissionId, ResolvedEpisodeRule.SkipWhenSameFingerprint, ct).ConfigureAwait(false);
             }
             catch (Exception ex) when ((ex is not OperationCanceledException || !ct.IsCancellationRequested) && PermanentWriteRefusal(request, ex) is { } code)
             {
@@ -989,9 +987,6 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
 
     // ── Signals ──
 
-    /// <summary>One Signal's step: written, a retryable <paramref name="FailureCode"/>, or a permanent <paramref name="RefusedCode"/> (F1-3).</summary>
-    private readonly record struct SignalStep(bool Wrote, string? FailureCode, string? RefusedCode = null);
-
     // ── F1-3: permanent Signal-write refusals ──
 
     /// <summary>The findings JSON member that records the Signals the writer refused permanently: <c>[{ policyCode, subject: { entity, id },
@@ -1000,25 +995,6 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
 
     /// <summary>One Signal the writer refused permanently: its policy, subject and the writer's code.</summary>
     internal sealed record SignalWriteRefused(string PolicyCode, string SubjectEntity, Guid SubjectId, string Code);
-
-    /// <summary>
-    /// The <see cref="SignalWriteResult.SkippedRefusalCode"/> values a redelivery cannot change (F1-3): the reconcile met a Signal whose core
-    /// record or no-core owner changed (<see cref="OntologyWriterFailureReason.CoreRecordChanged"/>, re-grouping is task 031's), and the
-    /// ownership resolver's refusals of the data or configuration it read (<see cref="RecordOwnerRefusal"/>). Not here, so retried:
-    /// <see cref="RecordOwnerRefusal.ParentUndetermined"/> (a derivation that FAILED, which a retry can pass) and any code not listed.
-    /// </summary>
-    internal static readonly IReadOnlySet<string> PermanentSkipCodes = new HashSet<string>(StringComparer.Ordinal)
-    {
-        OntologyWriterFailureReason.CoreRecordChanged,
-        RecordOwnerRefusal.ParentUnresolved,
-        RecordOwnerRefusal.SecureParentNotIsolated,
-        RecordOwnerRefusal.SecureOwnerTeamUnresolved,
-        RecordOwnerRefusal.SecureBusinessUnitAmbiguous,
-        RecordOwnerRefusal.NoDefaultOwnerTeam,
-        RecordOwnerRefusal.ActingUserUnresolved,
-        RecordOwnerRefusal.NoOwnerSource,
-        RecordOwnerRefusal.RecordMissing,
-    };
 
     /// <summary>
     /// The code of a Signal-write exception the writer would throw again on every attempt (F1-3), or null for a retryable one:
@@ -1097,128 +1073,6 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
 
         await _entities.UpdateAsync(FinanceBaseValues.SubmissionEntity, submissionId, update, ct).ConfigureAwait(false);
         return json;
-    }
-
-    /// <summary>
-    /// The option-a lifecycle (notes section 6) for one (policy, subject): the latest episode by the dedupe-key prefix, its status and its
-    /// stored reason-set fingerprint decide: none → episode 1; open + same → refresh it; open + different → Superseded, then episode n+1;
-    /// resolved + same → skip (a resume never re-raises what was resolved); resolved + different → episode n+1. A skipped write
-    /// (<see cref="SignalWriteResult.SkippedRefusalCode"/>) is permanent when its code is in <see cref="PermanentSkipCodes"/> (F1-3: recorded,
-    /// the run continues), otherwise a failure; an open Signal that changed while being superseded is a failure: retry.
-    /// </summary>
-    private async Task<SignalStep> WriteWithLifecycleAsync(SignalWriteRequest request, string fingerprint, Guid submissionId, CancellationToken ct)
-    {
-        var latest = await LatestEpisodeAsync(request, ct).ConfigureAwait(false);
-        var episode = 1;
-        if (latest is { } existing)
-        {
-            var same = string.Equals(existing.Fingerprint, fingerprint, StringComparison.Ordinal);
-            if (existing.IsResolved)
-            {
-                if (same)
-                {
-                    return new SignalStep(false, null);
-                }
-
-                episode = existing.Episode + 1;
-            }
-            else if (same)
-            {
-                episode = existing.Episode;
-            }
-            else
-            {
-                if (string.IsNullOrWhiteSpace(existing.RowVersion))
-                {
-                    _logger.LogWarning("Invoice submission {SubmissionId}: Signal {SignalId} was read without a row version; not superseded", submissionId, existing.Id);
-                    return new SignalStep(false, SignalChangedCode);
-                }
-
-                var closed = await _supersedeSignal(existing.Id, existing.RowVersion, request.PolicyCode, ct).ConfigureAwait(false);
-                if (closed != SignalCloseOutcome.Closed)
-                {
-                    return new SignalStep(false, SignalChangedCode);
-                }
-
-                episode = existing.Episode + 1;
-            }
-        }
-
-        var result = await _writeSignal(request with { Episode = episode }, ct).ConfigureAwait(false);
-        if (result.IsSkipped)
-        {
-            if (PermanentSkipCodes.Contains(result.SkippedRefusalCode!))
-            {
-                return new SignalStep(false, null, result.SkippedRefusalCode);
-            }
-
-            _logger.LogWarning("Invoice submission {SubmissionId}: the Signal of policy {PolicyCode} on {Subject} {SubjectId} was skipped ({Refusal})",
-                submissionId, request.PolicyCode, request.SubjectEntityLogicalName, request.SubjectId, result.SkippedRefusalCode);
-            return new SignalStep(false, SignalWriteSkippedCode);
-        }
-
-        return new SignalStep(true, null);
-    }
-
-    private sealed record ExistingEpisode(Guid Id, int Episode, bool IsResolved, string? Fingerprint, string? RowVersion);
-
-    private async Task<ExistingEpisode?> LatestEpisodeAsync(SignalWriteRequest request, CancellationToken ct)
-    {
-        var subjectId = request.SubjectId.ToString("D").ToLowerInvariant();
-        var prefix = SignalWriter.DedupeKeySubjectPrefix(request.PolicyCode, request.SubjectEntityLogicalName, subjectId);
-        var query = new QueryExpression(SignalEntity)
-        {
-            ColumnSet = new ColumnSet("sprk_dedupekey", "sprk_signalstatus", "sprk_evidencerefs", "versionnumber"),
-            NoLock = true,
-        };
-        query.Criteria.AddCondition("sprk_dedupekey", ConditionOperator.BeginsWith, prefix);
-        var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
-
-        ExistingEpisode? latest = null;
-        foreach (var row in rows.Entities)
-        {
-            if (!SignalWriter.TryParseDedupeKey(row.GetAttributeValue<string>("sprk_dedupekey"), out var code, out var entity, out var id, out var episode)
-                || !string.Equals(code, request.PolicyCode, StringComparison.Ordinal)
-                || !string.Equals(entity, request.SubjectEntityLogicalName, StringComparison.Ordinal) || id != request.SubjectId)
-            {
-                continue;
-            }
-
-            if (latest is null || episode > latest.Episode)
-            {
-                latest = new ExistingEpisode(
-                    row.Id,
-                    episode,
-                    row.GetAttributeValue<OptionSetValue>("sprk_signalstatus")?.Value == SignalWriter.SignalStatusResolved,
-                    FingerprintOf(row.GetAttributeValue<string>("sprk_evidencerefs")),
-                    row.RowVersion ?? (row.GetAttributeValue<long?>("versionnumber") is { } v ? v.ToString(CultureInfo.InvariantCulture) : null));
-            }
-        }
-
-        return latest;
-    }
-
-    /// <summary>The <see cref="BillingFindingSignalMapper.FingerprintEvidenceKind"/> line's <c>ref</c> in a stored <c>sprk_evidencerefs</c>; null when absent or unreadable.</summary>
-    internal static string? FingerprintOf(string? evidenceJson)
-    {
-        if (string.IsNullOrWhiteSpace(evidenceJson))
-        {
-            return null;
-        }
-
-        try
-        {
-            return JsonNode.Parse(evidenceJson) is JsonArray lines
-                ? lines.OfType<JsonObject>()
-                    .Where(l => Text(l, "kind") == BillingFindingSignalMapper.FingerprintEvidenceKind)
-                    .Select(l => Text(l, "ref"))
-                    .FirstOrDefault()
-                : null;
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
     }
 
     // ── System Signals (D-123, D-125) ──

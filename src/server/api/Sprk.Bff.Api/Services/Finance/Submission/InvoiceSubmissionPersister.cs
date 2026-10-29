@@ -1369,49 +1369,7 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             var f = findings[i];
             var scrub = withheldGroups.Contains((f.PolicyId, f.Subject));
             decisions.TryGetValue(i, out var decided);
-            var entry = new JsonObject
-            {
-                ["index"] = i,
-                ["ruleType"] = f.RuleType.ToString(),
-                ["policyId"] = f.PolicyId.ToString("D"),
-                ["policyCode"] = f.PolicyCode,
-                ["policyVersionId"] = f.PolicyVersionId.ToString("D"),
-                ["clause"] = f.ClauseReference,
-                ["clauseLocation"] = f.ClauseLocation,
-                ["subject"] = f.Subject.Kind.ToString(),
-                ["line"] = f.Subject.LineIndex,
-                ["reasonCode"] = f.ReasonCode,
-                ["detailWithheld"] = f.DetailWithheld || scrub,
-                ["consequence"] = decided?.Consequence?.ToString(),
-                ["rejects"] = decided?.Rejects ?? false,
-                ["heldBecause"] = decided?.HeldBecause,
-            };
-            if (!scrub)
-            {
-                entry["valuesRead"] = new JsonArray(f.ValuesRead.Select(v => (JsonNode)new JsonObject
-                {
-                    ["name"] = v.Name,
-                    ["value"] = v.Value,
-                    ["line"] = v.ExtractedField?.LineIndex,
-                    ["field"] = v.ExtractedField?.Field,
-                    ["confidence"] = v.Confidence,
-                    ["belowReliabilityThreshold"] = v.BelowReliabilityThreshold,
-                }).ToArray());
-
-                // Task 100 (the Invoice Review read model, FR-31): the adjustment the rule suggests, for the reviewer's "apply suggestion"
-                // click. An additive member of the stored copy (schema 1 readers ignore it); a reviewer decision applies it, never a handler.
-                // Left out of a scrubbed group with the rest of the detail (D-112), and when the rule suggests none.
-                if (f.SuggestedAdjustment is { } suggestion)
-                {
-                    entry["suggestedAdjustment"] = new JsonObject
-                    {
-                        ["kind"] = suggestion.Kind.ToString(),
-                        ["amount"] = suggestion.Amount,
-                    };
-                }
-            }
-
-            findingsJson.Add(entry);
+            findingsJson.Add(FindingEntryJson(i, f, decided, scrub));
         }
 
         var pipeline = new JsonArray(outcome.PipelineFindings.Select(p =>
@@ -1458,12 +1416,7 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             codedByKey?.TryGetValue(index.ToString(CultureInfo.InvariantCulture), out lineCoding);
             if (LineFindingCodeFor(outcome.Read.Lines[index].Narrative.Value, lineCoding) is { } lineCode)
             {
-                lineFindings.Add(new JsonObject
-                {
-                    ["line"] = index,
-                    ["code"] = lineCode,
-                    ["message"] = lineCode == LineFindingNotReturned ? "The line was not checked by the AI." : "The line has no description.",
-                });
+                lineFindings.Add(LineFindingEntryJson(index, lineCode));
             }
         }
 
@@ -1552,46 +1505,115 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
                 continue;
             }
 
-            var facts = new JsonObject();
-            foreach (var (name, value) in request.FactValues)
-            {
-                facts[name] = value?.ToString();
-            }
-
-            plan.Add(new JsonObject
-            {
-                ["policyId"] = request.PolicyId.ToString("D"),
-                ["policyCode"] = request.PolicyCode,
-                ["policyVersionId"] = request.PolicyVersionId.ToString("D"),
-                ["subjectEntity"] = request.SubjectEntityLogicalName,
-                ["subjectId"] = request.SubjectId.ToString("D"),
-                ["subjectName"] = request.SubjectDisplayName,
-                ["headline"] = request.ShortHeadline,
-                ["lane"] = request.Lane,
-                ["severity"] = request.Severity,
-                ["template"] = request.MessageTemplate,
-                ["facts"] = facts,
-                ["sentence"] = SignalWriter.RenderSentence(request.MessageTemplate, request.FactValues),
-                ["evidence"] = new JsonArray((request.EvidenceRefs ?? []).Select(e => (JsonNode)new JsonObject
-                {
-                    ["kind"] = e.Kind,
-                    ["ref"] = e.Ref,
-                    ["tier"] = e.Tier,
-                    ["confidence"] = e.Confidence,
-                    ["text"] = e.Text,
-                    ["source"] = e.Source,
-                    ["asOf"] = e.AsOf,
-                    ["clause"] = e.Clause,
-                }).ToArray()),
-                ["reasonCodes"] = new JsonArray(mapping.ReasonCodes.Select(c => (JsonNode)JsonValue.Create(c)!).ToArray()),
-                ["consequence"] = mapping.Consequence.ToString(),
-                ["fingerprint"] = mapping.Fingerprint,
-                ["decision"] = mapping.Decision.ToString(),
-            });
+            plan.Add(SignalPlanEntryJson(mapping));
         }
 
         return plan;
     }
+
+    /// <summary>
+    /// One <c>signalPlan[]</c> entry from a mapped (policy, subject) group (B2a: a per-entry builder so a correction's re-evaluation can replace ONE entry
+    /// of the stored plan). The caller has already passed the request through <see cref="SignalWriter.PreflightRefusal"/>.
+    /// </summary>
+    internal static JsonObject SignalPlanEntryJson(BillingSignalMapping mapping)
+    {
+        var request = mapping.Request;
+        var facts = new JsonObject();
+        foreach (var (name, value) in request.FactValues)
+        {
+            facts[name] = value?.ToString();
+        }
+
+        return new JsonObject
+        {
+            ["policyId"] = request.PolicyId.ToString("D"),
+            ["policyCode"] = request.PolicyCode,
+            ["policyVersionId"] = request.PolicyVersionId.ToString("D"),
+            ["subjectEntity"] = request.SubjectEntityLogicalName,
+            ["subjectId"] = request.SubjectId.ToString("D"),
+            ["subjectName"] = request.SubjectDisplayName,
+            ["headline"] = request.ShortHeadline,
+            ["lane"] = request.Lane,
+            ["severity"] = request.Severity,
+            ["template"] = request.MessageTemplate,
+            ["facts"] = facts,
+            ["sentence"] = SignalWriter.RenderSentence(request.MessageTemplate, request.FactValues),
+            ["evidence"] = new JsonArray((request.EvidenceRefs ?? []).Select(e => (JsonNode)new JsonObject
+            {
+                ["kind"] = e.Kind,
+                ["ref"] = e.Ref,
+                ["tier"] = e.Tier,
+                ["confidence"] = e.Confidence,
+                ["text"] = e.Text,
+                ["source"] = e.Source,
+                ["asOf"] = e.AsOf,
+                ["clause"] = e.Clause,
+            }).ToArray()),
+            ["reasonCodes"] = new JsonArray(mapping.ReasonCodes.Select(c => (JsonNode)JsonValue.Create(c)!).ToArray()),
+            ["consequence"] = mapping.Consequence.ToString(),
+            ["fingerprint"] = mapping.Fingerprint,
+            ["decision"] = mapping.Decision.ToString(),
+        };
+    }
+
+    /// <summary>
+    /// One <c>findings[]</c> entry (B2a: a per-entry builder so a correction's re-evaluation can patch ONE entry of the stored copy). <paramref name="scrub"/>
+    /// is D-112: the (policy, subject) group holds a withheld finding, so this entry carries no values read and no suggestion.
+    /// </summary>
+    internal static JsonObject FindingEntryJson(int index, BillingFinding f, FindingDecision? decided, bool scrub)
+    {
+        var entry = new JsonObject
+        {
+            ["index"] = index,
+            ["ruleType"] = f.RuleType.ToString(),
+            ["policyId"] = f.PolicyId.ToString("D"),
+            ["policyCode"] = f.PolicyCode,
+            ["policyVersionId"] = f.PolicyVersionId.ToString("D"),
+            ["clause"] = f.ClauseReference,
+            ["clauseLocation"] = f.ClauseLocation,
+            ["subject"] = f.Subject.Kind.ToString(),
+            ["line"] = f.Subject.LineIndex,
+            ["reasonCode"] = f.ReasonCode,
+            ["detailWithheld"] = f.DetailWithheld || scrub,
+            ["consequence"] = decided?.Consequence?.ToString(),
+            ["rejects"] = decided?.Rejects ?? false,
+            ["heldBecause"] = decided?.HeldBecause,
+        };
+        if (!scrub)
+        {
+            entry["valuesRead"] = new JsonArray(f.ValuesRead.Select(v => (JsonNode)new JsonObject
+            {
+                ["name"] = v.Name,
+                ["value"] = v.Value,
+                ["line"] = v.ExtractedField?.LineIndex,
+                ["field"] = v.ExtractedField?.Field,
+                ["confidence"] = v.Confidence,
+                ["belowReliabilityThreshold"] = v.BelowReliabilityThreshold,
+            }).ToArray());
+
+            // Task 100 (the Invoice Review read model, FR-31): the adjustment the rule suggests, for the reviewer's "apply suggestion"
+            // click. An additive member of the stored copy (schema 1 readers ignore it); a reviewer decision applies it, never a handler.
+            // Left out of a scrubbed group with the rest of the detail (D-112), and when the rule suggests none.
+            if (f.SuggestedAdjustment is { } suggestion)
+            {
+                entry["suggestedAdjustment"] = new JsonObject
+                {
+                    ["kind"] = suggestion.Kind.ToString(),
+                    ["amount"] = suggestion.Amount,
+                };
+            }
+        }
+
+        return entry;
+    }
+
+    /// <summary>One <c>lineFindings[]</c> entry (EB-D-175 / EB-D-176; B2a: a per-entry builder). <paramref name="code"/> is <see cref="LineFindingCodeFor"/>'s.</summary>
+    internal static JsonObject LineFindingEntryJson(int lineIndex, string code) => new()
+    {
+        ["line"] = lineIndex,
+        ["code"] = code,
+        ["message"] = code == LineFindingNotReturned ? "The line was not checked by the AI." : "The line has no description.",
+    };
 
     // ── Helpers ──
 

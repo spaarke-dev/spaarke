@@ -288,13 +288,16 @@ internal sealed class CorrectionWorld
 
     public Entity Line(Guid id = default) => Lines.Single(l => l.Id == (id == default ? FeeLineId : id));
 
+    /// <summary>The follow-through the service runs after a saved value (the B2 seam); null is the B1 no-op.</summary>
+    public Func<CorrectionApplied, CancellationToken, Task>? Seam { get; set; }
+
     public InvoiceCorrectionService Service()
     {
         var settings = new Mock<IEbillingSettingsReader>();
         var suggestions = new Mock<ICodeSetSuggestionProvider>();
         var resolver = new CodeSetResolver(Entities.Object, settings.Object, suggestions.Object, NullLogger<CodeSetResolver>.Instance);
         return new InvoiceCorrectionService(
-            Entities.Object, resolver, Ownership.Object, Identity.Object, ResolveApproversAsync, Log, Time);
+            Entities.Object, resolver, Ownership.Object, Identity.Object, ResolveApproversAsync, Log, Time, Seam);
     }
 
     private Task<EligibleApproverSet> ResolveApproversAsync(string coreEntity, Guid coreId, CancellationToken ct)

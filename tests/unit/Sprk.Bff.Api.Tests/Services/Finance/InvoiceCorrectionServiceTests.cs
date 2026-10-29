@@ -866,4 +866,72 @@ public sealed class InvoiceCorrectionServiceTests
         task.IsCompletedSuccessfully.Should().BeTrue();
         world.ValueWrites.Should().BeEmpty();
     }
+
+    // =========================================================================================
+    // 101 B2a: the seam runs on a repeat, and a seam failure is 503 Incomplete, never success
+    // =========================================================================================
+
+    [Fact(DisplayName = "101 B2a: an idempotent repeat that writes no second row still runs the seam")]
+    public async Task TheSeam_RunsOnAnIdempotentRepeat_ThatWritesNoSecondRow()
+    {
+        var world = new CorrectionWorld();
+        var applied = new List<CorrectionApplied>();
+        world.Seam = (a, _) =>
+        {
+            applied.Add(a);
+            return Task.CompletedTask;
+        };
+        var service = world.Service();
+
+        var first = await service.CorrectAsync(Line("Hours", "2.5"), CancellationToken.None);
+        var again = await service.CorrectAsync(Line("Hours", "2.5"), CancellationToken.None);
+
+        first.AlreadyApplied.Should().BeFalse();
+        again.AlreadyApplied.Should().BeTrue("the repeat wrote no second row and no second value");
+        world.Corrections.Should().HaveCount(1);
+        applied.Should().HaveCount(2, "the follow-through runs on the repeat too");
+        applied[0].ValueChanged.Should().BeTrue();
+        applied[1].ValueChanged.Should().BeFalse();
+        applied[1].Field.Should().Be("Hours");
+    }
+
+    [Fact(DisplayName = "101 B2a: a seam failure answers Incomplete (not Applied) with the failed step; the repeat writes no second row and completes it")]
+    public async Task ASeamFailure_IsIncomplete_AndTheRepeatCompletesIt_WithOneRow()
+    {
+        var world = new CorrectionWorld();
+        var calls = 0;
+        world.Seam = (_, _) => ++calls == 1 ? throw new TimeoutException("simulated") : Task.CompletedTask;
+        var service = world.Service();
+
+        var first = await service.CorrectAsync(Line("Hours", "2.5"), CancellationToken.None);
+
+        first.IsApplied.Should().BeFalse();
+        first.Status.Should().Be(CorrectionStatus.Incomplete);
+        first.Code.Should().Be("ebilling.correction.incomplete");
+        first.FailedStep.Should().Be("reevaluation");
+        first.Detail.Should().Contain("Repeat the same request");
+        world.Corrections.Should().HaveCount(1, "the correction itself is saved");
+        world.Line().GetAttributeValue<decimal>("sprk_quantity").Should().Be(2.5m);
+
+        var repeat = await service.CorrectAsync(Line("Hours", "2.5"), CancellationToken.None);
+
+        repeat.IsApplied.Should().BeTrue();
+        repeat.AlreadyApplied.Should().BeTrue();
+        world.Corrections.Should().HaveCount(1, "the repeat writes no second row");
+        calls.Should().Be(2);
+    }
+
+    [Fact(DisplayName = "101 B2a: Incomplete is HTTP 503 with errorCode and failedStep; Applied is 200")]
+    public async Task Incomplete_MapsTo503_WithTheStableCode_AndTheFailedStep()
+    {
+        var world = new CorrectionWorld { Seam = (_, _) => throw new InvalidOperationException("simulated") };
+        var result = await world.Service().CorrectAsync(Line("Hours", "2.5"), CancellationToken.None);
+
+        var http = Sprk.Bff.Api.Api.Finance.InvoiceCorrectionEndpoints.ToResult(result, new Microsoft.AspNetCore.Http.DefaultHttpContext());
+
+        var problem = http.Should().BeOfType<Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult>().Subject;
+        problem.StatusCode.Should().Be(503);
+        problem.ProblemDetails.Extensions["errorCode"].Should().Be("ebilling.correction.incomplete");
+        problem.ProblemDetails.Extensions["failedStep"].Should().Be("reevaluation");
+    }
 }

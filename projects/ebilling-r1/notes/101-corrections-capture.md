@@ -88,4 +88,41 @@ uncoded invoice's other lines stay Pending (D-126); coded lines with no finding 
 no Signal and no finding entry), so no new Signal kind or schema change was needed. Not done: the review read model does not yet surface `lineFindings` (the reviewer sees the
 Flagged status, `CodingStatus` and the blank narrative), and no Signal is raised for these lines; both are follow-ups.
 
+## 10. B2a - seam plumbing (refactor and wire; no new business behaviour)
+
+Branch `task/ebill-101-corrections`, on top of `33eba7f446`.
+
+| Piece | Where |
+|---|---|
+| Shared Signal lifecycle | `Services/Finance/Submission/SignalEpisodeLifecycle.cs` (internal sealed). The option-a lifecycle moved out of `InvoiceSubmissionAfterSteps` (`WriteWithLifecycleAsync`, `LatestEpisodeAsync`, `FingerprintOf`, `PermanentSkipCodes`, `SignalStep`, the two reason codes). |
+| Per-entry builders | `InvoiceSubmissionPersister.FindingEntryJson(int index, BillingFinding, FindingDecision?, bool scrub)`, `SignalPlanEntryJson(BillingSignalMapping)`, `LineFindingEntryJson(int lineIndex, string code)` |
+| Seam on repeat | `InvoiceCorrectionService.ApplyAsync` -> `OnValueWrittenAsync`; a failure is `CorrectionStatus.Incomplete` -> 503 `ebilling.correction.incomplete`, `failedStep` `reevaluation` |
+
+**The helper B2b calls**
+
+```csharp
+internal sealed class SignalEpisodeLifecycle
+{
+    public SignalEpisodeLifecycle(IGenericEntityService entities,
+        Func<SignalWriteRequest, CancellationToken, Task<SignalWriteResult>> writeSignal,
+        Func<Guid, string, string, CancellationToken, Task<SignalCloseOutcome>> supersedeSignal, ILogger logger);
+
+    internal Task<SignalStep> WriteAsync(SignalWriteRequest request, string fingerprint, string contextLabel, Guid contextId,
+        ResolvedEpisodeRule resolvedRule, CancellationToken ct);
+}
+internal enum ResolvedEpisodeRule { SkipWhenSameFingerprint /* 049 */, ReopenAsNextEpisode /* B2b: latest resolved -> episode n+1 */ }
+```
+
+049 passes `SkipWhenSameFingerprint`; behaviour is unchanged and its suite is untouched. The writer calls are functions (the shape the after-steps already use), so no DI registration was added. The log
+lines now take `{Context} {ContextId}` instead of the fixed words "Invoice submission {SubmissionId}"; the wording is otherwise the same. `PermanentWriteRefusal` (the exception classifier) stays in
+`InvoiceSubmissionAfterSteps`; B2b can call it (internal static) if it catches writer faults.
+
+**Seam on repeat.** `ApplyAsync` already reached `OnValueWrittenAsync` on a repeat that wrote no second row (the call sits after the optional transaction). B2a adds the test that pins it, and the
+failure path: a thrown seam is now `Incomplete` (503, `errorCode`, `failedStep`, the retry sentence "Repeat the same request to complete it."), never `Applied`. The service takes the seam body as an
+optional constructor argument (`onValueWritten`, null = the B1 no-op) so B2b wires its re-evaluation there and tests can fail it.
+
+**Tests.** `FindingsJson_OfAMixedInvoice_IsPinned` (golden captured from the persister BEFORE the extraction, run against it first); `EachStoredEntry_EqualsItsPerEntryBuilder`; the seam-on-repeat,
+seam-failure and 503-mapping tests in `InvoiceCorrectionServiceTests`; `SignalEpisodeLifecycleTests` (one-line justification: the reopen rule is the one new input to the extracted helper, and no 049 test reaches it).
+Seeded proof: the seam call guarded by `!rowExists || valueChanged` made the repeat test and the failure/repeat test fail; restored.
+
 rework: none

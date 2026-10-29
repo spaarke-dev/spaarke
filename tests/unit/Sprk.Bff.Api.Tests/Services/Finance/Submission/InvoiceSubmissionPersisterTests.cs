@@ -1062,6 +1062,85 @@ public class InvoiceSubmissionPersisterTests
         none.RootElement.GetProperty("findings")[0].TryGetProperty("suggestedAdjustment", out _).Should().BeFalse("must-not-fire: a rule that suggests nothing stores nothing");
     }
 
+    // ── 101 B2a: the per-entry builders leave the stored findings JSON byte-identical ──
+
+    /// <summary>
+    /// A mixed invoice: one rule firing on two lines (line 0 visible with a suggested adjustment, line 1 withheld), a line the Action did
+    /// not return and a line with a blank narrative. Its stored JSON exercises findings[] (visible and scrubbed), lineFindings[] and signalPlan[].
+    /// </summary>
+    private static async Task<SubmissionEvaluationOutcome> MixedInvoiceAsync()
+    {
+        var harness = new ProcessorHarness
+        {
+            Rules = [InvoiceSubmissionProcessorTests.InvoiceAgeReject()],
+            Lines =
+            [
+                InvoiceSubmissionProcessorTests.FeeLine(date: new DateOnly(2026, 1, 20)),
+                InvoiceSubmissionProcessorTests.FeeLine(date: new DateOnly(2026, 1, 21)) with { Narrative = InvoiceSubmissionProcessorTests.F<string?>("  ") },
+            ],
+            Channel = InvoiceSubmissionChannel.Internal,
+        };
+        harness.Coding.NotReturnedKeys = new HashSet<string> { "0" };
+        var outcome = await harness.RunAsync();
+        return outcome with
+        {
+            Evaluation = outcome.Evaluation! with
+            {
+                Findings =
+                [
+                    .. outcome.Evaluation.Findings.Select(f => f.Subject.LineIndex == 1
+                        ? f with { DetailWithheld = true }
+                        : f with { SuggestedAdjustment = new BillingSuggestedAdjustment(BillingAdjustmentKind.Reduce, 120.50m) }),
+                ],
+            },
+        };
+    }
+
+    [Fact(DisplayName = "101 B2a: the stored findings JSON of a mixed invoice is byte-identical to the pre-extraction output")]
+    public async Task FindingsJson_OfAMixedInvoice_IsPinned()
+    {
+        var outcome = await MixedInvoiceAsync();
+
+        var json = InvoiceSubmissionPersister.BuildFindingsJson(outcome, InvoiceId);
+
+        json.Should().Be(MixedInvoiceGoldenJson);
+    }
+
+    [Fact(DisplayName = "101 B2a: each findings[], signalPlan[] and lineFindings[] entry of the stored copy equals its per-entry builder")]
+    public async Task EachStoredEntry_EqualsItsPerEntryBuilder()
+    {
+        var outcome = await MixedInvoiceAsync();
+        var json = InvoiceSubmissionPersister.BuildFindingsJson(outcome, InvoiceId);
+
+        // The builders B2b patches an entry with produce exactly the entries in the stored copy.
+        var root = System.Text.Json.Nodes.JsonNode.Parse(json)!.AsObject();
+        var findings = outcome.Evaluation!.Findings;
+        var decisions = outcome.Decision!.Findings.ToDictionary(d => d.Index);
+        var withheld = findings.Where(f => f.DetailWithheld).Select(f => (f.PolicyId, f.Subject)).ToHashSet();
+        root["findings"]!.AsArray().Should().HaveCount(findings.Count);
+        for (var i = 0; i < findings.Count; i++)
+        {
+            decisions.TryGetValue(i, out var decided);
+            var built = InvoiceSubmissionPersister.FindingEntryJson(i, findings[i], decided, withheld.Contains((findings[i].PolicyId, findings[i].Subject)));
+            built.ToJsonString().Should().Be(root["findings"]![i]!.ToJsonString());
+        }
+
+        var plan = InvoiceSubmissionPersister.SignalPlanJson(outcome, InvoiceId);
+        plan.Should().NotBeEmpty();
+        for (var i = 0; i < plan.Count; i++)
+        {
+            root["signalPlan"]![i]!.ToJsonString().Should().Be(plan[i]!.ToJsonString());
+        }
+
+        var lineFindings = root[InvoiceSubmissionPersister.LineFindingsMember]!.AsArray();
+        lineFindings.Should().HaveCount(2);
+        InvoiceSubmissionPersister.LineFindingEntryJson(0, InvoiceSubmissionPersister.LineFindingNotReturned).ToJsonString().Should().Be(lineFindings[0]!.ToJsonString());
+        InvoiceSubmissionPersister.LineFindingEntryJson(1, "line.no_description").ToJsonString().Should().Be(lineFindings[1]!.ToJsonString());
+    }
+
+    /// <summary>Captured from the persister BEFORE the per-entry builders were extracted (B2a); a change to it is a change to the stored contract.</summary>
+    private const string MixedInvoiceGoldenJson = """{"schema":1,"kind":"Blocked","reasonCode":"ebilling.submission.blocked","invoiceId":"702a4e41-057f-9921-ef82-f784a2afb206","trackingNumber":"INV-100.2","receivedOn":"2026-06-05","decision":{"outcome":"Rejected","reliabilityThreshold":0.90,"deciding":[0,1]},"codeSet":{"id":"04900000-0000-4000-8000-0000000000e1","name":"UTBMS","source":"FirmCodes","needsReview":false},"findings":[{"index":0,"ruleType":"InvoiceAge","policyId":"c76b3d50-3e51-97b1-e0d6-6da9e29e9094","policyCode":"BILL-AGE","policyVersionId":"e894a2fe-0118-6a93-cbd3-b0b5f1cf26c1","clause":"Clause of BILL-AGE v1","clauseLocation":"OCG BILL-AGE","subject":"Line","line":0,"reasonCode":"invoice_age.too_old","detailWithheld":false,"consequence":"Reject","rejects":true,"heldBecause":null,"valuesRead":[{"name":"line.date","value":"2026-01-20","line":0,"field":"Date","confidence":0.99,"belowReliabilityThreshold":false},{"name":"invoice.date","value":"2026-06-01","line":null,"field":"InvoiceDate","confidence":0.99,"belowReliabilityThreshold":false},{"name":"line.hours","value":"1.5","line":0,"field":"Hours","confidence":0.99,"belowReliabilityThreshold":false},{"name":"line.amount","value":"750.00","line":0,"field":"Amount","confidence":0.99,"belowReliabilityThreshold":false}],"suggestedAdjustment":{"kind":"Reduce","amount":120.50}},{"index":1,"ruleType":"InvoiceAge","policyId":"c76b3d50-3e51-97b1-e0d6-6da9e29e9094","policyCode":"BILL-AGE","policyVersionId":"e894a2fe-0118-6a93-cbd3-b0b5f1cf26c1","clause":"Clause of BILL-AGE v1","clauseLocation":"OCG BILL-AGE","subject":"Line","line":1,"reasonCode":"invoice_age.too_old","detailWithheld":true,"consequence":"Reject","rejects":true,"heldBecause":null}],"pipelineFindings":[],"codingFindings":[],"lineFindings":[{"line":0,"code":"coding.not_returned","message":"The line was not checked by the AI."},{"line":1,"code":"line.no_description","message":"The line has no description."}],"invoiceName":"Firm LLP - INV-100","invoiceNumberReadConfidence":0.99,"signalPlan":[{"policyId":"c76b3d50-3e51-97b1-e0d6-6da9e29e9094","policyCode":"BILL-AGE","policyVersionId":"e894a2fe-0118-6a93-cbd3-b0b5f1cf26c1","subjectEntity":"sprk_billingevent","subjectId":"b9402a4d-5142-0eff-2cb9-fcaf0eaa30ee","subjectName":"INV-100.2 #1","headline":"Invoice held for review","lane":100000000,"severity":null,"template":"The rejection rule would reject this invoice: {{decidingReason}}","facts":{"invoice.date":"2026-06-01","line.date":"2026-01-20","rule.maxAgeDays":"90","decidingReason":"The line dated 2026-01-20 is more than 90 days before the invoice date 2026-06-01."},"sentence":"The rejection rule would reject this invoice: The line dated 2026-01-20 is more than 90 days before the invoice date 2026-06-01.","evidence":[{"kind":"billing.reasonset","ref":"invoice_age.too_old|Reject","tier":"Fact","confidence":null,"text":null,"source":null,"asOf":null,"clause":null},{"kind":"billing.reason","ref":"invoice_age.too_old","tier":"Fact","confidence":null,"text":"The line dated 2026-01-20 is more than 90 days before the invoice date 2026-06-01.","source":"sprk_policyversion:e894a2fe-0118-6a93-cbd3-b0b5f1cf26c1","asOf":null,"clause":null},{"kind":"billing.decision","ref":"Held","tier":"Fact","confidence":null,"text":"ebilling.submission.blocked","source":null,"asOf":null,"clause":null},{"kind":"billing.field","ref":"line[0].Date","tier":"Observation","confidence":0.99,"text":"2026-01-20","source":"line.date","asOf":null,"clause":null},{"kind":"billing.field","ref":"invoice.InvoiceDate","tier":"Observation","confidence":0.99,"text":"2026-06-01","source":"invoice.date","asOf":null,"clause":null},{"kind":"billing.field","ref":"line[0].Hours","tier":"Observation","confidence":0.99,"text":"1.5","source":"line.hours","asOf":null,"clause":null},{"kind":"billing.field","ref":"line[0].Amount","tier":"Observation","confidence":0.99,"text":"750.00","source":"line.amount","asOf":null,"clause":null}],"reasonCodes":["invoice_age.too_old"],"consequence":"Reject","fingerprint":"invoice_age.too_old|Reject","decision":"Blocked"},{"policyId":"c76b3d50-3e51-97b1-e0d6-6da9e29e9094","policyCode":"BILL-AGE","policyVersionId":"e894a2fe-0118-6a93-cbd3-b0b5f1cf26c1","subjectEntity":"sprk_billingevent","subjectId":"37c0f9a8-1bb6-a7c3-10f8-209c9d981223","subjectName":"INV-100.2 #2","headline":"Invoice held for review","lane":100000000,"severity":null,"template":"The rejection rule would reject this invoice: {{decidingReason}}","facts":{"decidingReason":"This matches an earlier submission."},"sentence":"The rejection rule would reject this invoice: This matches an earlier submission.","evidence":[{"kind":"billing.reasonset","ref":"invoice_age.too_old|Reject","tier":"Fact","confidence":null,"text":null,"source":null,"asOf":null,"clause":null},{"kind":"billing.reason","ref":"invoice_age.too_old","tier":"Fact","confidence":null,"text":"This matches an earlier submission.","source":"sprk_policyversion:e894a2fe-0118-6a93-cbd3-b0b5f1cf26c1","asOf":null,"clause":null},{"kind":"billing.decision","ref":"Held","tier":"Fact","confidence":null,"text":"ebilling.submission.blocked","source":null,"asOf":null,"clause":null},{"kind":"billing.field","ref":"line[1].Date","tier":"Observation","confidence":0.99,"text":null,"source":"line.date","asOf":null,"clause":null},{"kind":"billing.field","ref":"invoice.InvoiceDate","tier":"Observation","confidence":0.99,"text":null,"source":"invoice.date","asOf":null,"clause":null},{"kind":"billing.field","ref":"line[1].Hours","tier":"Observation","confidence":0.99,"text":null,"source":"line.hours","asOf":null,"clause":null},{"kind":"billing.field","ref":"line[1].Amount","tier":"Observation","confidence":0.99,"text":null,"source":"line.amount","asOf":null,"clause":null}],"reasonCodes":["invoice_age.too_old"],"consequence":"Reject","fingerprint":"invoice_age.too_old|Reject","decision":"Blocked"}],"provenance":{"analyzerId":"test","apiVersion":"test","actionCode":"invoice-line-code","actionVersion":1,"header":{"FirmInvoiceNumber":{"value":"INV-100","confidence":0.99,"combined":0.99},"InvoiceDate":{"value":"2026-06-01","confidence":0.99,"combined":0.99},"BillingPeriodStart":{"value":"2026-05-01","confidence":0.99,"combined":0.99},"BillingPeriodEnd":{"value":"2026-05-31","confidence":0.99,"combined":0.99},"Currency":{"value":"USD","confidence":0.99,"combined":0.99},"TotalDue":{"value":"1500.00","confidence":0.99,"combined":0.99}}}}""";
+
     // ── part D: the stored Signal plan ──
 
     [Fact(DisplayName = "049 D: the findings JSON stores the Signal plan (merged request, sentence, fingerprint, 073's decision) on the persisted row ids")]

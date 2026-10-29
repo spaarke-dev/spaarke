@@ -23,7 +23,9 @@ namespace Sprk.Bff.Api.Api.Finance;
 /// says which rule: <c>ebilling.code.not_in_set</c>, <c>ebilling.correction.field_unknown</c>, <c>field_not_applicable</c>,
 /// <c>field_not_supported_yet</c>, <c>value_required</c>, <c>value_invalid</c>, <c>nothing_to_confirm</c>); 401; 403; 404 uniform (invoice or
 /// line absent or unreadable); 409 (not In Review, line Pending or already decided, no recorded AI source, no code set, the line or invoice
-/// changed); 503 <c>ebilling.disabled</c> or a transient failure (repeat the same request: it writes no second row).</para>
+/// changed); 503 <c>ebilling.disabled</c> or a transient failure (repeat the same request: it writes no second row); 503
+/// <c>ebilling.correction.incomplete</c> with <c>failedStep</c> <c>reevaluation</c> when the value was saved but the step after it did not finish
+/// (repeat the same request: it writes no second row and runs that step again).</para>
 /// </remarks>
 public static class InvoiceCorrectionEndpoints
 {
@@ -142,11 +144,22 @@ public static class InvoiceCorrectionEndpoints
     private static IResult ReviewerUnresolved(HttpContext httpContext) =>
         ProblemDetailsHelper.Forbidden(CorrectionCodes.ReviewerUnresolved, "Your user could not be identified, so the correction was not made.", httpContext.TraceIdentifier);
 
-    private static IResult ToResult(CorrectionResult result, HttpContext httpContext) => result.IsApplied
+    internal static IResult ToResult(CorrectionResult result, HttpContext httpContext) => result.IsApplied
         ? TypedResults.Ok(new CorrectionResponse(result.Correction!, result.AlreadyApplied))
-        : ToProblem(result.Status, result.Code, result.Detail, httpContext);
+        : ToProblem(result, httpContext);
 
     /// <summary>Maps a service outcome to one HTTP status and one stable code (ADR-019).</summary>
+    private static IResult ToProblem(CorrectionResult result, HttpContext httpContext)
+    {
+        var (status, code, detail) = (result.Status, result.Code, result.Detail);
+        return status == CorrectionStatus.Incomplete
+            ? Results.Problem(
+                statusCode: StatusCodes.Status503ServiceUnavailable,
+                detail: detail,
+                extensions: new Dictionary<string, object?> { ["errorCode"] = code, ["failedStep"] = result.FailedStep })
+            : ToProblem(status, code, detail, httpContext);
+    }
+
     private static IResult ToProblem(CorrectionStatus status, string code, string? detail, HttpContext httpContext) => status switch
     {
         CorrectionStatus.InvalidRequest or CorrectionStatus.CodeNotInSet => InvoiceLineReviewEndpoints.Refused(StatusCodes.Status400BadRequest, code, detail),
