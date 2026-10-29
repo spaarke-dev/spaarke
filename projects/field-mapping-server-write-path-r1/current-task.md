@@ -8,8 +8,8 @@
 
 | Field | Value |
 |---|---|
-| **Active** | **071 ✅ done** (PR #2442 ready, auto-merge; task/fm-071 @ 9c151ead66). **Next: task 072** (GET /records/{table}/{id}/family, FR-31, sonnet/high, FULL), which builds on RecordFamilyReader. Start it via task-execute once #2442 is on master. |
-| **Next Action** | 1) Watch #2442 merge. 2) task-execute 072 from master. 3) After 072: mark #2383 (074) ready; run the TrackingFieldTrio suite when it meets 074. |
+| **Active** | **072 🔄 in progress** (GET /records/{table}/{id}/family, FR-31, FULL, sonnet/high). Step 1–2: implementer agent `fm-072` in an isolated worktree, branch task/fm-072 from origin/master 7008180304 (071 merged as #2442). Decision: `recordType` = the member table's display name (a property of the table, never per record); `root` = the walk's top on direction=full, omitted on down. |
+| **Next Action** | 1) On the agent's return: Step 9.5 gates (code-review, adr-check, one Opus adversarial-reviewer), publish-size delta vs fresh master + CVE check, open the PR. 2) After 072: mark #2383 (074) ready; run the TrackingFieldTrio suite when it meets 074. |
 | **Owner decisions today** | Q1 drop; Q2 (B), seeding the 7 canonical index rows per customer, team-owned, no BU defaults. Depth cap counted from the TOP (exception to UAC C4; design §12.11, quoted on #2442; UAC adopted it). WA owning unit follows its matter (UAC #2451). |
 | **#2399** | Live part FIXED: the owner re-tested the WA create as Test User 1 on 2026-10-29 (saves, with number and Assigned To). Open for the durable fix: FR-38/W3 still need the scope procedure (spec amendment → task-create → TASK-INDEX → owner approval); FR-39 and the index rows are provisioning's #2429. |
 | **Open PRs** | #2442 (071, draft). #2383 (074, HOLD until 072). #2387 (075, HOLD, ships with 040). Both overlap current-task.md: keep the work branch's version. |
