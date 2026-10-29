@@ -588,6 +588,7 @@ public class AssignTaskNotifier
         {
             var query = new QueryExpression("systemuser") { ColumnSet = new ColumnSet("fullname"), TopCount = 2 };
             query.Criteria.AddCondition("azureactivedirectoryobjectid", ConditionOperator.Equal, id);
+            query.Criteria.AddCondition("isdisabled", ConditionOperator.Equal, false);
             var users = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
             var name = users.Entities.Count == 1 ? users.Entities[0].GetAttributeValue<string>("fullname")?.Trim() : null;
             return string.IsNullOrEmpty(name) || name.Contains('@') ? null : name;

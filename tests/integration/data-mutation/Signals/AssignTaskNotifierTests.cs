@@ -184,6 +184,8 @@ public sealed class AssignTaskNotifierTests
             Entities.Setup(e => e.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "systemuser"), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((QueryExpression q, CancellationToken _) =>
                     new EntityCollection(q.Criteria.Conditions.Any(c => c.AttributeName == "azureactivedirectoryobjectid" && Equals(c.Values[0], AssignerOid))
+                        // Answers only a lookup that excludes disabled users (issue #1576): a disabled row keeps its oid.
+                        && q.Criteria.Conditions.Any(c => c.AttributeName == "isdisabled" && Equals(c.Values[0], false))
                         ? [new Entity("systemuser", AssignerUser) { ["fullname"] = AssignerName }]
                         : []));
             Entities.Setup(e => e.CreateAsync(It.Is<Entity>(x => x.LogicalName == "appnotification"), It.IsAny<CancellationToken>()))
