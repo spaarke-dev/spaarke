@@ -25,22 +25,30 @@ namespace Spaarke.ArchTests;
 /// <para><b>Not seen</b>: a method that writes a hard-deny row through a builder not pinned here and names no hard-deny table, and a
 /// question built more than one helper call away. The R3b-2 guard (<see cref="ChildRowOwnershipBuilderGuardTests"/>) still sees every
 /// hand-named parent anywhere.</para>
-/// <para><b>The baseline</b>: <see cref="KnownViolations"/> is a ratchet (a new finding fails; an entry that no longer fires must be
-/// removed). When the guard was added it found one, outside ebilling, listed with its reason.</para>
+/// <para><b>Exemptions</b>: <see cref="IntentionalExemptions"/> holds the permanent, owner-decided exemptions; they are not debt and must
+/// not be migrated. <see cref="KnownViolations"/> is the ratchet for debt (a new finding fails); it is empty. An entry in either list that
+/// no longer fires must be removed.</para>
 /// <para><b>Controls</b>: <see cref="Detector_MustFireAndMustNotFire"/>.</para>
 /// </remarks>
 public class HardDenyOwnershipQuestionGuardTests
 {
     private sealed record Entry(string Type, string Method, string Reason);
 
-    /// <summary>The ratchet: hard-deny writers whose owner question is not yet built by ForRow / ForChild, each with its reason.</summary>
-    private static readonly IReadOnlyList<Entry> KnownViolations =
+    /// <summary>
+    /// Permanent, intended exemptions (owner decisions), each with its reason. Not debt: do not migrate them to ForRow / ForChild.
+    /// </summary>
+    private static readonly IReadOnlyList<Entry> IntentionalExemptions =
     [
         new("Sprk.Bff.Api.Services.Ontology.OntologyAdminAuthoringService", "CheckVersionOwnerAsync",
-            "A secure-if-any gate before a sprk_policyversion create, over the policy and the matters its rule names (hand-built, KeepCreator): " +
-            "an ordinary answer binds no ownerid, so the version stays its author's and no default team can own it (R4b-2 rule 1); a " +
-            "Secure answer refuses. Not an ebilling writer; the R3b-2 guard exempts it for the same reason (R4-2)."),
+            "Intentional (D-197, owner): authoring asks with no child table and KeepCreator so the author keeps the version, including " +
+            "root-homed authors; ForRow/ForChild would make 194b refuse them. Pinned by " +
+            "Publish_AsksTheResolverWithNoChildTable_SoTheAuthorWins_RootIncluded. Do not migrate."),
     ];
+
+    /// <summary>The ratchet: hard-deny writers whose owner question is not yet built by ForRow / ForChild, each with its reason.</summary>
+    private static readonly IReadOnlyList<Entry> KnownViolations = [];
+
+    private static IEnumerable<Entry> Listed => IntentionalExemptions.Concat(KnownViolations);
 
     /// <summary>The resolver and the context: the rule's own implementation, not a writer.</summary>
     private static readonly Type[] Implementation = [typeof(RecordOwnershipResolver), typeof(RecordOwnershipContext)];
@@ -79,7 +87,7 @@ public class HardDenyOwnershipQuestionGuardTests
         var found = Findings(BffTypes.Value.Where(t => !Implementation.Contains(IlCallScan.Outermost(t))));
 
         var unlisted = found
-            .Where(f => !KnownViolations.Any(e => e.Type == f.Type && e.Method == f.Method))
+            .Where(f => !Listed.Any(e => e.Type == f.Type && e.Method == f.Method))
             .Select(f => $"{f.Type}.{f.Method}")
             .ToArray();
         Assert.True(unlisted.Length == 0,
@@ -87,11 +95,11 @@ public class HardDenyOwnershipQuestionGuardTests
             "table (UAC 194b R4b-2): build it with RecordOwnershipContext.ForRow(<the row's table>, <the lookups it writes>) or " +
             "ForChild(row), so the restricted-content exit applies:\n" + string.Join("\n", unlisted));
 
-        var stale = KnownViolations
+        var stale = Listed
             .Where(e => !found.Any(f => f.Type == e.Type && f.Method == e.Method))
             .Select(e => $"{e.Type}.{e.Method}")
             .ToArray();
-        Assert.True(stale.Length == 0, "A baseline entry no longer fires — remove it: " + string.Join(", ", stale));
+        Assert.True(stale.Length == 0, "An exemption or baseline entry no longer fires — remove it: " + string.Join(", ", stale));
     }
 
     [Fact(DisplayName = "194b R4b-2 (uac-r2 Q2): control — ContentOf, a hand-built context and a stored-file BuildRow under ContentOf are found; ForRow, a ForRow helper and an ordinary ContentOf are not")]

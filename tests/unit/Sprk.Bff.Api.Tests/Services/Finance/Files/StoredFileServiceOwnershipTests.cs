@@ -150,6 +150,38 @@ public sealed class StoredFileServiceOwnershipTests
         answer.InPlaceOfDefaultTeamId.Should().Be(OwnershipDirectory.CustomerChildTeam, "the acting user's business-unit default team is what it replaces");
     }
 
+    [Theory(DisplayName = "uac-r2 re-check K: under a parent that files nothing, a source document is the primary - its business unit decides, and a Secure source still gives the Secure team")]
+    [InlineData(StoredFileParentKind.BillingExport, false)]
+    [InlineData(StoredFileParentKind.BillingExport, true)]
+    [InlineData(StoredFileParentKind.ProcedureVersion, false)]
+    [InlineData(StoredFileParentKind.ProcedureVersion, true)]
+    public async Task NoCoreParent_WithASourceDocument_TheDocumentIsThePrimary(StoredFileParentKind kind, bool secureDocument)
+    {
+        var parent = new StoredFileParent(kind, ParentId);
+        var documentId = Guid.Parse("d0c00000-0000-4000-8000-0000000000f2");
+        var directory = World(parent).WithRecord(
+            StoredFileSchema.DocumentTable, documentId,
+            secureDocument ? OwnershipDirectory.SecureBu : OwnershipDirectory.CustomerChildBu,
+            owningTeam: secureDocument ? OwnershipDirectory.SecureNamedTeam : OwnershipDirectory.CustomerChildTeam);
+        var rig = new StoredFileRig { Ownership = directory };
+        var spec = new StoredFileRowSpec
+        {
+            FileId = Guid.NewGuid(),
+            Purpose = PurposeOf(kind),
+            Parent = parent,
+            Name = "a.pdf",
+            ContentType = "application/pdf",
+            SourceDocumentId = documentId,
+        };
+
+        var owner = OwnerOf(rig, await rig.Service.CreateForAppAsync(spec, new MemoryStream(Pdf), AppRequester, CancellationToken.None));
+
+        var asked = rig.OwnerContexts.Should().ContainSingle().Subject;
+        asked.TargetEntityLogicalName.Should().Be(StoredFileSchema.DocumentTable, "the parent is filtered out, so the source document leads");
+        asked.TargetRecordId.Should().Be(documentId);
+        owner.Should().Be(secureDocument ? OwnershipDirectory.SecureNamedTeam : OwnershipDirectory.RestrictedContentTeam);
+    }
+
     [Theory(DisplayName = "uac-r2 Q2 (fail closed): an app create under a parent that files nothing, with no acting user, is refused and writes nothing")]
     [InlineData(StoredFileParentKind.BillingExport)]
     [InlineData(StoredFileParentKind.ProcedureVersion)]
