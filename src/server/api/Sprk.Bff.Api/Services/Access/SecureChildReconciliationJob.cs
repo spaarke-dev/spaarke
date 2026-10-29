@@ -177,6 +177,12 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
     /// <summary>#2159 B2: the re-file pass stops examining this long after it started (the rest waits behind the cursor).</summary>
     internal static readonly TimeSpan RefileTimeSlice = TimeSpan.FromSeconds(60);
 
+    /// <summary>
+    /// UAC task 194b: the ordinary-parent-move pass stops walking roots this long after it started; a root not reached is carried
+    /// (recent) or holds the sweep cursor (swept), exactly as a root the write cap stops, and is walked first next run.
+    /// </summary>
+    internal static readonly TimeSpan OrdinaryTimeSlice = TimeSpan.FromSeconds(60);
+
     /// <summary>#2159 B6: an undecidable document is carried (and fails the run) for at most this many consecutive runs.</summary>
     internal const int MaxUndecidableRuns = 5;
 
@@ -749,6 +755,9 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                     reported = ordinary.Reported,
                     writesAttempted = ordinary.WritesAttempted,
                     capReached = ordinary.CapReached,
+                    timeSliceReached = ordinary.TimeSliceReached,
+                    // 194b R4-3 (B4): where the next report-only run resumes (null: from the first root of its window).
+                    reportCursor = ordinary.ReportCursor,
                     incompleteRoots = ordinary.IncompleteRoots.Take(50).ToArray(),
                     carriedRoots = ordinary.CarriedRoots,
                     // F1-a: the walk's document files handed to the re-file pass, and the roots deferred for want of room.
@@ -882,6 +891,41 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
             }, ResultJsonOptions));
     }
 
+    /// <summary>
+    /// UAC task 194b R4-3 (B4): the carried roots, least-recently-attempted first (a root without a stamp first), then table
+    /// and id — so a root a slice or a cap left behind moves forward every run and is reached within as many runs as there
+    /// are carried roots ahead of it.
+    /// </summary>
+    internal static List<(string Table, Guid Id)> OrderLeastRecentlyAttempted(
+        IEnumerable<(string Table, Guid Id)> carried, IReadOnlyDictionary<(string Table, Guid Id), long> stamps) =>
+        carried
+            .OrderBy(r => stamps.TryGetValue(r, out var stamp) ? stamp : long.MinValue)
+            .ThenBy(r => r.Table, StringComparer.Ordinal)
+            .ThenBy(r => r.Id)
+            .ToList();
+
+    /// <summary>
+    /// UAC task 194b R4-3 (B4): <paramref name="ordered"/> (change time, table, id) starting after <paramref name="after"/>, then
+    /// the rest from the start: the report-only cursor. Null: unchanged.
+    /// </summary>
+    internal static List<(string Table, Guid Id, DateTime ModifiedOn)> ResumeAfter(
+        List<(string Table, Guid Id, DateTime ModifiedOn)> ordered, (DateTime ModifiedOn, string Table, Guid Id)? after)
+    {
+        if (after is not { } cursor)
+            return ordered;
+
+        bool IsAfter((string Table, Guid Id, DateTime ModifiedOn) r)
+        {
+            var byTime = r.ModifiedOn.CompareTo(cursor.ModifiedOn);
+            if (byTime != 0)
+                return byTime > 0;
+            var byTable = StringComparer.Ordinal.Compare(r.Table, cursor.Table);
+            return byTable != 0 ? byTable > 0 : r.Id.CompareTo(cursor.Id) > 0;
+        }
+
+        return ordered.Where(IsAfter).Concat(ordered.Where(r => !IsAfter(r))).ToList();
+    }
+
     /// <summary>What the ordinary-parent-move pass did in one run (UAC task 194).</summary>
     internal sealed record OrdinaryMovesRun(bool Writes, DateTimeOffset Since)
     {
@@ -899,6 +943,12 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         public int Reported { get; set; }
         public int WritesAttempted { get; set; }
         public bool CapReached { get; set; }
+
+        /// <summary>194b: the pass stopped at <see cref="OrdinaryTimeSlice"/>; the roots it did not reach are carried or held.</summary>
+        public bool TimeSliceReached { get; set; }
+
+        /// <summary>194b R4-3 (B4): where the next report-only run resumes (<c>table:id</c>), or null (from its first root).</summary>
+        public string? ReportCursor { get; set; }
 
         /// <summary>Roots whose pass did not complete for a reason other than the write cap (a refusal, a failure).</summary>
         public List<string> IncompleteRoots { get; } = new();
@@ -935,8 +985,12 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
     /// </summary>
     /// <remarks>
     /// <para><b>Report-only unless</b> <see cref="OrdinaryMovesWritesEnabledConfigKey"/> is <c>true</c> and the recent-changes
-    /// emergency stop is not set. At most <see cref="MaxRootsPerRunConfigKey"/> roots (carried first, then oldest change
-    /// first) and <see cref="MaxOrdinaryMovesPerRunConfigKey"/> owner writes a run.</para>
+    /// emergency stop is not set. At most <see cref="MaxRootsPerRunConfigKey"/> roots (carried first, least-recently-attempted
+    /// first; then oldest change first) and <see cref="MaxOrdinaryMovesPerRunConfigKey"/> owner writes a run.</para>
+    /// <para><b>No starvation (194b R4-3, B4).</b> The time slice never stops a group (listed or swept) before its first root, so
+    /// every run advances at least one root of each; a carried root is reached within as many runs as there are carried roots
+    /// ahead of it. A report-only run, which keeps no carry, resumes after the last listed root the previous report-only run
+    /// reached and wraps around (the report-only cursor, per instance: a restart starts its window from the first root).</para>
     /// <para><b>Window and carry</b> (the secure pass's rule): the watermark moves only in a run that WROTE and listed
     /// completely, so a report-only run looks back <see cref="InitialRecentChangesLookback"/> every time. With writes on, a
     /// root left incomplete, stopped by the write cap, or past the root cap is carried and looked at first next run (at most
@@ -960,6 +1014,7 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         SecureChildReconciler reconciler, IGenericEntityService dataverse, bool recentWrites, int rootCap,
         DateTimeOffset startedAt, Guid runId, CancellationToken ct)
     {
+        var passStart = _timeProvider.GetTimestamp();
         var writes = recentWrites
                      && bool.TryParse(_configuration[OrdinaryMovesWritesEnabledConfigKey], out var enabled) && enabled;
         var mode = writes ? SecureChildReconcileMode.Apply : SecureChildReconcileMode.ReportOnly;
@@ -971,10 +1026,21 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         List<(string Table, Guid Id)> carried;
         bool sweepRuns;
         (string Table, Guid Id) sweepAfter;
+        long runNumber;
+        (DateTime ModifiedOn, string Table, Guid Id)? reportAfter;
         lock (_cursorGate)
         {
             since = _ordinaryMovesWatermark ?? startedAt - InitialRecentChangesLookback;
-            carried = _pendingOrdinaryRoots.OrderBy(r => r.Table, StringComparer.Ordinal).ThenBy(r => r.Id).ToList();
+            runNumber = ++_ordinaryRunNumber;
+
+            // 194b R4-3 (B4): least-recently-attempted first (a root never stamped — carried by an earlier instance's state,
+            // which a start loses — ranks first), then table and id for a stable order.
+            carried = OrderLeastRecentlyAttempted(_pendingOrdinaryRoots, _ordinaryAttemptStamps);
+
+            // A writing run carries what it does not reach; the report-only cursor is for report-only runs alone.
+            if (writes)
+                _ordinaryReportCursor = null;
+            reportAfter = _ordinaryReportCursor;
 
             // F4-a: a switch of the mode starts the sweep over, so a report-only cover never stands in for a writing one.
             if (_ordinarySweepWrites != writes)
@@ -1007,9 +1073,13 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
             };
         }
 
+        // 194b R4-3 (B4): a report-only run resumes after the root the previous one reached, then wraps around.
+        var changedInOrder = ResumeAfter(
+            changed.OrderBy(r => r.ModifiedOn).ThenBy(r => r.Table, StringComparer.Ordinal).ThenBy(r => r.Id).ToList(),
+            reportAfter);
+        var changedAt = changedInOrder.ToDictionary(r => (r.Table, r.Id), r => r.ModifiedOn);
         var all = carried
-            .Concat(changed.OrderBy(r => r.ModifiedOn).ThenBy(r => r.Table, StringComparer.Ordinal).ThenBy(r => r.Id)
-                .Select(r => (r.Table, r.Id)))
+            .Concat(changedInOrder.Select(r => (r.Table, r.Id)))
             .Distinct()
             .ToList();
         var take = all.Take(rootCap).ToList();
@@ -1030,6 +1100,15 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         var carry = new List<(string Table, Guid Id)>();
         (string Table, Guid Id)? firstDeferredSweep = null;
         var remaining = writeCap;
+
+        // 194b R4-3 (B4): the roots walked this run (stamped least-recently-attempted), how many of each group, and the last
+        // recent root walked (the report-only cursor). The time slice never stops a group before its first root, so every
+        // run advances at least one root of each: no root starves behind a slice spent by the listing or by one long root.
+        var walked = new List<(string Table, Guid Id)>();
+        var walkedListed = 0;
+        var walkedSwept = 0;
+        var anyListedNotReached = overflow.Count > 0;
+        (string Table, Guid Id)? lastListedWalked = null;
         foreach (var (table, id, swept) in take.Select(r => (r.Table, r.Id, false))
                      .Concat(sweepBatch.Select(r => (r.Table, r.Id, true))))
         {
@@ -1040,7 +1119,35 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                 // The write cap is spent: the rest are carried unread (each is walked again first next run).
                 carry.Add((table, id));
                 run.CapReached = true;
+                anyListedNotReached |= !swept;
                 continue;
+            }
+
+            // 194b: the time slice is spent. A recent root is carried, a swept one holds the cursor (as a deferred one does);
+            // none is dropped. Report-only keeps no carry; the report-only cursor resumes after the last root it reached.
+            // R4-3 (B4): never before the group's first root, so each run advances at least one root of each group.
+            var sliceSpent = _timeProvider.GetElapsedTime(passStart) >= OrdinaryTimeSlice;
+            if (sliceSpent && (swept ? walkedSwept : walkedListed) > 0)
+            {
+                run.TimeSliceReached = true;
+                anyListedNotReached |= !swept;
+                if (swept)
+                    firstDeferredSweep ??= (table, id);
+                else
+                    carry.Add((table, id));
+                continue;
+            }
+
+            walked.Add((table, id));
+            if (swept)
+            {
+                walkedSwept++;
+            }
+            else
+            {
+                walkedListed++;
+                if (changedAt.ContainsKey((table, id)))
+                    lastListedWalked = (table, id);
             }
 
             _logger.LogInformation(
@@ -1133,6 +1240,25 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                     _ordinaryMovesWatermark = startedAt - RecentChangesOverlap;
             }
 
+            // 194b R4-3 (B4): stamp the walked roots last, and a root first carried now just before them; keep only the
+            // carried set's stamps.
+            foreach (var root in walked)
+                _ordinaryAttemptStamps[root] = (runNumber * 2) + 1;
+            foreach (var root in _pendingOrdinaryRoots)
+                _ordinaryAttemptStamps.TryAdd(root, runNumber * 2);
+            foreach (var stale in _ordinaryAttemptStamps.Keys.Where(k => !_pendingOrdinaryRoots.Contains(k)).ToList())
+                _ordinaryAttemptStamps.Remove(stale);
+
+            // 194b R4-3 (B4): a report-only run that did not reach every listed root resumes after the last one it walked.
+            if (!writes)
+            {
+                _ordinaryReportCursor = anyListedNotReached && lastListedWalked is { } last
+                    ? (changedAt[last], last.Table, last.Id)
+                    : anyListedNotReached ? _ordinaryReportCursor : null;
+            }
+
+            run.ReportCursor = _ordinaryReportCursor is { } cursor ? $"{cursor.Table}:{cursor.Id:D}" : null;
+
             // F4-a: the sweep moves past its window (a root of it the write cap stopped, or left incomplete, is carried
             // above). Report-only it moves too: one report of every root, then it stops until the mode changes. A carry past
             // MaxCarriedRows holds it where it is.
@@ -1167,11 +1293,11 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
             "[SECURE-CHILD-RECONCILE] ordinary-moves run={RunId} mode={Mode} since={Since:o} rootsListed={Listed} " +
             "rootsInRun={InRun} rootsOverflow={Overflow} examined={Examined} alreadyCorrect={AlreadyCorrect} moved={Moved} " +
             "wouldMove={WouldMove} reported={Reported} refused={Refused} failed={Failed} writesAttempted={Writes} " +
-            "capReached={CapReached} incompleteRoots={Incomplete} carriedRoots={Carried} sweepRan={SweepRan} " +
+            "capReached={CapReached} timeSliceReached={TimeSliceReached} incompleteRoots={Incomplete} carriedRoots={Carried} sweepRan={SweepRan} " +
             "sweepRoots={SweepRoots} sweepComplete={SweepComplete} documentsHandedOff={HandedOff} deferredRoots={Deferred}",
             runId, writes ? ModeWrite : ModeReportOnly, since, run.RootsListed, run.RootsInRun, run.RootsOverflow, run.Totals[0],
             run.Totals[1], run.Totals[2], run.Totals[3], run.Reported, run.Totals[5], run.Totals[6], run.WritesAttempted,
-            run.CapReached, run.IncompleteRoots.Count, run.CarriedRoots, run.SweepRan, run.SweepRoots, run.SweepComplete,
+            run.CapReached, run.TimeSliceReached, run.IncompleteRoots.Count, run.CarriedRoots, run.SweepRan, run.SweepRoots, run.SweepComplete,
             run.DocumentsHandedOff, run.DeferredRoots.Count);
         return run;
     }
@@ -2297,6 +2423,19 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
     // reasoning; its own watermark, so it never holds the secure pass's window, #1378).
     private DateTimeOffset? _ordinaryMovesWatermark;
     private readonly HashSet<(string Table, Guid Id)> _pendingOrdinaryRoots = new();
+
+    // UAC task 194b R4-3 (B4): when each carried root was last attempted, so carried roots run least-recently-attempted
+    // first. A stamp is (run number × 2) + 1 for a root walked in that run, and run number × 2 for a root first carried in it
+    // without a walk, so within one run an unwalked root ranks before a walked one. Pruned to the carried set each run.
+    private long _ordinaryRunNumber;
+    private readonly Dictionary<(string Table, Guid Id), long> _ordinaryAttemptStamps = new();
+
+    // UAC task 194b R4-3 (B4): the REPORT-ONLY cursor. A report-only run keeps no carry and lists the same window again, so
+    // without it a slice or the root cap would stop every run at the same root and the tail would never be reported. The
+    // last recent root a report-only run walked (its change time, table, id); the next report-only run starts after it and
+    // wraps around. Cleared once a report-only run reaches every root of its window, and by a writing run (its carry does
+    // this work). Per instance, like every window of this job: a restart starts the window from its first root.
+    private (DateTime ModifiedOn, string Table, Guid Id)? _ordinaryReportCursor;
 
     // UAC task 194 F1-a: the documents the ordinary pass handed to the re-file pass that it has not reached yet. The re-file
     // pass reads them with its own carried rows and drops each once it examines it; they are never truncated. The ordinary

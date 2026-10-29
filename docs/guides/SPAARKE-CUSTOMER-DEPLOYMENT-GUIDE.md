@@ -1804,6 +1804,34 @@ Run intake no longer takes `communicationGraphResource` / `emailGraphResource`. 
 
 ### 7.11 Phase 11 — Secure-record environment setup (H7b; the operator verifies it before telling the customer the environment is ready)
 
+> **Customer owner teams: a manual step until provisioning's H7c ships (#2429) (unified-access-control-r2 task 194b R4b-3, R4b-2c).**
+> A BFF that carries the hard-deny rule (owner rounds 131 and 136) owns every ORDINARY row of `sprk_storedfile`,
+> `sprk_procedureassignment`, `sprk_ruleset`, `sprk_policy` and `sprk_policyversion` by the memberless team
+> `Spaarke Restricted Content Owners` **in the customer's own business unit** — the direct child of the root that **H10**
+> creates (`customerBusinessUnitId`, a sibling of `Secure Record`), never in the root, which holds only Spaarke product data.
+> The BFF finds the team from the answer itself: it walks up from the answer's business unit to the root's direct child and
+> uses the team there. The team holds that unit's copy of the role `Restricted Content Owner` (created once in the root;
+> Read at Basic on exactly those five tables, `config/restricted-content-owner-role.json`). Every customer unit needs the team,
+> set up **after H10** (which creates the unit). Until this step's `-Verify` exits 0, a BFF that carries the rule refuses every
+> ordinary write to those tables (`record_owner_restricted_content_team_unresolved`, also when the team has a member or
+> there are two, when the answer is in the root itself, or when it sits under `Secure Record`), and Dataverse refuses the
+> team as an owner while the role lacks Read. In the interim sequence (§12.2) the BFF deployed in Phase 6 is already running
+> when Phase 7 (H10) creates the unit, so it refuses those writes until Phase 7a's `-Verify` exits 0. Provisioning's H7c
+> (#2429: after H7b, before H9 and both seeders) will create both teams from the same role files; until it ships, run `scripts/Set-CustomerOwnerTeams.ps1 -CustomerBusinessUnitId <H10's customerBusinessUnitId>`:
+> dry run, then `-Apply`, then `-Verify`, which must exit 0. The full sequence is §12.2, "Phase 7a". Secure rows of these
+> tables still go to `Secure Record Owners`.
+>
+> **The same run sets up the customer configuration owner team (R4b-3b, field-mapping #2399).** Customer configuration rows
+> (`sprk_aisearchindex`, `sprk_fieldmappingprofile`, `sprk_fieldmappingrule`: the one list is
+> `config/customer-configuration-owner-role.json`) are owned in the customer's own business unit by a second memberless team,
+> `Spaarke Customer Configuration Owners`, holding that unit's copy of the role `Customer Configuration Owner` (created once in
+> the root; Read at Basic on exactly those tables). Dataverse refuses to assign a row to a team without Read on its table
+> (`0x80040299`), and the unit's default team is not an acceptable owner (a role on it reaches every member). The BFF does not
+> resolve this team. Field-mapping's seeder (its task 004) and provisioning's H12b seeder (FR-39) **will** own new
+> configuration rows to this team, so it must exist before either runs for the customer. Until they ship, no seeder does:
+> the rows stay with the seeding identity, and an operator re-owns them to this team after setup. Users keep reading the
+> rows through their own roles (`Spaarke Core User`, Deep).
+
 Secure projects, matters and work assignments (unified-access-control-r2) need Dataverse security configuration that
 no solution import can create. Since T256, **H7b creates it on every run**, after H6 and before H9:
 - the `Secure Record` business unit, which holds no users and **no container**;
@@ -2278,6 +2306,34 @@ pac admin assign-user --environment "https://spaarke-acme.crm.dynamics.com/" `
 # Interim: PPAC UI + Graph SDK; see auth-deployment-setup stub for MI-first checklist
 # T2 verification MANDATORY: systemusers?$filter=applicationid eq {uami-app-id} returns 1
 
+# Phase 7a — Customer owner teams (unified-access-control-r2 task 194b R4b-3, R4b-2c, R4b-3b, R4b-4). AFTER Phase 7 (H10
+# creates the customer's business unit, which these teams live in) and BEFORE Phase 8 seeds the customer's configuration.
+# PRECONDITION: the Secure Record unit exists (H7b creates it in a provisioning run). This interim sequence has no step
+# that creates it: on an interim environment, set up Secure Record first by hand, SECURE-PROJECT-ENVIRONMENT-SETUP.md
+# §3-§5 (the unit, the named owner team, the role), and pass its name as -SecureBusinessUnitName when it is not
+# 'Secure Record'. The script refuses to run while no unit (or more than one) has that name.
+# The BFF deployed in Phase 6 carries the hard-deny rule: until this step's -Verify exits 0 it REFUSES every ordinary write
+# to the five hard-deny tables (record_owner_restricted_content_team_unresolved). One run sets up both declared teams.
+# (1) The memberless 'Spaarke Restricted Content Owners' team in the CUSTOMER's business unit (H10's customerBusinessUnitId,
+# a direct child of the root; never the root, never 'Secure Record'), holding that unit's copy of the role 'Restricted
+# Content Owner' (created once in the root; Read at Basic on exactly the five tables in
+# config/restricted-content-owner-role.json) and no other role. Run once per customer business unit. The script refuses the
+# root, the Secure Record unit, a unit that is not a direct child of the root, and a -SecureBusinessUnitName (default
+# 'Secure Record'; pass SecureRecord:BusinessUnitName when it differs) that names no unit or two. -Apply never removes a
+# member, moves a team or takes a role off another principal: it refuses that drift (owner decision), and a dry run with
+# such drift exits 1 with the OWNER DECISION NEEDED summary. -Verify lists other customer units that lack the team as
+# information only. (2) The memberless 'Spaarke Customer Configuration Owners' team in the same unit, holding that unit's
+# copy of the role 'Customer Configuration Owner' (Read at Basic on exactly the tables in
+# config/customer-configuration-owner-role.json: sprk_aisearchindex, sprk_fieldmappingprofile, sprk_fieldmappingrule). The
+# BFF does not resolve it. Field-mapping's seeder (task 004) and provisioning's H12b seeder (FR-39) WILL own new
+# configuration rows to this team; until they ship, the rows stay with the seeding identity and an operator re-owns them
+# to this team after setup.
+# Provisioning's H7c (#2429) replaces this step in a provisioning run: one handler for both teams, after H7b and before H9,
+# from the same config/*-owner-role.json files, with its own gate and an H13 re-check.
+.\scripts\Set-CustomerOwnerTeams.ps1 -EnvironmentUrl "<dv-org-url>" -CustomerBusinessUnitId "<customerBusinessUnitId>"            # dry run: the plan for both teams, no writes (exit 1 = an owner decision is needed first)
+.\scripts\Set-CustomerOwnerTeams.ps1 -EnvironmentUrl "<dv-org-url>" -CustomerBusinessUnitId "<customerBusinessUnitId>" -Apply     # create each team (and each role once), add its tables, strip the rest, assign
+.\scripts\Set-CustomerOwnerTeams.ps1 -EnvironmentUrl "<dv-org-url>" -CustomerBusinessUnitId "<customerBusinessUnitId>" -Verify    # MUST exit 0 (no drift in either team); the Phase 6 BFF writes hard-deny rows only from then on
+
 # Phase 7b — B2B guests who are outsiders are flagged external (unified-access-control-r2 task 114, owner round 67;
 # Model 1 rule: spaarkeai-word-add-in-r1 task 126, owner 2026-10-13 — per environment, after the users exist, and again
 # whenever B2B guests are added outside the product). A BLANK sprk_isexternal means NOT external: Manage Access "+ User"
@@ -2711,6 +2767,7 @@ These are **module-scoped** deployment / build workflows — NOT customer-provis
 | 2026-10-22 | §9 T7 + §12.3 + H4b external-registration owner note: H13 trap T7 reads back `ExternalAccess__CustomerBusinessUnitId` on both slots (equal to H10's customer business unit) | `customer-provisioning-orchestration-r1` task 265 (#2265) |
 | 2026-10-23 | §6.5.2: contact access-level and identity bookkeeping columns are field-secured — `scripts/Set-ExternalAccessContactSecuritySchema.ps1` (dry run, `-Apply`, `-Verify` exit 0) secures `sprk_accesspermissiongrant`, `sprk_identityplane` and the `sprk_identitycollision*` columns and adds three BFF-only columns; the H6 path for a new stamp applies once SpaarkeMaster 1.2.4.0 is published; §7.11: H7b S18 covers the plane and collision columns, S19 verifies the access-level lock and the whole standing-grant lock (Standing Grant Administrators 4/4/4; no other writer but System Administrator — `secure_setup.standing_grant_lock_other_writer`), S22 verifies the three BFF-only columns' locks once a release carries them; an H7b carrying these checks requires SpaarkeMaster >= 1.2.4.0 published before the control plane is deployed | `spaarke-SPA-external-access-platform-r3` (contact identity hardening, slice A) |
 | 2026-10-23 | §6.5.2 rollout note: rollout order — the contact security schema is applied and `-Verify` passes (stamp columns and proof reads) on every environment BEFORE a BFF build that requires the invite stamp is deployed; without the stamp columns every email bind (CIAM and Workforce) is refused; an email bind needs a current invite stamp (invited address and, for work accounts, the invited tenant unless `xms_edov` is boolean true); invites take an optional `invitedTenantId` (GUID); Workforce contacts never invited through the BFF, or invited before this release, need a re-invite naming their tenant | `spaarke-SPA-external-access-platform-r3` (contact identity hardening, slice B) |
+| 2026-10-28 | §7.11 + §12.2: the customer owner teams step is **Phase 7a**, after Phase 7 (H10 creates the unit) and before Phase 8 — no longer "Phase 5d" before Phase 6; the Phase 6 BFF refuses ordinary hard-deny writes until its `-Verify` exits 0. The configuration-team seeders are future work (field-mapping task 004, H12b FR-39); until then an operator re-owns the rows | `unified-access-control-r2` task 194b R4b-4 |
 
 ---
 

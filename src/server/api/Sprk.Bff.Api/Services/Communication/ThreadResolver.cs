@@ -280,12 +280,17 @@ public sealed class ThreadResolver : IThreadResolver
             || !Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsOwnershipParent(anchor.RecordType))
             return null; // no anchor, or a party anchor (account / contact / organization): keeps its creator
 
+        // UAC task 194b R3b-2: through the one builder, keyed by the typed regarding lookup the thread holds (its one parent).
         var owner = await _ownership.ResolveOwnerAsync(
-            new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext
-            {
-                TargetEntityLogicalName = anchor.RecordType,
-                TargetRecordId = recordId,
-            },
+            Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForRow(
+                "sprk_communicationthread",
+                new[]
+                {
+                    KeyValuePair.Create(
+                        RegardingFieldMap.FieldFor(anchor.RecordType) ?? anchor.RecordType,
+                        (Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent?)new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(
+                            anchor.RecordType, recordId)),
+                }),
             ct);
 
         if (!owner.IsOwned)
@@ -1513,12 +1518,19 @@ public sealed class ThreadResolver : IThreadResolver
         Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution? recordOwner = null;
         if (Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsOwnershipParent(entityType))
         {
+            // UAC task 194b R3b-2: through the one builder, keyed by the typed regarding lookup written below (its one parent).
             var owner = await _ownership.ResolveOwnerAsync(
-                new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext
+                Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForRow(
+                    "sprk_communicationthread",
+                    new[]
+                    {
+                        KeyValuePair.Create(
+                            regardingField,
+                            (Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent?)new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(
+                                entityType, regardingId)),
+                    },
+                    callerSystemUserId: ownerSystemUserId) with
                 {
-                    TargetEntityLogicalName = entityType,
-                    TargetRecordId = regardingId,
-                    CallerSystemUserId = ownerSystemUserId,
                     // Task 146 c1-r1 (owner round 13 item 9): the caller asked for this app-created record thread.
                     RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.Of(ownerSystemUserId),
                 },

@@ -143,7 +143,7 @@ public sealed class InquiryReplyTodoCreator(
 
         // Owner: the one resolver (secure-if-any), exactly as a server-created task is owned. Never an individual.
         var owner = await ownership.ResolveOwnerAsync(
-            RecordOwnershipContext.ForChild(entity, new RecordOwnershipParent("sprk_matter", matterRef.Id)),
+            RecordOwnershipContext.ForChild(entity), // 194b R (B3): sprk_todo's primary order (the matter is its subject)
             ct).ConfigureAwait(false);
         if (!owner.IsOwned)
         {

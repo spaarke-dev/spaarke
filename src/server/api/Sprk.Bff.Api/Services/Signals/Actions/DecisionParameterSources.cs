@@ -311,7 +311,7 @@ public class DecisionParameterSources
     /// predicate that cannot tell, means undeterminable: the matter is treated as not secure. A Dataverse fault throws.</summary>
     private async Task<Guid?> SecureRecordBusinessUnitIdAsync(Guid owningBusinessUnitId, CancellationToken ct)
     {
-        var (secureId, ambiguous) = await SecureChildShareSynchronizer.ResolveSecureBusinessUnitAsync(_entities, _configuration, ct).ConfigureAwait(false);
+        var (secureId, ambiguous) = await SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync(_entities, _configuration, ct).ConfigureAwait(false);
         if (ambiguous)
         {
             _logger.LogWarning("Decision budget currency: more than one business unit carries the Secure Record name; the matter is treated as not secure.");

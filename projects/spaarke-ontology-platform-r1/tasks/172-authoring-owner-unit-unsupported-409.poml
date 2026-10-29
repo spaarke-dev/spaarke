@@ -1,85 +1,58 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <task id="172" project="spaarke-ontology-platform-r1">
   <metadata>
-    <title>Ontology Admin publish: an account whose business unit cannot own rules gets a 409 that says so, not a "try again" 503</title>
+    <title>Pin D-197 "author wins, root included": a rule publish asks the ownership question without a child table, so 194b never refuses a root-homed author</title>
     <phase>11 UAT</phase>
     <gate>startable: uac-r2 194b (R4b-2c, `RestrictedContentOwnerTeam`) is on master as 2cd0f62e2c</gate>
     <status>pending</status>
-    <rigor>FULL</rigor>
-    <rigor-reason>Access-tagged: it changes how an ownership-resolver refusal is answered in Sprk.Bff.Api (.cs) and the Ontology Admin client, and it modifies tests.</rigor-reason>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>One test and one code comment; no behaviour change. It modifies tests, so code-review and adr-check run.</rigor-reason>
     <model-tier>sonnet</model-tier>
-    <model-tier-reason>One new branch in one method plus its client message, copying an existing end-to-end path (rule_held_secure); nothing to design.</model-tier-reason>
+    <model-tier-reason>A pin test over an existing seam; nothing to design.</model-tier-reason>
     <effort>high</effort>
     <deps>uac-r2 194b (2cd0f62e2c)</deps>
-    <tags>bff,api,access,client,testing</tags>
-    <estimated-effort>2-3 hours</estimated-effort>
+    <tags>bff,access,testing</tags>
+    <estimated-effort>1 hour</estimated-effort>
     <parallel-group>N</parallel-group>
     <parallel-safe>true</parallel-safe>
   </metadata>
 
-  <prompt>uac-r2's 194b (on master, 2cd0f62e2c) owns ordinary policy and version rows to the customer top business unit's memberless restricted-content team, and FAILS CLOSED when that team cannot be used: the answer lands in the root (a root-homed author, where Dataverse puts new users by default), the customer unit is the Secure Record unit, or the team is missing, ambiguous or has a member. The resolver then answers a refusal with `RefusalCode == RecordOwnerRefusal.RestrictedContentOwnerTeamUnresolved` ("record_owner_restricted_content_team_unresolved"). Ontology Admin's publish maps every refusal to 503 `ontology.admin.owner_unavailable`, which the wizard shows as "try again". This refusal is permanent until an administrator moves the account or fixes the team, so retrying never helps. Answer it with its own 409 and a message that says what to do. Recommended by uac-r2 (2026-10-29); this is our service's mapping.</prompt>
-  <role>SPAARKE BFF + Fluent client engineer (Ontology Admin authoring).</role>
-  <goal>A publish whose new version's owner is refused with `RestrictedContentOwnerTeamUnresolved` returns 409 `ontology.admin.owner_unit_unsupported` with NOTHING written, and the Rule wizard shows a clear, non-retry message. Every other refusal, an answer with no team, and a fault keep today's 503 `ontology.admin.owner_unavailable`.</goal>
+  <prompt>REWRITTEN 2026-10-29. The first version (a 409 for `RestrictedContentOwnerTeamUnresolved`) rested on a wrong premise and is withdrawn: uac-r2 corrected themselves and the main session verified the code. `CheckVersionOwnerAsync` builds `new RecordOwnershipContext { Parents = ..., WhenUnfiled = KeepCreator }` and never sets `ChildEntityLogicalName`. 194b's restricted-content step (`RecordOwnershipResolver` ~:4050) returns the default-team answer unless `IsRestrictedContentTable(context.ChildEntityLogicalName)`, which is false for null. So a root-homed author's publish proceeds, no ownerid is bound, and the version stays the author's. That is the owner's D-197 ("Admin-tab authoring: the author wins ... including the root business unit"). Nothing pins it: if someone later passes `sprk_policyversion` as the child table (ForChild, ForRow), every root-homed author's publish starts failing with 503. Add that pin.</prompt>
+  <role>SPAARKE BFF engineer (Ontology Admin authoring tests).</role>
+  <goal>A test fails if the `RecordOwnershipContext` that `CheckVersionOwnerAsync` passes to `IRecordOwnershipResolver.ResolveOwnerAsync` carries a non-null `ChildEntityLogicalName`. A one-line comment at the call cites D-197 and UAC round 137. No behaviour change.</goal>
 
   <context>
     <background>
       <ul>
-        <li>Where: `src/server/api/Sprk.Bff.Api/Services/Ontology/OntologyAdminAuthoringService.cs`, `CheckVersionOwnerAsync` (~:1270-1317 on docs). The last branch logs `owner.RefusalCode` and returns `Fail(Failure.OwnerUnavailable)`. The reason constants are at ~:105-118; `Fail`/`Conflict` at ~:2214-2232.</li>
-        <li>The refusal constant: `RecordOwnerRefusal.RestrictedContentOwnerTeamUnresolved` in `Services/Dataverse/RecordOwnershipResolver.cs` (~:1429 on master). Resolver FAULTS throw (caught above the branch) and must stay 503.</li>
-        <li>Reference implementation to copy end to end: `ReasonRuleHeldSecure` / `RuleHeldSecureMessage` (server 409 via `Conflict`), `REASON_RULE_HELD_SECURE` in `src/client/shared/Spaarke.UI.Components/src/components/OntologyAdmin/RuleWizard/authoringService.ts:57` and its message, `tests/integration/auth/Ontology/OntologyAdminAuthoringSecureHoldTests.cs`, and `RuleWizard/__tests__/authoringService.test.ts:263-267`.</li>
-        <li>Rule edits and retires (`OntologyAdminRulesService`) update existing rows and ask no owner question (uac-r2), so they are out of scope.</li>
-        <li>`tests/Spaarke.ArchTests/RecordOwnerAssignmentCensusTests.cs:345` describes the authoring answers in prose; update that text only if it lists the 503 cases.</li>
+        <li>Where: `src/server/api/Sprk.Bff.Api/Services/Ontology/OntologyAdminAuthoringService.cs`, `CheckVersionOwnerAsync` (~:1270-1290): the `ResolveOwnerAsync` call.</li>
+        <li>The tests that already fake the resolver for this method: `tests/integration/auth/Ontology/OntologyAdminAuthoringSecureHoldTests.cs`. Capture the context there (or in a sibling file, in the same style) and assert on it.</li>
+        <li>The resolver rule being protected: `RecordOwnershipResolver.cs` ~:4050 (`OrdinaryExitAsync`) and `IsRestrictedContentTable` ~:1781 (read only).</li>
       </ul>
     </background>
     <relevant-files>
-      <file>src/server/api/Sprk.Bff.Api/Services/Ontology/OntologyAdminAuthoringService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ontology/OntologyAdminAuthoringService.cs (comment only)</file>
       <file>tests/integration/auth/Ontology/OntologyAdminAuthoringSecureHoldTests.cs</file>
-      <file>src/client/shared/Spaarke.UI.Components/src/components/OntologyAdmin/RuleWizard/authoringService.ts</file>
-      <file>src/client/shared/Spaarke.UI.Components/src/components/OntologyAdmin/RuleWizard/__tests__/authoringService.test.ts</file>
-      <file>src/server/api/Sprk.Bff.Api/Services/Dataverse/RecordOwnershipResolver.cs (read only)</file>
-      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/RestrictedContentOwnerTeam.cs (read only)</file>
     </relevant-files>
   </context>
 
-  <justification>
-    <existing>`CheckVersionOwnerAsync`'s refusal branch and the `rule_held_secure` 409 path (server constant, client constant and message, tests).</existing>
-    <extension>One more branch in the existing method and one more reason constant on each side, copying `rule_held_secure`. No new service, endpoint, registration or package.</extension>
-    <cost-of-doing-nothing>On every customer environment, an Ontology Administrator homed in the root (the Dataverse default) gets "service unavailable, try again" on every publish, forever, with no hint that their account must move (uac-r2, 194b impact, 2026-10-29).</cost-of-doing-nothing>
-  </justification>
-
   <constraints>
-    <constraint source="uac-r2">Only `owner.RefusalCode == RecordOwnerRefusal.RestrictedContentOwnerTeamUnresolved` becomes the 409. Use the constant, never a string literal. Any other refusal code, a null code (an answer with no team), and a thrown fault stay 503 `ontology.admin.owner_unavailable`.</constraint>
-    <constraint source="#2084">Nothing is written on the 409: no POST of the version and no PATCH of the previous one. Prove it in the integration test the way the secure-hold tests do.</constraint>
-    <constraint source="public repo">The message names no matter, team id or business unit id. Suggested text: "Rules can't be published from your account: its business unit can't own rules. Ask an administrator to move your account into your organization's business unit." Keep it one sentence pair; no exploitation detail.</constraint>
-    <constraint source="CLAUDE.md">Use `python`, never `python3`. No --no-verify, no bare stash, no sub-agents. No Dataverse writes, no deploys. Never run the unfiltered Sprk.Bff.Api.Tests. Client: `npm install --legacy-peer-deps --no-audit --no-fund` if needed, and run only the RuleWizard tests.</constraint>
+    <constraint source="D-197">No behaviour change. The ownership question, the answers and the reason codes all stay as they are; only the comment and the test are added.</constraint>
+    <constraint source="CLAUDE.md">Use `python`, never `python3`. No --no-verify, no git stash, no sub-agents. No Dataverse writes, no deploys. Never run the unfiltered Sprk.Bff.Api.Tests.</constraint>
   </constraints>
 
   <steps mode="directional">
-    <step order="0" name="Context + rigor declaration">Declare FULL rigor. Read the files above at origin/docs/ontology-platform-design.</step>
-    <step order="1">Write the failing tests first:
-      <ul>
-        <li>(1) Server: a resolver refusal with `RestrictedContentOwnerTeamUnresolved` gives 409 `ontology.admin.owner_unit_unsupported`, with no POST and no PATCH.</li>
-        <li>(2) Must-not-fire: a refusal with any other code, an answer with no team (null code) and a thrown fault each still give 503 `ontology.admin.owner_unavailable`.</li>
-        <li>(3) Client: the 409 reason maps to the new message, and the constant equals the server string.</li>
-      </ul>
-    </step>
-    <step order="2">Implement it. Update the method's doc list. Run the filtered BFF tests, the full ArchTests and the RuleWizard client tests. Measure the publish-size delta. Mutation-check (1): revert the branch and confirm the test fails. Open a PR into `docs/ontology-platform-design`.</step>
+    <step order="1">Add the test, asserting `ChildEntityLogicalName` is null and `WhenUnfiled` is `KeepCreator` on the captured context. Mutation-check: set `ChildEntityLogicalName = "sprk_policyversion"` at the call, confirm the test fails, then revert.</step>
+    <step order="2">Add the comment. Run the filtered Ontology authoring tests. Open a PR into `docs/ontology-platform-design` citing D-197.</step>
   </steps>
 
   <acceptance-criteria>
-    <criterion testable="true">`RestrictedContentOwnerTeamUnresolved` → 409 `ontology.admin.owner_unit_unsupported`, nothing written; the wizard shows the new message and offers no retry.</criterion>
-    <criterion testable="true">Must-not-fire: other refusal codes, a null code and a fault stay 503 `ontology.admin.owner_unavailable`. `rule_held_secure` and `scope_matter_secured` behave as before.</criterion>
-    <criterion testable="true">Test scope: tests (1)–(3) plus the existing secure-hold and authoringService tests. Anything beyond needs a one-line justification.</criterion>
+    <criterion testable="true">The pin test passes today and fails under the mutation.</criterion>
+    <criterion testable="true">No production behaviour changes: the diff to OntologyAdminAuthoringService.cs is the comment only.</criterion>
   </acceptance-criteria>
-
-  <escalation>
-    <trigger>If `RecordOwnerResolution.RefusalCode` is not populated for this refusal on the docs branch, or the client has no reason-to-message mapping to extend, STOP and report.</trigger>
-  </escalation>
 
   <knowledge>
     <files>
       <file>projects/spaarke-ontology-platform-r1/notes/decisions.md (D-197)</file>
-      <file>docs/adr/ADR-038-testing-strategy.md</file>
     </files>
   </knowledge>
 </task>
