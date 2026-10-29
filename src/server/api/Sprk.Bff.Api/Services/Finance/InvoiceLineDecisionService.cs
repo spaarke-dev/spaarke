@@ -164,6 +164,7 @@ public sealed class InvoiceLineDecisionService
     internal const string AcceptedInBulkLabel = "Accepted in bulk";
 
     private const int OutcomeAcceptedInBulk = 100000002;
+    private const int OutcomeUnreviewed = 100000003;
     private const int CorrectionChunk = 400;
     private static readonly TimeSpan LockDuration = TimeSpan.FromMinutes(2);
 
@@ -259,7 +260,7 @@ public sealed class InvoiceLineDecisionService
             return invalid;
         }
 
-        var key = LockKeyPrefix + command.InvoiceId.ToString("N", CultureInfo.InvariantCulture);
+        var key = LockKeyFor(command.InvoiceId);
         var owner = Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture);
         bool acquired;
         try
@@ -296,6 +297,127 @@ public sealed class InvoiceLineDecisionService
                     command.InvoiceId, ex.GetType().Name);
             }
         }
+    }
+
+    /// <summary>The per-invoice line-decision lock (K-4). Task 103's approve holds it while it accepts the Clean lines.</summary>
+    internal static string LockKeyFor(Guid invoiceId) => LockKeyPrefix + invoiceId.ToString("N", CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// Task 103 (D-72, F-2): Accept all Clean as a bulk decision, run by the approval, which already HOLDS <see cref="LockKeyFor"/>. Same rules,
+    /// order and recovery as <see cref="AcceptCleanAsync"/>; only the lock is the caller's.
+    /// </summary>
+    internal Task<LineDecisionResult> AcceptCleanHeldAsync(
+        Guid invoiceId, Guid decisionId, Guid deciderSystemUserId, string? callerBearerToken, CancellationToken ct)
+    {
+        var command = new LineDecisionCommand(invoiceId, decisionId, LineDecisionAction.Accept, null, [], deciderSystemUserId, Bulk: true, callerBearerToken);
+        return ShapeError(command, acceptClean: true) is { } invalid ? Task.FromResult(invalid) : ApplyAsync(command, acceptClean: true, ct);
+    }
+
+    /// <summary>
+    /// Task 103 (F2): completes the approval's bulk accept over lines it already wrote (they left Clean, so <see cref="AcceptCleanHeldAsync"/>
+    /// no longer chooses them). The documented repeat of an Incomplete bulk decision: the same decision id over those lines, Bulk, Accept, so
+    /// the same values, the same correction row ids ("Accepted in bulk") and only the missing records. The caller holds <see cref="LockKeyFor"/>.
+    /// </summary>
+    internal Task<LineDecisionResult> CompleteBulkAcceptHeldAsync(
+        Guid invoiceId, Guid decisionId, IReadOnlyList<Guid> lineIds, Guid deciderSystemUserId, string? callerBearerToken, CancellationToken ct)
+    {
+        var command = new LineDecisionCommand(
+            invoiceId, decisionId, LineDecisionAction.Accept, null, lineIds.Select(id => new LineDecisionLine(id)).ToList(), deciderSystemUserId, Bulk: true, callerBearerToken);
+        return ShapeError(command, acceptClean: false) is { } invalid ? Task.FromResult(invalid) : ApplyAsync(command, acceptClean: false, ct);
+    }
+
+    /// <summary>
+    /// Task 103 (D-72): every AI-sourced field of a decided Fee or Expense line (Accepted, Reduced, Disallowed) that has no correction row yet
+    /// gets one "Unreviewed" row (<c>sprk_islabel</c> false), attributed to the approver. Fields that already have a row (Accepted in bulk,
+    /// Corrected, Confirmed individually) are left alone. Row ids are deterministic per (<paramref name="scopeId"/>, line, field), so a repeat
+    /// upserts the same rows. The caller holds <see cref="LockKeyFor"/>. Returns Applied, or Unavailable / OwnerUnresolved with nothing
+    /// written, or Incomplete when a later chunk failed (a repeat completes it).
+    /// </summary>
+    internal async Task<LineDecisionResult> WriteUnreviewedAsync(
+        Guid invoiceId, Guid scopeId, Guid reviewerSystemUserId, string reviewerRole, DateTime decidedOnUtc, CancellationToken ct)
+    {
+        Entity? invoice;
+        List<Entity> lineRows;
+        HashSet<(Guid Line, string Field)> existing;
+        try
+        {
+            invoice = await ReadInvoiceAsync(invoiceId, ct).ConfigureAwait(false);
+            if (invoice is null)
+            {
+                return new LineDecisionResult(LineDecisionStatus.InvoiceNotFound, "ebilling.invoice.not_found");
+            }
+
+            lineRows = await InvoiceReviewReadService.ReadPagedAsync(_entities, InvoiceReviewReadService.LineQuery(invoiceId), ct).ConfigureAwait(false);
+            existing = await ReadCorrectionKeysAsync(invoiceId, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            return ReadFailed(invoiceId, ex);
+        }
+
+        var kind = new CorrectionKind(
+            invoiceId, (line, field) => IdOf($"ebilling-correction-unreviewed-{scopeId:D}-{line:D}-{field}"),
+            OutcomeUnreviewed, reviewerRole, reviewerSystemUserId);
+        var rows = lineRows
+            .Select(ToTarget)
+            .Where(t => t.Type is InvoiceLineCostType.Fee or InvoiceLineCostType.Expense
+                && t.Status is InvoiceLineStatus.Accepted or InvoiceLineStatus.Reduced or InvoiceLineStatus.Disallowed)
+            .OrderBy(t => t.Sequence).ThenBy(t => t.Id)
+            .SelectMany(t => CorrectionRowsFor(t, kind, invoice, decidedOnUtc))
+            .Where(row => !existing.Contains((row.GetAttributeValue<EntityReference>("sprk_invoiceline").Id, row.GetAttributeValue<string>("sprk_fieldname"))))
+            .ToList();
+        if (rows.Count == 0)
+        {
+            return new LineDecisionResult(LineDecisionStatus.Applied, "ok");
+        }
+
+        if (await StampOwnerAsync(rows, invoice, invoiceId, reviewerSystemUserId, ct).ConfigureAwait(false) is { } failure)
+        {
+            return failure;
+        }
+
+        var written = 0;
+        try
+        {
+            for (var offset = 0; offset < rows.Count; offset += CorrectionChunk)
+            {
+                var requests = rows.Skip(offset).Take(CorrectionChunk).Select(row => (OrganizationRequest)new UpsertRequest { Target = row }).ToList();
+                await _entities.ExecuteTransactionAsync(requests, ct).ConfigureAwait(false);
+                written += requests.Count;
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError("Unreviewed correction rows of invoice {InvoiceId}: {Written} of {Count} written, then a chunk failed ({ExceptionType}).",
+                invoiceId, written, rows.Count, ex.GetType().Name);
+            return new LineDecisionResult(
+                written == 0 ? LineDecisionStatus.Unavailable : LineDecisionStatus.Incomplete,
+                written == 0 ? LineDecisionCodes.Unavailable : LineDecisionCodes.Incomplete,
+                "The Unreviewed correction rows could not all be written. Try again.",
+                FailedStep: "unreviewed");
+        }
+
+        _logger.LogInformation("Unreviewed correction rows of invoice {InvoiceId}: {Count} written.", invoiceId, rows.Count);
+        return new LineDecisionResult(LineDecisionStatus.Applied, "ok");
+    }
+
+    /// <summary>The (line, field) pairs that already have a correction row on the invoice (any outcome).</summary>
+    private async Task<HashSet<(Guid Line, string Field)>> ReadCorrectionKeysAsync(Guid invoiceId, CancellationToken ct)
+    {
+        var query = new QueryExpression(CorrectionEntity)
+        {
+            ColumnSet = new ColumnSet("sprk_invoiceline", "sprk_fieldname"),
+            Criteria = new FilterExpression(LogicalOperator.And),
+            PageInfo = new PagingInfo { PageNumber = 1, Count = 5000 },
+        };
+        query.Criteria.AddCondition("sprk_invoice", ConditionOperator.Equal, invoiceId);
+        query.AddOrder($"{CorrectionEntity}id", OrderType.Ascending);
+        var rows = await InvoiceReviewReadService.ReadPagedAsync(_entities, query, ct).ConfigureAwait(false);
+        return rows
+            .Where(r => r.GetAttributeValue<EntityReference>("sprk_invoiceline") is { } line && line.Id != Guid.Empty
+                && !string.IsNullOrEmpty(r.GetAttributeValue<string>("sprk_fieldname")))
+            .Select(r => (r.GetAttributeValue<EntityReference>("sprk_invoiceline").Id, r.GetAttributeValue<string>("sprk_fieldname")))
+            .ToHashSet();
     }
 
     /// <summary>The request-shape rules that need no data (400). Reduce / Disallow need a reason; only Reduce takes an amount.</summary>
@@ -612,9 +734,11 @@ public sealed class InvoiceLineDecisionService
             : new LineDecisionResult(LineDecisionStatus.Applied, "ok", Lines: decided, Totals: TotalsOf(invoice, calculation));
     }
 
-    private LineDecisionResult ReadFailed(LineDecisionCommand command, Exception ex)
+    private LineDecisionResult ReadFailed(LineDecisionCommand command, Exception ex) => ReadFailed(command.InvoiceId, ex);
+
+    private LineDecisionResult ReadFailed(Guid invoiceId, Exception ex)
     {
-        _logger.LogWarning("Line decision on invoice {InvoiceId}: a read failed ({ExceptionType}); nothing changed.", command.InvoiceId, ex.GetType().Name);
+        _logger.LogWarning("Line decision on invoice {InvoiceId}: a read failed ({ExceptionType}); nothing changed.", invoiceId, ex.GetType().Name);
         return new LineDecisionResult(LineDecisionStatus.Unavailable, LineDecisionCodes.Unavailable, "The invoice could not be read; nothing was changed.");
     }
 
@@ -815,10 +939,13 @@ public sealed class InvoiceLineDecisionService
     private async Task<CorrectionBuild> BuildCorrectionsAsync(
         LineDecisionCommand command, Entity invoice, IReadOnlyList<Proposal> proposals, DateTime decidedOnUtc, CancellationToken ct)
     {
+        var kind = new CorrectionKind(
+            command.InvoiceId, (line, field) => IdOf($"ebilling-correction-{command.DecisionId:D}-{line:D}-{field}"),
+            OutcomeAcceptedInBulk, DeciderRole, command.DeciderSystemUserId);
         var rows = new List<Entity>();
         foreach (var proposal in proposals)
         {
-            rows.AddRange(CorrectionRowsFor(proposal.Line, command, invoice, decidedOnUtc));
+            rows.AddRange(CorrectionRowsFor(proposal.Line, kind, invoice, decidedOnUtc));
         }
 
         if (rows.Count == 0)
@@ -826,11 +953,19 @@ public sealed class InvoiceLineDecisionService
             return new CorrectionBuild(rows, null);
         }
 
-        // The core record the correction rows are filed under (013): the invoice's own, which every one of its lines shares (D-96).
+        return new CorrectionBuild(rows, await StampOwnerAsync(rows, invoice, command.InvoiceId, command.DeciderSystemUserId, ct).ConfigureAwait(false));
+    }
+
+    /// <summary>
+    /// Files the correction rows (013): each line's owner asked through the row's own question (194b R3b-2, below), the creating person,
+    /// and 013's guard. Null when stamped; a refusal otherwise (nothing is written).
+    /// </summary>
+    private async Task<LineDecisionResult?> StampOwnerAsync(List<Entity> rows, Entity invoice, Guid invoiceId, Guid creatorSystemUserId, CancellationToken ct)
+    {
         var core = CoreOf(invoice);
         if (core is null)
         {
-            return new CorrectionBuild(rows, new LineDecisionResult(LineDecisionStatus.OwnerUnresolved, LineDecisionCodes.OwnerUnresolved, "The invoice names no single core record."));
+            return new LineDecisionResult(LineDecisionStatus.OwnerUnresolved, LineDecisionCodes.OwnerUnresolved, "The invoice names no single core record.");
         }
 
         // UAC 194b R3b-2: each row's question is built from the row itself (RecordOwnershipContext.ForChild: its invoice, its line, its core
@@ -852,13 +987,13 @@ public sealed class InvoiceLineDecisionService
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
-                return new CorrectionBuild(rows, ReadFailed(command, ex));
+                return ReadFailed(invoiceId, ex);
             }
 
             if (!answer.IsOwned)
             {
-                _logger.LogWarning("Line decision on invoice {InvoiceId}: no owner for the correction rows ({Code}); nothing changed.", command.InvoiceId, answer.RefusalCode);
-                return new CorrectionBuild(rows, new LineDecisionResult(LineDecisionStatus.OwnerUnresolved, LineDecisionCodes.OwnerUnresolved, "The correction rows have no owner; nothing was changed."));
+                _logger.LogWarning("Line decision on invoice {InvoiceId}: no owner for the correction rows ({Code}); nothing changed.", invoiceId, answer.RefusalCode);
+                return new LineDecisionResult(LineDecisionStatus.OwnerUnresolved, LineDecisionCodes.OwnerUnresolved, "The correction rows have no owner; nothing was changed.");
             }
 
             owners[lineId] = answer;
@@ -867,7 +1002,7 @@ public sealed class InvoiceLineDecisionService
         foreach (var row in rows)
         {
             owners[row.GetAttributeValue<EntityReference>("sprk_invoiceline")?.Id ?? Guid.Empty].ApplyTo(row);
-            RecordCreatorPerson.Stamp(row, command.DeciderSystemUserId);
+            RecordCreatorPerson.Stamp(row, creatorSystemUserId);
             if (InvoiceFamilyCoreRecordGuard.Check(row) is { IsRefused: true } refused)
             {
                 // A builder defect, never sent (013's guard decides every invoice-family row as built).
@@ -875,8 +1010,11 @@ public sealed class InvoiceLineDecisionService
             }
         }
 
-        return new CorrectionBuild(rows, null);
+        return null;
     }
+
+    /// <summary>What a correction row records: its invoice, its deterministic id, the outcome type, and the reviewer and role.</summary>
+    private sealed record CorrectionKind(Guid InvoiceId, Func<Guid, string, Guid> IdFor, int Outcome, string Role, Guid Reviewer);
 
     /// <summary>The invoice's one core record (matter, project, else work assignment); null when it names none.</summary>
     internal static (string Entity, Guid Id)? CoreOf(Entity invoice)
@@ -897,7 +1035,7 @@ public sealed class InvoiceLineDecisionService
     /// extraction JSON has a confidence for it and the line holds a value; the coded task, activity and expense codes count when the line was coded.
     /// The row id is deterministic (decision, line, field), so a repeat upserts the same row.
     /// </summary>
-    private IEnumerable<Entity> CorrectionRowsFor(Target line, LineDecisionCommand command, Entity invoice, DateTime decidedOnUtc)
+    private static IEnumerable<Entity> CorrectionRowsFor(Target line, CorrectionKind kind, Entity invoice, DateTime decidedOnUtc)
     {
         var extraction = line.Row.GetAttributeValue<string>(InvoiceSubmissionPersister.LineExtractionConfidence);
         if (string.IsNullOrWhiteSpace(extraction))
@@ -938,7 +1076,7 @@ public sealed class InvoiceLineDecisionService
                         continue;
                     }
 
-                    yield return CorrectionRow(line, command, invoice, decidedOnUtc, field.Name, value, confidence, "invoice-extraction");
+                    yield return CorrectionRow(line, kind, invoice, decidedOnUtc, field.Name, value, confidence, "invoice-extraction");
                 }
             }
 
@@ -950,30 +1088,31 @@ public sealed class InvoiceLineDecisionService
                 {
                     if (coding.TryGetProperty(member, out var code) && code.ValueKind == JsonValueKind.Object && LineExtraction.Text(code, "code") is { Length: > 0 } text)
                     {
-                        yield return CorrectionRow(line, command, invoice, decidedOnUtc, name, text, codingConfidence, "invoice-line-code");
+                        yield return CorrectionRow(line, kind, invoice, decidedOnUtc, name, text, codingConfidence, "invoice-line-code");
                     }
                 }
             }
         }
     }
 
-    private Entity CorrectionRow(
-        Target line, LineDecisionCommand command, Entity invoice, DateTime decidedOnUtc, string fieldName, string value, decimal? confidence, string sourceCode)
+    private static Entity CorrectionRow(
+        Target line, CorrectionKind kind, Entity invoice, DateTime decidedOnUtc, string fieldName, string value, decimal? confidence, string sourceCode)
     {
-        var id = IdOf($"ebilling-correction-{command.DecisionId:D}-{line.Id:D}-{fieldName}");
+        var id = kind.IdFor(line.Id, fieldName);
         var row = new Entity(CorrectionEntity, id)
         {
             ["sprk_name"] = $"{fieldName} - line {line.Sequence.ToString(CultureInfo.InvariantCulture)}",
             ["sprk_fieldname"] = fieldName,
             ["sprk_aivalue"] = Cap(value),
             ["sprk_finalvalue"] = Cap(value),
-            ["sprk_outcometype"] = new OptionSetValue(OutcomeAcceptedInBulk),
+            // Accepted in bulk and Unreviewed are never labels (D-64, D-72).
+            ["sprk_outcometype"] = new OptionSetValue(kind.Outcome),
             ["sprk_islabel"] = false,
             ["sprk_sourcecode"] = sourceCode,
-            ["sprk_reviewerrole"] = DeciderRole,
+            ["sprk_reviewerrole"] = kind.Role,
             ["sprk_reviewedon"] = decidedOnUtc,
-            ["sprk_reviewedby"] = new EntityReference(SystemUserEntity, command.DeciderSystemUserId),
-            ["sprk_invoice"] = new EntityReference(InvoiceReviewReadService.InvoiceEntity, command.InvoiceId),
+            ["sprk_reviewedby"] = new EntityReference(SystemUserEntity, kind.Reviewer),
+            ["sprk_invoice"] = new EntityReference(InvoiceReviewReadService.InvoiceEntity, kind.InvoiceId),
             ["sprk_invoiceline"] = new EntityReference(InvoiceReviewReadService.LineEntity, line.Id),
         };
         if (confidence is { } c)

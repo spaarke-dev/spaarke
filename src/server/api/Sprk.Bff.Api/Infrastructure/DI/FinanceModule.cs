@@ -187,6 +187,14 @@ public static class FinanceModule
         // (task 119 round 2, DuplicateDetailGate, shared with InvoiceReviewReadService).
         services.AddScoped<SubmissionOverrideService>();
 
+        // Approval (ebilling-r1 task 103, FR-35, FR-11, D-40, D-72, D-78): the eligible-approver resolver (live at approve, recheck on GET,
+        // 049's acceptance step, the refresh job) and the approve service. Concrete (ADR-010). Scoped like their scoped dependencies
+        // (InvoiceLineDecisionService, IInvoiceLifecycleService). Unconditional (flag rule above); the routes and the job read the kill switch.
+        // The refresh is an ADR-036 scheduled job (no BackgroundService), every 15 minutes.
+        services.AddScoped<EligibleApproverResolver>();
+        services.AddScoped<InvoiceApprovalService>();
+        services.AddScheduledJob<EligibleApproverRefreshJob>(EligibleApproverRefreshJob.DefaultCronSchedule);
+
         // Invoice submission processing (ebilling-r1 task 049 parts B-E, FR-20 / FR-21, D-101; Processing Pipeline steps 1-9). The pipeline is
         // three scoped components behind the seams the handler tests fake, plus the ADR-004 job handler that composes them:
         //   * IInvoiceSubmissionProcessor  - read (043), resolve (046), code (047), evaluate (072), decide (073); writes nothing.

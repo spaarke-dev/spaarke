@@ -109,6 +109,7 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
     private readonly Func<BillingDecision, CancellationToken, Task<BillingDecisionRecordResult>> _record;
     private readonly Action<BillingDecision> _preflight;
     private readonly Func<Guid, CancellationToken, Task<SubmissionCommitGateResult>> _commitGate;
+    private readonly Func<Guid, CancellationToken, Task<bool>> _refreshApprovers;
 
     public InvoiceSubmissionAfterSteps(
         IGenericEntityService entities,
@@ -118,6 +119,7 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         IInvoiceTotalsService totals,
         IEbillingNotificationSink sink,
         SubmissionCommitGate gate,
+        EligibleApproverResolver approvers,
         ILogger<InvoiceSubmissionAfterSteps> logger)
         : this(
             entities,
@@ -131,7 +133,8 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
             (id, recordId, setReadAtUtc, policyCode, ct) => signals.CloseActedByDecisionAsync(id, recordId, setReadAtUtc, policyCode, decidedByUserId: null, ct),
             (recorder ?? throw new ArgumentNullException(nameof(recorder))).RecordAsync,
             recorder.Preflight,
-            commitGate: (gate ?? throw new ArgumentNullException(nameof(gate))).RunAsync)
+            commitGate: (gate ?? throw new ArgumentNullException(nameof(gate))).RunAsync,
+            refreshApprovers: (approvers ?? throw new ArgumentNullException(nameof(approvers))).RefreshInvoiceAsync)
     {
     }
 
@@ -148,8 +151,11 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         Func<BillingDecision, CancellationToken, Task<BillingDecisionRecordResult>> record,
         Action<BillingDecision> preflight,
         Func<Guid, CancellationToken, Task<SubmissionCommitGateResult>> commitGate,
-        TimeProvider? time = null)
+        TimeProvider? time = null,
+        Func<Guid, CancellationToken, Task<bool>>? refreshApprovers = null)
     {
+        // Task 103: the eligible approvers at acceptance (D-78). The unit-test seam defaults to "nothing to resolve".
+        _refreshApprovers = refreshApprovers ?? ((_, _) => Task.FromResult(false));
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _idempotency = idempotency ?? throw new ArgumentNullException(nameof(idempotency));
         _totals = totals ?? throw new ArgumentNullException(nameof(totals));
@@ -462,6 +468,20 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
             _logger.LogInformation("Invoice submission {SubmissionId}: invoice {InvoiceId}'s PDF is a Stored File; not indexed", submissionId, invoiceId);
         }
 
+        // ── Task 103 (D-78): the eligible approvers at acceptance, best effort (the refresh job and GET re-resolve; approve resolves live) ──
+        if (stored.Kind != SubmissionEvaluationKind.AutoRejected)
+        {
+            try
+            {
+                await _refreshApprovers(invoiceId, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogWarning("Invoice submission {SubmissionId}: the eligible approvers of invoice {InvoiceId} could not be resolved ({Fault}); the refresh job retries",
+                    submissionId, invoiceId, ex.GetType().Name);
+            }
+        }
+
         // ── 4. Notification: once per submission (the marker). The sink's contract: a failure is logged and never retries the pipeline ──
         await NotifyOnceAsync(submission, submissionId, invoiceId, terminal, terminalReasonCode, ct).ConfigureAwait(false);
 
@@ -707,9 +727,13 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
     /// line) and by 100's line decisions (the decided lines only, no invoice). The caller reads its clock BEFORE calling. K3 (ontology-r1):
     /// the subject is the ROW's (<see cref="StoredSignalSetCheck.RowSubjectOf"/>); an open row whose dedupe-key subject differs from its
     /// regarding row is skipped with one Warning, so a row whose rights were not asked is never closed.
+    /// <para>Task 103 (EB-D-172): <paramref name="createdOnOrBefore"/>, when given, keeps only Signals created at or before it (a row with no
+    /// <c>createdon</c> is skipped). Approve bounds its set by its frozen decision time, so a repeat that must re-derive the set before the
+    /// record stored it never widens it to a Signal raised after the decision.</para>
     /// </summary>
     internal static async Task<IReadOnlyList<(ResolvedSignal Signal, string SubjectEntity, Guid SubjectId)>> ReadOpenSignalsAsync(
-        IGenericEntityService entities, Guid? invoiceId, IReadOnlyCollection<Guid> lineIds, ILogger logger, CancellationToken ct)
+        IGenericEntityService entities, Guid? invoiceId, IReadOnlyCollection<Guid> lineIds, ILogger logger, CancellationToken ct,
+        DateTime? createdOnOrBefore = null)
     {
         if (invoiceId is null && lineIds.Count == 0)
         {
@@ -717,7 +741,10 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         }
 
         // K2 (notes 13c): a single RetrieveMultiple with no paging, fine below 5,000 Signals per invoice.
-        var query = new QueryExpression(SignalEntity) { ColumnSet = new ColumnSet([.. StoredSignalSetCheck.SubjectColumns, "sprk_signalstatus"]), NoLock = true };
+        string[] columns = createdOnOrBefore is null
+            ? [.. StoredSignalSetCheck.SubjectColumns, "sprk_signalstatus"]
+            : [.. StoredSignalSetCheck.SubjectColumns, "sprk_signalstatus", "createdon"];
+        var query = new QueryExpression(SignalEntity) { ColumnSet = new ColumnSet(columns), NoLock = true };
         query.Criteria.FilterOperator = LogicalOperator.Or;
         if (invoiceId is { } invoice)
         {
@@ -741,6 +768,11 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         {
             if (row.Id == Guid.Empty
                 || row.GetAttributeValue<OptionSetValue>("sprk_signalstatus")?.Value is not (SignalWriter.SignalStatusOpen or SignalWriter.SignalStatusAcknowledged))
+            {
+                continue;
+            }
+
+            if (createdOnOrBefore is { } bound && (row.GetAttributeValue<DateTime?>("createdon") is not { } created || created > bound))
             {
                 continue;
             }
