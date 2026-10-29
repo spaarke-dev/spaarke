@@ -11,7 +11,7 @@
 |---|---|
 | **Task** | **168** (#2418) is blocked on owner Q1/Q2. 171 and 172 are DONE (171: #2433 merged `3452d3017e` after fix round 1; 172: #2434 merged `fab8c91531`). |
 | **Status** | No lane is running. The worktrees `C:\wts-171` and `C:\wts-172` are removed. uac-r2 was sent the 171 fix-diff SHA `e025152e3b` after the merge; if they raise anything, handle it as a follow-up before docs→master. DI-124 (#2300) has the `-CustomerBusinessUnit` / `-WhatIf` comment. |
-| **Next Action** | 1) When the owner answers Q1/Q2: record D-199, then run the 168 fix round in `C:\wts-168` (plan below). 2) After the owner's next real decision commit: the task-170 App Insights check and the `BUD-` number (Lane facts). 3) Next docs→master (below). 4) Read any uac-r2 reply on the 171 fix diff. |
+| **Next Action** | 1) When the owner answers Q1/Q2: record D-199, then run the 168 fix round in `C:\wts-168` (plan below). 2) After the owner's next real decision commit: the task-170 App Insights check and the `BUD-` number (Lane facts). 4) Read any uac-r2 reply on the 171 fix diff. |
 
 ## Open owner questions (task 168, asked 2026-10-28; explained in detail 2026-10-29)
 
@@ -41,7 +41,7 @@ Branch `task/168-assign-task-notify`, head `8064311c54`. First merge docs (it no
 
 ## Next docs→master
 
-Contents: #2414, #2422, the 194b repoint, 171 (`3452d3017e`), 172 (`fab8c91531`), and 168 when ready. Before notices to word-add-in, R3 and uac-r2; merge master in; full ArchTests.
+The last one was PR #2439, merged as master `f07ab2ef1f` (2026-10-29): 167b, 167c, 171, 172 and the 194b repoint; all checks passed. Docs was fast-forwarded to it. The next one carries 168 when it is ready. Before it: notices to word-add-in, R3 and uac-r2; merge master in; full ArchTests. The word-add-in session refuses held messages while the two sessions run in different permission modes.
 
 ## Blocked follow-ups (ours)
 
