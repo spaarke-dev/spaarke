@@ -184,6 +184,9 @@ is closed as **Acted**, never Dismissed.
 - **A failed close only warns.** One Warning per Signal (ids and codes only); the decision and its response are unchanged. A Signal that
   no longer exists has nothing to close. A repeat of a decided submission (`AlreadyDecided`) re-runs the close over the stored set with the
   stamp's record and decider, after the same rights check; anything it cannot do only warns, and the repeat's answer is unchanged.
+  **Open (2026-10-29, ontology-r1 review of PR #1911, F2):** `CloseSetAsync` returns how many closes failed and both call sites here drop
+  it, so a failed close is answered Decided / AlreadyDecided. This service has no Incomplete outcome (`BlockedDecisionKind` is Decided,
+  AlreadyDecided, Refused), so it is not changed yet; the line decisions (100, section 9) now answer Incomplete at step `signals`.
 - **Races.** Losing the race at the set store to a concurrent run of the same decision is the same `AlreadyDecided` no-op as losing it at
   the state write; any other change is `concurrent_change`.
 

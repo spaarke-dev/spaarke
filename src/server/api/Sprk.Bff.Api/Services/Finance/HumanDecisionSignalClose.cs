@@ -10,7 +10,8 @@ namespace Sprk.Bff.Api.Services.Finance;
 /// The human-decision Signal close shared by the line decisions (task 100) and the override / return of a blocked submission (task 105),
 /// in the binding shape agreed with ontology-r1: no impersonation (the app-identity <see cref="SignalWriter"/> closes), the caller
 /// authorized first by the commit route's own rule (<see cref="DecisionCallerRights"/>), every Signal closed as Acted naming the decider,
-/// and a failed close only warns.
+/// and a failed close warns, is counted, and is returned to the caller to act on (never dropped: an uncounted failure leaves a Signal Open
+/// with no Decision Record link and nothing closes it later).
 /// </summary>
 /// <remarks>
 /// <para><b>Component justification (CLAUDE.md section 11).</b> Existing: <see cref="DecisionCallerRights"/> (the rule) and
@@ -63,8 +64,9 @@ internal static class HumanDecisionSignalClose
     /// Closes every Signal of the stored <paramref name="set"/> as Acted by <paramref name="recordId"/>, naming <paramref name="decider"/>.
     /// Closed and AlreadyClosedByThisRecord (a retry) are done; a Signal that no longer exists has nothing to close; LeftAsIs (resolved
     /// otherwise) is one Information line. A ChangedSinceRead or any fault is ONE Warning and the next Signal is still attempted: the
-    /// decision stands, and a retry of it re-runs this over the same stored set. Returns how many were not closed for a fault or a change.
-    /// Ids and codes only in the logs.
+    /// decision stands, and a retry of it re-runs this over the same stored set. Returns how many were not closed for a fault or a change:
+    /// the CALLER must act on a count above zero (answer its own "incomplete / repeat to complete" outcome, not success). Ids and codes only
+    /// in the logs.
     /// </summary>
     internal static async Task<int> CloseSetAsync(
         CloseActed close,

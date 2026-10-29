@@ -33,7 +33,7 @@ Named mechanism: a per-invoice processing lock (`IIdempotencyService.TryAcquireP
 - A second request on the same invoice while the first holds the lock gets 409 `ebilling.invoice.busy`, before it reads anything.
 - Defence in depth: with the lock defeated, two concurrent same-id requests still produce exactly one applied request and one 409, and one Decision Record (test `ConcurrentSameDecisionId_WithoutTheLock_IsStillExactlyOnce_ByTheConditionalWrite`).
 - Decision Records are idempotent by `BillingDecisionKey` (subject, decision id) plus content hash, one per line (D-75). A repeat of the same decision id writes no second record and returns `alreadyRecorded: true`.
-- Write order: validate everything (dry run of the totals, the recorder's no-I/O `Preflight`) -> lines (all or nothing) -> 016 recalculation -> correction rows -> Decision Records. A failure after the lines are written returns 503 `ebilling.decision.incomplete` with `committedLineIds` and `failedStep`; the caller repeats the same decision id through the multi-line route and every step is idempotent (tests: record, totals, corrections).
+- Write order: validate everything (dry run of the totals, the recorder's no-I/O `Preflight`) -> lines (all or nothing) -> 016 recalculation -> correction rows -> Decision Records. A failure after the lines are written returns 503 `ebilling.decision.incomplete` with `committedLineIds` and `failedStep` (`totals`, `corrections`, `record`, or `signals` after 2026-10-29, section 9); the caller repeats the same decision id through the multi-line route and every step is idempotent (tests: record, totals, corrections).
 
 ## 4. Behaviour
 
@@ -109,12 +109,25 @@ every policy, whose subject is THAT line. Another line's Signal is never touched
   identity, billing codes only, at most 10 rows; more than one match fails closed). When the line's decision is already recorded under the
   decision id, its stored set is used, never re-read or widened: a resend answers AlreadyRecorded (not review_invalid), a Signal raised
   after the first read stays open, and re-closing by the same record is `AlreadyClosedByThisRecord` (nothing twice).
-- **A failed close only warns.** One Warning per Signal; the decision and its response are unchanged. A Signal that no longer exists has
-  nothing to close. A retry of the same decision id finishes the close over the stored set with the stored read time.
+- **A failed close warns, and the decision is then incomplete (amended 2026-10-29, ontology-r1 review of PR #1911, F2).** One Warning per
+  Signal, and every other Signal and line is still attempted. A close that fails (a timeout or any fault) or that ends `ChangedSinceRead`
+  is counted; when the count is above zero the decision answers the existing **Incomplete** outcome at `failedStep` `"signals"` (503
+  `ebilling.decision.incomplete`, with `committedLineIds` and the decision id; the same body as a record, totals or corrections failure)
+  instead of Applied, because nothing else closes that Signal later: it would stay Open with no Decision Record link. A `record` failure
+  still answers step `record` first. The decision stands: the lines, the approved total and the Decision Records are written. **Repeat to
+  complete:** the client repeats the same decision id with the committed line ids through the multi-line route; the repeat finds each
+  line's record (AlreadyRecorded, no second Decision Record), re-runs the close over the stored set with the stored read time, and answers
+  Applied once every close is done (`AlreadyClosedByThisRecord` for the ones already closed, so nothing is closed twice). `LeftAsIs` (the
+  Signal was resolved otherwise) and a Signal that no longer exists are not failures. Before this amendment the count was dropped and the
+  decision was answered Applied. A Signal that no longer exists has nothing to close.
+- **K1 (2026-10-29):** `SignalWriter.CloseActedByDecisionAsync` re-closes a Signal the system closed after the set was read only when it
+  names no Decision Record; a system close already linked to a record is `LeftAsIs` (the write would replace that link).
 
 Tests: `InvoiceLineDecisionServiceTests` region "D-122 / FR-51" (each outcome; multi-line; rights asked as the caller; no Signal asks
-nothing; missing AppendTo / Write / token is 403 with nothing written; a failed close warns; a deleted Signal; resend after success; retry
-after a failed close; a Signal read fault) and `DecisionRecordWriterTests` `Billing_StoredSet_*` (no record is null through the lookup's
+nothing; missing AppendTo / Write / token is 403 with nothing written; a failed close is incomplete at `signals`, also for
+`ChangedSinceRead`, with the other Signals still closed; a clean close is Applied; `LeftAsIs` is Applied; `record` wins over `signals`; a
+deleted Signal; resend after success; the repeat after a failed close completes with no second record, single and multi-line; a Signal
+read fault), `SignalWriterTests` `AutomatedClose_ASystemCloseLinkedToARecord_IsLeftAsIs_AndNothingIsWritten` and `DecisionRecordWriterTests` `Billing_StoredSet_*` (no record is null through the lookup's
 filter; round trip; empty set; two records fail closed; a person-created lookalike is never trusted; a set-less record listing Signals
 fails closed; a lookup fault; bad input refused without a read).
 
