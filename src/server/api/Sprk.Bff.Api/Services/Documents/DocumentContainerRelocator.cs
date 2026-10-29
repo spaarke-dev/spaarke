@@ -1289,7 +1289,7 @@ public sealed class DocumentContainerRelocator
     /// </summary>
     private async Task<bool> IsIsolatedAsync(Guid documentId, CancellationToken ct)
     {
-        var secure = await SecureChildShareSynchronizer.ResolveSecureBusinessUnitAsync(_dataverse, _configuration, ct)
+        var secure = await SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync(_dataverse, _configuration, ct)
             .ConfigureAwait(false);
         if (secure.Ambiguous)
         {

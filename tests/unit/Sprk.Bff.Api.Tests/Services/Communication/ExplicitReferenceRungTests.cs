@@ -45,6 +45,7 @@ public class ExplicitReferenceRungTests
             && m.Target!.LogicalName == "sprk_matter" && m.Target!.Id == matterId && m.Confidence == 1.0);
         matches.Should().Contain(m => m.RegardingFieldName == "sprk_regardingorganization"
             && m.Target!.LogicalName == "sprk_organization" && m.Target!.Id == orgId);
+        matches.Should().OnlyContain(m => m.CallerSupplied); // #2412: the mapper lets the caller's choice win its field
     }
 
     [Fact]
@@ -60,7 +61,8 @@ public class ExplicitReferenceRungTests
         matches.Should().ContainSingle()
             .Which.Should().Match<RungMatch>(m =>
                 m.RegardingFieldName == "sprk_regardingmatter" && m.Target!.Id == matterId
-                && m.Rung == RungKind.ExplicitReference);
+                && m.Rung == RungKind.ExplicitReference
+                && !m.CallerSupplied); // #2412: a subject token is an inference, not the caller's choice
     }
 
     [Fact]

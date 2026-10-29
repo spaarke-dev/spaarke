@@ -105,6 +105,73 @@ public class OfficeEmailSaveNamingTests
     }
 
     [Fact]
+    public async Task EmailSave_WithATypedDocumentName_NamesTheFileOnly_AndKeepsTheEmailsOwnSubject_Issue2416()
+    {
+        // #2416 (owner's Outlook check on dev, 2026-10-28): the typed Document Name used to travel as the subject, so it
+        // replaced the email's subject in the .eml header, sprk_emailsubject and the communication.
+        var world = new OfficeVersionSaveWorld();
+        using var factory = new OfficeVersionSaveTestWebAppFactory(world);
+        var request = EmailSave(NewRecord(), "<named@test.com>", "Named.", systemNamed: false);
+        request = request with { Email = request.Email! with { DocumentName = "  Email Saved 10-28  " } };
+
+        var response = await factory.CreateClient().PostAsJsonAsync("/api/office/save", request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        const string typedName = "2026-09-14_Email Saved 10-28.eml";
+        var stored = EmlItems(world).Should().ContainSingle().Subject;
+        stored.Name.Should().Be(typedName, "the typed name names the file, unchanged");
+        world.CreatedDocumentNames.Should().ContainSingle().Which.Should().Be(typedName);
+        Encoding.UTF8.GetString(stored.Versions[0]).Should().Contain("Subject: Re: Filing", "the saved email keeps its own subject")
+            .And.NotContain("Email Saved 10-28\r\n");
+        world.DocumentUpdates.Where(u => u.Update.EmailSubject is not null)
+            .Should().ContainSingle().Which.Update.EmailSubject.Should().Be("Re: Filing");
+        world.CreatedDocumentDescriptions.Should().ContainSingle().Which.Should().Be(
+            "Re: Filing", "sprk_documentdescription is the email's subject, not the typed name");
+    }
+
+    [Fact]
+    public async Task EmailSave_WithABlankTypedDocumentName_FallsBackToTheSubject_WithTheUniqueSuffix_Issue2416()
+    {
+        // A whitespace-only typed name is no name: the file is named from the subject, so it is system-derived and
+        // must carry the suffix, or a second same-subject, same-date email would be refused as a collision.
+        var world = new OfficeVersionSaveWorld();
+        using var factory = new OfficeVersionSaveTestWebAppFactory(world);
+        var request = EmailSave(NewRecord(), "<blank@test.com>", "Blank.", systemNamed: false);
+        request = request with { Email = request.Email! with { DocumentName = "   " } };
+
+        var response = await factory.CreateClient().PostAsJsonAsync("/api/office/save", request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        EmlItems(world).Should().ContainSingle().Which.Name.Should().MatchRegex(SuffixedNamePattern);
+        world.CreatedDocumentNames.Should().ContainSingle().Which.Should().Be(ReadableName);
+    }
+
+    [Fact]
+    public async Task IdlessEmailSaves_UnderTwoTypedNames_AreTwoOperations_AndARetryIsStillOne_Issue2416()
+    {
+        // A draft has no Message-ID, so the idempotency key falls back to the subject. Before #2416 the typed name WAS
+        // the subject; now it travels separately and must stay in the key, or the second save is answered "Duplicate".
+        var world = new OfficeVersionSaveWorld();
+        using var factory = new OfficeVersionSaveTestWebAppFactory(world);
+        var client = factory.CreateClient();
+        var record = NewRecord();
+        SaveRequest Named(string name)
+        {
+            var r = EmailSave(record, null!, "Draft.", systemNamed: false);
+            return r with { Email = r.Email! with { DocumentName = name } };
+        }
+
+        (await client.PostAsJsonAsync("/api/office/save", Named("First copy"))).StatusCode.Should().Be(HttpStatusCode.Accepted);
+        (await client.PostAsJsonAsync("/api/office/save", Named("Second copy"))).StatusCode.Should().Be(
+            HttpStatusCode.Accepted, "a different typed name is a different operation");
+        (await client.PostAsJsonAsync("/api/office/save", Named("Second copy"))).StatusCode.Should().Be(
+            HttpStatusCode.OK, "the identical retry is answered as a duplicate");
+
+        world.Jobs.Select(j => j.IdempotencyKey).Distinct().Should().HaveCount(2,
+            "two typed names are two operations; the identical retry de-duplicates");
+    }
+
+    [Fact]
     public async Task SystemNamedEmailSave_SuffixesOnlyTheStoredFile_AndKeepsTheDocumentNameReadable()
     {
         var world = new OfficeVersionSaveWorld();
