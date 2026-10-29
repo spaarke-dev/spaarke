@@ -470,8 +470,8 @@ jobs:
   # Phase 2b gate in scripts/Deploy-Release.ps1 (task 164). The first two did not run in CI before
   # (ontology task 159, K3). The tests read the shipped functions out of the
   # scripts' own syntax trees and the checked-in config/*.policies.json; nothing talks to Dataverse.
-  # Pester pinned to 5.7.1 (2026-10-29): Pester 6.x fails every container here with "Export-ModuleMember ... can only be
-  # called from inside a module" (found in the 194b review); owner-teams-script-tests pins the same version.
+  # Pester pinned to 5.7.1 (2026-10-29), the same pin as owner-teams-script-tests: under Pester 6.x a container can fail
+  # with "Export-ModuleMember ... can only be called from inside a module" (seen in uac-r2's 194b review).
   # --------------------------------------------------------------------------
   ontology-script-tests:
     name: Ontology script tests (Pester)
