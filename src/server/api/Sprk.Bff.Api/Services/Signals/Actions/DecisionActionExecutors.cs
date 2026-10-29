@@ -542,15 +542,20 @@ public sealed class ReviseBudgetExecutor : IDecisionActionExecutor
             return (Refuse(DecisionActionReasons.CallerUnresolved, "You could not be identified, so the revision was not recorded."), null);
 
         // The revision's owner (D-33/D-38): secure-if-any over the budget and the matter, never the writer's own business unit.
+        // UAC task 194b R3b-2: through the one builder, keyed by the two columns the writer stamps on the revision
+        // (sprk_budget, sprk_matter) — sprk_budgetrevision's primary order (the budget first), as the reconciler asks it.
         RecordOwnerResolution owner;
         try
         {
-            owner = await _ownership.ResolveOwnerAsync(new RecordOwnershipContext
+            owner = await _ownership.ResolveOwnerAsync(RecordOwnershipContext.ForRow(
+                "sprk_budgetrevision",
+                new[]
+                {
+                    KeyValuePair.Create("sprk_budget", (RecordOwnershipParent?)new RecordOwnershipParent(BudgetEntity, budgetId)),
+                    KeyValuePair.Create("sprk_matter", (RecordOwnershipParent?)new RecordOwnershipParent("sprk_matter", matterId)),
+                },
+                callerObjectId: DecisionExec.CallerObjectId(request.Http)) with
             {
-                TargetEntityLogicalName = "sprk_matter",
-                TargetRecordId = matterId,
-                Parents = [new RecordOwnershipParent(BudgetEntity, budgetId)],
-                CallerObjectId = DecisionExec.CallerObjectId(request.Http),
                 // Task 147 (D-135, #1777): the person who caused the revision, recorded as sprk_createdbyperson by
                 // owner.ApplyTo. userId is the acting user's systemuserid (resolved above, else the plan refused).
                 RequestedBy = RecordRequester.Of(userId),
@@ -582,12 +587,18 @@ public sealed class CreateBudgetExecutor : ChildCreateExecutorBase
     /// <summary>Create on <c>sprk_budget</c> (schema name <c>sprk_Budget</c>, as <c>prvReadsprk_Budget</c>).</summary>
     internal const string CreateBudgetPrivilege = "prvCreatesprk_Budget";
 
-    private readonly TimeProvider _clock;
+    /// <summary>The MaxLength of <c>sprk_budget.sprk_budgetyear</c> (live metadata, spaarkedev1 2026-10-28).</summary>
+    internal const int BudgetYearMaxLength = 4;
 
-    public CreateBudgetExecutor(CallerRecordAccessProbe probe, DecisionRouteCores cores, IGenericEntityService entities, TimeProvider clock)
+    private readonly TimeProvider _clock;
+    private readonly DecisionParameterSources _sources;
+
+    public CreateBudgetExecutor(
+        CallerRecordAccessProbe probe, DecisionRouteCores cores, IGenericEntityService entities, TimeProvider clock, DecisionParameterSources sources)
         : base(probe, cores, entities)
     {
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));
+        _sources = sources ?? throw new ArgumentNullException(nameof(sources));
     }
 
     public override string Code => ResolvedDecisionPlan.CreateBudgetCode;
@@ -607,6 +618,87 @@ public sealed class CreateBudgetExecutor : ChildCreateExecutorBase
 
         payload["sprk_name"] = $"Budget {_clock.GetUtcNow():yyyy-MM-dd}";
         payload["sprk_totalbudget"] = amount;
+
+        // Task 167 (D-193): the optional fields. Shape only here (no I/O); a value in a live option set is checked in ExtendColumnsAsync.
+        // sprk_budgetnumber is never set: the platform autonumber (BUD-{SEQNUM:6}) fills it.
+        foreach (var (parameter, column, label) in OptionColumns)
+        {
+            if (request.Param(parameter) is not { } raw)
+                continue;
+            if (!int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var option))
+                return DecisionActionOutcome.Refused(Code, DecisionActionReasons.InvalidParameter, $"Choose one of the {label} options.");
+            payload[column] = option;
+        }
+
+        if (request.Param("year") is { } year)
+        {
+            if (year.Length > BudgetYearMaxLength)
+                return DecisionActionOutcome.Refused(Code, DecisionActionReasons.InvalidParameter, $"The year can be at most {BudgetYearMaxLength} characters.");
+            payload["sprk_budgetyear"] = year;
+        }
+
+        DateOnly start = default, end = default;
+        var hasStart = false;
+        var hasEnd = false;
+        if (request.Param("startDate") is { } startText)
+        {
+            if (!DecisionExec.TryDate(startText, out start))
+                return DecisionActionOutcome.Refused(Code, DecisionActionReasons.InvalidParameter, "Give the start date as yyyy-MM-dd.");
+            hasStart = true;
+            payload["sprk_budgetstartdate"] = DecisionExec.IsoDate(start);
+        }
+
+        if (request.Param("endDate") is { } endText)
+        {
+            if (!DecisionExec.TryDate(endText, out end))
+                return DecisionActionOutcome.Refused(Code, DecisionActionReasons.InvalidParameter, "Give the end date as yyyy-MM-dd.");
+            hasEnd = true;
+            payload["sprk_budgetenddate"] = DecisionExec.IsoDate(end);
+        }
+
+        if (hasStart && hasEnd && end < start)
+            return DecisionActionOutcome.Refused(Code, DecisionActionReasons.InvalidParameter, "The end date cannot be before the start date.");
+
+        return null;
+    }
+
+    /// <summary>Choice parameter, the column it writes, and the noun a refusal uses.</summary>
+    private static readonly (string Parameter, string Column, string Label)[] OptionColumns =
+    [
+        ("category", "sprk_budgetcategory", "category"),
+        ("period", "sprk_budgetperiod", "period"),
+    ];
+
+    /// <summary>
+    /// Task 167 (D-193): a Category or Period must be in the column's LIVE option set (the same list the plan route offered), and the
+    /// currency is the user's choice or, when omitted, the matter's business-unit default; it must be an existing, active currency.
+    /// The budget gets <c>transactioncurrencyid</c> and <c>sprk_currency</c> (that currency's ISO code); a currency that cannot be
+    /// determined refuses, never a blank. A list that cannot be read throws, so the commit answers 503 and nothing is written.
+    /// </summary>
+    protected override async Task<DecisionActionOutcome?> ExtendColumnsAsync(
+        DecisionActionRequest request, IDictionary<string, object?> payload, CancellationToken ct)
+    {
+        if (request.Core is not { Entity: "sprk_matter" } core)
+            return null; // BuildColumns refused it
+
+        DecisionActionCatalog.TryGet(Code, out var definition);
+        foreach (var (parameter, _, label) in OptionColumns)
+        {
+            if (request.Param(parameter) is not { } chosen)
+                continue;
+            var source = definition.Parameters.Single(p => p.Code == parameter).OptionsSource!;
+            var options = await _sources.OptionsAsync(request.Http, source, ct).ConfigureAwait(false)
+                ?? throw new InvalidOperationException($"The {label} options of the budget could not be read.");
+            if (options.All(o => !string.Equals(o.Value, chosen, StringComparison.Ordinal)))
+                return DecisionActionOutcome.Refused(Code, DecisionActionReasons.InvalidParameter, $"'{chosen}' is not one of the {label} options.");
+        }
+
+        var currency = await _sources.ResolveBudgetCurrencyAsync(core.Id, request.Param("currency"), ct).ConfigureAwait(false);
+        if (!currency.IsResolved)
+            return DecisionActionOutcome.Refused(Code, DecisionActionReasons.InvalidParameter, currency.Refusal ?? "The budget's currency could not be determined.");
+
+        payload["transactioncurrencyid@odata.bind"] = $"/transactioncurrencies({currency.Id!.Value:D})";
+        payload["sprk_currency"] = currency.IsoCode;
         return null;
     }
 
@@ -1137,11 +1229,19 @@ public abstract class ChildCreateExecutorBase : DecisionExecutorBase
     /// <summary>The table-specific columns, or a refusal when a parameter is missing or malformed.</summary>
     protected abstract DecisionActionOutcome? BuildColumns(DecisionActionRequest request, IDictionary<string, object?> payload);
 
+    /// <summary>Columns that need a READ: a value checked against live metadata, a lookup resolved (task 167, Create budget). Null when
+    /// they are fine, a refusal otherwise; a fault in Dataverse throws (the commit route answers 503 from its preflight, before any write).
+    /// Run in the preflight on a throwaway payload and again before the write. The default adds nothing.</summary>
+    protected virtual Task<DecisionActionOutcome?> ExtendColumnsAsync(
+        DecisionActionRequest request, IDictionary<string, object?> payload, CancellationToken ct) =>
+        Task.FromResult<DecisionActionOutcome?>(null);
+
     protected override IReadOnlyList<DecisionRecordRef> PossiblyWritten(DecisionActionRequest request) => [];
 
     public override async Task<DecisionActionOutcome?> PreflightAsync(DecisionActionRequest request, CancellationToken ct)
     {
-        if (BuildColumns(request, new Dictionary<string, object?>()) is { } invalid)
+        var preview = new Dictionary<string, object?>(StringComparer.Ordinal);
+        if (BuildColumns(request, preview) is { } invalid)
             return invalid;
 
         if (!await DecisionExec.CallerHoldsPrivilegeAsync(_probe, request.Http, CreatePrivilege, ct).ConfigureAwait(false))
@@ -1155,7 +1255,7 @@ public abstract class ChildCreateExecutorBase : DecisionExecutorBase
             && !await DecisionExec.CallerHoldsAsync(_probe, request.Http, DecisionExec.ContactSet, contact, DecisionExec.AppendToOperation, ct).ConfigureAwait(false))
             return Refuse(DecisionActionReasons.NotAuthorized, "You do not have permission to assign this to that person.");
 
-        return null;
+        return await ExtendColumnsAsync(request, preview, ct).ConfigureAwait(false);
     }
 
     /// <summary>Files the new row under the Signal's core record: the typed <c>sprk_regarding{type}</c> lookup and the ADR-024 pair,
@@ -1189,6 +1289,9 @@ public abstract class ChildCreateExecutorBase : DecisionExecutorBase
         var payload = new Dictionary<string, object?>(StringComparer.Ordinal);
         if (BuildColumns(request, payload) is { } refusal)
             return refusal;
+
+        if (await ExtendColumnsAsync(request, payload, ct).ConfigureAwait(false) is { } extended)
+            return extended;
 
         if (request.Core is { } core && await FileUnderAsync(core, payload, ct).ConfigureAwait(false) is { } failed)
             return failed;

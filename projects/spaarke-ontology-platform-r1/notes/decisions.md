@@ -267,10 +267,144 @@ Sources: **design** = [`design.md`](../design.md) §8 (D-1..D-12, §8.0c) and §
 - The owner asked for Basic User to be set "to what it needs to be". Live (669 privileges) already lacks the policy, policyversion and ruleset Reads, and has no depth differences from master's XML. So no change was made (security-roles §19).
 - The owner does not believe they edited the role on 10-22. The cause stays unexplained.
 - The leftover AppendTo on `sprk_policy` and `sprk_policyversion` (Console User, depth 4) is outside D-185, which covered only Read. It is left as is (uac-r2 observation, no write path).
+- **Customer stamps (added 2026-10-29, customer-provisioning):** D-189 covers spaarkedev1 only. Published stamps run SpaarkeMaster 1.2.3.1 (`736ed4d648`), which already contains Basic User `prvReadsprk_Policy` at Deep (added `49ef71b852`, D-110). So the 1.2.4.0 upgrade REMOVES it from every stamp. It is a real D-185 removal on Basic User, not a net-zero change. The upgrade also ADDS `prvAppendsprk_Policy` and `prvAppendsprk_PolicyVersion` (Deep) to Ontology Administrator (task 101). Checked after each stamp upgrade by customer-provisioning's `Test-RolePrivilegeExpectations.ps1` (`spaarkemaster-1.2.4.0.json`).
 
 ## D-190 — DI-126 accepted as a known limit (owner, 2026-10-26)
 
 - **Decision:** a direct (native form, view or Web API) read of a billing Duplicate Signal may show the earlier invoice's tracking number and line detail to a matter-team member who cannot read that invoice. Option C, accept (ebilling EB-D-152; the owner confirmed it in this session).
 - **Unchanged:** the BFF Signal read route still withholds it (157, D-176). Options A, B and D are not pursued.
 - **Related:** #2310 is closed. DI-120 (#2118) stays open separately.
+
+## D-191 — One canonical "Family" concept, with kinds (owner, 2026-10-27)
+
+- **Decision:** a Family is a set of records joined by typed edges of ONE kind. **Filing** is the kind now: a record and everything filed under it, a tree with one root. It is what field-mapping-r1's W7 builds (`RecordFamilyEdges`, `RecordFamilyReader`, `GET /api/v1/records/{table}/{id}/family`, the Family modal), and unified-access-control-r2 owns the edge content. A peer kind for patent and trademark families (e.g. Priority) comes later, as a graph with no root. "Secure family" is a qualifier (the Filing family of a Secure root), not a kind. Recorded in component model §3.
+- **Why:** the owner wants one family concept, not two, with future value for IP families. "Patent family" is the industry term, so the IP concept keeps the word.
+- **Guidance given to W7 (not a decision, field-mapping's to apply):**
+  - walk one kind at a time;
+  - push and Assigned-To are defined for Filing only and refused server-side for any other kind;
+  - the response describes the walk from an anchor, with an optional root;
+  - members carry `kind` and `edgeKind`;
+  - edge TYPES stay in code (parity-ratcheted), edge INSTANCES of a future peer kind live in Dataverse.
+- **Earlier discussion (found 2026-10-27, unified-access-control-r2):** the "family table" the owner remembers is UAC's Secure family.
+  - Round 94 (2026-10-12): the owner directed a `sprk_securefamily` table with a single-membership lookup on every family table.
+  - Round 100b (2026-10-14): an owner team per family was decided, conditional on platform spikes 2–7. It is NOT BUILT. **Deferred to the roadmap by UAC round 130 (#2362)**; see the last bullet.
+  - `projects/unified-access-control-r2/notes/secure-family-design-research-2026-10-12.md` §8 leaves an owner choice open: keep it secure-only, or generalise it to a record family for every core root, with a secure flag. That choice is still the owner's. Either way it is a materialisation of the Filing kind, so D-191 holds.
+  - ebilling has nothing (its "invoice family" is a table group). project-coordination's session held the question undelivered.
+- **Access rule (from uac-r2):** Secure-family membership comes only from Filing edges; a peer kind never confers it, crosses it, or carries actions across it.
+- **Clarification: one family per record (owner, 2026-10-27).** Approved in unified-access-control-r2's session as **UAC round 129**, with the owner's words verbatim in `projects/unified-access-control-r2/notes/session27-owner-decisions-and-research.md` (`47f452e522`). uac-r2 checked this wording against 194b slice 1 (`5b320ca0ec`): it matches. The subjects of the Signals a Decision Record resolves feed secure-if-any only, never the primary parent or the family. Since the 194b re-file answer (c) (2026-10-28), those subjects come from the record's stored `sprk_steps.resolvedSignalIds`, not from the FK.
+  - A record filed under several parents belongs to exactly ONE family: its **primary** parent's.
+  - The primary is the I-6 primary-parent rule, the same one that decides ownership: `RecordOwnershipContext.InPrimaryOrder` / `OrderedParentsOf` in `RecordOwnershipResolver.cs`, from UAC 194b, which is not yet on master. The order:
+    - Signals and Decision Records: the core record first, then the subject, then lineage order.
+    - Regarding-pair hosts such as To Do: the lookup that repeats the pair's record first, then the document carrier, then the communication carrier.
+    - Every other table: `SecureChildLineage.LookupOrder`.
+  - The other filing edges are **secondary**. They can be navigated, but they make the record a member of no other family.
+  - **Security is a separate question.** Secure-if-any still runs over ALL of a record's filing parents. A record can be isolated because a secondary parent is Secure, even though its family is its primary parent's. "Family" must not be read as "the security boundary": the Secure qualifier (`sprk_securefamily`) describes a family, and a row's isolation comes from its filing edges.
+  - **Projects (#2352, owner choice (a)):** a project has ONE filing root, its regarding pair. The Project ↔ Matter N:N stays an association; it is not a Filing edge. UAC task 195 makes the wizards write the pair. W7 models the pair as the Matter → Project filing edge.
+  - **W7 guidance:** `RecordFamilyReader` takes the primary parent from `InPrimaryOrder`, through `RecordFamilyEdges` (UAC-owned content), never from a second ordering.
+- **The family entity is deferred (owner, 2026-10-28).** Approved in unified-access-control-r2's session as **UAC round 130**, tracked as **#2362** (`notes/session27-owner-decisions-and-research.md`, `c1e4e8322d`).
+  - The Secure family qualifier's materialisation, `sprk_securefamily` with an owner team per family, is a **deferred design target, not a scheduled build**. UAC §8's open choice (secure-only, or a family for every root) waits with it.
+  - Nothing fails without it:
+    - isolation is the Secure Record Owners team in the Secure BU, plus mirror shares;
+    - membership is the primary-parent rule above;
+    - grouping is the core-ancestor stamps plus W7's `RecordFamilyReader`.
+  - **Binding now, so that a later build stays cheap; ontology code follows these too:**
+    1. Membership stays computable from stored data: the primary-parent rule, and one filing root per project.
+    2. Every ownership write goes through `RecordOwnershipResolver`.
+    3. New code asks "is this row isolated" through one shared predicate keyed on the Secure Record business unit, never a team id. It reads families through W7, never through raw lookups.
+  - **Existing ontology code, checked 2026-10-28:**
+    - No team id is hard-coded.
+    - `TodoAssigneeOwnerReconciliationJob` is already keyed on the Secure BU.
+    - `SignalSuppressionService.IsSecureOwned` (:285) compares the owner with the one resolved Secure owner team. It is correct today and would miss per-family teams. Logged as DI-129 (#2364). The shared predicate, named by uac-r2 and on master: `SecureRecordOwnerTeam.IsInSecureBusinessUnit` with `ResolveSecureBusinessUnitAsync`. The job's local check switches to the same pair when it is next touched.
+  - **Revisit triggers (#2362):**
+    - mirror-share growth near Dataverse limits;
+    - a feature that needs one deterministic family key across Secure records that the stamps and W7 cannot serve;
+    - structural isolation required between Secure families.
+
+## D-192 — "Matter has no active budget" items offer Create budget (owner, 2026-10-28)
+
+- **Decision (owner, this session, UAT round 1 re-check, check 4):** publish **POL-MATTER-NOBUDGET v3**.
+  - Plan actions: `revise-budget` first, then `assign-task`.
+  - Next steps: `add-todo` and `assign-work`.
+  - On a matter with no active budget, task 161's substitution (D-180) shows `revise-budget` as **Create budget**. The person who owns the item can set the budget or hand it off.
+- **Why:** v2's plan was `assign-task` only. 161 substitutes Create budget only where a plan offers Revise budget, so the rule that says "this matter has no budget" never offered a way to create one. The fee or scope change items did (verified by the owner).
+- `create-budget` stays non-authorable (D-180). The plan names `revise-budget`, and the server decides what is shown.
+- v1 and v2 rows stay, and Signals and Decision Records keep the version they cite (D-14).
+- **Approved:** the config change, and the dev apply through `Apply-DoLanePolicies.ps1 -DefinitionPath config/know-promotion.policies.json`, with a clean `-WhatIf` first. Task 166.
+
+## D-193 — Budgets get an autonumber, and Create budget fills currency and the budget fields (owner, 2026-10-28, UAT round 2 items 5–6)
+
+- **Budget number:** `sprk_budget.sprk_budgetnumber` becomes a Dataverse autonumber column, `BUD-{SEQNUM:6}`. This is the same process as matters (`MAT-{SEQNUM:6}`) and projects (`PRJ-{SEQNUM:6}`). `RecordTableRules` declares it as `AutonumberColumn` for `sprk_budget`, as it does for matter and project. **The schema change is approved** (owner: "yes use the same auto number process"). Apply it to spaarkedev1 through the Web API attribute update and record it in the SpaarkeMaster `sprk_Budget/Entity.xml`.
+- **Currency:** Create budget sets `transactioncurrencyid` from the matter's owning business unit's Default Currency (`businessunit.transactioncurrencyid`). It writes `sprk_currency` as that currency's ISO code (`transactioncurrency.isocurrencycode`). The user can change the currency in the step. There is **no** schema change to `sprk_currency`: it stays, required on the form, and is filled. Retiring it is outside ontology scope; finance and e-billing would review it later.
+- **Budget step fields:**
+  - Category (`sprk_budgetcategory`, a Choice): options come from live metadata, so the owner's later relabel needs no code change. The owner will update the placeholder labels.
+  - Year (`sprk_budgetyear`): text.
+  - Start date and end date (`sprk_budgetstartdate`, `sprk_budgetenddate`): DateOnly.
+  - Period (`sprk_budgetperiod`): Choice.
+  - Currency: as above.
+  - All of these are optional, except Currency, which is always filled from its default.
+- Task 167.
+
+## D-194 — Assign Task can notify the assignee by email and with a bell notification (owner, 2026-10-28, UAT round 2 item 2)
+
+- **Checkbox:** Assign Task gets a "Send email notification" checkbox, **ticked by default**.
+- **Email:** to the Assigned To contact (`emailaddress1`). The body has the matter name and link, What to do, and Due.
+  - Sent from the **assigner's own mailbox when available** (delegated send, as the budget inquiry does). The fallback is the system mailbox (`Communication:DefaultMailbox`, the access-granted email path).
+  - The template is embedded HTML with placeholders, following the `RegistrationEmailService` precedent.
+- **Bell:** a model-driven app notification (`NotificationService.CreateNotificationAsync`, the `GrantAccessNotifier` precedent) goes to the assignee's linked user. The link comes from the D-129 linked-contact path. With no linked user, the email alone is sent.
+- **Failure handling:** a failed send or notification is logged and never fails the decision. The Decision Record stays the last write of the commit (D-17), and notifying runs after it. No new tracked communication is required, but if the delegated-send path records one by design, that is acceptable and must be stated.
+- Task 168.
+
+## D-195 — Worklist lanes: subtitles and a collapsible card list (owner, 2026-10-28, UAT round 2 item 4)
+
+- **Titles:** keep the short titles and add subtitles. "Decide": "Items that need your decision". "Do": "Your work that is due soon or overdue".
+- **Collapsible list:** each lane's card list starts collapsed. The open or collapsed state is then **remembered on the device**, per lane, following the localStorage pattern of `usePaneCollapse`.
+- **Always shown:** the title, the subtitle, the count, the Start review / Work through these button and the metric cards stay visible when the list is collapsed.
+- Clicking a metric card opens the lane's list. Start review works whether the list is collapsed or open.
+- Task 169.
+
+## D-196 — Make recording a decision faster without changing its rules (UAT round 2 item 3)
+
+- **Measured:** one commit took 24.0 s, with 261 serial dependencies and no throttling. The time went to:
+  - 35 `WhoAmI` and 29 `RetrievePrincipalAccess` calls, about 5.6 s;
+  - about 30 uncached `EntityDefinitions` lookups through `DataverseServiceClientImpl.GetEntitySetNameAsync`, about 2.7 s plus WCF;
+  - repeated reads of the same rows.
+- **First step (task 170):**
+  - Per-request memoisation of the caller's systemuserid. It is never shared across callers or requests.
+  - A process-wide cache of entity-set names and `sprk_recordtype_ref` reads, since that metadata is immutable.
+  - Neither changes D-17 (the Decision Record written last by the single route), fail-closed access or append-only.
+- **Later:** memoising access probes, parallel reads, and moving work after the response touch correctness and uac-r2's code. They are proposed separately and need uac-r2's review.
+
+## D-197 — Seeded policies belong to the customer's business unit; admin-tab rules stay with their author (owner, UAC round 137, relayed by uac-r2 2026-10-28)
+
+- **Context:** UAC round 136. Customer records, configured or working, live under the customer's top business unit (the root's direct child that provisioning H10 creates), never under the Spaarke root.
+- **Seeded rules:** in a customer environment, the seed script (`scripts/Apply-DoLanePolicies.ps1`, or whatever provisioning runs) owns every policy and version row it **creates** to the memberless restricted-content owner team in the customer's top business unit. That team is defined by uac-r2 R4b-2c.
+  - **Dev: no change.** The existing root-owned rows stay. The owner wants the customer behaviour known and built.
+  - Task 171. It depends on R4b-2c's team.
+  - The operator must hold Assign on `sprk_policy` and `sprk_policyversion`, or create the rows with `ownerid`.
+- **Admin-tab authoring: the author wins.** A policy written in the admin tab stays owned by its author, wherever the author is homed, including the root business unit. `SavePolicyAsync` is unchanged.
+- **Release wiring:** running the script in the customer release or provisioning path is DI-124 (#2300), which stays separate.
+
+## D-198 — A secure matter's budget currency comes from the customer business unit (owner, 2026-10-28)
+
+- **Context:** review of task 167 (#2403, K1). D-193 prefills the budget currency from the matter's owning business unit. A secure matter is owned by the Secure Record unit, whose `transactioncurrencyid` is null, so its budget fell back to the organization base currency. In a multi-currency organization, a secure EUR matter would default to USD.
+- **Owner ruling: fix it now** (option B over accepting the fallback).
+- **Rule:**
+  - When the matter's owning business unit is the Secure Record unit (uac-r2's shared predicate, D-191), use the currency of the configured customer business unit, `ExternalAccess:CustomerBusinessUnitId`.
+  - If that unit is not configured or has no currency, use the organization base currency.
+  - Never apply this to a non-secure matter.
+- **uac-r2 confirmed (2026-10-28):**
+  - `ExternalAccess:CustomerBusinessUnitId` is the deployment's single customer business unit (provisioning H10, a child of the root).
+  - There is no better per-record answer. Secure Record is the customer unit's sibling, and nothing stores a matter's original unit.
+  - Reuse `SecureChildShareSynchronizer.ResolveSecureBusinessUnitAsync` (`Services/Access/SecureChildShareSynchronizer.cs:1293`) with `SecureRecordOwnerTeam.IsInSecureBusinessUnit` (`Infrastructure/Dataverse/SecureRecordOwnerTeam.cs:287`). Do not copy `RecordOwnershipResolver`'s private copy.
+  - Ambiguous, a null id, or a null predicate result means "undeterminable", and the matter is treated as not secure. That ends at the base currency either way, because Secure Record has no currency.
+  - If the configured customer unit is Secure Record itself or the root, treat it as unconfigured: base currency, with a Warning.
+- **Tests that pin the rule (uac-r2):**
+  - a secure matter gets the customer unit's currency;
+  - customer unit not set → base currency;
+  - customer unit = Secure Record → base currency;
+  - a non-secure matter never reads `CustomerBusinessUnitId`;
+  - ambiguous → not secure.
+- **Known limit:** a secure matter loses the currency of the sub-unit it came from. Acceptable, because the currency is a prefill the user can change.
+- **Implementation:** a separate small PR into docs after #2414 (the as-caller business-unit read) merges, task 167c, in `DecisionParameterSources.DefaultCurrencyAsync`.
+- **Dev fact (2026-10-28):** Secure Record, Spaarke Demo, Spaarke Dev 1 and Spaarke Test 1 have no currency; root (Spaarke) and Spaarke Business Unit 1 are USD. An ordinary unit with no currency still falls back to the base currency (D-193 unchanged).
 

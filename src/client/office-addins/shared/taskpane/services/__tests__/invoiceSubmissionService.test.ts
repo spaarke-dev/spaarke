@@ -308,6 +308,81 @@ describe('submitInvoiceFromEmail — the answer', () => {
     expect(await submit()).toMatchObject({ kind: 'refused', code: 'ebilling.disabled' });
   });
 
+  it("task 094: step A's re-file 403 carries its code only under extensions (the problem middleware's body)", async () => {
+    mockFetch.mockResolvedValueOnce(
+      res(403, {
+        type: 'https://spaarke.com/errors/COMMUNICATION_REFILE_FORBIDDEN',
+        title: 'Forbidden',
+        detail: 'The communication does not exist or is not visible to the caller, or the caller may not change it.',
+        status: 403,
+        extensions: { code: 'COMMUNICATION_REFILE_FORBIDDEN', correlationId: 'c-1' },
+      })
+    );
+    expect(await submit()).toMatchObject({ kind: 'refused', status: 403, code: 'COMMUNICATION_REFILE_FORBIDDEN' });
+
+    // must-not-fire: errorCode still wins over extensions.code
+    mockFetch.mockResolvedValueOnce(
+      res(403, { errorCode: 'ebilling.submission.source_forbidden', extensions: { code: 'OTHER' } })
+    );
+    expect(await submit()).toMatchObject({ code: 'ebilling.submission.source_forbidden' });
+
+    // must-not-fire: reasonCode wins too
+    mockFetch.mockResolvedValueOnce(
+      res(403, { reasonCode: 'sdap.access.deny.insufficient_rights', extensions: { code: 'OTHER' } })
+    );
+    expect(await submit()).toMatchObject({ code: 'sdap.access.deny.insufficient_rights' });
+  });
+
+  it("must-not-fire: extensions.code is read on a 403 only (the middleware's 502 Graph error and 401 OBO failure)", async () => {
+    mockFetch.mockResolvedValueOnce(res(502, { title: 'Graph', extensions: { code: 'graph_error' } }));
+    expect(await submit()).toMatchObject({ kind: 'retryable', status: 502, code: undefined });
+
+    // two 401s: authenticatedJsonFetch retries a 401 once with a fresh token
+    const obo = res(401, { title: 'OBO', extensions: { code: 'obo_failed' } });
+    mockFetch.mockResolvedValueOnce(obo).mockResolvedValueOnce(obo);
+    expect(await submit()).toMatchObject({ kind: 'refused', status: 401, code: undefined });
+  });
+
+  it('task 094: a detail ending in the pinned "filing is kept" sentence flags filingKept; others do not', async () => {
+    const kept =
+      'This email was already submitted as an invoice for this record by someone else. Nothing was saved. ' +
+      'The communication was filed under the record first; that filing is kept.';
+    mockFetch.mockResolvedValueOnce(
+      res(409, { errorCode: 'ebilling.submission.document_already_submitted', detail: kept })
+    );
+    expect(await submit()).toMatchObject({ kind: 'refused', filingKept: true });
+
+    mockFetch.mockResolvedValueOnce(res(503, { errorCode: 'ebilling.tracking.unavailable', detail: `Busy. ${kept}` }));
+    expect(await submit()).toMatchObject({ kind: 'retryable', filingKept: true });
+
+    mockFetch.mockResolvedValueOnce(
+      res(409, { errorCode: 'ebilling.submission.document_already_submitted', detail: 'Nothing was saved.' })
+    );
+    expect(await submit()).not.toHaveProperty('filingKept');
+
+    // must-not-fire: the sentence in the middle of the detail is not the pinned ending
+    mockFetch.mockResolvedValueOnce(
+      res(409, { errorCode: 'ebilling.submission.document_already_submitted', detail: `${kept} Then it was undone.` })
+    );
+    expect(await submit()).not.toHaveProperty('filingKept');
+  });
+
+  it("task 094: ebilling's top-level filingKept: true flags it without the sentence; false does not", async () => {
+    mockFetch.mockResolvedValueOnce(
+      res(409, {
+        errorCode: 'ebilling.submission.document_already_submitted',
+        detail: 'Nothing was saved.',
+        filingKept: true,
+      })
+    );
+    expect(await submit()).toMatchObject({ kind: 'refused', filingKept: true });
+
+    mockFetch.mockResolvedValueOnce(
+      res(409, { errorCode: 'ebilling.submission.document_already_submitted', filingKept: false })
+    );
+    expect(await submit()).not.toHaveProperty('filingKept');
+  });
+
   it('no response at all → retryable (the same key makes the retry safe)', async () => {
     mockFetch.mockRejectedValueOnce(new TypeError('network'));
     expect(await submit()).toEqual({ kind: 'retryable', status: 0, code: undefined });
@@ -398,6 +473,11 @@ describe('loadInvoiceFirms (§8)', () => {
     mockFetch.mockResolvedValueOnce(res(503, { errorCode: 'ebilling.submission.record_unavailable' }));
     await expect(loadInvoiceFirms(target, config)).rejects.toThrow(/couldn't list the firms/);
   });
+
+  it('a 404 record_unavailable (the read gate, 2026-10-28) says the record is not available, never []', async () => {
+    mockFetch.mockResolvedValueOnce(res(404, { reasonCode: 'sdap.access.deny.record_unavailable' }));
+    await expect(loadInvoiceFirms(target, config)).rejects.toThrow(/This record isn't available to you/);
+  });
 });
 
 describe('createInvoiceSubmitHandler — submit, then follow the status', () => {
@@ -433,6 +513,53 @@ describe('createInvoiceSubmitHandler — submit, then follow the status', () => 
       kind: 'permanent',
       message: "Spaarke couldn't find this email in your mailbox, so it can't be submitted from Outlook.",
     });
+  });
+
+  it('attachment_not_preserved (422, 2026-10-28) is permanent: nothing was saved, upload in Spaarke', async () => {
+    mockFetch.mockResolvedValueOnce(res(422, { errorCode: 'ebilling.submission.attachment_not_preserved' }));
+    const outcome = await createInvoiceSubmitHandler({ config, email: emailSource(), poll })(INPUT, { actionId: 'a' });
+    expect(outcome).toEqual({
+      kind: 'permanent',
+      message: "One of the marked files couldn't be saved exactly as attached. Nothing was submitted.",
+    });
+  });
+
+  it('task 094: a synchronous 422 email_save_failed is permanent; storage_not_configured is a plain refusal', async () => {
+    mockFetch.mockResolvedValueOnce(res(422, { errorCode: 'ebilling.submission.email_save_failed' }));
+    const handler = createInvoiceSubmitHandler({ config, email: emailSource(), poll });
+    expect(await handler(INPUT, { actionId: 'a' })).toMatchObject({
+      kind: 'permanent',
+      message: expect.stringMatching(/saved copy in Spaarke is missing or empty/),
+    });
+
+    mockFetch.mockResolvedValueOnce(res(422, { errorCode: 'ebilling.submission.storage_not_configured' }));
+    expect(await handler(INPUT, { actionId: 'b' })).toMatchObject({
+      kind: 'refused',
+      message: expect.stringMatching(/Ask an administrator\.$/),
+    });
+  });
+
+  it('task 094: COMMUNICATION_REFILE_FORBIDDEN is permanent (an upload in Spaarke does not file the email)', async () => {
+    mockFetch.mockResolvedValueOnce(res(403, { extensions: { code: 'COMMUNICATION_REFILE_FORBIDDEN' } }));
+    const outcome = await createInvoiceSubmitHandler({ config, email: emailSource(), poll })(INPUT, { actionId: 'a' });
+    expect(outcome).toMatchObject({ kind: 'permanent', message: expect.stringMatching(/permission to file it/) });
+  });
+
+  it('task 094: a refusal after step A tells the user the email stays filed', async () => {
+    mockFetch.mockResolvedValueOnce(
+      res(409, {
+        errorCode: 'ebilling.submission.document_already_submitted',
+        detail: 'Nothing was saved. The communication was filed under the record first; that filing is kept.',
+      })
+    );
+    const outcome = await createInvoiceSubmitHandler({ config, email: emailSource(), poll })(INPUT, { actionId: 'a' });
+    expect(outcome).toMatchObject({ kind: 'refused', message: expect.stringMatching(/stays filed there\.$/) });
+  });
+
+  it('OFFICE_AUTH_ERROR (500, 2026-10-28) is retryable', async () => {
+    mockFetch.mockResolvedValueOnce(res(500, { errorCode: 'OFFICE_AUTH_ERROR', correlationId: 'c-1' }));
+    const outcome = await createInvoiceSubmitHandler({ config, email: emailSource(), poll })(INPUT, { actionId: 'a' });
+    expect(outcome).toMatchObject({ kind: 'retryable', message: expect.stringMatching(/couldn't check your access/) });
   });
 
   it('accepted but still processing at the cap is not a failure', async () => {

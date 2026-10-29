@@ -142,12 +142,44 @@ public class RecordTableRulesTests
     [Theory]
     [InlineData("sprk_matter", "sprk_matternumber")]
     [InlineData("sprk_project", "sprk_projectnumber")]
+    [InlineData("sprk_budget", "sprk_budgetnumber")] // task 167 (D-193): BUD-{SEQNUM:6}
     public void AutonumberColumn_IsTheNumberingSchemaColumn_AndIsProtectedFromMapping(string table, string column)
     {
         var rule = RecordTableRules.Get(table);
 
         rule.AutonumberColumn.Should().Be(column);
         rule.MappingProtectedColumns.Should().Contain(column, "a mapped number would pre-empt the platform sequence (task 076)");
+    }
+
+    // Task 167 (D-193): the rule says the platform fills the number, so the solution source must declare the format on that very column.
+    [Theory]
+    [InlineData("sprk_Matter", "sprk_matternumber", "MAT-{SEQNUM:6}")]
+    [InlineData("sprk_Project", "sprk_projectnumber", "PRJ-{SEQNUM:6}")]
+    [InlineData("sprk_Budget", "sprk_budgetnumber", "BUD-{SEQNUM:6}")]
+    public void AutonumberColumn_IsDeclaredWithItsSeqnumFormat_InTheSolutionSource(string folder, string column, string format)
+    {
+        var entityXml = System.Xml.Linq.XDocument.Load(Path.Combine(
+            RepoRoot(), "src", "dataverse", "solutions", "SpaarkeMaster", "Entities", folder, "Entity.xml"));
+
+        var attribute = entityXml.Descendants("attribute")
+            .Single(a => string.Equals((string?)a.Element("LogicalName"), column, StringComparison.Ordinal));
+
+        ((string?)attribute.Element("AutoNumberFormat")).Should().Be(format);
+        RecordTableRules.Get(folder.ToLowerInvariant()).AutonumberColumn.Should().Be(column);
+    }
+
+    private static string RepoRoot()
+    {
+        var dir = AppContext.BaseDirectory;
+        while (dir is not null)
+        {
+            var git = Path.Combine(dir, ".git");
+            if (Directory.Exists(git) || File.Exists(git))
+                return dir;
+            dir = Directory.GetParent(dir)?.FullName;
+        }
+
+        throw new InvalidOperationException("Repository root not found above " + AppContext.BaseDirectory);
     }
 
     [Theory]
@@ -178,7 +210,7 @@ public class RecordTableRulesTests
     public void MappingProtectedColumns_AreDeclaredOnlyOnTheTablesThatNeedThem()
     {
         RecordTableRules.All.Where(r => r.MappingProtectedColumns.Count > 0).Select(r => r.Table)
-            .Should().BeEquivalentTo("sprk_matter", "sprk_project", "sprk_invoice", "sprk_billingevent", "sprk_document");
+            .Should().BeEquivalentTo("sprk_matter", "sprk_project", "sprk_invoice", "sprk_billingevent", "sprk_document", "sprk_budget");
     }
 
     [Fact]

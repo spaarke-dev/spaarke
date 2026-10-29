@@ -1,67 +1,62 @@
 # Current Task State — Spaarke Ontology Platform R1
 
-> **Last Updated**: 2026-10-23 ~12:10Z (main session, context-handoff). State only — history is in git log, task `<completion>` blocks and
+> **Last Updated**: 2026-10-29 (main session, context-handoff at 85%). State only: history is in git log, task `<completion>` blocks and
 > `notes/handoff-history/2026-10.md`. Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 and §6. Decisions: [`notes/decisions.md`](notes/decisions.md)
-> (D-1..D-190). Deferred work: one self-contained GitHub issue per item, label `ontology-deferred`, plus a DI-nn row in both tables of
-> `notes/defer-issues.md` (next free: **DI-129**). Sub-agents never edit this file.
+> (D-1..D-198). Deferred work: one self-contained GitHub issue per item, label `ontology-deferred`, plus a DI-nn row in both tables of
+> `notes/defer-issues.md` (next free: **DI-135**). Sub-agents never edit this file.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Task** | UAT round 1, live on dev. Dev BFF is **`58ffc37da3`**: deployed by R3 at 11:18:12Z, verified by DLL ProductVersion, healthz 200. It carries every UAT-1 task: 158, 159, 161, 162, 163, 164, and 160 + #2314. The D-185 dev steps are **done**: worklist config 11:20Z (verified in sync), POL-MATTER-NOBUDGET v2 11:20:38Z (verified), and Console User policy Reads removed 11:21:51–53Z (21 → 19). uac-r2 independently confirmed the read-back; their server gate is **PASS** (11:18–11:51Z). Basic User needed no change (D-189). |
-| **Status** | No lane running; no lane worktrees. Waiting on: (1) the **owner's browser checks** (list below); (2) nothing else from R3: dev BFF `3ff2c04bf5` has been live since 2026-10-27 01:29:15Z (R3 after-notice; DLL 1.0.0+3ff2c04bf5; 30-minute gate clean). |
-| **Next Action** | On the owner's browser-check results: fix any failure (a lane per defect), or close 114, 160 and 163 (✅ + POML + TASK-INDEX; run the drift check). Then open the next docs→master PR (D-185 guard #2316 plus docs; test-only). |
+| **Task** | **168** (#2418) is blocked on owner Q1/Q2. 171 and 172 are DONE (171: #2433 merged `3452d3017e` after fix round 1; 172: #2434 merged `fab8c91531`). |
+| **Status** | No lane is running. The worktrees `C:\wts-171` and `C:\wts-172` are removed. uac-r2 was sent the 171 fix-diff SHA `e025152e3b` after the merge; if they raise anything, handle it as a follow-up before docs→master. DI-124 (#2300) has the `-CustomerBusinessUnit` / `-WhatIf` comment. |
+| **Next Action** | 1) When the owner answers Q1/Q2: record D-199, then run the 168 fix round in `C:\wts-168` (plan below). 2) After the owner's next real decision commit: the task-170 App Insights check and the `BUD-` number (Lane facts). 3) Next docs→master (below). 4) Read any uac-r2 reply on the 171 fix diff. |
 
-## Owner browser checks (sent 2026-10-23 ~12:00Z; zz- test data, delete afterwards)
+## Open owner questions (task 168, asked 2026-10-28; explained in detail 2026-10-29)
 
-1. Worklist loads for a Console User. Rows show policy short name, work type and severity; no error banner (163, D-185).
-2. Wizard Person and Lookup fields open the side pane; the *What was found* record opens in a modal above the wizard (158).
-3. Assign Task on a no-budget item creates a Task event (159).
-4. A no-budget matter offers Create budget (161).
-5. Uploads to a WA, an invoice and a project show on that record's Documents (162).
-6. Budget inquiry composer, with To pre-filled. An internal recipient gets the app link and the matter in the footer. An external contact gets the portal link and the subject in the footer (160 + #2314).
+1. **Assignee is not an eligible internal user** (external, no linked user, several users). **A (rec.):** send nothing unless the contact holds an active onboarded External Access grant on the matter. B: a notice naming nothing. C: never.
+2. **System-mailbox fallback reach.** **A (rec.):** only for recipients who pass the gate; otherwise `assignee_email_not_sent`. B: everyone.
+- Q3/Q4 (171's no-parameter path; 194b vs D-197 for root-homed authors) were WITHDRAWN 2026-10-29. uac-r2 corrected itself, and the main session verified that `CheckVersionOwnerAsync` sets no `ChildEntityLogicalName`, so D-197 "author wins, root included" holds.
 
-## Next, in order
+## 168 fix plan (after Q1/Q2; uac-r2 agreed the plan and re-checks only the fix diff)
 
-1. Owner checks → close 114, 160 and 163, or fix.
-2. **Next docs→master PR:** the D-185 guard `PolicyReadRoleGuardTests` (#2316, docs `20d7cbd47c`) plus today's docs. Merge master first; run the full ArchTests; send before and after notices if it touches the Console or BFF (it doesn't today).
-3. **ebilling #1911:** F1 merge `bed558cb33` checked 2026-10-26: PASS for ontology. `EarlierInvoiceReadability` = the #2294 round; the combined diff is empty on every ontology file; Core User drops `InvoiceLineItem` (ebilling 029). K1 and K2 were decided by the owner in ebilling's session (ebilling `notes/decisions-log.md`, `399813b8f7`): EB-D-150 keeps Global policy Read on Billing Administrator (a census exception in #2322); EB-D-151 keeps D-90's full Core User rights on the five invoice working tables, a known limit. Nothing ontology-side is open.
-4. R2 §9 owner answers → `/design-to-spec`; 105 UAT; #1882 live re-run; 111 row 4; 090 wrap-up; the `[SIGNAL-EVALUATOR]` heartbeat.
-
-## Open owner questions
-
-- **Census finding, resolved (2026-10-26):** Deep Read on Signal, Decision Record and budget revision depends on the UAC business-unit restructure (§5.2), not on a role change. Security-roles §20. No ontology task.
-- The browser checks above.
-- The owner is removing `C:\wb160p` by hand (said yes).
+Branch `task/168-assign-task-notify`, head `8064311c54`. First merge docs (it now contains master + 194b).
+- A gate copied from master `GrantAccessNotifier.cs:222-260`: one eligible internal user per contact; `SecureShareNoAccessGuard.CheckRecordAndSecureParentsAsync(core,user,AsFlagged)` = NotSecure/NotWalled; Read on the task; fail closed. It runs in both `NotifyAsync` and `SendFromSystemMailboxAsync`.
+- `InquiryRecordFacts.ResolveAsync` for the name and link lines; the fallback only after the gate.
+- The job re-reads `sprk_assignedto` + `statecode` + the gate at send time. An inactive contact gets no email.
+- `IsInternalOnly=true` (read-back test + mutation); the `DecisionCommitFollowUps` DI test; "Assigned by" + `sprk_sentby`; Poisoned on 4xx; log the exception type and Graph code, not the exception object.
+- Must-not-fire: walled; secure non-member; Restricted + flagged-external; unverifiable. Watch UAC 193 `ContactUserRepresentation` (K-1).
 
 ## Lane facts to carry
 
-- **160 rules:**
-  - Link by recipient (D-187): an enabled systemuser gets the app link, even when flagged external; anyone else gets the portal link.
-  - The footer label is used ONLY when the matter is exactly Standard and every recipient is an enabled systemuser with `IsExternalAsync` false. Otherwise the subject is used (#2314).
-  - Known limits: `IsExternalAsync` is cached for 10 minutes; Sent Items reveals whether an address is an enabled user (K2, accepted); a null access permission gets no label.
-- **D-188:** the document parent link uses the unprefixed lookups (`sprk_matter` etc.). DI-127 / #2315 fixes `DocumentLinkFieldMap`'s "superseded" claim.
-- **D-185 is enforced by** `tests/Spaarke.ArchTests/PolicyReadRoleGuardTests.cs` (on docs; not yet on master). uac-r2 extends its census to the codified child tables (in `7479ce22a9`).
-- `RemovePrivilegeRole` payload: `{"Privilege":{"@odata.type":"Microsoft.Dynamics.CRM.privilege","privilegeid":…}}`. `PrivilegeId` is rejected.
+- **Docs now contains master through 194b** (`2cd0f62e2c`, merge `4470c95b86`). 194b moved `ResolveSecureBusinessUnitAsync` to `SecureRecordOwnerTeam`; our call was repointed in `f1133d951b` (uac-r2 approved). ArchTests 1665/1665 on that state.
+- **Dev BFF** `136568cf70` (R3, live 02:23:53Z). Smoke PASS (deploy-log `83e3e409cb`). **Pending:** the task-170 commit-path check (before: 28 WhoAmI, 22.4 s per commit) and the `BUD-` number need the owner's next real decision commit. Then query App Insights `spe-insights-dev-67e2xz` (rg `spe-infrastructure-westus2`) for `POST /api/v1/signals/{id}/decision` after 02:23:53Z.
+- **SpaarkeMaster 1.2.4.0 stamp check:** customer-provisioning built `Test-RolePrivilegeExpectations.ps1` + `spaarkemaster-1.2.4.0.json` (`b6e94f4499`). Stamps run 1.2.3.1, so the upgrade REMOVES Basic User `prvReadsprk_Policy` (D-189 note `53c01465dc`). They will send ACME's result after its upgrade.
+- **uac-r2 dev move:** root-homed humans move to BU1 (owner approval pending, no writes yet; they give notice first). The seed policies likely stay root-owned (`DoNotMoveAllRecords=true`). After the move, BU1-homed Ontology Admins (Deep) can't read root-owned seed policies; uac-r2 is preparing an owner question and will copy us. **Hold the memo-LIKE proof** until they confirm placement.
+- **CI:** `ontology-script-tests` is pinned to Pester 5.7.1 (#2428). DI-134 (#2430) asks the CI owner to pin `verdict-script-tests`.
+- **Don't push to docs while a docs→master PR is open** (it moves the PR head and restarts CI).
+- `OrdinaryMovesWritesEnabled` stays OFF.
+- **Commits in a fresh worktree:** lint-staged needs prettier: `export PATH="/c/code_files/spaarke-wt-spaarke-ontology-platform-r1/node_modules/.bin:$PATH"` (no junctions). Integration tests under `tests/integration/auth/**` compile into `tests/unit/Sprk.Bff.Api.Tests`; filter there.
+
+## Next docs→master
+
+Contents: #2414, #2422, the 194b repoint, 171 (`3452d3017e`), 172 (`fab8c91531`), and 168 when ready. Before notices to word-add-in, R3 and uac-r2; merge master in; full ArchTests.
 
 ## Blocked follow-ups (ours)
 
-- `OntologyAdminClassificationService.cs:658/685/705` labels an in-force billing version Draft. Waits for `sprk_publishstate` on master.
-- Five stale `DecisionRecordWriter.cs` comments (:556 :1547 :1660 :2164 :2326) and `DecisionRecordContextImmutabilityTests.CreateEntryPoints`. Wait for ebilling 074 on master.
-- Close **#2212** when ebilling's `f0884a175f` reaches master. When ebilling 015 reaches master, update the `notes/102a-authoring-contract.md` residual row and D-161.
-- The advisory ADR Compliance CI job is cancelled at about 5 minutes (#2009). It is not blocking.
+- `OntologyAdminClassificationService.cs:658/685/705` waits for `sprk_publishstate`. Five stale `DecisionRecordWriter.cs` comments wait for ebilling 074. Close #2212 when ebilling `f0884a175f` reaches master.
+- Owner re-checks still open: project create as a Core User (#2394), check 6 (the composer), then close 114, 158–163 and 166.
 
 ## Dev state (spaarkedev1 / spaarke-bff-dev)
 
-- BFF `3ff2c04bf5` since 2026-10-27 01:29:15Z (R3; rollback `bc99fc3e6b` at deploy/rollback/wwwroot-20261027T012731Z); Console `58ffc37da3` (run 39914343605).
-- Worklist row `…5010` is in sync. POL-MATTER-NOBUDGET's current version is v2 `…6312`.
-- Console User (root `51c924e2-…`): 19 privileges, no policy Reads; AppendTo on policy and policyversion remains (outside D-185, left).
-- Worktrees: none for lanes. R2 is at `C:\code_files\spaarke-wt-spaarke-ontology-platform-r2`. Remove a worktree only with `Remove-WorktreeSafe.ps1`.
-- Pester 5.7.1 for local runs is at `C:\Users\RALPHS~1\AppData\Local\Temp\p571\Pester\5.7.1`.
+- **BFF:** `136568cf70` (R3, 2026-10-29). **Console:** `a8314c2e0e`. **SpaarkeMaster:** 1.2.4.0. **POL-MATTER-NOBUDGET:** v3 `…6313`.
+- **Worktrees:** `C:\wts-168`. Remove only with `Remove-WorktreeSafe.ps1`, one path per call.
+- **Stash:** two old `lint-staged automatic backup` entries (20 and 30 h old) are not ours. Leave them.
 
 ## Peers (current session names)
 
 ebilling `spaarke-wt-ebilling-r1-5b` · R3 `spaarke-wt-spa-external-access-platform-08` · uac-r2 `spaarke-wt-unified-access-control-r2-ac` ·
-word-add-in `spaarke-wt-spaarkeai-word-add-in-r1-c4` · field-mapping `spaarke-wt-field-mapping-server-write-pa-be`. Send before and after notices to
-word-add-in, R3 and uac-r2 for any dev BFF, Console or landing change.
+word-add-in `spaarke-wt-spaarkeai-word-add-in-r1-c4` · field-mapping `spaarke-wt-field-mapping-server-write-pa-be` ·
+customer-provisioning `spaarke-wt-customer-provisioning-orchest-2f`. Send before and after notices to word-add-in, R3 and uac-r2 for any dev BFF,
+Console or landing change. word-add-in needs no after-notice for a Console-only change.

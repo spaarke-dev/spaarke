@@ -115,6 +115,9 @@ export type LoadInvoiceFirms = (target: InvoiceSubmissionTarget) => Promise<Invo
 /** The contract's `firmInvoiceNumber` bound: trimmed, 1-100 characters. */
 export const FIRM_INVOICE_NUMBER_MAX = 100;
 
+/** The contract's `poNumber` bound (2026-10-28): optional, at most 100 characters after trimming. */
+export const PO_NUMBER_MAX = 100;
+
 /**
  * One listed attachment: the marking component's {@link MarkableAttachment} with the content type and size Outlook
  * gave (always present here; the wire marks carry them).

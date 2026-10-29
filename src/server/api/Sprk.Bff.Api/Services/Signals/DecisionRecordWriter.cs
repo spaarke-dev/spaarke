@@ -1344,7 +1344,8 @@ public sealed class DecisionRecordWriter
             parents.Add(new RecordOwnershipParent(signalSubject.Entity, signalSubject.Id));
         }
 
-        return RecordOwnershipContext.ForParents(parents) with
+        // UAC task 194b fix round R (B3): the writer's own order IS sprk_decisionrecord's rule — the closed opt-out.
+        return RecordOwnershipContext.ForParentsInWriterOrder(parents) with
         {
             RequestedBy = noRequester ? null : RecordRequester.Of(request.ConfirmedByUserId),
         };
@@ -1518,6 +1519,18 @@ public sealed class DecisionRecordWriter
         }
 
         return stamp.Stamps;
+    }
+
+    /// <summary>
+    /// UAC task 194b fix round (F3): the parents this writer asks the owner question over for <paramref name="request"/> — through
+    /// the write's own filing and owner step (<see cref="FiledAndOwnedAsync"/>: the shared regarding builder, the derived cores,
+    /// <see cref="DecisionRecordRequest.SignalSubjects"/>, then the resolver) — with no write. The parity seam: tests compare it
+    /// with the reconciler's question for the existing row.
+    /// </summary>
+    internal async Task<IReadOnlyList<RecordOwnershipParent>> OwnershipParentsForAsync(DecisionRecordRequest request, CancellationToken ct)
+    {
+        var (_, owner) = await FiledAndOwnedAsync(request, handed: null, ct, noRequester: true).ConfigureAwait(false);
+        return owner.Parents;
     }
 
     /// <summary>Fix round 2 (K1): a handed filing that does not answer the request. Logged at Error (a caller bug, not a data

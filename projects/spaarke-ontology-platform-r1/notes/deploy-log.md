@@ -422,3 +422,81 @@ Criterion 89 (blank the writer client id, expect the writer-failure alert to fir
 - Ontology tables were checked only, all OK: the writer profile's only member is `mi-ontology-writer-dev`; it holds field permission on `sprk_createdbyperson` for budgetrevision, decisionrecord and signal, and nothing else.
 - Policy tables: only the BFF-Managed Field Writers may set `sprk_createdbyperson`. Ontology authoring never references the column (checked on master and ebilling), so nothing breaks. The missing creator stamp is DI-128 (#2336).
 
+
+## 2026-10-28 — POL-MATTER-NOBUDGET v3 on spaarkedev1 (D-192, task 166)
+
+- **Approval and source:** owner approved in this session, after a clean `-WhatIf`. Source: docs `4e6f26c1f1` (PR #2385, reviewed).
+- **Command:** `Apply-DoLanePolicies.ps1 -DefinitionPath config/know-promotion.policies.json`, about 12:38Z.
+  - `-WhatIf`: create v3, end v2, move the pointer; no other write.
+  - Apply: created v3 `…6313` (plan `revise-budget`, `assign-task`; next steps `add-todo`, `assign-work`). Ended v2 `sprk_inforceto` at 2026-10-28T00:00:00Z (backdated to v3's `inForceFrom`; review K1, accepted). Current version now points at v3. The enabled flag is unchanged (True). READ-BACK OK.
+  - `-Verify -RequireRows`: policy, v1, v2 and v3 all IN SYNC (exit 0).
+- **Effect:**
+  - Open v2 Signals keep v2's plan (Assign Task only) until the next re-evaluation pass, nightly at 02:30Z. That pass closes them as Superseded and raises v3 Signals, which offer Create budget, then Assign Task.
+  - Matters whose v2 item was Acted are not re-raised (D-119).
+  - The job was not triggered manually.
+- **Re-evaluation run by hand (owner asked, 2026-10-28):**
+  - `POST /api/admin/jobs/signal-reevaluation/trigger` at 13:02:40Z → run `5414d2d6`, ManualAdmin; Succeeded at 13:04:02Z (82 s).
+  - Result: policiesEvaluated 6, hits 149, supersededClosed 54, reraised 54, written 2, unchanged 86. Zero refused, policyFailures, accessDenied and anomalies.
+  - Read-back, `sprk_signalstatus` (`statecode` stays Active by design): v2 has 56 Resolved (54 superseded, plus 2 Acted); v3 has 54 Open.
+
+## 2026-10-28 14:23Z — Console `b445886fed` on dev (task 165, docs→master #2391)
+- **What:** PR #2391 (docs→master, head `756aa0b866`) merged as `b445886fed`. All CI checks passed with none pending. Before merging, a merge-tree preview against master was clean, and master's 11 newer commits (field-mapping docs) overlap none of its files.
+- **Deploy:** `deploy-spaarke-ai.yml` run 40704903667, triggered by the push. It completed with success at 14:23:32Z. No BFF, external SPA or landing change.
+- **Contents:** an optional `WizardShell` `resetKey`; `DecisionWizard` stays one dialog (165). Also the POL-MATTER-NOBUDGET v3 config and tests (166, already applied) and notes.
+- **Notices:** before and after notices went to R3 and uac-r2. word-add-in had no objection and asked not to receive the after-notice.
+- **Dev BFF at the same time:** R3 deployed `e56a3a51d4`. R3's read-back at 14:11:58Z showed DLL `1.0.0+e56a3a51d4…` with `OrdinaryMovesWritesEnabled` off. Ontology gave its OK first. The decide-lane smoke runs after R3's after-notice.
+- **Owner:** reload with Ctrl+F5, then re-check check 2 (one dialog on open, on › and on record) and check 4 (Create budget on v3 items).
+
+## 2026-10-28 — dev BFF `e56a3a51d4` (R3): ontology decide-lane smoke
+- **Deploy:** R3. DLL `1.0.0+e56a3a51d431d924003948ce88ae85940eefbda8`, live from 14:11:58Z. The UAC server gate (14:11–14:41Z) passed. `OrdinaryMovesWritesEnabled` is off: the report-only pass shows moved=0 and writesAttempted=0. Rollback point: the `de38296499` snapshot.
+- **Smoke, run as the owner via az CLI against the BFF API:** PASS.
+  - `GET /api/v1/signals/worklist` returned 200 in 3.8 s, with the Decide lane populated.
+  - `GET /api/v1/signals/47dfaafa-…/decision-plan` returned 200 for a v3 item (`policyVersionId …6313`). Actions: `create-budget` (recommended, first), then `assign-task`. Next steps: `add-todo`, then `assign-work`. This is D-192, and it is check 4 on the server.
+  - **fm-037:** `POST /api/v1/child-records/sprk_workassignment` with `{sprk_name: "zz-fm037-ontology-smoke", sprk_assignedtointernal: contact 8e9918a9…}` returned 201 (id `57e37569-a2c2-4d50-a7a1-b889cf73b168`). Read back: `sprk_assignedto` = `sprk_assignedtointernal` = 8e9918a9…, and the row is team-owned (owneridtype 9). Assign Work rows created before the deploy (for example `10686fa6…`, 00:05Z) have `sprk_assignedto` empty.
+  - **Not exercised:** a real decision commit through Assign Work. Committing one would act on the owner's open UAT items, so the owner's re-check covers it.
+- **Test data:** `zz-fm037-ontology-smoke` (`57e37569-…`) was deleted on 2026-10-28 with the owner's OK. A query by name returns no rows.
+
+## 2026-10-28 — `sprk_budgetnumber` autonumber `BUD-{SEQNUM:6}` on spaarkedev1 (task 167, D-193, owner-approved schema change)
+- **Before:** `AutoNumberFormat` was empty and MaxLength was 20. Existing budget numbers (`B001`, `B002`, `B003-01`, and some blank) are not renumbered.
+- **Change:** a Web API `PUT EntityDefinitions(LogicalName='sprk_budget')/Attributes(LogicalName='sprk_budgetnumber')`.
+  - The body is the full `StringAttributeMetadata` with only `AutoNumberFormat` changed.
+  - Headers: `MSCRM.MergeLabels: true` and `MSCRM.SolutionUniqueName: SpaarkeMaster`. The repo source carries the same format in `SpaarkeMaster/Entities/sprk_Budget/Entity.xml`.
+  - Then `PublishXml` for `sprk_budget` only. There was no tenant-wide publish.
+- **Read-back:** `AutoNumberFormat = BUD-{SEQNUM:6}`, MaxLength 20.
+- **Proof of numbering:** comes with the next budget created (the owner's UAT). No test budget was created, because deleting one needs the owner's OK.
+- **Code:** PR #2403 merged to docs as `4f52d3641f`. It reaches dev with the next docs→master merge and R3's BFF deploy (currency default, budget fields, year rule). The autonumber works now for any create path.
+
+## 2026-10-28 21:14Z — Console `a8314c2e0e` on dev (tasks 167, 169, 170; docs→master #2409)
+- **Merge:** PR #2409 (head `58daec8c2b`) merged to master as `a8314c2e0e`.
+  - Origin/master was merged into docs first, with no conflicts. R3 077 is an ancestor.
+  - The BFF build was clean, and the full ArchTests passed 1609/1609.
+  - CI had nothing pending. The only failure was the advisory Tier 2 "Last Reviewed Stamp". It passed on the previous head (`082f9cf51a`), and the newer head only added project notes.
+- **Deploy:** the push triggered `deploy-spaarke-ai.yml` run 40768831264, which succeeded at 21:14:15Z.
+- **Console contents:**
+  - 169: worklist lane subtitles, collapsed by default and remembered per device.
+  - 167: the budget fields in the DecisionWizard.
+- **BFF contents on master, NOT deployed:**
+  - 167: budget parameters and the currency default.
+  - 170: the WhoAmI memo and the entity-set-name cache.
+  - The dev BFF deploy is R3's operator step. It needs the owner's approval in R3's session.
+- **Notices:** before and after notices went to R3 and uac-r2. word-add-in replied with no hold.
+- **Owner:** hard-reload (Ctrl+F5) to see the worklist lanes. The budget fields need the BFF deploy before they can be committed.
+- **Not on master yet (docs only):** #2414 (`f634761a63`, the owning business unit read as the caller) and 167c / D-198 (in progress).
+
+## 2026-10-29 ~02:24Z — dev BFF `136568cf70` (R3) and SpaarkeMaster 1.2.4.0 (R3)
+- **BFF:** R3 deployed master `136568cf70`. The DLL reads back `1.0.0+136568cf701b68fe8b4132fe2223185a45f8f7a2` at 02:23:53Z. It contains #2409: 167 budget parameters and currency default, 170 WhoAmI memo and entity-set cache. `OrdinaryMovesWritesEnabled` is off. Rollback point: snapshot `e56a3a51d4`. Ontology gave its OK first, and the owner gave the go in R3's session.
+- **Solution:** SpaarkeMaster 1.2.4.0 published by run 40806065681 from master `a4b6459da3` (same SpaarkeMaster source as `136568cf70`). The manifest reads back 1.2.4.0 at 02:24:48Z.
+  - It carries our `3c6b316899`, `accfc2d2f7`, `4e9e295a30`, `7d6f7044bd`, `423fac833d`, `5098b423bb`, `0140c1cbc6` and `cf6e09a393`.
+  - Our condition, passed to provisioning: after a stamp's stage-and-upgrade, confirm the removed privileges (D-185 Reads, 049 Writes) are gone.
+- **R3 after-notice:** DLL `1.0.0+136568cf70…` live since 02:23:53Z. UAC's gate passed. Ordinary moves stayed report-only (moved=0).
+- **Decide-lane smoke (~03:10Z, as the owner via az CLI against the BFF API):** PASS.
+  - `GET /api/v1/signals/worklist`: 200, 3.1–4.6 s, 53 Decide and 21 Do groups.
+  - `GET /api/v1/signals/c0084ce2-…/decision-plan` (v3 `…6313`): 200 in 1.6 s.
+    - `create-budget` is recommended and first, then `assign-task`. Next steps: `add-todo`, `assign-work`.
+    - The budget parameters include amount, category (5 options from metadata), year (max 4), start and end dates (`notBefore: startDate`), period (5 options), and reason.
+    - **Currency is prefilled with US Dollar** (`73d7a6ea…`, from `currency:active`). That is the 167/D-193 budget plan check, PASS.
+- **Task 170, App Insights (spe-insights-dev-67e2xz):**
+  - **WhoAmI per request after the deploy:** worklist 1 (27 Dataverse calls, then 20 on the second call); decision-plan 0.
+  - **Baseline on `e56a3a51d4` (2026-10-27..29):** worklist 1; decision-plan 0; `POST …/decision` averaged **28 WhoAmI (max 35), 179 Dataverse calls, 22.4 s** across 2 commits. 170 targets that commit path.
+  - **Not exercised:** no decision commit since the deploy. A commit would act on the owner's open UAT items. The commit-side check (at most 2 WhoAmI per commit, plus the wall time) and the `BUD-` number on a new budget wait for the owner's next commit. Then query App Insights for `POST /api/v1/signals/{id}/decision` after 02:23:53Z.
+

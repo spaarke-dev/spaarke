@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="171" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Apply-DoLanePolicies.ps1 owns the policy and version rows it creates to the customer business unit's restricted-content team (D-197, UAC round 137)</title>
+    <phase>11 UAT</phase>
+    <gate>startable: uac-r2 R4b-2c (`Infrastructure/Dataverse/RestrictedContentOwnerTeam.cs`: name, customer-top-unit walk, fail-closed rules) is on master in 194b, 2cd0f62e2c (2026-10-29). Copy its rule; dev team "Spaarke Restricted Content Owners" 16685363-43d3-f111-84e8-00224820fd20 in BU1 (uac-r2), for -WhatIf only</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>An operator script (.ps1) and its Pester tests, with no BFF code. It modifies tests, so code-review and adr-check run.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Adds an optional owner to an existing idempotent script, using the team-resolution rule uac-r2 defines; the files are known.</model-tier-reason>
+    <effort>high</effort>
+    <deps>uac-r2 R4b-2c (team definition); 166 (current script shape)</deps>
+    <tags>scripts,config,access,testing</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+    <parallel-group>N</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Owner ruling (UAC round 137, D-197). In a customer environment, the policy seed script must own every `sprk_policy` and `sprk_policyversion` row it creates to the memberless restricted-content owner team in the customer's top business unit, not to the operator who runs it. On dev nothing changes: the existing root-owned rows stay, and a run without the new parameter behaves exactly as today. Admin-tab authoring is out of scope, because the author wins.</prompt>
+  <role>SPAARKE operator-tooling engineer (Signals policy configuration).</role>
+  <goal>`Apply-DoLanePolicies.ps1` accepts an explicit owner: the customer's top business unit. It resolves that unit's restricted-content team using uac-r2's rule and creates new policy and version rows owned by that team. `-Verify` reports any owner drift on the rows. Without the parameter, behaviour is unchanged.</goal>
+
+  <context>
+    <background>
+      <ul>
+        <li>The script creates rows with `Invoke-Dv POST` at `scripts/Apply-DoLanePolicies.ps1:317` (policy) and `:355` (version).</li>
+        <li>Its parameters are `-DataverseUrl`, `-DefinitionPath`, `-Verify` and `-RequireRows` (`:57-60`), and it supports `-WhatIf`.</li>
+        <li>Tests are in `tests/scripts/Apply-DoLanePolicies.Tests.ps1` (Pester 5.7.1; local copy at `C:\Users\RALPHS~1\AppData\Local\Temp\p571\Pester\5.7.1`).</li>
+        <li>uac-r2 R4b-2c defines the team: memberless, in the customer's top business unit (the root's direct child). It fails closed when the team is missing, ambiguous, has members, or sits in the root or the Secure Record unit. Read its final name and lookup rule from master after R4b-2c merges (`RecordOwnershipResolver.cs` and the uac-r2 task 194 / R4b-2c notes).</li>
+        <li>Release wiring is NOT part of this task; it is DI-124 (#2300).</li>
+      </ul>
+    </background>
+    <relevant-files>
+      <file>scripts/Apply-DoLanePolicies.ps1</file>
+      <file>tests/scripts/Apply-DoLanePolicies.Tests.ps1</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Access/RecordOwnershipResolver.cs (read only: the team rule)</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>The idempotent apply script, with -WhatIf and -Verify, and uac-r2's restricted-content team rule.</existing>
+    <extension>Add one optional parameter (the customer business unit, by id or name) to the existing script. Resolve the team with the same rule as the resolver: copy the predicate and cite it, and never invent a second rule. Bind `ownerid` on the two creates.</extension>
+    <cost-of-doing-nothing>In a customer environment, seeded rules would be owned by the operator. An operator homed in the root business unit then leaves customer configuration in the Spaarke root, against the owner's round 136/137 rule.</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="D-197 dev">Without the new parameter, the script's writes, output and exit codes are byte-for-byte as today, and all existing Pester tests pass unchanged. Nothing runs against spaarkedev1 or any other environment.</constraint>
+    <constraint source="fail closed">With the parameter, the run stops before any write (non-zero exit, a clear message) when the team is missing, ambiguous, has members, or sits in the root or the Secure Record business unit. `-WhatIf` reports the owner it would bind. If the operator lacks Assign on `sprk_policy` or `sprk_policyversion`, the script detects it up front with a privilege read (`RetrieveUserPrivileges` or equivalent) and stops before any write.</constraint>
+    <constraint source="scope">Only rows the script CREATES get the team owner. Existing rows are never re-owned by this script. With the parameter, `-Verify` reports as drift each existing row whose owner is not that team, and never writes. Admin-tab authoring (`SavePolicyAsync`) is not touched.</constraint>
+    <constraint source="CLAUDE.md">Use `python`, never `python3`. No --no-verify, no bare stash, no sub-agents. No secrets: use the operator's own `az` session, as today.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare STANDARD rigor. Confirm R4b-2c is on master and read the team rule. If it is not on master, stop.</step>
+    <step order="1">Write the failing Pester tests first:
+      <ul>
+        <li>no parameter: behaviour unchanged;</li>
+        <li>with the parameter: the creates carry `ownerid@odata.bind` to the team, and -WhatIf shows the owner;</li>
+        <li>missing, ambiguous, member-holding or root-homed team: exit non-zero with no write;</li>
+        <li>operator without Assign: exit non-zero with no write;</li>
+        <li>-Verify with the parameter: reports owner drift, writes nothing.</li>
+      </ul>
+    </step>
+    <step order="2">Implement it, run the Pester file, and open a PR into `docs/ontology-platform-design`. Comment on #2300 (DI-124) with the parameter the release phase must pass.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">Without the parameter, the behaviour and the existing Pester results are unchanged.</criterion>
+    <criterion testable="true">With the parameter, every created policy and version row is owned by the customer business unit's restricted-content team, and -WhatIf shows that owner.</criterion>
+    <criterion testable="true">Must-not-fire: a missing or invalid team, or an operator without Assign, stops the run before any write. Existing rows are never re-owned. -Verify reports owner drift without writing.</criterion>
+    <criterion testable="true">Test scope: the stated contract plus the cases above. Anything beyond needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If R4b-2c's team rule cannot be applied from a script (for example, it needs data only the BFF can read), STOP and report the options.</trigger>
+  </escalation>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ontology-platform-r1/notes/decisions.md (D-14, D-197)</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/defer-issues.md (DI-124)</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+  <completion date="2026-10-29">
+    Delivered (PR #2433, merged to docs `3452d3017e`): `scripts/Apply-DoLanePolicies.ps1 -CustomerBusinessUnit` binds `ownerid@odata.bind` on the policy and version creates to the customer top unit's "Spaarke Restricted Content Owners" team, with the same rule as 194b `RestrictedContentOwnerTeam` (Owner team, not default, exactly one, no members; refuses the root, the Secure Record unit and an unreadable or looping chain). It fails closed with an Assign preflight. `-WhatIf` shows the owner, `-Verify` reports DRIFT, and the path without the parameter is unchanged.
+    Review: uac-r2 OK at `9177fcb083` (K1 Assign depth is checked for presence only, so a shortfall becomes a 403 on the first create, before any row exists; K2 RetrieveUserPrivileges/teammemberships are not yet verified live, to be confirmed on the first live `-WhatIf`, DI-124 #2300). The adversarial-reviewer found F1: an empty `-CustomerBusinessUnit` failed open. Its F2s were an untested read-back, a parity test that CI skipped, and untested partial and mixed states; a K2 was the empty-guid team. Fix round `e025152e3b` fixed all of them: the gate is now whether the parameter was passed, and a blank value is refused in all three modes; added tests for the read-back, rerun-after-fault, mixed-state DRIFT, a missing Secure Record unit and the 32/33-unit bound; the parity test runs in CI (the sparse checkout adds Infrastructure/Dataverse). Main-session re-check of the fix diff: clean. Pester 87/87 (also with CI=true); 7 mutations, all caught.
+    rework: fix-round-1 task 171
+  </completion>
+</task>

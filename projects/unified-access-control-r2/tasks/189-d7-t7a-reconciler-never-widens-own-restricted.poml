@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="189" project="unified-access-control-r2">
+  <metadata>
+    <title>D7 T7a: ChildAccessPermissionReconciler must not widen a child's own Restricted (#2126)</title>
+    <phase>Session 28: UAC (owner round 110, 2026-10-20)</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security: the reconciler overwrites the value that task 188's predicate reads; a widening here silently defeats D7.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security; a possible new BFF-written record (schema); fails closed.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Edits ChildAccessPermissionReconciler and its tests only; task 188 edits the external read path.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, security, access-control, dataverse, testing</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+    <origin>
+      word-add-in-r1 task 130 finding (2026-10-20). Design: notes/2119-manage-access-all-forms-design.md §6.4 "T7a". Owner rounds 81/84 (task 173).
+    </origin>
+  </metadata>
+
+  <goal>
+ChildAccessPermissionReconciler (task 173; Services/Access/ChildAccessPermissionReconciler.cs:234-289 at origin/master 4f5f22694) writes the inherited Access Permission over every parented child's own value. A filed document's own Restricted (T8's fallback, or a user's choice) is therefore reset to its parent's value, which breaks D7 rule 2.
+
+Fix: the reconciler writes the MORE RESTRICTIVE of the inherited value and the child's own narrowing, and never widens below an own narrowing. The stored value alone cannot tell an own Restricted from one inherited earlier (a parent that widens must still widen an inherited Restricted), so the own narrowing needs its own BFF-written record.
+  </goal>
+
+  <design-checkpoint>
+    BEFORE any schema change, write the design in notes/task-189-own-narrowing.md and stop for the main session's review:
+    - Where the own narrowing is recorded. Prefer an existing column or row field if one can carry it without ambiguity; otherwise one new column on the participating child tables. Answer CLAUDE.md §11's three questions.
+    - Who writes it (BFF only; which code paths set and clear it: the user's own Restricted choice through the BFF, T8's fallback writer) and how a model-driven edit of Access Permission is classified (own choice vs inherited).
+    - How legacy rows without the record behave (fail closed: treat an existing Restricted as own? state the trade-off).
+    - Migration and read-back, if a column is added.
+  </design-checkpoint>
+
+  <constraints>
+    - ADR-028, ADR-002 (no plugins) and the project CLAUDE.md binding rules apply. One server-side owner per invariant (DATAVERSE-WRITE-PATH-ARCHITECTURE.md).
+    - Fail closed: an unreadable own narrowing writes nothing for that row (logged with ids only).
+    - No field-security, role or app-setting change by the agent. A column create on dev only after the design checkpoint is approved.
+    - Keep the reconciler's existing contract for children without an own narrowing (inherit exactly as today).
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion>Own Restricted survives the parent being Standard (reconciler writes nothing, or writes Restricted).</criterion>
+    <criterion>An inherited Restricted follows a parent that widens back to Standard.</criterion>
+    <criterion>An unreadable own narrowing writes nothing for that row.</criterion>
+    <criterion>Children without an own narrowing reconcile exactly as before (existing tests unchanged and green).</criterion>
+    <criterion>Negative control: each new test fails when the own-narrowing leg is removed (mutations recorded).</criterion>
+    <criterion>BFF build 0 errors; targeted tests green; full ArchTests green; publish-size delta measured.</criterion>
+    <criterion>Deployed to dev via R3; server-side live gate: a reconciler run logs no widening of an own-narrowed row and no new exception class.</criterion>
+  </acceptance-criteria>
+
+  <outputs>
+    - Code and tests on branch uac/189-own-narrowing (worktree C:/wt189), draft PR to master.
+    - notes/task-189-own-narrowing.md: design (checkpointed), §11 answers, mutation table.
+  </outputs>
+</task>

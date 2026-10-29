@@ -27,12 +27,24 @@ namespace Sprk.Bff.Api.Services.Access;
 /// relationships, not parents.</para>
 /// <para>Pinned by <c>SecureChildLineageTests</c>: every codified child table has an entry, and every lookup targets a root
 /// or a codified child.</para>
+/// <para><b>The order of a table's lookups is meaningful (UAC task 194b).</b> It is the order in which an EXISTING row's parents
+/// are named to the ownership resolver (<see cref="Table.LookupOrder"/>, read by
+/// <c>RecordOwnershipContext.OrderedParentsOf</c>), and the first one the row holds is its PRIMARY parent: the one whose
+/// business unit decides an ordinary row's owner. It matches the row's writer: a document's parent document, then its typed core
+/// lookups, then its <c>sprk_related*</c> links (<c>EmailAttachmentProcessor</c>); an analysis's document
+/// (<c>AnalysisEndpoints</c>, <c>AppOnlyAnalysisService</c>); a Decision Record's typed core. A Signal and a Decision Record
+/// name their core record and subject first (<c>RecordOwnershipContext.ForExistingRowAsync</c>). Secure-if-any reads every
+/// parent, so the order never decides whether a row is secure.</para>
 /// </remarks>
 internal static class SecureChildLineage
 {
     /// <summary>One table: its entity set (for POA writes) and its lookups to parents (column → target table).</summary>
     internal sealed record Table(string LogicalName, string EntitySet, IReadOnlyDictionary<string, string> Lookups)
     {
+        /// <summary>UAC task 194b: <see cref="Lookups"/>' columns in declaration order, the ownership primary order (see the
+        /// class remarks).</summary>
+        public IReadOnlyList<string> LookupOrder { get; init; } = Lookups.Keys.ToArray();
+
         /// <summary>The table's primary id column (every Spaarke table: logical name + <c>id</c>, verified live).</summary>
         public string IdColumn => LogicalName + "id";
     }
@@ -46,9 +58,23 @@ internal static class SecureChildLineage
         Enum.GetValues<ExternalGrantRootType>().Select(ExternalGrantRoot.LogicalNameFor), StringComparer.OrdinalIgnoreCase);
 
     private static Table T(string logicalName, string entitySet, params (string Column, string Target)[] lookups) =>
-        new(logicalName, entitySet, lookups.ToDictionary(l => l.Column, l => l.Target, StringComparer.OrdinalIgnoreCase));
+        new(logicalName, entitySet, lookups.ToDictionary(l => l.Column, l => l.Target, StringComparer.OrdinalIgnoreCase))
+        {
+            LookupOrder = lookups.Select(l => l.Column).ToArray(),
+        };
 
-    /// <summary>Document link targets that are not a filing parent (identities, the email activity, a service request).</summary>
+    /// <summary>UAC task 194b: a document's primary order — its parent document, then its typed core lookups, then the rest in
+    /// declaration order (the <c>sprk_related*</c> links), as <c>EmailAttachmentProcessor</c> names them.</summary>
+    private static int DocumentPrimaryRank(string column) => column switch
+    {
+        "sprk_parentdocument" => 0,
+        Matter or Project or WorkAssignment => 1,
+        _ => 2,
+    };
+
+    /// <summary>Document link targets this SECURE lineage map leaves out: identities and the email activity (relationships, not
+    /// parents), and a service request — which IS an ordinary ownership and filing parent (<c>RecordOwnershipResolver.FilingParentOf</c>;
+    /// the ordinary pass walks it), but a root of its own that the Secure lineage does not list (the class remarks).</summary>
     private static readonly HashSet<string> DocumentLinksThatAreNotFiling = new(StringComparer.OrdinalIgnoreCase)
     {
         "contact", "sprk_organization", "email", "sprk_servicerequest",
@@ -87,7 +113,17 @@ internal static class SecureChildLineage
         T("sprk_communication", "sprk_communications",
             new[] { ("sprk_communicationthread", "sprk_communicationthread") }
                 .Concat(Regarding("sprk_analysis", "sprk_budget", "sprk_event", "sprk_invoice", Matter, Project, "sprk_reportcard", WorkAssignment))
-                .ToArray()),
+                .ToArray()) with
+        {
+            // UAC task 194b R4: the thread's filing ranks AFTER the message's own lookups — the parents a record thread is
+            // filed under are asked under the column that files the message there (RecordThreadFiling.FilingLookupsOf), after
+            // what the message names itself (the reconciler's question, the re-file's and Repair's). The thread lookup itself
+            // targets no ownership parent, so its rank decides nothing else.
+            LookupOrder = Regarding("sprk_analysis", "sprk_budget", "sprk_event", "sprk_invoice", Matter, Project, "sprk_reportcard", WorkAssignment)
+                .Select(l => l.Item1)
+                .Append("sprk_communicationthread")
+                .ToArray(),
+        },
         T("sprk_communicationattachment", "sprk_communicationattachments",
             ("sprk_communication", "sprk_communication"), ("sprk_document", "sprk_document")),
         T("sprk_communicationparticipant", "sprk_communicationparticipants",
@@ -120,6 +156,7 @@ internal static class SecureChildLineage
                     ("sprk_canonicaldocument", "sprk_document"), ("sprk_currentversionid", "sprk_fileversion"),
                     ("sprk_parentdocument", "sprk_document"),
                 })
+                .OrderBy(l => DocumentPrimaryRank(l.Item1)) // 194b: stable, so each group keeps its declaration order
                 .ToArray()),
         T("sprk_emailartifact", "sprk_emailartifacts",
             ("sprk_document", "sprk_document")),
@@ -169,6 +206,21 @@ internal static class SecureChildLineage
             Regarding("sprk_agreement", "sprk_analysis", "sprk_budget", "sprk_communication", "sprk_document", "sprk_event",
                 "sprk_invoice", Matter, Project, "sprk_reportcard", WorkAssignment)),
     }.ToDictionary(t => t.LogicalName, StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// UAC task 194b R4: the primary order of a ROOT table whose rows are filed under a parent (a root is not a
+    /// <see cref="Children"/> entry, so it has no <see cref="Table.LookupOrder"/> there). A project's primary is the record its
+    /// ADR-024 pair names (<c>sprk_regardingrecordid</c>, <c>SecureRootInheritance.PairNamesAParentOnItsOwn</c>; the
+    /// field-mapping 070 registry's project→pair edge), asked under that column. A work assignment's primary is its matter,
+    /// then its project, invoice, event: its filing order (<c>SecureRootInheritance.TypedLookupsOf</c>, owner decision
+    /// 2026-10-29). Without an entry the order fell to column name, which put the event first.
+    /// </summary>
+    internal static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> RootLookupOrder =
+        new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
+        {
+            [Project] = ["sprk_regardingrecordid"],
+            [WorkAssignment] = SecureRootInheritance.TypedLookupsOf(WorkAssignment).Select(t => t.Column).ToArray(),
+        };
 
     /// <summary>True for a table whose rows the synchronizer mirrors (a child, never a root).</summary>
     internal static bool IsChild(string? logicalName) =>

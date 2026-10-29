@@ -284,6 +284,21 @@ public class ActionSeamTests
     }
 
     [Fact]
+    public async Task CreateTaskAsync_RegardingAnOwnershipParentWithNoTaskColumn_IsRefusedWithItsCode_AndWritesNothing()
+    {
+        // UAC task 194b V-fix (verifier A F1): the ad-hoc and enrichment callers get the named reason (the ad-hoc route
+        // answers it as a 422), never a degraded success.
+        var result = await CreateSeam().CreateTaskAsync(
+            new CreateTaskRequest { Subject = "X", RegardingObjectId = Guid.NewGuid(), RegardingObjectType = "sprk_todo" },
+            CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.TaskId.Should().Be(Guid.Empty);
+        result.Error.Should().StartWith(Sprk.Bff.Api.Services.Ai.Nodes.TaskActionCore.RegardingNotFilableCode);
+        _entityServiceMock.Verify(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
     public async Task CreateTaskAsync_WhenCreateThrows_ReturnsDegradedSuccessWithEmptyTaskId()
     {
         _entityServiceMock
@@ -449,7 +464,7 @@ public class ActionSeamTests
 
     private void UseMetadataFor(string entityLogicalName, EntityMetadataDto dto)
     {
-        var cacheKey = $"sdap:dv:entitymetadata:{entityLogicalName.ToLowerInvariant()}";
+        var cacheKey = $"sdap:dv:entitymetadata:v2:{entityLogicalName.ToLowerInvariant()}";
         var cacheMock = new Mock<IDistributedCache>();
         var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(dto, MetadataCacheJsonOptions));
         cacheMock

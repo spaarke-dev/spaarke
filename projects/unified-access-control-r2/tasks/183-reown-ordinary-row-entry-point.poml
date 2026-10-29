@@ -3,7 +3,8 @@
   <metadata>
     <title>A narrow re-own entry point for ordinary Decision Record and Signal rows (SecureChildReconciler.ReownOrdinaryRowAsync), for ontology task 148's follow-the-assignee reconciler (D-135), landed on the ontology integration branch</title>
     <phase>Session 28 — UAC (owner round 96, 2026-10-12)</phase>
-    <status>pending</status>
+    <status>completed</status>
+    <status-note>**Closed 2026-10-16.** Shipped as 0ccf18571 (2026-10-13, now on master). The K2 live proof (one stale-ETag 412 → Conflict on sprk_signal and on sprk_decisionrecord) runs as part of ontology task 148's server gate (148 POML &lt;gate&gt;), the first caller that exercises it live.</status-note>
     <rigor>FULL</rigor>
     <rigor-reason>New owner-write surface in the secure reconciler. It re-owns rows with the application identity, so security and tenant isolation apply.</rigor-reason>
     <model-tier>opus</model-tier>

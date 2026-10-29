@@ -567,6 +567,111 @@ public class AssociationStatusMapperTests
     }
 
     [Fact]
+    public void Decide_CallerSuppliedMatter_WinsOverConflictingTrackingToken_WritesCallerChoice_Issue2412()
+    {
+        // #2412 (owner's Outlook check on dev, 2026-10-28): the user saved an email to matter A in the add-in; the
+        // body carried a signed tracking token for matter B. Both are rung 0 at 1.0. The caller's choice is not a
+        // guess, so A is written and Resolved; B stays a review candidate (not written, not a conflict).
+        var chosen = Guid.NewGuid();
+        var tokenMatter = Guid.NewGuid();
+        var mapper = AssociationTestSupport.Mapper(enabled: true, threshold: 0.85);
+
+        var decision = mapper.Decide(
+            new[]
+            {
+                Match(MatterField, tokenMatter, 1.0, RungKind.ExplicitReference, provenance: "tracking-token:signed:sprk_matter"),
+                Match(MatterField, chosen, 1.0, RungKind.ExplicitReference, provenance: "explicit:caller-supplied:sprk_matter") with { CallerSupplied = true },
+                Match(MatterField, tokenMatter, 0.9, RungKind.RecordNameMatch),
+            },
+            CommunicationDirection.Incoming, tenantKey: null);
+
+        decision.Status.Should().Be(AssociationStatusCodes.Resolved);
+        decision.AutoFiled.Should().BeTrue();
+        decision.RegardingWrites[MatterField].Id.Should().Be(chosen);
+        decision.Provenance.Candidates.Should().Contain(c => c.TargetId == chosen.ToString("D") && c.Written && !c.Conflict);
+        decision.Provenance.Candidates.Should().Contain(c => c.TargetId == tokenMatter.ToString("D") && !c.Written);
+        decision.Provenance.Decision.Reason.Should().Contain("caller's choice decided field(s) sprk_regardingmatter");
+    }
+
+    [Fact]
+    public void Decide_CallerSuppliedMatter_KillSwitchOff_StillWritesCallerChoice_Issue2412()
+    {
+        // With auto-file off the status is Suggested, but the field is not a conflict, so the caller's matter is written.
+        var chosen = Guid.NewGuid();
+        var mapper = AssociationTestSupport.Mapper(enabled: false, threshold: 0.85);
+
+        var decision = mapper.Decide(
+            new[]
+            {
+                Match(MatterField, Guid.NewGuid(), 1.0, RungKind.ExplicitReference),
+                Match(MatterField, chosen, 1.0, RungKind.ExplicitReference) with { CallerSupplied = true },
+            },
+            CommunicationDirection.Incoming, tenantKey: null);
+
+        decision.Status.Should().Be(AssociationStatusCodes.Suggested);
+        decision.RegardingWrites[MatterField].Id.Should().Be(chosen);
+    }
+
+    [Fact]
+    public void Decide_CallerSuppliedNonCoreTarget_OverConflict_IsNotWritten_AndTheReasonDoesNotClaimIt_Issue2412()
+    {
+        // An invoice is non-core: the caller's invoice settles the conflict but is still a candidate only (unchanged
+        // write gate), so the reason must not say the caller "decided" a field nothing was written to.
+        var chosen = Guid.NewGuid();
+        var mapper = AssociationTestSupport.Mapper(enabled: true, threshold: 0.85);
+
+        var decision = mapper.Decide(
+            new[]
+            {
+                Match("sprk_regardinginvoice", chosen, 1.0, RungKind.ExplicitReference, entity: "sprk_invoice") with { CallerSupplied = true },
+                Match("sprk_regardinginvoice", Guid.NewGuid(), 0.95, RungKind.ExplicitReference, entity: "sprk_invoice"),
+            },
+            CommunicationDirection.Incoming, tenantKey: null);
+
+        decision.RegardingWrites.Should().NotContainKey("sprk_regardinginvoice");
+        decision.Provenance.Decision.Reason.Should().NotContain("caller's choice decided");
+    }
+
+    [Fact]
+    public void Decide_TwoCallerSuppliedTargetsOnSameField_StaysAmbiguous_Issue2412()
+    {
+        // Must-not-fire: the caller exemption settles a field only when the caller named ONE target on it.
+        var mapper = AssociationTestSupport.Mapper(threshold: 0.85);
+
+        var decision = mapper.Decide(
+            new[]
+            {
+                Match(MatterField, Guid.NewGuid(), 1.0, RungKind.ExplicitReference) with { CallerSupplied = true },
+                Match(MatterField, Guid.NewGuid(), 1.0, RungKind.ExplicitReference) with { CallerSupplied = true },
+            },
+            CommunicationDirection.Incoming, tenantKey: null);
+
+        decision.Status.Should().Be(AssociationStatusCodes.Ambiguous);
+        decision.RegardingWrites.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Decide_CallerSuppliedOnOneField_DoesNotSettleAConflictOnAnotherField_Issue2412()
+    {
+        // Must-not-fire: the caller's matter does not settle two conflicting projects the caller did not choose.
+        var chosen = Guid.NewGuid();
+        var mapper = AssociationTestSupport.Mapper(threshold: 0.85);
+
+        var decision = mapper.Decide(
+            new[]
+            {
+                Match(MatterField, chosen, 1.0, RungKind.ExplicitReference) with { CallerSupplied = true },
+                Match("sprk_regardingproject", Guid.NewGuid(), 0.95, RungKind.ThreadContinuity, entity: "sprk_project"),
+                Match("sprk_regardingproject", Guid.NewGuid(), 0.95, RungKind.ThreadContinuity, entity: "sprk_project"),
+            },
+            CommunicationDirection.Incoming, tenantKey: null);
+
+        decision.Status.Should().Be(AssociationStatusCodes.Ambiguous);
+        decision.RegardingWrites[MatterField].Id.Should().Be(chosen);
+        decision.RegardingWrites.Should().NotContainKey("sprk_regardingproject");
+    }
+
+    [Fact]
     public void Decide_ConflictOnOneField_StillWritesCleanSiblingField()
     {
         // Duplicate same-named projects (legitimate in production) conflict on the project field, but a single

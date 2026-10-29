@@ -96,6 +96,9 @@ public static class SignalsModule
         // caller's. DecisionRouteCores adapts the shipped event, child-record and communications cores. Unconditional:
         // nothing here is feature-gated (bff-extensions.md F.1).
         services.AddScoped<DecisionRouteCores>();
+        // Task 167 (D-193): the one resolver of a catalog parameter's named option lists (live picklist metadata, active currencies) and of a
+        // budget's currency, used by the plan route and the Create budget executor. Scoped: it holds the caller's IDataverseUserClient.
+        services.AddScoped<DecisionParameterSources>();
         services.AddScoped<IDecisionActionExecutor, ReviseBudgetExecutor>();
         services.AddScoped<IDecisionActionExecutor, CreateBudgetExecutor>();
         services.AddScoped<IDecisionActionExecutor, ApproveVarianceExecutor>();
