@@ -51,13 +51,15 @@ public class RecordFamilyEdgesGuardTests
         [Only("SecureChildLineage", "sprk_analysis.sprk_outputfileid -> sprk_document")] =
             "an analysis's output file, not its filing (SecureChildLineage remarks)",
 
-        // ebilling-r1 (PROPOSAL, needs UAC-r2 review): invoice-submission lookups ebilling task 013 added to SecureChildLineage
-        // that are not the submission's filing. Its filing root is its one core record (FR-05); see RecordFamilyEdges.
+        // ebilling-r1 (UAC-r2 review accepted, 2026-10-28): invoice-submission lookups ebilling task 013 added to
+        // SecureChildLineage that are not the submission's filing. Its filing root is its one core record (FR-05); see
+        // RecordFamilyEdges.
         [Only("SecureChildLineage", "sprk_invoicesubmission.sprk_resubmissionof -> sprk_invoicesubmission")] =
             "the earlier submission this one resubmits (same firm invoice number, D-37): a peer reference, not its filing; "
             + "sprk_invoicesubmission is not an ownership parent",
-        // UAC-r2: decide — RecordOwnershipContext.ParentsOf reads sprk_document as an ownership-parent table, so a write
-        // that sets this column offers the report as a parent, as it does for the analysis's sprk_outputfileid above.
+        [Only("SecureChildLineage", "sprk_invoicesubmission.sprk_invoice -> sprk_invoice")] =
+            "the invoice the submission produced, set at commit and cleared when the submission fails: its output, not its "
+            + "filing (as an analysis's sprk_outputfileid)",
         [Only("SecureChildLineage", "sprk_invoicesubmission.sprk_reportdocument -> sprk_document")] =
             "the adjustment or rejection report generated for the submission: its output, not its filing (as an "
             + "analysis's sprk_outputfileid)",
@@ -242,7 +244,7 @@ public class RecordFamilyEdgesGuardTests
     /// <summary>
     /// The access columns of every row (FamilyKind | child.lookup -> parent | EdgeKind | InSecureFamily), sorted. UAC-r2
     /// owns this content: change it only with a "UAC-r2 review:" line in the PR.
-    /// ebilling-r1 PROPOSAL (needs UAC-r2 review): the 22 rows of sprk_externalidentifier, sprk_invoiceapproval,
+    /// ebilling-r1 (UAC-r2 review accepted, 2026-10-28): the 21 rows of sprk_externalidentifier, sprk_invoiceapproval,
     /// sprk_invoicecorrection and sprk_invoicesubmission, sprk_billingevent / sprk_invoice .sprk_regardingworkassignment and
     /// sprk_decisionrecord / sprk_signal .sprk_regardinginvoiceline (RecordFamilyEdges, the ebilling-r1 block).
     /// </summary>
@@ -353,7 +355,6 @@ public class RecordFamilyEdgesGuardTests
         "Filing | sprk_invoicecorrection.sprk_regardingproject -> sprk_project | Stamp | secure",
         "Filing | sprk_invoicecorrection.sprk_regardingworkassignment -> sprk_workassignment | Stamp | secure",
         "Filing | sprk_invoicesubmission.sprk_document -> sprk_document | LineageHop | secure",
-        "Filing | sprk_invoicesubmission.sprk_invoice -> sprk_invoice | LineageHop | secure",
         "Filing | sprk_invoicesubmission.sprk_regardingmatter -> sprk_matter | Stamp | secure",
         "Filing | sprk_invoicesubmission.sprk_regardingproject -> sprk_project | Stamp | secure",
         "Filing | sprk_invoicesubmission.sprk_regardingworkassignment -> sprk_workassignment | Stamp | secure",
