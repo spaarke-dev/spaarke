@@ -483,3 +483,10 @@ Criterion 89 (blank the writer client id, expect the writer-failure alert to fir
 - **Owner:** hard-reload (Ctrl+F5) to see the worklist lanes. The budget fields need the BFF deploy before they can be committed.
 - **Not on master yet (docs only):** #2414 (`f634761a63`, the owning business unit read as the caller) and 167c / D-198 (in progress).
 
+## 2026-10-29 ~02:24Z — dev BFF `136568cf70` (R3) and SpaarkeMaster 1.2.4.0 (R3)
+- **BFF:** R3 deployed master `136568cf70`. The DLL reads back `1.0.0+136568cf701b68fe8b4132fe2223185a45f8f7a2` at 02:23:53Z. It contains #2409: 167 budget parameters and currency default, 170 WhoAmI memo and entity-set cache. `OrdinaryMovesWritesEnabled` is off. Rollback point: snapshot `e56a3a51d4`. Ontology gave its OK first, and the owner gave the go in R3's session.
+- **Solution:** SpaarkeMaster 1.2.4.0 published by run 40806065681 from master `a4b6459da3` (same SpaarkeMaster source as `136568cf70`). The manifest reads back 1.2.4.0 at 02:24:48Z.
+  - It carries our `3c6b316899`, `accfc2d2f7`, `4e9e295a30`, `7d6f7044bd`, `423fac833d`, `5098b423bb`, `0140c1cbc6` and `cf6e09a393`.
+  - Our condition, passed to provisioning: after a stamp's stage-and-upgrade, confirm the removed privileges (D-185 Reads, 049 Writes) are gone.
+- **Pending (after uac-r2's gate ends ~02:54Z and R3's after-notice):** the decide-lane smoke, the task-170 App Insights check (at most 2 WhoAmI per commit, plus the wall time), and the budget plan check (currency prefilled).
+
