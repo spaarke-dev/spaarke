@@ -133,6 +133,8 @@ public sealed class InvoiceSubmissionProcessingFlowTests
                 {
                     "sprk_signal" => SignalRows(q),
                     "sprk_policy" => new EntityCollection(),
+                    // 104 (D-43): the persister asks for an earlier Returned to Firm invoice of the same firm and number; none here.
+                    "sprk_invoice" => new EntityCollection(),
                     "sprk_billingevent" => new EntityCollection(Created.Where(c => c.LogicalName == "sprk_billingevent").ToList()),
                     _ => throw new InvalidOperationException($"unexpected query on {q.EntityName}"),
                 });

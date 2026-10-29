@@ -416,6 +416,13 @@ public partial class RouteAuthorizationGuardTests
             + "it. Approve additionally resolves the caller's eligibility LIVE from the invoice's core record inside InvoiceApprovalService on every "
             + "call (403 ebilling.approver.not_eligible, nothing written); the stored eligible-approver set never grants. The decider and the "
             + "decision id are derived server-side, never taken from the request."),
+        new GovernedFile("Api/Finance/InvoiceRejectReturnEndpoints.cs", Scope.RouteLevelGate,
+            "POST /api/finance/invoices/{invoiceId}/reject and POST /api/finance/invoices/{invoiceId}/return (ebilling-r1 task 104, FR-36, "
+            + "FR-11, D-43, D-122) -- an eligible approver rejects an invoice (final) or returns it to the firm. Each route carries "
+            + "AddFinanceAuthorizationFilter as the caller on the invoice named in the path (ebilling.invoice.decide: Write), fail closed; the "
+            + "eBilling kill switch runs after it. Both additionally resolve the caller's eligibility LIVE from the invoice's core record inside "
+            + "InvoiceRejectReturnService on every call (403 ebilling.approver.not_eligible, nothing written); the stored eligible-approver set "
+            + "never grants. The decider and the decision id are derived server-side, never taken from the request."),
         new GovernedFile("Api/Finance/StoredFileEndpoints.cs", Scope.RouteLevelGate,
             "GET /api/finance/files/{fileId}/content (ebilling-r1 task 090, EB-D-148, procedure-and-file-model 4.3) -- an internal caller downloads "
             + "a Stored File's bytes. AddStoredFileAccessFilter runs the download rule before the handler: step 0 (403 before any record read), "
@@ -1086,7 +1093,12 @@ public partial class RouteAuthorizationGuardTests
     //            denies 403). The uniform 404 covers no Read, an unknown id, a non-family table and a probe fault. Pinned
     //            through a minimal TestServer host (this endpoint mapped alone, probe and Dataverse substituted) by
     //            tests/integration/contract/Api/Records/RecordFamilyEndpointsContractTests.cs.
-    private const int ExpectedEndpointFileCount = 147;
+    //
+    // 147 -> 148 (2026-10-29, ebilling-r1 task 104, FR-36; written on the branch as 146 -> 147, reconciled at the merge into work). Net +1: Api/Finance/InvoiceRejectReturnEndpoints.cs ADDED -- POST
+    // /api/finance/invoices/{invoiceId}/reject and POST .../return. Classified by GovernedFiles (RouteLevelGate: step 0 on the group, then
+    // AddFinanceAuthorizationFilter as the caller on the route's invoice, ebilling.invoice.decide: Write; eligibility is asked inside the
+    // service on every call); .RequireEbillingEnabled is already in NotAuthorizationForms.
+    private const int ExpectedEndpointFileCount = 148;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision

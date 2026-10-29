@@ -145,6 +145,7 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
     internal const string TooManyLinesCode = "ebilling.submission.too_many_lines";
     internal const string FindingsTooLargeCode = "ebilling.submission.findings_too_large";
     internal const string OwnerUnresolvedCode = "ebilling.submission.owner_unresolved";
+    internal const string SupersedesReadFailedCode = "ebilling.submission.supersedes_read_failed";
     internal const string SubmitterMissingCode = "ebilling.submission.submitter_missing";
 
     /// <summary>
@@ -515,6 +516,28 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         if (submittedBy is { } contactId)
         {
             invoice[InvoiceSubmittedBy] = new EntityReference(ContactEntity, contactId);
+        }
+
+        // Task 104 (FR-36, D-43): an ACCEPTED resubmission of a Returned to Firm invoice is linked to the invoice it replaces. An automatic
+        // rejection is not accepted and is never linked. A fault reading the predecessor is a Retry (a missed link would be permanent).
+        if (outcome.Kind != SubmissionEvaluationKind.AutoRejected)
+        {
+            Guid? superseded;
+            try
+            {
+                superseded = await FindSupersededInvoiceAsync(submissionId, invoiceId, outcome.Submission!, core, ct).ConfigureAwait(false);
+            }
+            catch (Exception readFault) when (readFault is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogWarning("Invoice submission {SubmissionId}: the earlier invoice for its firm and invoice number could not be read ({Fault}); retry",
+                    submissionId, readFault.GetType().Name);
+                return Result(SubmissionPersistStatus.Retry, submissionId, SupersedesReadFailedCode);
+            }
+
+            if (superseded is { } supersededId)
+            {
+                invoice[InvoiceFamilyCoreRecordGuard.SupersedesInvoiceColumn] = new EntityReference(InvoiceReviewService.InvoiceEntity, supersededId);
+            }
         }
 
         var initial = outcome.Kind == SubmissionEvaluationKind.AutoRejected ? InvoiceLifecycleStatus.Rejected : InvoiceLifecycleStatus.InReview;
@@ -933,6 +956,77 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
                 committed.SubmissionId, committed.InvoiceId, ex.GetType().Name);
             return committed with { Status = SubmissionPersistStatus.Retry, ReasonCode = TotalsFailedCode };
         }
+    }
+
+    /// <summary>
+    /// D-43 and EB-D-174 (task 104): the invoice this submission's invoice supersedes. Walking back from the MOST RECENT earlier invoice (by created on, then
+    /// id) for the same firm and firm invoice number, AUTOMATIC rejections are skipped (049 creates them Rejected with no approval row: nobody
+    /// decided them, and they must not hide the Returned invoice the firm is correcting); the first invoice that is not one is the predecessor,
+    /// and only when it is Returned to Firm. A human-Rejected (a Rejected invoice that has its approval row), or any other, most-recent invoice
+    /// is never linked: EB-D-174 skips automatic rejections only, and a rejection by a person ends the chain. The two invoices must regard the same single core record (<see cref="InvoiceFamilyCoreRecordGuard"/>
+    /// refuses a supersedes link across core records), else no link. Read app-only: a firm resubmitting must not be able to learn, from a
+    /// refusal, that an invoice it cannot read exists. Throws on a read fault (the caller retries).
+    /// </summary>
+    internal async Task<Guid?> FindSupersededInvoiceAsync(
+        Guid submissionId, Guid invoiceId, SubmissionSnapshot submission, InvoiceCoreRecord core, CancellationToken ct)
+    {
+        var number = submission.FirmInvoiceNumber?.Trim();
+        if (string.IsNullOrEmpty(number) || submission.FirmId == Guid.Empty)
+        {
+            return null;
+        }
+
+        var query = new QueryExpression(InvoiceReviewService.InvoiceEntity)
+        {
+            ColumnSet = new ColumnSet(["statuscode", "createdon", .. EligibleApproverResolver.CoreLookupColumns(InvoiceReviewService.InvoiceEntity)]),
+            Criteria = new FilterExpression(LogicalOperator.And),
+            NoLock = true,
+        };
+        query.Criteria.AddCondition(InvoiceVendorOrg, ConditionOperator.Equal, submission.FirmId);
+        query.Criteria.AddCondition(InvoiceReviewService.InvInvoiceNumber, ConditionOperator.Equal, number);
+        query.AddOrder("createdon", OrderType.Descending);
+        query.AddOrder(InvoiceReviewService.InvoiceEntity + "id", OrderType.Descending);
+
+        var earlier = (await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.Where(e => e.Id != invoiceId).ToList();
+
+        // The Rejected ones are told apart in ONE read: a human rejection (104) keeps its approval row, an automatic one (049) never had one.
+        var rejected = earlier.Where(e => StatusOfInvoice(e) == InvoiceStatusCodes.Rejected).Select(e => e.Id).ToList();
+        var withApproval = rejected.Count == 0 ? [] : await ReadInvoicesWithApprovalAsync(rejected, ct).ConfigureAwait(false);
+        var previous = earlier.FirstOrDefault(e => StatusOfInvoice(e) != InvoiceStatusCodes.Rejected || withApproval.Contains(e.Id));
+        if (previous is null || StatusOfInvoice(previous) != InvoiceStatusCodes.ReturnedToFirm)
+        {
+            return null;
+        }
+
+        if (EligibleApproverResolver.SingleCoreOf(InvoiceReviewService.InvoiceEntity, previous) is not { } previousCore
+            || !string.Equals(previousCore.Entity, core.EntityLogicalName, StringComparison.OrdinalIgnoreCase)
+            || previousCore.Id != core.RecordId)
+        {
+            _logger.LogWarning(
+                "Invoice submission {SubmissionId}: the Returned to Firm invoice {PreviousId} for its firm and invoice number is filed under another core record; no supersedes link",
+                submissionId, previous.Id);
+            return null;
+        }
+
+        return previous.Id;
+    }
+
+    private static int? StatusOfInvoice(Entity invoice) => invoice.GetAttributeValue<OptionSetValue>("statuscode")?.Value;
+
+    /// <summary>The ids among <paramref name="invoiceIds"/> that have an approval row (one read). A fault throws (the caller retries).</summary>
+    private async Task<HashSet<Guid>> ReadInvoicesWithApprovalAsync(IReadOnlyList<Guid> invoiceIds, CancellationToken ct)
+    {
+        var query = new QueryExpression(ApprovalEntity)
+        {
+            ColumnSet = new ColumnSet(ApprovalInvoice),
+            Criteria = new FilterExpression(LogicalOperator.And),
+            NoLock = true,
+        };
+        query.Criteria.AddCondition(ApprovalInvoice, ConditionOperator.In, invoiceIds.Cast<object>().ToArray());
+        return (await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities
+            .Select(a => a.GetAttributeValue<EntityReference>(ApprovalInvoice)?.Id ?? Guid.Empty)
+            .Where(id => id != Guid.Empty)
+            .ToHashSet();
     }
 
     private async Task<Entity?> ReadSubmissionAsync(Guid submissionId, CancellationToken ct)

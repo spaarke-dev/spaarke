@@ -1114,6 +1114,12 @@ public class ExternalDocumentNarrowingGuardTests
         // ebilling-r1 task 103 fix round (K2): a refused transition clears the claim it wrote, conditional on the version just read.
         ["Sprk.Bff.Api.Services.Finance.InvoiceApprovalService::ReleaseClaimAsync"] =
             "Clears only sprk_decidedby, sprk_decidedon and sprk_approvedamount (DBNull, literal keys) on sprk_invoiceapproval (ApprovalEntity).",
+        // ebilling-r1 task 104: the reject / return claim, conditioned on the approval portion's row version.
+        ["Sprk.Bff.Api.Services.Finance.InvoiceRejectReturnService::DecideHeldAsync"] =
+            "Writes only sprk_decidedby and sprk_decidedon (ClaimFields, literal keys) on sprk_invoiceapproval (ApprovalEntity).",
+        // ebilling-r1 task 104: a refused transition clears the claim it wrote, conditional on the version just read.
+        ["Sprk.Bff.Api.Services.Finance.InvoiceRejectReturnService::ReleaseClaimAsync"] =
+            "Clears only sprk_decidedby and sprk_decidedon (DBNull, literal keys) on sprk_invoiceapproval (ApprovalEntity).",
         // ebilling-r1 task 090 (found at the merge of master's #2253 guard): the Stored File store's verified flip. It cannot ask the
         // refusal: sprk_storedfile is itself refused whole (AccessTables, uac-r2 F4), and this is its typed writer.
         ["Sprk.Bff.Api.Services.Finance.Files.StoredFileService::FlipToServableAsync"] =
