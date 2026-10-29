@@ -422,6 +422,27 @@ public class BillingFactLoaderTests
         byLine.PriorSubmissions.Single(p => p.SubmissionId == rejected).Lines.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task APriorsRemovedAdjustment_IsNotAPriorLine_ButItsDeactivatedFeeLineIs_Task102()
+    {
+        // Task 102 (NFR-09): a removed invoice-level adjustment is deactivated, never deleted. It stays out of every count of the invoice's lines,
+        // the prior lines a Duplicate rule compares included. A deactivated Fee line is still a line the firm billed.
+        Policy(RuleSet(RuleSetScope.Firm, FirmId), "FIRM-DUPLICATE", RuleType.Duplicate, DuplicateByLine);
+        var prior = PriorWithInvoice("INV-100.1", null);
+        var invoice = _world.ValueOf<EntityReference>("sprk_invoicesubmission", prior, "sprk_invoice")!.Id;
+        void Line(int sequence, int costType, int state) => _world.Add("sprk_billingevent", Guid.NewGuid(),
+            ("sprk_invoice", Ref("sprk_invoice", invoice)), ("sprk_linesequence", sequence), ("sprk_costtype", new OptionSetValue(costType)),
+            ("sprk_amount", new Money(10m * sequence)), ("statecode", new OptionSetValue(state)));
+        Line(1, 100000000, 0);   // an active Fee line
+        Line(2, 100000000, 1);   // a deactivated Fee line
+        Line(3, 100000002, 0);   // an active Adjustment
+        Line(4, 100000002, 1);   // a removed Adjustment
+
+        var loaded = await Loader().LoadAsync(Request(null), CancellationToken.None);
+
+        loaded.PriorSubmissions.Single().Lines.Select(l => l.Amount).Should().Equal(10m, 20m, 30m);
+    }
+
     [Theory]
     [InlineData("""{"type":"Duplicate","matchFields":["firmInvoiceNumber"]}""", false)]
     [InlineData("""{"type":"Duplicate","matchFields":["narrative"]}""", true)]

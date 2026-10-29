@@ -384,6 +384,7 @@ public static class EndpointMappingExtensions
         app.MapInvoiceContextEndpoints(); // ebilling-r1 task 106 (FR-33)
         app.MapInvoiceRelatedWorkEndpoints(); // ebilling-r1 task 107 (FR-34)
         app.MapInvoiceLineReviewEndpoints(); // ebilling-r1 task 100 (FR-31)
+        app.MapInvoiceAdjustmentEndpoints(); // ebilling-r1 task 102 (FR-32)
         app.MapInvoiceSubmissionEndpoints(); // ebilling-r1 task 044 (FR-17 internal channel)
         app.MapCodeSetMappingEndpoints(); // ebilling-r1 task 048 (FR-22)
         app.MapSubmissionOverrideEndpoints(); // ebilling-r1 task 105 (FR-19, FR-37)

@@ -303,6 +303,23 @@ public sealed class InvoiceReviewReadServiceTests
         review.Lines[2].ApprovedAmount.Should().Be(60m);
     }
 
+    [Fact(DisplayName = "102: the line read leaves out a removed (deactivated) Adjustment line and nothing else (NFR-09)")]
+    public async Task TheLineReadExcludesOnlyDeactivatedAdjustmentLines_Task102()
+    {
+        var w = new World();
+        w.AddLine(1, InvoiceLineStatus.Pending);
+
+        await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None);
+
+        var lineQuery = w.Queries.Single(q => q.EntityName == "sprk_billingevent");
+        var guard = lineQuery.Criteria.Filters.Single(f => f.Conditions.Any(c => c.AttributeName == "statecode"));
+        guard.FilterOperator.Should().Be(LogicalOperator.Or, "a line passes when it is not an Adjustment OR it is active");
+        guard.Conditions.Select(c => (c.AttributeName, c.Operator)).Should().BeEquivalentTo(new[]
+        {
+            ("sprk_costtype", ConditionOperator.NotEqual), ("sprk_costtype", ConditionOperator.Null), ("statecode", ConditionOperator.Equal),
+        });
+    }
+
     [Fact(DisplayName = "100: a Pending line is shown as Processing (D-58) and the stored status name is kept")]
     public async Task PendingIsShownAsProcessing()
     {
