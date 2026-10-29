@@ -864,14 +864,18 @@ Filed as a known limit (#2413). Not recomputed at a move.
 ### 13.5 Open questions
 
 1. ~~Owner: drop or refuse for a client index (§13.3).~~ **Decided by the owner 2026-10-29: drop.**
-2. ~~Owner and UAC-r2: are `sprk_aisearchindex` rows wanted in customer environments?~~ **Decided by the owner 2026-10-29: (A) no rows in customer environments.** Dev keeps its rows (re-owned per §13.2 (b)). The allow-list fix below still ships (provisioning). Provisioning's answer (2026-10-28): nothing creates them there. H2b creates the Azure AI Search index, not a Dataverse row, and ACME has 0 rows. The BFF's `DataverseAllowedIndexesProvider` falls back to appsettings.
+2. ~~Owner and UAC-r2: are `sprk_aisearchindex` rows wanted in customer environments?~~ **Decided by the owner 2026-10-29, revised the same day: (B) seed the canonical indexes, with no BU defaults.** (A) was first chosen and then withdrawn. The Semantic Search page's index picker (`aiSearchIndexService.listActiveSearchIndexes`, read as the user) needs the rows. With none it shows "No indexes configured for your role", and users can't pick among the 7 indexes.
+   - Provisioning seeds one `sprk_aisearchindex` row per `CanonicalIndexCatalog` entry, owned by the configuration team (H7c): name, endpoint of the stamp's own service, target entity type, display name and order. `sprk_isdefault` is set on the row matching `KnowledgeIndexName`.
+   - No business unit gets `sprk_ai_search_index`. FR-38 therefore leaves the record column empty, and indexing uses the settings default, as under (A).
+   - `DataverseAllowedIndexesProvider` then reads the allow-list from the rows. The `AiSearch__AllowedIndexes` settings fix (H4b) stays as its fallback.
+   - Dev keeps its rows (re-owned per §13.2 (b)). Provisioning's answer (2026-10-28): nothing creates them there. H2b creates the Azure AI Search index, not a Dataverse row, and ACME has 0 rows. The BFF's `DataverseAllowedIndexesProvider` falls back to appsettings.
    - Without rows, FR-38 leaves the column empty on every customer record, and indexing uses the appsettings fallback.
    - If rows are wanted per customer, provisioning seeds them in H12a, owned by the team.
-   - **Joint recommendation, provisioning + field-mapping (2026-10-28): (A) no rows in customer environments.**
+   - Joint recommendation, provisioning + field-mapping (2026-10-28), **since withdrawn**: (A) no rows in customer environments. It missed the Semantic Search picker.
      - H2b creates the same 7 canonical indexes on each stamp's own AI Search service. Isolation comes from the service endpoint, so a row adds only a target for the BU lookup.
      - Rows (B) pay off only when one customer needs different indexes per BU. They would add a second source of truth and a dependency on the owner team.
      - Fix needed either way (provisioning owns it): stamps set no `AiSearch__AllowedIndexes`. The allow-list is therefore empty (`AiSearchOptions.cs:103`), and every path that names an index returns 400 `INDEX_NOT_ALLOWED` on customer stamps (ACME). Provisioning's H4b will write the allow-list from the same `CanonicalIndexCatalog` H2b provisions. Live stamps need their owner's OK.
-     - Owner decided (A), 2026-10-29.
+     - Owner first chose (A), then (B) on 2026-10-29 once the picker dependency was found (above).
 3. **Owner (#2410):** Basic User reads rules but not profiles.
 4. **Dev arrangement (UAC-r2):** users homed in dev's root BU won't read team-owned rows in BU1 through Deep. That is the open dev-layout item, not routed around here.
 
