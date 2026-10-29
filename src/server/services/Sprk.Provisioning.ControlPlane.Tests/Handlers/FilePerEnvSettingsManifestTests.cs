@@ -307,6 +307,28 @@ public sealed class FilePerEnvSettingsManifestTests
         entries.Where(e => e.Indexed).Should().OnlyContain(e => PerEnvSourceCatalog.BySourceKey[e.ParameterKey!].IsList);
     }
 
+    [Fact]
+    public async Task ReadAsync_RealEmbeddedManifest_AiSearchAllowedIndexes_IsARequiredIndexedListFromH2b()
+    {
+        // T186 follow-up (AiSearch allow-list): H4b writes AiSearch__AllowedIndexes__N on both slots from the indexes
+        // H2b verified. A customer environment has no sprk_aisearchindex rows, so without it the BFF allow-list is
+        // empty and every index-naming call answers 400 INDEX_NOT_ALLOWED — the entry is required.
+        var entries = ((PerEnvSettingsManifestReadResult.Success)await NewManifest().ReadAsync(CancellationToken.None)).Entries;
+
+        var entry = entries.Single(e => e.Key == "AiSearch__AllowedIndexes");
+
+        entry.Indexed.Should().BeTrue();
+        entry.Required.Should().BeTrue();
+        entry.PerEnvSource.Should().Be(PerEnvSettingSource.FromHandlerOutput);
+        entry.ParameterKey.Should().Be("ai_search_index_names");
+        entry.IOptionsModuleName.Should().Be("AiSearchOptions");
+        var source = PerEnvSourceCatalog.BySourceKey["ai_search_index_names"];
+        source.IsList.Should().BeTrue();
+        source.ProducerHandlerId.Should().Be("H2b");
+        entries.Where(e => e.Key.StartsWith("AiSearch__AllowedIndexes", StringComparison.Ordinal))
+            .Should().ContainSingle("no scalar AiSearch__AllowedIndexes__N entry may sit beside the list");
+    }
+
     [Theory]
     [InlineData("from-intake-parameter:tenant_id", "true", "true", "is not a list source")]                       // scalar source, indexed
     [InlineData("from-intake-parameter:customer_workforce_tenant_ids", "false", "true", "is not `indexed: true`")]   // list source, not indexed

@@ -1351,8 +1351,15 @@ System Administrator application user there. **H10** follows (before H6 — §5.
 only when the intake says `solutionPackageType = unmanaged` (ADR-027 §3, amended 2026-10-07). It refuses to switch an
 environment's type and refuses a downgrade; an upgrade is `StageAndUpgrade`. Package definition, release, IAM and
 upgrade: [`SPAARKE-SOLUTION-RELEASE-PROCESS.md`](../procedures/SPAARKE-SOLUTION-RELEASE-PROCESS.md). H6 side built
-2026-10-07 (T218b). ⚠️ A real run fails at H6 until the package is published in the new format (T218c–e: content,
-git source, CI publish) — the store still holds the hand-made 2026-08-21 manifest.
+2026-10-07 (T218b); the store holds CI-published packages (1.2.4.0 since 2026-10-29).
+
+**After any SpaarkeMaster upgrade of a stamp** (an H6 run or a manual `pac solution import --stage-and-upgrade`), check
+the security roles against the release:
+`scripts/provisioning/Test-RolePrivilegeExpectations.ps1 -EnvironmentUrl <stamp> -ExpectationsPath
+scripts/provisioning/role-privilege-expectations/spaarkemaster-<version>.json` (read-only; exit 0 = match). A managed
+role loses a privilege the release removed only on a stage-and-upgrade, so a leftover means the wrong import method or a
+privilege added by hand. A leftover Signal Write or Decision Record Create lets callers bypass the BFF commit route. Add
+an expectations file for every release that changes roles (the owning project supplies the list).
 
 **H7** sets the 7 per-customer env-var values (§6.4).
 
@@ -1983,9 +1990,23 @@ The package has no `permissions`, `webApplicationInfo`, bot or knowledge capabil
    - scope `api://{bffAppRegId}/user_impersonation offline_access`;
    - PKCE **on**.
 
-   Save, then copy the **OAuth client registration ID**. With the Agents Toolkit the same values go through
-   `oauth/register` (`isPKCEEnabled: true`, `targetAudience: AnyTenant`, `applicableToApps: AnyApp`, no
-   `clientSecret`).
+   **The portal form cannot save these values (T186 ACME, 2026-10-28):** it marks the client secret required, and the
+   Spaarke Copilot Agent client has no secret (SPA redirect + PKCE), so a dummy value would make every sign-in fail.
+   Use the Agents Toolkit `oauth/register` instead, which takes no secret when `isPKCEEnabled: true`. Copy
+   `provisioning-runs/acme-b6941254-ac1b-42a6-8b12-dec7587090fc/copilot-auth-config/m365agents.yml` into the
+   customer's run record, change the name, base URL and scope, then run (operator's own Microsoft 365 sign-in):
+   `npm install -g @microsoft/m365agentstoolkit-cli`, `atk auth login m365 --tenant {SpaarkeTenantId}`,
+   `atk provision --env {customerId} --folder {that folder}`. The id lands in `env/.env.{customerId}` as
+   `SPAARKE_COPILOT_AUTH_CONFIG_ID` — commit that file: the toolkit skips creation only while that variable has a
+   value, so a run from a fresh folder creates a second auth config. Scope is comma-separated there; `appId` is
+   required by the driver and unused with `AnyApp`. The portal's **Client password authentication method** does not
+   apply (no secret). The portal still shows, edits and deletes the auth config. **Sign in with the Spaarke work
+   account**, not a personal Microsoft account. The same address can be both (ACME: the operator's @spaarke.com
+   address also exists as a personal account); when Microsoft asks which one, pick **Work or school account**. The
+   browser also reuses an already signed-in account, and `--tenant` stops neither. A personal account fails `oauth/register` with `Request failed with status code 401`;
+   `~/.fx/account/homeId.cache.appStudio` then ends in the consumer tenant `9188040d-6c67-4c5b-b112-36a304b66dad`.
+   Fix: `atk auth logout m365`, sign in again choosing the work account, re-run `atk provision` (safe — nothing was
+   created).
 7. **Record the id** on the customer's registry row. PATCH `sprk_copilotauthconfigid` on `sprk_dataverseenvironment`
    with your own identity (`pac data update` or the Web API). The id is not a secret; re-renders and decommission read
    it from the row.
