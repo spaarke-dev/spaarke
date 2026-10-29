@@ -2171,7 +2171,7 @@ Delete the column through the API, then import or recreate. Do this before impor
    `MSCRM.SolutionUniqueName`) and publish `sprk_signal` and `sprk_decisionrecord` only (`PublishXml`).
 7. **Verify** the metadata read now returns `Lookup` with `Targets = [sprk_recordtype_ref]`, then re-enable the writers
    (they must be on a build that writes the lookup, task 141) and clear the cached entity metadata
-   (`sdap:dv:entitymetadata:sprk_signal` and `sprk_decisionrecord`, up to 6 h in Redis) in the same window.
+   (`sdap:dv:entitymetadata:v2:sprk_signal` and `sprk_decisionrecord`, up to 6 h in Redis) in the same window.
 
 Between steps 5 and 6 the column is absent; keep that gap short and do not run Signal jobs inside it.
 
@@ -2198,7 +2198,7 @@ goes out in **two SpaarkeMaster versions**:
    `StageAndUpgrade`. Creating the lookup is then an ordinary additive change.
 6. **Verify** the metadata read returns `Lookup` with `Targets = [sprk_recordtype_ref]`, back-fill the lookup from the
    exported rows if there were any, then re-enable the writers (a build that writes the lookup, task 141) and clear the
-   cached entity metadata (`sdap:dv:entitymetadata:sprk_signal` and `sprk_decisionrecord`, up to 6 h in Redis).
+   cached entity metadata (`sdap:dv:entitymetadata:v2:sprk_signal` and `sprk_decisionrecord`, up to 6 h in Redis).
 
 Between steps 4 and 5 the column is absent; keep that gap short and do not run Signal jobs inside it. Both versions are
 cut at release time (`Assemble-SpaarkeMasterSolution.ps1 -Version`); this task did not bump the version, and the source

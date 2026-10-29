@@ -13,6 +13,7 @@ using Sprk.Bff.Api.Api.Finance;
 using Sprk.Bff.Api.Api.Insights;
 using Sprk.Bff.Api.Api.Membership;
 using Sprk.Bff.Api.Api.Platform;
+using Sprk.Bff.Api.Api.Records;
 using Sprk.Bff.Api.Api.Notifications;
 using Sprk.Bff.Api.Api.Office;
 using Sprk.Bff.Api.Api.Reporting;
@@ -228,6 +229,10 @@ public static class EndpointMappingExtensions
         // for Outlook taskpane (Create To Do ribbon + linked-todos banner).
         app.MapOfficeCommunicationsEndpoints();
         app.MapFieldMappingEndpoints();
+        // field-mapping-server-write-path-r1 task 072 (FR-31): GET /api/v1/records/{table}/{id}/family — a record's Filing
+        // family, read as the caller. Its own file and group instance; the gate is an equalised Read probe in the handler.
+        // UNCONDITIONAL (bff-extensions.md §F.1): RecordFamilyReader is registered unconditionally (AddDataverseMetadataServices).
+        app.MapRecordFamilyEndpoints();
         app.MapEventEndpoints();
         // Ontology platform R1 task 036: a Signal's decision plan resolved against the closed action catalog.
         app.MapDecisionPlanEndpoints();
