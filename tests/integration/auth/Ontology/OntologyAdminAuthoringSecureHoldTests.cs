@@ -75,6 +75,22 @@ public partial class OntologyAdminAuthoringEndpointTests
     }
 
     [Fact]
+    public async Task Publish_AsksTheResolverWithNoChildTable_SoTheAuthorWins_RootIncluded()
+    {
+        // D-197 / UAC round 137 ("author wins, including the root business unit"): the ownership question names NO child table.
+        // 194b's restricted-content step applies only when ChildEntityLogicalName is a restricted-content table; naming
+        // sprk_policyversion here (ForChild / ForRow) would make the resolver refuse every root-homed author with 503.
+        (await ScopedDryRun(PolicyId, MatterB)).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var response = await ScopedPublish(PolicyId, MatterB);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        var asked = _fixture.Ownership.Requests.Should().ContainSingle().Subject;
+        asked.ChildEntityLogicalName.Should().BeNull("a child table here would make 194b refuse root-homed authors (D-197)");
+        asked.WhenUnfiled.Should().Be(UnfiledOwnership.KeepCreator);
+    }
+
+    [Fact]
     public async Task Publish_WhenTheRequestedMatterTurnsSecureAfterTheScopeCheckPassed_IsScopeMatterSecured_AndWritesNothing()
     {
         // Case (i): the caller's read of MatterB says ordinary (CheckScopeAsync passes), but by the time the owner is asked the

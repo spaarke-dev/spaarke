@@ -164,6 +164,22 @@ public class CreateTaskNodeExecutorTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_RegardingADocument_FailsWithTheNamedRefusal_AndWritesNothing()
+    {
+        // UAC task 194b V-fix (verifier A F1): sprk_event has no regarding column for a document, so the task could not
+        // follow it; the node fails with the named reason before anything is written.
+        var config = @"{""subject"":""Review"",""regardingObjectId"":""" + Guid.NewGuid() + @""",""regardingObjectType"":""sprk_document""}";
+        SetupMockPassThrough();
+
+        var result = await _executor.ExecuteAsync(CreateValidContext(config), CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(NodeErrorCodes.ValidationFailed);
+        result.ErrorMessage.Should().Contain(Sprk.Bff.Api.Services.Ai.Nodes.TaskActionCore.RegardingNotFilableCode);
+        _entityServiceMock.Verify(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_WhenTheCoreCreatedNothing_ReturnsAnErrorNotTaskCreated()
     {
         // Task 141 fix round 2: an owner refusal makes TaskActionCore answer Guid.Empty (nothing is created). The node
@@ -230,8 +246,9 @@ public class CreateTaskNodeExecutorTests
         var config = $@"{{
             ""subject"":""Task"",
             ""regardingObjectId"":""{recordId}"",
-            ""regardingObjectType"":""sprk_document""
+            ""regardingObjectType"":""sprk_matter""
         }}";
+        // 194b V-fix: a document regarding is now refused (no sprk_event column; see the test above), so a supported type.
         var context = CreateValidContext(config);
 
         SetupMockPassThrough();

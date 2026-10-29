@@ -352,6 +352,7 @@ CLAUDE.md §11 applies: every entry must name a concrete behavior or contract th
   - Check the build's exit code and confirm your test appears **by name**.
   - `--no-incremental` in a per-project loop breaks the next project's `obj/ref` (CS0006).
   - `dotnet clean` / `Remove-Item` near build paths is rejected by the permission layer and runs nothing.
+- **"Fails without the fix" checks on .NET** (2026-10-28): restoring the fixed file with `Copy-Item` keeps the copy's OLDER timestamp, so the incremental build keeps the pre-fix assembly and the fixed code still "fails". After restoring, set `(Get-Item <file>).LastWriteTime = Get-Date` before the next build. Jest is unaffected (it caches by content).
 - **Known pre-existing flakes** (2026-09-30 / 2026-10-03): `SseStreamingIntegrationTests.Cancellation_NoLingeringBackgroundTask_AfterClientAbort` (`Task.Delay`) and PinnedMemory (passes alone).
 - **Office test hosts** (2026-09-30): the oid is `"test-user-oid"` (not a GUID); the factories register `RecordOwnershipResolverDouble` (`factory.Ownership`).
 - **CI pins Node 20**; this desktop runs Node 22 (2026-09-21) — local office-addins gate runs are advisory.

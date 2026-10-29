@@ -97,8 +97,7 @@ public class AnalysisResultPersistence
                         TargetEntityLogicalName = "sprk_analysis",
                         TargetRecordId = analysisId,
                     }
-                    : Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForParents(
-                        new[] { new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent("sprk_document", documentId) }))
+                    : AppOnlyAnalysisService.OwnershipOfNewAnalysis(documentId))
                     with { RequestedBy = requestedBy },
                 cancellationToken);
 

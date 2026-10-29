@@ -110,6 +110,30 @@ internal sealed class TaskActionCore
         };
 
     /// <summary>
+    /// UAC task 194b V-fix (verifier A F1): the named refusal for a task regarding an OWNERSHIP PARENT that
+    /// <c>sprk_event</c> has no regarding column for (a document, a to-do, an agreement, a billing event, …). Such a task
+    /// would be written with no parent on the row, so its owner question would name none and a task about a Secure record
+    /// would land ordinary; the reconciler could never ask about a column-less parent either. Fail closed: nothing is
+    /// written. A regarding type that is NOT an ownership parent keeps the degraded branch (the task is unfiled anyway).
+    /// </summary>
+    internal const string RegardingNotFilableCode = "task_regarding_not_filable";
+
+    /// <summary>
+    /// The refusal (<see cref="RegardingNotFilableCode"/> and why) when a task regarding <paramref name="regardingType"/>
+    /// cannot be created, or <c>null</c> when it can: the type has an <c>sprk_event</c> regarding column, or it is not an
+    /// ownership parent. Asked by every caller before the create (the node executor, the action seam) and by
+    /// <see cref="CreateAsync"/> itself.
+    /// </summary>
+    internal static string? RegardingRefusalOf(string? regardingType, Guid? regardingId) =>
+        regardingId.HasValue
+        && !string.IsNullOrWhiteSpace(regardingType)
+        && !RegardingFieldByEntity.ContainsKey(regardingType)
+        && RecordOwnershipResolver.IsOwnershipParent(regardingType)
+            ? $"{RegardingNotFilableCode}: a task cannot be filed under a {regardingType.Trim()}: the task table has no "
+              + "regarding column for it, so the task's owner could not follow it."
+            : null;
+
+    /// <summary>
     /// <c>sprk_event.sprk_regardingrecordname</c>'s live maximum length (spaarkedev1 describe, read-only, 2026-10-02:
     /// NVARCHAR(1000)). A longer name would make Dataverse refuse the whole create (degraded Guid.Empty), so it is capped —
     /// the <c>InvoiceReviewService</c> precedent for a resolver name.
@@ -242,10 +266,21 @@ internal sealed class TaskActionCore
                     return Guid.Empty;
                 }
             }
+            else if (RegardingRefusalOf(input.RegardingObjectType, input.RegardingObjectId) is { } refusal)
+            {
+                // UAC task 194b V-fix (verifier A F1): an ownership parent with no regarding column on sprk_event. Created
+                // without it, the task would be asked about no parent and land in the acting user's team even under a Secure
+                // record. Refused, fail closed, in this class's error contract (Guid.Empty): nothing is written.
+                _logger.LogError(
+                    "CreateTask: refusing to create the sprk_event regarding {RegardingType} {RegardingId} ({Refusal}).",
+                    input.RegardingObjectType, input.RegardingObjectId, refusal);
+                return Guid.Empty;
+            }
             else
             {
-                // sprk_event has no typed regarding lookup for this entity — record the fact rather than
-                // silently mis-filing onto the wrong lookup. The task is still created (degraded regarding).
+                // sprk_event has no typed regarding lookup for this entity, and it is not an ownership parent — record the
+                // fact rather than silently mis-filing onto the wrong lookup. The task is still created (degraded regarding,
+                // unfiled).
                 _logger.LogWarning(
                     "CreateTask: no sprk_event regarding lookup for entity type '{RegardingType}'; creating the task without a regarding.",
                     input.RegardingObjectType);
@@ -259,10 +294,9 @@ internal sealed class TaskActionCore
         // task 152's Assigned To (written below). With NO parent, the supplied owner — else the acting user — is the
         // user whose business unit owns it (I-6; owner round 5: a BFF-created row goes to the creating identity's
         // business-unit team); with neither, nothing is created.
-        var regardingParent = input.RegardingObjectId is { } rid && !string.IsNullOrWhiteSpace(input.RegardingObjectType)
-            ? new RecordOwnershipParent(input.RegardingObjectType!, rid)
-            : null;
-        var ownerContext = RecordOwnershipContext.ForChild(entity, regardingParent) with
+        // UAC task 194b fix round R (B3): in sprk_event's primary order (ForChild → ForRow), never the regarding named first —
+        // the order the reconciler asks the written row in.
+        var ownerContext = RecordOwnershipContext.ForChild(entity) with
         {
             CallerSystemUserId = input.OwnerId ?? input.ActingUserId,
             RequestedBy = RecordRequester.Of(input.RequestedBySystemUserId), // task 146 c1-r1

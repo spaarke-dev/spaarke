@@ -269,7 +269,7 @@ internal static class TestRecordContainerResolver
 
         /// <summary>
         /// #2159 A2: the Secure Record business unit exists (the name query of
-        /// <c>SecureChildShareSynchronizer.ResolveSecureBusinessUnitAsync</c> finds <see cref="SecureRecordBusinessUnit"/>).
+        /// <c>SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync</c> finds <see cref="SecureRecordBusinessUnit"/>).
         /// A row is ISOLATED when its own business unit is it, or its owning team's (<see cref="Teams"/>) is. Unset (the
         /// default), this environment has none and no row is isolated.
         /// </summary>

@@ -262,6 +262,27 @@ public class DecisionActionExecutorsTests
     }
 
     [Fact]
+    public async Task ReviseBudget_AsksAboutTheRevisionInItsTablesPrimaryOrder_TheBudgetFirst()
+    {
+        // UAC task 194b R3b-2: sprk_budgetrevision's primary order is its budget, then its matter — the order the reconciler
+        // asks the written revision in; never the matter named first.
+        var questions = new List<RecordOwnershipContext>();
+        var writer = new WriterHarness();
+        var executor = new ReviseBudgetExecutor(Probe(CanWrite).Object, BudgetUser(MatterId), writer.Build(),
+            OwnerThatRecordsTheRequester(questions.Add).Object, new FakeTimeProvider(Now), NullLogger<ReviseBudgetExecutor>.Instance);
+
+        var outcome = await executor.ExecuteAsync(Request(ReviseParams()), CancellationToken.None);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Done);
+        var asked = questions.Should().ContainSingle("the plan asks once, before anything is written").Subject;
+        asked.TargetEntityLogicalName.Should().Be("sprk_budget");
+        asked.TargetRecordId.Should().Be(BudgetId);
+        asked.Parents.Should().Equal(new RecordOwnershipParent("sprk_budget", BudgetId), new RecordOwnershipParent("sprk_matter", MatterId));
+        asked.Parents.Should().Equal(RecordOwnershipContext.OrderedParentsOf(writer.Created.Single()),
+            "the writer asks exactly the question the reconciler asks about the written revision");
+    }
+
+    [Fact]
     public async Task ReviseBudget_WhenTheOwnerDecisionNamesNoPerson_RecordsNoPerson_AndStillCreatesOwnedByTheTeam()
     {
         var writer = new WriterHarness();
@@ -1164,6 +1185,8 @@ public class DecisionActionExecutorsTests
     {
         var sources = new Mock<DecisionParameterSources>(
             new Mock<IDataverseUserClient>().Object, new Mock<IGenericEntityService>().Object, new Mock<Sprk.Bff.Api.Infrastructure.Cache.ITenantCache>().Object,
+            new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
+            new Mock<Microsoft.Extensions.Options.IOptionsMonitor<Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalAccessOptions>>().Object,
             NullLogger<DecisionParameterSources>.Instance)
         { CallBase = false };
         sources.Setup(s => s.OptionsAsync(It.IsAny<HttpContext>(), "metadata:sprk_budget.sprk_budgetcategory", It.IsAny<CancellationToken>()))
@@ -1801,9 +1824,10 @@ public class DecisionActionExecutorsTests
         var revision = writer.Created.Should().ContainSingle().Subject;
         revision.GetAttributeValue<EntityReference>("ownerid").Should().Be(new EntityReference("team", team),
             "the revision must not fall to the writer's own business unit");
-        asked!.TargetEntityLogicalName.Should().Be("sprk_matter");
-        asked.TargetRecordId.Should().Be(MatterId);
-        asked.Parents.Should().Contain(new RecordOwnershipParent("sprk_budget", BudgetId));
+        // UAC task 194b R3b-2: asked over both, in sprk_budgetrevision's primary order (the budget first, then the matter).
+        asked!.TargetEntityLogicalName.Should().Be("sprk_budget");
+        asked.TargetRecordId.Should().Be(BudgetId);
+        asked.Parents.Should().Contain(new RecordOwnershipParent("sprk_matter", MatterId));
     }
 
     [Fact]

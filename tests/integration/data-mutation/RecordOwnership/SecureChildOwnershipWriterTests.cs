@@ -314,7 +314,12 @@ public class SecureChildOwnershipWriterTests
     [Fact]
     public async Task SignalEvaluation_ForASecureMatter_UpsertsSignalsOwnedByTheNamedTeam()
     {
-        var (service, upserts) = SignalEvaluation(World().Resolver(), SecureMatter);
+        // 194b R4-2: the signal is asked over its matter AND its snapshot, which the snapshot service owned like its matter.
+        var snapshot = Guid.NewGuid();
+        var (service, upserts) = SignalEvaluation(World()
+            .WithRecord("sprk_spendsnapshot", snapshot, Directory.SecureBu, owningTeam: Directory.SecureNamedTeam,
+                extra: new() { ["sprk_matter"] = new EntityReference("sprk_matter", SecureMatter) })
+            .Resolver(), SecureMatter, snapshot);
 
         var count = await service.EvaluateAsync(SecureMatter, CancellationToken.None);
 
@@ -326,7 +331,11 @@ public class SecureChildOwnershipWriterTests
     [Fact]
     public async Task SignalEvaluation_ForAnOrdinaryMatter_UpsertsSignalsOwnedByThatMattersTeam()
     {
-        var (service, upserts) = SignalEvaluation(World().Resolver(), OrdinaryMatter);
+        var snapshot = Guid.NewGuid();
+        var (service, upserts) = SignalEvaluation(World()
+            .WithRecord("sprk_spendsnapshot", snapshot, Directory.ChildBu, owningTeam: Directory.ChildTeam,
+                extra: new() { ["sprk_matter"] = new EntityReference("sprk_matter", OrdinaryMatter) })
+            .Resolver(), OrdinaryMatter, snapshot);
 
         await service.EvaluateAsync(OrdinaryMatter, CancellationToken.None);
 
@@ -958,9 +967,9 @@ public class SecureChildOwnershipWriterTests
     };
 
     private static (SignalEvaluationService Service, List<Dictionary<string, object?>> Upserts) SignalEvaluation(
-        IRecordOwnershipResolver ownership, Guid matterId)
+        IRecordOwnershipResolver ownership, Guid matterId, Guid? snapshot = null)
     {
-        var snapshotId = Guid.NewGuid();
+        var snapshotId = snapshot ?? Guid.NewGuid();
         var upserts = new List<Dictionary<string, object?>>();
         var fields = new Mock<IFieldMappingDataverseService>(MockBehavior.Loose);
         fields.Setup(f => f.QueryChildRecordIdsAsync("sprk_spendsnapshot", "sprk_matter", matterId, It.IsAny<CancellationToken>()))
