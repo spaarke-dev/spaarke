@@ -4,55 +4,49 @@
 > - **Standing rules:** the project `CLAUDE.md`.
 > - **Decisions:** `notes/session27-owner-decisions-and-research.md` (round 136 is the latest: customer BU = top level for customer records; 135: Unsecure keeps all access).
 > - **Defer list:** `notes/defer-issues.md`.
-> - **Delete design:** `notes/core-record-delete-design.md` (§12 = ebilling D-146, §13 = slice D Restrict, §14 = ebilling EB-D-148 Procedures).
-> - **Task 191 design:** `notes/2179-flagged-external-dataverse-design.md` (last section: D-185 input).
-> - **Last deploy + gate:** e56a3a51d4 (R3 #2386) deployed to dev 2026-10-28 ~14:11Z; gate PASS (a, b, d), (c) deferred to #2389. The ACME 0x80072560 proof-read failures and ID-LINK-RECON aborts are pre-existing (#2163). Previous: `notes/deploy-gate-2026-10-27-3ff2c04bf5.md`.
+> - **Delete design:** `notes/core-record-delete-design.md`.
+> - **Last deploy + gate:** e56a3a51d4 (R3 #2386) on dev 2026-10-28 ~14:11Z; gate PASS (a, b, d), (c) deferred to #2389.
 > - **Previous copy:** `notes/handoff-history/current-task-2026-10-22-cp60.md`.
 
-> **Last Updated**: 2026-10-28 (checkpoint #71).
+> **Last Updated**: 2026-10-28 (checkpoint #72).
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Mode** | Final push, round-90 wrap-up rules. Merge only when BOTH required checks (Router + "Client lint (type-aware ratchet)") are green. One background merge job at a time. Merge with `--squash --match-head-commit`, no `--delete-branch`, after `git merge-tree`. Deploy via R3 (owner's go given directly in R3's session). A task closes on merge + deploy + a server-side gate. |
-| **Fix bar** | The most technically correct fix; no complexity without value. Every defect found is fixed or filed. Public repo: no live exploit mechanism in issues, PRs, commits or committed notes. |
-| **Agents** | Opus for executors and verifiers, with every model stated. Helper scripts get a unique prefix in a private folder (temp `uacmerge/uacg/r194/`). Cap 4 concurrent. |
+| **Mode** | Final push, round-90 wrap-up rules. Merge only when Router + "Client lint (type-aware ratchet)" are green; one merge job at a time; `--squash --match-head-commit`, no `--delete-branch`, after `git merge-tree`. Deploy via R3 (the owner's go is given in R3's session). A task closes on merge + deploy + a server-side gate. |
+| **Fix bar** | The most technically correct fix; no complexity without value. Every defect found is fixed or filed. Public repo: no live exploit mechanism in issues, PRs, commits or committed notes (task 197: details chat only, neutral wording). |
+| **Agents** | Opus for executors and verifiers; Sonnet high for scoped re-checks and mapping. Every model is stated. Helper scripts use unique prefixes in private temp folders (`uacmerge/uacg/`). Cap 4 concurrent. |
 | **Peers** | R3 `spaarke-wt-spa-external-access-platform-08`, ebilling `spaarke-wt-ebilling-r1-5b`, word-add-in `spaarke-wt-spaarkeai-word-add-in-r1-c4`, field-mapping `spaarke-wt-field-mapping-server-write-pa-be`, provisioning `spaarke-wt-customer-provisioning-orchest-2f`, ontology `spaarke-wt-spaarke-ontology-platform-r1-79`. |
-| **Gate tooling** | App Insights `spe-insights-dev-67e2xz` (RG `spe-infrastructure-westus2`), role `spaarke-bff-dev`. BFF host `spaarke-bff-dev.azurewebsites.net`. Job status: `GET /api/admin/jobs/{jobId}/status` (in-memory store). Script: temp `uacmerge/uacg/uacg_gate.sh`. |
+| **Gate tooling** | App Insights `spe-insights-dev-67e2xz` (RG `spe-infrastructure-westus2`). BFF `spaarke-bff-dev.azurewebsites.net`. Script: temp `uacmerge/uacg/uacg_gate.sh`. |
 
 ## Next actions (mine)
-1. **Task 194b (#2339 fix):** C:/wt194, branch `fix/uac-194b-ownership-primary`. 194 deployed with `OrdinaryMovesWritesEnabled` OFF. History: `notes/task-194-ordinary-parent-move.md` (on the branch). K issues: #2378-#2381. Brief: temp `uacmerge/uacg/r194/r4b2_brief.md`.
-   - Accepted: R5 bd5208d0b5, V-fix 3743e0fabf, cfa7bbe421, R4b-2 e34be8fa39, R4b-2b 129a2225e3. R4b-3 b85176fc6e superseded (round 136).
-   - R4b-2c db5880dd32 (content team per customer top BU) → R4b-2d 92e3cc8ed7 (re-file keeps author) → R4b-3b **12aeb8742a** (`Set-CustomerOwnerTeams.ps1` sets up both teams; config role Read Basic on sprk_aisearchindex/fieldmappingprofile/fieldmappingrule; guard 31/31; ArchTests 1629; dev dry run BU1 = 12 steps, re-own 11/7/40 rows) → 2 security passes done (A: reconcile fault crash, team-type pin, report broad-owner rows; B: script Secure-unit fail-open, guard one-way, doc order, seeder claim) → R4b-4 **68ffc79cf0** (all fixed; ArchTests 1637; +620 B; Pester job in ci-standalone-checks) → **fix-diff re-check RUNNING** (Sonnet). 196b input recorded.
-   - Next: fixes → ontology re-check → owner go: `Set-CustomerOwnerTeams.ps1` on BU1 cb15f587 + field-mapping re-own → sha to ebilling (EB-D-168a) and field-mapping → PR → merge → deploy via R3 → report-only run + ontology memo-LIKE proof → owner go for writes → close. Remove C:/wt194 (check junctions).
-2. **R3:** #2386 merged as e56a3a51d4, -Verify PASS, deployed to dev ~14:11Z. **Gate PASS** (sent to R3): health OK; report-only, moved=0; the dev FLS-READ proofs pass; the ACME failures are pre-existing (#2163); the caller-stamp check is deferred to #2389. Master BFF to dev is unblocked. Remove C:/wtuacsec when convenient (check junctions first).
-3. **Task 193 (#2338, one "Add person"):** C:/wt193, branch `fix/uac-193-add-person`. Notes on the branch: `notes/task-193-add-person-notes.md` (the branch copy supersedes the project copy; take it on merge). #2371, #2377 filed.
-   - Round 131 (share + paired dated workforce grant; revoke ends both): G1 6a73134482 → G2 a9dd8ce420 → G2b a970a05b33 → G3a c2512a8075 → G3b f6eb5acd3f (modal text; TrackingFieldTrio 1.0.58) → G3c **efb948ace3** (master merged clean; guide + notes; unit 12129/0, Arch 1620, BFF int 186/0/8, Spe 353/0/23; publish +98 KiB) → G3d **7c592a34ee** (no timing promise; TrackingFieldTrio 1.0.59) → G3e **c4ed79080b** (orphaned grant standalone wording; 1.0.60) → **2 security passes RUNNING** (A server, B client).
-   - Then: two security passes → PR (owner behaviour table) → merge → owner go for `Deploy-ExternalRecordAccessPairedSystemUser.ps1` → deploy via R3 → TrackingFieldTrio import via Import-SolutionScoped.ps1 → gate. Owner Q (optional): turn R5 writes on?
-4. **Task 195 (#2352 (i)+(ii), owner round 129):** the server writes a project's regarding pair (one root); N:N stays association only (three N:N cases in the POML); backfill 7 dev projects (owner go). Starts after 194b merges. Field-mapping W7/040 depend on 194b + 195 shas.
-4b. **Task 196 (rounds 135 + 138): Unsecure keeps all access; child shares follow the record.** Map DONE; design `notes/task-196-unsecure-keeps-access.md`. 196a after 193 merges; 196b after 194b. Filed #2406 (JIT prune), #2407 (team shares hidden).
-5. **#2382:** MERGED as PR #2394 (bafe310ca4); dev roles live, -Verify PASS. Follow-ups: #2393, #2395-#2398; #2396 needs a role decision (Report Card create). #2401 closed (round 136: dev layout). Next: ask the owner to retry UAT check 5, then close #2382. Lint-staged stash backups remain (drop by tag later).
-6. **ebilling:** EB-D-162 merged into work/ebilling-r1 with EB-D-150 entry removed; live on dev (-Verify PASS). Its master PR carries both integration suites' counts.
-7. **#2027:** org audit verified on dev (-1, on, on). ACME read-back and table flags asked of provisioning.
-7b. **Task 197 (owner 10-28: fix now, no tracking; details chat only):** C:/wt197, branch `fix/uac-197-stored-match-and-session-owner` off a8314c2e0e. Split into runs A-G; A+B DONE at 1e86c8b107 (session owner checks; invoice search trim); parent-session empty-owner fix + 197-C RUNNING, then (stored trace), D (client), E (dev report-only script), F (guard), G (gates). -Apply for the dev clean-up needs the owner's go. Then 2 security passes → PR (neutral text) → merge → deploy via R3. Chat copies of record documents accepted as a K (owner).
-8. **#2292** (membership junction never populated): filed; fix when there is capacity.
+1. **Task 194b (#2339):** C:/wt194, `fix/uac-194b-ownership-primary`, head **7f25e18ecc** (R4b-4 68ffc79cf0 + R4b-4b: dead check removed; the guard refuses any other write of `$DeclaredRoleFiles`; Phase 7a needs Secure Record first; guard 48/48, Pester 4/4 on 5.7.1 and 6.2.0). Re-check of R4b-4 all VERIFIED. **Ontology re-check asked** (12aeb8742a..7f25e18ecc).
+   - Next: ontology verdict → owner go: `Set-CustomerOwnerTeams.ps1` on BU1 cb15f587 + field-mapping re-own → sha to ebilling (EB-D-168a) and field-mapping → PR → merge → deploy via R3 → report-only run + ontology memo-LIKE proof → owner go for writes → close. Check the first CI run of the Pester job. Remove C:/wt194 (check junctions).
+2. **Task 193 (#2338, one "Add person"):** C:/wt193, `fix/uac-193-add-person`, head c4ed79080b (G3e). Branch notes `notes/task-193-add-person-notes.md` supersede the project copy.
+   - Security pass A findings F-1..F-4 (paired end never retried; system paths record Declined; SPE failure → untrue pairedGrantEnded; client abort leaves the grant) and the server part of pass B (F1 read failure wording, F5 would_lower counts lapsed rows, F3 ExpiryDate on ShareRecordWithUserRequest) → **G4a RUNNING**.
+   - **G4b to launch** (client/docs): the client wording, the share note respecting veto/suppression, the client sending expiryDate, the guide's adoption text corrected (owner: a duplicate access → removing any part removes all; a manual revoke of Assigned-To access holds until re-added or the Assigned To is re-set), the K3 duplicate-name test, the would_lower wording.
+   - Then: fix-diff re-check → PR (owner behaviour table) → merge → owner go for `Deploy-ExternalRecordAccessPairedSystemUser.ps1` → deploy via R3 → TrackingFieldTrio (1.0.60) import via Import-SolutionScoped.ps1 → gate. After merge, tell ontology (K-1 conflict with #2418). Owner Q (optional): turn R5 writes on.
+3. **Task 197 (owner 10-28: fix now, no tracking):** C:/wt197, `fix/uac-197-stored-match-and-session-owner`. A+B 1e86c8b107, parent-session 5ce954ae8b, C **422767bc05** (stored provenance v2: ids and reason codes only).
+   - D decisions sent: hide unknown/unreadable (fail closed); one shared batched viewer resolver in `Spaarke.Communication.Components` generalized from the CommunicationConnections PCF resolver; review state unchanged by hiding (test); no resolver → no candidate cards. **D1 RUNNING** (same agent), then D2–D4.
+   - Then E (dev report-only data script to v2), F (search-trim guard + only `SerializeProvenance` writes `sprk_associationprovenance`; invoice search allow-listed), G (gates) → 2 security passes → PR (neutral) → merge → deploy via R3 → owner go for the dev clean-up -Apply.
+4. **R3:** UAC OK sent for the SpaarkeMaster 1.2.4.0 publish and the dev BFF deploy of 136568cf70 (roles: reductions plus AppendTo-only; #2417/#2419 checked). Waiting for the deploy time → run the gate.
+5. **Task 195 (#2352 (i)+(ii)):** after 194b merges. **Task 196:** 196a after 193 merges; 196b after 194b (input: restore the pre-secure author on Unsecure, `notes/task-196-unsecure-keeps-access.md`).
+6. **#2382:** merged (bafe310ca4); dev roles live, -Verify PASS. Ask the owner to retry UAT check 5, then close. #2396 needs a role decision.
+7. **#2292** (membership junction never populated): fix when there is capacity.
 
 ## Peer reviews owed (UAC is the gate)
-- **ebilling (10-28):** 095 OK to merge into work (#2390). 094 at c7253943f5: NOT READY (F4-1 withdraw before the deletes; K2-b, K4-a, K1-a, sprk_storedfile role guard); `.eml` anchor ACCEPTED. 098 round 5 at 797398d548: READY (F1, F3 fixed; EB-D-169: 503 on a faulted decision). Standing: no Procedure-table role privilege without UAC review; D-185.
-- **ebilling 086:** superseded by round 131/136: hard-deny ordinary rows → the customer-BU restricted-content team (194b R4b-2c). EB-D-168a waits for the 194b sha. 191: no BU or Deep Read on these tables.
-- **field-mapping:** 017 is blocked; 018b is owed. 070 (#2367) and 037 (#2370) merged. After 194b merges master: run RecordFamilyEdgesGuardTests and 037's pins (`SecureRootInheritanceWriterTests.ChildRecordRoute_AWorkAssignmentUnderASecureMatter_…`, `RecordTableCopiedDefaultGuardTests`), and check the copied default still lands before the ownership step in `OwnedChildWrite.CreateAsync`. 071 takes the primary from 194b ordering and starts after 194b merges.
-- **field-mapping design §13 (#2399):** ACCEPTED at 86dc5c1f92 (FR-38, FR-39; #2413 known limit). §13.5 Q2 (index rows per customer) is field-mapping's to raise. AI trim inventory done.
+- **ebilling RecordFamilyEdges proposal** (task/ebill-master-sync 4beed693da, 22 rows + 2 baselines): three decisions (invoice ↔ work assignment cycle; submission.sprk_invoice; submission.sprk_reportdocument read as a parent by ParentsOf). **Code mapping RUNNING** → reply with a "UAC-r2 review:" line.
+- **ebilling 094 round 5:** re-check RUNNING → verdict to ebilling. 098 round 5 READY. 095 OK. Standing: no Procedure-table role privilege without UAC review; D-185.
+- **ontology #2418** (Assign Task email + bell): NOT READY (F-1..F-4, F1b); wait for the fix head after the owner answers ontology's policy questions; re-check the diff only. #2422 (D-198) APPROVED; #2414 APPROVED; #2409 merged. Filed #2423.
+- **field-mapping:** §13 (#2399) accepted. After 194b merges: run RecordFamilyEdgesGuardTests and 037's pins; check the copied default lands before the ownership step in `OwnedChildWrite.CreateAsync`. 071 starts after 194b.
 - **word-add-in task 130:** two security passes when the PR arrives.
-- **ontology #2418** (task 168 Assign Task email + bell) at 8064311c54: NOT READY (F-1 no recipient access gate; F-2 fallback reach; F-3 job re-check; F-4 inactive contact). Owner Qs via ontology. K-1: conflicts with 193 `ContactUserRepresentation`. #2422 (D-198) APPROVED. Filed #2423 (send log names the sender address).
-- **ontology:** #2409 merge OK; #2414 (d as caller) APPROVED at 48340e1ed3. D-198 (secure matter currency = `ExternalAccess:CustomerBusinessUnitId`) rule confirmed with 5 tests asked.
 
 ## Owner items outstanding
-1. **Task 191:** F1 and S4 block T191b onward.
-2. **Task 190:** Apply, and the Restricted call on the 91 unmatched archives plus their 20 children.
-3. **Decisions:** #2343 schema delete; #2245; #2250; #2260; K5 / #2270 (via R3); #2262.
-4. **Optional live checks:** partner document read (D7); #2177 Outlook; #2161 re-file; T191 MDA/Copilot/grid checks.
-5. **Carried:** #2163 environment-change go; 186 intake checks 3/5b/6 and the Workforce role export; 036 gates (ii)–(vi); #2153 sign-off (#2152, C:/wt2152, draft).
+1. Task 191: F1 and S4 block T191b onward. Task 190: Apply + the Restricted call on the 91 unmatched archives.
+2. Decisions: #2343, #2245, #2250, #2260, K5/#2270 (via R3), #2262, #2396; the dev arrangement for root-homed users.
+3. Optional live checks: D7 partner document read; #2177; #2161; T191 MDA/Copilot/grid.
+4. Carried: #2163 environment go; 186 intake checks 3/5b/6; 036 gates (ii)–(vi); #2153 sign-off.
 
 ## Recently filed
-#2393, #2395-#2398, #2406, #2407 (this session); #2401 closed.
+#2423 (send log names the sender address); peers: #2410, #2411, #2413, #2415, #2424-#2426.
