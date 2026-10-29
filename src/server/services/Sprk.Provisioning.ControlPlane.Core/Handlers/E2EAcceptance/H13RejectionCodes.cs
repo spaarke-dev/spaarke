@@ -129,6 +129,16 @@ public static class H13Rejections
     /// <summary>Task 263: the customer mailbox check reached no verdict (missing input, sidecar or Dataverse unreachable). Resumable.</summary>
     public const string CustomerMailboxInconclusive = "h13-customer-mailbox-inconclusive";
 
+    /// <summary>
+    /// #2429: a customer owner team H7c set up is not in the declared state — missing, ambiguous, not an Owner team, a member,
+    /// another role, its role assigned elsewhere, a privilege missing, at another depth or outside its file — or the customer
+    /// unit is refused. QuarantineRequired.
+    /// </summary>
+    public const string CustomerOwnerTeamsFailed = "h13-customer-owner-teams-failed";
+
+    /// <summary>#2429: the customer owner teams check reached no verdict (missing input, Dataverse unreachable). Resumable.</summary>
+    public const string CustomerOwnerTeamsInconclusive = "h13-customer-owner-teams-inconclusive";
+
     // ---- Keyless stamp (task 230b, owner D13) ----
 
     /// <summary>
@@ -233,6 +243,9 @@ public static class H13Gates
 
     /// <summary>Flips to Verified when the customer's shared mailbox and its verified account row are in place (task 263).</summary>
     public const string CustomerMailboxVerified = "h13-customer-mailbox";
+
+    /// <summary>Flips to Verified when both customer owner teams H7c set up are in the declared state (#2429).</summary>
+    public const string CustomerOwnerTeamsVerified = "h13-customer-owner-teams";
 
     /// <summary>Flips to Verified when ALL 7 §4B T1–T7 trap re-verifications pass (SC #6).</summary>
     public const string TrapCatalogVerified = "h13-trap-catalog";

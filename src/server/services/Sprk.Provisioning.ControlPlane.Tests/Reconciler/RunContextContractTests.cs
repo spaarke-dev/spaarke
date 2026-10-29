@@ -78,6 +78,7 @@ public sealed class RunContextContractTests
         ["SolutionImport"] = HandlerIds.H6,
         ["EnvVarValues"] = HandlerIds.H7,
         ["SecureRecordSetup"] = HandlerIds.H7b,
+        ["CustomerOwnerTeams"] = HandlerIds.H7c,   // #2429 (H7c)
         ["SpeContainer"] = HandlerIds.H8,
         ["BffDeploy"] = HandlerIds.H9,
         ["DataverseAppUserGraphParity"] = HandlerIds.H10,

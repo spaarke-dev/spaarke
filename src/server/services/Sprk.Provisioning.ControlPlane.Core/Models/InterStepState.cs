@@ -237,6 +237,29 @@ public sealed class InterStepState
     [ProducedBy(HandlerIds.H10)]
     public string? CustomerBusinessUnitId { get; set; }
 
+    /// <summary>
+    /// #2429 (H7c): the memberless Owner team "Spaarke Restricted Content Owners" in the customer's top business unit
+    /// (<see cref="CustomerBusinessUnitId"/>), holding that unit's copy of "Restricted Content Owner". Canonical "D" GUID.
+    /// Written only once H7c has verified both teams.
+    /// </summary>
+    /// <remarks>CONTROLLED SCHEMA EXTENSION (same discipline as <see cref="CustomerBusinessUnitId"/>).</remarks>
+    [JsonPropertyName("restrictedContentOwnerTeamId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [ProducedBy(HandlerIds.H7c)]
+    public string? RestrictedContentOwnerTeamId { get; set; }
+
+    /// <summary>
+    /// #2429 (H7c): the memberless Owner team "Spaarke Customer Configuration Owners" in the customer's top business unit,
+    /// holding that unit's copy of "Customer Configuration Owner". Canonical "D" GUID. H12b binds the owner of the
+    /// customer configuration rows it seeds to it (field-mapping FR-39; a later change). Written only once H7c has
+    /// verified both teams.
+    /// </summary>
+    /// <remarks>CONTROLLED SCHEMA EXTENSION (same discipline as <see cref="CustomerBusinessUnitId"/>).</remarks>
+    [JsonPropertyName("customerConfigurationOwnerTeamId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [ProducedBy(HandlerIds.H7c)]
+    public string? CustomerConfigurationOwnerTeamId { get; set; }
+
     /// <summary>Correlation ID for the SPE consent flow (design intent: H0.5 output). No handler writes it today.</summary>
     [JsonPropertyName("speConsentCorrelationId")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

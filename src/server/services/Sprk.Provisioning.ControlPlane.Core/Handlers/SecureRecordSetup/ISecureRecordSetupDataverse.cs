@@ -26,6 +26,12 @@ public sealed record SecureSetupBusinessUnit(Guid Id, string Name, Guid? ParentI
 public sealed record SecureSetupTeam(Guid Id, string Name, Guid BusinessUnitId, bool IsDefault);
 
 /// <summary>
+/// #2429 (H7c): a team with its <c>teamtype</c> (0 Owner, 1 Access, 2 Security group, 3 Office group; -1 when the row
+/// carries none, so it never reads as an Owner team).
+/// </summary>
+public sealed record SecureSetupTypedTeam(Guid Id, string Name, Guid BusinessUnitId, bool IsDefault, int TeamType);
+
+/// <summary>
 /// A security role. <paramref name="ParentRootRoleId"/> ≠ <paramref name="Id"/> means a replica of an ancestor unit's role.
 /// <paramref name="RoleTemplateId"/> is the platform role template the role was made from (null for a custom role).
 /// </summary>
@@ -150,6 +156,18 @@ public interface ISecureRecordSetupDataverse
     /// <summary>S13: up to <paramref name="top"/> rows whose column is NULL.</summary>
     Task<IReadOnlyList<Guid>> ListRowsWithNullColumnAsync(SecureRecordSetupTarget target, SecureSetupTableIdentity table, string attributeLogicalName, int top, CancellationToken cancellationToken);
 
+    /// <summary>#2429 (H7c): every team with this name, in every unit and of every type (default teams included), every page.</summary>
+    Task<IReadOnlyList<SecureSetupTypedTeam>> FindTeamsByNameAsync(SecureRecordSetupTarget target, string name, CancellationToken cancellationToken);
+
+    /// <summary>#2429 (H7c): the direct children of a business unit, every page.</summary>
+    Task<IReadOnlyList<SecureSetupBusinessUnit>> ListChildBusinessUnitsAsync(SecureRecordSetupTarget target, Guid parentId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// #2429 (H7c): every role whose parent root role is <paramref name="rootRoleId"/> — the copies Dataverse makes of a
+    /// root role in every child unit (the root role itself included when Dataverse reports it as its own root), every page.
+    /// </summary>
+    Task<IReadOnlyList<SecureSetupRole>> ListRoleCopiesAsync(SecureRecordSetupTarget target, Guid rootRoleId, CancellationToken cancellationToken);
+
     // ---------------- writes ----------------
 
     /// <summary>S1: creates a business unit under <paramref name="parentId"/>; returns its id.</summary>
@@ -181,4 +199,10 @@ public interface ISecureRecordSetupDataverse
 
     /// <summary>S13: sets the row's column to false (<c>If-Match: *</c> — never an upsert).</summary>
     Task SetColumnFalseAsync(SecureRecordSetupTarget target, SecureSetupTableIdentity table, Guid rowId, string attributeLogicalName, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// #2429 (H7c): <c>RemoveMembersTeam</c>. Called only on a team the same run created (a member it has then was added by
+    /// the create itself, never by a person — scripts/Set-CustomerOwnerTeams.ps1).
+    /// </summary>
+    Task RemoveTeamMembersAsync(SecureRecordSetupTarget target, Guid teamId, IReadOnlyList<Guid> userIds, CancellationToken cancellationToken);
 }

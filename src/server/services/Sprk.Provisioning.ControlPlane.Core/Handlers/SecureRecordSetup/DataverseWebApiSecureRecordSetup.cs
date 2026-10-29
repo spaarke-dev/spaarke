@@ -240,6 +240,22 @@ public sealed class DataverseWebApiSecureRecordSetup : ISecureRecordSetupDataver
     /// <inheritdoc/>
     public Task SetColumnFalseAsync(SecureRecordSetupTarget target, SecureSetupTableIdentity table, Guid rowId, string attributeLogicalName, CancellationToken cancellationToken)
         => Session(target).SetColumnFalseAsync(table, rowId, attributeLogicalName, cancellationToken);
+
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<SecureSetupTypedTeam>> FindTeamsByNameAsync(SecureRecordSetupTarget target, string name, CancellationToken cancellationToken)
+        => Session(target).FindTeamsByNameAsync(name, cancellationToken);
+
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<SecureSetupBusinessUnit>> ListChildBusinessUnitsAsync(SecureRecordSetupTarget target, Guid parentId, CancellationToken cancellationToken)
+        => Session(target).ListChildBusinessUnitsAsync(parentId, cancellationToken);
+
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<SecureSetupRole>> ListRoleCopiesAsync(SecureRecordSetupTarget target, Guid rootRoleId, CancellationToken cancellationToken)
+        => Session(target).ListRoleCopiesAsync(rootRoleId, cancellationToken);
+
+    /// <inheritdoc/>
+    public Task RemoveTeamMembersAsync(SecureRecordSetupTarget target, Guid teamId, IReadOnlyList<Guid> userIds, CancellationToken cancellationToken)
+        => Session(target).RemoveTeamMembersAsync(teamId, userIds, cancellationToken);
 }
 
 /// <summary>
@@ -485,6 +501,27 @@ internal sealed class SecureRecordSetupWebApi
                 $"Reading {table.LogicalName} rows with {attributeLogicalName} NULL", ct).ConfigureAwait(false))
             .Select(r => Id(r, table.PrimaryIdAttribute)).ToArray();
 
+    // #2429 (H7c) — the reads scripts/Set-CustomerOwnerTeams.ps1 makes that H7b does not (every page: fail closed).
+
+    internal async Task<IReadOnlyList<SecureSetupTypedTeam>> FindTeamsByNameAsync(string name, CancellationToken ct)
+        => (await GetAllValuesAsync(
+                $"teams?$filter=name eq '{Literal(name)}'&$select=teamid,name,teamtype,isdefault,_businessunitid_value",
+                $"Reading the teams named '{name}'", ct).ConfigureAwait(false))
+            .Select(TypedTeam).ToArray();
+
+    internal async Task<IReadOnlyList<SecureSetupBusinessUnit>> ListChildBusinessUnitsAsync(Guid parentId, CancellationToken ct)
+        => (await GetAllValuesAsync(
+                $"businessunits?$filter=_parentbusinessunitid_value eq {parentId}&$select=businessunitid,name,_parentbusinessunitid_value",
+                "Reading the child business units", ct).ConfigureAwait(false))
+            .Select(BusinessUnit).ToArray();
+
+    internal async Task<IReadOnlyList<SecureSetupRole>> ListRoleCopiesAsync(Guid rootRoleId, CancellationToken ct)
+        => (await GetAllValuesAsync(
+                $"roles?$filter=_parentrootroleid_value eq {rootRoleId}" +
+                "&$select=roleid,name,_businessunitid_value,_parentrootroleid_value,_roletemplateid_value",
+                "Reading the role's copies", ct).ConfigureAwait(false))
+            .Select(Role).ToArray();
+
     // ------------------------------------------------------------ writes
 
     internal Task<Guid> CreateBusinessUnitAsync(string name, Guid parentId, CancellationToken ct)
@@ -552,6 +589,16 @@ internal sealed class SecureRecordSetupWebApi
     internal Task SetColumnFalseAsync(SecureSetupTableIdentity table, Guid rowId, string attributeLogicalName, CancellationToken ct)
         => WriteAsync(HttpMethod.Patch, $"{table.EntitySetName}({rowId})", new Dictionary<string, object?> { [attributeLogicalName] = false },
             $"Setting {table.LogicalName}.{attributeLogicalName}", ct, ifMatchAny: true);
+
+    internal Task RemoveTeamMembersAsync(Guid teamId, IReadOnlyList<Guid> userIds, CancellationToken ct)
+        => WriteAsync(HttpMethod.Post, $"teams({teamId})/Microsoft.Dynamics.CRM.RemoveMembersTeam", new Dictionary<string, object?>
+        {
+            ["Members"] = userIds.Select(id => new Dictionary<string, object?>
+            {
+                ["@odata.type"] = "Microsoft.Dynamics.CRM.systemuser",
+                ["systemuserid"] = id,
+            }).ToArray(),
+        }, "RemoveMembersTeam", ct);
 
     // ------------------------------------------------------------ plumbing
 
@@ -691,6 +738,12 @@ internal sealed class SecureRecordSetupWebApi
     private static SecureSetupTeam Team(JsonElement e)
         => new(Id(e, "teamid"), Text(e, "name") ?? string.Empty, Id(e, "_businessunitid_value"),
             e.TryGetProperty("isdefault", out var d) && d.ValueKind == JsonValueKind.True);
+
+    /// <summary>#2429 (H7c): a missing or non-numeric teamtype reads as -1, never as 0 (Owner) — fail closed.</summary>
+    private static SecureSetupTypedTeam TypedTeam(JsonElement e)
+        => new(Id(e, "teamid"), Text(e, "name") ?? string.Empty, Id(e, "_businessunitid_value"),
+            e.TryGetProperty("isdefault", out var d) && d.ValueKind == JsonValueKind.True,
+            e.TryGetProperty("teamtype", out var type) && type.ValueKind == JsonValueKind.Number && type.TryGetInt32(out var value) ? value : -1);
 
     private static SecureSetupRole Role(JsonElement e)
         => new(Id(e, "roleid"), Text(e, "name") ?? string.Empty, Id(e, "_businessunitid_value"), OptionalId(e, "_parentrootroleid_value"),

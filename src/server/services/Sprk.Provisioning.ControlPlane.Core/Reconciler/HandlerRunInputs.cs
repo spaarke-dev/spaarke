@@ -205,6 +205,15 @@ public static class HandlerRunInputs
                 // and that both application users are in it (INCOMING-145 §6 T1/T3).
                 RunInput.Output(nameof(InterStepState.CustomerBusinessUnitId)),
             ],
+            [HandlerIds.H7c] =
+            [
+                Tenant,
+                // #2429: H7b's environment and identity — the environment H5 adopted, signed in to as the BFF app registration (H3).
+                RunInput.Output(nameof(InterStepState.DataverseEnvUrl)),
+                RunInput.Output(nameof(InterStepState.BffAppRegId)),
+                // The customer's top business unit H10 created — the owner teams live there (never the root).
+                RunInput.Output(nameof(InterStepState.CustomerBusinessUnitId)),
+            ],
             [HandlerIds.H8] =
             [
                 Tenant,

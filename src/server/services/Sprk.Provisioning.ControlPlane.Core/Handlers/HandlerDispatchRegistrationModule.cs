@@ -53,6 +53,7 @@ using Sprk.Provisioning.ControlPlane.Handlers.BffDeploy;
 using Sprk.Provisioning.ControlPlane.Handlers.BicepInfraDeploy;
 using Sprk.Provisioning.ControlPlane.Handlers.BulkAppSettings;
 using Sprk.Provisioning.ControlPlane.Handlers.ConsentCapture;
+using Sprk.Provisioning.ControlPlane.Handlers.CustomerOwnerTeams;
 using Sprk.Provisioning.ControlPlane.Handlers.DataverseAppUserGraphParity;
 using Sprk.Provisioning.ControlPlane.Handlers.DataverseEnvCreation;
 using Sprk.Provisioning.ControlPlane.Handlers.E2EAcceptance;
@@ -122,6 +123,9 @@ public static class HandlerDispatchRegistrationModule
         // T256: H7b — the per-environment Secure Record setup (SecureRecordSetupModule registers the concrete type).
         services.AddKeyedScoped<IProvisioningHandler>(
             HandlerIds.H7b, (sp, _) => sp.GetRequiredService<H7bSecureRecordSetupHandler>());
+        // #2429: H7c — the customer owner teams (CustomerOwnerTeamsModule registers the concrete type).
+        services.AddKeyedScoped<IProvisioningHandler>(
+            HandlerIds.H7c, (sp, _) => sp.GetRequiredService<H7cCustomerOwnerTeamsHandler>());
         services.AddKeyedScoped<IProvisioningHandler>(
             HandlerIds.H8, (sp, _) => sp.GetRequiredService<H8SpeContainerHandler>());
         services.AddKeyedScoped<IProvisioningHandler>(

@@ -310,6 +310,19 @@
       <LogicalName>Sprk.Provisioning.ControlPlane.Handlers.SecureRecordSetup.SecureRecordOwnerRole.json</LogicalName>
     </EmbeddedResource>
 
+    <!-- #2429 (H7c): the two declared customer owner roles, config/restricted-content-owner-role.json and
+         config/customer-configuration-owner-role.json — the files scripts/Set-CustomerOwnerTeams.ps1 reads. Linked from the
+         repository root (never copied), so H7c and the script grant exactly the same Read-at-Basic sets
+         (CustomerOwnerRoleSetParityTests). -->
+    <EmbeddedResource Include="..\..\..\..\config\restricted-content-owner-role.json"
+                       Link="Handlers\CustomerOwnerTeams\restricted-content-owner-role.json">
+      <LogicalName>Sprk.Provisioning.ControlPlane.Handlers.CustomerOwnerTeams.RestrictedContentOwnerRole.json</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\..\..\..\config\customer-configuration-owner-role.json"
+                       Link="Handlers\CustomerOwnerTeams\customer-configuration-owner-role.json">
+      <LogicalName>Sprk.Provisioning.ControlPlane.Handlers.CustomerOwnerTeams.CustomerConfigurationOwnerRole.json</LogicalName>
+    </EmbeddedResource>
+
     <!-- Task 150 (Wave G-5 Batch G-5A) — H12a YamlDotNet manifest engine +
          DV-REST seed writes. task-069's manifest.yaml (single source of
          truth per its own header) + the 4 flat-JSON content files

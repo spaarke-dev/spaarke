@@ -50,6 +50,7 @@ using Sprk.Provisioning.ControlPlane.Handlers.BicepInfraDeploy;
 using Sprk.Provisioning.ControlPlane.Handlers.BulkAppSettings;
 using Sprk.Provisioning.ControlPlane.Handlers.ConsentCapture;
 using Sprk.Provisioning.ControlPlane.Handlers.Credentials;
+using Sprk.Provisioning.ControlPlane.Handlers.CustomerOwnerTeams;
 using Sprk.Provisioning.ControlPlane.Handlers.DataverseAppUserGraphParity;
 using Sprk.Provisioning.ControlPlane.Handlers.DataverseEnvCreation;
 using Sprk.Provisioning.ControlPlane.Handlers.E2EAcceptance;
@@ -727,6 +728,8 @@ builder.Services.AddScoped<IEnvVarValuesWriter, DataverseWebApiEnvVarValuesWrite
 builder.Services.AddScoped<H7DataverseEnvVarValuesHandler>();
 // T256: H7b Secure Record setup — signs in exactly as H7 (EnvVarValuesOptions + the FR-39 factory above).
 builder.Services.AddH7bSecureRecordSetupHandler();
+// #2429: H7c customer owner teams — H7b's Dataverse seam and identity (registered on the line above).
+builder.Services.AddH7cCustomerOwnerTeamsHandler();
 
 // Task 214 (H8-B rewrite, 2026-08-30): H8 SPE-container-CREATION handler
 // (H8-B semantics — container-TYPE creation retired to operator prereq per

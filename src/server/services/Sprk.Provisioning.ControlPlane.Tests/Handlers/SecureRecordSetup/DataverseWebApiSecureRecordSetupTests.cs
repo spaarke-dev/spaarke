@@ -327,6 +327,68 @@ public sealed class DataverseWebApiSecureRecordSetupTests
         (await act.Should().ThrowAsync<SecureRecordSetupDataverseException>()).Which.Kind.Should().Be(kind);
     }
 
+    // ------------------------------------------------------------ #2429 (H7c) — the customer owner teams' reads and writes
+
+    [Fact]
+    public async Task W13_FindTeamsByName_FiltersOnTheEscapedName_AndAMissingTeamTypeIsNeverAnOwnerTeam()
+    {
+        var owner = Guid.NewGuid();
+        var untyped = Guid.NewGuid();
+        var http = new Recorder().Respond(_ => Json(new
+        {
+            value = new object[]
+            {
+                new { teamid = owner, name = "O'Brien Owners", teamtype = 0, isdefault = false, _businessunitid_value = Unit },
+                new { teamid = untyped, name = "O'Brien Owners", isdefault = false, _businessunitid_value = Unit },
+            },
+        }));
+
+        var teams = await Api(http).FindTeamsByNameAsync("O'Brien Owners", CancellationToken.None);
+
+        var uri = Uri.UnescapeDataString(http.Requests.Single().Uri);
+        uri.Should().Contain("/teams?$filter=name eq 'O''Brien Owners'").And.Contain("teamtype").And.Contain("_businessunitid_value");
+        teams.Should().Equal(
+            new SecureSetupTypedTeam(owner, "O'Brien Owners", Unit, false, 0),
+            new SecureSetupTypedTeam(untyped, "O'Brien Owners", Unit, false, -1));
+    }
+
+    [Fact]
+    public async Task W13b_ChildUnits_AndRoleCopies_FilterOnTheirParent()
+    {
+        var units = new Recorder().Respond(_ => Json(new
+        {
+            value = new object[] { new { businessunitid = Unit, name = "Acme", _parentbusinessunitid_value = Role } },
+        }));
+        (await Api(units).ListChildBusinessUnitsAsync(Role, CancellationToken.None))
+            .Should().Equal(new SecureSetupBusinessUnit(Unit, "Acme", Role));
+        Uri.UnescapeDataString(units.Requests.Single().Uri).Should().Contain($"/businessunits?$filter=_parentbusinessunitid_value eq {Role}");
+
+        var copy = Guid.NewGuid();
+        var roles = new Recorder().Respond(_ => Json(new
+        {
+            value = new object[] { new { roleid = copy, name = "Restricted Content Owner", _businessunitid_value = Unit, _parentrootroleid_value = Role } },
+        }));
+        (await Api(roles).ListRoleCopiesAsync(Role, CancellationToken.None)).Single().Id.Should().Be(copy);
+        Uri.UnescapeDataString(roles.Requests.Single().Uri).Should().Contain($"/roles?$filter=_parentrootroleid_value eq {Role}");
+    }
+
+    [Fact]
+    public async Task W13c_RemoveMembersTeam_SendsSystemUserReferences()
+    {
+        var team = Guid.NewGuid();
+        var user = Guid.NewGuid();
+        var http = new Recorder().Respond(_ => new HttpResponseMessage(HttpStatusCode.NoContent));
+
+        await Api(http).RemoveTeamMembersAsync(team, [user], CancellationToken.None);
+
+        var request = http.Requests.Single();
+        request.Method.Should().Be(HttpMethod.Post);
+        request.Uri.Should().EndWith($"/teams({team})/Microsoft.Dynamics.CRM.RemoveMembersTeam");
+        var member = JsonDocument.Parse(request.Body!).RootElement.GetProperty("Members").EnumerateArray().Single();
+        member.GetProperty("@odata.type").GetString().Should().Be("Microsoft.Dynamics.CRM.systemuser");
+        member.GetProperty("systemuserid").GetGuid().Should().Be(user);
+    }
+
     // ------------------------------------------------------------ helpers
 
     private static SecureRecordSetupWebApi Api(Recorder http)

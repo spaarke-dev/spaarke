@@ -6,7 +6,7 @@
 //
 // PURPOSE:
 //   Single source of truth for every HandlerId literal used across the L2
-//   control plane: DagAdvancer's dependency-DAG map, each of the 22 handler
+//   control plane: DagAdvancer's dependency-DAG map, each of the 23 handler
 //   classes' own HandlerId-backing const, the keyed-DI registration surface
 //   (HandlerDispatchRegistrationModule), and (task 102) the dispatcher's
 //   envelope-driven GetKeyedService<IProvisioningHandler> resolution.
@@ -17,7 +17,7 @@
 //   DagAdvancer's dependency map is string-keyed.
 //
 // DISPATCHABLE VS SUB-STEP:
-//   21 of the 23 handler ids are independently enqueued via
+//   22 of the 24 handler ids are independently enqueued via
 //   HandlerEnvelope.HandlerId and therefore need a keyed DI registration --
 //   these are <see cref="Dispatchable"/>. The remaining two (H14a, and H14m since
 //   task 263) are orchestrated IN-PROCESS by H14IntegrationWiringHandler (ONE
@@ -85,6 +85,15 @@ public static class HandlerIds
     /// </summary>
     public const string H7b = "H7b";
 
+    /// <summary>
+    /// H7c (#2429 — unified-access-control-r2 task 194b; field-mapping FR-39) -- the customer owner teams: in the customer's
+    /// top business unit (H10), the memberless Owner teams "Spaarke Restricted Content Owners" and "Spaarke Customer
+    /// Configuration Owners", each holding that unit's copy of its root-unit role with exactly the Read-at-Basic set of
+    /// config/restricted-content-owner-role.json / config/customer-configuration-owner-role.json (a port of
+    /// scripts/Set-CustomerOwnerTeams.ps1). Runs after H7b; H9 waits for it; H13 re-verifies it.
+    /// </summary>
+    public const string H7c = "H7c";
+
     /// <summary>H8 -- SPE container CREATION (H8-B semantics per task 214, 2026-08-30). Container-TYPE is a pre-existing per-model operator prereq (docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md). Wire format literal "H8" is unchanged.</summary>
     public const string H8 = "H8";
 
@@ -137,6 +146,6 @@ public static class HandlerIds
     /// </summary>
     public static readonly IReadOnlyList<string> Dispatchable =
     [
-        H0, H05, H1, H2a, H2b, H3, H4, H4b, H5, H6, H7, H7b, H8, H9, H10, H11, H12a, H12b, H12c, H13, H14,
+        H0, H05, H1, H2a, H2b, H3, H4, H4b, H5, H6, H7, H7b, H7c, H8, H9, H10, H11, H12a, H12b, H12c, H13, H14,
     ];
 }

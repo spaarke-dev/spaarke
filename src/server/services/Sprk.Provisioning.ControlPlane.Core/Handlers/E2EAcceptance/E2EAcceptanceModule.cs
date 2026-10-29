@@ -220,6 +220,9 @@ public static class E2EAcceptanceModule
         // Task 263: H13's customer-mailbox check — reuses H14m's seams (ICustomerMailboxClient, ICommunicationAccountStore,
         // registered by AddH14IntegrationWiringHandler). Scoped: the account store is scoped.
         services.AddScoped<ICustomerMailboxVerifier, CustomerMailboxVerifier>();
+        // #2429: H13's customer owner teams check — H7c's procedure over H7b's seam (ISecureRecordSetupDataverse, registered
+        // by AddH7bSecureRecordSetupHandler). Scoped: the seam is scoped.
+        services.AddScoped<ICustomerOwnerTeamsVerifier, CustomerOwnerTeamsVerifier>();
         services.AddScoped<H13E2EAcceptanceGateHandler>();
 
         return services;

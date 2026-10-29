@@ -7,6 +7,8 @@
 //   - creating a business unit creates its default team, which may arrive holding System Administrator;
 //   - creating a role silently adds platform privileges at Global (SDK/plugin reads + the SharePoint four);
 //   - AddPrivilegesRole adds what was asked at Basic AND re-injects the SharePoint four.
+//   - (#2429, H7c) creating a role copies it into every unit below the one it is created in (Dataverse's role copies,
+//     each with the new role as its parent root role), and creating an owner team may add the caller as a member.
 // Every write is counted, so "a second run writes nothing" and "a dry run writes nothing" are assertions, not hopes.
 // No HTTP, no Moq (ADR-038).
 // -----------------------------------------------------------------------------
@@ -48,6 +50,18 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
     internal List<SecureSetupBusinessUnit> Units { get; } = [];
     internal Dictionary<Guid, Guid> UserUnit { get; } = [];
     internal List<SecureSetupTeam> Teams { get; } = [];
+
+    /// <summary>#2429 (H7c): a team's <c>teamtype</c>; absent = 0 (Owner).</summary>
+    internal Dictionary<Guid, int> TeamTypes { get; } = [];
+
+    /// <summary>#2429 (H7c): creating a role copies it into every unit below (false: the copies never appear).</summary>
+    internal bool RoleCopiesOnCreate { get; set; } = true;
+
+    /// <summary>#2429 (H7c): a member the platform adds to every owner team it creates (the script removes it), or none.</summary>
+    internal Guid? CreateOwnerTeamAddsMember { get; set; }
+
+    /// <summary>#2429 (H7c): RemoveMembersTeam is accepted but does not stick (verify-phase tests).</summary>
+    internal bool RemoveTeamMembersIgnored { get; set; }
     internal Dictionary<Guid, HashSet<Guid>> TeamMembers { get; } = [];
     internal List<SecureSetupRole> Roles { get; } = [];
     internal Dictionary<Guid, Dictionary<Guid, (string Name, string Depth)>> RolePrivileges { get; } = [];
@@ -452,6 +466,27 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
         return Task.FromResult<IReadOnlyList<Guid>>(NullFlagRows.TryGetValue(table.LogicalName, out var rows) ? rows.Take(top).ToArray() : []);
     }
 
+    public Task<IReadOnlyList<SecureSetupTypedTeam>> FindTeamsByNameAsync(SecureRecordSetupTarget target, string name, CancellationToken cancellationToken)
+    {
+        Read(nameof(FindTeamsByNameAsync));
+        return Task.FromResult<IReadOnlyList<SecureSetupTypedTeam>>(Teams
+            .Where(t => string.Equals(t.Name, name, StringComparison.OrdinalIgnoreCase))
+            .Select(t => new SecureSetupTypedTeam(t.Id, t.Name, t.BusinessUnitId, t.IsDefault, TeamTypes.GetValueOrDefault(t.Id)))
+            .ToArray());
+    }
+
+    public Task<IReadOnlyList<SecureSetupBusinessUnit>> ListChildBusinessUnitsAsync(SecureRecordSetupTarget target, Guid parentId, CancellationToken cancellationToken)
+    {
+        Read(nameof(ListChildBusinessUnitsAsync));
+        return Task.FromResult<IReadOnlyList<SecureSetupBusinessUnit>>(Units.Where(u => u.ParentId == parentId).ToArray());
+    }
+
+    public Task<IReadOnlyList<SecureSetupRole>> ListRoleCopiesAsync(SecureRecordSetupTarget target, Guid rootRoleId, CancellationToken cancellationToken)
+    {
+        Read(nameof(ListRoleCopiesAsync));
+        return Task.FromResult<IReadOnlyList<SecureSetupRole>>(Roles.Where(r => r.ParentRootRoleId == rootRoleId).ToArray());
+    }
+
     // ---------------- writes ----------------
 
     public Task<Guid> CreateBusinessUnitAsync(SecureRecordSetupTarget target, string name, Guid parentId, CancellationToken cancellationToken)
@@ -470,7 +505,12 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
     public Task<Guid> CreateOwnerTeamAsync(SecureRecordSetupTarget target, Guid businessUnitId, string name, string description, CancellationToken cancellationToken)
     {
         Write($"CreateOwnerTeam {name}");
-        return Task.FromResult(AddTeam(businessUnitId, name, isDefault: false));
+        var id = AddTeam(businessUnitId, name, isDefault: false);
+        if (CreateOwnerTeamAddsMember is { } member)
+        {
+            TeamMembers[id].Add(member);
+        }
+        return Task.FromResult(id);
     }
 
     public Task<Guid> CreateRoleAsync(SecureRecordSetupTarget target, Guid businessUnitId, string name, string description, CancellationToken cancellationToken)
@@ -480,6 +520,19 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
         foreach (var (privilegeId, privilegeName) in InjectedOnCreate)
         {
             RolePrivileges[id][privilegeId] = (privilegeName, "Global");
+        }
+        if (RoleCopiesOnCreate)
+        {
+            // Dataverse copies a role into every unit below the one it was created in; the copies share its privileges.
+            var below = new Queue<Guid>(Units.Where(u => u.ParentId == businessUnitId).Select(u => u.Id));
+            while (below.TryDequeue(out var unit))
+            {
+                AddRole(unit, name, parentRootRoleId: id);
+                foreach (var child in Units.Where(u => u.ParentId == unit))
+                {
+                    below.Enqueue(child.Id);
+                }
+            }
         }
         return Task.FromResult(id);
     }
@@ -541,6 +594,19 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
         if (!ProfileAssociationsIgnored.Contains(profileId))
         {
             ProfileUsers[profileId].Add(userId);
+        }
+        return Task.CompletedTask;
+    }
+
+    public Task RemoveTeamMembersAsync(SecureRecordSetupTarget target, Guid teamId, IReadOnlyList<Guid> userIds, CancellationToken cancellationToken)
+    {
+        Write($"RemoveTeamMembers {teamId} {userIds.Count}");
+        if (!RemoveTeamMembersIgnored)
+        {
+            foreach (var user in userIds)
+            {
+                TeamMembers[teamId].Remove(user);
+            }
         }
         return Task.CompletedTask;
     }

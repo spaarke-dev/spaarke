@@ -1038,6 +1038,85 @@ public sealed class H13E2EAcceptanceGateHandlerTests
         result.Should().BeOfType<HandlerResult.Failure>().Which.RejectionCode.Should().Be(H13Rejections.CustomerMailboxInconclusive);
     }
 
+    // ---------- AC-40..43 (#2429): the customer owner teams (H7c) gate Ready ----------
+
+    [Fact]
+    public async Task AC40_OwnerTeamsPassed_IsCalledWithTheRunsCoordinates_AndItsGateIsVerified()
+    {
+        var repo = new FakeRepository(BuildRun(), etag: "etag-40");
+        var handler = BuildHandler(repo, out _, configureSeams: s => s.OwnerTeams = _ownerTeamsVerifier);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        _ownerTeamsVerifier.Requests.Should().ContainSingle().Which.Should().Be(new CustomerOwnerTeamsVerificationRequest(
+            TenantId, DataverseUrl, "bff-appreg-id", CustomerBusinessUnitId));
+        repo.LastWrittenRun!.GateStates[H13Gates.CustomerOwnerTeamsVerified].Status.Should().Be(GateState.Verified);
+    }
+
+    [Fact]
+    public async Task AC41_OwnerTeamsFailed_Quarantines_AndNeverReachesReady()
+    {
+        _ownerTeamsVerifier.Outcome = new CustomerOwnerTeamsVerificationOutcome.Failed(
+            new[] { "TEAM MEMBERS: 'Spaarke Restricted Content Owners' has 1 member(s); it must have none." });
+        var repo = new FakeRepository(BuildRun(), etag: "etag-41");
+        var handler = BuildHandler(repo, out var seams, configureSeams: s => s.OwnerTeams = _ownerTeamsVerifier);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.QuarantineRequired);
+        failure.RejectionCode.Should().Be(H13Rejections.CustomerOwnerTeamsFailed);
+        failure.Diagnostic.Should().Contain("TEAM MEMBERS");
+        seams.Registry.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task AC42_OwnerTeamsInconclusive_IsResumable_AndNeverReachesReady()
+    {
+        _ownerTeamsVerifier.Outcome = new CustomerOwnerTeamsVerificationOutcome.Inconclusive("Dataverse 503");
+        var repo = new FakeRepository(BuildRun(), etag: "etag-42");
+        var handler = BuildHandler(repo, out var seams, configureSeams: s => s.OwnerTeams = _ownerTeamsVerifier);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(H13Rejections.CustomerOwnerTeamsInconclusive);
+        seams.Registry.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task AC43_OwnerTeamsCheckThrows_IsResumable_NotAnEscape()
+    {
+        var repo = new FakeRepository(BuildRun(), etag: "etag-43");
+        var handler = BuildHandler(repo, out _, configureSeams: s => s.OwnerTeams = new ThrowingOwnerTeamsVerifier());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Failure>().Which.RejectionCode.Should().Be(H13Rejections.CustomerOwnerTeamsInconclusive);
+    }
+
+    private readonly FakeOwnerTeamsVerifier _ownerTeamsVerifier = new();
+
+    private sealed class FakeOwnerTeamsVerifier : ICustomerOwnerTeamsVerifier
+    {
+        public CustomerOwnerTeamsVerificationOutcome Outcome { get; set; } = new CustomerOwnerTeamsVerificationOutcome.Passed("ok");
+        public List<CustomerOwnerTeamsVerificationRequest> Requests { get; } = new();
+
+        public Task<CustomerOwnerTeamsVerificationOutcome> VerifyAsync(CustomerOwnerTeamsVerificationRequest request, CancellationToken cancellationToken)
+        {
+            Requests.Add(request);
+            return Task.FromResult(Outcome);
+        }
+    }
+
+    private sealed class ThrowingOwnerTeamsVerifier : ICustomerOwnerTeamsVerifier
+    {
+        public Task<CustomerOwnerTeamsVerificationOutcome> VerifyAsync(CustomerOwnerTeamsVerificationRequest request, CancellationToken cancellationToken)
+            => throw new InvalidOperationException("boom");
+    }
+
     private readonly FakeMailboxVerifier _mailboxVerifier = new();
 
     private sealed class FakeMailboxVerifier : ICustomerMailboxVerifier
@@ -1069,6 +1148,7 @@ public sealed class H13E2EAcceptanceGateHandlerTests
         public ICostEnvelopeChecker Cost { get; set; } = FakeCostChecker.WithinBudget();
         public IRegistrySetupStatusUpdater Registry { get; set; } = FakeRegistryUpdater.Success();
         public ICustomerMailboxVerifier Mailbox { get; set; } = new FakeMailboxVerifier();   // task 263 — Passed by default
+        public ICustomerOwnerTeamsVerifier OwnerTeams { get; set; } = new FakeOwnerTeamsVerifier();   // #2429 — Passed by default
 
         public FakeValidator ValidatorFake => (FakeValidator)Validator;
         public FakeTrapVerifier TrapsFake => (FakeTrapVerifier)Traps;
@@ -1124,7 +1204,7 @@ public sealed class H13E2EAcceptanceGateHandlerTests
         return new H13E2EAcceptanceGateHandler(
             repo, seams.Validator, seams.Traps, seams.Invariants, seams.Keyless,
             seams.Cost, seams.Registry,
-            registryClient, seams.Mailbox, Options.Create(options),
+            registryClient, seams.Mailbox, seams.OwnerTeams, Options.Create(options),
             NullLogger<H13E2EAcceptanceGateHandler>.Instance);
     }
 

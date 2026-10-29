@@ -156,6 +156,7 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
     private readonly IRegistrySetupStatusUpdater _registryUpdater;
     private readonly IDataverseEnvironmentRegistryClient _registryClient;
     private readonly ICustomerMailboxVerifier _mailboxVerifier;
+    private readonly ICustomerOwnerTeamsVerifier _ownerTeamsVerifier;
     private readonly H13AcceptanceOptions _options;
     private readonly ILogger<H13E2EAcceptanceGateHandler> _logger;
 
@@ -172,6 +173,7 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
         IRegistrySetupStatusUpdater registryUpdater,
         IDataverseEnvironmentRegistryClient registryClient,
         ICustomerMailboxVerifier mailboxVerifier,
+        ICustomerOwnerTeamsVerifier ownerTeamsVerifier,
         IOptions<H13AcceptanceOptions> options,
         ILogger<H13E2EAcceptanceGateHandler> logger)
     {
@@ -184,6 +186,7 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
         ArgumentNullException.ThrowIfNull(registryUpdater);
         ArgumentNullException.ThrowIfNull(registryClient);
         ArgumentNullException.ThrowIfNull(mailboxVerifier);
+        ArgumentNullException.ThrowIfNull(ownerTeamsVerifier);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(logger);
 
@@ -196,6 +199,7 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
         _registryUpdater = registryUpdater;
         _registryClient = registryClient;
         _mailboxVerifier = mailboxVerifier;
+        _ownerTeamsVerifier = ownerTeamsVerifier;
         _options = options.Value;
         _logger = logger;
     }
@@ -594,6 +598,26 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
             mailboxOutcome = new CustomerMailboxVerificationOutcome.Inconclusive($"The customer mailbox check threw: {ex.GetType().Name}: {ex.Message}.");
         }
 
+        // (7d) Customer owner teams (#2429): the two memberless Owner teams H7c set up in the customer's top unit are in the
+        //      declared state (scripts/Set-CustomerOwnerTeams.ps1 -Verify, through H7c's procedure). Read-only.
+        //      Failed -> QuarantineRequired; no verdict -> Resumable.
+        CustomerOwnerTeamsVerificationOutcome ownerTeamsOutcome;
+        try
+        {
+            ownerTeamsOutcome = await _ownerTeamsVerifier.VerifyAsync(
+                new CustomerOwnerTeamsVerificationRequest(
+                    TenantId: tenantId,
+                    DataverseUrl: dataverseUrl,
+                    BffAppRegId: bffAppRegId,
+                    CustomerBusinessUnitId: run.InterStepState.CustomerBusinessUnitId ?? string.Empty),
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "H13 customer owner teams check infra fault: runId={RunId} customerId={CustomerId}", envelope.RunId, envelope.CustomerId);
+            ownerTeamsOutcome = new CustomerOwnerTeamsVerificationOutcome.Inconclusive($"The customer owner teams check threw: {ex.GetType().Name}: {ex.Message}.");
+        }
+
         // (8) DECISION: aggregate every collaborator's outcome + pick failure
         //     with correct §4C classification. Priority order:
         //       (a) Trap/invariant FAILED → QuarantineRequired (silent-fail
@@ -601,12 +625,14 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
         //       (a1) Secure-isolation census not isolated / inert / failed → QuarantineRequired (task 260).
         //       (a2) Stamp accepts keys (ARM, task 230b) → QuarantineRequired.
         //       (a3) Customer mailbox missing / foreign / unverified (task 263) → QuarantineRequired.
+        //       (a4) Customer owner teams drifted (#2429) → QuarantineRequired.
         //       (b) Live checks FAILED (incl. the keyless proof) → QuarantineRequired.
         //       (c) Cost drift (fail-run mode) → QuarantineRequired.
         //       (d) Trap/invariant/ARM-keyless InfraFault → Resumable (no verdict).
         //       (d2) Live checks Inconclusive → Resumable (task 230b).
         //       (d3) Secure-isolation census Inconclusive → Resumable (task 260).
         //       (d4) Customer mailbox check Inconclusive → Resumable (task 263).
+        //       (d5) Customer owner teams check Inconclusive → Resumable (#2429).
         //       (e) Cost query infra fault → Resumable.
         //     Advisory-warn cost drift is NOT a failure branch — it's attached
         //     to the diagnostic + gate-state but the Ready transition still
@@ -667,6 +693,15 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
                 " Fix the cause (H14m's diagnostic, the scope group, the account row), then resume.",
                 cancellationToken).ConfigureAwait(false);
         }
+        if (ownerTeamsOutcome is CustomerOwnerTeamsVerificationOutcome.Failed ownerTeamsFailed)
+        {
+            return await FailAsync(run, etag, FailureClass.QuarantineRequired,
+                H13Rejections.CustomerOwnerTeamsFailed,
+                "The customer owner teams are not in the declared state (#2429): " + string.Join(" | ", ownerTeamsFailed.Problems) +
+                " Settle each finding (scripts/Set-CustomerOwnerTeams.ps1 -Verify names them; a member, another role or a role " +
+                "assigned elsewhere is an owner decision), then resume.",
+                cancellationToken).ConfigureAwait(false);
+        }
         if (validationOutcome is E2EValidationOutcome.Failure valFail)
         {
             return await FailAsync(run, etag, FailureClass.QuarantineRequired,
@@ -725,6 +760,21 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
             return await FailAsync(run, etag, FailureClass.Resumable,
                 H13Rejections.CustomerMailboxInconclusive,
                 $"The customer mailbox check reached no verdict (task 263): {mailboxInconclusive.Diagnostic}",
+                cancellationToken).ConfigureAwait(false);
+        }
+        if (ownerTeamsOutcome is CustomerOwnerTeamsVerificationOutcome.Inconclusive ownerTeamsInconclusive)
+        {
+            return await FailAsync(run, etag, FailureClass.Resumable,
+                H13Rejections.CustomerOwnerTeamsInconclusive,
+                $"The customer owner teams check reached no verdict (#2429): {ownerTeamsInconclusive.Diagnostic}",
+                cancellationToken).ConfigureAwait(false);
+        }
+        if (ownerTeamsOutcome is not CustomerOwnerTeamsVerificationOutcome.Passed)
+        {
+            // Defence in depth: an outcome this handler does not know never reaches Ready.
+            return await FailAsync(run, etag, FailureClass.QuarantineRequired,
+                H13Rejections.CustomerOwnerTeamsFailed,
+                $"The customer owner teams check returned an unhandled outcome '{ownerTeamsOutcome.GetType().Name}'.",
                 cancellationToken).ConfigureAwait(false);
         }
         if (mailboxOutcome is not CustomerMailboxVerificationOutcome.Passed)
@@ -1191,6 +1241,7 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
         run.GateStates[H13Gates.StampKeylessVerified] = verified;
         run.GateStates[H13Gates.SecureIsolationVerified] = verified;
         run.GateStates[H13Gates.CustomerMailboxVerified] = verified;   // task 263
+        run.GateStates[H13Gates.CustomerOwnerTeamsVerified] = verified;   // #2429
         run.GateStates[H13Gates.TrapCatalogVerified] = verified;
         run.GateStates[H13Gates.InvariantCatalogVerified] = verified;
         run.GateStates[H13Gates.CostEnvelopeVerified] = new GateEntry

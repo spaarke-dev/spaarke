@@ -26,12 +26,15 @@
 //     │       │        also waits for H5 — it binds the container to the environment's root business unit; H7 waits for H8)
 //     │       └── H9 (BFF deploy — needs H3 AND H4b so KV refs + batched
 //     │                app-settings are landed before BFF boot / F20 chain;
-//     │                T218b: AND H6, so the package lands before the BFF it serves)
+//     │                T218b: AND H6, so the package lands before the BFF it serves;
+//     │                T256: AND H7b; #2429: AND H7c — see below)
 //     └── H5 (Dataverse env ADOPT — the operator created it; T228)
 //           ↓
 //           H10 (Dataverse App Users + Graph parity — also waits for H3; T228: before H6, whose BFF-app identity it registers)
 //             ↓
 //             H6 (solution import)
+//               ├── H7b (Secure Record setup — T256) → H7c (customer owner teams — #2429); H9 waits for both,
+//               │        H13 for H7b
 //               ↓
 //               H7 (env-var values — also waits for H8: it writes H8's BOUND root container)
 //                 ↓
@@ -108,6 +111,9 @@ public sealed class DagAdvancer : IDagAdvancer
     /// <summary>H7b — Secure Record setup (T256, unified-access-control-r2 INCOMING-145).</summary>
     public const string HandlerH7b = HandlerIds.H7b;
 
+    /// <summary>H7c — customer owner teams (#2429, unified-access-control-r2 task 194b).</summary>
+    public const string HandlerH7c = HandlerIds.H7c;
+
     /// <summary>Handler identifier for H8 SPE container CREATION (H8-B semantics; container-type is a pre-existing operator prereq per docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md).</summary>
     public const string HandlerH8 = HandlerIds.H8;
 
@@ -166,7 +172,10 @@ public sealed class DagAdvancer : IDagAdvancer
             // T256 (INCOMING-145): H7b reads entity metadata of the package's tables, so it follows H6 (and, through H6, H10
             // — it signs in as the BFF app registration H10 made an application user). It is independent of H7.
             [HandlerH7b] = new[] { HandlerH6 },
-            [HandlerH9] = new[] { HandlerH3, HandlerH4b, HandlerH6, HandlerH7b }, // EXEC-01: BFF boot needs KV refs + batched app-settings; gate on H4b (which transitively gates on H4). T218b: + H6 — on an upgrade run the new BFF must not start against the old schema (the package lands first). T256: + H7b — an environment without sprk_noaccessentry denies every BFF read, a task-150 BFF refuses a NULL sprk_issecure (H7b's S13 repairs them first), and every secure path refuses without the Secure Record anchor.
+            // #2429 (H7c): the customer owner teams follow H7b — the procedure refuses the Secure Record unit (H7b creates
+            // it) as a customer unit, and reads the package's tables (H6) and H10's customer unit through it.
+            [HandlerH7c] = new[] { HandlerH7b },
+            [HandlerH9] = new[] { HandlerH3, HandlerH4b, HandlerH6, HandlerH7b, HandlerH7c }, // #2429: + H7c — the BFF refuses every hard-deny write (record_owner_restricted_content_team_unresolved) until the Restricted Content Owners team exists, so it serves the customer only after both teams do. EXEC-01: BFF boot needs KV refs + batched app-settings; gate on H4b (which transitively gates on H4). T218b: + H6 — on an upgrade run the new BFF must not start against the old schema (the package lands first). T256: + H7b — an environment without sprk_noaccessentry denies every BFF read, a task-150 BFF refuses a NULL sprk_issecure (H7b's S13 repairs them first), and every secure path refuses without the Secure Record anchor.
             // T228: H10 needs only H3 (BffAppRegId), H2a (MiClientId / MiObjectId — upstream of H3 and H5) and H5
             // (DataverseEnvUrl); it registers the application users the later Dataverse handlers act as. H11 stays after H7:
             // T232 — it makes each B2B guest a Dataverse user holding the solution's role(s), which H6 imports (H6 → H7).

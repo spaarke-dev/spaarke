@@ -570,7 +570,7 @@ public sealed class RunControlServiceTests
     private static ProvisioningRun MakeClearedQuarantineRun(DateTimeOffset? resumedAt)
     {
         var run = MakeRun(RunStatus.Failed, currentPhase: "H12a");
-        foreach (var done in new[] { "H0", "H1", "H2a", "H2b", "H3", "H4", "H4b", "H5", "H6", "H7", "H7b", "H8", "H9", "H10", "H11" })
+        foreach (var done in new[] { "H0", "H1", "H2a", "H2b", "H3", "H4", "H4b", "H5", "H6", "H7", "H7b", "H7c", "H8", "H9", "H10", "H11" })
         {
             run.CompletedPhases.Add(new CompletedPhase { Phase = done, CompletedAt = FrozenNow, IdempotencyKey = done, JobId = done });
         }
