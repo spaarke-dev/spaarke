@@ -37,6 +37,41 @@
                     </row>
                   </rows>
                 </section>
+                <section name="section_ebilling" id="{6A81B04C-50A8-A587-F47C-0FBB3ADA1508}" IsUserDefined="1" showlabel="true" showbar="false" columns="11" celllabelposition="Top" labelwidth="115" celllabelalignment="Left" layout="varwidth">
+                  <labels>
+                    <label description="Timekeeper roster" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{B4B98A3E-2911-A46B-2C03-D8DBDE61EF50}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_firm" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_firm" />
+                      </cell>
+                      <cell id="{D61EE08C-415C-4010-90B8-EF6F8F8A358A}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_classification" classid="{3EF39988-22BB-4F0B-BBBE-64B5A3748AEE}" datafieldname="sprk_classification" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{9AC21A13-03FC-718F-23F3-CEA534384191}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_effectivefrom" classid="{5B773807-9FB2-42DB-97C3-7A91EFF8ADFF}" datafieldname="sprk_effectivefrom" />
+                      </cell>
+                      <cell id="{811095B5-916B-4F59-93DC-85A691CA3F05}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_effectiveto" classid="{5B773807-9FB2-42DB-97C3-7A91EFF8ADFF}" datafieldname="sprk_effectiveto" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
               </sections>
             </column>
           </columns>

@@ -209,8 +209,12 @@ public class ExternalMessageSendTests
         var data = _roots.NewService();
         return ExternalMessageEndpoints.PostMessageCoreAsync(
             root, id, request, caller, registry ?? ProductionRegistry(), ReadRecord, Service(), NullLogger.Instance,
-            CancellationToken.None, data.GetNonSecureRootsAsync, data.GetLiveParentRootsAsync);
+            CancellationToken.None, data.GetNonSecureRootsAsync, data.GetLiveParentRootsAsync,
+            hideInvoices: _invoiceHiding.Seam);
     }
+
+    /// <summary>ebilling-r1 task 098: the (a') predicate the route passes; hides nothing unless a test says so.</summary>
+    private InvoiceHidingStub _invoiceHiding = InvoiceHidingStub.NoneHidden();
 
     /// <summary>Task 036: a post with the Dataverse rights reader the route passes (the probe, as the caller), and (fix
     /// round 1, F1) its privilege reader.</summary>
@@ -223,7 +227,8 @@ public class ExternalMessageSendTests
         return ExternalMessageEndpoints.PostMessageCoreAsync(
             root, id, new PostExternalMessageRequest { SprkBody = "Can you confirm the filing date?" }, caller,
             ProductionRegistry(), ReadRecord, Service(), NullLogger.Instance, CancellationToken.None,
-            data.GetNonSecureRootsAsync, data.GetLiveParentRootsAsync, readCallerRights, readCallerPrivilege);
+            data.GetNonSecureRootsAsync, data.GetLiveParentRootsAsync, readCallerRights, readCallerPrivilege,
+            _invoiceHiding.Seam);
     }
 
     /// <summary>A request body bound exactly as the route binds it (System.Text.Json, web defaults).</summary>
@@ -549,6 +554,48 @@ public class ExternalMessageSendTests
         ShouldBeForbidden(missing, ExternalMessageEndpoints.DenyRecordNotAccessible);
         ((ProblemHttpResult)theirs).ProblemDetails.Detail.Should().Be(((ProblemHttpResult)missing).ProblemDetails.Detail);
         ShouldHaveWrittenNothing();
+    }
+
+    // ebilling-r1 task 098 surface (b): the post gate is the read gate, so an invoice the (a') predicate hides (or cannot
+    // decide) is refused exactly as an invoice that does not exist, and nothing is written.
+    [Theory]
+    [InlineData("hidden")]
+    [InlineData("fault")]
+    public async Task Task098_AnInvoiceThePredicateHides_IsRefusedAsANonexistentInvoice_AndCreatesNoRow(string kind)
+    {
+        var matter = Guid.NewGuid();
+        var invoice = Guid.NewGuid();
+        _records[("sprk_invoice", invoice)] = new Dictionary<string, object?>
+        {
+            ["id"] = invoice,
+            ["sprk_matter"] = Lookup(matter, "sprk_matter"),
+        };
+        _invoiceHiding = kind == "hidden" ? InvoiceHidingStub.Hiding(invoice) : InvoiceHidingStub.Faulting();
+
+        var hidden = await Post("invoices", invoice, Ciam(matter: matter));
+        var missing = await Post("invoices", Guid.NewGuid(), Ciam(matter: matter));
+
+        ShouldBeForbidden(hidden, ExternalMessageEndpoints.DenyRecordNotAccessible);
+        ShouldBeForbidden(missing, ExternalMessageEndpoints.DenyRecordNotAccessible);
+        ((ProblemHttpResult)hidden).ProblemDetails.Detail.Should().Be(((ProblemHttpResult)missing).ProblemDetails.Detail);
+        ((ProblemHttpResult)hidden).ProblemDetails.Title.Should().Be(((ProblemHttpResult)missing).ProblemDetails.Title);
+        ShouldHaveWrittenNothing();
+    }
+
+    [Fact]
+    public async Task Task098_AnInvoiceThePredicateLeavesVisible_IsPosted_AsBefore()
+    {
+        var matter = Guid.NewGuid();
+        var invoice = Guid.NewGuid();
+        _records[("sprk_invoice", invoice)] = new Dictionary<string, object?>
+        {
+            ["id"] = invoice,
+            ["sprk_matter"] = Lookup(matter, "sprk_matter"),
+        };
+        _invoiceHiding = InvoiceHidingStub.Hiding(Guid.NewGuid());
+
+        Created(await Post("invoices", invoice, Ciam(matter: matter)));
+        _invoiceHiding.Calls.Should().Contain(call => call.Contains(invoice));
     }
 
     [Theory]

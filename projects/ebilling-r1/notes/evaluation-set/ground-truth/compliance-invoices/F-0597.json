@@ -1,0 +1,30 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0597",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0597","generator_id":"gen_eval_set.py@1 F-0597","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0597.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-03"},
+ "header":{"firm":"Rutherford Beckett PC","firm_invoice_number":"INV-2025-94702","invoice_date":"2026-02-01","billing_period_start":"2026-01-01","billing_period_end":"2026-01-31","firm_matter_reference":"31307-0034","po_number":"PO-4558558","fees_total":3515.0,"expenses_total":5934.52,"adjustments_total":0.0,"total_due":9449.52,"currency":"USD"},
+ "timekeepers":[{"name":"Emeka Kowalczyk","title":"Paralegal","rate":125.0,"billed_as":"EK"},{"name":"Ingrid Lockhart","title":"Associate","rate":250.0,"billed_as":"IL"},{"name":"Jordan Castellanos","title":"Associate","rate":250.0,"billed_as":"JC"},{"name":"Victor Dunleavy","title":"Paralegal","rate":120.0,"billed_as":"VD"},{"name":"Victor Okafor","title":"Senior Associate","rate":265.0,"billed_as":"VO"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-01-01","timekeeper":"IL","timekeeper_name":"Ingrid Lockhart","timekeeper_title":"Associate","title":"Assoc","hours":2.5,"rate":250.0,"amount":625.0,"narrative":"Review draft expert disclosure for the distribution agreement","codes":["L420","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-01-05","timekeeper":"JC","timekeeper_name":"Jordan Castellanos","timekeeper_title":"Associate","title":"Assoc","hours":0.5,"rate":250.0,"amount":125.0,"narrative":"Review draft expert disclosure for the employment claim","codes":["L420","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-01-07","timekeeper":"IL","timekeeper_name":"Ingrid Lockhart","timekeeper_title":"Associate","title":"Assoc","hours":2.4,"rate":250.0,"amount":600.0,"narrative":"Telephone conference with witness regarding the warranty claim","codes":["L410","A106"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-01-07","timekeeper":"VO","timekeeper_name":"Victor Okafor","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.1,"rate":265.0,"amount":291.5,"narrative":"Telephone conference with witness regarding the customs audit","codes":["L410","A106"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-01-08","timekeeper":"IL","timekeeper_name":"Ingrid Lockhart","timekeeper_title":"Associate","title":"Assoc","hours":1.6,"rate":250.0,"amount":400.0,"narrative":"Prepare expert witness for testimony in the licensing dispute","codes":["L420","A101"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-01-09","timekeeper":"VO","timekeeper_name":"Victor Okafor","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.4,"rate":265.0,"amount":371.0,"narrative":"Prepare examination outlines for trial in the regulatory inquiry","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-01-12","timekeeper":"VD","timekeeper_name":"Victor Dunleavy","timekeeper_title":"Paralegal","title":"Para","hours":1.6,"rate":120.0,"amount":192.0,"narrative":"Prepare examination outlines for trial in the construction contract","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-01-15","timekeeper":"JC","timekeeper_name":"Jordan Castellanos","timekeeper_title":"Associate","title":"Assoc","hours":1.1,"rate":250.0,"amount":275.0,"narrative":"Prepare expert witness for testimony in the regulatory inquiry","codes":["L420","A101"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-01-21","timekeeper":"VO","timekeeper_name":"Victor Okafor","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.7,"rate":265.0,"amount":185.5,"narrative":"Prepare trial notebook and demonstrative exhibits for the data incident","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2026-01-22","timekeeper":"EK","timekeeper_name":"Emeka Kowalczyk","timekeeper_title":"Paralegal","title":"Para","hours":2.8,"rate":125.0,"amount":350.0,"narrative":"Prepare examination outlines for trial in the customs audit","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2026-01-26","timekeeper":"EK","timekeeper_name":"Emeka Kowalczyk","timekeeper_title":"Paralegal","title":"Para","hours":0.4,"rate":125.0,"amount":50.0,"narrative":"Review court docket and calendar of pending deadlines for the distribution agreement","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2026-01-29","timekeeper":"IL","timekeeper_name":"Ingrid Lockhart","timekeeper_title":"Associate","title":"Assoc","hours":0.2,"rate":250.0,"amount":50.0,"narrative":"Revise reply brief after review by lead counsel","codes":["L430","A104"],"page":2,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2026-01-15","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":5904.85,"amount":5904.85,"narrative":"Consulting expert fees","codes":["E119"],"page":2,"narrative_style":"clear"},
+  {"n":14,"line_type":"expense","date":"2026-01-15","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":43.0,"rate":0.69,"amount":29.67,"narrative":"Mileage to courthouse","codes":["E109"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["209 Commerce Avenue","Dallas","Tax ID 37-3812866"],"template":"T05","pages":2},
+ "rule_set_id":"RS-03",
+ "context":{"matter_open":"2024-09-20","matter_close":"2026-05-01","matter_budget":62798.0,"approved_timekeepers":["Victor Dunleavy","Victor Okafor","Ingrid Lockhart","Emeka Kowalczyk","Jordan Castellanos","Mei Wickham"],"invoice_received_date":"2026-02-03"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

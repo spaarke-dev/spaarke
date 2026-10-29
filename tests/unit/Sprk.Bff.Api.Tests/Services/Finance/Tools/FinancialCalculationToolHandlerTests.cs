@@ -1,8 +1,10 @@
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
+using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Tools;
 using Sprk.Bff.Api.Telemetry;
 using Xunit;
@@ -148,4 +150,36 @@ public class FinancialCalculationToolHandlerTests
         result.Error.Should().Contain("actual:");
         result.Error.Should().NotContain("resolved as ServiceClient");
     }
+
+    // ebilling-r1 task 015 (D-41, D-103; #1771): the invoice query filters statuscode on the counted set, reads the real amount
+    // column, and is the rollup's own query. It once filtered the retired status column on three values, two of which never
+    // existed, so Approved / Sent to AP / Paid invoices were never totalled.
+    [Theory]
+    [InlineData("sprk_matter")]
+    [InlineData("sprk_project")]
+    public void BuildInvoiceQuery_FiltersStatuscodeOnTheCountedSet_AndReadsTheTotalAmount(string lookup)
+    {
+        var parentId = Guid.NewGuid();
+
+        var query = FinancialCalculationToolHandler.BuildInvoiceQuery(lookup, parentId);
+
+        query.EntityName.Should().Be("sprk_invoice");
+        // D-130: the tool's totals follow the rollup's amount rule (approved total, else billed), so both columns are read.
+        query.ColumnSet.Columns.Should().Contain("sprk_totalamount").And.Contain("sprk_approvedtotal").And.Contain("statuscode");
+        query.Criteria.Conditions.Should().ContainSingle(c => c.AttributeName == lookup && c.Operator == ConditionOperator.Equal)
+            .Which.Values.Should().Equal(parentId);
+        var status = query.Criteria.Conditions.Should().ContainSingle(c => c.AttributeName == "statuscode").Subject;
+        status.Operator.Should().Be(ConditionOperator.In);
+        status.Values.Cast<int>().Should().Equal(FinanceBaseValues.CountedInvoiceStatuses);
+        query.Criteria.Conditions.Should().HaveCount(2, "no other filter (in particular no statecode: Paid is Inactive)");
+    }
+
+    [Theory]
+    [InlineData(InvoiceStatusCodes.Paid, true)]
+    [InlineData(InvoiceStatusCodes.Approved, true)]
+    [InlineData(InvoiceStatusCodes.Rejected, false)]
+    [InlineData(InvoiceStatusCodes.Cancelled, false)]
+    public void BuildInvoiceQuery_AdmitsARealStatuscode_OnlyWhenItIsCounted(int statusCode, bool admitted) =>
+        FinancialCalculationToolHandler.BuildInvoiceQuery("sprk_matter", Guid.NewGuid()).Criteria.Conditions
+            .Single(c => c.AttributeName == "statuscode").Values.Cast<int>().Contains(statusCode).Should().Be(admitted);
 }

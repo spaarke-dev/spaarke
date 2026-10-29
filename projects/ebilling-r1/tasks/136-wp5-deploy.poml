@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="136" project="ebilling-r1">
+  <metadata>
+    <title>Deploy WP5 to dev</title>
+    <phase>5 Firm feedback (WP5) — wave W5-4</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deployment, WP5 schema sync into solution source using the 029 procedure, and smoke verification of reviewed tasks; no new code.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Prescriptive deploy procedure using existing scripts, skills and the SPA workflow.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Writes the shared dev environment (BFF, Dataverse rows, SPA Static Web App) and SpaarkeMaster solution source (serial-only after 029).</parallel-reason>
+    <deps>130, 131, 132, 133, 134, 135, 112</deps>
+    <tags>deploy, bff, external-spa</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Deploy WP5 to dev — any WP5 schema additions (applied and synced into SpaarkeMaster source with the 029 procedure), the invoice-firm-notice Action and Binding together with the BFF that lists it in ConsumerTypes.All, the BFF, and the external SPA — then smoke every new route and prove end to end that a firm user sees the outcome, the PDF report and the Billing Guidelines, and that the email arrives.</prompt>
+
+  <role>SPAARKE platform developer. Expert in bff-deploy, dataverse-deploy and the external SPA deploy workflow, and in dev smoke verification.</role>
+
+  <goal>Dev runs WP5; new routes answer 401 unauthenticated and the expected status authenticated; /healthz is Healthy; a firm user sees outcome, report and guidelines; submitter and billing contact receive the email with the PDF; WP5 schema is in SpaarkeMaster source; evidence in notes/136-wp5-deploy.md.</goal>
+
+  <context>
+    <background>Spec WP5 (FR-38 – FR-40, FR-49, FR-50), success criterion 6, project CLAUDE.md section 5 (dev only; scripts/Deploy-BffApi.ps1 for the BFF; scripts/Import-SolutionScoped.ps1 is the only import path) and section 3 (after 029, solution source is edited only by serial tasks; deploy tasks add navigation entries for pages they deploy and sync any columns their phase added after 029). WP4 (112) is deployed first. Solution-sync procedure: task 029 steps 4-6 (scripts/solution-authoring/Test-SolutionCompleteness.ps1, scripts/solution-authoring/Export-SpaarkeMasterSource.ps1 to a temp folder, copy only eBilling hunks, pac solution pack, Import-SolutionScoped.ps1 -PlanOnly). RoutingConsumerTypeHealthCheck turns /healthz Unhealthy when a ConsumerTypes.All entry has no Binding row (Services/Ai/PublicContracts/RoutingConsumerTypeHealthCheck.cs:251-262), so the Binding seed and the BFF deploy go together. External SPA: .github/workflows/deploy-external-spa.yml (workflow_dispatch, input environment=dev, concurrency group per environment; shared with SPA-r3).</background>
+    <relevant-files>
+      <file role="read">scripts/Deploy-BffApi.ps1</file>
+      <file role="read">scripts/Deploy-ActionMirrors.ps1</file>
+      <file role="read">scripts/dataverse/Seed-PlaybookConsumers.ps1</file>
+      <file role="read">.github/workflows/deploy-external-spa.yml</file>
+      <file role="read">scripts/solution-authoring/Test-SolutionCompleteness.ps1</file>
+      <file role="read">scripts/solution-authoring/Export-SpaarkeMasterSource.ps1</file>
+      <file role="read">scripts/Import-SolutionScoped.ps1</file>
+      <file role="modify">src/dataverse/solutions/SpaarkeMaster/ (WP5 eBilling hunks only, if any)</file>
+      <file role="read">projects/ebilling-r1/tasks/029-wp1-apply-and-export.poml (sync procedure)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="130-135" status="pending">All WP5 tasks complete on the branch</dependency>
+      <dependency task="112" status="pending">WP4 deployed to dev</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project CLAUDE.md section 5">Dev only; no production or customer environment; no secrets in the repo or notes (App Service setting names only).</constraint>
+    <constraint source=".claude/skills/bff-deploy/SKILL.md">BFF only through scripts/Deploy-BffApi.ps1 with hash verification.</constraint>
+    <constraint source="project CLAUDE.md section 3">Solution source: only WP5 eBilling components and navigation entries, via the 029 procedure; no real import, no Assemble, no version bump; unrelated drift listed, never copied.</constraint>
+    <constraint source="RoutingConsumerTypeHealthCheck">Seed the invoice-firm-notice Binding immediately before the BFF deploy that contains it in ConsumerTypes.All; /healthz must be Healthy afterwards.</constraint>
+    <constraint source="project">No destructive Dataverse change; -WhatIf first where supported. Never delete owner-created containers or evaluation-set documents.</constraint>
+    <constraint source="project">The SPA workflow is shared with SPA-r3: confirm no SPA-r3 deploy is pending that this run would overwrite or be overwritten by.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/ci-cd/SKILL.md</file>
+      <file>docs/procedures/SPAARKE-SOLUTION-RELEASE-PROCESS.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>projects/ebilling-r1/CLAUDE.md (sections 3 and 5)</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Preconditions: every dependency shows ✅ in TASK-INDEX.md; dotnet build, dotnet test and npm test (src/client/external-spa) green on the branch; record the commit SHA. Collect from 130-135 notes: schema scripts, App Service setting names, route list.</step>
+    <step order="2">Schema: run each WP5 schema script listed in the notes (for example a document-type option from 133) with -WhatIf, then for real; verify by metadata read. If none, record "no WP5 schema".</step>
+    <step order="3">Solution source: for every WP5 component from step 2, follow 029 steps 4-6 (completeness check, AddSolutionComponent, export to temp, copy only those eBilling files, pac pack, Import-SolutionScoped -PlanOnly). WP5 adds no model-driven page; if a task added one, add its sitemap entry the same way. Record the diff summary.</step>
+    <step order="4">App Service settings: for each new setting name in the notes, set it on spaarke-bff-dev (az webapp config appsettings set, value from the owner or Key Vault reference — never written to notes). Verify Ebilling__Enabled=true and Finance__EbillingOutputContainerId are set (133 needs the output container).</step>
+    <step order="5">Action and Binding: Deploy-ActionMirrors.ps1 for invoice-firm-notice, then Seed-PlaybookConsumers.ps1; verify both rows with a read query.</step>
+    <step order="6">BFF: scripts/Deploy-BffApi.ps1 against spaarke-bff-dev; hash verification passed; /healthz Healthy (RoutingConsumerTypeHealthCheck included).</step>
+    <step order="7">SPA: gh workflow run deploy-external-spa.yml --ref work/ebilling-r1 -f environment=dev; wait for success; record the run URL.</step>
+    <step order="8">Route smoke: for every route added by 130, 131, 133 and 135, call once unauthenticated (expect 401) and once authenticated as the expected caller (expect 200); call 130's outcome route and 135's guidelines route as another firm's user (expect 403). Record status codes.</step>
+    <step order="9">End to end in dev: submit an invoice that is rejected in session (seeded violation) and one that is approved with an adjustment; as the firm user verify the rejected result screen and the invoice outcome (134), Download PDF (133), the Billing Guidelines widget (135) and the SPA feed items (132); verify the submitter and the billing contact received each email with the PDF and that no email was sent for an invoice approved without adjustments; verify the eligible approver's in-app notification on acceptance.</step>
+    <step order="10">Run the 134 and 135 ui-tests against dev (including dark mode and phone width); record results.</step>
+    <step order="11">Record evidence (SHA, script output summaries, setting names, status codes, record ids, workflow run, screenshots paths) in projects/ebilling-r1/notes/136-wp5-deploy.md.</step>
+    <step order="12">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+    <step order="13">Record deviations in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any deploy script, hash verification or the SPA workflow fails, STOP; do not retry blindly or deploy by another route. Report the output.</trigger>
+    <trigger>If /healthz is Unhealthy after the BFF deploy, STOP and report the failing check (likely a ConsumerTypes.All entry without a Binding row).</trigger>
+    <trigger>If any smoke route returns 500, or another firm's user gets 200, STOP before the end-to-end step.</trigger>
+    <trigger>If an eBilling change cannot be separated from another project's drift in a shared solution file, STOP and ask the owner how to split it.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="pwsh">deploy and solution scripts</tool>
+    <tool name="gh">workflow dispatch</tool>
+    <tool name="az">App Service settings</tool>
+    <tool name="pac">solution pack</tool>
+    <tool name="dataverse-mcp">read_query verification</tool>
+    <tool name="ui-test">browser checks</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ebilling-r1/notes/136-wp5-deploy.md</output>
+    <output type="config">src/dataverse/solutions/SpaarkeMaster/ (WP5 hunks, if any)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Deploy-BffApi.ps1 completed with hash verification passed; /healthz Healthy after deploy.</criterion>
+    <criterion testable="true">The invoice-firm-notice Action and Binding exist in dev (read-query evidence).</criterion>
+    <criterion testable="true">The SPA workflow run for dev succeeded (run URL recorded).</criterion>
+    <criterion testable="true">Every new WP5 route returns 401 unauthenticated and 200 for the expected caller; another firm's user gets 403 (recorded per route).</criterion>
+    <criterion testable="true">End to end: the firm user saw the outcome, the PDF and the guidelines; submitter and billing contact received the email with the PDF; no email for approval without adjustments; approver in-app notification present.</criterion>
+    <criterion testable="true">Any WP5 schema is in SpaarkeMaster source, packs with pac, and Import-SolutionScoped -PlanOnly lists it; no real import ran; or notes state "no WP5 schema".</criterion>
+    <criterion testable="true">134 and 135 ui-tests pass in dev, including dark mode.</criterion>
+    <criterion testable="true">Evidence recorded in notes/136-wp5-deploy.md.</criterion>
+  </acceptance-criteria>
+
+  <notes>Shared dev environment: coordinate timing with other projects deploying spaarke-bff-dev and with SPA-r3 for the SPA. Record the deployed BFF package size for the cumulative NFR-12 view. Unlike 079's wording, this task does edit solution source for its phase (project CLAUDE.md section 3 names 136 as a serial solution-source editor).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

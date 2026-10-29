@@ -1,0 +1,25 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0355",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0355","generator_id":"gen_eval_set.py@1 F-0355","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0355.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Lindenmeyer and Cranmer LLP","firm_invoice_number":"INV-2025-86522","invoice_date":"2025-06-01","billing_period_start":"2025-05-01","billing_period_end":"2025-05-31","firm_matter_reference":"93073-0033","po_number":"PO-4558562","fees_total":2119.0,"expenses_total":6046.18,"adjustments_total":0.0,"total_due":8165.18,"currency":"USD"},
+ "timekeepers":[{"name":"Daniel Pemberton","title":"Associate","rate":325.0,"billed_as":"Daniel Pemberton"},{"name":"Ivan Kowalczyk","title":"Paralegal","rate":165.0,"billed_as":"Ivan Kowalczyk"},{"name":"Mei Galbraith","title":"Associate","rate":325.0,"billed_as":"Mei Galbraith"},{"name":"Priya Zielinski","title":"Partner","rate":600.0,"billed_as":"Priya Zielinski"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-05-02","timekeeper":"Daniel Pemberton","timekeeper_name":"Daniel Pemberton","timekeeper_title":"Associate","title":"Associate","hours":0.5,"rate":325.0,"amount":162.5,"narrative":"Research case law supporting settlement proposal","codes":["L240","A102"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-05-13","timekeeper":"Daniel Pemberton","timekeeper_name":"Daniel Pemberton","timekeeper_title":"Associate","title":"Associate","hours":0.2,"rate":325.0,"amount":65.0,"narrative":"Research case law supporting requests for production","codes":["L240","A102"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-05-02","timekeeper":"Ivan Kowalczyk","timekeeper_name":"Ivan Kowalczyk","timekeeper_title":"Paralegal","title":"Paralegal","hours":1.9,"rate":165.0,"amount":313.5,"narrative":"Prepare case assessment memorandum regarding the licensing dispute and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-05-28","timekeeper":"Ivan Kowalczyk","timekeeper_name":"Ivan Kowalczyk","timekeeper_title":"Paralegal","title":"Paralegal","hours":1.7,"rate":165.0,"amount":280.5,"narrative":"Prepare production set and cover correspondence for service on Meridian Foods","codes":["L320","A110"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-05-27","timekeeper":"Mei Galbraith","timekeeper_name":"Mei Galbraith","timekeeper_title":"Associate","title":"Associate","hours":0.3,"rate":325.0,"amount":97.5,"narrative":"Prepare monthly status report to client regarding the distribution agreement","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-05-06","timekeeper":"Priya Zielinski","timekeeper_name":"Priya Zielinski","timekeeper_title":"Partner","title":"Partner","hours":1.2,"rate":600.0,"amount":720.0,"narrative":"Conference with client expert regarding rebuttal report","codes":["L340","A106"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-05-09","timekeeper":"Priya Zielinski","timekeeper_name":"Priya Zielinski","timekeeper_title":"Partner","title":"Partner","hours":0.8,"rate":600.0,"amount":480.0,"narrative":"Conference with client expert regarding rebuttal report","codes":["L340","A106"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"expense","date":"2025-05-16","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":10.65,"amount":10.65,"narrative":"Postage - certified mail","codes":["E108"],"page":2,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2025-05-29","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":6035.53,"amount":6035.53,"narrative":"Consulting expert fees","codes":["E119"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["607 Commerce Avenue","Chicago","Tax ID 69-2288372"],"template":"T13","pages":2},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2024-09-15","matter_close":"2025-08-29","matter_budget":57660.0,"approved_timekeepers":["Mei Galbraith","Priya Zielinski","Hannah Quillen","Elena Halloran","Ivan Kowalczyk","Naomi Carmichael","Daniel Pemberton","Marcus Hargrove"],"invoice_received_date":"2025-06-20"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

@@ -97,7 +97,8 @@ public static class ChatDocumentEndpoints
     /// ADR-019 stable errorCode for "the durable byte copy could not be written" (compose-r8 FR-B01).
     /// Distinguishes this 500 from every other 500 on the upload routes — a client seeing this knows the
     /// file was NOT stored and a retry is meaningful, and an operator knows to check
-    /// <c>SessionFileStore:BlobEndpoint</c> + the Storage Blob Data Contributor assignment.
+    /// <c>SessionFileStore:BlobEndpoint</c> + the container-scoped Storage Blob Data Contributor assignment on
+    /// <c>SessionFileStore:ContainerName</c>.
     /// </summary>
     private const string DurableStoreFailedErrorCode = "session.durable-store-failed";
 

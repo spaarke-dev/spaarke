@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="191" project="unified-access-control-r2">
+  <metadata>
+    <title>D7 Dataverse side: a flagged-external systemuser reaches no internal-only record, in Dataverse or the SPA (#2179 reopened)</title>
+    <phase>Session 28: UAC (owner round 113, 2026-10-21)</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security and tenant isolation; changes who can read rows directly in Dataverse; schema and share-job changes likely.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security design across Dataverse ownership, shares and the BFF; fails closed.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches the share/secure-root jobs and the access-permission columns that 188/189/190 also touch; runs after 188 merges.</parallel-reason>
+    <deps>188 merged (BFF-side D7), 189 merged (stored = max(own, inherited))</deps>
+    <tags>bff-api, security, access-control, tenant-isolation, dataverse, testing</tags>
+    <estimated-effort>design 1 day; build per design</estimated-effort>
+    <origin>
+      Owner round 113 (2026-10-21), verbatim in notes/session27-owner-decisions-and-research.md "Round 113". Reverses round 111 item 5 (#2179 (c)) and the round-77 I-14 known limit. Expected to be the "real fix" for #1864 (ISS-010), which #2125 (ISS-014) and #2127 (ISS-016) wait on.
+    </origin>
+  </metadata>
+
+  <goal>
+A systemuser with sprk_isexternal = true must not read or change any internal-only record, whether directly in Dataverse (Web API, model-driven app) or through any BFF/SPA/Teams surface. Internal means internal to the customer. Internal-only records (owner-confirmed, round 113):
+1. any record whose Access Permission is Restricted (Limited stays visible, round 111);
+2. communications marked internal-only, and the documents attached to or derived from them (the 065 rule; sprk_relatedcommunication, sprk_parentdocument up to 3 hops);
+3. all Procedure files (ebilling). Extracts of Procedures in rules or decision records that an external user may see are not affected.
+
+Invoice and export files stay reachable by the related external user through the firm route (036 read set, I-14 veto, task 187 rule, file gate).
+
+Open question carried in (ebilling 099 review, 2026-10-21): scorecard grades (`ScorecardCalculatorEndpoints`, /api/matters|projects/{id} grades) are derived from spend but sit outside /api/finance, so ebilling's step 0 does not refuse a flagged-external systemuser there; likewise `InsightsSearchEndpoint` and `WorkspaceAiEndpoints`. Decide in the design study whether they count as internal-only for a flagged-external systemuser.
+  </goal>
+
+  <design-checkpoint>
+    BEFORE any schema, role or share change: the design study notes/2179-flagged-external-dataverse-design.md (inventory, Dataverse mechanisms, recommendation, owner questions) is reviewed by the main session and the owner's questions are answered. Cover Read and Write (no lowering Access Permission, unlinking from an internal-only communication or re-parenting), rows that become or stop being internal-only (revoke/regrant and timing), fail-closed, migration of existing shares, task 189 and the 065 rule, events and to-dos, and CLAUDE.md §11 answers.
+  </design-checkpoint>
+
+  <constraints>
+    - ADR-002 (no plugins), ADR-028, ADR-052; one server-side owner per invariant (DATAVERSE-WRITE-PATH-ARCHITECTURE.md).
+    - Fail closed: an unreadable flag or internal-only state counts as external / internal-only.
+    - No Entra, role, field-security, Key Vault or tenant-config write without explicit owner approval in-session.
+    - The BFF-side D7 narrowing (task 188) stays; this task adds the Dataverse-side enforcement and closes the I-14 / #2179 known limit.
+    - Logs carry ids and counts only.
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion>A flagged-external systemuser cannot read a Restricted row, an internal-only communication, a document derived from one, or a Procedure file through the Dataverse Web API (live check on dev with a test flagged-external user).</criterion>
+    <criterion>The same user cannot lower Access Permission, unlink a document from an internal-only communication or re-parent it out of a Restricted ancestor.</criterion>
+    <criterion>An unflagged internal user with the same shares is unaffected (must-not-fire).</criterion>
+    <criterion>A row that becomes internal-only is withdrawn within the stated window; one that stops being internal-only is regranted.</criterion>
+    <criterion>#2125, #2127 and #1864 are closed by this work or explicitly re-scoped.</criterion>
+    <criterion>I-14 and .claude/constraints/auth.md updated: the #2179 known limit is removed; Enforced by named.</criterion>
+    <criterion>BFF build 0 errors; targeted tests green; full ArchTests green; publish-size delta measured; deployed to dev via R3 with a server-side live gate.</criterion>
+  </acceptance-criteria>
+
+  <outputs>
+    - notes/2179-flagged-external-dataverse-design.md (design, checkpointed).
+    - Code, scripts and tests on branch uac/191-flagged-external-dataverse (worktree C:/wt191), draft PR to master.
+  </outputs>
+</task>

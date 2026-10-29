@@ -1,0 +1,70 @@
+{
+  "$comment": "Mirror of sprk_analysisaction.sprk_inputschema for invoice-codeset-match (ebilling-r1 task 054, FR-22, D-93). The Action is a Linear AI Consumer reached only through IInvoiceAi.MatchCodeSetAsync (the Binding carries no tool description, so it is never loop-projected); the schema documents the operand the facade sends as the '## Input' section ({ reference, candidates, examples }) and is validated by CatalogInputSchemaContractTests like every other mirror. Property-level \"required\": true is FORBIDDEN (use the object-level required array). actionCode carries NO version suffix. The tenant id travels in the LinearRunContext, never in the operand. Deployed to the row by scripts/ebilling/Ensure-ActionRow.ps1.",
+  "actionCode": "invoice-codeset-match",
+  "environment": "spaarkedev1",
+  "inputSchema": {
+    "type": "object",
+    "required": ["reference", "candidates", "examples"],
+    "properties": {
+      "reference": {
+        "type": "object",
+        "description": "The matter type or practice area to map.",
+        "required": ["type", "name"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "MatterType or PracticeArea.",
+            "enum": ["MatterType", "PracticeArea"]
+          },
+          "name": { "type": "string", "description": "The row's name (sprk_mattertypename / sprk_practiceareaname)." }
+        }
+      },
+      "candidates": {
+        "type": "array",
+        "description": "The closed list of code sets the answer must come from: every usable set when there are few, otherwise the top-ranked by embedding similarity. A usable set is active and has at least one active Task code, so the shared Activity and Expense sets are never candidates.",
+        "items": {
+          "type": "object",
+          "required": ["codeSetId", "name", "taskCodes"],
+          "properties": {
+            "codeSetId": {
+              "type": "string",
+              "description": "The sprk_billingcodesetid; the answer copies it exactly."
+            },
+            "name": { "type": "string", "description": "sprk_name, e.g. UTBMS Project." },
+            "body": { "type": ["string", "null"], "description": "sprk_body, the standards body (ABA, LOC)." },
+            "description": {
+              "type": ["string", "null"],
+              "description": "sprk_description: the work the set's task codes cover (admin-editable tuning text)."
+            },
+            "matchHints": {
+              "type": ["string", "null"],
+              "description": "sprk_matchhints: matter types and practice areas the set fits, synonyms, and what it is not for (admin-editable tuning text)."
+            },
+            "taskCodes": {
+              "type": "array",
+              "description": "The set's active Task codes as 'code short-name' strings.",
+              "items": { "type": "string" }
+            }
+          }
+        }
+      },
+      "examples": {
+        "type": "array",
+        "description": "Mappings an administrator confirmed in this environment (never from another tenant or environment); empty when there are none.",
+        "items": {
+          "type": "object",
+          "required": ["referenceType", "referenceName", "codeSetName"],
+          "properties": {
+            "referenceType": {
+              "type": "string",
+              "description": "MatterType or PracticeArea.",
+              "enum": ["MatterType", "PracticeArea"]
+            },
+            "referenceName": { "type": "string", "description": "The mapped row's name." },
+            "codeSetName": { "type": "string", "description": "The name of the code set it is mapped to." }
+          }
+        }
+      }
+    }
+  }
+}

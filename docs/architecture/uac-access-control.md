@@ -278,6 +278,19 @@ A person who is not yet a colleague in the system is refused, never created, onb
 
 ---
 
+## Known Gap — Attestation (FR-32)
+
+UAC does not yet answer "who could see record X on date D" in-product. The access-event log, evaluator replay and attestation seam (spec FR-32; tasks 087–089) are deferred to [#1303](https://github.com/spaarke-dev/spaarke/issues/1303). `sprk_accessevent` and `scripts/Deploy-AccessEventEntity.ps1` are superseded: the table was never deployed, and the script refuses to run without `-Force`.
+
+**Interim answer:** a manual review of the Dataverse audit log. It records:
+- grant-row changes on `sprk_externalrecordaccess`;
+- No Access entries;
+- record Share / Modify Share / Unshare (audit actions 14 / 48 / 49), with the principal and the before/after rights;
+- Assign;
+- changes to `sprk_issecure` and `sprk_accesspermission`.
+
+This works only when **org-level** auditing is on (`organization.isauditenabled`). The table and column flags shipped in SpaarkeMaster record nothing without it. On dev it was verified on 2026-10-16. Provisioning must set it, with an explicit retention, for customer environments: [#2027](https://github.com/spaarke-dev/spaarke/issues/2027).
+
 ## Troubleshooting
 
 | Issue | Cause | Solution |

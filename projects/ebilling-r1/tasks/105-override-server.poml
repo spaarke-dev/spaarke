@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="105" project="ebilling-r1">
+  <metadata>
+    <title>Override (server)</title>
+    <phase>4 Review and approval (WP4) — wave W4-2</phase>
+    <gate>startable</gate>
+    <status>in-progress</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Introduces a new privilege that lets one person accept a submission the rules blocked; authorization is security-class and the accept path must stay all-or-nothing.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Privilege check reuses an existing caller-scoped probe; the accept path is 049's; the remaining work is a guarded service and routes. The mechanism choice is escalated, not designed here.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P4-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>044, 049, 074</deps>
+    <tags>bff, api, auth, security</tags>
+    <estimated-effort>2 days</estimated-effort>
+  </metadata>
+
+  <prompt>Let a user holding the "eBilling Override" privilege accept an internal submission despite a blocking failure, with a mandatory reason, as one person: the submission is persisted as accepted through 049's all-or-nothing path, the overridden finding stays visible to the reviewer marked Overridden, and one Decision Record is written via 074. Also provide the blocked-submission read (findings, canOverride) and the non-override alternative "Return to firm" for a blocked internal submission (owner question F-7).</prompt>
+
+  <role>SPAARKE platform developer. Expert in ASP.NET Core authorization, Dataverse privileges and fail-closed design.</role>
+
+  <goal>SubmissionOverrideEndpoints.cs and SubmissionOverrideService with GET blocked-submission state, POST override and POST return; one reusable override-privilege check (also used by 052 and 111 through canOverride); seeding proof that a caller without the privilege gets 403.</goal>
+
+  <context>
+    <background>Spec FR-37 (acceptance: Decision Record written; the overridden finding remains visible to the reviewer), FR-19 (user without the privilege sees no Override option and the server refuses an override call, 403; override writes a Decision Record), D-24 / D-39 (internal submissions only; one person), spec Assumptions ("a new security role privilege eBilling Override"), FR-26 / I-5, FR-30. 020: sprk_invoicesubmission (sprk_channel, sprk_processingstatus Received / Processing / Accepted / Rejected / Failed, sprk_outcomereasoncode, sprk_findingsjson, sprk_invoice). 049 persists accepted submissions (invoice, lines, portion, Signals) all-or-nothing and stores rejections as findings on the submission. Privilege building blocks: CallerRecordAccessProbe.CallerHoldsPrivilegeAsync (Infrastructure/ExternalAccess/CallerRecordAccessProbe.cs:437 — caller-scoped OBO, uncached, fail closed), wrapped for routes by FinanceAuthorizationCheck.CallerPrivilege (Api/Filters/FinanceAuthorizationFilter.cs:154); app-role precedent: the "SystemAdmin" policy (Infrastructure/DI/AuthorizationModule.cs:465). Dataverse has no custom privilege type, so a "security role privilege" needs a carrier (see escalation). 076 chose an admin mechanism for rule sets — read its notes and stay consistent. Policy keys: Spaarke.Core/Auth/OperationAccessPolicy.cs (100 added "ebilling.invoice.decide").</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Finance/SubmissionOverrideEndpoints.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Finance/SubmissionOverrideService.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Finance/EbillingOverridePrivilege.cs (the one privilege check; name directional)</file>
+      <file role="modify">src/server/shared/Spaarke.Core/Auth/OperationAccessPolicy.cs (submission read / write keys, if the existing keys do not fit)</file>
+      <file role="modify">049's accept path (file named in 049's notes) only if it cannot be called with an override marker — shared append point, see notes</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs (shared append point)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs:376-377 (shared append point)</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/SubmissionOverrideServiceTests.cs</file>
+      <file role="new">tests/integration/contract/Api/Finance/SubmissionOverrideEndpointsAuthorizationContractTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="044" status="pending">Submission records and channel</dependency>
+      <dependency task="049" status="pending">All-or-nothing accept path and stored rejection findings</dependency>
+      <dependency task="074" status="pending">Override action and recorder</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="074 ontology-r1 review K1/K3 (2026-10-17)">Recording billing Decision Records through BillingDecisionRecorder (074) brings two caller obligations.
+- (1) Exactly-once. The writer is exactly-once only for retries made one after another; two concurrent calls with one decision id can both write, and a duplicate in an append-only ledger is permanent. So:
+  - this task names its serialisation mechanism as an acceptance criterion. Examples: the job claims IIdempotencyService keyed by the decision id; an endpoint does a RowVersion-conditional status update and records only after it succeeds;
+  - it adds a test for the concurrent same-id case.
+- (2) Decider identity:
+  - derive the deciding user from the authenticated principal, never from request input;
+  - check invoice access through the UAC filter before recording;
+  - pass no contact id. The recorder looks the contact up itself, as DecisionCommitService does; 074's fix round removes that parameter.</constraint>
+    <constraint source="owner D-101 (2026-10-17)">An overridden submission already has its invoice (In Review, held). Override releases it to approval, and its Decision Record files under that invoice (D-100 WriteBillingDecisionAsync).</constraint>
+    <constraint source="D-76">eBilling Override is a Dataverse table privilege on a small dedicated table (owner decision D-76), checked once through CallerRecordAccessProbe.CallerHoldsPrivilegeAsync and failing closed; no security-role-name check and no app role. The table is created by an idempotent additive script under scripts/ebilling/ and captured into the solution source by the next deploy task; answer the root CLAUDE.md section 11 three questions for it in notes.</constraint>
+    <constraint source="FR-19, FR-37, root CLAUDE.md section 6">Override requires the privilege, checked server-side on every call, fail closed (no token, probe failure, unknown user = 403 ebilling.override.not_permitted). Reason required (400). One person: no second approval step.</constraint>
+    <constraint source="D-24">Only an internal-channel submission whose processing status is Rejected because of a blocking finding can be overridden; SPA submissions, Failed submissions and already-accepted ones are refused (409 with stable codes). A repeat override is a no-op with no new Decision Record.</constraint>
+    <constraint source="FR-37, I-5">The override never deletes or rewrites the blocking finding: it is persisted as a Signal on the new invoice / line marked Overridden (with who, when, reason) and the line is Flagged for review.</constraint>
+    <constraint source="FR-20, ADR-002">Acceptance runs through 049's all-or-nothing persist step; no second invoice-creation path. A failure leaves no partial invoice and the submission stays Rejected.</constraint>
+    <constraint source="FR-30">Exactly one Decision Record per override via 074; the Return of a blocked submission records the outcome on the submission and a Decision Record only if 074's actions cover a submission subject.</constraint>
+    <constraint source="ADR-001, ADR-008, ADR-019">Own endpoints file; per-route filter plus RequireEbillingEnabled(); ProblemDetails with stable codes.</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">Placement BFF (B1 caller identity, B4 live request); publish-size delta; no new HIGH CVE; no package.</constraint>
+    <constraint source="074 fix-round adversarial pass (2026-10-18), caller obligations of BillingDecisionRecorder">Callers that record billing decisions through BillingDecisionRecorder must:
+- Derive the resolved Signal ids and the policy version id server-side, from the decision's own invoice and lines. Never take them from the request. The writer accepts any existing Signal or policy version (074 review K-2).
+- Record before mutating, or run the recorder's reads first. Its refusals that depend on Dataverse reads (unknown policy version, missing Signal, undetermined subject, contact read fault) happen after Preflight, so a caller that changes invoice status first can be left with a changed status and no Decision Record (K-3).
+- Serialise decisions per invoice (one at a time per invoice). The recorder's "already recorded" check and its create are not atomic (K-4).
+- Build Values the same way on every attempt (same types, same decimal scale), so that an honest retry hashes to the same content (K-5, unless 074's follow-up normalises decimals).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/spec.md (FR-19, FR-20, FR-26, FR-30, FR-37, Assumptions)</file>
+      <file>c:\code_files\spaarke-prototype\projects\ebilling.r1\README.md (Overrides row, F-7)</file>
+      <file>c:\code_files\spaarke-prototype\projects\ebilling.r1\src\review\Dialogs.tsx (OverrideModal — required reason)</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Resolve the privilege-mechanism escalation with the owner BEFORE coding; read 076's notes, 049's accept path and stored rejection shape, 074's override action.</step>
+    <step order="1">Implement the one privilege check (EbillingOverridePrivilege) and expose canOverride.</step>
+    <step order="2">Routes under /api/finance/submissions/{submissionId} (names directional): GET blocked (channel, status, blocking findings with rule, version, clause, values read; canOverride; canReturn); POST override (decision id, reason); POST return (reason).</step>
+    <step order="3">Override: validate state, call 049's accept path with the override marker, mark the blocking finding Overridden, record via 074, set the submission outcome. Return: per the F-7 answer.</step>
+    <step order="4">Tests: privileged override happy path (invoice created, finding visible and marked, one record); no privilege 403; probe failure 403; reason missing 400; SPA / Failed / already accepted 409; repeat is a no-op; accept-path failure leaves no invoice; Return per F-7; contract tests 401 / 403 / disabled.</step>
+    <step order="5">Seeding proof (missing-privilege guard): make the check return true unconditionally, show the 403 test fails, restore; record in notes.</step>
+    <step order="6">dotnet build and dotnet test green; publish-size delta and vulnerable-package check recorded.</step>
+    <step order="7">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+    <step order="8">Record deviations (mechanism, F-7 answer, routes) in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>🔔 Privilege mechanism (auth, security-sensitive — STOP and ask before coding). Options: (A) a Dataverse security role "eBilling Override" granting a privilege on a dedicated marker table, checked with CallerHoldsPrivilegeAsync (existing caller-scoped probe; administered with other Dataverse roles; needs one small schema addition, synced by 112); (B) an Entra app role on the BFF registration, checked like the SystemAdmin policy (no schema; administered in Entra, not Dataverse); (C) role-membership query by role name (no existing helper; name-based, fragile). Recommendation: A, matching the spec's "security role privilege" assumption and the existing probe; keep consistent with 076's choice where possible.</trigger>
+    <trigger>Owner decided D-73 (F-7): any internal user with access to the submission's core record may Return a blocked internal submission, no privilege; only Override needs the eBilling Override privilege.</trigger>
+    <trigger>If 049's accept path cannot take an override marker without restructuring, STOP and coordinate rather than duplicating invoice creation.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Spec section 11 row "Review / approval / export / rule endpoints"; privilege probe CallerRecordAccessProbe.CallerHoldsPrivilegeAsync and FinanceAuthorizationCheck.CallerPrivilege exist; no override route or privilege exists (grep "Override" under Services/Finance finds none).</existing>
+    <extension>Reuses the existing probe or policy pattern and 049's accept path; a single privilege class is added so 052, 111 and the routes share one check instead of three copies.</extension>
+    <cost-of-doing-nothing>An internal user cannot accept a legitimately blocked invoice (e.g. a negotiated rate not yet in the rate card), so FR-19 and FR-37 fail and the only path is asking the firm to resubmit.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">build, test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Api/Finance/SubmissionOverrideEndpoints.cs; Services/Finance/SubmissionOverrideService.cs; Services/Finance/EbillingOverridePrivilege.cs</output>
+    <output type="test">SubmissionOverrideServiceTests.cs; SubmissionOverrideEndpointsAuthorizationContractTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Override returns 403 ebilling.override.not_permitted for a caller without the privilege, and also when the privilege probe fails; seeding proof recorded.</criterion>
+    <criterion testable="true">A privileged override with a reason on a blocked internal submission releases the already-persisted held invoice (D-101) to approval, so it starts counting toward spend (D-102), writes exactly one Decision Record, and the blocking finding is visible on the invoice marked Overridden with who, when and reason.</criterion>
+    <criterion testable="true">Override without a reason is 400; on an SPA, Failed or already accepted submission it is 409; a repeat writes nothing new.</criterion>
+    <criterion testable="true">A failure inside the accept path leaves no invoice and the submission still Rejected.</criterion>
+    <criterion testable="true">GET blocked returns canOverride true only for privileged callers; Return behaves per the recorded F-7 answer.</criterion>
+    <criterion testable="true">Routes return 401 unauthenticated and 503 ebilling.disabled when off.</criterion>
+    <criterion testable="true">dotnet build 0 errors; all tests green, including OperationAccessPolicyCompletenessTests.</criterion>
+    <criterion testable="true">Publish-size delta measured against a fresh master build and recorded in task notes; no new HIGH CVE.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Parallel group P4-B: own files. Shared append points: FinanceModule.cs, EndpointMappingExtensions.cs, and 049's accept-path file (103 also adds one call there — re-read immediately before editing; /conflict-check before the PR). The only WP4-B task that edits OperationAccessPolicy.cs. If option A is chosen, the marker table and role are created in dev by this task's idempotent script under scripts/ebilling/ and synced to solution source by 112. 052 (wizard) and 111 (page) consume canOverride and these routes.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

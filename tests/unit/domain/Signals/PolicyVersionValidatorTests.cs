@@ -774,6 +774,49 @@ public class PolicyVersionValidatorTests
         reasons().Should().Equal(OntologyWriterFailureReason.RuleBodyTooLarge);
     }
 
+    // ebilling-r1 task 070 fix-round-1 (K1): ValidateInternal pairs Success() with a compiled predicate. If a future bug breaks
+    // that pairing, the gate must not return false in silence -- it logs and meters the row as internal_error like any refusal.
+    [Fact]
+    public void Conclude_ValidResultButNoCompiledPredicate_ReturnsFalse_LoggedAndMeteredAsInternalError()
+    {
+        var scope = Guid.NewGuid();
+        PolicyInvalidMetricScope.Value = scope;
+        var (listener, reasons) = ListenPolicyInvalidReasonsScoped(scope);
+        using var listenerScope = listener;
+        var logger = new CapturingLogger<PolicyVersionValidator>();
+
+        var ok = Sut(logger).Conclude(
+            Snapshot("Existence", ValidExistenceBody), PolicyVersionValidationResult.Success(), candidate: null, out var compiled);
+
+        ok.Should().BeFalse();
+        compiled.Should().BeNull();
+        reasons().Should().Equal(OntologyWriterFailureReason.InternalError);
+        var entry = logger.Entries.Should().ContainSingle().Subject;
+        entry.Level.Should().Be(LogLevel.Error);
+        entry.EventId.Id.Should().Be(OntologyWriterEvents.PolicyVersionInvalid.Id);
+        entry.Message.Should().Contain(OntologyWriterFailureReason.InternalError).And.NotContain("sprk_matter",
+            "the rule body is never logged");
+    }
+
+    [Fact]
+    public void Conclude_ValidResultWithACompiledPredicate_ReturnsTrue_NothingLoggedOrMetered()
+    {
+        var scope = Guid.NewGuid();
+        PolicyInvalidMetricScope.Value = scope;
+        var (listener, reasons) = ListenPolicyInvalidReasonsScoped(scope);
+        using var listenerScope = listener;
+        var logger = new CapturingLogger<PolicyVersionValidator>();
+        var sut = Sut(logger);
+        sut.TryPrepareForEvaluation(Snapshot("Existence", ValidExistenceBody), subjectId: null, out var real).Should().BeTrue();
+
+        var ok = sut.Conclude(Snapshot("Existence", ValidExistenceBody), PolicyVersionValidationResult.Success(), real, out var compiled);
+
+        ok.Should().BeTrue();
+        compiled.Should().BeSameAs(real);
+        logger.Entries.Should().BeEmpty();
+        reasons().Should().BeEmpty();
+    }
+
     // Finding F1: Guid.Empty is a CALLER bug. It must throw, and must never be logged or metered as an invalid
     // POLICY -- before the fix it reached the compiler, came back as compile_refused, and logged EventId 50301
     // against a valid policy version.

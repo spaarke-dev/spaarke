@@ -1,0 +1,37 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0221",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0221","generator_id":"gen_eval_set.py@1 F-0221","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0221.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-05"},
+ "header":{"firm":"Jarrow Whitcombe PC","firm_invoice_number":"INV-2025-13689","invoice_date":"2026-06-02","billing_period_start":"2026-05-01","billing_period_end":"2026-05-31","firm_matter_reference":"98312-0030","po_number":"PO-4574889","fees_total":4963.5,"expenses_total":1144.86,"adjustments_total":0.0,"total_due":6108.36,"currency":"USD"},
+ "timekeepers":[{"name":"Dmitri Nwosu","title":"Associate","rate":300.0,"billed_as":"DN"},{"name":"Elena Tavares","title":"Partner","rate":545.0,"billed_as":"ET"},{"name":"Gideon Sandoval","title":"Paralegal","rate":150.0,"billed_as":"GS"},{"name":"Hannah Pemberton","title":"Paralegal","rate":130.0,"billed_as":"HP"},{"name":"Helena Tavares","title":"Senior Associate","rate":310.0,"billed_as":"HT"},{"name":"Mei Lindqvist","title":"Associate","rate":250.0,"billed_as":"ML"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-05-07","timekeeper":"GS","timekeeper_name":"Gideon Sandoval","timekeeper_title":"Paralegal","title":"Para","hours":2.7,"rate":225.0,"amount":607.5,"narrative":"Plan strategy for upcoming phase of the customs audit with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-05-08","timekeeper":"ML","timekeeper_name":"Mei Lindqvist","timekeeper_title":"Associate","title":"Assoc","hours":1.9,"rate":250.0,"amount":475.0,"narrative":"Attend and present oral argument in the distribution agreement","codes":["L530","A109"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-05-11","timekeeper":"DN","timekeeper_name":"Dmitri Nwosu","timekeeper_title":"Associate","title":"Assoc","hours":0.7,"rate":300.0,"amount":210.0,"narrative":"Draft notice of appeal and docketing statement for the supply agreement","codes":["L510","A103"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-05-15","timekeeper":"DN","timekeeper_name":"Dmitri Nwosu","timekeeper_title":"Associate","title":"Assoc","hours":1.4,"rate":300.0,"amount":420.0,"narrative":"Review documents.","codes":["L190","A104"],"page":1,"narrative_style":"vague"},
+  {"n":5,"line_type":"fee","date":"2026-05-18","timekeeper":"DN","timekeeper_name":"Dmitri Nwosu","timekeeper_title":"Associate","title":"Assoc","hours":2.5,"rate":300.0,"amount":750.0,"narrative":"Research appealability issues in the employment claim","codes":[],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-05-18","timekeeper":"DN","timekeeper_name":"Dmitri Nwosu","timekeeper_title":"Associate","title":"Assoc","hours":1.3,"rate":300.0,"amount":390.0,"narrative":"Prepare for oral argument in the employment claim","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-05-21","timekeeper":"HT","timekeeper_name":"Helena Tavares","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.2,"rate":310.0,"amount":372.0,"narrative":"Various tasks regarding matter.","codes":["L190","A104"],"page":1,"narrative_style":"vague"},
+  {"n":8,"line_type":"fee","date":"2026-05-22","timekeeper":"ET","timekeeper_name":"Elena Tavares","timekeeper_title":"Partner","title":"Ptr","hours":0.2,"rate":545.0,"amount":109.0,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-05-22","timekeeper":"HT","timekeeper_name":"Helena Tavares","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.5,"rate":310.0,"amount":465.0,"narrative":"Prepare monthly status report to client regarding the vendor agreement","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2026-05-27","timekeeper":"ML","timekeeper_name":"Mei Lindqvist","timekeeper_title":"Associate","title":"Assoc","hours":2.4,"rate":250.0,"amount":600.0,"narrative":"Draft notice of appeal and docketing statement for the employment claim","codes":["L510","A103"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2026-05-28","timekeeper":"ML","timekeeper_name":"Mei Lindqvist","timekeeper_title":"Associate","title":"Assoc","hours":2.0,"rate":250.0,"amount":500.0,"narrative":"Research appealability issues in the insurance coverage issue","codes":["L510","A102"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2026-05-29","timekeeper":"HP","timekeeper_name":"Hannah Pemberton","timekeeper_title":"Paralegal","title":"Para","hours":0.3,"rate":130.0,"amount":39.0,"narrative":"Attend and present oral argument in the warranty claim","codes":[],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"fee","date":"2026-05-29","timekeeper":"HP","timekeeper_name":"Hannah Pemberton","timekeeper_title":"Paralegal","title":"Para","hours":0.2,"rate":130.0,"amount":26.0,"narrative":"Plan strategy for upcoming phase of the lease dispute with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":14,"line_type":"expense","date":"2026-05-08","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":21.08,"amount":21.08,"narrative":"Long distance conference call charges","codes":["E105"],"page":1,"narrative_style":"clear"},
+  {"n":15,"line_type":"expense","date":"2026-05-22","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1123.78,"amount":1123.78,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["358 Elm Court","Atlanta","Tax ID 44-6123212"],"template":"T01","pages":2},
+ "rule_set_id":"RS-05",
+ "context":{"matter_open":"2025-02-16","matter_close":"2026-08-29","matter_budget":49433.0,"approved_timekeepers":["Helena Tavares","Beatrix Mbeki","Hannah Pemberton","Dmitri Nwosu","Mei Lindqvist","Marcus Voss","Gideon Sandoval","Elena Tavares","Dmitri Voss"],"invoice_received_date":"2026-06-18"},
+ "expected_findings":[
+  {"rule_id":"RS-05-R01","rule_type":"ApprovedRate","scope":"line","line_refs":[1],"consequence":"Reduce"},
+  {"rule_id":"RS-05-R03","rule_type":"AiObservation","scope":"line","line_refs":[4],"consequence":"Reduce"},
+  {"rule_id":"RS-05-R03","rule_type":"AiObservation","scope":"line","line_refs":[7],"consequence":"Reduce"},
+  {"rule_id":"RS-05-R07","rule_type":"RequiredData","scope":"line","line_refs":[5],"consequence":"Reject"},
+  {"rule_id":"RS-05-R07","rule_type":"RequiredData","scope":"line","line_refs":[12],"consequence":"Reject"}
+ ],
+ "seeded_violations":5
+}

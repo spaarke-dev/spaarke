@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spaarke.com/schemas/billing/billing-discount.schema.json",
+  "title": "Discount billing rule body",
+  "description": "sprk_policyversion.sprk_rulebody shape for sprk_ruletype = Discount (ebilling-r1 task 115; procedure-and-file-model.md 6.3). 13. A fee line's billed rate is at most the rack rate less the agreed discount, plus an optional tolerance. A check only ('rate above the agreed discounted rate', per line): Flag, never an adjustment. Rack rates are reference data (rate cards), never copied here. Parameters only: no consequence (that is the sprk_consequence column). additionalProperties=false: any other member is refused, not ignored. 'messageTemplate' (anywhere) and 'then' are refused by RuleBodySchemaValidator before this schema runs.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "discountPercent"],
+  "properties": {
+    "type": {
+      "const": "Discount"
+    },
+    "discountPercent": {
+      "description": "The agreed discount off the rack rate, in percent. More than 0, less than 100.",
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "exclusiveMaximum": 100
+    },
+    "tolerancePercent": {
+      "description": "Percent over the discounted rate still accepted, 0-100. Absent = 0.",
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100
+    }
+  }
+}

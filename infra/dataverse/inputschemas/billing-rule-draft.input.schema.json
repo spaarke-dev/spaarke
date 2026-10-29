@@ -1,0 +1,37 @@
+{
+  "$comment": "Mirror of sprk_analysisaction.sprk_inputschema for billing-rule-draft (ebilling-r1 task 075, FR-27, D-27). The Action is a Linear AI Consumer reached only through IInvoiceAi.DraftRulesAsync (the Binding carries no tool description, so it is never loop-projected); the schema documents the operand the facade sends as the '## Input' section ({ documentText, ruleTypes }) and is validated by CatalogInputSchemaContractTests like every other mirror. Property-level \"required\": true is FORBIDDEN (use the object-level required array). actionCode carries NO version suffix. The document id and tenant id travel in the LinearRunContext / logs, never in the operand. Deployed to the row by scripts/ebilling/Ensure-ActionRow.ps1.",
+  "actionCode": "billing-rule-draft",
+  "environment": "spaarkedev1",
+  "inputSchema": {
+    "type": "object",
+    "required": ["documentText", "ruleTypes"],
+    "properties": {
+      "documentText": {
+        "type": "string",
+        "description": "The extracted text of the guideline, rate letter or internal procedure, or one part of a long one (BillingRuleDraftJobHandler splits a long text at paragraph breaks)."
+      },
+      "ruleTypes": {
+        "type": "array",
+        "description": "The closed list of billing rule types the proposals must come from: the eleven types of BillingRuleCatalogue, each with its parameter schema (the type member itself is left out; the application adds it).",
+        "items": {
+          "type": "object",
+          "required": ["ruleType", "description", "parameterSchema"],
+          "properties": {
+            "ruleType": {
+              "type": "string",
+              "description": "The rule type name, e.g. TimeIncrement. The answer copies it exactly."
+            },
+            "description": {
+              "type": "string",
+              "description": "What the rule type checks, in one sentence."
+            },
+            "parameterSchema": {
+              "type": "object",
+              "description": "The JSON Schema of the type's parameters, embedded as JSON."
+            }
+          }
+        }
+      }
+    }
+  }
+}

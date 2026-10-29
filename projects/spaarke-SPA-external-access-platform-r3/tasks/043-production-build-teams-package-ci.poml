@@ -4,7 +4,7 @@
     <title>Production SPA build + production Teams package in CI (FR-20)</title>
     <phase>4 SPA auth and platform</phase>
     <gate>after 040</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>CI workflow and packaging changes with explicit acceptance</rigor-reason>
     <model-tier>sonnet</model-tier>

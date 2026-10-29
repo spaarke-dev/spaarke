@@ -325,6 +325,7 @@ public static class DataverseDocumentsEndpoints
         documentsGroup.MapDelete("/{id}", async (
             string id,
             IDocumentDataverseService dataverseService,
+            Spaarke.Dataverse.IGenericEntityService entities,
             ILogger<Program> logger,
             HttpContext context) =>
         {
@@ -363,6 +364,19 @@ public static class DataverseDocumentsEndpoints
                         "Delete refused for document {DocumentId}: {ChildCount} child document(s) still name it as parent",
                         id, childCount);
                     return ProblemDetailsHelper.DocumentHasChildDocuments(childCount, traceId);
+                }
+
+                // ebilling-r1 task 094 (ontology-r1 088 gate F1; owner EB-D-166): a Stored File copied from the document
+                // (sprk_sourcedocument, Delete = Restrict) refuses the row the same way, so it is checked too - with its own code
+                // (fix round F1-c): the document is an invoice's source, not a parent of child documents.
+                var copyCount = await Sprk.Bff.Api.Services.Finance.Files.StoredFileService.CountCopiesOfDocumentAsync(
+                    entities, Guid.Parse(id), context.RequestAborted);
+                if (copyCount > 0)
+                {
+                    logger.LogInformation(
+                        "Delete refused for document {DocumentId}: {CopyCount} Stored File copies name it as their source",
+                        id, copyCount);
+                    return ProblemDetailsHelper.DocumentIsInvoiceSource(traceId);
                 }
 
                 try

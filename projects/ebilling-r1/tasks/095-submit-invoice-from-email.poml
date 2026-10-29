@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="095" project="ebilling-r1">
+  <metadata>
+    <title>Submit Invoice from the Outlook add-in: POST /api/finance/invoice-submissions/from-email (email-only save + submission)</title>
+    <phase>3 Procedures and files (WP3, EB-D-148) — wave W3-F</phase>
+    <gate>blocked until 094 and 088 are done AND #2177 (task 130, T8) is merged and deployed to dev</gate>
+    <status>in-progress</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New authorized BFF endpoint (tags bff-api, auth) that writes an own-Restricted .eml and a submission all or nothing; tenant-isolation marker with an ArchTest.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Auth and isolation (own-Restricted .eml, submission marker, (a′) interplay), .eml resolution across duplicate paths and retryable vs permanent refusals; a cross-project contract with word-add-in-r1.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3-F</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Shares InvoiceSubmissionContracts.cs and InvoiceSubmissionService.cs with 097 (correction mode); run 095 and 097 one after the other.</parallel-reason>
+    <deps>094, 088</deps>
+    <tags>bff-api, api, auth, finance, office, write-path, secure-records</tags>
+    <estimated-effort>3-4 days</estimated-effort>
+  </metadata>
+
+  <prompt>Build the from-email endpoint exactly as model section 9.1 "Email-only save" specifies: one call saves the email as its .eml Document (no attachment Documents) through the existing /office/save pipeline, own-Restricted with the submission marker in the same create, resolves that .eml from its communication, and submits the marked Invoice attachment (plus Supporting files) through 094's Submit Invoice operation, all or nothing. The submission job reads the marked parts' bytes out of the saved .eml in SPE, app-only.</prompt>
+
+  <role>SPAARKE platform developer. Expert in the Office save pipeline (OfficeService, UploadFinalizationWorker), Minimal API filters, Dataverse access narrowing (uac-r2 D7) and idempotent intake. Follow ADRs strictly.</role>
+
+  <goal>POST /api/finance/invoice-submissions/from-email exists in the /api/finance group with every filter 9.1 names; a valid request leaves exactly one own-Restricted, marked .eml linked to its communication and one submission naming it; every refusal leaves neither; an ArchTest pins the marker's only writer.</goal>
+
+  <context>
+    <background>The contract is projects/ebilling-r1/notes/procedure-and-file-model.md section 9.1, "Surfaces" through "Why one call, not two", and the (a′) bullet "On an add-in invoice"; reviews sections 4.x, 14, 15. Code (verified 2026-10-21; lines drift): save route filters Api/Office/OfficeEndpoints.cs:185-195; EntityAccessFilter reads only a SaveRequest argument (Api/Filters/EntityAccessFilter.cs:347-358); OfficeService.SaveAsync (:365), per-user duplicate FindExistingAsync (:423) and early return (:433-447), save key GenerateIdempotencyKey (:1194-1204; the model's :1239-1249 is stale), capture before upload (:498-517); SelectedAttachmentFileNames null = all, [] = none (Workers/Office/UploadFinalizationWorker.cs:1033-1045); IsEmailArchive set at OfficeDocumentPersistence.cs:327 and UploadFinalizationWorker.cs:684; GetEmailArchiveByCommunicationAsync returns the first only (src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs:1152); .eml parts exist only for attachments sent with ContentBase64 (OfficeEmailEnricher.cs:324); AccessInheritance.OwnNarrowing (Services/Access/SecureRootInheritance.Cascade.cs:368). 088 adds the marker column on sprk_document. #2177 moves the .eml-to-communication link into the create; on this branch it is still best-effort after the create (OfficeDocumentPersistence.cs:330-338).</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Finance/InvoiceSubmissionFromEmailEndpoint.cs (route, filters; name directional)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Finance/Submission/FromEmailSubmissionService.cs (marks, bytes, save, .eml resolution, A, submission; name directional)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs, OfficeDocumentPersistence.cs (submission-path create option: own Restricted + marker; in-process .eml id)</file>
+      <file role="modify">src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs, IDocumentDataverseService.cs (list variant of the email-archive lookup)</file>
+      <file role="modify">Services/Finance/Submission/InvoiceSubmissionContracts.cs; Services/Jobs/Handlers/InvoiceSubmissionProcessingJobHandler.cs (byte read from the .eml); Infrastructure/DI/FinanceModule.cs and the Finance endpoint-mapping call site</file>
+      <file role="new">tests/Spaarke.ArchTests/SubmissionMarkerWriterGuardTests.cs</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/Submission/FromEmailSubmissionServiceTests.cs</file>
+      <file role="new">tests/integration/contract/Api/Finance/InvoiceSubmissionFromEmailContractTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="model 9.1 Marks">Each named attachment is Invoice (exactly one), Supporting or Don't save; any other value, zero or two Invoice marks, or a mark on an inline part → 400 before any write. A mark identifies an attachment by file name, size and content type as sent. Invoice → Stored File Invoice PDF; Supporting → Invoice supporting file; both Firm-visible No; Don't save creates nothing.</constraint>
+    <constraint source="model 9.1 step 0">Before any write, every Invoice and Supporting attachment must be present with its ContentBase64; otherwise 422 naming the file.</constraint>
+    <constraint source="model 9.1 step 1 (uac-r2 F2-a)">The server overwrites SelectedAttachmentFileNames with [] whatever the client sends (null means every attachment). The save runs through the existing /office/save pipeline in-process.</constraint>
+    <constraint source="model 9.1 Route and filters (uac-r2 F2-a)">The route is in the /api/finance group: step 0 (099) before any record read, then OfficeAuthFilter, EntityAccessFilter (Read and AppendTo on the target core record), the Office Save rate limit and OfficeVersionSaveAuthorizationFilter, plus RequireEbillingEnabled. Core record types: sprk_matter, sprk_project, sprk_workassignment (the FilingCores list, never sprk_matter alone).</constraint>
+    <constraint source="model 9.1 step 1a (uac-r2 F2-b, v5.7 change 3)">The .eml is resolved from its communication, never from a returned or job-result document id. Fresh create: the .eml this request created (in-process; no search). Duplicate path: candidates are Documents with that sprk_relatedcommunication AND sprk_isemailarchive = true, filed under the target core record with no parent document, created by the caller only; if more than one, the one whose MIME parts contain the Invoice mark's SHA-256. A then runs through the refile path; a communication filed elsewhere → 409 document_core_record_mismatch.</constraint>
+    <constraint source="model 9.1 F1-c (owner v5.7)">The email that can't be identified is refused and nothing is saved (no .eml, no submission); never task 130's save-Restricted fallback. Retryable ("try again", 503): Graph timeout, Graph 429, Graph 5xx, transient Dataverse error. Permanent (named, non-retryable, suggests the internal upload route): no Message-ID; Graph 403 or 404; a duplicate onto an earlier unlinked or task-130 Restricted .eml; no communication resolves; none or several candidates after the SHA check.</constraint>
+    <constraint source="model 9.1 own-Restricted (owner F1-a (i), uac-r2 v5.7 change 1)">An .eml this endpoint creates is saved with AccessInheritance.OwnNarrowing(Restricted) and the submission marker in the SAME create, written only by this submission path. An .eml resolved from an earlier normal save is neither narrowed nor marked. The marker is never written in any update payload.</constraint>
+    <constraint source="model 9.1 step 2 (uac-r2 F1-b)">The submission names the .eml as its source document and each marked attachment by file name and SHA-256, matched against the .eml's MIME parts; it refuses when no communication resolves.</constraint>
+    <constraint source="model 9.1 step 3 (uac-r2 F2-c)">The job starts only after the .eml's finalization and reads bytes from the saved .eml in SPE app-only, never a mailbox: one retrieve of the .eml row gives driveId, itemId and versionnumber; the part's ordinal, name and SHA-256 must match the mark or the submission ends Failed; step 4's IfRowVersionMatches pins that version. Logs carry ids and ordinals only, never file names or subjects. A failed .eml finalization ends the submission Failed; the .eml survives a failed submission.</constraint>
+    <constraint source="model 9.1 Idempotency key">Message-ID + core record + mode + invoice id + the sorted (file name, mark) list; a different marking is a different operation. Mode values: New, and Correction with a required invoice id (400 when missing); 097 implements Correction in the operation, this task only carries it.</constraint>
+    <constraint source="CLAUDE.md §10">BFF hygiene per .claude/constraints/bff-extensions.md: placement stated, publish-size delta against a fresh master build, no new package, no new HIGH CVE.</constraint>
+    <constraint source="live data">No live Dataverse writes and no deploys.</constraint>
+    <constraint source="095 contract, pinned 2026-10-27 for word-add-in-r1">The wire contract in projects/ebilling-r1/notes/095-from-email-contract.md (request fields, idempotency rule, 202 body, replay rules, error statuses and codes) is binding. Any change to it, including resolving its open points OP-1 to OP-8, needs word-add-in-r1's agreement before it merges. word-add-in-r1 AGREED the whole file (sections 1-9, OP-1 to OP-8) at 717cf238d9 on 2026-10-27; their task 133 builds against it. EB-D-160 (re-attempt after Failed) was added after that agreement and is sent to them.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/notes/procedure-and-file-model.md (section 9.1)</file>
+      <file>projects/ebilling-r1/notes/procedure-model-reviews.md (sections 4.x, 14, 15)</file>
+      <file>projects/ebilling-r1/notes/094-submit-invoice.md (written by 094)</file>
+      <file>.claude/constraints/api.md, auth.md, testing.md, bff-extensions.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md, ADR-008-endpoint-filters.md, ADR-019-problemdetails.md, ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md; .claude/patterns/testing/unit-test-structure.md; docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Column-writer ArchTest with must-fire / must-not-fire controls" location="tests/Spaarke.ArchTests/DocumentAccessPermissionWriterGuardTests.cs">Copy its source scan, member attribution, approved-writer list and Detector_MustFireAndMustNotFire controls for the marker column; add an update-payload ban.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare FULL. Confirm the gate: #2177 merged into this branch (the .eml-to-communication link is written in the create) and deployed to dev; else STOP. Read 088's marker column and 094's operation.</step>
+    <step order="1">Request model and route: email payload (as /office/save), core record, marks, mode, invoice id, client idempotency key; filters in the constrained order; make EntityAccessFilter see the target (a SaveRequest argument or an extension of its extraction).</step>
+    <step order="2">Service: marks validation (400), bytes-present (422), [] overwrite, in-process save with the submission-path create option (own Restricted + marker), .eml resolution (fresh / duplicate), A via the refile path, refusal classification, then 094's operation with the .eml as source.</step>
+    <step order="3">List variant of the email-archive lookup; the job's byte read from the .eml's MIME parts with the F2-c checks.</step>
+    <step order="4">SubmissionMarkerWriterGuardTests with must-fire and must-not-fire controls.</step>
+    <step order="5">Tests per the acceptance criteria; seeding proof; build; Office, Finance and Submission unit tests; full ArchTests; publish-size delta.</step>
+    <step order="6">Notes in projects/ebilling-r1/notes/095-submit-invoice-from-email.md: request contract for word-add-in-r1, refusal table, seeding proof, §11 answers. Send the contract to word-add-in-r1.</step>
+    <step order="7">Update TASK-INDEX.md: this task's status cell to `✅ [done]` after the adversarial reviews and uac-r2's review.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If #2177 is not merged into this branch and deployed to dev, STOP: from-email does not ship before it (model 9.1 Prerequisite).</trigger>
+    <trigger>If the own-Restricted narrowing and the marker cannot be written in the .eml's create (only in a later update), STOP and report; do not write the marker in an update.</trigger>
+    <trigger>If word-add-in-r1's request shape differs from 9.1 (marks keyed other than file name + size + content type, or "add supporting files to an existing invoice" sent through this route), STOP and settle the contract; the model routes supporting files for an existing invoice through the internal upload route.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>POST /office/save (OfficeEndpoints.cs:185) saves the email; 094's Submit Invoice operation submits a source Document; GetEmailArchiveByCommunicationAsync (DataverseServiceClientImpl.cs:1152) finds the first .eml of a communication.</existing>
+    <extension>The save pipeline and 094's operation are reused in-process, not copied. A separate route is required: /office/save's replay and duplicate keys cannot carry a submission (OfficeService.cs:1194-1204) and two client calls can leave an email saved with no submission (model 9.1). The lookup gets a list variant because one communication can have several .eml Documents after #2177.</extension>
+    <cost-of-doing-nothing>The add-in's Invoice module has no server call: an invoice arriving by email in Outlook cannot be submitted, and the word-add-in-r1 contract (owner I, L) fails.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">build, test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">InvoiceSubmissionFromEmailEndpoint.cs; FromEmailSubmissionService.cs; OfficeService / OfficeDocumentPersistence create option; email-archive list lookup; job byte read</output>
+    <output type="test">SubmissionMarkerWriterGuardTests.cs; FromEmailSubmissionServiceTests.cs; InvoiceSubmissionFromEmailContractTests.cs</output>
+    <output type="docs">projects/ebilling-r1/notes/095-submit-invoice-from-email.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Happy path: one call creates one .eml Document (sprk_isemailarchive true, linked to its communication, filed under the core record, own Restricted, marker set) with no attachment child Documents, and one submission naming it; the job stages the Invoice and Supporting parts as Stored Files (Firm-visible No) and the invoice is created (test).</criterion>
+    <criterion testable="true">Marks: zero or two Invoice marks, an unknown mark value, or a mark on an inline part → 400; an Invoice or Supporting attachment without bytes → 422 naming the file; each writes nothing (tests).</criterion>
+    <criterion testable="true">A client-sent SelectedAttachmentFileNames of null or a non-empty list is overwritten with [] (test).</criterion>
+    <criterion testable="true">Filters: unauthenticated → 401; flagged-external caller → refused by step 0 before any record read; caller without Read and AppendTo on the core record → 403 from EntityAccessFilter; rate limit exceeded → 429; eBilling off → 503 ebilling.disabled (tests).</criterion>
+    <criterion testable="true">Duplicate path: a second call by the same user for the same email and record resolves the caller's own .eml from the communication (never from a job result); another user's marked .eml of the same email is never chosen; several of the caller's candidates are narrowed by the Invoice SHA-256; none or still several → the permanent refusal (tests).</criterion>
+    <criterion testable="true">An .eml resolved from an earlier normal save is neither narrowed nor marked; a communication filed to another core record → 409 document_core_record_mismatch (tests).</criterion>
+    <criterion testable="true">Refusals save nothing (no .eml, no submission): Graph timeout, 429, 5xx and a transient Dataverse error → retryable 503; no Message-ID, Graph 403 or 404, a duplicate onto an unlinked or task-130 Restricted .eml, no communication → permanent named refusals (one test each).</criterion>
+    <criterion testable="true">Job byte read: a part whose ordinal, name or SHA-256 differs from the mark ends the submission Failed; the .eml survives; logs carry no file name or subject (tests).</criterion>
+    <criterion testable="true">Idempotency: the same key returns the earlier result and creates nothing; a different marking or mode is a different operation; mode Correction without an invoice id → 400 (tests).</criterion>
+    <criterion testable="true">ArchTest: the marker column is written only by the submission create path, only in the create that writes the narrowing, never in an update payload; must-fire controls (a writer in another member; the marker in an update payload) and must-not-fire controls (the approved create; a read) pass.</criterion>
+    <criterion testable="true">Seeding proof, recorded in notes: add a marker write to an update payload → the ArchTest fails; restored.</criterion>
+    <criterion testable="true">dotnet build exits 0; Office, Finance and Submission unit tests, contract tests and the full ArchTests pass (known pre-existing failures listed by name); publish-size delta recorded; no new HIGH CVE.</criterion>
+    <criterion testable="true">Contract tests (InvoiceSubmissionFromEmailContractTests.cs) pin the request and response field names, the status codes and the errorCode / reasonCode values listed in notes/095-from-email-contract.md, one test per error-table row and per replay row (tests).</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Reviews: adversarial-reviewer twice (auth, tenant isolation), uac-r2, and word-add-in-r1 for the contract. Known limits (model 9.1, owner-visible): cloud-link or over-20 MB invoices cannot be submitted from the add-in; an earlier normal save with the invoice ticked leaves an invoice-PDF Document beside the Stored File; a later normal save after this call answers "already saved" (#2209); lower-then-raise of the .eml's Restricted leaves the marker. 096 removes the old Office invoice legs one release after word-add-in-r1 ships the module. word-add-in-r1 2026-10-21: the from-email request and response shapes are frozen as model §9.1 states them; any change to either is sent to word-add-in-r1 before it merges. Their add-in release (Invoice view, Submit Invoice button, Invoice removed from Save and quick-create) follows this task's dev deploy and 118's marking component; 096 is one release after it. uac-r2 2026-10-22 (round 122, #2234): a save-time "email unidentified" Restricted is PROVISIONAL (AccessInheritance.OwnNarrowingUntilEmailIdentified, written only by ApplyEmailCommunicationOutcome) and is released to the communication's value once the .eml is linked. The submission's own Restricted on the .eml must be a NON-provisional own narrowing: do not build it through ApplyEmailCommunicationOutcome's unidentified branch (own path or factory). Must-fire test: a linked submission .eml stays Restricted. ontology-r1 088 gate 2026-10-22: the .eml source is held by sprk_storedfile.sprk_sourcedocument and sprk_sourcecommunication (Restrict). 094 extends the document delete 409 pre-check to count Stored File references; this task confirms that it covers the .eml document this route creates (must-fire test: deleting the submission's .eml returns 409 and the SPE file is untouched). The communication side follows 117's rule.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load every file in knowledge/files before Step 1. Follow task-execute for rigor, checkpoints and quality gates.</protocol>
+  </execution>
+</task>

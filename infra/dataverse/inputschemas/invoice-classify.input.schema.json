@@ -1,0 +1,16 @@
+{
+  "$comment": "Mirror of sprk_analysisaction.sprk_inputschema for invoice-classify (ebilling-r1 task 042, FR-46). The Action is a Linear AI Consumer reached only through IInvoiceAi.ClassifyAsync (Binding carries no tool description, so it is never loop-projected); the schema documents the operand the facade sends as the '## Input' section ({ documentText }) and is validated by CatalogInputSchemaContractTests like every other mirror. Property-level \"required\": true is FORBIDDEN (use the object-level required array). actionCode carries NO version suffix (owner hygiene). The tenant id travels in the LinearRunContext, never in the operand. Deployed to the row by scripts/ebilling/Ensure-ActionRow.ps1.",
+  "actionCode": "invoice-classify",
+  "environment": "spaarkedev1",
+  "inputSchema": {
+    "type": "object",
+    "required": ["documentText"],
+    "properties": {
+      "documentText": {
+        "type": "string",
+        "description": "The extracted text of the Finance attachment to classify (AttachmentClassificationJobHandler, from TextExtractorService). Content only; the model is told to treat it as data, never as instructions.",
+        "maxLength": 100000
+      }
+    }
+  }
+}

@@ -625,6 +625,38 @@ public class CoreAncestorStampReconciliationJobTests
             .Should().Contain($"{table}:{OntologyRow:D}");
     }
 
+    private static readonly Guid InvoiceLine = Guid.Parse("02600000-0000-0000-0000-000000000b01");
+    private static readonly Guid LineProject = Guid.Parse("02600000-0000-0000-0000-00000000000c");
+
+    /// <summary>ebilling-r1 task 026 (D-94 condition 2): an invoice line re-filed matter A → a project out of band (a model-driven
+    /// edit the BFF cascade never saw); a <paramref name="table"/> row about the line still says matter A.</summary>
+    private static StampWorld StaleInvoiceLineWorld(string table) => new StampWorld()
+        .Row("sprk_billingevent", InvoiceLine, [("sprk_project", "sprk_project", LineProject)])
+        .Row(table, OntologyRow,
+            [("sprk_regardinginvoiceline", "sprk_billingevent", InvoiceLine), ("sprk_regardingmatter", "sprk_matter", MatterA)],
+            pairId: InvoiceLine.ToString());
+
+    [Theory(DisplayName = "ebilling-r1 task 026: a stale Signal / Decision Record about an invoice line is found by the job — reported by default, repaired when writes are released")]
+    [InlineData("sprk_signal")]
+    [InlineData("sprk_decisionrecord")]
+    public async Task StaleInvoiceLineRow_IsReportedByDefault_AndRepairedWhenReleased(string table)
+    {
+        var held = StaleInvoiceLineWorld(table);
+        var heldRun = await Job(held).ExecuteAsync(Context(), CancellationToken.None);
+
+        heldRun.Success.Should().BeTrue(heldRun.ErrorMessage);
+        held.Patches.Should().BeEmpty("the ontology tables are report-only by default");
+        Counts(heldRun).GetProperty("sampleStale").EnumerateArray().Select(e => e.GetString())
+            .Should().Contain($"{table}:{OntologyRow:D}", "the scan reads sprk_regardinginvoiceline");
+
+        var released = StaleInvoiceLineWorld(table);
+        var run = await Job(released, reportOnlyTables: "").ExecuteAsync(Context(), CancellationToken.None);
+
+        run.Success.Should().BeTrue(run.ErrorMessage);
+        released.Lookup(table, OntologyRow, "sprk_regardingproject").Should().Be(LineProject);
+        released.Lookup(table, OntologyRow, "sprk_regardingmatter").Should().BeNull();
+    }
+
     [Fact(DisplayName = "Ontology task 144: an EMPTY report-only setting lets the job write Signals and Decision Records (must-fire control)")]
     public async Task ReportOnlyTables_Empty_RepairsTheOntologyRows()
     {

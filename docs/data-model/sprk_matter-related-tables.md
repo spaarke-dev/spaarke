@@ -196,3 +196,18 @@ Below is the unfiltered `EntityDefinitions` dump of `sprk_matter`, `sprk_matters
 | Matter Type         | sprk_mattertype_ref    | timezoneruleversionnumber             | TimeZoneRuleVersionNumber             | Time Zone Rule Version Number      | Whole number     | For internal use only.                                                                       |
 | Matter Type         | sprk_mattertype_ref    | utcconversiontimezonecode             | UTCConversionTimeZoneCode             | UTC Conversion Time Zone Code      | Whole number     | Time zone code that was in use when the record was created.                                  |
 | Matter Type         | sprk_mattertype_ref    | versionnumber                         | VersionNumber                         | Version Number                     | BigInt           | Version Number                                                                               |
+
+---
+
+## 4. eBilling billing columns on every core record (ebilling-r1 task 080, EB-D-148)
+
+> **Status**: created by `scripts/ebilling/Deploy-EbillingProcedureSchema.ps1`, run on dev 2026-10-21 and verified against live metadata (projects/ebilling-r1/notes/080-dev-run-2026-10-21.md).
+
+`sprk_matter`, `sprk_project` and `sprk_workassignment` (every table in `InvoiceFamilyCoreRecordGuard.FilingCores`, which the script reads at run time) each get two optional lookups to `sprk_organization`, delete **RemoveLink**:
+
+| Field | Display name | Use |
+|---|---|---|
+| `sprk_billingfirm` | Billing Firm | The law firm whose Procedures the record's list shows by default. Not used for evaluation (the invoice's firm is) or for submission eligibility (`sprk_assignedlawfirm1/2` stays). Relationship `{table}_billingfirm_organization`. |
+| `sprk_billingresponsible` | Billing Responsible | The client's billing entity. No R1 consumer. Relationship `{table}_billingresponsible_organization`. |
+
+**Neither column confers access.** A lookup to `sprk_organization` on a core record could confer access through the org-expansion term if it were in the access registry, and `MembershipFieldDiscoveryService` discovers membership columns by opt-out (`sprk_organization` is an identity table). So neither column is added to the access registry, no grant or share path reads them, and giving a firm access through either would be a separate owner decision through uac-r2's registry review. A K-2 pin test (task 081) asserts the registry has no `billing*` column.

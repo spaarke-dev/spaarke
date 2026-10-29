@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="083" project="ebilling-r1">
+  <metadata>
+    <title>Firm clause: GetFirmClauseAsync re-keyed to the invoice's snapshot, firm-facing name; 130-135 POML constraint lines</title>
+    <phase>3 Rules (WP3) — Procedure model (EB-D-148), wave W3-E; must land before 130</phase>
+    <gate>082 merged (resolver and snapshot); before 130 starts</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes a .cs method that decides which clause text a firm sees (D-66, D-79); firm-facing output must stay fail-closed.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>One existing method re-keyed onto 082's snapshot with an exact reference, plus a closed list of POML constraint edits.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3-E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>082</deps>
+    <tags>bff, rules, external-access, testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Re-key RuleSetService.GetFirmClauseAsync (Services/Finance/RuleSetService.cs:2013) so a firm sees a rule's clause exactly when that policy version judged the firm's invoice according to the invoice's evaluation snapshot (082, model 7.4), with the Procedure's firm-facing name (model 3.2, 8.1), and update the matching constraint lines in the POMLs of tasks 130, 131, 133, 134 and 135 before 130 starts.</prompt>
+
+  <role>SPAARKE platform developer. Expert in RuleSetService (076) and the firm-visibility rules D-66 and D-79.</role>
+
+  <goal>Clause text reaches a firm only for a policy version that the invoice's own snapshot lists as applied, only when its rule set is visible to firms, and labelled with the firm-facing name, never the Procedure's internal name, id or the override basis; the five downstream POMLs cite the new contract.</goal>
+
+  <context>
+    <background>Model 3.2 (Firm-facing name: defaults to Name), 7.4 (snapshot; firms never see the basis), 8.1 (record-scoped set's neutral name "Billing instructions for this record"), 12 (rule set gains sprk_procedure). Today GetFirmClauseAsync(policyVersionId, invoiceFirmId, ct) (:2013-2063) reads the version, its Billing policy and rule set, decides "was in force" from sprk_currentversion or sprk_inforceto (:2039, a 7.2 reader to re-key) and allows only ClientDefault or a Firm set for that firm (:2052-2056); FirmClauseText(Quote, SectionReference) is at :132; RuleSetClauseVisibility.ForFirm applies the flag. No caller exists yet. Planned callers cite the old signature at tasks/130-firm-findings-projection.poml:55, 131-firm-notice-action.poml:58, 133-adjustment-report-pdf.poml:50, 134-spa-invoice-detail.poml:49, 135-spa-billing-guidelines.poml:53.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/RuleSetService.cs (GetFirmClauseAsync, FirmClauseText, the caller contract comment)</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/RuleSetServiceTests.cs</file>
+      <file role="modify">projects/ebilling-r1/tasks/130-firm-findings-projection.poml, 131-firm-notice-action.poml, 133-adjustment-report-pdf.poml, 134-spa-invoice-detail.poml, 135-spa-billing-guidelines.poml (constraint lines only)</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Signals/Billing/ProcedureResolver.cs and the snapshot members (082)</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs (ComposeForCiamContactAsync, for 135's constraint)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="model 7.4, 8.2 (decided invoices keep their snapshot)">New signature GetFirmClauseAsync(Guid policyVersionId, Guid invoiceId, CancellationToken ct). It reads, app-only, the invoice's firm (sprk_vendororg) and its submission snapshot, and returns text only when the snapshot lists policyVersionId as APPLIED (not displaced, not excluded) for that invoice. It never re-runs the resolver for an invoice (a later Procedure change must not change what a firm sees for a judged invoice) and has no scope switch of its own; the :2039 "was in force" rule is removed.</constraint>
+    <constraint source="076 review round 2 item 5 (kept)">invoiceId is the invoice the finding belongs to, passed only after the route's own firm-membership check; never taken from the request and never the SPA identity's firm.</constraint>
+    <constraint source="fail closed">No text when: the invoice has no firm; it has no snapshot, or a pre-v5 snapshot without the Procedure members; any read faults (no throw to the firm); the policy is not Billing; the rule set's visible-to-firms flag is off (D-79: the finding then carries the reason and the name only).</constraint>
+    <constraint source="model 3.2, 8.1">FirmClauseText gains the firm-facing name (additive member): the Procedure's Firm-facing name (Name when blank); for a record rule, "Billing instructions for this record". It never carries the Procedure's Name, its id, the Procedure Version id, an override reason or any other basis member.</constraint>
+    <constraint source="model 7.4 (R3)">The five POMLs each gain one line: the firm projection is an explicit allow-list DTO; a negative test asserts no override reason, Procedure name or Procedure id appears.</constraint>
+    <constraint source="D-172 Q15, uac-r2 review item 8 (re-keyed)">135's content rule becomes: the general Billing Guidelines view shows the clauses of Published Procedures that Apply to All records or to the caller's firm, through 082's ProcedureResolver for that firm and today, with no record; a per-record view (coreRecordId) runs the resolver for that record and firm and is gated by IAccessibleRecordSetService.ComposeForCiamContactAsync and AccessibleRecordSet.Contains (a denied record answers like a missing one). A rule from a direct parent is labelled "from the parent record" and never names the parent.</constraint>
+    <constraint source="project CLAUDE.md">POML edits are constraint lines only (the cited signature, the firm-facing name, the allow-list line, 135's content rule). Do not change those tasks' goals, deps or other criteria. Remove the old interim-B "business unit not known" lines if 083's earlier version added any (the BU filter is dropped, O-12).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/notes/procedure-and-file-model.md (sections 3.2, 7.4, 8.1)</file>
+      <file>projects/ebilling-r1/notes/076-ruleset-endpoints.md (section 8)</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Flag check" location="RuleSetClauseVisibility.ForFirm (Services/Finance/RuleSetService.cs:149)">Keep as the last step.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Change the signature, caller contract comment and FirmClauseText; read the snapshot; drop the scope switch and :2039.</step>
+    <step order="2">Tests (criteria).</step>
+    <step order="3">Edit the five POML constraint lines.</step>
+    <step order="4">dotnet build and test.</step>
+    <step order="5">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+    <step order="6">Record deviations in projects/ebilling-r1/notes/083-firm-clause-applicability.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any of 130, 131, 133, 134 or 135 has started (not 🔲 in TASK-INDEX.md), STOP and raise it with the main session instead of editing its POML.</trigger>
+    <trigger>If 082's snapshot does not identify applied policy versions per invoice, STOP; do not re-resolve at read time.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">build, test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Finance/RuleSetService.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/RuleSetServiceTests.cs</output>
+    <output type="docs">POML constraint lines of 130, 131, 133, 134, 135; projects/ebilling-r1/notes/083-firm-clause-applicability.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">With the flag on, a policy version listed as applied in the invoice's snapshot returns quote, section reference and the Procedure's firm-facing name; the same version on an invoice whose snapshot lists it as displaced or excluded, or does not list it, returns no text.</criterion>
+    <criterion testable="true">A Procedure published after the invoice was judged does not change the answer for that invoice (no re-resolve).</criterion>
+    <criterion testable="true">A record rule's clause carries "Billing instructions for this record"; no response carries the Procedure's Name when a Firm-facing name is set, a Procedure id or an override reason (negative).</criterion>
+    <criterion testable="true">No text for: an invoice with no firm, no snapshot, a pre-v5 snapshot, a read fault (no exception escapes), a non-Billing policy, the flag off.</criterion>
+    <criterion testable="true">The five POMLs cite GetFirmClauseAsync(policyVersionId, invoiceId, ct) with invoiceId read server-side after the membership check, carry the allow-list DTO line, and 135 states the re-keyed general and per-record rule with the IAccessibleRecordSetService gate and the "from the parent record" label.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>No caller exists yet, so the signature change breaks nothing. P3-E beside 084 and 085: 083 alone edits RuleSetService.cs in this wave.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

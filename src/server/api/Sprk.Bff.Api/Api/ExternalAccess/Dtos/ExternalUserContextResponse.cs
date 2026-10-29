@@ -14,6 +14,15 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// (<c>ExternalDataService.IsCreatedByCaller</c>) stays the authority. It is the caller's own id only, so it
 /// discloses nothing new.
 /// </param>
+/// <param name="Firms">
+/// ebilling-r1 task 051 (additive; the fields above are unchanged). The firms the caller can submit invoices for: the
+/// caller contact's CONFERRING organization memberships, id and name only, the same set the invoice submission routes
+/// resolve <c>firmId</c> from. Empty when the caller belongs to no firm, and for a workforce systemuser (internal users submit
+/// through the internal route). <see langword="null"/>, and then OMITTED from the JSON (<c>WhenWritingNull</c>, so ordinary /me
+/// responses do not carry <c>"firms":null</c>), when it is not known: eBilling is off (the list is not read at all), or the
+/// memberships or names could not be read. A reader treats an absent field as "eBilling off, not applicable, or unknown",
+/// never as "no firm". Only the caller's own firms are ever listed.
+/// </param>
 /// <param name="WriteAccessPerRecord">
 /// <see langword="true"/> for a caller whose access Dataverse decides (<c>CallerPrincipal.DataverseConfirmsWrites</c>,
 /// unified-access-control-r2 task 036 fix round 1, F4). Their <see cref="Projects"/> levels then say only what they may
@@ -27,9 +36,16 @@ public record ExternalUserContextResponse(
     string Email,
     IReadOnlyList<ProjectAccessEntry> Projects,
     Guid? SystemUserId = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<ExternalFirmEntry>? Firms = null,
     [property: System.Text.Json.Serialization.JsonIgnore(
         Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
     bool WriteAccessPerRecord = false);
+
+/// <summary>One firm the caller belongs to (see <see cref="ExternalUserContextResponse.Firms"/>).</summary>
+/// <param name="FirmId">The Dataverse <c>sprk_organizationid</c>; the value to send as <c>firmId</c> when submitting.</param>
+/// <param name="Name">The organization's display name.</param>
+public record ExternalFirmEntry(Guid FirmId, string Name);
 
 /// <summary>
 /// A single project access entry in the external user context response.

@@ -366,6 +366,124 @@ public static class DecisionActionCatalog
     /// <summary>The catalog proper: <see cref="Declared"/> with every exclusion made mutual.</summary>
     private static readonly DecisionActionDefinition[] Definitions = Mutualize(Declared);
 
+    private const string ReasonHint = "Shown with the decision; required";
+
+    /// <summary>
+    /// ebilling-r1 task 074 (spec FR-30, FR-19, FR-35 to FR-37; D-75): the billing decisions, a closed set of their own. They are
+    /// recorded by the eBilling endpoints, never taken through the Signals commit route, so they are NOT in <see cref="All"/> and
+    /// <see cref="TryGet"/> does not know them: a Signals plan naming one is refused as an unknown action, the commit route refuses
+    /// it as unresolved, and no executor can be registered for one (<see cref="DecisionActionExecutors"/> refuses a code outside
+    /// <see cref="All"/>). Line decisions are about the invoice line itself and invoice decisions about the invoice (D-75).
+    /// <see cref="DecisionActionDefinition.WorkType"/> is null: no Signals plan offers them.
+    /// </summary>
+    private static readonly DecisionActionDefinition[] DeclaredBilling =
+    [
+        // ---- Line decisions (subject: the invoice line) ------------------------------------------------------
+        new("accept-line", "Accept line", DecisionLane.Decide, IsNextStep: false, WorkType: null,
+            [],
+            ["Accepts the line at its billed amount"],
+            Excludes: ["reduce-line", "disallow-line"],
+            DecisionRecordClass.Routine)
+        { Gate = new DecisionGateFactors(GateRiskTier.Tier2b, Reversible: true, RecordOfTruthImpact: true) },
+
+        new("reduce-line", "Reduce line", DecisionLane.Decide, IsNextStep: false, WorkType: null,
+            [
+                new("approvedAmount", "Approved amount", DecisionParameterKind.Money, Required: true),
+                new("reason", "Reason for reduction", DecisionParameterKind.TextArea, Required: true, Hint: ReasonHint),
+            ],
+            ["Sets the line's approved amount below its billed amount", "Recomputes the invoice totals"],
+            Excludes: ["disallow-line"],
+            DecisionRecordClass.Judgement)
+        { Gate = new DecisionGateFactors(GateRiskTier.Tier2b, Reversible: true, RecordOfTruthImpact: true) },
+
+        new("disallow-line", "Disallow line", DecisionLane.Decide, IsNextStep: false, WorkType: null,
+            [new("reason", "Reason for disallowing", DecisionParameterKind.TextArea, Required: true, Hint: ReasonHint)],
+            ["Sets the line's approved amount to zero", "Recomputes the invoice totals"],
+            Excludes: [],
+            DecisionRecordClass.Judgement)
+        { Gate = new DecisionGateFactors(GateRiskTier.Tier2b, Reversible: true, RecordOfTruthImpact: true) },
+
+        // ---- Invoice decisions (subject: the invoice) --------------------------------------------------------
+        new("approve-invoice", "Approve invoice", DecisionLane.Decide, IsNextStep: false, WorkType: null,
+            [new("note", "Approval note", DecisionParameterKind.TextArea, Required: false)],
+            ["Approves the invoice as payable", "Freezes the approved total"],
+            Excludes: ["reject-invoice", "return-to-firm"],
+            DecisionRecordClass.Judgement)
+        { Gate = new DecisionGateFactors(GateRiskTier.Tier4, Reversible: false, RecordOfTruthImpact: true) },
+
+        new("reject-invoice", "Reject invoice", DecisionLane.Decide, IsNextStep: false, WorkType: null,
+            [new("reason", "Reason for rejection", DecisionParameterKind.TextArea, Required: true, Hint: ReasonHint)],
+            ["Rejects the whole invoice; the rejection is final", "The firm sees the reason"],
+            Excludes: ["return-to-firm"],
+            DecisionRecordClass.Judgement)
+        { Gate = new DecisionGateFactors(GateRiskTier.Tier4, Reversible: false, ExternallyVisible: true, RecordOfTruthImpact: true) },
+
+        new("return-to-firm", "Return to firm", DecisionLane.Decide, IsNextStep: false, WorkType: null,
+            [new("reason", "Reason for returning", DecisionParameterKind.TextArea, Required: true, Hint: ReasonHint)],
+            ["Returns the invoice to the firm to correct and resubmit", "The firm sees the reason"],
+            Excludes: [],
+            DecisionRecordClass.Judgement)
+        { Gate = new DecisionGateFactors(GateRiskTier.Tier4, Reversible: false, ExternallyVisible: true, RecordOfTruthImpact: true) },
+
+        // ---- Override (D-24; subject: the invoice the accepted submission created) ----------------------------
+        new("override-submission", "Override blocking failure", DecisionLane.Decide, IsNextStep: false, WorkType: null,
+            [new("reason", "Reason for overriding", DecisionParameterKind.TextArea, Required: true, Hint: ReasonHint)],
+            ["Accepts the submission despite its blocking failure", "The overridden finding stays visible to the reviewer"],
+            Excludes: [],
+            DecisionRecordClass.Judgement)
+        { Gate = new DecisionGateFactors(GateRiskTier.Tier3, Reversible: true, RecordOfTruthImpact: true) },
+    ];
+
+    /// <summary>The billing set with every exclusion made mutual. Its codes never overlap <see cref="Definitions"/> (checked at static
+    /// initialisation, so a code can never be both a Signals action and a billing action).</summary>
+    private static readonly DecisionActionDefinition[] BillingDefinitions = Separate(Mutualize(DeclaredBilling), Definitions);
+
+    /// <summary>Throws when a billing code is also a Signals catalog code.</summary>
+    private static DecisionActionDefinition[] Separate(DecisionActionDefinition[] billing, DecisionActionDefinition[] signals)
+    {
+        foreach (var clash in billing.Where(b => signals.Any(s => s.Code == b.Code)))
+        {
+            throw new InvalidOperationException($"Action catalog: billing code '{clash.Code}' is also a Signals action.");
+        }
+
+        return billing;
+    }
+
+    private static readonly FrozenDictionary<string, DecisionActionDefinition> BillingByCode =
+        BillingDefinitions.ToFrozenDictionary(d => d.Code, StringComparer.Ordinal);
+
+    /// <summary>ebilling-r1 task 074: every billing action, in declaration order. Not part of <see cref="All"/>.</summary>
+    public static IReadOnlyList<DecisionActionDefinition> BillingActions => BillingDefinitions;
+
+    /// <summary>Resolves a billing code, exactly as <see cref="TryGet"/> resolves a Signals code: case-sensitive, never guessed.</summary>
+    public static bool TryGetBilling(string? code, out DecisionActionDefinition definition)
+    {
+        if (code is not null && BillingByCode.TryGetValue(code, out var found))
+        {
+            definition = found;
+            return true;
+        }
+
+        definition = null!;
+        return false;
+    }
+
+    /// <summary>The first pair of billing codes in <paramref name="takenCodes"/> that exclude each other, or null. The same check as
+    /// <see cref="FirstConflict"/>, over the billing set.</summary>
+    public static (string First, string Second)? FirstBillingConflict(IEnumerable<string> takenCodes)
+    {
+        var taken = takenCodes.ToList();
+        foreach (var code in taken)
+        {
+            if (TryGetBilling(code, out var action) && taken.FirstOrDefault(other => action.Excludes.Contains(other)) is { } clash)
+            {
+                return (code, clash);
+            }
+        }
+
+        return null;
+    }
+
     /// <summary>
     /// Makes every declared exclusion mutual. Throws (at static initialisation, so the catalog cannot load) when an exclusion
     /// names a code that is not declared: a typo would otherwise silently drop the exclusion.

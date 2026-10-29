@@ -81,6 +81,13 @@ public class DocumentDestroyAuthorizationTestFixture : WorkspaceTestFixture
     public ConcurrentDictionary<Guid, int> RowDeleteFaultCodes { get; } = new();
 
     /// <summary>
+    /// ebilling-r1 task 094 (ontology-r1 088 gate F1): how many Stored Files name a document id as their source
+    /// (<c>sprk_sourcedocument</c>, Delete = Restrict). C3's route counts them app-only through <see cref="IGenericEntityService"/>;
+    /// this fixture answers that one query from here. Absent = none.
+    /// </summary>
+    public ConcurrentDictionary<Guid, int> StoredFileCopyCounts { get; } = new();
+
+    /// <summary>
     /// R3 ISS-004 (#1650): document ids whose SPE FILE delete is not done, so C2's double answers
     /// <see cref="FileNotDeletedDeleteResult"/> (the row kept) with this HTTP status: 503
     /// (<see cref="DocumentCheckoutService.FileNotDeletedCode"/>, a Graph fault) or 409 (the pointer check refused).
@@ -109,6 +116,7 @@ public class DocumentDestroyAuthorizationTestFixture : WorkspaceTestFixture
         ChildDocumentCounts.Clear();
         RowDeleteFaultCodes.Clear();
         FileNotDeletedStatuses.Clear();
+        StoredFileCopyCounts.Clear();
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -155,6 +163,12 @@ public class DocumentDestroyAuthorizationTestFixture : WorkspaceTestFixture
                 RowDeleteFaultCodes,
                 FileNotDeletedStatuses));
 
+            // C3's Stored File copy count (task 094): the base fixture's IDataverseService mock answers every QueryExpression with
+            // three matters, so the sprk_storedfiles query is answered from StoredFileCopyCounts; every other call goes to it as before.
+            services.RemoveAll<IGenericEntityService>();
+            services.AddSingleton<IGenericEntityService>(sp => StoredFileCopyAnswering.Over(
+                sp.GetRequiredService<IDataverseService>(), StoredFileCopyCounts));
+
             // C3's destroy path.
             services.RemoveAll<IDocumentDataverseService>();
             services.AddSingleton<IDocumentDataverseService>(
@@ -187,6 +201,52 @@ public class DocumentDestroyAuthorizationTestFixture : WorkspaceTestFixture
         client.DefaultRequestHeaders.Authorization =
             new AuthenticationHeaderValue("Bearer", $"rights={dataverseRights}");
         return client;
+    }
+
+    /// <summary>
+    /// <see cref="IGenericEntityService"/> over the base fixture's: a <c>sprk_storedfiles</c> QueryExpression filtered on one
+    /// <c>sprk_sourcedocument</c> answers that many rows from the counts; every other call is forwarded unchanged.
+    /// </summary>
+    public class StoredFileCopyAnswering : System.Reflection.DispatchProxy
+    {
+        private IGenericEntityService _inner = null!;
+        private ConcurrentDictionary<Guid, int> _counts = null!;
+
+        public static IGenericEntityService Over(IGenericEntityService inner, ConcurrentDictionary<Guid, int> counts)
+        {
+            var proxy = Create<IGenericEntityService, StoredFileCopyAnswering>();
+            var self = (StoredFileCopyAnswering)(object)proxy;
+            self._inner = inner;
+            self._counts = counts;
+            return proxy;
+        }
+
+        protected override object? Invoke(System.Reflection.MethodInfo? targetMethod, object?[]? args)
+        {
+            if (targetMethod!.Name == nameof(IGenericEntityService.RetrieveMultipleAsync)
+                && args![0] is Microsoft.Xrm.Sdk.Query.QueryExpression { EntityName: "sprk_storedfiles" or "sprk_storedfile" } query)
+            {
+                var source = query.Criteria.Conditions
+                    .Where(c => c.AttributeName == "sprk_sourcedocument")
+                    .Select(c => c.Values.Single())
+                    .OfType<Guid>()
+                    .Single();
+                var rows = Enumerable.Range(0, _counts.TryGetValue(source, out var n) ? n : 0)
+                    .Select(_ => new Microsoft.Xrm.Sdk.Entity(query.EntityName, Guid.NewGuid()))
+                    .ToList();
+                return Task.FromResult(new Microsoft.Xrm.Sdk.EntityCollection(rows));
+            }
+
+            try
+            {
+                return targetMethod.Invoke(_inner, args);
+            }
+            catch (System.Reflection.TargetInvocationException e) when (e.InnerException is not null)
+            {
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(e.InnerException).Throw();
+                throw;
+            }
+        }
     }
 
     /// <summary>

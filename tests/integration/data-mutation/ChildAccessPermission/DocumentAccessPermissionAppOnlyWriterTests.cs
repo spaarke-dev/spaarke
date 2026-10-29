@@ -20,6 +20,10 @@ namespace Sprk.Bff.Api.Tests.DataMutation.ChildAccessPermission;
 /// and the action seam acting for no person (<see cref="UpdateRecordActionCore"/>). Their payload is built by a model or a configuration; a value or record it wrote
 /// could lower a user's Restricted document and show it to partners (D7). Must not fire: the same columns on a to-do or
 /// an event (allowed today), and the action seam's apply of a proposal its impersonated user confirmed (a user's own edit).
+/// ebilling-r1 task 088 adds the submission marker <c>sprk_restrictedbysubmission</c>
+/// (<see cref="InheritedAccessPermission.SubmissionMarkerColumn"/>): refused on a document like the two columns above (a set
+/// marker would un-hide an isolated invoice from external callers), not refused on a to-do, and a document payload that does
+/// not name it is written.
 /// </summary>
 public class DocumentAccessPermissionAppOnlyWriterTests
 {
@@ -32,6 +36,7 @@ public class DocumentAccessPermissionAppOnlyWriterTests
     [InlineData("sprk_accesspermission", "100000000")]
     [InlineData("sprk_accessinheritance", "{\"v\":1,\"parents\":[],\"floorPermission\":100000000}")]
     [InlineData("SPRK_AccessPermission", "100000000")]
+    [InlineData("sprk_restrictedbysubmission", "true")] // ebilling-r1 task 088: the submission marker (must fire)
     public async Task APlaybookUpdate_OfADocumentsAccessColumns_IsRefused_AndNothingIsWritten(string column, string value)
     {
         var act = () => Core().UpdateAsync(
@@ -50,6 +55,7 @@ public class DocumentAccessPermissionAppOnlyWriterTests
     [InlineData("sprk_todo", "sprk_accesspermission")]
     [InlineData("sprk_event", "sprk_accesspermission")]
     [InlineData("sprk_todo", "sprk_accessinheritance")]
+    [InlineData("sprk_todo", "sprk_restrictedbysubmission")] // ebilling-r1 task 088: the marker name off a document (must not fire)
     public async Task APlaybookUpdate_OfTheSameColumnOnAToDoOrAnEvent_IsWritten(string table, string column)
     {
         await Core().UpdateAsync(
@@ -61,6 +67,21 @@ public class DocumentAccessPermissionAppOnlyWriterTests
         _writes.Verify(w => w.UpdateRecordFieldsAsync(
             table, Row, It.Is<Dictionary<string, object?>>(f => f.ContainsKey(column)), It.IsAny<CancellationToken>(), null),
             Times.Once);
+    }
+
+    [Fact]
+    public async Task APlaybookUpdate_OfADocumentWithoutAnAccessColumnOrTheMarker_IsWritten()
+    {
+        // ebilling-r1 task 088 (must not fire): adding the marker to the refusal does not refuse an ordinary document payload.
+        await Core().UpdateAsync(
+            new UpdateRecordActionInput(
+                "sprk_document", Row, FieldMappings: null,
+                LegacyFields: new Dictionary<string, string?> { ["sprk_documentdescription"] = "x" }, Lookups: null),
+            CancellationToken.None);
+
+        _writes.Verify(w => w.UpdateRecordFieldsAsync(
+            "sprk_document", Row, It.Is<Dictionary<string, object?>>(f => f.ContainsKey("sprk_documentdescription")),
+            It.IsAny<CancellationToken>(), null), Times.Once);
     }
 
     [Fact]
@@ -163,7 +184,11 @@ public class DocumentAccessPermissionAppOnlyWriterTests
             CancellationToken.None);
 
         result.Success.Should().BeFalse();
-        result.Error.Should().StartWith(InheritedAccessPermission.AppOnlyDocumentWriteReasonCode);
+        // Master merge: the seam prints the stable code once (ebilling-r1 #2081 follow-up), as the refusal's "(code)".
+        result.Error.Should().Contain($"({InheritedAccessPermission.AppOnlyDocumentWriteReasonCode})");
+        System.Text.RegularExpressions.Regex.Matches(
+            result.Error!, System.Text.RegularExpressions.Regex.Escape(InheritedAccessPermission.AppOnlyDocumentWriteReasonCode))
+            .Count.Should().Be(1);
         _writes.Invocations.Should().BeEmpty();
     }
 
@@ -180,6 +205,7 @@ public class DocumentAccessPermissionAppOnlyWriterTests
     [Theory]
     [InlineData("sprk_accesspermission")]
     [InlineData("sprk_accessinheritance")]
+    [InlineData("sprk_restrictedbysubmission")] // ebilling-r1 task 088: the submission marker (must fire)
     public async Task AnOutputMapping_OfADocumentsAccessColumns_IsRefused_AndNothingIsWritten(string column)
     {
         var act = () => Handler().UpdateAsync(

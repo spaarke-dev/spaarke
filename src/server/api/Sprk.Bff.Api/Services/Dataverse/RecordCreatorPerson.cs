@@ -93,6 +93,9 @@ public static class RecordCreatorPerson
         // forms) and "New Billing Event" (invoice form) create through the same route, so they record the person too
         // (same script, gate G147-5).
         "sprk_kpiassessment", "sprk_billingevent",
+        // ebilling-r1 task 013: the invoice family's new secure children are created by the BFF as the application (intake,
+        // approval, correction), so they record the person who asked, like the invoice and the line (same script).
+        "sprk_invoicesubmission", "sprk_invoiceapproval", "sprk_externalidentifier", "sprk_invoicecorrection",
         // Ontology task 147 (D-135 Q27, #1777): a budget revision records the person whose decision commit caused it
         // (ReviseBudgetExecutor passes RequestedBy). The owner created the column on dev; the same script lists it, and
         // its relationship carries the maker's name form (`sprk_budgetrevision_CreatedByPerson_systemuser`).
@@ -105,6 +108,20 @@ public static class RecordCreatorPerson
         // SignalWriteRequest.RequestedBy; every Signal raised today is job-raised and names nobody). The owner created the column
         // on dev (field-secured, D-136); the same script lists it, with SpaarkeMaster / OntologyPlatformSolution as its homes.
         "sprk_signal",
+        // ebilling-r1 task 081 (procedure model 13, O-23): ProcedureService creates Procedures and their versions app-only for the
+        // calling admin, so they record that person. 080 created the column; the script secures and verifies it (SpaarkeMaster).
+        // Not in the Secure Record Owner role set (Procedures are not secure-record children):
+        // RecordOwnerAssignmentCensusTests.StampedOutsideCodifiedChildren lists them as stamped outside it.
+        "sprk_procedure", "sprk_procedureversion",
+        // ebilling-r1 task 081 (080 hand-off; ontology F4-1, D-173): 080 created the column on the policy tables too. RuleSetService and
+        // the Procedure copy-forward create them app-only for the calling admin, so they record that person; the script empty-checks,
+        // secures and publishes both (SpaarkeMaster).
+        "sprk_policy", "sprk_policyversion",
+        // ebilling-r1 task 090 (UAC answer to 081 Q5): every table the BFF creates app-only for a person records that person. A rule set
+        // is created app-only for the calling admin (RuleSetService's upload, ProcedureService's Procedure create: owner.ApplyTo), and a
+        // Procedure assignment will be (no BFF writer creates one yet). 080 created both columns UNSECURED; the script empty-checks,
+        // secures and publishes them like 081's four (SpaarkeMaster).
+        "sprk_ruleset", "sprk_procedureassignment",
     };
 
     /// <summary>Whether <paramref name="entityLogicalName"/> carries the column: a secure root or a stamped child table.</summary>

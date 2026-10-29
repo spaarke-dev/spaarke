@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="115" project="ebilling-r1">
+  <metadata>
+    <title>AddedFee (100000015) and Discount (100000016) billing rule types: options, domain, schemas, validator refusals, handlers</title>
+    <phase>3 Rules (WP3) — Procedures and files (EB-D-148), wave P3-A</phase>
+    <gate>Startable. Code after step 2 (ontology-r1 review of the option values and the parameter design); the dev option run (step 9) after the owner's OK.</gate>
+    <status>in-progress</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Adds members to the closed RuleType set and two handlers in ontology-owned Services/Signals code; an unknown or unmapped type must fail closed (FR-24, security-class).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The model fixes the option values and the refusals but not the parameter shapes or the facts each handler reads; step 1 is a design judgment over BillingFactSet that ontology-r1 then reviews.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>bff-api, rules, dataverse, testing, coordination</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+  </metadata>
+
+  <prompt>Add the AddedFee and Discount billing rule types end to end — enum members, domain mapping, catalogue entries, JSON schemas, validator refusals, handlers, the two Dataverse option values and their SpaarkeMaster source — after ontology-r1 has reviewed the option values and a short parameter design, so that a published AddedFee cap rule and a Discount rule produce findings and every not-yet-supported AddedFee form is refused at save.</prompt>
+
+  <role>SPAARKE platform developer. Expert in the billing rule catalogue (D-27 closed typed templates), JSON Schema validation and the Signals billing handlers.</role>
+
+  <goal>RuleType has AddedFee = 100000015 and Discount = 100000016, mapped to Billing in RuleDomains.DomainOf; both are in the catalogue with schemas and handlers; the validator refuses AddedFee "not allowed" and "after N days" with a test each; Discount only flags; dev and SpaarkeMaster carry both option values; ontology-r1 has reviewed the values, the design and the PR.</goal>
+
+  <context>
+    <background>Model: projects/ebilling-r1/notes/procedure-and-file-model.md section 6.3 "Rule types the examples need" (AddedFee, Discount), section 0 row 17 and section 0 "What changed in v5.1" row 12 (AddedFee forms refused by the validator until extraction supports them); O-16 (a late fee is just an added fee). Today: RuleType.cs ends at SubmissionIntegrity = 100000014 (:93), so 100000015 and 100000016 are the next free values; RuleDomains.DomainOf (RuleDomain.cs:49-56) throws for an unmapped member; IsRejectEligible (BillingRuleCatalogue.cs:389-395) throws for an unlisted one. Facts a handler can read: BillingFactSet.cs (lines: LineType Fee/Expense, Amount, Hours, BilledRate, ApprovedRate with RackRate (InvoiceResolutionModels.cs:266-278), task / activity / expense codes; invoice: InvoiceDate, Currency). There is no per-line fee kind and no due date in BillingFactSet; InvoiceExtractionToolHandler returns the header due date (:153) but no fee kind. ontology-r1 owns Services/Signals/** (project CLAUDE.md section 4); precedent for an option value plus SpaarkeMaster source: task 049, commit 039c3fda9e.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/RuleType.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/RuleDomain.cs (DomainOf :49-56)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/RuleBodySchemaValidator.cs (ResolveSchema :366-377)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/PolicyVersionValidator.cs (ValidateBilling :472: the AddedFee form refusals)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/Billing/BillingRuleCatalogue.cs (Types :26-36, schema suffix :64-75, read fields :164-176, IsRejectEligible :389-395, consequences, reason codes, Describe)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/Billing/BillingFinding.cs (BillingReasonCodes :136)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/Billing/Handlers/BillingRuleHandlers.cs (HandlerFor :80-92)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Signals/Billing/Handlers/AddedFeeHandler.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Signals/Billing/Handlers/DiscountHandler.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Signals/Schemas/billing-added-fee.schema.json</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Signals/Schemas/billing-discount.schema.json</file>
+      <file role="modify">src/dataverse/solutions/SpaarkeMaster/Entities/sprk_PolicyVersion/Entity.xml (two options)</file>
+      <file role="new">scripts/ebilling/Deploy-EbillingAddedFeeDiscountOptions.ps1 (copy of Deploy-EbillingSubmissionIntegrityOption.ps1)</file>
+      <file role="new">tests/unit/domain/Signals/Billing/Handlers/AddedFeeHandlerTests.cs, DiscountHandlerTests.cs</file>
+      <file role="modify">tests/unit/domain/Signals/RuleTypeOptionSetSyncTests.cs, Billing/BillingRuleCatalogueTests.cs, Billing/Handlers/BillingRuleHandlersDispatchTests.cs, RuleBodySchemaValidatorTests.cs (only where they pin the member set)</file>
+      <file role="new">projects/ebilling-r1/notes/115-addedfee-discount-rule-types.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="model 6.3, ontology 6">AddedFee = 100000015, Discount = 100000016, both RuleDomain.Billing, both in BillingRuleCatalogue.Types. Labels "Added fee" and "Discount". Renumbering any existing member is forbidden.</constraint>
+    <constraint source="model 6.3, v5.1 row 12">AddedFee carries a fee kind (late fee, administrative fee, interest, other) and one allowance: not allowed, a cap (amount or percent), or allowed after N days. The schema may describe all three; the validator refuses "not allowed" and "after N days" at save and at the evaluation gate with a named reason, until extraction returns a per-line fee kind and the due date. Only the cap form evaluates.</constraint>
+    <constraint source="model 6.3">Discount is a check only: its findings are Flag consequence ("agreed discount not applied"), it never adjusts an amount.</constraint>
+    <constraint source="FR-26, project CLAUDE.md section 2 (I-5)">Neither type is reject-eligible: IsRejectEligible returns false for both, and a Reject consequence is refused for them at publish (the existing D-89 path). The FR-26 list (1, 2, 6-10) is unchanged.</constraint>
+    <constraint source="FR-24, project CLAUDE.md section 2">Every switch over RuleType still throws for an unmapped member; no default arm maps a new member silently. Handlers read only BillingFactSet (BillingHandlerPurityGuardTests); no new loader fact or extraction field in this task.</constraint>
+    <constraint source="project CLAUDE.md section 3 (pipeline), commit 039c3fda9e">SpaarkeMaster: only the two option entries in sprk_PolicyVersion/Entity.xml (RuleTypeOptionSetSyncTests requires them). No other solution file changes.</constraint>
+    <constraint source="root CLAUDE.md section 10">Measure the BFF publish-size delta against a fresh master build; no new package.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/notes/procedure-and-file-model.md (section 6.3)</file>
+      <file>projects/ebilling-r1/tasks/070-billing-rule-type-catalogue.poml and notes/070-billing-rule-type-catalogue.md</file>
+      <file>projects/ebilling-r1/notes/071-read-fields-per-type.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Cap handler" location="src/server/api/Sprk.Bff.Api/Services/Signals/Billing/Handlers/ExpenseRuleHandler.cs">Codes plus a cap, Require / RequireList for parameters, findings with reason codes.</pattern>
+      <pattern name="Rate comparison" location="src/server/api/Sprk.Bff.Api/Services/Signals/Billing/Handlers/ApprovedRateHandler.cs">Reads RateResolution; skips a line whose rate is unresolved.</pattern>
+      <pattern name="Option value script" location="scripts/ebilling/Deploy-EbillingSubmissionIntegrityOption.ps1">Insert a value into the local choice; refuse a relabel or renumber.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Write notes/115-addedfee-discount-rule-types.md: the two option values; each type's parameter JSON; the facts each handler reads; the finding text and reason codes; consequences. Starting proposal — AddedFee cap: "feeKind", "feeCodes" (codes that identify the fee's lines, matched like ExpenseRule), "capAmount" or "capPercent" (percent of the invoice's other lines); finding when the fee lines' total exceeds the cap. Discount: "discountPercent" and "tolerancePercent"; finding on a Fee line whose BilledRate exceeds RackRate × (1 − discountPercent / 100) plus tolerance; a line with no resolved rack rate is skipped.</step>
+    <step order="2">Send the note and the option values to ontology-r1 for review (D-27 catalogue additions); fix and record the PASS with its date.</step>
+    <step order="3">Enum members, DomainOf, catalogue entries (Types, schema suffix, read fields, IsRejectEligible false, Flag-only consequences, reason codes, Describe), ResolveSchema, the two schemas.</step>
+    <step order="4">Validator refusals for the two AddedFee forms, at save and at the evaluation gate.</step>
+    <step order="5">The two handlers and their HandlerFor entries.</step>
+    <step order="6">Entity.xml options and the option script (-WhatIf output recorded).</step>
+    <step order="7">Tests (scope below); dotnet build and the Signals test projects green; publish-size delta.</step>
+    <step order="8">PR review by ontology-r1 (it owns Services/Signals/**); record it.</step>
+    <step order="9">With the owner's OK: run the option script on dev, then again (nothing written); verify both options by metadata read.</step>
+    <step order="10">Update TASK-INDEX.md: this task's status cell to "✅ [done]"; record deviations in the notes.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If ontology-r1 does not pass the option values or the design in step 2, STOP before code.</trigger>
+    <trigger>If either type cannot be evaluated from facts BillingFactSet already holds, STOP and raise 🔔 Human Input Required; do not add a loader fact or an extraction field.</trigger>
+    <trigger>If 100000015 or 100000016 is already used on dev or in Entity.xml with another label, STOP; do not renumber.</trigger>
+    <trigger>If anyone asks for either type to be reject-eligible, STOP: that changes FR-26 and needs the owner.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>RuleType.cs:32-94 has no added-fee or discount member; ExpenseRule (100000008) caps expense items by code and ApprovedRate (100000004) compares billed to approved rate; "approve travel" works through ExpenseRule (model 6.3).</existing>
+    <extension>ExpenseRule cannot carry a fee kind or a percent-of-invoice cap and is reject-eligible; ApprovedRate compares to the approved rate, not a discount off the rack rate. D-27 rules are closed typed templates, so a new behaviour is a new type, not new parameters on an old one.</extension>
+    <cost-of-doing-nothing>The Procedure examples "no late fee" and "agreed discount" (O-16) cannot be written as rules, and a guideline's added-fee or discount clause drafts to nothing.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+    <tool name="pwsh">Option script</tool>
+    <tool name="dataverse-mcp">Metadata reads</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">The src/ files listed in relevant-files</output>
+    <output type="script">scripts/ebilling/Deploy-EbillingAddedFeeDiscountOptions.ps1</output>
+    <output type="test">tests/unit/domain/Signals/Billing/Handlers/AddedFeeHandlerTests.cs, DiscountHandlerTests.cs and the pinned-set updates</output>
+    <output type="docs">projects/ebilling-r1/notes/115-addedfee-discount-rule-types.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">RuleType.AddedFee = 100000015 and RuleType.Discount = 100000016; DomainOf returns Billing for both; IsRejectEligible returns false for both; both are in BillingRuleCatalogue.Types.</criterion>
+    <criterion testable="true">An AddedFee body with allowance "not allowed" or "after N days" is refused at save and at the evaluation gate with the named reason (one test each); a valid cap body passes.</criterion>
+    <criterion testable="true">AddedFee cap: fee lines over the cap give one finding with the reason code; at or under the cap give none; an invoice with no matching fee line gives none.</criterion>
+    <criterion testable="true">Discount: a Fee line billed above the discounted rack rate (beyond tolerance) gives a Flag finding; a line at or below gives none; a line with no resolved rack rate is skipped; no Discount finding carries a Reject consequence, and publishing a Discount or AddedFee rule with a Reject consequence is refused.</criterion>
+    <criterion testable="true">An undefined RuleType value still throws in DomainOf and IsRejectEligible (existing must-fire tests still pass).</criterion>
+    <criterion testable="true">Entity.xml carries both options; RuleTypeOptionSetSyncTests passes; dev shows both options after the run, and a second run writes nothing.</criterion>
+    <criterion testable="true">ontology-r1's design PASS (step 2) and PR review (step 8) are recorded with dates; the publish-size delta is recorded.</criterion>
+    <criterion testable="true">Test scope: cover the contract and edge cases named in these criteria only. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>"Approve travel" stays on ExpenseRule (model 6.3). The extraction work that would lift the two AddedFee refusals (per-line fee kind, due date in BillingFactSet) is not in R1's breakdown; record it with /project-defer-issue-tracking.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

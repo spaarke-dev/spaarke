@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="005" project="ebilling-r1">
+  <metadata>
+    <title>Extraction spike — four arms, coding model comparison, package size; go / no-go</title>
+    <phase>0 Baseline and AI foundations (WP0)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Spike code and an evaluation note outside src/; produces the evidence for an owner gate decision.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Experiment design, metric interpretation and a recommendation that gates the critical path (043); ambiguous evidence needs judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>002, 004</deps>
+    <tags>spike, ai, evaluation, content-understanding</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+  </metadata>
+
+  <prompt>Run the FR-03 extraction spike on the 30+ invoice spike subset from the evaluation set: arms (a) current text + LLM extraction, (b) Content Understanding prebuilt-invoice, (c) sprk_invoice_v1 on GA 2025-11-01, (c-prime) the same analyzer on 2026-06-01-preview; plus the gpt-5.4-mini vs gpt-5.6-luna coding comparison, the activity-code classify experiment, and the Azure.AI.ContentUnderstanding publish-size delta. Write notes/extraction-spike.md and end with an owner go / no-go.</prompt>
+
+  <role>SPAARKE AI engineer. Expert in document extraction evaluation, confidence calibration and Azure AI Content Understanding.</role>
+
+  <goal>projects/ebilling-r1/notes/extraction-spike.md reports, per arm: header and line-field accuracy against ground truth, confidence calibration (count and rate of fields at confidence ≥ 0.90 that were wrong), latency p90 and cost per invoice; the coding comparison (task-code top-1 accuracy, latency, cost per line for both models); the classify experiment result; the preview-under-GA probe result; the package publish-size delta; and a recommendation. The owner's go / no-go is recorded in notes/decisions-log.md as a new D-entry proposal and in this task's notes.</goal>
+
+  <context>
+    <background>D-49: Content Understanding custom analyzer, with FR-03 as the gate; no-go switches task 043 to DI prebuilt-layout (Services/Ai/DocumentIntelligenceService.cs) plus an extraction Action behind the same IInvoiceAi.ReadInvoiceAsync. D-53: build on GA; preview is tested as arm c-prime, adopted only at GA; if the spike shows preview is needed for NFR-04, that becomes a documented project exception (root CLAUDE.md §6.5 path A) with a GA fallback. D-50 approved the package; its delta must be measured here (NFR-12). D-51 models. Research note §9.8 lists the UNVERIFIED items to test.</background>
+    <relevant-files>
+      <file role="read">projects/ebilling-r1/notes/evaluation-set/manifest.md (spike subset, ground-truth format — from 002)</file>
+      <file role="read">infrastructure/content-understanding/sprk-invoice-v1.json (from 004)</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceAnalysisService.cs (arm a: ExtractInvoiceFactsAsync, line 118)</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Finance/Models/FinanceJsonSchemas.cs (arm a schema)</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Ai/TextExtractorService.cs (arm a text input; client construction 103-127)</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj (package delta baseline)</file>
+      <file role="read">projects/ebilling-r1/notes/research/content-understanding-vs-docintel.md (§3.3, §4, §9)</file>
+      <file role="output">projects/ebilling-r1/notes/spikes/extraction/ (spike harness and raw results)</file>
+      <file role="output">projects/ebilling-r1/notes/extraction-spike.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="002" status="pending">Evaluation set, spike subset and ground truth</dependency>
+      <dependency task="004" status="pending">sprk_invoice_v1 deployed in dev</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">No change under src/ and no new package in Sprk.Bff.Api.csproj on this branch. The package delta is measured in a throwaway worktree or scratch project that is discarded; record the paths, both sizes, file counts and the zip tool (bff-hygiene item 4 procedure).</constraint>
+    <constraint source="project">Spike code lives under projects/ebilling-r1/notes/spikes/extraction/ or the session scratchpad; it calls services directly (REST / SDK), not through the BFF.</constraint>
+    <constraint source="ADR-015">Only evaluation-set items whose manifest row clears PII may be sent to a model. Logs and the note carry identifiers, sizes, timings and outcome codes, not document text.</constraint>
+    <constraint source="D-53">The preview API (arm c-prime) is used only by spike code, never in infrastructure/ or scripts/. The probe whether a preview-built analyzer runs under the GA API is reported, not adopted.</constraint>
+    <constraint source="spec FR-03">At least 30 invoices including the largest available and at least 3 bundled PDFs (cover letter + invoice); the same items for every arm.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/notes/research/content-understanding-vs-docintel.md</file>
+      <file>projects/ebilling-r1/notes/research/test-data-sources.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/agents/researcher.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Write the scoring harness first: field-level comparison against the 002 ground-truth format (normalised dates / amounts), per-field accuracy, line matching, calibration bins, latency and cost capture.</step>
+    <step order="2">Run arms a, b, c, c-prime on the same 30+ invoices; store raw outputs under notes/spikes/extraction/ (no document text in committed files if the manifest says local-only).</step>
+    <step order="3">Run the coding comparison: the same extracted lines and a fixed code list through gpt-5.4-mini (low reasoning effort) and gpt-5.6-luna; score task-code top-1 against filed codes from set A.</step>
+    <step order="4">Run the experiment with the 28-value activity code as an analyzer classify field (a copy of v1, not v1 itself) and compare with the separate coding step.</step>
+    <step order="5">Probe whether a preview-built analyzer runs under the GA API; record the result.</step>
+    <step order="6">Measure the Azure.AI.ContentUnderstanding 1.1.0 publish-size delta in a throwaway worktree against a fresh master build; discard the worktree.</step>
+    <step order="7">Write notes/extraction-spike.md: method, per-arm tables, calibration, latency p90, cost, coding comparison, package delta, risks, recommendation (go / no-go and, if go, GA-only or a path-A exception for preview).</step>
+    <step order="8">Present the results to the owner and STOP for the decision (escalation trigger 1). Record the decision as a new D-entry proposal in notes/decisions-log.md and in task notes.</step>
+    <step order="9">Update TASK-INDEX.md: change this task's status cell to ✅ [done].</step>
+    <step order="10">If any deviations from plan, document in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Always: after the note is written, present a summary (per-arm accuracy vs NFR-04, calibration, p90, cost, package delta, recommendation) and STOP for the owner's go / no-go (root CLAUDE.md §6). Do not mark the task done before the decision is recorded.</trigger>
+    <trigger>If the package delta is ≥ +5 MB, flag it explicitly in the summary — it needs owner justification before 043 (root CLAUDE.md §10).</trigger>
+    <trigger>If only the preview arm meets NFR-04, present it as a root CLAUDE.md §6.5 path-A exception proposal with the GA fallback, not as a default.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Scratch project for SDK calls and package-size measurement</tool>
+    <tool name="az">Tokens and REST calls</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ebilling-r1/notes/extraction-spike.md</output>
+    <output type="code">projects/ebilling-r1/notes/spikes/extraction/ (harness)</output>
+    <output type="docs">projects/ebilling-r1/notes/decisions-log.md (new D-entry proposal for the go / no-go)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">extraction-spike.md has, for each of arms a, b, c and c-prime: header-field accuracy, line-field accuracy for date / timekeeper / hours / rate / amount, the count and rate of fields at confidence ≥ 0.90 that were wrong, latency p90 and cost per invoice — on the same ≥ 30 invoices including the largest and ≥ 3 bundled PDFs.</criterion>
+    <criterion testable="true">The note reports the gpt-5.4-mini vs gpt-5.6-luna coding comparison (top-1 task accuracy, latency, cost per line), the activity-code classify experiment, and the preview-under-GA probe result.</criterion>
+    <criterion testable="true">The note reports the Azure.AI.ContentUnderstanding publish-size delta with both sizes, file counts and zip tool; git diff shows no change under src/ and no package reference added on this branch.</criterion>
+    <criterion testable="true">The owner's go / no-go decision is recorded in task notes and as a new D-entry proposal in notes/decisions-log.md; on no-go the note names the 043 fallback (DI prebuilt-layout + extraction Action behind ReadInvoiceAsync).</criterion>
+    <criterion testable="true">No committed file under notes/spikes/ contains document text from items the manifest marks local-only.</criterion>
+  </acceptance-criteria>
+
+  <notes>This task's recommendation feeds 043 (client vs fallback), 047 (coding model and tier), 161 / 162 (baseline numbers). Keep the harness reusable for 162. The note is an input to NFR-04 / NFR-05, not their final measurement.
+
+Execution 2026-10-15 (task-execute, STANDARD, opus): steps 1-7 done; step 8 = owner gate OPEN.
+- Result: notes/extraction-spike.md. Harness, runs and scores: notes/spikes/extraction/ (results/*.json).
+- 41 items, the same for every arm: 37 synthetic (14 bundled, B-0150 at 26 pages), A-07 (108 pages), C-03, C-10, C-11. A-02 was excluded (PII disposition REVIEW).
+- Arm a ran on the gpt-4o-mini deployment (gpt-4.1-mini) with a stand-in system prompt (#1918).
+- GA analyzer meets NFR-04 after deterministic repair:
+  - header 97.6;
+  - date / timekeeper / hours / rate / amount 91.5 / 92.1 / 92.0 / 100 / 100;
+  - hours 89.3 as returned.
+- Preview c' scores about 4 points higher.
+- Wrong at confidence >= 0.90: c 1.0 %, c' 0.6 %, a 2.8 %.
+- p90 49 s; $0.07 per typical invoice.
+- Coding: gpt-5.4-mini 66.1 / 63.9 vs gpt-5.6-luna 65.7 / 61.7 task top-1 (NFR-05 at risk).
+- Classify field 75.7 vs coding step 77.2 activity top-1.
+- Probe: a preview-built analyzer is 404 under GA (and GA-built is 404 under preview).
+- Package delta +0.16 MB, +1 file (not flagged).
+- Recommendation: GO, GA only, no path-A exception; conditions for 043 in note section 12.
+- PROPOSED as D-81 in notes/decisions-log.md, awaiting the owner (A / B / C).
+- Do NOT mark done until the owner decides; then record the decision here and in D-81.
+- Azure: created spike analyzers sprk_invoice_v1p (preview), sprk_invoice_v1_cls, sprk_invoice_router, sprk_invoice_router_p (preview). No model deployment; sprk_invoice_v1 unchanged.
+- No new defects filed. The research note section 9.6 statement on GA -> preview portability is corrected in place.
+
+Owner decision 2026-10-15 (D-81): GO with a path-A preview exception (option B); GA fallback analyzer kept in step. Spike-only analyzers sprk_invoice_v1_cls, sprk_invoice_router and sprk_invoice_router_p can be deleted; sprk_invoice_v1p is the starting point for the preview primary in 043.
+rework: none task 005</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in knowledge files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

@@ -40,6 +40,9 @@ public sealed class DataverseSearchDataHandlerTests : TypedToolHandlerTestFixtur
     /// <summary>Task 188: what the BFF reads APP-ONLY when it decides an external caller's document hits.</summary>
     private readonly AppOnlyDocumentWorld _appOnly = new();
 
+    /// <summary>Task 098: the assistant tools' (a') invoice-family seam (a test that reaches it sets one).</summary>
+    private Sprk.Bff.Api.Infrastructure.ExternalAccess.AppOnlyInvoiceFamilyHiding _hideInvoiceFamily = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyHidingStubs.NeverCalled;
+
     public DataverseSearchDataHandlerTests()
     {
         // Default caller: a resolved INTERNAL systemuser (sprk_isexternal not true).
@@ -53,7 +56,7 @@ public sealed class DataverseSearchDataHandlerTests : TypedToolHandlerTestFixtur
 
     private DataverseSearchDataHandler CreateHandler() =>
         new(_dataverse.Object, CreateLogger<DataverseSearchDataHandler>(), _httpContextAccessor,
-            _callerResolver.Object, _identityResolver.Object, _appOnly.Narrowing);
+            _callerResolver.Object, _identityResolver.Object, _appOnly.Narrowing, _hideInvoiceFamily);
 
     private void AsExternalCaller() =>
         _identityResolver
@@ -382,6 +385,113 @@ public sealed class DataverseSearchDataHandlerTests : TypedToolHandlerTestFixtur
     private static List<string> ResultEntities(ToolResult result) =>
         result.Data!.Value.GetProperty("results").EnumerateArray()
             .Select(r => r.GetProperty("entity").GetString()!).ToList();
+
+    // ═════════════════════════════════════════════════════════════════════════════
+    // ebilling-r1 task 098 surface (d): the (a') invoice predicate on invoice-family hits
+    // ═════════════════════════════════════════════════════════════════════════════
+
+    private static readonly Guid InvoiceHitVisible = Guid.Parse("09800000-0000-4000-8000-0000000000b1");
+    private static readonly Guid InvoiceHitHidden = Guid.Parse("09800000-0000-4000-8000-0000000000b2");
+    private static readonly Guid SignalHitHidden = Guid.Parse("09800000-0000-4000-8000-0000000000b3");
+
+    private static string InvoiceFamilyHitsJson =>
+        "{ \"value\": [ "
+        + "{ \"@search.score\": 4.0, \"entityname\": \"sprk_matter\", \"objectid\": \"" + MatterHit.ToString("D") + "\" }, "
+        + "{ \"@search.score\": 3.0, \"entityname\": \"sprk_invoice\", \"objectid\": \"" + InvoiceHitVisible.ToString("D") + "\" }, "
+        + "{ \"@search.score\": 2.0, \"entityname\": \"sprk_invoice\", \"objectid\": \"" + InvoiceHitHidden.ToString("D") + "\" }, "
+        + "{ \"@search.score\": 1.0, \"entityname\": \"sprk_signal\", \"objectid\": \"" + SignalHitHidden.ToString("D") + "\" } "
+        + "] }";
+
+    [Fact]
+    public async Task ExecuteChatAsync_Task098_ExternalCaller_HiddenInvoiceFamilyHitsAreDropped_OneSeamCallPerTable()
+    {
+        AsExternalCaller();
+        CaptureSearchBodies(DataverseUserResponse.Ok(200, ParseJson(InvoiceFamilyHitsJson)));
+        var calls = new List<string>();
+        _hideInvoiceFamily = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyHidingStubs.Hiding(calls, InvoiceHitHidden, SignalHitHidden);
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: """{"query":"contoso"}""");
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildSearchTool(), CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        ResultEntities(result).Should().Equal("sprk_matter", "sprk_invoice");
+        result.Data!.Value.GetProperty("count").GetInt32().Should().Be(2);
+        result.Warnings.Should().BeEmpty("nothing tells the model that hits were dropped");
+        calls.Should().BeEquivalentTo(new[] { "sprk_invoice:2", "sprk_signal:1" });
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_Task098_ExternalCaller_ThePredicateReadFails_ErrorWithNoData()
+    {
+        AsExternalCaller();
+        CaptureSearchBodies(DataverseUserResponse.Ok(200, ParseJson(InvoiceFamilyHitsJson)));
+        _hideInvoiceFamily = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyHidingStubs.Throwing;
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: """{"query":"contoso"}""");
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildSearchTool(), CancellationToken.None);
+
+        result.Success.Should().BeFalse("a predicate read fault can never turn into 'show it'");
+        result.Data.Should().BeNull();
+    }
+
+    // Review round 5 (F1): a submission with no invoice is decided by its own source, as on the routes (the REAL seam).
+
+    private static string SubmissionHitsJson(params Guid[] submissions) =>
+        "{ \"value\": [ "
+        + "{ \"@search.score\": 9.0, \"entityname\": \"sprk_matter\", \"objectid\": \"" + MatterHit.ToString("D") + "\" }, "
+        + string.Join(", ", submissions.Select((id, i) =>
+            "{ \"@search.score\": " + (5 - i) + ".0, \"entityname\": \"sprk_invoicesubmission\", \"objectid\": \""
+            + id.ToString("D") + "\" }"))
+        + " ] }";
+
+    [Fact]
+    public async Task ExecuteChatAsync_Task098_R5_ExternalCaller_ANoInvoiceInternalSubmissionWhoseSourceIsWithheld_IsDropped()
+    {
+        AsExternalCaller();
+        var world = new Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld();
+        var withheld = world.PendingSubmission(
+            world.Document(Guid.NewGuid(), permission: Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.RestrictedPermission), Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.InternalChannel);
+        var spa = world.PendingSubmission(null, Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.SpaChannel);
+        CaptureSearchBodies(DataverseUserResponse.Ok(200, ParseJson(SubmissionHitsJson(withheld, spa))));
+        _hideInvoiceFamily = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyHidingStubs.Real(world);
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: """{"query":"contoso"}""");
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildSearchTool(), CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        ResultEntities(result).Should().Equal("sprk_matter", "sprk_invoicesubmission");
+        result.Data!.Value.GetRawText().Should().Contain(spa.ToString("D")).And.NotContain(withheld.ToString("D"));
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_Task098_R5_ExternalCaller_ANoInvoiceSpaSubmission_StaysVisible()
+    {
+        AsExternalCaller();
+        var world = new Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld();
+        var spa = world.PendingSubmission(null, Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.SpaChannel);
+        CaptureSearchBodies(DataverseUserResponse.Ok(200, ParseJson(SubmissionHitsJson(spa))));
+        _hideInvoiceFamily = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyHidingStubs.Real(world);
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: """{"query":"contoso"}""");
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildSearchTool(), CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        ResultEntities(result).Should().Equal("sprk_matter", "sprk_invoicesubmission");
+        result.Data!.Value.GetRawText().Should().Contain(spa.ToString("D"));
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_Task098_InternalCaller_InvoiceFamilyHitsNeverReachThePredicate()
+    {
+        CaptureSearchBodies(DataverseUserResponse.Ok(200, ParseJson(InvoiceFamilyHitsJson)));
+        // _hideInvoiceFamily stays NeverCalled: any call would fail the tool.
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: """{"query":"contoso"}""");
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildSearchTool(), CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        ResultEntities(result).Should().Equal("sprk_matter", "sprk_invoice", "sprk_invoice", "sprk_signal");
+    }
 
     [Fact]
     public async Task ExecuteChatAsync_ExternalCallerUnscoped_DropsCommunicationFamilyHitsOnly()

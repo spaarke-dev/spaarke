@@ -1,0 +1,34 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0240",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0240","generator_id":"gen_eval_set.py@1 F-0240","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0240.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-06"},
+ "header":{"firm":"Penhallow and Vance LLP","firm_invoice_number":"INV-2026-61783","invoice_date":"2025-11-02","billing_period_start":"2025-10-01","billing_period_end":"2025-10-31","firm_matter_reference":"54563-0008","po_number":"PO-4539527","fees_total":7792.0,"expenses_total":416.54,"adjustments_total":0.0,"total_due":8208.54,"currency":"USD"},
+ "timekeepers":[{"name":"Emeka Galbraith","title":"Of Counsel","rate":390.0,"billed_as":"Galbraith, E."},{"name":"Jordan Castellanos","title":"Paralegal","rate":115.0,"billed_as":"Castellanos, J."},{"name":"Naomi Halloran","title":"Associate","rate":210.0,"billed_as":"Halloran, N."},{"name":"Peter Esposito","title":"Partner","rate":360.0,"billed_as":"Esposito, P."},{"name":"Priya Brennan","title":"Paralegal","rate":115.0,"billed_as":"Brennan, P."}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-10-03","timekeeper":"Galbraith, E.","timekeeper_name":"Emeka Galbraith","timekeeper_title":"Of Counsel","title":"O/C","hours":0.7,"rate":390.0,"amount":273.0,"narrative":"Draft notice of appeal and docketing statement for the insurance coverage issue","codes":["L510","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-10-30","timekeeper":"Galbraith, E.","timekeeper_name":"Emeka Galbraith","timekeeper_title":"Of Counsel","title":"O/C","hours":1.4,"rate":390.0,"amount":546.0,"narrative":"Review court docket and calendar of pending deadlines for the warranty claim","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-10-02","timekeeper":"Castellanos, J.","timekeeper_name":"Jordan Castellanos","timekeeper_title":"Paralegal","title":"Para","hours":1.0,"rate":115.0,"amount":115.0,"narrative":"Attend and present oral argument in the employment claim","codes":["L530","A109"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-10-07","timekeeper":"Halloran, N.","timekeeper_name":"Naomi Halloran","timekeeper_title":"Associate","title":"Assoc","hours":3.0,"rate":210.0,"amount":630.0,"narrative":"Prepare for oral argument in the warranty claim","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-10-08","timekeeper":"Halloran, N.","timekeeper_name":"Naomi Halloran","timekeeper_title":"Associate","title":"Assoc","hours":1.2,"rate":210.0,"amount":252.0,"narrative":"Prepare for hearing.","codes":["L510","A103"],"page":1,"narrative_style":"vague"},
+  {"n":6,"line_type":"fee","date":"2025-10-14","timekeeper":"Halloran, N.","timekeeper_name":"Naomi Halloran","timekeeper_title":"Associate","title":"Assoc","hours":2.6,"rate":210.0,"amount":546.0,"narrative":"Prepare monthly status report to client regarding the employment claim","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-10-09","timekeeper":"Esposito, P.","timekeeper_name":"Peter Esposito","timekeeper_title":"Partner","title":"Ptr","hours":2.9,"rate":360.0,"amount":1044.0,"narrative":"Draft notice of appeal and docketing statement for the insurance coverage issue","codes":["L510","A103"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-10-21","timekeeper":"Esposito, P.","timekeeper_name":"Peter Esposito","timekeeper_title":"Partner","title":"Ptr","hours":4.0,"rate":360.0,"amount":1440.0,"narrative":"Attend and present oral argument in the data incident","codes":["L530","A109"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-10-21","timekeeper":"Esposito, P.","timekeeper_name":"Peter Esposito","timekeeper_title":"Partner","title":"Ptr","hours":4.0,"rate":360.0,"amount":1440.0,"narrative":"Analyze exposure and damages model for the supply agreement","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-10-21","timekeeper":"Esposito, P.","timekeeper_name":"Peter Esposito","timekeeper_title":"Partner","title":"Ptr","hours":3.8,"rate":360.0,"amount":1368.0,"narrative":"Prepare case assessment memorandum regarding the construction contract and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-10-06","timekeeper":"Brennan, P.","timekeeper_name":"Priya Brennan","timekeeper_title":"Paralegal","title":"Para","hours":1.2,"rate":115.0,"amount":138.0,"narrative":"Analyze exposure and damages model for the employment claim","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-10-06","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":835.0,"rate":0.14,"amount":116.9,"narrative":"Photocopies - 835 pages","codes":["E101"],"page":2,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2025-10-24","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":299.64,"amount":299.64,"narrative":"Court filing fee","codes":["E112"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["476 Lakeshore Drive","Houston","Tax ID 36-1905867"],"template":"T24","pages":2},
+ "rule_set_id":"RS-06",
+ "context":{"matter_open":"2024-07-05","matter_close":"2026-01-29","matter_budget":57834.0,"approved_timekeepers":["Priya Brennan","Ivan Ashdown","Jordan Castellanos","Naomi Halloran","Peter Esposito"],"invoice_received_date":"2025-11-13"},
+ "expected_findings":[
+  {"rule_id":"RS-06-R01","rule_type":"ApprovedTimekeeper","scope":"line","line_refs":[1],"consequence":"Reject"},
+  {"rule_id":"RS-06-R01","rule_type":"ApprovedTimekeeper","scope":"line","line_refs":[2],"consequence":"Reject"},
+  {"rule_id":"RS-06-R07","rule_type":"DailyHoursCap","scope":"line","line_refs":[10],"consequence":"Reduce"},
+  {"rule_id":"RS-06-R11","rule_type":"AiObservation","scope":"line","line_refs":[5],"consequence":"Flag"}
+ ],
+ "seeded_violations":4
+}

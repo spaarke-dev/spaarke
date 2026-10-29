@@ -1,0 +1,37 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0094",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0094","generator_id":"gen_eval_set.py@1 F-0094","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0094.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-04"},
+ "header":{"firm":"Rutherford & Zeller LLP","firm_invoice_number":"INV-2025-07680","invoice_date":"2026-04-02","billing_period_start":"2025-12-01","billing_period_end":"2025-12-31","firm_matter_reference":"96781-0039","po_number":"PO-4554928","fees_total":6031.25,"expenses_total":7741.48,"adjustments_total":0.0,"total_due":13772.73,"currency":"USD"},
+ "timekeepers":[{"name":"Elena Zielinski","title":"Associate","rate":315.0,"billed_as":"EZ"},{"name":"Jordan Galbraith","title":"Partner","rate":705.0,"billed_as":"JG"},{"name":"Louis Oyelaran","title":"Associate","rate":375.0,"billed_as":"LO"},{"name":"Nadia Lockhart","title":"Senior Associate","rate":415.0,"billed_as":"NL"},{"name":"Priya Oyelaran","title":"Partner","rate":600.0,"billed_as":"PO"},{"name":"Yusuf Quillen","title":"Paralegal","rate":200.0,"billed_as":"YQ"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-12-02","timekeeper":"LO","timekeeper_name":"Louis Oyelaran","timekeeper_title":"Associate","title":"Assoc","hours":0.5,"rate":375.0,"amount":187.5,"narrative":"Review and organize incoming production from Orchard Row Brands for matter file","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-12-03","timekeeper":"LO","timekeeper_name":"Louis Oyelaran","timekeeper_title":"Associate","title":"Assoc","hours":0.5,"rate":375.0,"amount":187.5,"narrative":"Correspondence with consulting expert regarding scope of analysis","codes":["L130","A108"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-12-08","timekeeper":"PO","timekeeper_name":"Priya Oyelaran","timekeeper_title":"Partner","title":"Ptr","hours":1.75,"rate":600.0,"amount":1050.0,"narrative":"Invoice preparation and review of billing entries","codes":["L190","A111"],"page":1,"narrative_style":"clerical"},
+  {"n":4,"line_type":"expense","date":"2025-12-08","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":85.61,"amount":85.61,"narrative":"Court filing fee","codes":["E112"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"expense","date":"2025-12-10","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":5972.49,"amount":5972.49,"narrative":"Consulting expert fees","codes":["E119"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-12-11","timekeeper":"NL","timekeeper_name":"Nadia Lockhart","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.25,"rate":415.0,"amount":933.75,"narrative":"Telephone conference with client representative regarding factual background of the data incident","codes":["L110","A106"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-12-15","timekeeper":"YQ","timekeeper_name":"Yusuf Quillen","timekeeper_title":"Paralegal","title":"Para","hours":2.75,"rate":200.0,"amount":550.0,"narrative":"Review court docket and calendar of pending deadlines for the data incident","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-12-22","timekeeper":"YQ","timekeeper_name":"Yusuf Quillen","timekeeper_title":"Paralegal","title":"Para","hours":2.5,"rate":200.0,"amount":500.0,"narrative":"Plan strategy for upcoming phase of the warranty claim with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-12-22","timekeeper":"NL","timekeeper_name":"Nadia Lockhart","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.0,"rate":415.0,"amount":830.0,"narrative":"Review and analyze client documents concerning the customs audit to identify key facts","codes":["L110","A104"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-12-23","timekeeper":"EZ","timekeeper_name":"Elena Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":0.5,"rate":315.0,"amount":157.5,"narrative":"Analyze exposure and damages model for the insurance coverage issue","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-12-24","timekeeper":"JG","timekeeper_name":"Jordan Galbraith","timekeeper_title":"Partner","title":"Ptr","hours":0.25,"rate":705.0,"amount":176.25,"narrative":"Plan strategy for upcoming phase of the distribution agreement with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2025-12-24","timekeeper":"LO","timekeeper_name":"Louis Oyelaran","timekeeper_title":"Associate","title":"Assoc","hours":0.75,"rate":375.0,"amount":281.25,"narrative":"Review court docket and calendar of pending deadlines for the construction contract","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2025-12-24","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":17.0,"rate":1.97,"amount":33.49,"narrative":"Facsimile charges","codes":["E104"],"page":1,"narrative_style":"clear"},
+  {"n":14,"line_type":"fee","date":"2025-12-25","timekeeper":"EZ","timekeeper_name":"Elena Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":0.5,"rate":315.0,"amount":157.5,"narrative":"Telephone conference with client regarding selection of expert for the data incident","codes":["L130","A106"],"page":1,"narrative_style":"clear"},
+  {"n":15,"line_type":"fee","date":"2025-12-26","timekeeper":"JG","timekeeper_name":"Jordan Galbraith","timekeeper_title":"Partner","title":"Ptr","hours":0.25,"rate":705.0,"amount":176.25,"narrative":"Attend case management conference in the data incident","codes":["L230","A109"],"page":1,"narrative_style":"clear"},
+  {"n":16,"line_type":"fee","date":"2025-12-29","timekeeper":"LO","timekeeper_name":"Louis Oyelaran","timekeeper_title":"Associate","title":"Assoc","hours":2.25,"rate":375.0,"amount":843.75,"narrative":"Prepare for case management conference in the insurance coverage issue","codes":["L230","A101"],"page":1,"narrative_style":"clear"},
+  {"n":17,"line_type":"expense","date":"2025-12-30","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1649.89,"amount":1649.89,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["418 Union Square","Portland","Tax ID 51-2714525"],"template":"T09","pages":2},
+ "rule_set_id":"RS-04",
+ "context":{"matter_open":"2024-09-11","matter_close":"2026-03-31","matter_budget":80090.0,"approved_timekeepers":["Jordan Galbraith","Louis Oyelaran","Priya Oyelaran","Nadia Lockhart","Naomi Ashdown","Elena Zielinski","Yusuf Quillen"],"invoice_received_date":"2026-04-03"},
+ "expected_findings":[
+  {"rule_id":"RS-04-R05","rule_type":"InvoiceAge","scope":"invoice","line_refs":[],"consequence":"Flag"},
+  {"rule_id":"RS-04-R07","rule_type":"ExpenseRule","scope":"line","line_refs":[13],"consequence":"Disallow"},
+  {"rule_id":"RS-04-R08","rule_type":"NonBillableActivity","scope":"line","line_refs":[3],"consequence":"Disallow"}
+ ],
+ "seeded_violations":3
+}

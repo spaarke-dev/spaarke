@@ -44,6 +44,9 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
     /// <summary>Task 188: what the BFF reads APP-ONLY when it decides an external caller's documents.</summary>
     private readonly AppOnlyDocumentWorld _appOnly = new();
 
+    /// <summary>Task 098: the assistant tools' (a') invoice-family seam (a test that reaches it sets one).</summary>
+    private Sprk.Bff.Api.Infrastructure.ExternalAccess.AppOnlyInvoiceFamilyHiding _hideInvoiceFamily = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyHidingStubs.NeverCalled;
+
     public DataverseReadQueryHandlerTests()
     {
         // Default caller: a resolved INTERNAL systemuser (sprk_isexternal not true).
@@ -57,7 +60,7 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
 
     private DataverseReadQueryHandler CreateHandler() =>
         new(_dataverse.Object, CreateLogger<DataverseReadQueryHandler>(), _httpContextAccessor,
-            _callerResolverOverride ?? _callerResolver.Object, _identityResolver.Object, _appOnly.Narrowing);
+            _callerResolverOverride ?? _callerResolver.Object, _identityResolver.Object, _appOnly.Narrowing, _hideInvoiceFamily);
 
     private void AsExternalCaller() =>
         _identityResolver
@@ -842,6 +845,148 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
     private static readonly Guid CommUnreadable = Guid.Parse("c1000000-0000-0000-0000-000000000006");
     private static readonly Guid ThreadOpen = Guid.Parse("71000000-0000-0000-0000-000000000001");
     private static readonly Guid ThreadPrivate = Guid.Parse("71000000-0000-0000-0000-000000000002");
+
+    // ═════════════════════════════════════════════════════════════════════════════
+    // ebilling-r1 task 098 surface (d): the (a') invoice predicate on invoice-family tables
+    // ═════════════════════════════════════════════════════════════════════════════
+
+    private static readonly Guid InvoiceVisible = Guid.Parse("09800000-0000-4000-8000-0000000000a1");
+    private static readonly Guid InvoiceHidden = Guid.Parse("09800000-0000-4000-8000-0000000000a2");
+
+    private void SetupFamilyTable(string table, string entitySet, string idColumn, string nameColumn) =>
+        _dataverse
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith($"EntityDefinitions(LogicalName='{table}')")), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson(
+                "{ \"EntitySetName\": \"" + entitySet + "\", \"PrimaryIdAttribute\": \"" + idColumn + "\", "
+                + "\"Attributes\": [ { \"LogicalName\": \"" + nameColumn + "\", \"AttributeType\": \"String\" } ] }")));
+
+    private void UserReadReturns(string entitySet, string rowsJson) =>
+        _dataverse
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith($"{entitySet}?")), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson(rowsJson)));
+
+    private static string FamilyRows(string idColumn, params (Guid? Id, string Name)[] rows) =>
+        "{ \"value\": [ " + string.Join(", ", rows.Select(r =>
+            "{ \"" + idColumn + "\": " + (r.Id is { } id ? "\"" + id.ToString("D") + "\"" : "null") + ", \"sprk_name\": \"" + r.Name + "\" }"))
+        + " ] }";
+
+    private async Task<ToolResult> ReadAsync(string sql) =>
+        await CreateHandler().ExecuteChatAsync(
+            BuildChatInvocationContext(toolArgumentsJson: Args(sql)), BuildReadQueryTool(), CancellationToken.None);
+
+    private static IEnumerable<string?> Names(ToolResult result) =>
+        result.Data!.Value.GetProperty("rows").EnumerateArray().Select(r => r.GetProperty("sprk_name").GetString());
+
+    [Fact]
+    public async Task ExecuteChatAsync_Task098_ExternalCallerOnInvoices_AHiddenInvoiceIsDropped_OneSeamCallForThePage()
+    {
+        AsExternalCaller();
+        SetupFamilyTable("sprk_invoice", "sprk_invoices", "sprk_invoiceid", "sprk_name");
+        UserReadReturns("sprk_invoices", FamilyRows("sprk_invoiceid", (InvoiceVisible, "Visible"), (InvoiceHidden, "Isolated")));
+        var calls = new List<string>();
+        _hideInvoiceFamily = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyHidingStubs.Hiding(calls, InvoiceHidden);
+
+        var result = await ReadAsync("SELECT sprk_name FROM sprk_invoice");
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        Names(result).Should().Equal("Visible");
+        calls.Should().Equal("sprk_invoice:2");
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_Task098_ExternalCallerOnInvoiceLines_ALineOfAHiddenInvoiceIsDropped()
+    {
+        AsExternalCaller();
+        var hiddenLine = Guid.NewGuid();
+        var visibleLine = Guid.NewGuid();
+        SetupFamilyTable("sprk_billingevent", "sprk_billingevents", "sprk_billingeventid", "sprk_name");
+        UserReadReturns("sprk_billingevents", FamilyRows("sprk_billingeventid", (hiddenLine, "Hidden line"), (visibleLine, "Visible line")));
+        var calls = new List<string>();
+        _hideInvoiceFamily = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyHidingStubs.Hiding(calls, hiddenLine);
+
+        var result = await ReadAsync("SELECT sprk_name FROM sprk_billingevent");
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        Names(result).Should().Equal("Visible line");
+        calls.Should().Equal("sprk_billingevent:2");
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_Task098_ExternalCallerOnInvoices_ARowWithoutAnId_IsHidden()
+    {
+        AsExternalCaller();
+        SetupFamilyTable("sprk_invoice", "sprk_invoices", "sprk_invoiceid", "sprk_name");
+        UserReadReturns("sprk_invoices", FamilyRows("sprk_invoiceid", (null, "No id"), (InvoiceVisible, "Visible")));
+        _hideInvoiceFamily = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyHidingStubs.Hiding(null);
+
+        var result = await ReadAsync("SELECT sprk_name FROM sprk_invoice");
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        Names(result).Should().Equal("Visible");
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_Task098_ExternalCallerOnInvoices_ThePredicateReadFails_ErrorWithNoData()
+    {
+        AsExternalCaller();
+        SetupFamilyTable("sprk_invoice", "sprk_invoices", "sprk_invoiceid", "sprk_name");
+        UserReadReturns("sprk_invoices", FamilyRows("sprk_invoiceid", (InvoiceVisible, "Visible")));
+        _hideInvoiceFamily = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyHidingStubs.Throwing;
+
+        var result = await ReadAsync("SELECT sprk_name FROM sprk_invoice");
+
+        result.Success.Should().BeFalse("a predicate read fault can never turn into 'show it'");
+        result.Data.Should().BeNull();
+    }
+
+    // Review round 5 (F1): a submission with no invoice is decided by its own source, as on the routes (the REAL seam).
+
+    [Fact]
+    public async Task ExecuteChatAsync_Task098_R5_ExternalCallerOnSubmissions_ANoInvoiceInternalSubmissionWhoseSourceIsWithheld_IsDropped()
+    {
+        AsExternalCaller();
+        var world = new Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld();
+        var withheld = world.PendingSubmission(
+            world.Document(Guid.NewGuid(), permission: Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.RestrictedPermission), Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.InternalChannel);
+        var spa = world.PendingSubmission(null, Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.SpaChannel);
+        SetupFamilyTable("sprk_invoicesubmission", "sprk_invoicesubmissions", "sprk_invoicesubmissionid", "sprk_name");
+        UserReadReturns("sprk_invoicesubmissions", FamilyRows("sprk_invoicesubmissionid", (withheld, "Internal"), (spa, "Spa")));
+        _hideInvoiceFamily = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyHidingStubs.Real(world);
+
+        var result = await ReadAsync("SELECT sprk_name FROM sprk_invoicesubmission");
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        Names(result).Should().Equal("Spa");
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_Task098_R5_ExternalCallerOnSubmissions_ANoInvoiceSpaSubmission_StaysVisible()
+    {
+        AsExternalCaller();
+        var world = new Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld();
+        var spa = world.PendingSubmission(null, Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.SpaChannel);
+        SetupFamilyTable("sprk_invoicesubmission", "sprk_invoicesubmissions", "sprk_invoicesubmissionid", "sprk_name");
+        UserReadReturns("sprk_invoicesubmissions", FamilyRows("sprk_invoicesubmissionid", (spa, "Spa")));
+        _hideInvoiceFamily = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyHidingStubs.Real(world);
+
+        var result = await ReadAsync("SELECT sprk_name FROM sprk_invoicesubmission");
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        Names(result).Should().Equal("Spa");
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_Task098_InternalCallerOnInvoices_NeverReachesThePredicate()
+    {
+        SetupFamilyTable("sprk_invoice", "sprk_invoices", "sprk_invoiceid", "sprk_name");
+        UserReadReturns("sprk_invoices", FamilyRows("sprk_invoiceid", (InvoiceVisible, "Visible"), (InvoiceHidden, "Isolated")));
+        // _hideInvoiceFamily stays NeverCalled: any call would fail the tool.
+
+        var result = await ReadAsync("SELECT sprk_name FROM sprk_invoice");
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        Names(result).Should().Equal("Visible", "Isolated");
+    }
 
     private void SetupDocumentMetadata() =>
         _dataverse

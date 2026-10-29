@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="047" project="ebilling-r1">
+  <metadata>
+    <title>UTBMS coding Action INVOICE-LINE-CODE@v1 and code-set resolution</title>
+    <phase>2 Submission and extraction (WP2)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>One Action + Binding through the 041 facade plus a deterministic resolver and a server-side code guard; follows the 042 pattern.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Pattern-following Action authoring; the out-of-set guard and resolution order need care (xhigh), not new architecture.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>P2-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>041, 018, 025, 029</deps>
+    <tags>bff, ai, jps</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+  </metadata>
+
+  <prompt>Author the coding Action invoice-line-code (spec INVOICE-LINE-CODE@v1, consumer type invoice-line-code, Binding, Fast tier) and a LineCodingService that resolves each line's code set (firm codes, matter type, practice area, AI suggestion hook, settings default), sends lines in chunks of the settings chunk size with the allowed codes and their guidance text to IInvoiceAi.CodeLinesAsync, and refuses any returned code outside the line's code set (FR-22, D-46, D-51).</prompt>
+
+  <role>SPAARKE platform developer. Expert in JPS Actions, the linear ActionRunner and UTBMS code sets. Follow ADRs strictly.</role>
+
+  <goal>Action, output-schema mirror and Binding exist and are seeded in dev; LineCodingService returns per line: task / activity / expense code (or none) from the resolved set, confidence, observations (BlockBilling, VagueDescription with quoted text), firm-supplied codes retained with a mismatch flag, and the code-set source; out-of-set codes are refused server-side; a seam test proves the path through the real ActionRunner.</goal>
+
+  <context>
+    <background>Spec FR-22, Processing Pipeline step 3, D-46, D-51 (gpt-5.4-mini, low effort), D-64 (no retrieved examples in R1), D-05 (firm codes retained, mismatch flagged). Tables from 018: sprk_billingcodeset, sprk_billingcode (sprk_codeset, sprk_codetype Task / Activity / Expense, sprk_code, sprk_description, sprk_guidancetext, statuscode), and lookup sprk_defaultbillingcodeset on sprk_mattertype_ref and sprk_practicearea_ref. Matter, Project and Work Assignment reach those through their sprk_mattertype and sprk_practicearea lookup columns. Settings (025): sprk_codingchunksize (default 25) and sprk_defaultcodeset (Litigation). Verified platform limits: ActionRunner $choices enrichment (ActionRunner.cs:379 ResolveLookupChoicesAsync, :426 EnrichOutputSchemaWithResolvedChoices; the spec cites :424) resolves ALL active rows of a lookup entity through Services/Ai/LookupChoicesResolver.cs — it cannot filter by code set per call; BoundInputs and LinearRunContext carry no per-call output-schema override and no reasoning-effort setting; the Fast tier maps to the platform-wide DocumentIntelligenceOptions.FastModel (ModelTierDeploymentResolver.cs:46).</background>
+    <relevant-files>
+      <file role="new">infra/dataverse/actions/invoice-line-code.action.json and infra/dataverse/outputschemas/invoice-line-code.schema.json</file>
+      <file role="modify">infra/dataverse/sprk_playbookconsumer-rows.json (shared append point: one row)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerTypes.cs (add InvoiceLineCode to All with the Binding)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Finance/Coding/ (ILineCodingService, LineCodingService, CodeSetResolver with an AI-suggestion hook interface for 048)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs (shared append point)</file>
+      <file role="canonical-reference">infra/dataverse/actions/agreement-classify.action.json; tests/integration/contract/Catalog/AgreementClassifyActionContractTests.cs</file>
+      <file role="canonical-reference">tests/integration/seam/Ai/ContextBinderActionRunnerSeamTests.cs (real ActionRunner, fake IOpenAiClient at :593)</file>
+      <file role="new">tests/integration/contract/Catalog/InvoiceLineCodeActionContractTests.cs; tests/integration/seam/Finance/LineCodingSeamTests.cs; tests/unit/Sprk.Bff.Api.Tests/Services/Finance/Coding/</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="041" status="required">IInvoiceAi.CodeLinesAsync and its DTOs; ConsumerTypes.InvoiceLineCode.</dependency>
+      <dependency task="018" status="required">Code-set tables, mappings and seeded sets.</dependency>
+      <dependency task="025" status="required">Chunk size and default code set.</dependency>
+      <dependency task="029" status="required">Schema live in dev.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §10">Every change under src/server/api/Sprk.Bff.Api follows .claude/constraints/bff-extensions.md.</constraint>
+    <constraint source="FR-22 MUST">Codes come only from the line's resolved code set. The service validates every returned code against that set and refuses (drops to no code, low confidence, finding input "code refused") any code outside it — even if the model returns it. An out-of-set code is never stored.</constraint>
+    <constraint source="FR-22 order">Per line: (1) the set implied by firm-supplied codes (only if every supplied code belongs to one set), (2) core record's matter type default set, (3) practice area default set, (4) AI suggestion through the hook (flagged as a finding for review; 048 supplies it, until then the hook returns none), (5) settings default. Record the source per line.</constraint>
+    <constraint source="closed enum">Pass the allowed codes (code, type, description, guidance text) as Action input. Do not change ActionRunner, BoundInputs or LinearRunContext to obtain a per-call enum or reasoning effort; a static $choices enum over all active codes may be added to the schema as an extra guard, but the server-side check above is mandatory.</constraint>
+    <constraint source="D-51 / D-52">Action tier Fast with the Binding's sprk_modeltieroverride; no deployment name in C# or in FinanceOptions; no retrieved examples (D-64). actionCode invoice-line-code (repo convention, no version suffix; v1 in description).</constraint>
+    <constraint source="ADR-039 boot reconciliation">Add InvoiceLineCode to ConsumerTypes.All only together with the Binding row.</constraint>
+    <constraint source="ADR-015">Minimum text: line narrative and the fields needed for coding only; no client names beyond what is in the narrative; logs carry ids, counts, timings only.</constraint>
+    <constraint source="project">Do not write under .claude/ (the jps-action-create save under .claude/skills/ is skipped; the infra/dataverse mirror is the copy).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>JPS Actions and coding</topic>
+    <files>
+      <file>.claude/skills/jps-action-create/SKILL.md</file>
+      <file>.claude/skills/jps-validate/SKILL.md</file>
+      <file>docs/guides/ai-guide-consumer-wiring.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-043-ai-capability-execution-spine.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>tests/integration/seam/README.md</file>
+      <file>projects/ebilling-r1/notes/extraction-spike.md (coding model comparison, if 005 is done)</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context and rigor">Declare rigor STANDARD. Read 041's CodeLines DTOs, 018 / 025 docs/data-model files and 042's notes (Action seeding as executed).</step>
+    <step order="1">Check the dev FastModel deployment: if it is not gpt-5.4-mini, do not change the platform-wide FastModel — escalate (see escalation) and continue with the Binding tier override only if an existing tier maps to gpt-5.4-mini.</step>
+    <step order="2">Author the Action with jps-action-create (input: lines with key, date, type, narrative, hours, amount, codes as billed; allowed codes with guidance; output per 041 DTO) and validate with jps-validate; write mirrors and the contract test.</step>
+    <step order="3">Add the Binding row and ConsumerTypes.All entry; seed in dev with Deploy-ActionMirrors.ps1 -Filter invoice-line-code (-DryRun then live) and Seed-PlaybookConsumers.ps1 (-DryRun, live, -DiffOnly).</step>
+    <step order="4">Implement CodeSetResolver (one batched read of sets and codes per invoice) and LineCodingService (chunking by settings, call, validate, merge firm codes, mismatch flag).</step>
+    <step order="5">Unit tests: each resolution step; firm codes spanning two sets → fall through; chunking boundaries (24, 25, 26 lines); out-of-set code refused; mismatch flagged with both codes kept; Null facade → typed failure the caller (049) can map to Failed. Seam test: CodeLinesAsync through the real ActionRunner with a fake IOpenAiClient returning one in-set and one out-of-set code — the out-of-set code is refused.</step>
+    <step order="6">Run a coding pass over a sample from the evaluation set in dev; record task-code top-1 accuracy against NFR-05 in notes (final measurement is 162's).</step>
+    <step order="7">Build, test, publish-size delta.</step>
+    <step order="8">Update TASK-INDEX.md: change this task's status cell to `✅ [done]`.</step>
+    <step order="9">Record deviations (closed-enum approach, tier mapping, accuracy sample) in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If D-51's "low reasoning effort" or a per-call enum can only be met by changing ActionRunner, IActionRunner, BoundInputs or LinearRunContext, STOP and escalate — that is a platform dispatch change (ADR-043) outside this task.</trigger>
+    <trigger>If no model tier in dev resolves to gpt-5.4-mini without changing the platform-wide FastModel, STOP and present options (change FastModel for all Fast-tier consumers, add a tier, or accept the current model for R1).</trigger>
+    <trigger>If the sample accuracy is far below NFR-05 (under 70 percent task-code top-1), STOP and report before tuning the prompt further.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No UTBMS coding exists (grep -i "utbms|billingcode" in src/server finds no service). LookupChoicesResolver gives all-rows enums only. IInvoiceAi.CodeLinesAsync (041) is the facade entry.</existing>
+    <extension>The Action replaces any C# prompt; CodeSetResolver extends nothing because no code-set logic exists; $choices cannot filter by set, so the allowed list travels as input and the guard is server-side.</extension>
+    <cost-of-doing-nothing>FR-22 and NFR-05 fail: lines have no UTBMS codes, code-based billing rules (072) cannot evaluate, and a hallucinated code could be stored.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">dotnet build src/server/api/Sprk.Bff.Api/ ; dotnet test</tool>
+    <tool name="pwsh">scripts/Deploy-ActionMirrors.ps1 ; scripts/dataverse/Seed-PlaybookConsumers.ps1</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">infra/dataverse/actions/invoice-line-code.action.json, infra/dataverse/outputschemas/invoice-line-code.schema.json, sprk_playbookconsumer-rows.json row</output>
+    <output type="code">Services/Finance/Coding/*, ConsumerTypes.cs, FinanceModule.cs</output>
+    <output type="test">InvoiceLineCodeActionContractTests.cs, LineCodingSeamTests.cs, Services/Finance/Coding unit tests</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Negative (FR-22): a model output code not in the line's resolved code set is refused server-side and never returned as the line's code; the seam test proves it through the production ActionRunner.</criterion>
+    <criterion testable="true">Code-set resolution follows the five-step order; each step is selected by a unit test and the line records its source.</criterion>
+    <criterion testable="true">Lines are sent in chunks of the settings chunk size; each chunk's input carries the allowed codes with description and guidance text and no retrieved examples.</criterion>
+    <criterion testable="true">Firm-supplied codes are retained alongside the AI code; a mismatch is flagged.</criterion>
+    <criterion testable="true">Observations carry type (BlockBilling or VagueDescription), confidence and quoted text.</criterion>
+    <criterion testable="true">The output-schema mirror exists in infra/dataverse/outputschemas/ and the contract test asserts it matches the 041 DTO; the Action passes jps-validate.</criterion>
+    <criterion testable="true">In dev the Action and Binding rows exist; Seed-PlaybookConsumers.ps1 -DiffOnly shows no difference; /healthz consumer-type reconciliation is Healthy.</criterion>
+    <criterion testable="true">Grep finds no deployment name, prompt text or JSON schema literal for coding in C#.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+    <criterion testable="true">Publish-size delta of Sprk.Bff.Api measured against a fresh master build and recorded in task notes; no new HIGH CVE.</criterion>
+    <criterion testable="true">dotnet build exits 0; dotnet test exits 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-22, NFR-05, D-05, D-46, D-51, D-64. Shared append points: FinanceModule.cs, sprk_playbookconsumer-rows.json. The brief names scripts/seed-data/Deploy-Actions.ps1; the current mirror seeding is scripts/Deploy-ActionMirrors.ps1 (Seed-JpsActions.ps1 is retired, scripts/README.md:171). 048 implements the AI code-set suggestion hook defined here.
+    Completion (2026-10-16): code complete and committed; live dev seeding of the Action row and Binding is HELD for the owner (no dev tier maps to gpt-5.4-mini, low reasoning effort needs a platform change, and the accuracy sample is 55.0 percent gpt-4.1-mini / 63.3 percent gpt-5.4-mini task top-1 against NFR-05 80 percent). Acceptance criteria not yet met because of the hold: dev Action and Binding rows exist, Seed-PlaybookConsumers.ps1 -DiffOnly clean, /healthz consumer-type reconciliation Healthy. Seed the Binding row and deploy the BFF carrying the ConsumerTypes.All entry together. Details, options and live commands: projects/ebilling-r1/notes/047-line-code-action.md.
+    rework: fix-round-2 task 047</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load every file in knowledge/files before Step 1. Follow task-execute for rigor, checkpoints and quality gates.</protocol>
+  </execution>
+</task>

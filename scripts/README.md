@@ -1784,6 +1784,196 @@ These scripts were used during initial SPE Container Type registration and are k
 
 ---
 
+## eBilling Scripts
+
+Owned by `ebilling-r1` (`projects/ebilling-r1/`). All are idempotent: a second run reports no change.
+
+The `Deploy-Ebilling*Schema.ps1` scripts share one helper module, `ebilling/EbillingSchema.psm1` (Dataverse calls, re-reads of eventually consistent metadata, create-or-skip with every "already exists" code, required-level helpers, publish locks); a hardening fix is made there once. Required levels: ApplicationRequired is enforced on forms only, SystemRequired on every write (decisions: `projects/ebilling-r1/notes/schema-script-hardening.md`).
+
+### `ebilling/Deploy-EbillingInvoiceLineSchema.ps1`
+
+Additive Dataverse metadata script that turns `sprk_billingevent` into the Invoice Line (FR-04 / FR-05): review, coding, adjustment and extraction columns, `sprk_linestatus`, the work-assignment lookup and the ADR-024 resolver fields. The UTBMS code lookups are deferred until `sprk_billingcode` exists (task 018) and are created on the next run after that (done in dev 2026-10-15). Supports `-WhatIf`; never deletes or renames. Columns: `docs/data-model/sprk_billingevent.md`.
+
+```powershell
+pwsh scripts/ebilling/Deploy-EbillingInvoiceLineSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -WhatIf
+pwsh scripts/ebilling/Deploy-EbillingInvoiceLineSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com
+```
+
+### `ebilling/Deploy-EbillingInvoiceHeaderSchema.ps1`
+
+Additive Dataverse metadata script that extends `sprk_invoice` for eBilling (FR-05 / FR-06 / FR-07, D-43): the `sprk_regardingworkassignment` lookup, the five totals (fees, expenses, line adjustments, invoice adjustments, approved), the `sprk_supersedesinvoice` self-lookup, the date-only billing period, and the lifecycle `statuscode` values (In Review, Approved, Sent to AP on statecode 0; Paid, Rejected, Returned to Firm, Cancelled on statecode 1). It counts invoices at statecode 1 first and stops with exit 2, before any write, if any exist (value 2 would be relabelled Cancelled). Supports `-WhatIf`; never deletes or renames by logical name; retries on customization / publish locks and tolerates eventually consistent metadata reads. It does not change `CoreAncestorResolver` (task 013). Columns and status table: `docs/data-model/sprk_invoice.md`.
+
+```powershell
+pwsh scripts/ebilling/Deploy-EbillingInvoiceHeaderSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -WhatIf
+pwsh scripts/ebilling/Deploy-EbillingInvoiceHeaderSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com
+```
+
+### `ebilling/Deploy-EbillingBillingCodeSchema.ps1`
+
+Additive Dataverse metadata script for the UTBMS reference tables (FR-08 / FR-22): creates `sprk_billingcodeset` and `sprk_billingcode`, the alternate key `sprk_billingcode_codeset_code_key` on (`sprk_codeset`, `sprk_code`) (waits for the index to be Active), and `sprk_defaultbillingcodeset` on `sprk_mattertype_ref` and `sprk_practicearea_ref`. Supports `-WhatIf`; never deletes or renames; retries on customization / publish locks and on a new table still propagating; ends with a metadata read-back of everything it owns. Run it before `Seed-EbillingBillingCodes.ps1`, then re-run `Deploy-EbillingInvoiceLineSchema.ps1` so the three code lookups on the Invoice Line are created. Columns and key: `docs/data-model/sprk_billingcode.md`.
+
+```powershell
+pwsh scripts/ebilling/Deploy-EbillingBillingCodeSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -WhatIf
+pwsh scripts/ebilling/Deploy-EbillingBillingCodeSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com
+```
+
+### `ebilling/Seed-EbillingBillingCodes.ps1`
+
+Seeds the eight UTBMS code sets (litigation, counseling, project, bankruptcy, IP patent prosecution, trademark, activity, expense; 161 codes) from `scripts/seed-data/ebilling/utbms-*.csv`, one CSV per set carrying set name, body, version, source URL and download date. Create-only: a set is matched on its name and a code on its alternate key; a missing row is created and an existing row is **never** updated (an admin's `sprk_guidancetext` edit always survives). A re-run with unchanged CSVs makes zero writes. Validates every CSV before any write (duplicate codes in a set stop it with exit 2). Supports `-WhatIf`. Not part of `scripts/seed-data/manifest.yaml`.
+
+```powershell
+pwsh scripts/ebilling/Seed-EbillingBillingCodes.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -WhatIf
+pwsh scripts/ebilling/Seed-EbillingBillingCodes.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com
+```
+
+### `ebilling/Deploy-EbillingTimekeeperRateCardSchema.ps1`
+
+Additive Dataverse metadata script (FR-08, `ebilling-r1` task 017) that extends the existing `sprk_timekeeper` stub into the firm roster (`sprk_firm`, date-only `sprk_effectivefrom` / `sprk_effectiveto`, `sprk_contact` shown as "Linked contact", `statuscode` 1 Approved + Pending + 2 Inactive) and creates the user-owned `sprk_ratecard` (firm, optional matter / project / work assignment scope, source document, effective dates, Draft / Published / Inactive) and `sprk_ratecardrate` (parental card lookup, optional timekeeper, approved and rack rate money, effective dates). It counts timekeeper rows at statuscode 1 first and stops with exit 2, before any write, if any exist. It revises and extends the shared global choice `sprk_timekeeperrole` to the 20 LEDES timekeeper classifications (label = LEDES name, ExternalValue = LEDES code; existing values kept; the non-LEDES options it first left in place were deleted by `Deploy-EbillingUserProfileRoleChoice.ps1`, D-84) and creates `sprk_classification` on `sprk_timekeeper` and `sprk_ratecardrate` bound to it. `-RemoveStubInvoiceLookup` deletes the obsolete `sprk_timekeeper.sprk_invoice` lookup (owner-approved; refuses if any row or component uses it). Supports `-WhatIf`; deletes nothing else and renames nothing by logical name; retries on customization / publish locks, MetadataCache lag after a table create, and eventually consistent metadata reads. Columns: `docs/data-model/sprk_ratecard.md`.
+
+```powershell
+pwsh scripts/ebilling/Deploy-EbillingTimekeeperRateCardSchema.ps1 -WhatIf
+pwsh scripts/ebilling/Deploy-EbillingTimekeeperRateCardSchema.ps1
+```
+
+### `ebilling/Deploy-EbillingUserProfileRoleChoice.ps1`
+
+Dataverse metadata script for `ebilling-r1` decision D-84 (follow-up to task 017). It gives `sprk_userprofile.sprk_primaryrole` its own global choice `sprk_userprofilerole` ("User Profile Role", the same 14 values and labels the column always had, so `userProfileService.ts` and `StatedProfileReader.cs` keep working), then deletes the 10 non-LEDES options from `sprk_timekeeperrole` so it holds exactly the 20 LEDES classifications. A column cannot be re-bound in place, so it saves the row values and the form / view placements to `projects/ebilling-r1/notes/d84-userprofile-primaryrole-predrop.json`, takes the column off the form (an empty cell with the same id keeps the position) and publishes, deletes the platform-generated `ais_FormFillFieldOptOut_sprk_userprofile_sprk_primaryrole` skill config that blocks the drop (0x8004f01f), drops the column, recreates `sprk_PrimaryRole` on the new choice, puts it back on the form and restores and verifies the values. A re-run after an interrupted run recreates and restores from the saved file. Exits 2 before the first write on a dependency other than the skill config and the forms / views it handles, on a chart / workflow / personal view that uses the column, and (for the option delete) on any row holding one of the 10 values or any column other than `sprk_contactorganization.sprk_role`, `sprk_billingevent.sprk_timekeeperrole`, `sprk_timekeeper.sprk_classification` and `sprk_ratecardrate.sprk_classification` bound to `sprk_timekeeperrole`. Supports `-WhatIf`; a second run reports no change and does not publish. Columns: `docs/data-model/sprk_ratecard.md`.
+
+```powershell
+pwsh scripts/ebilling/Deploy-EbillingUserProfileRoleChoice.ps1 -WhatIf
+pwsh scripts/ebilling/Deploy-EbillingUserProfileRoleChoice.ps1
+```
+
+### `ebilling/Deploy-EbillingPolicyStoreSchema.ps1`
+
+Additive Dataverse metadata script that extends the ontology-owned policy store for billing rules (FR-09, D-26, D-66): the global option set `sprk_policydomain` (Billing, Ontology, Docketing), `sprk_domain` and the `sprk_ruleset` lookup on `sprk_policy`, `sprk_clausereference` / `sprk_clauselocation` / `sprk_consequence` / `sprk_proposalstatus` on `sprk_policyversion`, and the new user-owned table `sprk_ruleset` (domain, source document, scope, firm, `sprk_visibletofirms` defaulting to No, effective dates, not-converted JSON, statuscode Draft / Published / Retired). Never relabels, deletes or renumbers an existing policy column or option and writes no policy row; stops with exit 2 if a planned name exists with another type, target or option list. Supports `-WhatIf`; retries on customization / publish locks, a new table still propagating and stale option reads; ends with a metadata read-back. Columns and values: `docs/data-model/sprk_ruleset.md`.
+
+```powershell
+pwsh scripts/ebilling/Deploy-EbillingPolicyStoreSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -WhatIf
+pwsh scripts/ebilling/Deploy-EbillingPolicyStoreSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com
+```
+
+### `ebilling/Deploy-EbillingRuleRejectionReasonSchema.ps1`
+
+Additive Dataverse metadata script (`ebilling-r1` task 077, D-113) that adds `sprk_rejectionreason` (multiline text, max 2,000, not required) to `sprk_policyversion`: the reason an admin gives when rejecting a drafted billing rule. Written only by the BFF reject route; admin-only, never read by a firm projection. Never deletes or renames; stops with exit 2 if the column exists with another type. Supports `-WhatIf` (reads metadata, writes nothing); a second run reports it as skipped and does not publish. Run it before the BFF build that reads the column is deployed. Column: `docs/data-model/sprk_ruleset.md`.
+
+```powershell
+pwsh scripts/ebilling/Deploy-EbillingRuleRejectionReasonSchema.ps1 -WhatIf
+pwsh scripts/ebilling/Deploy-EbillingRuleRejectionReasonSchema.ps1
+```
+
+### `ebilling/Deploy-EbillingSubmissionSchema.ps1`
+
+Additive Dataverse metadata script that creates `sprk_invoicesubmission` (FR-10, D-37), one row per submission attempt: the user-owned table, its tracking-number / channel / processing-status / findings / notice / PO / received-on / correlation columns, the submitter, firm, document, report-document, resulting-invoice and resubmission-of lookups, the ADR-024 `sprk_regardingmatter` / `sprk_regardingproject` / `sprk_regardingworkassignment` / `sprk_regardingrecordtype` lookups and four resolver text fields, and the firm-scoped alternate key `sprk_invoicesubmission_firm_trackingnumber` on (`sprk_vendororg`, `sprk_trackingnumber`) (waits for the index to be Active). Supports `-WhatIf`; never deletes or retypes; stops with exit 2 on a conflicting same-name item; publishes entity-scoped only when it changed something; retries on customization / publish locks and tolerates eventually consistent metadata reads. Columns: `docs/data-model/sprk_invoicesubmission.md`.
+
+```powershell
+pwsh scripts/ebilling/Deploy-EbillingSubmissionSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -WhatIf
+pwsh scripts/ebilling/Deploy-EbillingSubmissionSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com
+```
+
+### `ebilling/Deploy-EbillingApprovalSchema.ps1`
+
+Additive Dataverse metadata script (FR-11 / FR-05 / FR-35, `ebilling-r1` task 021) that creates the user-owned `sprk_invoiceapproval` (invoice x core record): `sprk_approvalstatus` (Pending default / Approved / Rejected / Returned), `sprk_approvedamount`, `sprk_eligibleresolvedon`, `sprk_decidedon`, the `sprk_invoice` lookup (raised to SystemRequired, because Dataverse does not enforce ApplicationRequired on API writes), the `sprk_decisionrecord` and `sprk_decidedby` (contact) lookups, the ADR-024 `sprk_regardingmatter` / `sprk_regardingproject` / `sprk_regardingworkassignment` / `sprk_regardingrecordtype` lookups with four resolver text fields, and the N:N `sprk_invoiceapproval_eligibleapprover_contact` (the queryable eligible-approver store). It first checks (read-only) that every approver assignment lookup on Matter, Project and Work Assignment targets `contact` and stops with exit 2 before any write if not. Supports `-WhatIf`; never deletes or retypes; stops with exit 2 on a conflicting same-name item; publishes entity-scoped only when it changed something; retries on customization / publish locks and tolerates eventually consistent metadata reads. Columns: `docs/data-model/sprk_invoiceapproval.md`.
+
+```powershell
+pwsh scripts/ebilling/Deploy-EbillingApprovalSchema.ps1 -WhatIf
+pwsh scripts/ebilling/Deploy-EbillingApprovalSchema.ps1
+```
+
+### `ebilling/Deploy-EbillingExportSchema.ps1`
+
+Additive Dataverse metadata script (FR-13 / FR-41 / D-21, `ebilling-r1` task 023) that creates the user-owned AP export batch table `sprk_billingexport` (`sprk_name` 100, `sprk_invoicecount`, `sprk_totalamount`, multi-select `sprk_formats` CSV / JSON / XML, `sprk_exportstatus` Generating / Completed / Failed, `sprk_mappingsnapshot` 1,048,576, `sprk_failurereason`), its `sprk_csvdocument` / `sprk_jsondocument` lookups to `sprk_document`, and the single-valued `sprk_invoice.sprk_billingexport` batch lookup that keeps an invoice in at most one batch. It first checks (read-only) that `sprk_invoice` has no other batch link and stops with exit 2 before any write if it does. Supports `-WhatIf`; never deletes or retypes; stops with exit 2 on a conflicting same-name item; publishes entity-scoped only when it changed something; retries on customization / publish locks and tolerates eventually consistent metadata reads (it also waits for the shortened primary-name length to settle before setting the required level, so the second update cannot undo the first). Columns: `docs/data-model/sprk_billingexport.md`.
+
+```powershell
+pwsh scripts/ebilling/Deploy-EbillingExportSchema.ps1 -WhatIf
+pwsh scripts/ebilling/Deploy-EbillingExportSchema.ps1
+```
+
+### `ebilling/Deploy-EbillingApproverRoleSchema.ps1`
+
+Additive Dataverse metadata script (FR-14 / D-33, `ebilling-r1` task 024) that checks the global choice `sprk_billingapproverrole` and its columns on Matter, Project and Work Assignment (labels compared ignoring case, values preserved), and creates the firm billing contact lookup `sprk_organization.sprk_billingcontact` (to `contact`, delete RemoveLink). By default it only reports the Matter column, which is still single-select in dev (DEF-011, #1941). `-ReplaceMatterApproverRole` drops that column and recreates it as a multi-select on the same global choice, and refuses (exit 2, no change) if any Matter row holds a value or anything other than its auto-generated skill config depends on it; run it only with the owner's OK. Supports `-WhatIf`; publishes entity-scoped only when it changed something.
+
+```powershell
+pwsh scripts/ebilling/Deploy-EbillingApproverRoleSchema.ps1 -WhatIf
+pwsh scripts/ebilling/Deploy-EbillingApproverRoleSchema.ps1
+```
+
+### `ebilling/Deploy-EbillingExternalIdentifierSchema.ps1`
+
+Additive Dataverse metadata script (FR-12 / FR-05 / D-12 / D-68, `ebilling-r1` task 022) that creates the user-owned table `sprk_externalidentifier` (typed identifiers such as the firm invoice number, firm client-matter number, law-department matter number and PO as quoted): the eight-value local choice `sprk_identifiertype` (system-required), `sprk_identifiervalue`, `sprk_normalizedvalue` (system-required matching value), `sprk_issuingsystem`, the `sprk_issuingorganization` and `sprk_regardinginvoice` lookups, the ADR-024 `sprk_regarding*` lookups and five resolver fields, and the owner-decided alternate key (firm, type, normalized value, core record id). It waits for the key index to be Active and stops with exit 2, choosing no other key, if Dataverse refuses this one. Supports `-WhatIf`; never deletes or retypes; stops with exit 2 on a conflicting same-name item; publishes entity-scoped only when it changed something; retries on customization / publish locks and tolerates eventually consistent metadata reads. Columns and the key tests: `docs/data-model/sprk_externalidentifier.md`.
+
+```powershell
+pwsh scripts/ebilling/Deploy-EbillingExternalIdentifierSchema.ps1 -WhatIf
+pwsh scripts/ebilling/Deploy-EbillingExternalIdentifierSchema.ps1
+```
+
+### `ebilling/Deploy-EbillingCorrectionSchema.ps1`
+
+Additive Dataverse metadata script (D-64 / FR-31 / D-47, `ebilling-r1` task 027) that creates the user-owned child table `sprk_invoicecorrection`: one structured record per reviewer confirmation or correction (field name, AI value, final value, AI confidence 0-1, the four-value local choice `sprk_outcometype` Corrected / Confirmed individually / Accepted in bulk / Unreviewed, stored `sprk_islabel`, separate `sprk_sourcecode` / `sprk_sourceversion`, reviewer and role, reviewed on), the SystemRequired `sprk_invoice` parent lookup (cascade delete), optional `sprk_invoiceline`, `sprk_reviewedby` -> systemuser, and the ADR-024 `sprk_regarding*` lookups with resolver fields. Queryable per Action version. A second run reports no change. Supports `-WhatIf`; exit 2 on a conflicting existing item.
+
+```powershell
+pwsh scripts/ebilling/Deploy-EbillingCorrectionSchema.ps1 -WhatIf
+pwsh scripts/ebilling/Deploy-EbillingCorrectionSchema.ps1
+```
+
+### `ebilling/Deploy-EbillingSettingsSchema.ps1`
+
+Additive Dataverse metadata script (FR-48 / D-59 / D-47 / D-54 / D-56 / D-69, `ebilling-r1` task 025) that creates the audited organization-owned singleton table `sprk_ebillingsetting` and seeds its one default row: auditing on the table and every custom column; the required one-option choice `sprk_singleton` plus the alternate key `sprk_ebillingsetting_singleton` (a second row is refused by the platform); range-checked decimal (0 to 1) and whole-number columns for the rejection threshold, the confidence weights and caps, the related-work window and the coding chunk size; three multi-selects on the global choice `sprk_billingapproverrole`; the AP export mapping; the firm-notice AI toggle; and the `sprk_defaultcodeset` lookup (printed SKIPPED when `sprk_billingcodeset` does not exist; re-run after task 018). The seed row is written only when the table is empty, so an admin edit is never overwritten; the weights and caps are provisional (D-69). Runs only against the dev environment, stops with exit 2 if organization auditing is off, supports `-WhatIf`, publishes entity-scoped only when it changed something, and ends with a metadata read-back. Columns and values: `docs/data-model/sprk_ebillingsetting.md`.
+
+```powershell
+pwsh scripts/ebilling/Deploy-EbillingSettingsSchema.ps1 -WhatIf
+pwsh scripts/ebilling/Deploy-EbillingSettingsSchema.ps1
+```
+
+### `ebilling/Remove-EbillingInvoiceLineItem.ps1`
+
+Retires the superseded invoice-line-item table (`ebilling-r1` task 011, D-18: `sprk_billingevent` is the Invoice Line). **Read-only by default**: prints the usage and dependency inventory (rows, forms, views, relationships, app modules, AI skill configs, `RetrieveDependenciesForDelete`) and a READY / BLOCKED verdict. **`-Delete -OwnerApproval '<date and who>'` is destructive** and needs the owner's explicit OK (project `CLAUDE.md` section 5). It refuses with exit 2, changing nothing, if the table holds any row (`-DeleteRows` lifts that only for the four known test rows, after a JSON backup) or any dependency is not an expected one. It then removes the form subgrids and navigation entries, the `sprk_timekeeper` lookup, the AI skill configs and the app module registrations, re-checks that no dependency is left, and deletes the table. Verifies that the entity reads 404 and the `sprk_billingevent`, `sprk_invoice` and `sprk_timekeeper` forms load.
+
+```powershell
+pwsh scripts/ebilling/Remove-EbillingInvoiceLineItem.ps1
+pwsh scripts/ebilling/Remove-EbillingInvoiceLineItem.ps1 -Delete -OwnerApproval '<date and who>' -WhatIf
+```
+
+### `ebilling/Deploy-EbillingFormsViews.ps1`
+
+Builds the WP1 forms, views and navigation in dev (`ebilling-r1` task 029; also the procedure later serial tasks reuse: add the new column names to the `$Spec` table and re-run). Rewrites the stub main form and the Active view of the 11 new WP1 tables (read-only controls, rates / codes / eligible-approver subgrids), adds a `section_ebilling` to the existing `sprk_timekeeper`, `sprk_invoice` and `sprk_billingevent` main forms (the five invoice totals and `sprk_billingevent.sprk_amount` are disabled), creates the "Invoices to review" view on `sprk_invoice`, adds the eBilling sitemap entries, then publishes only the touched entities, the two sitemaps and the two app modules (never a tenant-wide publish). Idempotent: a second run changes nothing and publishes nothing. `-WhatIf` reads everything and writes nothing. Refuses to publish when another pending form / view of a touched entity would go out too, unless `-AllowPendingCollateral`. Dev only in R1. It cannot add tables to an app (the API silently ignores it); it prints that manual app-designer step.
+
+```powershell
+pwsh scripts/ebilling/Deploy-EbillingFormsViews.ps1 -WhatIf
+pwsh scripts/ebilling/Deploy-EbillingFormsViews.ps1
+```
+
+### `ebilling/Deploy-EbillingRolePrivileges.ps1`
+
+Grants table privileges on the eBilling tables for `ebilling-r1` decision D-90 (follow-up to task 029 finding B: non-admins got 0x80040220 on `sprk_invoiceapproval`). For `Spaarke Core User`, and for `Spaarke Basic User` while it holds `sprk_invoice` privileges, it reads the role's own privileges on `sprk_invoice` and mirrors them: on the working tables (`sprk_invoiceapproval`, `sprk_invoicesubmission`, `sprk_invoicecorrection`, `sprk_externalidentifier`, `sprk_billingexport`) the same privileges at the same depth; on the configuration tables (`sprk_ebillingsetting`, `sprk_ratecard`, `sprk_ratecardrate`, `sprk_billingcodeset`, `sprk_billingcode`, `sprk_ruleset`, `sprk_timekeeper`) Read at the invoice Read depth (Global on the organization-owned tables, which offer nothing else) plus AppendTo only where a working table's lookup targets the table (none today). It only ever adds (`AddPrivilegesRole` on the root-business-unit role): a privilege already held at or above the target is skipped, nothing is removed or lowered, and the script stops with exit 2 if a read-back shows a lowered privilege. It reads the added privileges back and checks the per-business-unit role copies picked them up. Supports `-WhatIf` (prints each privilege it would add); a second run reports no change. No publish is involved; the role source under `src/dataverse/solutions/SpaarkeMaster/Roles` is updated from an export (`projects/ebilling-r1/notes/029-wp1-apply-and-export.md`, "Role privileges (D-90)").
+
+```powershell
+pwsh scripts/ebilling/Deploy-EbillingRolePrivileges.ps1 -WhatIf
+pwsh scripts/ebilling/Deploy-EbillingRolePrivileges.ps1
+```
+
+### `ebilling/Deploy-EbillingProcedureSchema.ps1`
+
+Creates the Procedure schema for `ebilling-r1` task 080 (EB-D-148, `projects/ebilling-r1/notes/procedure-and-file-model.md` sections 3, 5.2, 6.3, 7.2, 13; replaces the never-run `Deploy-EbillingRuleSetScopeSchema.ps1`). Five global choices (`sprk_proceduretype`, `sprk_procedureappliesto`, `sprk_procedurestatus`, `sprk_procedureversionstatus`, `sprk_publishstate`); the user-owned, audited tables `sprk_procedure`, `sprk_procedureversion` (delete-only cascade to its Procedure, not parental; alternate key on Procedure + version number, both SystemRequired; DateOnly effective dates, `sprk_notconverted`) and `sprk_procedureassignment` (one typed lookup per core table (RemoveLink, nothing cascades: the core-record delete planner of task 117 deletes the rows), mode Follow latest / Pinned / Excluded); on `sprk_ruleset` the record lookups (RemoveLink), the `Record` 100000002 and `Firm record` 100000003 options of `sprk_scope`, `sprk_procedure` and the unsecured `sprk_createdbyperson`; on `sprk_policyversion` `sprk_procedureversion`, `sprk_publishstate` and `sprk_basedonversion`; on `sprk_ratecard` `sprk_procedureversion`; and `sprk_billingfirm` / `sprk_billingresponsible` on every core table. **The core-table list is not typed in the script**: it is read at run time from the `FilingCores` initializer in `InvoiceFamilyCoreRecordGuard.cs` (override with `-GuardSourcePath`), and the script stops with exit 2 and writes nothing when it cannot parse a non-empty list. Restrict only on lookups to a Procedure, a Procedure Version or a firm, never to a core record; an existing lookup with another delete behaviour is not changed (exit 2). Exactly one lookup per table is Delete Cascade (Dataverse counts that as parental and allows one per table): `sprk_procedureassignment.sprk_excludedpolicy` and `sprk_procedureversion.sprk_procedure`, each delete-only (assign, share, unshare, reparent, merge, rollup view NoCascade), read back member by member; an existing core lookup that a first run left Cascade is repaired in place (PUT, read back) before `sprk_excludedpolicy` is created; `sprk_createdbyperson` is also added (unsecured) on `sprk_policy` and `sprk_policyversion`; the verify fails if any role held by a `sprk_isexternal` user (direct or through a team) has a privilege on the three new tables. Field-secures 18 BFF-only columns (reader: Read for every user; writer: the BFF application users only), reusing the existing "Spaarke BFF-Managed Field Readers / Writers" pair without changing any profile's members (`-CreateProfiles` makes an ebilling-owned pair instead). Idempotent check-then-create, entity-scoped publish, SpaarkeMaster header, dev only. Never creates a banner column, `sprk_isexceptions`, a business-unit column or N:N, `sprk_ratecard.sprk_scope` or `sprk_storedfile`. **Needs ontology-r1's full schema-review PASS, the before-notices and the owner's OK before a real run.** `-WhatIf` reads everything (reads only), writes nothing, prints the lookup plan with relationship names and delete behaviours, and lists every item it would create, change or skip. The `FilingCores` parse and the plan are tested by `tests/scripts/Deploy-EbillingProcedureSchema.Tests.ps1`.
+
+```powershell
+pwsh scripts/ebilling/Deploy-EbillingProcedureSchema.ps1 -WhatIf
+pwsh scripts/ebilling/Deploy-EbillingProcedureSchema.ps1
+```
+
+### `ebilling/Deploy-EbillingStoredFileSchema.ps1`
+
+Creates the Stored File schema for `ebilling-r1` task 088 (EB-D-148, `projects/ebilling-r1/notes/procedure-and-file-model.md` sections 4.1, 4.2, 5.2, 9.1, 10). F1: the global choice `sprk_storedfilepurpose` (Procedure source, Invoice PDF, Invoice supporting file, Export file; 100000000-100000003). F2: the user-owned, audited table `sprk_storedfile` (primary `sprk_name` = file name, 400) with the parent lookups `sprk_procedureversion`, `sprk_invoice`, `sprk_billingexport` (RemoveLink: the orphan reconcile of task 090 handles a parent deleted outside the BFF), `sprk_purpose`, `sprk_firmvisible` (default No), the local choice `sprk_filestatus` (Not yet servable, Servable, Removed), the source lookups `sprk_sourcedocument` / `sprk_sourcecommunication` (Restrict), `sprk_sourceattachmentidentity` (1000), `sprk_sourceversion` (text 20) and `sprk_sizebytes` (whole number 0..2147483647; BigInt cannot be field-secured, run 1 2026-10-22), `sprk_sourcesha256` / `sprk_sha256` (64), `sprk_contenttype` (255), `sprk_blobpath` (1024) and the unsecured `sprk_createdbyperson` (task 086 secures it); no lookup cascades assign, share, unshare or reparent. F4: the submission marker `sprk_document.sprk_restrictedbysubmission` (two options, default No; written only by task 095's submission path). F5: `sprk_invoice` status reason `Superseded` = 659490005 at statecode 1 (set only by task 097); the pre-flight stops (exit 2, nothing written) when that value or label exists with another meaning or the seven task-012 values differ. F3: field security on every F2 column except `sprk_name` and `sprk_createdbyperson`, and on F4, reusing the "Spaarke BFF-Managed Field Readers / Writers" pair (permission rows only, never a member); `sprk_blobpath` gets the writer row only (server-only). Every column is checked securable before any is secured. The pre-flight stops (exit 2) when `sprk_procedureversion` (task 080) does not exist. Idempotent check-then-create, entity-scoped publish, SpaarkeMaster header, dev only; creates no form, view or role privilege and writes no row. **Needs ontology-r1's full schema-review PASS, the before-notices to ontology-r1 and uac-r2, the owner's OK and task 080's real run before a real run.** `-WhatIf` reads only. The plan and the F5 decision are tested by `tests/scripts/Deploy-EbillingStoredFileSchema.Tests.ps1`.
+
+```powershell
+pwsh scripts/ebilling/Deploy-EbillingStoredFileSchema.ps1 -WhatIf
+pwsh scripts/ebilling/Deploy-EbillingStoredFileSchema.ps1
+```
+
+### `content-understanding/Deploy-Analyzers.ps1`
+
+Deploys Azure AI Content Understanding analyzers from `infrastructure/content-understanding/*.json` (GA API 2025-11-01, Entra token, no keys). Creates a missing analyzer, does nothing when the deployed one matches, and refuses to overwrite a differing one unless `-Replace` is passed. Analyzer ids allow only letters, digits, `.` and `_` (`sprk_invoice_v1`). Supports `-WhatIf`.
+
 ## Script Maintenance
 
 ### Adding New Scripts
@@ -1954,4 +2144,16 @@ Most scripts require:
 - **2026-10-01:** Added Migrate-SecureRecordsToNamedOwnerTeam.ps1. It moves secure roots off the Secure Record business unit's default team onto its named, memberless owner team, with a dry run by default, read-back, share-count comparison and a `-Verify` gate (`unified-access-control-r2` task 144, #967).
 - **2026-10-02:** Added Set-RecordNumberingSchema.ps1 — interim `MAT-`/`PRJ-` platform autonumber on the matter/project primary-name columns, data-derived seed, blank-row backfill, alternate keys, `-Verify` (`spaarkeai-word-add-in-r1` task 076, write-path invariant I-11).
 - **2026-09-30:** Added Backfill-RecordOwnership.ps1 — re-owns existing app-owned `sprk_document`/`sprk_todo` rows to a business unit default owner team, record-first, with a write-ahead reversal manifest (`spaarkeai-word-add-in-r1` task 080, write-path invariant I-6).
+- **2026-10-15:** Added the eBilling Scripts section: Deploy-EbillingInvoiceLineSchema.ps1 (task 010) and content-understanding/Deploy-Analyzers.ps1 (task 004), `ebilling-r1`.
+- **2026-10-15:** Added ebilling/Deploy-EbillingInvoiceHeaderSchema.ps1 (sprk_invoice header columns and lifecycle statuscode values, `ebilling-r1` task 012).
+- **2026-10-15:** Added ebilling/Deploy-EbillingBillingCodeSchema.ps1 and ebilling/Seed-EbillingBillingCodes.ps1 (UTBMS code set tables, alternate key, default-code-set lookups, eight seeded sets; `ebilling-r1` task 018).
+- **2026-10-15:** Added ebilling/Deploy-EbillingPolicyStoreSchema.ps1 (policy store domain / rule set / clause / consequence columns, `sprk_policydomain`, `sprk_ruleset` table; `ebilling-r1` task 019).
+- **2026-10-15:** Added ebilling/Deploy-EbillingTimekeeperRateCardSchema.ps1 (sprk_timekeeper roster columns and statuscode, sprk_ratecard, sprk_ratecardrate; classification held pending an owner decision; `ebilling-r1` task 017).
+- **2026-10-15:** Added ebilling/Deploy-EbillingSubmissionSchema.ps1 (sprk_invoicesubmission table, ADR-024 regarding lookups, firm-scoped tracking-number alternate key; `ebilling-r1` task 020).
+- **2026-10-15:** Added ebilling/Deploy-EbillingApprovalSchema.ps1 (sprk_invoiceapproval table, ADR-024 regarding lookups, SystemRequired invoice lookup, eligible-approver N:N to contact; `ebilling-r1` task 021).
+- **2026-10-15:** Added ebilling/Deploy-EbillingExportSchema.ps1 (sprk_billingexport AP batch table, CSV / JSON document lookups, single-valued sprk_invoice.sprk_billingexport batch lookup; `ebilling-r1` task 023).
+- **2026-10-15:** Added ebilling/Deploy-EbillingExternalIdentifierSchema.ps1 (sprk_externalidentifier table, ADR-024 regarding lookups, D-68 alternate key on firm, type, normalized value and core record id; `ebilling-r1` task 022).
+- **2026-10-15:** Added ebilling/Deploy-EbillingCorrectionSchema.ps1 (sprk_invoicecorrection structured correction record table, four-value outcome type, SystemRequired invoice lookup, ADR-024 regarding lookups; `ebilling-r1` task 027).
+- **2026-10-15:** Added ebilling/Deploy-EbillingSettingsSchema.ps1 (sprk_ebillingsetting audited singleton table: alternate-key singleton, range-checked threshold / weights / caps / window / chunk size, approver-role multi-selects, AP mapping, default code set lookup, seeded default row; `ebilling-r1` task 025).
+- **2026-10-16:** Added ebilling/Deploy-EbillingFormsViews.ps1 (WP1 main forms, Active views, "Invoices to review" view and eBilling sitemap entries, entity-scoped publish; `ebilling-r1` task 029).
 - **2026-10-21:** Added Set-FieldMappingRuleSyncMode.ps1 — one-time, idempotent migration of existing Copy field-mapping rules to sync mode Manual Refresh (`sprk_syncmode = 1`), dry-run by default with `-Apply`, `-Verify` and `-SelfTest` (`field-mapping-server-write-path-r1` task 005, FR-05d).

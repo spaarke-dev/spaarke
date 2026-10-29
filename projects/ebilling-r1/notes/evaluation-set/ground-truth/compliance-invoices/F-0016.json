@@ -1,0 +1,32 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0016",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0016","generator_id":"gen_eval_set.py@1 F-0016","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0016.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-04"},
+ "header":{"firm":"Holloway & Vance LLP","firm_invoice_number":"INV-2026-31001","invoice_date":"2026-03-28","billing_period_start":"2025-12-01","billing_period_end":"2025-12-31","firm_matter_reference":"11534-0037","po_number":"PO-4543103","fees_total":5572.5,"expenses_total":4478.96,"adjustments_total":0.0,"total_due":10051.46,"currency":"USD"},
+ "timekeepers":[{"name":"Beatrix Thornbury","title":"Senior Associate","rate":415.0,"billed_as":"Thornbury, B."},{"name":"Gideon Delacroix","title":"Paralegal","rate":160.0,"billed_as":"Delacroix, G."},{"name":"Helena Oyelaran","title":"Partner","rate":710.0,"billed_as":"Oyelaran, H."},{"name":"Imani Delacroix","title":"Associate","rate":390.0,"billed_as":"Delacroix, I."},{"name":"Katya Abernathy","title":"Associate","rate":355.0,"billed_as":"Abernathy, K."},{"name":"Naomi Hargrove","title":"Associate","rate":300.0,"billed_as":"Hargrove, N."},{"name":"Yusuf Fairweather","title":"Partner","rate":540.0,"billed_as":"Fairweather, Y."}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-12-29","timekeeper":"Thornbury, B.","timekeeper_name":"Beatrix Thornbury","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.75,"rate":415.0,"amount":726.25,"narrative":"Draft motion for preliminary injunction in the employment claim","codes":["L220","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-12-05","timekeeper":"Delacroix, G.","timekeeper_name":"Gideon Delacroix","timekeeper_title":"Paralegal","title":"Para","hours":1.0,"rate":160.0,"amount":160.0,"narrative":"Prepare monthly status report to client regarding the distribution agreement","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-12-29","timekeeper":"Delacroix, G.","timekeeper_name":"Gideon Delacroix","timekeeper_title":"Paralegal","title":"Para","hours":1.75,"rate":160.0,"amount":280.0,"narrative":"Conference with client regarding settlement authority for the employment claim","codes":["L160","A106"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-12-01","timekeeper":"Oyelaran, H.","timekeeper_name":"Helena Oyelaran","timekeeper_title":"Partner","title":"Ptr","hours":0.5,"rate":710.0,"amount":355.0,"narrative":"Telephone conference with opposing counsel regarding settlement terms","codes":["L160","A107"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-04-09","timekeeper":"Delacroix, I.","timekeeper_name":"Imani Delacroix","timekeeper_title":"Associate","title":"Assoc","hours":2.0,"rate":390.0,"amount":780.0,"narrative":"Plan strategy for upcoming phase of the distribution agreement with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-12-23","timekeeper":"Abernathy, K.","timekeeper_name":"Katya Abernathy","timekeeper_title":"Associate","title":"Assoc","hours":2.75,"rate":355.0,"amount":976.25,"narrative":"Research pleading standards applicable to the distribution agreement","codes":["L210","A102"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-12-04","timekeeper":"Hargrove, N.","timekeeper_name":"Naomi Hargrove","timekeeper_title":"Associate","title":"Assoc","hours":1.75,"rate":300.0,"amount":525.0,"narrative":"Review and revise motion to dismiss based on client comments","codes":["L210","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-12-25","timekeeper":"Hargrove, N.","timekeeper_name":"Naomi Hargrove","timekeeper_title":"Associate","title":"Assoc","hours":2.75,"rate":300.0,"amount":825.0,"narrative":"Telephone conference with client representative regarding factual background of the regulatory inquiry","codes":["L110","A106"],"page":2,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-12-03","timekeeper":"Fairweather, Y.","timekeeper_name":"Yusuf Fairweather","timekeeper_title":"Partner","title":"Ptr","hours":1.75,"rate":540.0,"amount":945.0,"narrative":"Draft motion for preliminary injunction in the customs audit","codes":["L220","A103"],"page":2,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-12-04","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":500.9,"amount":500.9,"narrative":"Airfare to Atlanta for deposition","codes":["E110"],"page":2,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-12-11","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":13.66,"amount":13.66,"narrative":"Long distance conference call charges","codes":["E105"],"page":2,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-12-17","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":3964.4,"amount":3964.4,"narrative":"Consulting expert fees","codes":["E119"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["748 Elm Court","Portland","Tax ID 51-6335787"],"template":"T24","pages":2},
+ "rule_set_id":"RS-04",
+ "context":{"matter_open":"2024-10-04","matter_close":"2026-03-31","matter_budget":65205.0,"approved_timekeepers":["Helena Oyelaran","Naomi Hargrove","Beatrix Thornbury","Gideon Delacroix","Katya Abernathy","Imani Delacroix"],"invoice_received_date":"2026-03-29"},
+ "expected_findings":[
+  {"rule_id":"RS-04-R01","rule_type":"ApprovedTimekeeper","scope":"line","line_refs":[9],"consequence":"Reject"},
+  {"rule_id":"RS-04-R04","rule_type":"CoreRecordWindow","scope":"line","line_refs":[5],"consequence":"Flag"},
+  {"rule_id":"RS-04-R05","rule_type":"InvoiceAge","scope":"invoice","line_refs":[],"consequence":"Flag"}
+ ],
+ "seeded_violations":3
+}

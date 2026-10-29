@@ -4,7 +4,7 @@ namespace Sprk.Bff.Api.Services.Finance;
 
 /// <summary>
 /// AI-powered invoice analysis service using OpenAI structured output.
-/// Provides attachment classification (Playbook A) and invoice fact extraction (Playbook B).
+/// Provides invoice fact extraction (Playbook B). Attachment classification is <c>IInvoiceAi.ClassifyAsync</c> (task 042).
 /// </summary>
 /// <remarks>
 /// Per ADR-013: Extends BFF API with AI analysis capability.
@@ -13,15 +13,6 @@ namespace Sprk.Bff.Api.Services.Finance;
 /// </remarks>
 public interface IInvoiceAnalysisService
 {
-    /// <summary>
-    /// Classify an attachment as invoice candidate or non-invoice using AI (Playbook A).
-    /// Uses gpt-4o-mini for speed and cost efficiency.
-    /// </summary>
-    /// <param name="documentText">The extracted text content of the document.</param>
-    /// <param name="ct">Cancellation token.</param>
-    /// <returns>Classification result with confidence score and optional invoice hints.</returns>
-    Task<ClassificationResult> ClassifyAttachmentAsync(string documentText, CancellationToken ct = default);
-
     /// <summary>
     /// Extract structured invoice facts from document text using AI (Playbook B).
     /// Uses gpt-4o for higher accuracy on complex extraction tasks.

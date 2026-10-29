@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="099" project="ebilling-r1">
+  <metadata>
+    <title>Finance step 0: refuse flagged-external callers on every /api/finance route (5.3; owner 2026-10-21)</title>
+    <phase>3 Rules (WP3) — Procedure model (EB-D-148), wave W3-A</phase>
+    <gate>startable once 100 and 105 are merged into the branch (this task adds the route-group flag to their endpoint files); uac-r2 reviews the diff before merge (auth)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags include auth: a new refusal inside the shared Finance authorization filter, on routes that expose invoices, submissions, overrides and Procedure content.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive (auth) change to a filter every Finance route runs, with a fail-closed contract and uac-r2 review conditions (C4, C5, v5.3 re-check).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>bff, api, auth, security, testing</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Implement step 0 of notes/procedure-and-file-model.md section 5.3 inside FinanceAuthorizationFilter: when the route's group carries one internal-callers-only flag, resolve the caller's systemuser from the token's oid and refuse (no row, sprk_isexternal true, or a fault reading the flag) before any record read, answering with that route's own Deny(). Switch the flag on for exactly the routes section 5.3 lists, and add a guard so a new /api/finance invoice or submission route cannot ship without it.</prompt>
+
+  <role>SPAARKE platform developer. Expert in ASP.NET Core endpoint filters, the Finance authorization filter (ADR-008) and fail-closed authorization (ADR-003, ADR-028).</role>
+
+  <goal>Every in-scope route refuses a flagged-external caller, a caller with no systemuser row and a caller whose flag cannot be read, before its first Dataverse record read, with 403 on Forbidden routes and the byte-identical uniform 404 on UniformNotFound routes; internal callers (flag false or blank) are unaffected; out-of-scope routes are unchanged; the step-0 verdict is available to the request for task 113.</goal>
+
+  <context>
+    <background>Model section 5.3 (verbatim scope), section 12 row "/api/finance … (section 5.3)", section 13 row "New (Finance step 0)". Not a change to master behaviour: none of these routes is on master; it lands on this branch with #1911. Filter today: FinanceAuthorizationFilter.InvokeAsync (Api/Filters/FinanceAuthorizationFilter.cs:296) resolves the oid (CallerResolution.ResolveObjectId), then runs record checks; Deny (:426) renders FinanceDenial.UniformNotFound as UniformRecordNotFound (:293) and Forbidden as 403. The filter is built per route by AddFinanceAuthorizationFilter (:49, :70). Routes are declared in several MapGroup calls, one per endpoints file. The step-0 semantics already exist as one method: ExternalCallerCommunicationGuard.IsExternalCallerAsync (Services/Ai/Handlers/Dataverse/ExternalCallerCommunicationGuard.cs:150), over ICallerSystemUserResolver (Services/Ai/Context/CallerSystemUserResolver.cs) and ISystemUserIdentityResolver.IsExternalAsync (Services/Identity/SystemUserIdentityResolver.cs:270: blank is internal; a missing row is external; a failed read throws).</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Filters/FinanceAuthorizationFilter.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Finance/InvoiceLineReviewEndpoints.cs, InvoiceContextEndpoints.cs, InvoiceRelatedWorkEndpoints.cs, InvoiceSubmissionEndpoints.cs, SubmissionOverrideEndpoints.cs, RuleSetEndpoints.cs (group flag)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Finance/FinanceEndpoints.cs (per-route flag on POST /invoice-review/confirm only; the group also holds out-of-scope routes)</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/Dataverse/ExternalCallerCommunicationGuard.cs (IsExternalCallerAsync, the semantics to reuse)</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Api/Filters/FinanceStepZeroTests.cs</file>
+      <file role="new">tests/Spaarke.ArchTests/FinanceStepZeroCoverageGuardTests.cs</file>
+      <file role="modify">tests/integration/contract/Api/Finance/FinanceEndpointsAuthorizationContractTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="model 5.3 (verbatim)">Step 0 = (1) resolve the caller's systemuser from the token's oid; no row → refuse. (2) sprk_isexternal true → refuse; false or blank → internal. (3) A fault reading the flag → refuse. Reuse ExternalCallerCommunicationGuard.IsExternalCallerAsync or move it to a shared place unchanged in behaviour; do not write a second resolution.</constraint>
+    <constraint source="model 5.3">The check runs inside FinanceAuthorizationFilter, after the oid 401 and BEFORE the target declaration's first record read and before any check, and only when the endpoint carries the flag. The flag is set once per route group (MapGroup) as endpoint metadata the filter reads; FinanceEndpoints.cs is the one exception (per route on /invoice-review/confirm), because its group holds the out-of-scope routes.</constraint>
+    <constraint source="model 5.3">A refusal answers with the route's own Deny(): 403 ProblemDetails on Forbidden routes (/review, /context and the rest); UniformRecordNotFound on UniformNotFound routes (GET /invoice-submissions/{id}, GET /submissions/{submissionId}/blocked), byte-identical for an existing and a non-existent id. The deny log carries the reason, never the flag value or the systemuser id beyond the existing log fields.</constraint>
+    <constraint source="model 5.3 scope (owner round 116 item 2)">Flag ON for exactly: GET /api/finance/invoices/{invoiceId}/review (InvoiceLineReviewEndpoints.cs:39); GET /invoices/{invoiceId}/context (InvoiceContextEndpoints.cs:28); GET /invoice-submissions/{id} (InvoiceSubmissionEndpoints.cs:65; the model cites :74); GET /submissions/{submissionId}/blocked (SubmissionOverrideEndpoints.cs:40); POST /lines/{lineId}/decision, /lines/decisions, /lines/accept-clean (InvoiceLineReviewEndpoints.cs); GET /lines/{lineId}/related-work (InvoiceRelatedWorkEndpoints.cs:30); POST /submissions/{id}/override and /return; the internal submit routes (POST /matters|projects|workassignments/{id}/invoice-submissions; POST /invoice-review/confirm); every /api/finance/rulesets route. Flag OFF (unchanged): /invoices/search, /matters/{matterId}/summary.</constraint>
+    <constraint source="model 5.3">Not in InvoiceSubmissionService: the external submit route shares it. No change to /api/v1/external/* routes.</constraint>
+    <constraint source="project">Expose the verdict for the request (one HttpContext.Items key, an Internal value set only when step 0 passed) so 113 can compute the banner only for a caller step 0 classed as internal. Nothing else reads it in this task.</constraint>
+    <constraint source="ADR-008, ADR-019, .claude/constraints/bff-extensions.md">Endpoint-filter change only; ProblemDetails unchanged in shape; no new service registration unless the reused guard needs one; no package; publish-size delta recorded.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/notes/procedure-and-file-model.md (sections 5.3, 12, 13)</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Step-0 semantics" location="src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/Dataverse/ExternalCallerCommunicationGuard.cs (IsExternalCallerAsync)">Lookup failure throws; unresolved is external; only a stored true is external.</pattern>
+      <pattern name="Uniform 404 test" location="tests/integration/contract/Api/Finance/FinanceEndpointsAuthorizationContractTests.cs">Compare the absent-id and refused-id bodies.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Merge 100 and 105 if not yet in the branch; re-read the seven endpoint files and the filter.</step>
+    <step order="1">Add the flag (endpoint metadata) and the step-0 branch in FinanceAuthorizationFilter.InvokeAsync, reusing IsExternalCallerAsync; set the verdict item.</step>
+    <step order="2">Put the flag on the groups and the one FinanceEndpoints route listed above.</step>
+    <step order="3">Unit tests per in-scope route (below); contract test for the uniform 404 bodies.</step>
+    <step order="4">Coverage guard: enumerate the /api/finance endpoints from the built route table (or the endpoint-file scanner RouteAuthorizationGuardTests already uses) and fail when a route outside an explicit allowlist lacks the flag. Allowlist with a reason per entry: /invoices/search, /matters/{matterId}/summary, /invoice-review/reject, /matters|projects/{id}/recalculate, /ratecards/*, /code-set-mappings/*.</step>
+    <step order="5">Seeding proof: make the step-0 branch skip; the must-fire tests must fail; restore and re-run. Record in notes.</step>
+    <step order="6">dotnet build, dotnet test (unit, ArchTests, contract); publish-size delta; /conflict-check.</step>
+    <step order="7">uac-r2 review of the diff; record it.</step>
+    <step order="8">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+    <step order="9">Record deviations in projects/ebilling-r1/notes/099-finance-step-0.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the step-0 check cannot run before the target declaration's record reads without restructuring the filter, STOP and agree the shape with uac-r2; never move it into InvoiceSubmissionService.</trigger>
+    <trigger>If a client or test on this branch calls an in-scope route as a flagged-external systemuser on purpose, STOP and raise 🔔 Human Input Required (section 5.3 says none does).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>FinanceAuthorizationFilter (Api/Filters/FinanceAuthorizationFilter.cs:219) has no sprk_isexternal check; the semantics exist in ExternalCallerCommunicationGuard.IsExternalCallerAsync (:150) for AI tools only.</existing>
+    <extension>Extends the existing filter with one metadata-driven branch and reuses the existing guard; the only new surface is the flag type and two test files.</extension>
+    <cost-of-doing-nothing>A flagged-external systemuser holding Read on an invoice reads its review, findings, override reasons and record-scoped rule content through internal routes, which owner round 116 restricts to the firm route.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">build, test</tool>
+    <tool name="conflict-check">before the PR</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">FinanceAuthorizationFilter.cs and the seven endpoint files above</output>
+    <output type="test">FinanceStepZeroTests.cs, FinanceStepZeroCoverageGuardTests.cs, FinanceEndpointsAuthorizationContractTests.cs</output>
+    <output type="docs">projects/ebilling-r1/notes/099-finance-step-0.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Must fire, for EVERY in-scope route: sprk_isexternal true → refused; no systemuser row for the oid → refused; a fault reading the flag (or the lookup) → refused. Each refusal is the route's own Deny() (403, or the uniform 404 on the two UniformNotFound routes) and no record read or rights call happens (the mocked record path is never called).</criterion>
+    <criterion testable="true">Must not fire, for every in-scope route: flag false → the route behaves as before; flag blank → the same.</criterion>
+    <criterion testable="true">On GET /invoice-submissions/{id} and GET /submissions/{submissionId}/blocked, a refused flagged-external caller gets a body byte-identical (apart from the correlation id) for an existing id and a non-existent id.</criterion>
+    <criterion testable="true">Out of scope unchanged: /invoices/search and /matters/{matterId}/summary run no step-0 lookup (negative test); the external /api/v1/external/* submission routes are untouched (diff).</criterion>
+    <criterion testable="true">The verdict item is set to Internal only when step 0 passed; it is absent on a refused request and on unflagged routes.</criterion>
+    <criterion testable="true">The coverage guard fails on a planted /api/finance invoice route without the flag (must fire) and passes on the real route table (must not fire); the allowlist names each excluded route with its reason.</criterion>
+    <criterion testable="true">Seeding proof recorded: with the step-0 branch disabled the must-fire tests fail; restored they pass.</criterion>
+    <criterion testable="true">uac-r2 review recorded; publish-size delta recorded; no package; no new HIGH CVE; /conflict-check run.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Two adversarial-review passes (auth). Later tasks reuse the flag: 081 and 089 (Procedure and assignment routes), 084 (6.6 read models), 090 and 098 (file routes apply the same definition). 113 reads the verdict item. P3-A beside 080, 088, 115, 091: no shared files. OWNER 2026-10-21 (re-plan Q3): step 0 applies to EVERY route under /api/finance (invoices, submissions, invoice-review incl. reject, recalculate, matter/project rollups, ratecards, code-set-mappings, rulesets, related-work), so a future route cannot be missed. Apply it at the /api/finance group level where possible; an ArchTest fails any /api/finance route without it. This supersedes the narrower scope in this POML's other text.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

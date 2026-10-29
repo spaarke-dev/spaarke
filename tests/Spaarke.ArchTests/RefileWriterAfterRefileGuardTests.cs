@@ -3,7 +3,6 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Dataverse;
-using Sprk.Bff.Api.Services.Finance;
 using Xunit;
 
 namespace Spaarke.ArchTests;
@@ -67,12 +66,10 @@ public class RefileWriterAfterRefileGuardTests
     /// <summary>The ratchet baseline: re-file writers that do not run the step yet, each with its reason.</summary>
     private sealed record KnownViolation(Type Type, string Reason);
 
-    private static readonly IReadOnlyList<KnownViolation> KnownViolations = new[]
-    {
-        new KnownViolation(typeof(InvoiceReviewService),
-            "Found by this guard (#2091 review): a document filed under an invoice is re-parented (ReparentAsync, inherited " +
-            "matter) without AfterRefileAsync. Not in #2091's scope; follow-up #2095."),
-    };
+    // Empty: ThreadResolver and CommunicationService run the step since #2110 (#2091). The invoice confirm's document re-file (#2095,
+    // InvoiceDocumentRefile since 050a / D-134) is retired by ebilling-r1 task 094: a Submit Invoice source is copied, never re-filed.
+    // A new entry needs a reason; an entry that no longer violates must be removed.
+    private static readonly IReadOnlyList<KnownViolation> KnownViolations = Array.Empty<KnownViolation>();
 
     private static readonly Lazy<IReadOnlyList<Type>> BffTypes = new(() => typeof(Program).Assembly.GetTypes());
 

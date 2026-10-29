@@ -632,7 +632,8 @@ public static class RagEndpoints
             // R3 FR-3H3.2 dual-write: set new sprk_searchindexcompletedon AND keep legacy
             // sprk_searchindexed=true + sprk_searchindexedon for the transition window
             // (R3 + one sprint per spec assumption line 366). Removal deferred to R4.
-            if (!string.IsNullOrEmpty(request.DocumentId))
+            // A skipped file (E-Billing Output Files container, ebilling-r1 FR-16) was not indexed: no stamp.
+            if (!string.IsNullOrEmpty(request.DocumentId) && !result.Skipped)
             {
                 var indexName = searchIndexNameResolver.GetDefaultIndexName();
                 var completedAt = DateTime.UtcNow;
@@ -1336,7 +1337,18 @@ public static class RagEndpoints
                 // Step 5: Index via OBO authentication
                 var indexResult = await fileIndexingService.IndexFileAsync(indexRequest, httpContext, cancellationToken);
 
-                if (indexResult.Success)
+                if (indexResult.Skipped)
+                {
+                    // Deliberately not indexed (E-Billing Output Files container, ebilling-r1 FR-16): no stamp, and the
+                    // caller is told it was not indexed rather than shown a success with zero chunks.
+                    results.Add(new SendToIndexDocumentResult
+                    {
+                        DocumentId = documentId,
+                        Success = false,
+                        ErrorMessage = "This document is stored in a container that is not indexed."
+                    });
+                }
+                else if (indexResult.Success)
                 {
                     // Step 6: Update Dataverse with search index fields.
                     // R3 FR-3H3.2 dual-write: set new sprk_searchindexcompletedon AND keep legacy

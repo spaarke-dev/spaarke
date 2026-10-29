@@ -71,8 +71,6 @@ public class ChildRowOwnershipBuilderGuardTests
             "Single parent: the analysis (sprk_analysisoutput writes only sprk_analysisid as a parent; R4-2)."),
         new(Bff("Services.Ai.AppOnlyAnalysisService"), "ExecutePlaybookAnalysisAsync",
             "Single parent: the analysis (sprk_analysisoutput writes only sprk_analysisid as a parent; R4-2)."),
-        new(Bff("Services.Finance.InvoiceReviewService"), "CreateInvoiceRecordAsync",
-            "Single parent: the matter (the vendor organisation it also writes is not an ownership parent; R4-2)."),
         new(Bff("Services.Finance.SpendSnapshotService"), "ResolveSnapshotOwnerAsync",
             "Single parent: the matter OR the project, one per path, never both (R4-2)."),
     ];

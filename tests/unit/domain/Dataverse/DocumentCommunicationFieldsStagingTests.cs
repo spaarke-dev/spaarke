@@ -80,4 +80,82 @@ public class DocumentCommunicationFieldsStagingTests
 
         document.Attributes.Should().BeEmpty("a Document save is created exactly as before task 130");
     }
+
+    // ── ebilling-r1 task 095: the from-email submission's .eml (own non-provisional Restricted + the marker) ──────────
+
+    [Fact]
+    [Trait("status", "task-095-ebilling-r1")]
+    public void SubmissionNarrowing_StagesTheLink_Restricted_ANonProvisionalRecord_AndTheMarker_InTheOneCreate()
+    {
+        var request = new CreateDocumentRequest { Name = "Invoice email.eml", ContainerId = "b!c" };
+        Sprk.Bff.Api.Services.Office.OfficeDocumentPersistence
+            .ApplyEmailCommunicationOutcome(request, CommunicationId, submissionNarrowing: true)
+            .Should().BeFalse("this Restricted is chosen; it is not the unidentified-email fallback logged as an Error");
+        var document = new Entity("sprk_document");
+
+        DataverseServiceClientImpl.StageDocumentCommunicationFields(document, request);
+
+        document["sprk_relatedcommunication"].Should().BeOfType<EntityReference>().Which.Id.Should().Be(CommunicationId);
+        document["sprk_accesspermission"].Should().BeOfType<OptionSetValue>().Which.Value.Should().Be(100000002, "Restricted");
+        var (record, unreadable) = Sprk.Bff.Api.Services.Access.AccessInheritance.Parse((string)document["sprk_accessinheritance"]);
+        unreadable.Should().BeFalse();
+        record!.OwnPermission.Should().Be(100000002);
+        record.OwnProvisional.Should().BeFalse("model 9.1: linking the communication must never release the submission's narrowing");
+        document["sprk_restrictedbysubmission"].Should().Be(true);
+    }
+
+    [Fact]
+    [Trait("status", "task-095-ebilling-r1")]
+    public void SubmissionNarrowing_WithoutACommunication_IsRefused_AndSetsNothing()
+    {
+        foreach (var missing in new Guid?[] { null, Guid.Empty })
+        {
+            var request = new CreateDocumentRequest { Name = "Invoice email.eml", ContainerId = "b!c" };
+
+            var act = () => Sprk.Bff.Api.Services.Office.OfficeDocumentPersistence
+                .ApplyEmailCommunicationOutcome(request, missing, submissionNarrowing: true);
+
+            act.Should().Throw<InvalidOperationException>().WithMessage("*communication*");
+            request.RestrictedBySubmission.Should().BeFalse();
+            request.AccessPermission.Should().BeNull();
+            request.AccessInheritanceRecord.Should().BeNull();
+        }
+    }
+
+    [Theory]
+    [Trait("status", "task-095-ebilling-r1")]
+    [InlineData(null, null)]                    // no narrowing at all
+    [InlineData(100000002, null)]               // Restricted without its record (refused by task 189's rule first)
+    [InlineData(100000001, "{\"v\":1}")]        // a narrowing that is not Restricted
+    public void TheMarker_WithoutItsOwnRestrictedAndRecord_IsRefused_AndNotStaged(int? permission, string? record)
+    {
+        var document = new Entity("sprk_document");
+        var request = new CreateDocumentRequest
+        {
+            Name = "Invoice email.eml", ContainerId = "b!c", RelatedCommunicationId = CommunicationId,
+            AccessPermission = permission, AccessInheritanceRecord = record, RestrictedBySubmission = true,
+        };
+
+        var act = () => DataverseServiceClientImpl.StageDocumentCommunicationFields(document, request);
+
+        act.Should().Throw<InvalidOperationException>();
+        document.Contains("sprk_restrictedbysubmission").Should().BeFalse();
+    }
+
+    [Theory]
+    [Trait("status", "task-095-ebilling-r1")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void AnOrdinaryEmailSave_NeverCarriesTheMarker(bool identified)
+    {
+        var request = new CreateDocumentRequest { Name = "Status.eml", ContainerId = "b!c" };
+        Sprk.Bff.Api.Services.Office.OfficeDocumentPersistence
+            .ApplyEmailCommunicationOutcome(request, identified ? CommunicationId : null);
+        var document = new Entity("sprk_document");
+
+        DataverseServiceClientImpl.StageDocumentCommunicationFields(document, request);
+
+        request.RestrictedBySubmission.Should().BeFalse();
+        document.Contains("sprk_restrictedbysubmission").Should().BeFalse();
+    }
 }

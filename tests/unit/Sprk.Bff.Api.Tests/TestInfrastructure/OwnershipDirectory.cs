@@ -489,6 +489,15 @@ internal sealed class OwnershipDirectory
         return this;
     }
 
+    /// <summary>
+    /// The shared isolation predicate (ebilling-r1 CLAUDE.md §3, 2026-10-28): <paramref name="teamId"/> is a team of the business unit
+    /// named <see cref="SecureBuName"/> — keyed on the Secure Record business unit, never on a team id.
+    /// </summary>
+    public bool IsTeamOfTheSecureRecordBusinessUnit(Guid teamId) =>
+        _teams.Any(t => t.TeamId == teamId
+                        && _businessUnits.Any(b => b.BusinessUnitId == t.BusinessUnit
+                                                   && string.Equals(b.Name, SecureBuName, StringComparison.OrdinalIgnoreCase)));
+
     public EntityCollection Answer(QueryExpression query)
     {
         QueriedEntities.Add(query.EntityName);
