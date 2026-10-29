@@ -1,44 +1,21 @@
 # Current Task — field-mapping-server-write-path-r1
 
-> **Last updated**: 2026-10-28 (W7-C: 074 and 075 built, reviewed, fixed; both PRs draft/held)
-> **Phase**: Wave 2 + W7. Done on master: 001–006, 010–016, 018, 037 #2370, 038 #2376, 070 #2367, 073 #2366.
-> **Live on dev: de38296499** (R3, 2026-10-27 19:42Z; rollback deploy/rollback/wwwroot-20261027T193805Z = 3ff2c04bf5). Filed from the owner's click checks: #2352 (push 409 Matter→Project; answered by UAC 195 pair edge), #2353 (WA autonumber, owner OK needed), #2354 (Assigned To — resolved by 037/038).
-> **Owner 2026-10-28:** 075 merges and deploys ONLY with 040 (Push Updates keeps working until then); 076 deploys 074 + 038 only. 017 still blocked on ebilling #1911.
+> **Last updated**: 2026-10-29 ~02:15Z (by context-handoff). Recovery: read Quick Recovery first.
+> **Done on master**: 001–006, 010–016, 018, 037, 038, 070, 073. Work branch merged to master as #2392 (14b9335a6c); later doc commits are on the work branch (e2771ff315, 86dc5c1f92 and this one).
+> **Live on dev: 136568cf70** (R3, live 2026-10-29 02:23:53Z; UAC gate passed, no 5xx). SpaarkeMaster 1.2.4.0 published 02:24:48Z (run 40806065681, master a4b6459da3), not yet imported anywhere: map check follows model1-prod's upgrade or the next provisioning run (H6). #2408 merged a4b6459da3; C:\wt2400 removed.
 
 ## Quick Recovery
 
 | Field | Value |
 |---|---|
-| **Active task** | W7-C. **074** (Family icon on TrackingFieldTrio; PCF 1.0.55; forms Matter {4fa382f2…}, Project {5aa00242…}, WA {7e578eef…}, Event {eaf22dcb…}, To Do {eca59df4…}) task/fm-074 @ f7d21dafc8, reviewed + fixed, **draft PR #2383 — HOLD until 072 merges** (it calls the family endpoint). **075** (Push Updates opens `sprk_recordfamily` code page; RecordFamilyModal `embedded` prop; save-before-open; familyParams validation; LEGACY push helpers kept for 040 to delete) task/fm-075 @ ed1cf9b5d1, opus review F1/F3/K1–K3 fixed + scoped re-check F4×2/K1/K4 fixed (round 2), **draft PR #2387 — HOLD, merges + deploys with 040**. 040's POML carries the 075 ship-with-040 list |
-| **HEAD** | work branch 20da6b7927 + this checkpoint |
-| **Running** | Nothing. 075 review cycle closed; its only open item (K2 duplicate save-error dialog) is a live check in 040's POML |
-| **Next Action** | 1) —. 2) When #2383 and #2387 meet (at 040): run the TrackingFieldTrio suite against the embedded-mode RecordFamilyModal. 3) Owner to drop stash d5d17bcc7f (074 agent's lint-staged backup; `git stash drop` needs human OK). 4) Wait for UAC 194b sha → 071 (opus/xhigh) from master; then 072; then mark #2383 ready. 040 needs 019 (→017→ebilling #1911), 071, UAC 195; 076 needs 072, 074, 038. R3 contact-security deploy hold. /devops-project-sync not yet run |
-| **018 progress** | COMPLETE. 018c deleted `OfficeRecordCreationService` + `CreateTimeFieldMapping.Apply`; `ResolveDefaultAssigneeAsync` moved to `IOfficeService`; guards updated (KnownCallSites 2, owner allow-list empty, census). Opus review: F3 fixed, K4 fixed, K2 known limit (cancellation seam test timing). Publish −21,556 B (37.73 MB). #2253 (UAC) carries `WriteIdentity.AppOnly` in `DropAppOnlyRefusedRules` + must-fire/must-not-fire tests (`RecordCreationServiceMappingSeamTests.AppOnlyAccessSets.cs`); nothing for this project |
-| **#2281 (out-of-task defect, fixed)** | PR #2282, merge **1fa0cf5cb8**. `sprk_targetfieldtype` uses the global set `sprk_fieldmappingtypes` (100000000+n, Currency 100000007); legacy rows and `sprk_sourcefieldtype` hold bare n. `FieldMappingColumns.NormalizeFieldType` reads both at the single rule read (`MapToFieldMappingRuleEntity`); Currency → Number. Client `describeError` shows the Xrm message. Ontology reviewed (no findings); dev check after the BFF deploy that carries it: Create Work Assignment from a matter with `sprk_assignedattorney1` copies it. Known limit: one bad column still voids the profile's client `$select` (task 035 deletes the engine). Seeder writing `1` = #2283, already fixed on the provisioning branch |
-| **CI note** | #2252 raised the Tier 1 arch job timeout to 10 min (merged). The Tier 2 ADR job (#2224) may still be cancelled by its timeout; read the log |
-| **Cleanup left for the owner** | Empty, unregistered folders (Remove-WorktreeSafe partial delete, "Permission denied"): `C:\code_files\spaarke\.claude\worktrees\agent-a10e5fe383a4dfcd2`, `...\agent-a80d401ebbcfb9d3e`, `...\agent-a1ced7a9c67154b2b` (018c, merged) |
-
-## 018 — what is decided (all in the 018 POML and notes/decisions.md)
-
-- **Office mapping becomes fill-only** (owner Q6/Q10; NFR-07 pins only error codes). Four Office contract assertions
-  that pin overwrite are rewritten. Release note.
-- **Contract fixtures follow the new write** (one Web API dictionary via `UpdateRecordFieldsAsync`, 412 retry). What
-  each test asserts stays the same; changed assertions are listed.
-- **UAC-r2 condition (b) for 018b:**
-  - an Assigned To contact the caller names is REFUSED without AppendTo, and the code names `assignedTo`;
-  - no token gives 500 `caller_rights_unverifiable`;
-  - the membership event fires exactly once (the endpoint publish is removed);
-  - a project under a secure matter is owned by Secure Record Owners and is secure;
-  - a table-driven refusal map keeps every Office status (OwnerUnresolved 403).
-- **The maker's-contact Assigned To default is DROPPED, not refused** (UAC-r2 concurs): the adapter shows
-  `default_value_dropped`, and nothing writes Assigned To app-only afterwards.
-- **018a new surface:** `ReferenceLookupColumns` (registry allow-list `RecordTableRule.OptionalReferenceLookups`:
-  matter type, practice area, project type; `IsNeverAReference` throws for the for-person column, protected, pair,
-  filing, access-conferring and assigned* columns), `PostMappingDefaults` (fill-only, step 3½, checked at step 5),
-  K1 test, K3 fix.
-- **Optional for 018b:** #2238 (DI-006), case-insensitive de-dup of step-9 server binds.
-- **018c:** delete `OfficeRecordCreationService`; re-point or retire 9 test files; census; owner-guard allow-list;
-  the #2188 guard `KnownCallSites` 3 → 2; remove the legacy `CreateTimeFieldMapping.Apply`; close #1614/#1617.
+| **Active** | **Task 071 (RecordFamilyReader, FR-30) IN PROGRESS** — FULL, opus @ xhigh. Gate met: UAC 194b merged 2cd0f62e2c (#2432). Work branch synced with master (e4dbc0b6de). Step 8: implementer agent on branch task/fm-071 from 2cd0f62e2c (worktree). Then Step 9.5: two adversarial passes (auth-tagged), adr-check, publish delta, CVE. **#2399** live part: dev re-own done; waiting for the owner's UI re-test. |
+| **Plan (design §13, accepted by UAC-r2 at 86dc5c1f92)** | (a) UAC builds the memberless team "Spaarke Customer Configuration Owners" and the role "Customer Configuration Owner" (Read at Basic on sprk_aisearchindex, sprk_fieldmappingprofile, sprk_fieldmappingrule) in 194b R4b-3b. **Wait for their sha.** (b) After the owner's go: create the team and role in BU1 (cb15f587-baa0-f111-aaac-000d3a99d1d7) on dev, then re-own 10 index rows + 7 profiles + 40 rules with a read-back (nothing cascades; checked). (c) FR-38: the server drops a client index on every BFF write path and applies the FINAL owning BU's index (empty and logged if none). (d) FR-39: provisioning owns it (one PR, H10 team + H12b owner bind; I review). (e) W3 wizards stop binding the index. |
+| **Next Action** | 1) **Owner decided 2026-10-29:** §13.5 Q2 = **(B)**: seed the 7 canonical index rows per customer, team-owned, no BU defaults. (A) was withdrawn because the Semantic Search picker needs the rows. Q1 = drop. Correction sent to provisioning and UAC-r2. 2) **Dev re-own DONE 2026-10-29** (owner's go): 57 rows → team 2dae7e6e… in BU1, read-back 57/57; Test User 1 has Read+AppendTo on BU1's index. Owner to re-test the WA create in the UI; then close #2399's live part. Rollback list: session scratchpad `reown-2399-backup.json`. Provisioning creates the team in H7c (#2429); UAC 194b = c4fd7175cd. 3) Scope procedure for FR-38/FR-39: spec amendment → task-create → TASK-INDEX → owner approval. 4) R3: when 1.2.4.0 reaches model1-prod, check the BU→Matter index map is gone and how it was upgraded; stamp proof = the next new provisioning run (H6 StageAndUpgrade); don't check ACME. Dev is already clean (checked 2026-10-28). bafe310ca4 (#2382) doesn't change Core User depth on index/profile/rule; §13 (e) removes the index entry from `config/core-user-wizard-linking-role.json` (0e5904d4aa). |
+| **Open PRs** | #2383 (074, draft, HOLD until 072). #2387 (075, draft, HOLD, ships with 040; head ed1cf9b5d1). #2408 (#2400 error icon, auto-merge). |
+| **Issues filed today** | #2399 (above), #2400 (icon; PR #2408), #2410 (CLOSED, not planned: owner says Basic users need no profile access), #2411 (CLOSED: duplicate inactive index row deleted on dev with the owner's OK), #2413 (known limit: index not recomputed on a BU move; discoverability only). |
+| **Running** | Nothing. |
+| **Waiting on** | UAC 194b sha → 071 → 072 (then mark #2383 ready). UAC 195 → 040, 076. UAC R4b-3b sha → #2399 re-own. 017 blocked on ebilling #1911. |
+| **Owner to do** | Drop stash d5d17bcc7f (074 agent's lint-staged backup). Leftover agent worktree `C:\code_files\spaarke\.claude\worktrees\agent-aec6d06ca99a5a9f6` (locked by a claude.exe; contents on origin) and C:\wt2400 (fix/2400 worktree) to remove with Remove-WorktreeSafe at the end. |
 
 ## Blocked: 017
 
