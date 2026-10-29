@@ -2087,6 +2087,13 @@ public class InvoiceSubmissionPersisterTests
     [InlineData(StoredFileBlobs.MetadataSourceVersion, "seven")]
     [InlineData(StoredFileBlobs.MetadataEmlParts, "1,x")]
     [InlineData(StoredFileBlobs.MetadataExtension, "../pdf")]
+    // Review round 5 (uac-r2): a key that is present but blank is unreadable, never read as absent (the upload's shape).
+    [InlineData(StoredFileBlobs.MetadataSourceDocument, "")]
+    [InlineData(StoredFileBlobs.MetadataSourceDocument, "   ")]
+    [InlineData(StoredFileBlobs.MetadataSourceCommunication, " ")]
+    [InlineData(StoredFileBlobs.MetadataSourceVersion, " ")]
+    [InlineData(StoredFileBlobs.MetadataEmlParts, " ")]
+    [InlineData(StoredFileBlobs.MetadataSourceAttachment, " ")]
     public async Task FromEmail_AnUnreadableSourceKeyOnTheInvoicePart_IsRefused_NoTransaction(string key, string value)
     {
         var outcome = await new ProcessorHarness { Channel = InvoiceSubmissionChannel.Internal }.RunAsync();

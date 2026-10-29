@@ -691,6 +691,8 @@ public sealed class SubmitInvoiceFromEmailOperationTests
     [InlineData(StoredFileBlobs.MetadataSourceVersion, "seven")]
     [InlineData(StoredFileBlobs.MetadataEmlParts, "1,x")]
     [InlineData(StoredFileBlobs.MetadataSourceDocument, "not-a-guid")]
+    [InlineData(StoredFileBlobs.MetadataSourceDocument, " ")]
+    [InlineData(StoredFileBlobs.MetadataSourceCommunication, "")]
     public async Task ReadAttemptSource_AStageWithAnUnreadableSourceKey_FailsClosed(string key, string value)
     {
         var input = Input();

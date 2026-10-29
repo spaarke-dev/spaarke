@@ -154,9 +154,19 @@ public sealed class StoredFileService
         }
 
         var metadata = properties.Metadata;
-        string? Value(string key) => metadata.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value) ? value : null;
-        // Review round 5: a source key that is present but cannot be read marks the blob unreadable (fail closed), never an upload.
+        // Review round 5: a source key that is present but cannot be read marks the blob unreadable (fail closed), never an upload. A
+        // present key with a blank value is one of them (the stage never writes a blank value; an absent key is the upload's shape).
         var unreadable = false;
+        string? Value(string key)
+        {
+            if (!metadata.TryGetValue(key, out var value))
+                return null;
+            if (!string.IsNullOrWhiteSpace(value))
+                return value;
+            unreadable = true;
+            return null;
+        }
+
         Guid? IdOf(string key)
         {
             if (Value(key) is not { } raw)
@@ -200,6 +210,7 @@ public sealed class StoredFileService
                 unreadable = true;
         }
 
+        var attachment = Value(StoredFileBlobs.MetadataSourceAttachment);
         if (unreadable)
         {
             _logger.LogWarning("Stored file {FileId}: a source fact its stage recorded is not readable", fileId);
@@ -210,7 +221,7 @@ public sealed class StoredFileService
             document,
             communication,
             version,
-            Value(StoredFileBlobs.MetadataSourceAttachment),
+            attachment,
             ordinals,
             extension,
             string.IsNullOrWhiteSpace(properties.ContentType) ? null : properties.ContentType,
