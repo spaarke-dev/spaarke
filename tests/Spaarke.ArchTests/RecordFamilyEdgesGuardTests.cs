@@ -51,6 +51,17 @@ public class RecordFamilyEdgesGuardTests
         [Only("SecureChildLineage", "sprk_analysis.sprk_outputfileid -> sprk_document")] =
             "an analysis's output file, not its filing (SecureChildLineage remarks)",
 
+        // ebilling-r1 (PROPOSAL, needs UAC-r2 review): invoice-submission lookups ebilling task 013 added to SecureChildLineage
+        // that are not the submission's filing. Its filing root is its one core record (FR-05); see RecordFamilyEdges.
+        [Only("SecureChildLineage", "sprk_invoicesubmission.sprk_resubmissionof -> sprk_invoicesubmission")] =
+            "the earlier submission this one resubmits (same firm invoice number, D-37): a peer reference, not its filing; "
+            + "sprk_invoicesubmission is not an ownership parent",
+        // UAC-r2: decide — RecordOwnershipContext.ParentsOf reads sprk_document as an ownership-parent table, so a write
+        // that sets this column offers the report as a parent, as it does for the analysis's sprk_outputfileid above.
+        [Only("SecureChildLineage", "sprk_invoicesubmission.sprk_reportdocument -> sprk_document")] =
+            "the adjustment or rejection report generated for the submission: its output, not its filing (as an "
+            + "analysis's sprk_outputfileid)",
+
         // CoreAncestorResolver's stamp sources are the intermediates a stamp is COPIED from, not every filing lookup.
         [Extra("CoreAncestorResolver.StampSourceColumns", "sprk_analysis.sprk_documentid -> sprk_document")] =
             "the analysis's ownership primary, not a stamp source (CoreAncestorResolver.cs:212-214)",
@@ -68,8 +79,6 @@ public class RecordFamilyEdgesGuardTests
             "a service request's own family (ServiceRequestRelations); the stamp topology excludes it by name (IntermediateRootColumns)",
 
         // OwnershipParentEntities lists the tables a child can be filed under FOR OWNERSHIP.
-        [Only("OwnershipParentEntities", "sprk_billingevent")] =
-            "an ownership parent through sprk_invoicelineitem.sprk_billingevent, which waits for ebilling (#2348)",
         [Only("OwnershipParentEntities", "sprk_kpiassessment")] =
             "an ownership parent no filing lookup names (no SecureChildLineage row has a lookup to it)",
         [Only("OwnershipParentEntities", "sprk_memo")] =
@@ -233,6 +242,9 @@ public class RecordFamilyEdgesGuardTests
     /// <summary>
     /// The access columns of every row (FamilyKind | child.lookup -> parent | EdgeKind | InSecureFamily), sorted. UAC-r2
     /// owns this content: change it only with a "UAC-r2 review:" line in the PR.
+    /// ebilling-r1 PROPOSAL (needs UAC-r2 review): the 22 rows of sprk_externalidentifier, sprk_invoiceapproval,
+    /// sprk_invoicecorrection and sprk_invoicesubmission, sprk_billingevent / sprk_invoice .sprk_regardingworkassignment and
+    /// sprk_decisionrecord / sprk_signal .sprk_regardinginvoiceline (RecordFamilyEdges, the ebilling-r1 block).
     /// </summary>
     internal static readonly string[] PinnedAccessRows =
     {
@@ -254,6 +266,7 @@ public class RecordFamilyEdgesGuardTests
         "Filing | sprk_billingevent.sprk_invoice -> sprk_invoice | LineageHop | secure",
         "Filing | sprk_billingevent.sprk_matter -> sprk_matter | LineageHop | secure",
         "Filing | sprk_billingevent.sprk_project -> sprk_project | LineageHop | secure",
+        "Filing | sprk_billingevent.sprk_regardingworkassignment -> sprk_workassignment | Stamp | secure",
         "Filing | sprk_budget.sprk_matter -> sprk_matter | LineageHop | secure",
         "Filing | sprk_budget.sprk_project -> sprk_project | LineageHop | secure",
         "Filing | sprk_budgetbucket.sprk_budget -> sprk_budget | LineageHop | secure",
@@ -286,6 +299,7 @@ public class RecordFamilyEdgesGuardTests
         "Filing | sprk_decisionrecord.sprk_regardingdocument -> sprk_document | LineageHop | secure",
         "Filing | sprk_decisionrecord.sprk_regardingevent -> sprk_event | LineageHop | secure",
         "Filing | sprk_decisionrecord.sprk_regardinginvoice -> sprk_invoice | LineageHop | secure",
+        "Filing | sprk_decisionrecord.sprk_regardinginvoiceline -> sprk_billingevent | LineageHop | secure",
         "Filing | sprk_decisionrecord.sprk_regardingmatter -> sprk_matter | Stamp | secure",
         "Filing | sprk_decisionrecord.sprk_regardingproject -> sprk_project | Stamp | secure",
         "Filing | sprk_decisionrecord.sprk_regardingservicerequest -> sprk_servicerequest | Stamp | not-secure",
@@ -320,10 +334,29 @@ public class RecordFamilyEdgesGuardTests
         "Filing | sprk_event.sprk_regardingservicerequest -> sprk_servicerequest | Stamp | not-secure",
         "Filing | sprk_event.sprk_regardingworkassignment -> sprk_workassignment | Stamp | secure",
         "Filing | sprk_eventlog.sprk_event -> sprk_event | LineageHop | secure",
+        "Filing | sprk_externalidentifier.sprk_regardinginvoice -> sprk_invoice | LineageHop | secure",
+        "Filing | sprk_externalidentifier.sprk_regardingmatter -> sprk_matter | Stamp | secure",
+        "Filing | sprk_externalidentifier.sprk_regardingproject -> sprk_project | Stamp | secure",
+        "Filing | sprk_externalidentifier.sprk_regardingworkassignment -> sprk_workassignment | Stamp | secure",
         "Filing | sprk_fileversion.sprk_document -> sprk_document | LineageHop | secure",
         "Filing | sprk_invoice.sprk_matter -> sprk_matter | LineageHop | secure",
         "Filing | sprk_invoice.sprk_project -> sprk_project | LineageHop | secure",
         "Filing | sprk_invoice.sprk_regardingagreement -> sprk_agreement | LineageHop | secure",
+        "Filing | sprk_invoice.sprk_regardingworkassignment -> sprk_workassignment | Stamp | secure",
+        "Filing | sprk_invoiceapproval.sprk_invoice -> sprk_invoice | LineageHop | secure",
+        "Filing | sprk_invoiceapproval.sprk_regardingmatter -> sprk_matter | Stamp | secure",
+        "Filing | sprk_invoiceapproval.sprk_regardingproject -> sprk_project | Stamp | secure",
+        "Filing | sprk_invoiceapproval.sprk_regardingworkassignment -> sprk_workassignment | Stamp | secure",
+        "Filing | sprk_invoicecorrection.sprk_invoice -> sprk_invoice | LineageHop | secure",
+        "Filing | sprk_invoicecorrection.sprk_invoiceline -> sprk_billingevent | LineageHop | secure",
+        "Filing | sprk_invoicecorrection.sprk_regardingmatter -> sprk_matter | Stamp | secure",
+        "Filing | sprk_invoicecorrection.sprk_regardingproject -> sprk_project | Stamp | secure",
+        "Filing | sprk_invoicecorrection.sprk_regardingworkassignment -> sprk_workassignment | Stamp | secure",
+        "Filing | sprk_invoicesubmission.sprk_document -> sprk_document | LineageHop | secure",
+        "Filing | sprk_invoicesubmission.sprk_invoice -> sprk_invoice | LineageHop | secure",
+        "Filing | sprk_invoicesubmission.sprk_regardingmatter -> sprk_matter | Stamp | secure",
+        "Filing | sprk_invoicesubmission.sprk_regardingproject -> sprk_project | Stamp | secure",
+        "Filing | sprk_invoicesubmission.sprk_regardingworkassignment -> sprk_workassignment | Stamp | secure",
         "Filing | sprk_kpiassessment.sprk_matter -> sprk_matter | LineageHop | secure",
         "Filing | sprk_kpiassessment.sprk_project -> sprk_project | LineageHop | secure",
         "Filing | sprk_kpiassessment.sprk_reportcard -> sprk_reportcard | LineageHop | secure",
@@ -351,6 +384,7 @@ public class RecordFamilyEdgesGuardTests
         "Filing | sprk_signal.sprk_regardingdocument -> sprk_document | LineageHop | secure",
         "Filing | sprk_signal.sprk_regardingevent -> sprk_event | LineageHop | secure",
         "Filing | sprk_signal.sprk_regardinginvoice -> sprk_invoice | LineageHop | secure",
+        "Filing | sprk_signal.sprk_regardinginvoiceline -> sprk_billingevent | LineageHop | secure",
         "Filing | sprk_signal.sprk_regardingmatter -> sprk_matter | Stamp | secure",
         "Filing | sprk_signal.sprk_regardingproject -> sprk_project | Stamp | secure",
         "Filing | sprk_signal.sprk_regardingservicerequest -> sprk_servicerequest | Stamp | not-secure",

@@ -319,6 +319,48 @@ internal static class RecordFamilyEdges
             ("sprk_regardingproject", Project), ("sprk_regardingreportcard", ReportCard),
             ("sprk_regardingworkassignment", WorkAssignment)));
 
+        // --- ebilling-r1 (PROPOSAL, needs UAC-r2 review): the SecureChildLineage rows ebilling-r1 tasks 013 and 026 added ---
+        // Each invoice-family table names exactly ONE core record (FR-05, InvoiceFamilyCoreRecordGuard.CoreRecordLookups over
+        // FilingCores: matter, project, work assignment): that lookup is the row's one filing root. sprk_invoice and
+        // sprk_billingevent keep their typed sprk_matter / sprk_project (rows above) and add sprk_regardingworkassignment; the
+        // tables created for eBilling carry the sprk_regarding{core} trio. The other lookups below name an ownership parent
+        // (RecordOwnershipResolver.IsOwnershipParent, not a citation), so RecordOwnershipContext.ParentsOf already treats them
+        // as parents; each is filed in the same core record by a write-time rule, cited per row. Left out, each baselined in
+        // RecordFamilyEdgesGuardTests.KnownDisagreements: sprk_invoicesubmission.sprk_resubmissionof (a peer reference) and
+        // sprk_invoicesubmission.sprk_reportdocument (the submission's generated report).
+        // A line's third core record (ebilling task 010; CoreAncestorResolver.IntermediateRootColumns root column).
+        rows.AddRange(Secure("sprk_billingevent", ("sprk_regardingworkassignment", WorkAssignment)));
+        // An invoice's third core record (ebilling task 012; CoreAncestorResolver.IntermediateRootColumns root column).
+        // UAC-r2: decide — a work assignment may itself be filed under an invoice (sprk_workassignment.sprk_regardinginvoice,
+        // IntermediateFilingColumns, owner Option A), so with this row the two tables file under each other. No write-time rule
+        // found that refuses an invoice regarding a work assignment filed under that same invoice.
+        rows.AddRange(Secure(Invoice, ("sprk_regardingworkassignment", WorkAssignment)));
+        // The invoice-line subject of a Decision Record / Signal (task 026, D-94), as their sprk_regardinginvoice rows above; a
+        // stamp source (CoreAncestorResolver.StampSourceColumns), and the line's root is its own core lookup only (D-75).
+        rows.AddRange(Secure("sprk_decisionrecord", ("sprk_regardinginvoiceline", "sprk_billingevent")));
+        rows.AddRange(Secure("sprk_signal", ("sprk_regardinginvoiceline", "sprk_billingevent")));
+        // An external identifier (D-68) regards one core record, or one invoice when no core lookup is set; never walked from
+        // the invoice to its core record.
+        rows.AddRange(Secure("sprk_externalidentifier",
+            ("sprk_regardinginvoice", Invoice), ("sprk_regardingmatter", Matter), ("sprk_regardingproject", Project),
+            ("sprk_regardingworkassignment", WorkAssignment)));
+        // An approval decision on one invoice.
+        rows.AddRange(Secure("sprk_invoiceapproval",
+            ("sprk_invoice", Invoice), ("sprk_regardingmatter", Matter), ("sprk_regardingproject", Project),
+            ("sprk_regardingworkassignment", WorkAssignment)));
+        // A correction of one invoice and, when line-level, one of its lines (D-82).
+        rows.AddRange(Secure("sprk_invoicecorrection",
+            ("sprk_invoice", Invoice), ("sprk_invoiceline", "sprk_billingevent"), ("sprk_regardingmatter", Matter),
+            ("sprk_regardingproject", Project), ("sprk_regardingworkassignment", WorkAssignment)));
+        // A submission: its submitted PDF (sprk_document; its input, as the analysis's sprk_documentid above; the source must
+        // already be filed in the target core record, D-140 document_core_record_mismatch) and the invoice it produced.
+        // UAC-r2: decide — sprk_invoice is written at commit, after the submission is created, and cleared again when the
+        // submission fails (procedure-and-file-model 9, uac-r2 F1-5), so this lookup is set and unset over the row's life. The
+        // invoice is created under the submission's own core record.
+        rows.AddRange(Secure("sprk_invoicesubmission",
+            ("sprk_document", Document), ("sprk_invoice", Invoice), ("sprk_regardingmatter", Matter),
+            ("sprk_regardingproject", Project), ("sprk_regardingworkassignment", WorkAssignment)));
+
         // --- a service request's own family: ExternalDataService.ServiceRequestRelations at de38296499 (the document's
         // link is above, from DocumentLinkFields) ---
         rows.AddRange(new[]
