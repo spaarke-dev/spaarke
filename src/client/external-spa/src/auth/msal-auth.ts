@@ -855,7 +855,7 @@ export class TeamsGuestAccountError extends Error {
 
 /**
  * Whether the last successful Teams sign-in was a guest of the Teams tenant, and a masked `detail` saying why:
- * `path=naa|popup acct=0|1|other|missing home=match|differs|unreadable|none ext=yes|no` (no ids, names or addresses).
+ * `path=naa|popup acct=0|1|other|missing home=match|differs|unreadable|none ext=yes|no src=cache|fresh` (no ids, names or addresses).
  */
 export interface TeamsGuestVerdict {
   guest: boolean;
@@ -894,7 +894,10 @@ function teamsGuestVerdict(
         : 'differs';
   const ext = typeof account?.username === 'string' && account.username.toUpperCase().includes('#EXT#') ? 'yes' : 'no';
   const guest = acct === 'missing' ? isTeamsGuestAccount(account, cfg.tenantId) : acct !== '0';
-  return { guest, detail: `path=${path} acct=${acct} home=${home} ext=${ext}` };
+  return {
+    guest,
+    detail: `path=${path} acct=${acct} home=${home} ext=${ext} src=${result.fromCache ? 'cache' : 'fresh'}`,
+  };
 }
 
 /** The verdict of the last successful Teams token acquisition (null before the first). */

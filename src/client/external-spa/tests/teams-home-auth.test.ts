@@ -1072,8 +1072,36 @@ describe('Teams bootstrap (main.tsx): the Teams context tid picks the backend', 
       expect(instance?.getActiveAccount()).toBe(JANE);
       expect(msalAuth.getTeamsWorkforceGuestVerdict()).toEqual({
         guest: false,
-        detail: 'path=naa acct=0 home=match ext=no',
+        detail: 'path=naa acct=0 home=match ext=no src=fresh',
       });
+    });
+
+    it('a token served from the MSAL cache says src=cache in the diagnostic', async () => {
+      h.naa[HOME_CLIENT_ID] = { sso: async () => ({ ...tokenWithAcct(1, JANE), fromCache: true }) };
+      const { rtl } = await boot();
+      expect(await rtl.screen.findByText(screenText)).toBeTruthy();
+      expect(document.body.textContent).toContain('Diagnostic: path=naa acct=1 home=match ext=no src=cache');
+    });
+
+    it('recovery: the "Sign in" click returns a non-member token -> the guest screen carries the popup diagnostic', async () => {
+      let attempts = 0;
+      h.naa[HOME_CLIENT_ID] = {
+        sso: async () => {
+          throw new Error('NAA bridge error');
+        },
+      };
+      h.pca[HOME_CLIENT_ID] = {
+        popup: async () => {
+          attempts += 1;
+          if (attempts === 1) throw new Error('popup_window_error');
+          return tokenWithAcct(1, JANE);
+        },
+      };
+      const { rtl } = await boot();
+      rtl.fireEvent.click(await rtl.screen.findByRole('button', { name: 'Sign in' }));
+      expect(await rtl.screen.findByText(screenText)).toBeTruthy();
+      expectGuestScreen(rtl);
+      expect(document.body.textContent).toContain('Diagnostic: path=popup acct=1 home=match ext=no src=fresh');
     });
   });
 
