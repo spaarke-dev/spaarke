@@ -461,11 +461,16 @@ public sealed class InvoiceAdjustmentService
             return new AdjustmentResult(AdjustmentStatus.OwnerUnresolved, AdjustmentCodes.OwnerUnresolved, "The invoice names no single core record.");
         }
 
+        var reviewedOn = _time.GetUtcNow();
+        var nextSequence = lineRows.Select(r => r.GetAttributeValue<int?>(InvoiceSubmissionPersister.LineSequence) ?? 0).DefaultIfEmpty(0).Max() + 1;
+        var row = BuildRow(command, lineId, method, value, reason, dryRun.AdjustmentLineAmounts[lineId], nextSequence, reviewedOn.UtcDateTime, invoice, core.Value);
+
+        // UAC 194b R3b-2: the line's question is built from the row itself (RecordOwnershipContext.ForChild: its invoice, its core record and
+        // the other lookups it holds, in sprk_billingevent's primary order), the question the secure-child reconciler asks the written row.
         RecordOwnerResolution owner;
         try
         {
-            owner = await _ownership.ResolveOwnerAsync(
-                RecordOwnershipContext.ForParents(new RecordOwnershipParent?[] { new(core.Value.Entity, core.Value.Id) }), ct).ConfigureAwait(false);
+            owner = await _ownership.ResolveOwnerAsync(RecordOwnershipContext.ForChild(row), ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -478,9 +483,6 @@ public sealed class InvoiceAdjustmentService
             return new AdjustmentResult(AdjustmentStatus.OwnerUnresolved, AdjustmentCodes.OwnerUnresolved, "The adjustment line has no owner; nothing was changed.");
         }
 
-        var reviewedOn = _time.GetUtcNow();
-        var nextSequence = lineRows.Select(r => r.GetAttributeValue<int?>(InvoiceSubmissionPersister.LineSequence) ?? 0).DefaultIfEmpty(0).Max() + 1;
-        var row = BuildRow(command, lineId, method, value, reason, dryRun.AdjustmentLineAmounts[lineId], nextSequence, reviewedOn.UtcDateTime, invoice, core.Value);
         owner.ApplyTo(row);
         RecordCreatorPerson.Stamp(row, command.ReviewerSystemUserId);
         if (InvoiceFamilyCoreRecordGuard.Check(row) is { IsRefused: true } refused)

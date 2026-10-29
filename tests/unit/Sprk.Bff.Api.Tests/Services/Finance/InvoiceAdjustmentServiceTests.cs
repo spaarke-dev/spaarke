@@ -77,6 +77,8 @@ public sealed class InvoiceAdjustmentServiceTests
         public readonly Dictionary<Guid, string> RuleSetNames = new() { [RuleSet] = "Acme Billing Guidelines" };
         public readonly List<Guid> FirmsAsked = [];
         public RecordOwnerResolution Owner = RecordOwnerResolution.Owned(Team);
+        /// <summary>194b R3b-2: when set, the REAL resolver (over an <see cref="TestInfrastructure.OwnershipDirectory"/>) replaces the mock.</summary>
+        public IRecordOwnershipResolver? Resolver;
         public int CreateCount;
         public int DeactivationCount;
         public int TotalsWriteCount;
@@ -243,7 +245,7 @@ public sealed class InvoiceAdjustmentServiceTests
         {
             var totals = new InvoiceTotalsService(Records.Object, Entities.Object, NullLogger<InvoiceTotalsService>.Instance);
             return new InvoiceAdjustmentService(
-                Entities.Object, totals, Locks, Ownership.Object,
+                Entities.Object, totals, Locks, Resolver ?? Ownership.Object,
                 (firm, _) =>
                 {
                     FirmsAsked.Add(firm);
@@ -651,6 +653,61 @@ public sealed class InvoiceAdjustmentServiceTests
 
         result.Status.Should().Be(AdjustmentStatus.OwnerUnresolved);
         w.CreateCount.Should().Be(0);
+    }
+
+    [Fact(DisplayName = "194b R3b-2: the Adjustment line asks its own question (ForChild): sprk_billingevent, the invoice primary, then the core record")]
+    public async Task TheAdjustmentLine_AsksTheRowsOwnQuestion_InvoicePrimary()
+    {
+        var w = new World();
+
+        var result = await w.Service().AddAsync(Add(w), CancellationToken.None);
+
+        result.Status.Should().Be(AdjustmentStatus.Applied);
+        var ask = w.Ownership.Invocations
+            .Where(i => i.Method.Name == nameof(IRecordOwnershipResolver.ResolveOwnerAsync))
+            .Select(i => (RecordOwnershipContext)i.Arguments[0])
+            .Should().ContainSingle().Subject;
+        ask.ChildEntityLogicalName.Should().Be("sprk_billingevent", "the question is built for the line's table (ForChild)");
+        ask.Parents.Should().Equal(
+            new RecordOwnershipParent("sprk_invoice", w.InvoiceId),
+            new RecordOwnershipParent("sprk_project", Core));
+    }
+
+    [Theory(DisplayName = "194b R3b-2: an ordinary invoice's Adjustment line is owned by its business unit's team; a Secure invoice's by the Secure Record owner team")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task TheAdjustmentLine_IsOwnedLikeItsInvoice_OrdinaryOrSecure(bool secure)
+    {
+        var w = new World();
+        var directory = TestInfrastructure.OwnershipDirectory.Standard();
+        if (secure)
+        {
+            directory.WithSecureRoot("sprk_project", Core)
+                .WithRecord("sprk_invoice", w.InvoiceId, TestInfrastructure.OwnershipDirectory.SecureBu, owningTeam: TestInfrastructure.OwnershipDirectory.SecureNamedTeam);
+        }
+        else
+        {
+            directory.WithOrdinaryRoot("sprk_project", Core)
+                .WithRecord("sprk_invoice", w.InvoiceId, TestInfrastructure.OwnershipDirectory.ChildBu, owningTeam: TestInfrastructure.OwnershipDirectory.ChildTeam);
+        }
+
+        w.Resolver = directory.Resolver();
+
+        var result = await w.Service().AddAsync(Add(w), CancellationToken.None);
+
+        result.Status.Should().Be(AdjustmentStatus.Applied);
+        var owner = w.Row(result.Adjustment!.LineId).GetAttributeValue<EntityReference>("ownerid");
+        owner.LogicalName.Should().Be("team");
+        if (secure)
+        {
+            owner.Id.Should().Be(TestInfrastructure.OwnershipDirectory.SecureNamedTeam, "a Secure invoice's line goes to the named Secure Record owner team");
+            directory.IsTeamOfTheSecureRecordBusinessUnit(owner.Id).Should().BeTrue();
+        }
+        else
+        {
+            owner.Id.Should().Be(TestInfrastructure.OwnershipDirectory.ChildTeam, "an ordinary invoice's line goes to its business unit's default team");
+            directory.IsTeamOfTheSecureRecordBusinessUnit(owner.Id).Should().BeFalse();
+        }
     }
 
     [Fact]
