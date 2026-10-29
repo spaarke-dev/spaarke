@@ -192,6 +192,9 @@ public sealed class ExternalAccessReconciliationJob : IScheduledJob
     /// </summary>
     internal const string OrganizationLookupAttribute = "sprk_organization";
 
+    /// <summary>The grant row's contact lookup, as an SDK attribute name (task 193 G4a: R5 checks it still represents the paired user).</summary>
+    internal const string ContactLookupAttribute = "sprk_contact";
+
     private const string OrganizationAlias = "og";
 
     // Dataverse Inactive on BOTH tables, live-verified 2026-09-21 (MCP describe): statecode Inactive(1) and
@@ -363,6 +366,13 @@ public sealed class ExternalAccessReconciliationJob : IScheduledJob
                 problems.Add(
                     $"{rule.Rule}: {pairedFaults.ShareUnreadable} paired grant(s) were left unchanged because their record's " +
                     "shares could not be read; they are retried on the next run.");
+            }
+
+            if (rule.Paired is { RepresentationUnreadable: > 0 } representationFaults)
+            {
+                problems.Add(
+                    $"{rule.Rule}: {representationFaults.RepresentationUnreadable} paired grant(s) were left unchanged because who " +
+                    "their contact represents could not be read; they are retried on the next run.");
             }
         }
 
@@ -1199,6 +1209,8 @@ public sealed class ExternalAccessReconciliationJob : IScheduledJob
         if (RootOf(row) is not { } root)
             return null;
 
+        var contact = row.GetAttributeValue<EntityReference>(ContactLookupAttribute) is { } c && c.Id != Guid.Empty ? c.Id : (Guid?)null;
+
         return new PlannedChange(
             RuleEndPairedGrantShareGone,
             ExternalGrantLifecycle.EntityLogicalName,
@@ -1207,7 +1219,7 @@ public sealed class ExternalAccessReconciliationJob : IScheduledJob
             AfterState: "(decided by the paired user's share on the record)",
             Fields: new Dictionary<string, object>())
         {
-            Paired = new PairedGrant(paired.Id, root),
+            Paired = new PairedGrant(paired.Id, root) { ContactId = contact },
         };
     }
 
@@ -1243,6 +1255,7 @@ public sealed class ExternalAccessReconciliationJob : IScheduledJob
         }
 
         var sharesByRoot = new Dictionary<(ExternalGrantRootType, Guid), IReadOnlyList<DataversePrincipalAccess>?>();
+        var representations = new Dictionary<Guid, ContactRepresentation>();
         var resolved = new List<PlannedChange>(pending.Count);
         foreach (var change in pending)
         {
@@ -1285,7 +1298,32 @@ public sealed class ExternalAccessReconciliationJob : IScheduledJob
             var mask = shares.Where(sh => sh.Principal == principal).Aggregate(0, (m, sh) => m | sh.AccessRightsMask);
             if (mask != 0)
             {
-                report.ShareHeld++;
+                // Task 193 G4a (K): the share is held, but the pairing also needs the grant's contact to still represent the
+                // paired user (task 141's link, through the ONE representation read). A contact that no longer does — the link
+                // moved, the oid binding changed, the contact was deactivated — ends the grant: it is no longer that user's
+                // workforce-app access. A read that cannot tell leaves the grant unchanged and is counted (never a guess).
+                var represented = paired.ContactId is { } contactId
+                    ? await StillRepresentsAsync(services, contactId, paired.SystemUserId, representations, context, ct).ConfigureAwait(false)
+                    : true;
+                if (represented is null)
+                {
+                    report.RepresentationUnreadable++;
+                    continue;
+                }
+
+                if (represented.Value)
+                {
+                    report.ShareHeld++;
+                    continue;
+                }
+
+                report.NoLongerRepresented++;
+                resolved.Add(change with
+                {
+                    AfterState = $"statecode={StateCodeInactive} statuscode={StatusCodeInactive} (the grant's contact no longer " +
+                                 $"represents paired user {paired.SystemUserId}; pairing kept)",
+                    Fields = DeactivationFields(),
+                });
                 continue;
             }
 
@@ -1300,11 +1338,63 @@ public sealed class ExternalAccessReconciliationJob : IScheduledJob
         planned[RuleEndPairedGrantShareGone] = resolved;
     }
 
+    /// <summary>
+    /// Task 193 G4a (K): whether <paramref name="contactId"/> still represents <paramref name="systemUserId"/>, through
+    /// <see cref="ContactUserRepresentation.ResolveAsync"/> (one read per contact per run). <c>true</c>/<c>false</c> when decided
+    /// (an inactive or missing contact represents nobody); <c>null</c> when it could not be told — the reader missing or a read
+    /// that failed. The Restricted input is irrelevant here (only who is represented is asked), so it is not read.
+    /// </summary>
+    private async Task<bool?> StillRepresentsAsync(
+        IServiceProvider services,
+        Guid contactId,
+        Guid systemUserId,
+        Dictionary<Guid, ContactRepresentation> cache,
+        JobRunContext context,
+        CancellationToken ct)
+    {
+        if (!cache.TryGetValue(contactId, out var representation))
+        {
+            try
+            {
+                var reader = services.GetService<ContactUserRepresentation>();
+                representation = reader is null
+                    ? ContactRepresentation.Failed(null, "The contact representation reader is not registered.")
+                    : await reader.ResolveAsync(contactId, rootIsRestricted: false, BindingColumnMissingPolicy.DecideOnLink, ct)
+                        .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                representation = ContactRepresentation.Failed(ex, $"Who contact {contactId} represents could not be read.");
+            }
+
+            cache[contactId] = representation;
+            if (representation.Status == ContactRepresentationStatus.Unreadable)
+            {
+                _logger.LogError(representation.Fault,
+                    "[EXT-ACCESS-RECON] {Rule}: who contact {ContactId} represents could not be read ({Detail}); its paired grant(s) " +
+                    "are left unchanged. correlationId={CorrelationId}",
+                    RuleEndPairedGrantShareGone, contactId, representation.FaultDetail, context.CorrelationId);
+            }
+        }
+
+        return representation.Status switch
+        {
+            ContactRepresentationStatus.Read or ContactRepresentationStatus.ColumnMissing
+                => representation.Users.Any(u => u.SystemUserId == systemUserId),
+            ContactRepresentationStatus.Inactive or ContactRepresentationStatus.NotFound => false,
+            _ => null,
+        };
+    }
+
     /// <summary>The R5 scan: ACTIVE grant rows that carry a pairing, with their record lookups. Ordered by id for stable paging.</summary>
     internal static string BuildPairedGrantScanFetchXml(int page, string? pagingCookie)
     {
         var entity = new XElement("entity", new XAttribute("name", ExternalGrantLifecycle.EntityLogicalName),
-            Attributes(new[] { "sprk_externalrecordaccessid", "statecode", PairedSystemUserAttribute }
+            Attributes(new[] { "sprk_externalrecordaccessid", "statecode", PairedSystemUserAttribute, ContactLookupAttribute }
                 .Concat(RootLookupAttributes.Select(r => r.Attribute)).ToArray()),
             new XElement("order", new XAttribute("attribute", "sprk_externalrecordaccessid")),
             new XElement("filter", new XAttribute("type", "and"),
@@ -1560,7 +1650,11 @@ public sealed class ExternalAccessReconciliationJob : IScheduledJob
     }
 
     /// <summary>A paired grant awaiting its R5 decision: the user it is paired with and the record it grants.</summary>
-    internal sealed record PairedGrant(Guid SystemUserId, (ExternalGrantRootType Type, Guid Id) Root);
+    internal sealed record PairedGrant(Guid SystemUserId, (ExternalGrantRootType Type, Guid Id) Root)
+    {
+        /// <summary>The grant's contact (<c>sprk_contact</c>), when it names one: it must still represent the paired user.</summary>
+        public Guid? ContactId { get; init; }
+    }
 
     /// <summary>R5's report (task 193 G1): what the run found about the paired grants beyond the planned ends.</summary>
     internal sealed class PairedGrantReport
@@ -1574,7 +1668,20 @@ public sealed class ExternalAccessReconciliationJob : IScheduledJob
         /// <summary>Paired grants whose record's shares could not be read: left unchanged, retried on the next run.</summary>
         public int ShareUnreadable;
 
-        public object ToReport() => new { columnMissing = ColumnMissing, shareHeld = ShareHeld, shareUnreadable = ShareUnreadable };
+        /// <summary>Task 193 G4a (K): paired grants planned to end because their contact no longer represents the paired user.</summary>
+        public int NoLongerRepresented;
+
+        /// <summary>Task 193 G4a (K): paired grants left unchanged because who their contact represents could not be read.</summary>
+        public int RepresentationUnreadable;
+
+        public object ToReport() => new
+        {
+            columnMissing = ColumnMissing,
+            shareHeld = ShareHeld,
+            shareUnreadable = ShareUnreadable,
+            noLongerRepresented = NoLongerRepresented,
+            representationUnreadable = RepresentationUnreadable,
+        };
     }
 
     /// <summary>A contact-issued undated grant row awaiting its R1 decision (session 27 round 42 item 2).</summary>

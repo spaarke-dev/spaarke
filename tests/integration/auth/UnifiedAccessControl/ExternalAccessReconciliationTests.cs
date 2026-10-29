@@ -63,6 +63,8 @@ public class ExternalAccessReconciliationTests
     private readonly FakeDataverse _dataverse = new();
     private readonly ContactGrantTable _grants = new();
     private readonly FakeRecordShareTable _shares = new();
+    // Task 193 G4a (K): who a grant's contact represents — the ONE representation read, over the harness's link and identity stores.
+    private readonly AssignedAccessTestDoubles.Harness _people = new();
     private readonly GrantPolicyTestDoubles.FlagStubParticipationService _participations = new(RootRecordFlags.None);
     private readonly CapturingLogger _log = new();
     private readonly FakeTimeProvider _time = new(Now);
@@ -440,6 +442,97 @@ public class ExternalAccessReconciliationTests
         Report().GetProperty("status").GetString().Should().Be("error");
     }
 
+    // ── R5, task 193 G4a (K): the grant's contact must still represent the paired user ─────────────────────────────
+
+    /// <summary>A paired grant on <paramref name="contact"/>, paired with <paramref name="user"/>, who holds a share on the matter.</summary>
+    private Guid SeedPairedGrantOnContact(Guid contact, Guid user)
+    {
+        var (id, matter, _) = SeedPairedGrant(user: user);
+        Grant(id)[ExternalAccessReconciliationJob.ContactLookupAttribute] = new EntityReference("contact", contact);
+        _shares.Seed("sprk_matter", matter, DataversePrincipalRef.User(user), 1);
+        return id;
+    }
+
+    [Fact]
+    public async Task R5_APairedGrantWhoseContactStillRepresentsTheUser_AndWhoseShareIsHeld_IsLeftAlone()
+    {
+        var (contact, user) = _people.LinkedContact();
+        var id = SeedPairedGrantOnContact(contact, user);
+
+        var result = await RunAsync(writes: true);
+
+        result.Success.Should().BeTrue();
+        State(Grant(id)).Should().Be(0);
+        Paired().GetProperty("shareHeld").GetInt32().Should().Be(1);
+        Paired().GetProperty("noLongerRepresented").GetInt32().Should().Be(0);
+        _dataverse.Writes.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// The contact now represents someone else (its link moved): the grant is no longer the paired user's workforce-app access,
+    /// so it ends even though that user still holds the share. The pairing is kept, as for any R5 end.
+    /// </summary>
+    [Fact]
+    public async Task R5_APairedGrantWhoseContactNoLongerRepresentsTheUser_IsEnded_EvenWhileTheShareIsHeld()
+    {
+        var (contact, _) = _people.LinkedContact();
+        var formerlyRepresented = Guid.NewGuid();
+        var id = SeedPairedGrantOnContact(contact, formerlyRepresented);
+
+        var result = await RunAsync(writes: true);
+
+        result.Success.Should().BeTrue();
+        State(Grant(id)).Should().Be(1);
+        Status(Grant(id)).Should().Be(2);
+        Grant(id).GetAttributeValue<EntityReference>(ExternalAccessReconciliationJob.PairedSystemUserAttribute).Id
+            .Should().Be(formerlyRepresented, "ending the grant does not erase what it was paired with");
+        Paired().GetProperty("noLongerRepresented").GetInt32().Should().Be(1);
+        Rule("R5")["Changed"].Should().Be(1);
+    }
+
+    [Fact]
+    public async Task R5_APairedGrantWhoseContactIsInactive_IsEnded()
+    {
+        var (contact, user) = _people.LinkedContact();
+        _people.Identities.AddContact(contact, oid: null, stateCode: 1);
+        var id = SeedPairedGrantOnContact(contact, user);
+
+        await RunAsync(writes: true);
+
+        State(Grant(id)).Should().Be(1, "an inactive contact represents nobody");
+    }
+
+    [Fact]
+    public async Task R5_ReportOnly_PlansTheEndOfAGrantWhoseContactNoLongerRepresentsTheUser_AndWritesNothing()
+    {
+        var (contact, _) = _people.LinkedContact();
+        var id = SeedPairedGrantOnContact(contact, Guid.NewGuid());
+
+        await RunAsync(writes: null);
+
+        Rule("R5")["Planned"].Should().Be(1);
+        Rule("R5")["Changed"].Should().Be(0);
+        State(Grant(id)).Should().Be(0);
+        _dataverse.Writes.Should().BeEmpty();
+        Paired().GetProperty("noLongerRepresented").GetInt32().Should().Be(1);
+    }
+
+    [Fact]
+    public async Task R5_WhenWhoTheContactRepresentsCannotBeRead_TheGrantIsUnchanged_TheFaultIsCounted_AndTheRunIsPartial()
+    {
+        var (contact, user) = _people.LinkedContact();
+        var id = SeedPairedGrantOnContact(contact, user);
+        _people.Store.FailLinkRead = true;
+
+        var result = await RunAsync(writes: true);
+
+        State(Grant(id)).Should().Be(0, "never end access on a read that failed");
+        Paired().GetProperty("representationUnreadable").GetInt32().Should().Be(1);
+        result.Success.Should().BeFalse();
+        Report().GetProperty("status").GetString().Should().Be("partial");
+        result.ErrorMessage.Should().Contain("who their contact represents could not be read");
+    }
+
     [Fact]
     public void ThePairedGrantScan_AdmitsOnlyActivePairedRows_AndSelectsThePairingAndEveryRecordLookup()
     {
@@ -449,6 +542,7 @@ public class ExternalAccessReconciliationTests
         entity.Elements("attribute").Select(a => (string?)a.Attribute("name")).Should()
             .Contain(ExternalAccessReconciliationJob.RootLookupAttributes.Select(r => r.Attribute))
             .And.Contain(ExternalAccessReconciliationJob.PairedSystemUserAttribute)
+            .And.Contain(ExternalAccessReconciliationJob.ContactLookupAttribute)
             .And.Contain("statecode");
         entity.Descendants("condition").Should().Contain(c =>
             (string?)c.Attribute("attribute") == ExternalAccessReconciliationJob.PairedSystemUserAttribute
@@ -1349,6 +1443,8 @@ public class ExternalAccessReconciliationTests
         services.AddSingleton<ExternalParticipationService>(_participations);
         // R5's share reads (task 193 G1) — resolved only when a paired grant is planned.
         services.AddSingleton<IDataverseRecordShareService>(_shares);
+        // R5's representation read (task 193 G4a, K) — resolved only when a paired grant whose user holds a share names a contact.
+        services.AddSingleton(new ContactUserRepresentation(_people.Identities, _people.Store, _people.Participations));
         using var provider = services.BuildServiceProvider();
 
         var job = new ExternalAccessReconciliationJob(
