@@ -113,6 +113,7 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
     private readonly Action<BillingDecision> _preflight;
     private readonly Func<JobContract, CancellationToken, Task> _submitJob;
     private readonly Func<Guid, Guid?, Guid, CancellationToken, Task<InvoiceDocumentRefileResult>> _refileDocument;
+    private readonly Func<Guid, CancellationToken, Task<bool>> _refreshApprovers;
 
     public InvoiceSubmissionAfterSteps(
         IGenericEntityService entities,
@@ -123,6 +124,7 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         IInvoiceTotalsService totals,
         IEbillingNotificationSink sink,
         InvoiceDocumentRefile refile,
+        EligibleApproverResolver approvers,
         ILogger<InvoiceSubmissionAfterSteps> logger)
         : this(
             entities,
@@ -137,7 +139,8 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
             (recorder ?? throw new ArgumentNullException(nameof(recorder))).RecordAsync,
             recorder.Preflight,
             (jobs ?? throw new ArgumentNullException(nameof(jobs))).SubmitJobAsync,
-            refileDocument: (refile ?? throw new ArgumentNullException(nameof(refile))).RefileAsync)
+            refileDocument: (refile ?? throw new ArgumentNullException(nameof(refile))).RefileAsync,
+            refreshApprovers: (approvers ?? throw new ArgumentNullException(nameof(approvers))).RefreshInvoiceAsync)
     {
     }
 
@@ -155,8 +158,11 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         Action<BillingDecision> preflight,
         Func<JobContract, CancellationToken, Task> submitJob,
         TimeProvider? time = null,
-        Func<Guid, Guid?, Guid, CancellationToken, Task<InvoiceDocumentRefileResult>>? refileDocument = null)
+        Func<Guid, Guid?, Guid, CancellationToken, Task<InvoiceDocumentRefileResult>>? refileDocument = null,
+        Func<Guid, CancellationToken, Task<bool>>? refreshApprovers = null)
     {
+        // Task 103: the eligible approvers at acceptance (D-78). The unit-test seam defaults to "nothing to resolve".
+        _refreshApprovers = refreshApprovers ?? ((_, _) => Task.FromResult(false));
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _idempotency = idempotency ?? throw new ArgumentNullException(nameof(idempotency));
         _totals = totals ?? throw new ArgumentNullException(nameof(totals));
@@ -513,6 +519,20 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
                     _logger.LogInformation(
                         "InvoiceIndexing jobs are handled only when DocumentIntelligence:Enabled is true; otherwise the message dead-letters (task 049 map row 9)");
                 }
+            }
+        }
+
+        // ── Task 103 (D-78): the eligible approvers at acceptance, best effort (the refresh job and GET re-resolve; approve resolves live) ──
+        if (stored.Kind != SubmissionEvaluationKind.AutoRejected)
+        {
+            try
+            {
+                await _refreshApprovers(invoiceId, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogWarning("Invoice submission {SubmissionId}: the eligible approvers of invoice {InvoiceId} could not be resolved ({Fault}); the refresh job retries",
+                    submissionId, invoiceId, ex.GetType().Name);
             }
         }
 

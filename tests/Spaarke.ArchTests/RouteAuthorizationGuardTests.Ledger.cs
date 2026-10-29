@@ -402,6 +402,13 @@ public partial class RouteAuthorizationGuardTests
             + "Dataverse as the caller on EVERY call inside SubmissionOverrideService (EbillingOverridePrivilege, fail closed: 403 "
             + "ebilling.override.not_permitted); Return needs no privilege (D-73). The decider, the invoice, the findings and the decision id are "
             + "derived server-side, never taken from the request."),
+        new GovernedFile("Api/Finance/InvoiceApprovalEndpoints.cs", Scope.RouteLevelGate,
+            "GET /api/finance/invoices/{invoiceId}/approval and POST /api/finance/invoices/{invoiceId}/approve (ebilling-r1 task 103, FR-35, "
+            + "FR-11, D-40, D-78) -- the approval state and the approve operation. Each route carries AddFinanceAuthorizationFilter as the caller on "
+            + "the invoice named in the path (finance.read: Read; ebilling.invoice.decide: Write), fail closed; the eBilling kill switch runs after "
+            + "it. Approve additionally resolves the caller's eligibility LIVE from the invoice's core record inside InvoiceApprovalService on every "
+            + "call (403 ebilling.approver.not_eligible, nothing written); the stored eligible-approver set never grants. The decider and the "
+            + "decision id are derived server-side, never taken from the request."),
         new GovernedFile("Api/Finance/StoredFileEndpoints.cs", Scope.RouteLevelGate,
             "GET /api/finance/files/{fileId}/content (ebilling-r1 task 090, EB-D-148, procedure-and-file-model 4.3) -- an internal caller downloads "
             + "a Stored File's bytes. AddStoredFileAccessFilter runs the download rule before the handler: step 0 (403 before any record read), "
@@ -1024,7 +1031,12 @@ public partial class RouteAuthorizationGuardTests
     // /api/finance/files/{fileId}/content. Classified by GovernedFiles (RouteLevelGate: AddStoredFileAccessFilter, credited in CreditedForms:
     // step 0, then the caller's own Read on the parent and the source document via the gate variant); .RequireEbillingEnabled is already in
     // NotAuthorizationForms.
-    private const int ExpectedEndpointFileCount = 143;
+    // 143 -> 144 (2026-10-28, ebilling-r1 task 103, FR-35). Net +1: Api/Finance/InvoiceApprovalEndpoints.cs ADDED -- GET
+    // /api/finance/invoices/{invoiceId}/approval and POST .../approve. Classified by GovernedFiles (RouteLevelGate: AddFinanceAuthorizationFilter,
+    // finance.read / ebilling.invoice.decide on the route's invoice; approve's eligibility is asked inside the service on every call); the
+    // kill-switch filter .RequireEbillingEnabled is already classified in NotAuthorizationForms. Parallel tasks 101 / 102 that also add a file
+    // each bump this by one: reconcile the sum at integration.
+    private const int ExpectedEndpointFileCount = 144;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision

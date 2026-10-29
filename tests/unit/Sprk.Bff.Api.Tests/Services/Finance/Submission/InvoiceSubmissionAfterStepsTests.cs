@@ -369,8 +369,12 @@ public class InvoiceSubmissionAfterStepsTests
                     return Task.CompletedTask;
                 },
                 Clock,
-                refileDocument: Refile);
+                refileDocument: Refile,
+                refreshApprovers: RefreshApprovers);
         }
+
+        /// <summary>Task 103: the eligible-approver step at acceptance (null: the test-seam default, "nothing to resolve").</summary>
+        public Func<Guid, CancellationToken, Task<bool>>? RefreshApprovers { get; set; }
 
         /// <summary>050a: the re-file step (null: the production default for a test seam, "no existing document").</summary>
         public Func<Guid, Guid?, Guid, CancellationToken, Task<InvoiceDocumentRefileResult>>? Refile { get; set; }
@@ -763,6 +767,51 @@ public class InvoiceSubmissionAfterStepsTests
             Submission, SubmissionDecisionOutcome.Accepted, InvoiceSubmissionChannel.Spa, InvoiceId, null));
         world.TerminalWrites.Should().ContainSingle().Which[InvoiceSubmissionPersister.SubmissionStatus]
             .Should().Be(new OptionSetValue((int)InvoiceSubmissionStatus.Accepted));
+    }
+
+    [Fact(DisplayName = "103: an accepted invoice's eligible approvers are resolved once, before the notification; an automatic rejection resolves none")]
+    public async Task Accepted_ResolvesTheEligibleApprovers_AutoRejectedDoesNot()
+    {
+        var accepted = await Accepted();
+        var refreshed = new List<Guid>();
+        var world = new World(accepted)
+        {
+            RefreshApprovers = (invoice, _) =>
+            {
+                refreshed.Add(invoice);
+                return Task.FromResult(true);
+            },
+        };
+
+        var result = await world.Build().RunAsync(Persisted(accepted), null);
+
+        result.Status.Should().Be(SubmissionAfterStepsStatus.Completed);
+        refreshed.Should().Equal(InvoiceId);
+
+        var rejected = await AutoRejected();
+        var rejectedWorld = new World(rejected)
+        {
+            RefreshApprovers = (invoice, _) =>
+            {
+                refreshed.Add(invoice);
+                return Task.FromResult(true);
+            },
+        };
+        (await rejectedWorld.Build().RunAsync(Persisted(rejected), null)).Status.Should().Be(SubmissionAfterStepsStatus.Completed);
+        refreshed.Should().ContainSingle("an automatically rejected invoice has no one to approve it");
+    }
+
+    [Fact(DisplayName = "103: a failure resolving the eligible approvers only warns; the submission still completes (the refresh job retries)")]
+    public async Task EligibleApproverFailure_OnlyWarns()
+    {
+        var accepted = await Accepted();
+        var world = new World(accepted) { RefreshApprovers = (_, _) => throw new InvalidOperationException("dataverse down") };
+
+        var result = await world.Build().RunAsync(Persisted(accepted), null);
+
+        result.Status.Should().Be(SubmissionAfterStepsStatus.Completed);
+        world.Notified.Should().ContainSingle();
+        world.TerminalWrites.Should().ContainSingle();
     }
 
     [Fact(DisplayName = "049 D: AcceptedUncoded - the hold system Signal (policy present), indexing, notify Accepted")]
