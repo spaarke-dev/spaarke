@@ -8,8 +8,9 @@
 
 - **#2412 (ISS-027) and #2416 (ISS-028): CLOSED 2026-10-29.** The owner re-test passed on dev in Outlook web: a typed name produced `2026-10-08_New Email File Name 10-29-2026.eml` filed to PAT-935426, and the subject was kept. Retest comments are on both issues. Known limit: #2421.
 - **Outlook DESKTOP sign-in: "Bad Request - Request Too Long" (HTTP 400, request headers too long) on login.microsoftonline.com** in the sign-in popup. Outlook web is fine.
-  - Diagnosis: the cookie jar for login.microsoftonline.com in Outlook desktop's embedded browser has grown too large. The authorize URL is normal, and our MSAL `storeAuthStateInCookie` writes only on the add-in's own origin.
-  - Asked the owner to clear the Office add-in cache (`%LOCALAPPDATA%\Microsoft\Office\16.0\Wef\`, with Outlook closed). If it recurs soon after a clear, investigate what keeps adding cookies and file it.
+  - NOT the add-in and NOT the Office cache: clearing Wef did not help, and Edge also gets the 400 on admin.microsoft.com and portal.azure.com.
+  - Machine: Entra-joined to Helios IP, plus 3 registered work accounts (RightHub Groups, Spaarke Inc., Dewey Cheatham & Howe PC). Likely cause: the per-account Windows SSO cookies Edge and WebView2 send to login.microsoftonline.com are too large in total.
+  - Owner steps: an InPrivate test, clear Edge's login.microsoftonline.com site data, then disconnect an unneeded work account (never Helios IP: that is the device join). No code change; nothing to file.
 - Offer to correct the owner's 10-28 test record (comm 12f1f3f8…, doc 536204ff…) only if they ask.
 - **ebilling 094 merged into work/ebilling-r1** (094 head 600079fd11; contract unchanged since 97c793670b). The client for its codes is in **PR #2448, AUTO-MERGE ON**: `task/word-133-094-codes`, **C:\wt133d**; e480113b0c, then review round 1 d5a75a0479.
   - Every 094 row in §6 and §9 has a sentence. Permanent (upload hint): email_save_failed, document_unavailable, document_not_found, source_communication_mismatch, COMMUNICATION_REFILE_FORBIDDEN. storage_not_configured is a plain refusal.
