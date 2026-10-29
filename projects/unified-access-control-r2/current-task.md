@@ -39,6 +39,12 @@
 - **ebilling RecordFamilyEdges proposal** (4beed693da): verdict SENT. Accepted 21 rows. The invoice ↔ work-assignment row is kept, and ebilling adds a write-time refusal plus a test that pins the container 409. submission.sprk_invoice and .sprk_reportdocument are baselined as outputs, and ebilling puts the submission's core lookups first. **UAC follow-up #2427:** an `OutputLookups` set in RecordOwnershipResolver, landing before `OrdinaryMovesWritesEnabled` is turned on (after 194b merges); send the sha to ebilling.
 - **ebilling 094 round 5** (97c793670b): READY after the F3 withdraw-fault test + blank-key fix (queued their side); re-check that diff only. 098 round 5 READY. 095 OK. Standing: no Procedure-table role privilege without UAC review; D-185.
 - **ontology #2418** (Assign Task email + bell): NOT READY (F-1..F-4, F1b); wait for the fix head after the owner answers ontology's policy questions; re-check the diff only. #2422 (D-198) APPROVED; #2414 APPROVED; #2409 merged. Filed #2423.
+- **field-mapping §13.5 (owner 10-29):**
+  - Q1: drop, on every write path.
+  - Q2: (B). Each customer environment gets the 7 canonical `sprk_aisearchindex` rows, owned by the config team, with no business-unit defaults. The reason: the code-page picker is empty with 0 rows, and ACME is in that state today.
+  - FR-38 keeps the per-BU lookup as a hook.
+  - The table stays, and the config role keeps it.
+  - The wizard-linking role entry goes in W3; that PR comes to UAC. My notes sent: H7c runs before H12a; the rows share one source with the allow-list catalog; consider dropping Core User's AppendTo Deep in W3.
 - **field-mapping:** §13 (#2399) accepted. After 194b merges: run RecordFamilyEdgesGuardTests and 037's pins; check the copied default lands before the ownership step in `OwnedChildWrite.CreateAsync`. 071 starts after 194b.
 - **word-add-in task 130:** two security passes when the PR arrives.
 
