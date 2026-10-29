@@ -302,6 +302,23 @@ public sealed class StoredFileService
     }
 
     /// <summary>
+    /// The lookups <see cref="BuildRow"/> writes on a row for <paramref name="spec"/> (column → record): the parent lookup and, when set,
+    /// the source document and source communication. The ownership question of the row is asked over exactly these.
+    /// </summary>
+    private static KeyValuePair<string, RecordOwnershipParent?>[] RowLookupsOf(StoredFileRowSpec spec)
+    {
+        var lookups = new List<KeyValuePair<string, RecordOwnershipParent?>>
+        {
+            KeyValuePair.Create(spec.Parent.Table, (RecordOwnershipParent?)new RecordOwnershipParent(spec.Parent.Table, spec.Parent.Id)),
+        };
+        if (spec.SourceDocumentId is { } document)
+            lookups.Add(KeyValuePair.Create(StoredFileSchema.SourceDocument, (RecordOwnershipParent?)new RecordOwnershipParent(StoredFileSchema.DocumentTable, document)));
+        if (spec.SourceCommunicationId is { } communication)
+            lookups.Add(KeyValuePair.Create(StoredFileSchema.SourceCommunication, (RecordOwnershipParent?)new RecordOwnershipParent(StoredFileSchema.CommunicationTable, communication)));
+        return lookups.ToArray();
+    }
+
+    /// <summary>
     /// Flips a Not yet servable row to Servable (9.1 step 5): the row's path must be its own, the blob must exist and its SHA-256,
     /// recomputed by streaming, must equal <c>sprk_sha256</c>; then ONE update of <c>sprk_filestatus</c> with
     /// <c>IfRowVersionMatches</c>. Missing blob, mismatch or a row that is not flippable → <see cref="StoredFileFlipOutcome.Definitive"/>
@@ -406,7 +423,8 @@ public sealed class StoredFileService
 
     /// <summary>
     /// stage → row → flip for a caller that has ALREADY authorized the work (150's export files): no caller checks here. The owner
-    /// is resolved from the parent (content rule); <paramref name="requestedBy"/> is recorded as the creator person when given. A
+    /// is the row's own answer (its table and lookups, UAC 194b R4b-2); <paramref name="requestedBy"/> is also the acting user a
+    /// parent that files nothing falls back to, and is recorded as the creator person when given. A
     /// retry with a deterministic id meets the row and blob of the first attempt and completes it.
     /// </summary>
     public Task<StoredFileCreateResult> CreateForAppAsync(StoredFileRowSpec spec, Stream content, Guid? requestedBy, CancellationToken ct)
@@ -435,8 +453,15 @@ public sealed class StoredFileService
             return StoredFileCreateResult.Refused(StoredFileRefusal.InvalidRequest);
         }
 
+        // UAC 194b R4b-2 (uac-r2 Q2): sprk_storedfile is a hard-deny table, so the question is the row's own (ForRow: its table and the
+        // lookups BuildRow writes), never its parent's content question. An ordinary answer is then the restricted-content owner team, a
+        // Secure one the Secure team. A parent that files nothing (a billing export, a procedure version) leaves the row unfiled: the
+        // acting user's business unit decides, through the same restricted-content exit; no acting user refuses.
         var owner = await _owners.ResolveOwnerAsync(
-            RecordOwnershipContext.ContentOf(spec.Parent.Table, spec.Parent.Id) with { RequestedBy = requester }, ct).ConfigureAwait(false);
+            RecordOwnershipContext.ForRow(
+                StoredFileSchema.Entity, RowLookupsOf(spec),
+                callerObjectId: requester?.ObjectId, callerSystemUserId: creatorPersonId) with { RequestedBy = requester },
+            ct).ConfigureAwait(false);
         if (owner.IsRefused)
         {
             _logger.LogWarning("Stored file {FileId} refused: no owner under {ParentTable} {ParentId} ({OwnerCode})",

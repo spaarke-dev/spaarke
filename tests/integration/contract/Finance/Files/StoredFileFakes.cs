@@ -470,7 +470,9 @@ internal sealed class StoredFileRig
         StepZero = StatedCaller.Register(services, stepZero);
         Provider = services.BuildServiceProvider();
         Owners.Setup(o => o.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(() => OwnerAnswer);
+            .Callback((RecordOwnershipContext context, CancellationToken _) => OwnerContexts.Add(context))
+            .Returns((RecordOwnershipContext context, CancellationToken token) =>
+                Ownership is { } directory ? directory.Resolver().ResolveOwnerAsync(context, token) : Task.FromResult(OwnerAnswer));
         Service = new StoredFileService(Dataverse.Service, Blobs, Probe, Owners.Object, Provider, NullLogger<StoredFileService>.Instance);
     }
 
@@ -482,6 +484,12 @@ internal sealed class StoredFileRig
     public RecordingRightsProbe Probe { get; } = new();
     public Mock<IRecordOwnershipResolver> Owners { get; } = new(MockBehavior.Strict);
     public RecordOwnerResolution OwnerAnswer { get; set; } = RecordOwnerResolution.Owned(TeamId);
+
+    /// <summary>When set, the owner is answered by the REAL resolver over this directory instead of <see cref="OwnerAnswer"/>.</summary>
+    public Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory? Ownership { get; set; }
+
+    /// <summary>Every ownership question the service asked, in order.</summary>
+    public List<RecordOwnershipContext> OwnerContexts { get; } = [];
     public ILogger Logger { get; } = NullLogger.Instance;
     public StatedCaller StepZero { get; }
     public ServiceProvider Provider { get; }
