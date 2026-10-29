@@ -486,6 +486,8 @@ public sealed class InvoiceReviewReadService
             PageInfo = new PagingInfo { PageNumber = 1, Count = PageSize },
         };
         query.Criteria.AddCondition(InvoiceTotalsService.LineInvoiceLookup, ConditionOperator.Equal, invoiceId);
+        // Task 102 (NFR-09): a removed (deactivated) invoice-level Adjustment line is neither shown nor counted; 016's totals read does the same.
+        InvoiceTotalsService.ExcludeInactiveAdjustments(query);
         query.AddOrder(InvoiceSubmissionPersister.LineSequence, OrderType.Ascending);
         query.AddOrder($"{LineEntity}id", OrderType.Ascending);
         return query;

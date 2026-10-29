@@ -280,7 +280,8 @@ public sealed class BillingFactLoader
 
     // ── Rules ────────────────────────────────────────────────────────────────────────────────────────────────
 
-    private async Task<IReadOnlyList<BillingRuleCandidate>> LoadRulesAsync(Guid firmId, CancellationToken ct)
+    // Internal since ebilling-r1 task 102: the invoice-adjustment rule list (D-74, F-8) uses the evaluator's own selection, not a second copy.
+    internal async Task<IReadOnlyList<BillingRuleCandidate>> LoadRulesAsync(Guid firmId, CancellationToken ct)
     {
         var setQuery = new QueryExpression(RuleSetEntity)
         {
@@ -606,11 +607,12 @@ public sealed class BillingFactLoader
             {
                 ColumnSet = new ColumnSet(
                     "sprk_invoice", "sprk_eventdate", "sprk_timekeeper", "sprk_resolvedtimekeeper", "sprk_quantity", "sprk_description",
-                    "sprk_amount", "sprk_costtype", "sprk_linesequence"),
+                    "sprk_amount", "sprk_costtype", "sprk_linesequence", "statecode"),
                 NoLock = true,
             };
             query.Criteria.AddCondition("sprk_invoice", ConditionOperator.In, chunk.Cast<object>().ToArray());
-            rows.AddRange(await AllAsync(query, ct).ConfigureAwait(false));
+            // ebilling-r1 task 102 (NFR-09): a removed invoice-level adjustment is deactivated, not deleted, so it is not a prior line.
+            rows.AddRange((await AllAsync(query, ct).ConfigureAwait(false)).Where(Finance.InvoiceTotalsService.IsCounted));
         }
 
         return rows

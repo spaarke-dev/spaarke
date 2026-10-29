@@ -359,6 +359,13 @@ public partial class RouteAuthorizationGuardTests
             + "and GET .../retire-preview -- Write on the Procedure AND the billing-admin marker (Write on sprk_ruleset); POST .../versions -- the "
             + "same plus Create on sprk_policyversion; POST .../versions/{versionId}/publish -- the same plus Write on sprk_policyversion and "
             + "sprk_policy; POST .../retire -- the same plus Write on sprk_policy. The eBilling kill switch runs after it."),
+        new GovernedFile("Api/Finance/InvoiceAdjustmentEndpoints.cs", Scope.RouteLevelGate,
+            "GET /api/finance/invoices/{invoiceId}/adjustment-rules, POST .../adjustments and DELETE .../adjustments/{lineId} (ebilling-r1 task 102, "
+            + "FR-32) -- the invoice-level adjustments. Every route carries AddFinanceAuthorizationFilter on sprk_invoices(invoiceId) as the caller, fail "
+            + "closed: the rule list with \"finance.read\" (Read), add and remove with \"ebilling.invoice.decide\" (Write, D-77); invoice access reaches "
+            + "the caller through the core record (013, ADR-034). The eBilling kill switch runs after it. The body carries no amount and no total (016 "
+            + "computes both), a removed line must be an Adjustment line of the route's own invoice (uniform 404), and the reviewer is the caller's "
+            + "systemuserid from their own token, never the body."),
         new GovernedFile("Api/Finance/InvoiceContextEndpoints.cs", Scope.RouteLevelGate,
             "GET /api/finance/invoices/{invoiceId}/context (ebilling-r1 task 106, FR-33) -- the Invoice Review context panel. The route carries "
             + "AddFinanceAuthorizationFilter(\"finance.read\", sprk_invoices, invoiceId): Read on the invoice as the caller, fail closed; the eBilling "
@@ -1040,7 +1047,12 @@ public partial class RouteAuthorizationGuardTests
     // 143 + 133 -> 144 (2026-10-28, ebilling-r1 merge of origin/master cae791a74): both sides already shared 132. ebilling-r1
     // added 11 on it (143); master added 1 (external-access-r3 C3 PersonAccessAdministrationEndpoints.cs) for 133.
     // Union 132 + 11 + 1 = 144. No route added or removed here.
-    private const int ExpectedEndpointFileCount = 144;
+    //
+    // 144 -> 145 (2026-10-29, ebilling-r1 task 102, FR-32). Net +1: Api/Finance/InvoiceAdjustmentEndpoints.cs ADDED -- GET
+    // /api/finance/invoices/{invoiceId}/adjustment-rules, POST .../adjustments and DELETE .../adjustments/{lineId}. Classified by GovernedFiles
+    // (RouteLevelGate: step 0 on the group, then AddFinanceAuthorizationFilter as the caller on the route's invoice); .RequireEbillingEnabled is
+    // already in NotAuthorizationForms. (Written on the branch as 143 -> 144; reconciled at the ebilling-r1 integration merge.)
+    private const int ExpectedEndpointFileCount = 145;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision

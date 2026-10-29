@@ -32,8 +32,10 @@ public interface IInvoiceTotalsService
 /// <see cref="MaxWriteAttempts"/> times (the <see cref="InvoiceReviewService"/> retry pattern). Adjustment-line amounts are written first and are
 /// idempotent, so a retry or a later recalculation repairs a partial write; the invoice write is the commit point.</para>
 /// <para><b>Not covered here.</b> The totals columns are plain columns: a direct Dataverse / model-driven edit is blocked only by form
-/// read-only settings (task 029) or a field-security profile, neither built here. Deactivated lines are counted like active ones: no task
-/// defines a line deactivation, and silently dropping a row from a money total is the worse default.</para>
+/// read-only settings (task 029) or a field-security profile, neither built here. Deactivated Fee and Expense lines are counted like active
+/// ones: no task defines their deactivation, and silently dropping a row from a money total is the worse default. A deactivated ADJUSTMENT
+/// line is not counted (ebilling-r1 task 102, NFR-09: removing an invoice-level adjustment deactivates its row, it never deletes it), so
+/// removing one restores the totals; <see cref="ExcludeInactiveAdjustments"/> is the one definition every reader of an invoice's lines uses.</para>
 /// </remarks>
 public sealed class InvoiceTotalsService : IInvoiceTotalsService
 {
@@ -58,6 +60,10 @@ public sealed class InvoiceTotalsService : IInvoiceTotalsService
     internal const string LineStatus = "sprk_linestatus";
     internal const string LineAdjustmentMethod = "sprk_adjustmentmethod";
     internal const string LineAdjustmentValue = "sprk_adjustmentvalue";
+    internal const string LineState = "statecode";
+
+    /// <summary><c>statecode</c> of an active row.</summary>
+    internal const int StateActive = 0;
 
     private const int PageSize = 5000;
 
@@ -176,11 +182,12 @@ public sealed class InvoiceTotalsService : IInvoiceTotalsService
     {
         var query = new QueryExpression(LineEntity)
         {
-            ColumnSet = new ColumnSet(LineCostType, LineAmount, LineApprovedAmount, LineStatus, LineAdjustmentMethod, LineAdjustmentValue),
+            ColumnSet = new ColumnSet(LineCostType, LineAmount, LineApprovedAmount, LineStatus, LineAdjustmentMethod, LineAdjustmentValue, LineState),
             Criteria = new FilterExpression(LogicalOperator.And),
             PageInfo = new PagingInfo { PageNumber = 1, Count = PageSize },
         };
         query.Criteria.AddCondition(LineInvoiceLookup, ConditionOperator.Equal, invoiceId);
+        ExcludeInactiveAdjustments(query);
         query.AddOrder($"{LineEntity}id", OrderType.Ascending);
 
         var rows = new List<InvoiceLineInput>();
@@ -188,7 +195,8 @@ public sealed class InvoiceTotalsService : IInvoiceTotalsService
         {
             ct.ThrowIfCancellationRequested();
             var page = await _entities.RetrieveMultipleAsync(query, ct);
-            rows.AddRange(page.Entities.Select(ToRow));
+            // Second layer, as 076 and 072 do: a deactivated Adjustment line the query should not have returned is dropped here.
+            rows.AddRange(page.Entities.Where(IsCounted).Select(ToRow));
 
             if (!page.MoreRecords)
             {
@@ -199,6 +207,27 @@ public sealed class InvoiceTotalsService : IInvoiceTotalsService
             query.PageInfo.PagingCookie = page.PagingCookie;
         }
     }
+
+    /// <summary>
+    /// NFR-09 / ebilling-r1 task 102: an invoice-level Adjustment line that was removed is deactivated, never deleted, and must no longer count.
+    /// Adds "not an Adjustment line, or active" to <paramref name="query"/>'s criteria. A line with no cost type passes (the calculator refuses
+    /// it, fail closed, rather than the query hiding it).
+    /// </summary>
+    internal static void ExcludeInactiveAdjustments(QueryExpression query)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        var notAnInactiveAdjustment = new FilterExpression(LogicalOperator.Or);
+        notAnInactiveAdjustment.AddCondition(LineCostType, ConditionOperator.NotEqual, (int)InvoiceLineCostType.Adjustment);
+        notAnInactiveAdjustment.AddCondition(LineCostType, ConditionOperator.Null);
+        notAnInactiveAdjustment.AddCondition(LineState, ConditionOperator.Equal, StateActive);
+        query.Criteria.AddFilter(notAnInactiveAdjustment);
+    }
+
+    /// <summary>False only for an Adjustment line whose <c>statecode</c> is not Active. A row without a <c>statecode</c> counts as active.</summary>
+    internal static bool IsCounted(Entity line) =>
+        line.GetAttributeValue<OptionSetValue>(LineCostType)?.Value != (int)InvoiceLineCostType.Adjustment
+        || (line.GetAttributeValue<OptionSetValue>(LineState)?.Value ?? StateActive) == StateActive;
 
     private static InvoiceLineInput ToRow(Entity line) => new(
         line.Id,
