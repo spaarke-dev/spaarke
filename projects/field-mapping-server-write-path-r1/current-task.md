@@ -1,18 +1,18 @@
 # Current Task — field-mapping-server-write-path-r1
 
 > **Last updated**: 2026-10-29 (by context-handoff). Recovery: read Quick Recovery first.
-> **Done on master**: 001–006, 010–016, 018, 037, 038, 070, 071, 073 (072 in PR #2459). The work branch was merged to master as #2435 (6b0c1e2fed); later doc commits are on the work branch.
+> **Done on master**: 001–006, 010–016, 018, 037, 038, 070, 071, 072, 073 (074 in PR #2383). The work branch was merged to master as #2435 (6b0c1e2fed); later doc commits are on the work branch.
 > **Live on dev:** BFF 136568cf70 (UAC gate passed). SpaarkeMaster 1.2.4.0 is published but not imported anywhere yet. Check that the BU→Matter index map is gone after the model1-prod upgrade or the next provisioning run (H6).
 
 ## Quick Recovery
 
 | Field | Value |
 |---|---|
-| **Active** | **072 ✅ done** (PR #2459, auto-merge; task/fm-072 @ 8378b3ee1d). recordType = table display name via MetadataService (DTO DisplayName, key v2); root = walk top on full, omitted on down (owner told; no reply yet). **Next: 074** (#2383, HOLD until #2459 merges) — mark ready, run the TrackingFieldTrio suite against the merged endpoint. |
-| **Next Action** | 1) Watch #2459 merge; then sync the work branch with master. 2) #2383 (074): rebase on master, mark ready, run its suites. 3) 076 (W7 deploy + live Family check) once 074 lands; needs the owner's deploy go in R3's session. |
+| **Active** | **072 ✅** (#2459 merged 11c3739d7e). **074 ✅** (#2383 ready, auto-merge; task/fm-074 @ 0e7444ec5b, re-verified on master: 136 tests, build:prod PASS). Next on W7: **076** (deploy + live Family check), which needs 074 merged and the owner's deploy go in R3's session. 075 (#2387) still ships with 040. |
+| **Next Action** | 1) Watch #2383 merge; sync the work branch. 2) Prepare 076 (BFF + TrackingFieldTrio 1.0.55 + RecordFamilyModal consumers) and ask the owner for the deploy go via R3. 3) Remove temp worktree C:\wt074 with Remove-WorktreeSafe.ps1 after #2383 merges. |
 | **Owner decisions today** | Q1 drop; Q2 (B), seeding the 7 canonical index rows per customer, team-owned, no BU defaults. Depth cap counted from the TOP (exception to UAC C4; design §12.11, quoted on #2442; UAC adopted it). WA owning unit follows its matter (UAC #2451). |
 | **#2399** | Live part FIXED: the owner re-tested the WA create as Test User 1 on 2026-10-29 (saves, with number and Assigned To). Open for the durable fix: FR-38/W3 still need the scope procedure (spec amendment → task-create → TASK-INDEX → owner approval); FR-39 and the index rows are provisioning's #2429. |
-| **Open PRs** | #2459 (072, auto-merge). #2383 (074, HOLD until #2459). #2387 (075, HOLD, ships with 040). They overlap current-task.md: keep the work branch's version. |
+| **Open PRs** | #2383 (074, auto-merge). #2387 (075, HOLD, ships with 040). Both overlap current-task.md: keep the work branch's version. |
 | **Issues** | #2444 (UAC: shared reads-agnostic ordering helper). #2413 (known limit). #2429 (provisioning H7c team + H12b index-row seed + H4b allow-list; I review the PR). |
 | **Waiting on** | UAC 195 → 040, 076. Provisioning's #2429 PR. 017 blocked on ebilling #1911. |
 | **Owner to do** | Leftover locked worktree agent-aec6d06ca99a5a9f6 (075): end of project. |

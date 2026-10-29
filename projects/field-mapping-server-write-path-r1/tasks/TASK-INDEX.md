@@ -85,7 +85,7 @@
 | 071 | [RecordFamilyReader (OBO walk)](071-record-family-reader.poml) | FR-30 | opus / xhigh | FULL | W7-B | 070; UAC 194b | ✅ [done] #2442 |
 | 072 | [GET /records/{table}/{id}/family](072-record-family-endpoint.poml) | FR-31 | sonnet / high | FULL | W7-B | 071 | ✅ [done] #2459 |
 | 073 | [RecordFamilyModal (shared UI)](073-record-family-modal.poml) | FR-32 | sonnet / high | FULL | W7-A | none | ✅ [done] #2366 |
-| 074 | [TrackingFieldTrio Family tool](074-trackingfieldtrio-family-tool.poml) | FR-33 | sonnet / high | FULL | W7-C | 073 | 🔲 [open] |
+| 074 | [TrackingFieldTrio Family tool](074-trackingfieldtrio-family-tool.poml) | FR-33 | sonnet / high | FULL | W7-C | 073 | ✅ [done] #2383 |
 | 075 | [Push Updates ribbon opens the Family view](075-push-ribbon-opens-family-view.poml) | FR-35 | sonnet / high | FULL | W7-C | 073 (build); merges with 040 | 🔲 [open] |
 | 076 | [W7 deploy + live Family check](076-w7-deploy-and-live-check.poml) | FR-29–FR-33, FR-35 | sonnet / high | FULL | none | 072, 074, 038 | 🔲 [open] |
 
