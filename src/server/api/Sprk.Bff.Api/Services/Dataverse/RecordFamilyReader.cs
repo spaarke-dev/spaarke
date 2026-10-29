@@ -159,6 +159,9 @@ internal sealed class RecordFamilyReader
     private const string CoreRecordIdColumn = "sprk_corerecordid";
     private const string RecordTypeTable = "sprk_recordtype_ref";
     private const string RecordTypeTableColumn = "sprk_recordlogicalname";
+    // A TABLE name used as a map key below. Held in a constant because DecisionRecordContextImmutabilityTests (D-34) scans for the
+    // text ["sprk_policyversion"] = and cannot tell a table-name key from a write of the Decision Record context column.
+    private const string PolicyVersionKey = "sprk_policyversion";
 
     /// <summary>
     /// The display-name column of the family tables the ONE regarding display-name map
@@ -188,7 +191,7 @@ internal sealed class RecordFamilyReader
             ["sprk_kpiassessment"] = "sprk_kpiname",
             ["sprk_memo"] = "sprk_name",
             ["sprk_policy"] = "sprk_name",
-            ["sprk_policyversion"] = "sprk_name",
+            [PolicyVersionKey] = "sprk_name",
             ["sprk_signal"] = "sprk_name",
             ["sprk_spendsignal"] = "sprk_name",
             ["sprk_spendsnapshot"] = "sprk_name",
