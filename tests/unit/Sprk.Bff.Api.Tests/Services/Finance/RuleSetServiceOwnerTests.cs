@@ -3,6 +3,7 @@ using Microsoft.Xrm.Sdk;
 using Moq;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 using static Sprk.Bff.Api.Tests.Services.Finance.RuleSetServiceTests;
 
@@ -95,11 +96,104 @@ public sealed class RuleSetServiceOwnerTests
             ask.CallerObjectId.Should().Be(CallerOid);
         }
 
-        editAsk.Should().BeEquivalentTo(firstVersionAsk, "both creates resolve the owner the same way");
+        // EB-D-168a: each names its own hard-deny table (the policy the first version is filed under; the version), so the restricted-content
+        // exit applies to both; nothing else differs.
+        firstVersionAsk.ChildEntityLogicalName.Should().Be("sprk_policy");
+        editAsk.ChildEntityLogicalName.Should().Be("sprk_policyversion");
+        editAsk.Should().BeEquivalentTo(firstVersionAsk, o => o.Excluding(c => c.ChildEntityLogicalName), "both creates resolve the owner the same way");
         h.Rows["sprk_policy"].Single(p => p.GetAttributeValue<string>("sprk_policycode")!.StartsWith("BRD-", StringComparison.Ordinal))
             .GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(AnswerTeam);
         h.Rows["sprk_policyversion"].Where(v => v.Contains("ownerid")).Select(v => v.GetAttributeValue<EntityReference>("ownerid").Id)
             .Should().OnlyContain(t => t == AnswerTeam);
+    }
+
+    // ── EB-D-168 / EB-D-168a: rule sets, policies and versions are hard-deny rows ──────────────
+
+    private static OwnershipDirectory CallerIn(Guid businessUnit) =>
+        OwnershipDirectory.Standard().WithUser(Guid.NewGuid(), CallerOid, businessUnit);
+
+    /// <summary>A harness whose owner questions are answered by the REAL resolver over <paramref name="directory"/>.</summary>
+    private static Harness WithRealOwnership(OwnershipDirectory directory)
+    {
+        var h = new Harness();
+        var resolver = directory.Resolver();
+        h.Ownership.Setup(o => o.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
+            .Returns((RecordOwnershipContext c, CancellationToken t) => resolver.ResolveOwnerAsync(c, t));
+        return h;
+    }
+
+    private static IEnumerable<Guid> OwnersOf(Harness h, string table) =>
+        h.Rows.TryGetValue(table, out var rows)
+            ? rows.Where(r => r.Contains("ownerid")).Select(r => r.GetAttributeValue<EntityReference>("ownerid").Id)
+            : Array.Empty<Guid>();
+
+    [Fact(DisplayName = "EB-D-168a: a drafted rule's policy and first version are owned by the restricted-content owner team, never a default team")]
+    public async Task Drafts_PolicyAndVersion_AreOwnedByTheRestrictedContentTeam()
+    {
+        var h = WithRealOwnership(CallerIn(OwnershipDirectory.CustomerChildBu));
+        var drafts = RuleSetWithSource(h);
+
+        var outcome = await h.Service().AddDraftsAsync(drafts, new[] { Drafted() }, Array.Empty<NotConvertedClause>(), CallerOid, CancellationToken.None);
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done);
+        OwnersOf(h, "sprk_policy").Should().ContainSingle().Which.Should().Be(OwnershipDirectory.RestrictedContentTeam);
+        OwnersOf(h, "sprk_policyversion").Should().ContainSingle().Which.Should().Be(OwnershipDirectory.RestrictedContentTeam);
+        OwnerContexts(h).Should().ContainSingle().Which.ChildEntityLogicalName.Should().Be("sprk_policy");
+    }
+
+    [Fact(DisplayName = "EB-D-168a: the edit-path version is owned by the restricted-content owner team")]
+    public async Task Edit_TheNewVersion_IsOwnedByTheRestrictedContentTeam()
+    {
+        var h = WithRealOwnership(CallerIn(OwnershipDirectory.CustomerChildBu));
+        var set = h.RuleSet(RuleSetService.RuleSetPublished);
+        var (policy, v1) = h.Rule(set, state: ProposalState.Accepted, current: true);
+
+        var outcome = await h.Service().EditAsync(set, policy, Edit("Changed"), default);
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done);
+        h.Rows["sprk_policyversion"].Single(v => v.Id != v1).GetAttributeValue<EntityReference>("ownerid").Id
+            .Should().Be(OwnershipDirectory.RestrictedContentTeam);
+    }
+
+    [Fact(DisplayName = "EB-D-168a: an uploaded rule set is owned by the restricted-content owner team; its source document by the caller's business-unit team")]
+    public async Task Create_TheRuleSetIsOwnedByTheRestrictedContentTeam_TheDocumentByTheCallersTeam()
+    {
+        var h = WithRealOwnership(CallerIn(OwnershipDirectory.CustomerChildBu));
+
+        var outcome = await h.Service().CreateAsync(
+            new RuleSetCreateRequest("Acme OCG", RuleSetSourceKind.Guideline, RuleSetScope.ClientDefault, null, "ocg.pdf", CallerOid),
+            new byte[] { 1 }, default);
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done);
+        OwnersOf(h, "sprk_ruleset").Should().ContainSingle().Which.Should().Be(OwnershipDirectory.RestrictedContentTeam);
+        h.DocumentCreates.Should().ContainSingle().Which.OwningTeamId.Should().Be(OwnershipDirectory.CustomerChildTeam,
+            "sprk_document is not a hard-deny table");
+    }
+
+    [Fact(DisplayName = "EB-D-168a: a caller in the Secure Record business unit gets the Secure Record owner team for a drafted rule")]
+    public async Task Drafts_ForACallerInTheSecureRecordBusinessUnit_AreOwnedInTheSecureRecordBusinessUnit()
+    {
+        var directory = CallerIn(OwnershipDirectory.SecureBu);
+        var h = WithRealOwnership(directory);
+        var drafts = RuleSetWithSource(h);
+
+        await h.Service().AddDraftsAsync(drafts, new[] { Drafted() }, Array.Empty<NotConvertedClause>(), CallerOid, CancellationToken.None);
+
+        OwnersOf(h, "sprk_policy").Concat(OwnersOf(h, "sprk_policyversion")).Should().HaveCount(2)
+            .And.OnlyContain(team => directory.IsTeamOfTheSecureRecordBusinessUnit(team));
+    }
+
+    [Fact(DisplayName = "EB-D-168a (fail closed): a drafted rule answered in the root business unit is refused and nothing is written")]
+    public async Task Drafts_AnsweredInTheRootBusinessUnit_AreRefused_NothingWritten()
+    {
+        var h = WithRealOwnership(CallerIn(OwnershipDirectory.GeneralBu));
+        var drafts = RuleSetWithSource(h);
+
+        var outcome = await h.Service().AddDraftsAsync(drafts, new[] { Drafted() }, Array.Empty<NotConvertedClause>(), CallerOid, CancellationToken.None);
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.OwnerRefused);
+        outcome.OwnerRefusal!.RefusalCode.Should().Be(RecordOwnerRefusal.RestrictedContentOwnerTeamUnresolved);
+        h.Writes.Should().NotContain(w => w.Entity == "sprk_policy" || w.Entity == "sprk_policyversion");
     }
 
     // ── A refusal refuses the edit and writes nothing ───────────────────────────────────────────

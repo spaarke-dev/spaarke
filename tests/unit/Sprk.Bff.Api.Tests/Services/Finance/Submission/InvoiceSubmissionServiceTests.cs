@@ -438,6 +438,9 @@ public sealed class InvoiceSubmissionServiceTests
         var (container, name) = h.StagedName(outcome.Receipt.SubmissionId);
         h.Stages.Should().Equal($"{container}/{name}");
         h.OwnerContexts.Should().ContainSingle().Which.RequestedBy!.ObjectId.Should().Be(CallerOid);
+        // 194b R3b-2: the submission row's own question (ForChild): its table, its core record under its sprk_regarding{core} lookup.
+        h.OwnerContexts[0].ChildEntityLogicalName.Should().Be("sprk_invoicesubmission");
+        h.OwnerContexts[0].Parents.Should().ContainSingle().Which.EntityLogicalName.Should().BeOneOf("sprk_matter", "sprk_project", "sprk_workassignment");
         var fields = h.Allocations.Should().ContainSingle().Subject.Fields!;
         ((OptionSetValue)fields["sprk_channel"]).Value.Should().Be((int)InvoiceSubmissionChannel.Internal);
         fields.Keys.Should().NotContain(new[] { "sprk_submitter", "sprk_document" });

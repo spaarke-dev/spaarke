@@ -833,26 +833,40 @@ public sealed class InvoiceLineDecisionService
             return new CorrectionBuild(rows, new LineDecisionResult(LineDecisionStatus.OwnerUnresolved, LineDecisionCodes.OwnerUnresolved, "The invoice names no single core record."));
         }
 
-        RecordOwnerResolution owner;
-        try
+        // UAC 194b R3b-2: each row's question is built from the row itself (RecordOwnershipContext.ForChild: its invoice, its line, its core
+        // record, in sprk_invoicecorrection's primary order), the question the secure-child reconciler asks the written row. The rows of one
+        // line hold the same lookups, so one question is asked per line; every answer is read before any row is written.
+        var owners = new Dictionary<Guid, RecordOwnerResolution>();
+        foreach (var row in rows)
         {
-            owner = await _ownership.ResolveOwnerAsync(
-                RecordOwnershipContext.ForParents(new RecordOwnershipParent?[] { new(core.Value.Entity, core.Value.Id) }), ct).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-        {
-            return new CorrectionBuild(rows, ReadFailed(command, ex));
-        }
+            var lineId = row.GetAttributeValue<EntityReference>("sprk_invoiceline")?.Id ?? Guid.Empty;
+            if (owners.ContainsKey(lineId))
+            {
+                continue;
+            }
 
-        if (!owner.IsOwned)
-        {
-            _logger.LogWarning("Line decision on invoice {InvoiceId}: no owner for the correction rows ({Code}); nothing changed.", command.InvoiceId, owner.RefusalCode);
-            return new CorrectionBuild(rows, new LineDecisionResult(LineDecisionStatus.OwnerUnresolved, LineDecisionCodes.OwnerUnresolved, "The correction rows have no owner; nothing was changed."));
+            RecordOwnerResolution answer;
+            try
+            {
+                answer = await _ownership.ResolveOwnerAsync(RecordOwnershipContext.ForChild(row), ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                return new CorrectionBuild(rows, ReadFailed(command, ex));
+            }
+
+            if (!answer.IsOwned)
+            {
+                _logger.LogWarning("Line decision on invoice {InvoiceId}: no owner for the correction rows ({Code}); nothing changed.", command.InvoiceId, answer.RefusalCode);
+                return new CorrectionBuild(rows, new LineDecisionResult(LineDecisionStatus.OwnerUnresolved, LineDecisionCodes.OwnerUnresolved, "The correction rows have no owner; nothing was changed."));
+            }
+
+            owners[lineId] = answer;
         }
 
         foreach (var row in rows)
         {
-            owner.ApplyTo(row);
+            owners[row.GetAttributeValue<EntityReference>("sprk_invoiceline")?.Id ?? Guid.Empty].ApplyTo(row);
             RecordCreatorPerson.Stamp(row, command.DeciderSystemUserId);
             if (InvoiceFamilyCoreRecordGuard.Check(row) is { IsRefused: true } refused)
             {

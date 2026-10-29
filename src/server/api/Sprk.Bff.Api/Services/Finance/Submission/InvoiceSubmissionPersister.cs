@@ -448,8 +448,13 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
                 : Result(SubmissionPersistStatus.Refused, submissionId, code);
         }
 
+        // UAC 194b R3b-2: the invoice's question through the one builder — its table and the core lookup it holds (the column its row
+        // writes). Its lines and approval are filed under the invoice this transaction creates, so they take its answer.
         var owner = await _ownership.ResolveOwnerAsync(
-            RecordOwnershipContext.ForParents(new RecordOwnershipParent?[] { new(core.EntityLogicalName, core.RecordId) }), ct).ConfigureAwait(false);
+            RecordOwnershipContext.ForRow(
+                InvoiceReviewService.InvoiceEntity,
+                new[] { KeyValuePair.Create(CoreColumn(invoice.LogicalName, core), (RecordOwnershipParent?)new RecordOwnershipParent(core.EntityLogicalName, core.RecordId)) }),
+            ct).ConfigureAwait(false);
         if (!owner.IsOwned)
         {
             _logger.LogWarning("Invoice submission {SubmissionId}: no owner resolved ({Code}); nothing persisted", submissionId, owner.RefusalCode);
@@ -544,24 +549,42 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             return Result(SubmissionPersistStatus.Refused, submissionId, FindingsTooLargeCode);
         }
 
+        // EB-D-168 / EB-D-168a (UAC 194b R4b-2): a Stored File is a HARD-DENY row with its own question, never the invoice's team. Its
+        // parent, the invoice, is created by this same transaction and cannot be read yet, so the question names what the invoice is filed
+        // under — its core record — for the sprk_storedfile table: the same business unit and the same secure-if-any as the invoice's own
+        // answer, so an ordinary invoice's files go to the customer's restricted-content owner team and a Secure one's to the Secure team.
+        // Asked only when a file row is written; a refusal (fail closed: the answer in the root business unit, a team that cannot be used)
+        // persists nothing.
+        RecordOwnerResolution? fileOwner = null;
+        if (fileSpec is not null || supporting.Count > 0 || outcome.StagedFiles.Count > 0)
+        {
+            fileOwner = await _ownership.ResolveOwnerAsync(StoredFileOwnerContext(core), ct).ConfigureAwait(false);
+            if (!fileOwner.IsOwned)
+            {
+                _logger.LogWarning("Invoice submission {SubmissionId}: no owner resolved for its stored files ({Code}); nothing persisted",
+                    submissionId, fileOwner.RefusalCode);
+                return Result(SubmissionPersistStatus.Refused, submissionId, fileOwner.RefusalCode ?? OwnerUnresolvedCode);
+            }
+        }
+
         var requests = new List<OrganizationRequest>(create.Requests);
         if (fileSpec is not null)
         {
-            // Task 092 (model 4.1, 9.1 step 4): the invoice PDF's row, right after the invoice it hangs under. Not yet servable; owned like the
-            // invoice (the same ForParents resolution over its core record); the creator person is the submitter, none for a contact (K6).
-            requests.Add(_files.BuildRow(fileSpec, stagedFile!, owner, submitter));
+            // Task 092 (model 4.1, 9.1 step 4): the invoice PDF's row, right after the invoice it hangs under. Not yet servable; owned by the
+            // Stored File answer (above); the creator person is the submitter, none for a contact (K6).
+            requests.Add(_files.BuildRow(fileSpec, stagedFile!, fileOwner!, submitter));
         }
 
         foreach (var (partSpec, partBlob) in supporting)
         {
-            // From-email (task 094): a Supporting part's row, the same rules (Not yet servable, owned like the invoice, Firm-visible No).
-            requests.Add(_files.BuildRow(partSpec, partBlob, owner, submitter));
+            // From-email (task 094): a Supporting part's row, the same rules (Not yet servable, the Stored File answer, Firm-visible No).
+            requests.Add(_files.BuildRow(partSpec, partBlob, fileOwner!, submitter));
         }
 
         foreach (var copy in outcome.StagedFiles)
         {
-            // Task 094 (9.1 step 4): the source copy's row, the same rules (Not yet servable, owned like the invoice), Firm-visible No.
-            requests.Add(_files.BuildRow(copy.Spec, copy.Blob, owner, submitter));
+            // Task 094 (9.1 step 4): the source copy's row, the same rules (Not yet servable, the Stored File answer), Firm-visible No.
+            requests.Add(_files.BuildRow(copy.Spec, copy.Blob, fileOwner!, submitter));
         }
 
         requests.AddRange(lines.Select(line => new CreateRequest { Target = line }));
@@ -1531,6 +1554,15 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
     }
 
     /// <summary>The column on <paramref name="table"/> that names <paramref name="core"/> (013's map: typed or <c>sprk_regarding{core}</c>).</summary>
+    /// <summary>
+    /// EB-D-168a: the ownership question for the Stored File rows this transaction writes under the invoice it creates — the
+    /// <c>sprk_storedfile</c> table (a hard-deny table) through the one builder, filed under the invoice's core record (see the call site).
+    /// </summary>
+    internal static RecordOwnershipContext StoredFileOwnerContext(InvoiceCoreRecord core) =>
+        RecordOwnershipContext.ForRow(
+            StoredFileSchema.Entity,
+            new[] { KeyValuePair.Create(core.EntityLogicalName, (RecordOwnershipParent?)new RecordOwnershipParent(core.EntityLogicalName, core.RecordId)) });
+
     internal static string CoreColumn(string table, InvoiceCoreRecord core) =>
         InvoiceFamilyCoreRecordGuard.CoreRecordLookups[table].Single(l => l.CoreEntity == core.EntityLogicalName).Column;
 

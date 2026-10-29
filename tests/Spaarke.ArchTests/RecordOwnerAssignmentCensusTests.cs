@@ -2476,8 +2476,11 @@ public class RecordOwnerAssignmentCensusTests
         new PersonBearingWriter("DataverseWebApiService.cs", "BuildCreateEventPayload", "seam: binds CreatedByPersonId"),
         new PersonBearingWriter("DataverseWebApiService.cs", "CreateEventLogAsync", "seam: binds createdByPersonId"),
         // ebilling-r1 task 081 (procedure model 13, O-23): the calling admin creates Procedures, their versions and the copied policy
-        // versions; ProcedureService's one owner decision names them (RequestedBy), which ApplyTo stamps on sprk_procedure(version).
-        new PersonBearingWriter("ProcedureService.cs", "OwnerContext", "the calling admin (oid) of a Procedure, version or copy-forward create"),
+        // versions, and RuleSetService's uploads and drafts. EB-D-168a: both services ask through RuleSetService's two questions — the
+        // caller's team (a Procedure, its versions, a source document) and a hard-deny row's (a rule set, a policy, a version) — and each
+        // names the caller (RequestedBy), which ApplyTo stamps.
+        new PersonBearingWriter("RuleSetService.cs", "CallerOwnerContext", "the calling admin (oid) of a Procedure, version or source-document create"),
+        new PersonBearingWriter("RuleSetService.cs", "ContentOwnerContext", "the calling admin (oid) of a rule set, policy or policy version create"),
     };
 
     /// <summary>

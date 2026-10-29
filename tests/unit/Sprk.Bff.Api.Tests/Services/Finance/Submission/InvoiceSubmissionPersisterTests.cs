@@ -450,7 +450,7 @@ public class InvoiceSubmissionPersisterTests
 
     // ── owner ──
 
-    [Fact(DisplayName = "049 C (uac-r2): the owner is resolved once from the core record and applied to every created row")]
+    [Fact(DisplayName = "049 C (uac-r2, 194b R3b-2): the invoice's owner is asked through ForRow over its core record and applied to every invoice-family row; the Stored File asks its own question")]
     public async Task Owner_IsResolvedFromTheCoreRecord_OnEveryRow()
     {
         var outcome = await new ProcessorHarness().RunAsync();
@@ -458,11 +458,77 @@ public class InvoiceSubmissionPersisterTests
 
         await store.Build().PersistAsync(outcome, null);
 
-        store.OwnerContexts.Should().ContainSingle().Which.Parents.Should().Equal(new RecordOwnershipParent("sprk_matter", Matter));
+        store.OwnerContexts.Should().HaveCount(2, "one question for the invoice family, one for its Stored File (EB-D-168a)");
+        var invoiceAsk = store.OwnerContexts[0];
+        invoiceAsk.ChildEntityLogicalName.Should().Be("sprk_invoice", "the question is built for the invoice's table (ForRow)");
+        invoiceAsk.Parents.Should().Equal(new RecordOwnershipParent("sprk_matter", Matter));
+        var fileAsk = store.OwnerContexts[1];
+        fileAsk.ChildEntityLogicalName.Should().Be(StoredFileSchema.Entity, "a hard-deny row's question names its table");
+        fileAsk.Parents.Should().Equal(new RecordOwnershipParent("sprk_matter", Matter));
         foreach (var create in store.Transactions.Single().OfType<CreateRequest>())
         {
             create.Target.GetAttributeValue<EntityReference>("ownerid").Should().Be(new EntityReference("team", TeamId), create.Target.LogicalName);
         }
+    }
+
+    // ── EB-D-168 / EB-D-168a: the Stored File is a hard-deny row, owned apart from the invoice ──
+
+    private static Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory MatterIn(Guid businessUnit, Guid team, bool secure = false) =>
+        Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory.Standard()
+            .WithRecord("sprk_matter", Matter, businessUnit, isSecure: secure, owningTeam: team);
+
+    private static Entity CreatedOf(Store store, string table) =>
+        store.Transactions.Single().OfType<CreateRequest>().Select(c => c.Target).Single(t => t.LogicalName == table);
+
+    [Fact(DisplayName = "EB-D-168a: an ordinary invoice's Stored File is owned by the restricted-content owner team; the invoice keeps its business unit's team")]
+    public async Task StoredFile_OfAnOrdinaryInvoice_IsOwnedByTheRestrictedContentTeam_TheInvoiceByItsBusinessUnitsTeam()
+    {
+        var D = Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory.CustomerChildBu;
+        var directory = MatterIn(D, Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory.CustomerChildTeam);
+        var outcome = await new ProcessorHarness().RunAsync();
+        var store = new Store { Ownership = directory };
+
+        await store.Build().PersistAsync(outcome, null);
+
+        CreatedOf(store, StoredFileSchema.Entity).GetAttributeValue<EntityReference>("ownerid").Id
+            .Should().Be(Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory.RestrictedContentTeam);
+        var invoiceOwner = CreatedOf(store, "sprk_invoice").GetAttributeValue<EntityReference>("ownerid").Id;
+        invoiceOwner.Should().Be(Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory.CustomerChildTeam, "the invoice keeps its own team (EB-D-168)");
+        directory.IsTeamOfTheSecureRecordBusinessUnit(invoiceOwner).Should().BeFalse();
+    }
+
+    [Fact(DisplayName = "EB-D-168a: a Secure invoice's Stored File is owned by the Secure Record business unit's team, like its invoice")]
+    public async Task StoredFile_OfASecureInvoice_IsOwnedInTheSecureRecordBusinessUnit()
+    {
+        var directory = MatterIn(
+            Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory.SecureBu,
+            Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory.SecureNamedTeam, secure: true);
+        var outcome = await new ProcessorHarness().RunAsync();
+        var store = new Store { Ownership = directory };
+
+        await store.Build().PersistAsync(outcome, null);
+
+        var fileOwner = CreatedOf(store, StoredFileSchema.Entity).GetAttributeValue<EntityReference>("ownerid").Id;
+        directory.IsTeamOfTheSecureRecordBusinessUnit(fileOwner).Should().BeTrue("a Secure row goes to the Secure Record owner team");
+        fileOwner.Should().NotBe(Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory.RestrictedContentTeam);
+        directory.IsTeamOfTheSecureRecordBusinessUnit(CreatedOf(store, "sprk_invoice").GetAttributeValue<EntityReference>("ownerid").Id)
+            .Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "EB-D-168a (fail closed): a Stored File answered in the root business unit is refused and nothing is persisted")]
+    public async Task StoredFile_AnsweredInTheRootBusinessUnit_IsRefused_NothingPersisted()
+    {
+        var directory = MatterIn(
+            Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory.GeneralBu,
+            Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory.GeneralTeam);
+        var outcome = await new ProcessorHarness().RunAsync();
+        var store = new Store { Ownership = directory };
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Refused);
+        result.ReasonCode.Should().Be(RecordOwnerRefusal.RestrictedContentOwnerTeamUnresolved);
+        store.Transactions.Should().BeEmpty("a refused Stored File owner writes no invoice, no line and no file row");
     }
 
     [Fact(DisplayName = "049 C: an owner that cannot be resolved refuses before any write")]
@@ -2273,6 +2339,9 @@ public class InvoiceSubmissionPersisterTests
         public bool SubmissionDeleted { get; init; }
         public RecordOwnerResolution Owner { get; init; } = RecordOwnerResolution.Owned(TeamId);
 
+        /// <summary>EB-D-168a: when set, every owner question is answered by the REAL resolver over this directory (not <see cref="Owner"/>).</summary>
+        public Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory? Ownership { get; init; }
+
         /// <summary>050a review #1 / #2: the document's live row as a confirm submission's check reads it (null: unlinked, not rejected).</summary>
         public Entity? DocumentRow { get; set; }
 
@@ -2472,9 +2541,11 @@ public class InvoiceSubmissionPersisterTests
                 .ReturnsAsync(new Entity("sprk_recordtype_ref", RecordTypeId) { [RegardingRecordType.RecordNumberFieldColumn] = "sprk_matternumber" });
 
             var ownership = new Mock<IRecordOwnershipResolver>(MockBehavior.Strict);
+            var realOwnership = Ownership?.Resolver();
             ownership.Setup(o => o.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
                 .Callback((RecordOwnershipContext context, CancellationToken _) => OwnerContexts.Add(context))
-                .ReturnsAsync(() => Owner);
+                .Returns((RecordOwnershipContext context, CancellationToken token) =>
+                    realOwnership is null ? Task.FromResult(Owner) : realOwnership.ResolveOwnerAsync(context, token));
 
             var totals = new Mock<IInvoiceTotalsService>(MockBehavior.Strict);
             totals.Setup(t => t.RecalculateAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))

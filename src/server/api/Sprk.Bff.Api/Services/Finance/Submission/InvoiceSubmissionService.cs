@@ -1014,8 +1014,10 @@ public class InvoiceSubmissionService
                     "The firm could not be checked right now. Try again shortly."));
         }
 
+        // UAC 194b R3b-2: the submission's question is built from the row as written so far (RecordOwnershipContext.ForChild: its core
+        // record under its sprk_regarding{core} lookup, in sprk_invoicesubmission's primary order) — the question the reconciler asks it.
         var owner = await _ownership.ResolveOwnerAsync(
-            RecordOwnershipContext.ForParents(new RecordOwnershipParent?[] { new(core.EntityLogicalName, core.RecordId) }) with
+            RecordOwnershipContext.ForChild(row) with
             {
                 RequestedBy = RecordRequester.Of(systemUserId: requesterSystemUserId ?? spaCaller?.SystemUserId, objectId: request.CallerObjectId),
             },
