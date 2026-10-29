@@ -127,7 +127,7 @@ public class PairedGrantFollowsShareRemovalTests
             .Which.SystemUserId.Should().Be(Walled);
         report.Removed.Should().ContainSingle(r => r.SystemUserId == Walled, "the share removal stands");
         h.Shares.MaskOf(Project, SecureProject, User(Walled)).Should().BeNull();
-        Active(SecureProject, paired).Should().BeTrue("left for the reconciliation job's R5");
+        Active(SecureProject, paired).Should().BeTrue("left active; the next pass, a repeated removal or R5 (writes on) ends it");
     }
 
     [Fact]
@@ -321,7 +321,7 @@ public class PairedGrantFollowsShareRemovalTests
             .Which.SystemUserId.Should().Be(external);
         report.Removed.Should().Equal(external);
         _grants.Shares.MaskOf(MatterTable, _matter, User(external)).Should().BeNull("the share removal stands");
-        Active(_matter, paired).Should().BeTrue("left for the reconciliation job's R5");
+        Active(_matter, paired).Should().BeTrue("left active; the next pass, a repeated removal or R5 (writes on) ends it");
     }
 
     /// <summary>
@@ -429,7 +429,7 @@ public class PairedGrantFollowsShareRemovalTests
         outcome.Complete.Should().BeFalse();
         outcome.Failures.Should().ContainSingle(f => f.Kind == AssignedAccessMaterializer.PairedGrantNotEndedKind);
         _grants.Shares.MaskOf(MatterTable, _matter, User(user)).Should().BeNull("the share removal stands");
-        Active(_matter, paired).Should().BeTrue("left for the reconciliation job's R5");
+        Active(_matter, paired).Should().BeTrue("left active; the next pass, a repeated removal or R5 (writes on) ends it");
     }
 
     /// <summary>

@@ -334,7 +334,9 @@ public static class ExternalAccessModule
         // the materializer) ends the grant PAIRED with that share through the same call (RevokePairedWithAsync).
         // §11 — Existing: ExternalGrantRevocationService, built by hand by each caller. Extension: this registers that class
         // as it is; no new type. Cost of doing nothing: each share-removal path would build its own copy from eight
-        // dependencies, or leave the paired grant (workforce-app access) active up to a day until the reconciliation job's R5.
+        // dependencies, or leave the paired grant (workforce-app access) active with nothing to end it: the reconciliation job's
+        // R5 deactivates one only with ExternalAccess:Reconciliation:WritesEnabled on (report-only by default), never retrying
+        // file access.
         // Every dependency is registered unconditionally (ADR-032); the logger is the class's own (its constructor takes ILogger).
         services.AddScoped(sp => new Sprk.Bff.Api.Api.ExternalAccess.ExternalGrantRevocationService(
             sp.GetRequiredService<DataverseWebApiClient>(),

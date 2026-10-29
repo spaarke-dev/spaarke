@@ -379,7 +379,7 @@ public class SecureRootInheritanceRound31Tests : IClassFixture<ProvisionProjectT
         code.Should().Be(InternalShareEndpoints.ChildrenIncompleteReasonCode);
         body.GetProperty("filedRecordsNotUpdated").GetInt32().Should().BeGreaterThan(0);
         _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(0, "the share removal stands");
-        grants.Grants.ActiveRowsOf(workAssignment).Should().Contain(r => r.Id == paired, "left for the reconciliation job's R5");
+        grants.Grants.ActiveRowsOf(workAssignment).Should().Contain(r => r.Id == paired, "left active; the next pass, a repeated removal or R5 (writes on) ends it");
     }
 
     /// <summary>Task 193 G2b: a grant on the filed record paired with <see cref="Colleague"/>, ended through this harness.</summary>

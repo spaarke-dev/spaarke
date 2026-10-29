@@ -1031,7 +1031,7 @@ public class ContactGrantSharesInternalUserTests
                 "the grant is still active and listed");
         ShareMask(user).GetValueOrDefault().Should().Be(0, "the share stays removed");
         _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle().Which.Id.Should().Be(grant,
-            "left for the reconciliation job's R5");
+            "left active; the next pass, a repeated removal or R5 (writes on) ends it");
     }
 
     [Fact]

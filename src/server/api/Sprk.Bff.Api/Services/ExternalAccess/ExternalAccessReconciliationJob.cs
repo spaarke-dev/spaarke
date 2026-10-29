@@ -57,8 +57,11 @@ namespace Sprk.Bff.Api.Services.ExternalAccess;
 ///     row naming any record, live or not, is not R4's.</item>
 ///   <item><b>R5</b> (task 193 G1, owner decision (a), 2026-10-28) — an ACTIVE grant PAIRED with an internal user
 ///     (<c>sprk_pairedsystemuser</c>: Manage Access's "Add person" shared the record with the user and granted the contact that
-///     represents them) is deactivated when that user no longer holds a direct share on the record. The reverse (the grant
-///     gone, the share kept) is left alone. A share read that fails changes nothing, is counted, and the run is reported
+///     represents them) is deactivated when that user no longer holds a direct share on the record, or (task 193 G4a)
+///     when the grant's contact no longer represents that user (<see cref="ContactUserRepresentation"/>: the link moved, the
+///     oid binding changed, the contact was deactivated). The reverse (the grant gone, the share kept) is left alone. Like
+///     every rule it writes only with <see cref="WritesEnabledConfigKey"/> on; it never runs the file-access step (a removal
+///     from Manage Access does). A share or representation read that fails changes nothing, is counted, and the run is reported
 ///     partial (retried tomorrow); a grant with no pairing is never R5's. Its own scan, after the one above, so a missing
 ///     column (the schema script not yet applied) skips R5 alone. See <see cref="ResolvePairedGrantsAsync"/>.</item>
 /// </list>
