@@ -36,7 +36,9 @@ const assignTask: DecisionAction = {
       defaultValue: 'true',
     },
   ],
-  effectLines: ['Creates a task (an event of type Task) linked to the record, assigned to the person above, when the decision is recorded'],
+  effectLines: [
+    'Creates a task (an event of type Task) linked to the record, assigned to the person above, when the decision is recorded',
+  ],
   excludes: [],
 };
 
@@ -80,7 +82,9 @@ describe('Assign Task: Send email notification', () => {
     setup();
     const step = await openStep();
 
-    const fields = within(step).getAllByTestId(/^field-/).map(f => f.getAttribute('data-testid'));
+    const fields = within(step)
+      .getAllByTestId(/^field-/)
+      .map(f => f.getAttribute('data-testid'));
     expect(fields).toEqual(['field-assignee', 'field-description', 'field-dueDate', 'field-notify']);
     const box = screen.getByRole('checkbox', { name: /^Send email notification/ });
     expect(box).toBeChecked();
@@ -111,6 +115,18 @@ describe('Assign Task: Send email notification', () => {
     );
     expect(describeWarning('assignee_email_missing')).toBe(
       'The task was assigned, but the assignee has no email address, so no email was sent.'
+    );
+  });
+
+  it('D-199: each reason the gate refused the email reads as its own sentence', () => {
+    expect(describeWarning('assignee_email_not_sent_no_access')).toBe(
+      'The task was assigned, but no email was sent: the assignee does not have access to this record.'
+    );
+    expect(describeWarning('assignee_email_not_sent_several_users')).toBe(
+      "The task was assigned, but no email was sent: the assignee's contact is linked to more than one user."
+    );
+    expect(describeWarning('assignee_email_not_sent_unverified')).toBe(
+      'The task was assigned, but no email was sent: whether the assignee can see this record could not be checked.'
     );
   });
 });

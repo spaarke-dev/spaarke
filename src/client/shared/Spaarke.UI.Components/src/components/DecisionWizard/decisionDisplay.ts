@@ -193,6 +193,13 @@ const WARNING_TEXT: Record<string, string> = {
   // Task 168 (D-194): the task was created and the decision recorded; only the email did not go.
   assignee_email_not_sent: 'The task was assigned, but the email to the assignee could not be sent.',
   assignee_email_missing: 'The task was assigned, but the assignee has no email address, so no email was sent.',
+  // Task 168 fix round (D-199): the assignee is emailed only when they can see the record.
+  assignee_email_not_sent_no_access:
+    'The task was assigned, but no email was sent: the assignee does not have access to this record.',
+  assignee_email_not_sent_several_users:
+    "The task was assigned, but no email was sent: the assignee's contact is linked to more than one user.",
+  assignee_email_not_sent_unverified:
+    'The task was assigned, but no email was sent: whether the assignee can see this record could not be checked.',
 };
 
 /** A warning from the commit answer as a sentence; a code this build does not know reads generically. */
