@@ -501,8 +501,8 @@ jobs:
   # task 194b R4b-4): no business unit named -SecureBusinessUnitName refuses (Secure Record is never accepted as a
   # customer unit), Secure Record is refused by its name, and a dry run whose drift is an owner decision exits 1.
   # The script runs over a mocked Invoke-RestMethod and az (any write fails the test) and reads the checked-in
-  # config/*-owner-role.json; nothing talks to Dataverse. Same Pester setup as ontology-script-tests:
-  # -MinimumVersion 5.5.0, no pin (passes on Pester 5.7.1 and 6.2.0).
+  # config/*-owner-role.json; nothing talks to Dataverse. Pester is pinned to 5.7.1: under 6.x a container can fail
+  # with "Export-ModuleMember ... can only be called from inside a module", which would turn this job red on a release.
   # --------------------------------------------------------------------------
   owner-teams-script-tests:
     name: Owner teams script tests (Pester)
@@ -520,8 +520,8 @@ jobs:
       - name: Pester
         shell: pwsh
         run: |
-          Install-Module Pester -MinimumVersion 5.5.0 -Scope CurrentUser -Force -SkipPublisherCheck
-          Import-Module Pester -MinimumVersion 5.5.0
+          Install-Module Pester -RequiredVersion 5.7.1 -Scope CurrentUser -Force -SkipPublisherCheck
+          Import-Module Pester -RequiredVersion 5.7.1
           $r = Invoke-Pester -Path tests/scripts/Set-CustomerOwnerTeams.Tests.ps1 -Output Detailed -PassThru
           if ($r.FailedCount -gt 0 -or $r.TotalCount -eq 0) { exit 1 }
 

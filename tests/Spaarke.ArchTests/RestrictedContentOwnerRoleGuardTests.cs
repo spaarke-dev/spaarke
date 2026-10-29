@@ -227,12 +227,15 @@ public class RestrictedContentOwnerRoleGuardTests
         string.Join('\n', WithoutBlockComments(script).Split('\n').Select(line => line.Split('#')[0]));
 
     /// <summary>
-    /// R4b-4b: every way the script could WRITE <c>$DeclaredRoleFiles</c> — an assignment of any form (<c>=</c>, <c>+=</c>,
-    /// <c>-=</c>, <c>??=</c>, a scoped or braced name), <c>Set-Variable</c>/<c>New-Variable</c>, the <c>variable:</c> drive,
-    /// a collection method that changes it, or a <c>[ref]</c>. Only the one array literal may write it.
+    /// R4b-4b: the forms that WRITE <c>$DeclaredRoleFiles</c> by name — an assignment of any form (<c>=</c>, <c>+=</c>,
+    /// <c>-=</c>, <c>??=</c>, a scoped or braced name), an element assignment (<c>$DeclaredRoleFiles[1] = …</c>),
+    /// <c>Set-Variable</c>/<c>New-Variable</c>, a common parameter that writes a variable (<c>-OutVariable</c> and its kin),
+    /// the <c>variable:</c> drive, a collection method that changes it, or a <c>[ref]</c>. Only the one array literal may
+    /// write it. A write through an alias (<c>$x = $DeclaredRoleFiles; $x[0] = …</c>) is beyond a text scan.
     /// </summary>
     private static readonly Regex DeclaredRoleFilesWrite = new(
-        @"\$\{?(?:(?:script|global|local|private|variable):)?DeclaredRoleFiles\}?\s*(?:[-+*/%]|\?\?)?=(?!=)"
+        @"\$\{?(?:(?:script|global|local|private|variable):)?DeclaredRoleFiles\}?\s*(?:\[[^\]]*\]\s*)?(?:[-+*/%]|\?\?)?=(?!=)"
+        + @"|-(?:OutVariable|ov|PipelineVariable|pv|ErrorVariable|ev|WarningVariable|wv|InformationVariable|iv)\b\s*:?\s*['""]?\+?DeclaredRoleFiles\b"
         + @"|\b(?:Set|New)-Variable\b[^\n]*\bDeclaredRoleFiles\b"
         + @"|\bvariable:\s*DeclaredRoleFiles\b"
         + @"|\$\{?DeclaredRoleFiles\}?\s*\.\s*(?:Add|AddRange|Insert|InsertRange|Clear|Remove\w*|Set\w*)\s*\("
@@ -339,6 +342,18 @@ public class RestrictedContentOwnerRoleGuardTests
         {
             "(R4b-4b) a collection method",
             AfterTheArray("$DeclaredRoleFiles.Add('secure-record-owner-role.json')")
+        },
+        {
+            "an element assigned",
+            AfterTheArray("$DeclaredRoleFiles[1] = 'secure-record-owner-role.json'")
+        },
+        {
+            "an element appended to",
+            AfterTheArray("$DeclaredRoleFiles[0] += 'x'")
+        },
+        {
+            "a common parameter that writes the variable",
+            AfterTheArray("Get-ChildItem config -Filter '*.json' -OutVariable DeclaredRoleFiles | Out-Null")
         },
     };
 
