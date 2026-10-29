@@ -935,11 +935,22 @@ public class InvoiceSubmissionService
             return outcome;
         }
 
-        var detail = (outcome.Detail ?? string.Empty)
+        return outcome with { Detail = AfterFilingDetail(outcome.Detail), FilingKept = true };
+    }
+
+    /// <summary>
+    /// The detail of a refusal after step A: "nothing was saved" restated and <see cref="FilingKeptSentence"/> appended (once). The one
+    /// wording for every refusal that follows a filing, whatever its code field (<c>errorCode</c> or <c>reasonCode</c>).
+    /// </summary>
+    internal static string AfterFilingDetail(string? detail)
+    {
+        var text = (detail ?? string.Empty)
             .Replace("Nothing was saved", "No submission was saved", StringComparison.Ordinal)
             .Replace("nothing was saved", "no submission was saved", StringComparison.Ordinal)
             .TrimEnd();
-        return outcome with { Detail = (detail.Length == 0 ? string.Empty : detail + " ") + FilingKeptSentence };
+        return text.EndsWith(FilingKeptSentence, StringComparison.Ordinal)
+            ? text
+            : (text.Length == 0 ? string.Empty : text + " ") + FilingKeptSentence;
     }
 
     /// <summary>Fix round F1-b: what a refusal after step A adds.</summary>

@@ -158,6 +158,8 @@ internal sealed record FromEmailSubmitResult
 
     public static FromEmailSubmitResult AlreadyCreated(bool filed = false) => new() { Outcome = FromEmailSubmitOutcome.AlreadyCreated, Filed = filed };
 
-    public static FromEmailSubmitResult Refused(int status, string errorCode, string detail) =>
-        new() { Outcome = FromEmailSubmitOutcome.Refused, Status = status, ErrorCode = errorCode, Detail = detail };
+    /// <param name="filed">True when step A filed the communication for this request before the refusal: the route adds the top-level
+    /// <c>filingKept: true</c> (contract section 6, changed 2026-10-29); <paramref name="detail"/> already carries the sentence.</param>
+    public static FromEmailSubmitResult Refused(int status, string errorCode, string detail, bool filed = false) =>
+        new() { Outcome = FromEmailSubmitOutcome.Refused, Status = status, ErrorCode = errorCode, Detail = detail, Filed = filed };
 }

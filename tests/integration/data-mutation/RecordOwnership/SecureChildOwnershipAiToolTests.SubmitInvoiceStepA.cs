@@ -166,8 +166,15 @@ public sealed partial class SecureChildOwnershipAiToolTests
 
         var act = () => StepOneThenA(SourceReads(communicationFiled: false).Object);
 
-        (await act.Should().ThrowAsync<SdapProblemException>()).Which.Code.Should().Be(
-            Sprk.Bff.Api.Api.Filters.CommunicationRecordAuthorizationFilter.RefileDenyCode);
+        // Changed 2026-10-29 (095 contract fix): the 403 is the intake's answer (a SourceFilingRefusedException carrying the route's
+        // Refused result), not an SdapProblemException the problem middleware would render with the code nested under extensions.code.
+        // Asserted on the wire body: a client reads errorCode ?? reasonCode (contract section 6).
+        var refused = (await act.Should().ThrowAsync<InvoiceSubmissionEndpoints.SourceFilingRefusedException>()).Which.Answer;
+        var (status, body) = await Sprk.Bff.Api.Tests.Services.Finance.Submission.WireBody.OfAsync(refused);
+        status.Should().Be(StatusCodes.Status403Forbidden);
+        body.GetProperty("errorCode").GetString().Should().Be(Sprk.Bff.Api.Api.Filters.CommunicationRecordAuthorizationFilter.RefileDenyCode);
+        body.GetProperty("detail").GetString().Should().Be(InvoiceSubmissionEndpoints.RefileForbiddenDetail);
+        body.TryGetProperty("filingKept", out _).Should().BeFalse("nothing was filed");
         _user.Patches.Should().BeEmpty();
     }
 

@@ -27,6 +27,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api;
 using Sprk.Bff.Api.Api.Finance;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.DI;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services;
@@ -626,6 +627,42 @@ public class FinanceEndpointsAuthorizationContractTests
         json["errorCode"]!.GetValue<string>().Should().Be(errorCode);
         json["detail"]!.GetValue<string>().Should().Be("refused; nothing was saved");
         json.Should().NotContainKey("submissionId");
+    }
+
+    [Fact(DisplayName = "095 contract fix: confirm - step A's COMMUNICATION_REFILE_FORBIDDEN is a 403 with a TOP-LEVEL errorCode through the real problem middleware; no nested extensions.code")]
+    public async Task Confirm_StepA_RefileForbidden_IsA403_WithATopLevelErrorCode_ThroughTheRealMiddleware()
+    {
+        await using var host = await FinanceAuthHost.StartAsync(realProblemMiddleware: true);
+        var body = ConfirmBody.New();
+        host.GrantFullConfirm(body);
+        host.Review.Setup(r => r.ConfirmInvoiceAsync(It.IsAny<InvoiceReviewConfirmRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvoiceSubmissionEndpoints.SourceFilingRefusedException(InvoiceSubmissionEndpoints.RefileForbidden()));
+
+        var response = await host.SendAsync(Confirm(body));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync())!.AsObject();
+        json["errorCode"]!.GetValue<string>().Should().Be(Sprk.Bff.Api.Api.Filters.CommunicationRecordAuthorizationFilter.RefileDenyCode);
+        json["detail"]!.GetValue<string>().Should().Be(InvoiceSubmissionEndpoints.RefileForbiddenDetail);
+        json.Should().NotContainKey("extensions", "the code is not nested under extensions.code");
+        json.Should().NotContainKey("filingKept", "step A filed nothing");
+    }
+
+    [Fact(DisplayName = "095 contract fix: confirm - a problem that still reaches the route as an SdapProblemException is answered in the route's shape (top-level errorCode), not the middleware's nested one")]
+    public async Task Confirm_AnSdapProblemException_IsAnsweredWithATopLevelErrorCode()
+    {
+        await using var host = await FinanceAuthHost.StartAsync(realProblemMiddleware: true);
+        var body = ConfirmBody.New();
+        host.GrantFullConfirm(body);
+        host.Review.Setup(r => r.ConfirmInvoiceAsync(It.IsAny<InvoiceReviewConfirmRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(InvoiceSubmissionService.ReadUnavailable());
+
+        var response = await host.SendAsync(Confirm(body));
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync())!.AsObject();
+        json["errorCode"]!.GetValue<string>().Should().Be(InvoiceSubmissionErrors.CoreRecordUnavailable);
+        json.Should().NotContainKey("extensions");
     }
 
     public static TheoryData<InvoiceReviewFailure, HttpStatusCode, bool> ConfirmFailures => new()
@@ -1376,14 +1413,16 @@ public class FinanceEndpointsAuthorizationContractTests
         /// <param name="registerProbe">False builds a host whose container has NO <see cref="CallerRecordAccessProbe"/>
         /// — the configuration fault the Privilege path must deny on.</param>
         /// <param name="ebillingEnabled">The eBilling flag (050a: the confirm route is gated by it).</param>
-        public static async Task<FinanceAuthHost> StartAsync(bool registerProbe = true, bool ebillingEnabled = true)
+        /// <param name="realProblemMiddleware">095 contract fix (2026-10-29): true runs the BFF's REAL pipeline
+        /// (<c>UseSpaarkeMiddleware</c>, its global exception handler included), so a test sees an exception as the wire renders it.</param>
+        public static async Task<FinanceAuthHost> StartAsync(bool registerProbe = true, bool ebillingEnabled = true, bool realProblemMiddleware = false)
         {
             var host = new FinanceAuthHost();
-            await host.InitializeAsync(registerProbe, ebillingEnabled);
+            await host.InitializeAsync(registerProbe, ebillingEnabled, realProblemMiddleware);
             return host;
         }
 
-        private async Task InitializeAsync(bool registerProbe, bool ebillingEnabled)
+        private async Task InitializeAsync(bool registerProbe, bool ebillingEnabled, bool realProblemMiddleware = false)
         {
             var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
             builder.Logging.ClearProviders();
@@ -1425,11 +1464,23 @@ public class FinanceEndpointsAuthorizationContractTests
             builder.Services.AddSingleton<FinanceRollupService>(Rollup);
 
             builder.WebHost.UseTestServer();
+            if (realProblemMiddleware)
+            {
+                builder.Services.AddCors();
+            }
+
             _app = builder.Build();
-            _app.UseRouting();
-            _app.UseAuthentication();
-            _app.UseAuthorization();
-            _app.UseRateLimiter();
+            if (realProblemMiddleware)
+            {
+                _app.UseSpaarkeMiddleware(); // CORS, headers, the global exception handler, authentication, authorization, rate limiting
+            }
+            else
+            {
+                _app.UseRouting();
+                _app.UseAuthentication();
+                _app.UseAuthorization();
+                _app.UseRateLimiter();
+            }
 
             _app.MapFinanceEndpoints();
             _app.MapFinanceRollupEndpoints();

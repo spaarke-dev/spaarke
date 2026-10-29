@@ -390,7 +390,7 @@ internal class SubmitInvoiceFromEmailOperation : ISubmitInvoiceFromEmail
     // ── Answers ──
 
     private static FromEmailSubmitResult Refused(int status, string code, string detail, bool filed) =>
-        FromEmailSubmitResult.Refused(status, code, filed ? AfterFiling(detail) : detail);
+        FromEmailSubmitResult.Refused(status, code, filed ? AfterFiling(detail) : detail, filed);
 
     private static FromEmailSubmitResult NotQueued(bool filed) =>
         Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.Failed, "The invoice could not be submitted right now. Try again shortly.", filed);
@@ -409,8 +409,10 @@ internal class SubmitInvoiceFromEmailOperation : ISubmitInvoiceFromEmail
     {
         if (outcome.Kind == InvoiceSubmissionOutcomeKind.OwnerRefused)
         {
-            throw new FromEmailRouteAnswerException(ProblemDetailsHelper.RecordOwnerRefused(
-                outcome.OwnerRefusal!, "invoice submission", input.Http?.TraceIdentifier ?? input.CorrelationId ?? string.Empty));
+            throw new FromEmailRouteAnswerException(
+                ProblemDetailsHelper.RecordOwnerRefused(
+                    outcome.OwnerRefusal!, "invoice submission", input.Http?.TraceIdentifier ?? input.CorrelationId ?? string.Empty),
+                filed);
         }
 
         var detail = outcome.Detail ?? "The invoice was not submitted.";
@@ -443,7 +445,7 @@ internal class SubmitInvoiceFromEmailOperation : ISubmitInvoiceFromEmail
             return Refused(status, errorCode, problem.Detail ?? "The invoice was not submitted.", filed);
         }
 
-        throw new FromEmailRouteAnswerException(answer);
+        throw new FromEmailRouteAnswerException(answer, filed);
     }
 
     /// <summary>
@@ -476,7 +478,7 @@ internal class SubmitInvoiceFromEmailOperation : ISubmitInvoiceFromEmail
 
         if (status == StatusCodes.Status403Forbidden)
         {
-            return stepA ? throw InvoiceSubmissionEndpoints.RefileForbidden() : Answer(InvoiceSubmissionEndpoints.SourceForbidden(), filed: false);
+            return Answer(stepA ? InvoiceSubmissionEndpoints.RefileForbidden() : InvoiceSubmissionEndpoints.SourceForbidden(), filed: false);
         }
 
         if (status is StatusCodes.Status408RequestTimeout or StatusCodes.Status429TooManyRequests or StatusCodes.Status502BadGateway
@@ -497,8 +499,12 @@ internal class SubmitInvoiceFromEmailOperation : ISubmitInvoiceFromEmail
 /// <summary>
 /// ebilling-r1 task 094: an answer of the from-email operation that is another route's own (the communication re-file's, step A; the owner
 /// refusal's ProblemDetails). The from-email route returns <see cref="Answer"/> as it is; nothing of the submission was written.
+/// <paramref name="filingKept"/>: step A filed the communication for this request before the answer (contract section 6, "After step A"),
+/// so the route appends the unchanged sentence and adds the top-level <c>filingKept: true</c> to the answer.
 /// </summary>
-internal sealed class FromEmailRouteAnswerException(IResult answer) : Exception("The from-email submission was answered by another route's rule.")
+internal sealed class FromEmailRouteAnswerException(IResult answer, bool filingKept = false) : Exception("The from-email submission was answered by another route's rule.")
 {
     internal IResult Answer { get; } = answer;
+
+    internal bool FilingKept { get; } = filingKept;
 }
