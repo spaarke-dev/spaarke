@@ -396,7 +396,8 @@ public sealed record RecordOwnershipContext
         var parents = new List<RecordOwnershipParent>();
         foreach (var (column, value) in fields)
         {
-            if (RecordOwnershipResolver.IsCitation(table, column))
+            // #2427: nor its output (RecordOwnershipResolver.IsOutput) — a row is filed under neither.
+            if (RecordOwnershipResolver.IsCitation(table, column) || RecordOwnershipResolver.IsOutput(table, column))
                 continue;
 
             if (value is EntityReference reference
@@ -470,7 +471,7 @@ public sealed record RecordOwnershipContext
     /// <summary>
     /// UAC task 194b fix round R (B3): THE primary-order rule, shared by the reconciler's question about an existing row
     /// (<see cref="OrderedParentsOf"/>) and every writer's question about a row it writes (<see cref="ForRow"/>): the lookups
-    /// that file the row (an ownership-parent target, a real id, not a citation of <paramref name="table"/>) in
+    /// that file the row (an ownership-parent target, a real id, not a citation or an output of <paramref name="table"/>) in
     /// <paramref name="table"/>'s primary order (<see cref="InPrimaryOrder{TValue}"/>, the subject named by
     /// <paramref name="pairId"/> first on a regarding host table), de-duplicated.
     /// </summary>
@@ -481,6 +482,8 @@ public sealed record RecordOwnershipContext
             .Where(l => l.Value is { IsSpecified: true } parent
                         && RecordOwnershipResolver.IsOwnershipParent(parent.EntityLogicalName)
                         && !RecordOwnershipResolver.IsCitation(table, l.Key)
+                        // #2427: nor is the row's output, anywhere (RecordOwnershipResolver.IsOutput).
+                        && !RecordOwnershipResolver.IsOutput(table, l.Key)
                         // V-fix 3: a Secure-only parent is never in the primary order (SecureOnlyParents carries it).
                         && !RecordOwnershipResolver.IsSecureOnlyParent(table, l.Key))
             .Select(l => new KeyValuePair<string, RecordOwnershipParent>(l.Key, l.Value!))
@@ -1195,6 +1198,9 @@ public sealed record RecordReparent
     /// </summary>
     internal static string? FilingParentOf(string table, string column)
     {
+        // #2427: a row's output (RecordOwnershipResolver.IsOutput) is still named here, so a payload that binds or clears it stays
+        // a candidate re-file and the step after a re-file (the Secure mirror, which walks it) still runs. It decides no owner:
+        // ReparentAsync reads it as a lineage-only lookup (LineageOnlyTargetOf, asked first).
         if (Sprk.Bff.Api.Services.Access.SecureChildLineage.Children.TryGetValue(table, out var lineage)
             && lineage.Lookups.TryGetValue(column, out var target)
             && RecordOwnershipResolver.IsOwnershipParent(target))
@@ -1224,12 +1230,14 @@ public sealed record RecordReparent
     /// <remarks>Component Justification (CLAUDE.md §11): (1) Existing — <see cref="FilingParentOf"/> maps the lineage lookups
     /// that ARE ownership parents. (2) Extension — its complement over the same map, beside it, not a second map. (3) Cost of
     /// doing nothing — the same-parent skip read a change of a message's thread alongside a re-bind of its held matter as
-    /// "nothing moved", and the step after a re-file did not run.</remarks>
+    /// "nothing moved", and the step after a re-file did not run. #2427: a row's OUTPUT
+    /// (<see cref="RecordOwnershipResolver.IsOutput"/>: an analysis's output file) is one too — its target is an ownership-parent
+    /// table, but it files the row under nothing, and the mirror walks it.</remarks>
     internal static string? LineageOnlyTargetOf(string? table, string? column) =>
         table is not null && column is not null
         && Sprk.Bff.Api.Services.Access.SecureChildLineage.Children.TryGetValue(table.Trim(), out var lineage)
         && lineage.Lookups.TryGetValue(column, out var target)
-        && !RecordOwnershipResolver.IsOwnershipParent(target)
+        && (!RecordOwnershipResolver.IsOwnershipParent(target) || RecordOwnershipResolver.IsOutput(table.Trim(), column))
             ? target
             : null;
 
@@ -1742,6 +1750,29 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         table is not null && column is not null && CitationLookups.Contains((table, column));
 
     /// <summary>
+    /// #2427: lookups to an ownership-parent table that name the row's OUTPUT rather than what it is filed under — (table,
+    /// column). An analysis's output file (<c>sprk_analysis.sprk_outputfileid</c>, the document the analysis was saved as) is
+    /// produced BY the row. Ownership follows filing, so an output is never an ownership parent: not the primary, not in
+    /// secure-if-any (a Secure output file does not pull an ordinary analysis into isolation; an analysis filed under a Secure
+    /// matter is Secure through that filing), and not a re-file's parent — a re-file treats it as a lineage-only lookup
+    /// (<see cref="RecordReparent.LineageOnlyTargetOf"/>), which the Secure sharee mirror still walks (SecureChildLineage keeps
+    /// every lookup: an extra one can only narrow a mirror). Read as a parent, it ranked ahead of every <c>sprk_regarding*</c>
+    /// lookup in SecureChildLineage's order, so it could decide an ordinary row's business unit, and re-own the row each time it
+    /// was set or cleared. The one set every parent derivation applies, beside <see cref="CitationLookups"/>;
+    /// <c>RecordFamilyEdgesGuardTests</c> derives its output baselines from it (<see cref="OutputLookupColumns"/>).
+    /// </summary>
+    private static readonly HashSet<(string Table, string Column)> OutputLookups = new(
+        [("sprk_analysis", "sprk_outputfileid")], CitationComparer.Instance);
+
+    /// <summary>True when <paramref name="column"/> of <paramref name="table"/> names the row's output rather than files the row
+    /// under it (<see cref="OutputLookups"/>): never an ownership parent.</summary>
+    public static bool IsOutput(string? table, string? column) =>
+        table is not null && column is not null && OutputLookups.Contains((table, column));
+
+    /// <summary>The output lookups (<see cref="OutputLookups"/>), for the guard that derives its baselines from them.</summary>
+    internal static IReadOnlyCollection<(string Table, string Column)> OutputLookupColumns => OutputLookups;
+
+    /// <summary>
     /// UAC task 194b V-fix 3 (coordinator ruling, 2026-10-28): lookups to an ownership-parent table that count for
     /// SECURE-IF-ANY only — (table, column). The opposite rule to <see cref="CitationLookups"/>: a citation is left out of
     /// secure-if-any; one of these is IN secure-if-any and OUT of the primary order. An editable copy's link to the
@@ -1994,7 +2025,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         }
 
         // Current parents, keyed by column, overlaid with the change.
-        var byColumn = OwnershipParentColumnsOf(current);
+        var byColumn = OwnershipParentColumnsOf(request.EntityLogicalName, current);
 
         // #2143 round 6: a message also takes its record thread's filing (RecordThreadFiling, the reconciler's rule) — before
         // the change from the thread it sits in, after it from the thread the change puts it in (the one it names in
@@ -2372,14 +2403,16 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         return (await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
     }
 
-    /// <summary>Every ownership-parent lookup <paramref name="row"/> holds, keyed by column.</summary>
-    private static Dictionary<string, RecordOwnershipParent> OwnershipParentColumnsOf(Entity row)
+    /// <summary>Every ownership-parent lookup <paramref name="row"/> (of <paramref name="table"/>) holds, keyed by column. #2427:
+    /// never its output (<see cref="IsOutput"/>), which files it under nothing — a re-file reads it as a lineage-only lookup.</summary>
+    private static Dictionary<string, RecordOwnershipParent> OwnershipParentColumnsOf(string table, Entity row)
     {
         var byColumn = new Dictionary<string, RecordOwnershipParent>(StringComparer.OrdinalIgnoreCase);
         foreach (var (column, value) in row.Attributes)
         {
             if (value is EntityReference reference && reference.Id != Guid.Empty
-                && IsOwnershipParent(reference.LogicalName))
+                && IsOwnershipParent(reference.LogicalName)
+                && !IsOutput(table, column))
             {
                 byColumn[column] = new RecordOwnershipParent(reference.LogicalName, reference.Id);
             }
@@ -2450,12 +2483,12 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             row.GetAttributeValue<EntityReference>(OwningBusinessUnitColumn)?.Id,
             WithInheritedParents(
                 RecordOwnershipContext.InPrimaryOrder(
-                        request.EntityLogicalName, FilingColumns(request.EntityLogicalName, OwnershipParentColumnsOf(row)),
+                        request.EntityLogicalName, FilingColumns(request.EntityLogicalName, OwnershipParentColumnsOf(request.EntityLogicalName, row)),
                         RecordOwnershipContext.SubjectColumnOf(row))
                     .Select(c => c.Value).Concat(threadParents),
                 request),
             LineageOnlyLookupsOf(request.EntityLogicalName, row),
-            SecureOnlyColumns(request.EntityLogicalName, OwnershipParentColumnsOf(row)))
+            SecureOnlyColumns(request.EntityLogicalName, OwnershipParentColumnsOf(request.EntityLogicalName, row)))
         {
             OwningUser = row.GetAttributeValue<EntityReference>(OwningUserColumn)?.Id is { } user && user != Guid.Empty ? user : null,
         };

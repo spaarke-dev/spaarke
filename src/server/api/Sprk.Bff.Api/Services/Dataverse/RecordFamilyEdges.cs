@@ -239,7 +239,7 @@ internal static class RecordFamilyEdges
         rows.AddRange(Secure(Agreement,
             ("sprk_regardingdocument", Document), ("sprk_regardingmatter", Matter), ("sprk_regardingproject", Project)));
         // sprk_documentid is the analysis's ownership primary (RecordOwnershipResolver.ParentsOf; UAC-r2 ruling 2026-10-28),
-        // though not a stamp source. Left out: sprk_outputfileid (its output file, not its filing).
+        // though not a stamp source. Left out: sprk_outputfileid (its output file, not its filing: RecordOwnershipResolver.IsOutput).
         rows.AddRange(Secure(Analysis,
             ("sprk_documentid", Document), ("sprk_regardingbudget", Budget), ("sprk_regardingcommunication", Communication),
             ("sprk_regardingdocument", Document), ("sprk_regardinginvoice", Invoice), ("sprk_regardingmatter", Matter),
