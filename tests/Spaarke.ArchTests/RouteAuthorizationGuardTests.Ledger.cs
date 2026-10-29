@@ -475,6 +475,13 @@ public partial class RouteAuthorizationGuardTests
             + "item 3): each route carries RecordRouteAccessAuthorizationFilter on its fixed entity set with the 'read' key "
             + "(no Read, an absent record and any probe fault are the uniform 404); the entries are added only when the rights "
             + "that same probe returned include Write (owner O2). Not on the admin group: DelegationRuleFilter demands Write."),
+        new GovernedFile("Api/Records/RecordFamilyEndpoints.cs", Scope.RouteLevelGate,
+            "GET /api/v1/records/{table}/{id}/family (field-mapping-server-write-path-r1 task 072, FR-31): a record's Filing family, "
+            + "read AS THE CALLER by RecordFamilyReader. The gate is in the HANDLER (HandlerDecisions): the route supplies the "
+            + "table, which RecordRouteAccessAuthorizationFilter's fixed-entity-set form cannot take, and its declared-target form "
+            + "denies with a 403, the wrong shape. The handler asks the caller's Read on the anchor through "
+            + "CallerRecordAccessProbe.GetCallerRightsForAuthorizationGateAsync (an unknown id and a denied one take the same work, "
+            + "#2137); no Read, an unknown record, a non-family table and any probe fault are the uniform 404."),
         new GovernedFile("Api/ExternalAccess/AssignedAccessSyncEndpoint.cs", Scope.GroupGated,
             "POST /assigned-access/sync, GET /assigned-access and POST /assigned-access/dismiss under the DelegationRuleFilter "
             + "admin group (task 142): the Assigned-To rule for one root record — Write on the RECORD; an unknown id and an "
@@ -908,7 +915,17 @@ public partial class RouteAuthorizationGuardTests
     //           and /reinstate-person. GovernedFiles entry (RouteLevelGate), AdminMechanism
     //           (AddExternalAccessAdministratorAuthorizationFilter) and AdminOnlyRoutes group added with it. The filter
     //           consults CallerRecordAccessProbe (WhoAmI over the caller's token), so it passes Rule B as a decision service.
-    private const int ExpectedEndpointFileCount = 133;
+    //
+    // 133 -> 134 (2026-10-29, field-mapping-server-write-path-r1 task 072, FR-31). An UPWARD move:
+    //
+    //   072  +1  Api/Records/RecordFamilyEndpoints.cs ADDED — GET /api/v1/records/{table}/{id:guid}/family, a record's Filing
+    //            family read as the caller by RecordFamilyReader (task 071). Governed RouteLevelGate (its own MapGroup, the
+    //            /api/v1/records conventions of RecordNoAccessEndpoint, which keeps its one responsibility) with ONE
+    //            HandlerDecision: the gate is the equalised Read probe on the anchor in the handler, not a route filter (the
+    //            route supplies the table; the filter's fixed-entity-set form cannot take it and its declared-target form
+    //            denies 403). The uniform 404 covers no Read, an unknown id, a non-family table and a probe fault. Pinned
+    //            through a real host by tests/unit/domain/Api/Records/RecordFamilyEndpointsTests.cs.
+    private const int ExpectedEndpointFileCount = 134;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision
@@ -2092,6 +2109,12 @@ public partial class RouteAuthorizationGuardTests
             "Task 166 (sweep S-67): Read on the SOURCE record and the caller's systemuserid through CallerRecordAccessProbe "
             + "(FieldMappingEndpoints.cs:474, :776), then the source and the children are read and written impersonated as "
             + "the caller (:530, :710); an unauthorized source is the uniform 404."),
+        new HandlerDecision("GET /api/v1/records/{table}/{id:guid}/family", "GetFamilyAsync", "CallerRecordAccessProbe", Array.Empty<string>(),
+            "Task 072 (FR-31): the caller's systemuserid (WhoAmI on their own token, RecordFamilyEndpoints.cs:208) and Read on the "
+            + "ANCHOR through CallerRecordAccessProbe.GetCallerRightsForAuthorizationGateAsync on the reader's own entity set for the "
+            + "route table (:137, :150, :162) before anything is read; no Read, an unknown id, a non-family table and a probe fault "
+            + "are the uniform 404. The walk then reads every member AS THE CALLER (RecordFamilyReader over "
+            + "IImpersonatedCommunicationQuery, :171): a record the caller cannot read is never listed."),
         new HandlerDecision("POST /api/compose/active-document", "RegisterActiveDocument", "IDataverseUserClient", Array.Empty<string>(),
             "Task 166 r1 (was UNOWNED-NEW): the body session must be the caller's (ResolveOwnedSessionAsync, "
             + "ComposeActiveDocumentEndpoints.cs:402), and a STORED document is recorded only when the caller can read its row "
