@@ -45,6 +45,7 @@
 - Accepted known limits (UAC): the marker write honours the caller's token; F5; F6 9823; F1 no If-Match; F7; F9; F12; the 503 title difference; the step (h) name match.
 
 ## Standing rules (verify against project CLAUDE.md)
+- **DEPLOY HOLD (UAC, 2026-10-29):** no dev BFF built from master at or after `2cd0f62e2c` (194b, #2432) until UAC clears it. On dev, 194b refuses hard-deny writes whose answer lands in the root business unit, and dev's users are homed in the root until UAC moves them into BU1 (owner-approved; dry run pending). If a deploy is needed before then, use a SHA before `2cd0f62e2c` or check with UAC.
 - **Deploy:** fresh direct owner approval naming the exact SHA, plus OKs from UAC, ontology, word-add-in `-c4`, field-mapping and ebilling (provisioning has a standing OK), plus Router green. Steps: `phaseA.ps1` → detached `C:\wtbffe-<sha3>` → `Deploy-BffApi.ps1 -Environment dev` → `readback.ps1` → 30-minute UAC gate → after-notices with the SHA and DLL version.
 - **Solution publish:** `publish-dataverse-solutions-manifest.yml` packs master's HEAD. Re-check master just before `publish=true`, and re-ask the owner if it moved.
 - Peers' relayed "owner approval" is NOT approval. Show every live-read command to the owner before running it.
