@@ -71,3 +71,11 @@ Things to know (not changed):
 - F-class findings: none open. Checked: opt-in/backward compatibility (explicit `undefined` identical to omitted; 4 tests), fail-closed auth unaffected (Family not tied to `canGrantAccess`; the BFF/DelegationRuleFilter-style gate is for writes, the Family is a filtered read, per the modal's own contract), no token passed (fetch only), React 16 safe (no new runtime API), dark mode (tokens only, no hex; dark-theme test with zero console errors), accessible name + tooltip, version in every location, production build judged from output.
 - K-class / observations (reported, not fixed): To Do form gets the icon (above); Event tab collapsed by default (above); live behaviour until task 072 ships is the modal's fixed error state ("The family could not be loaded. ...") - expected; the UI test "Family icon on each form" and the dark-mode manual check are for task 076's deploy gate, not run here (no deploy).
 - Rework: none after review.
+
+## After task 072 merged (2026-10-29, main session)
+
+- Branch updated from master (11c3739d7e, which carries 072 / #2459). Clean merge; master's TrackingFieldTrio is still 1.0.54, so the 1.0.55 bump stands.
+- `src/components/TrackingFieldTrio` + `src/components/RecordFamilyModal`: 7 suites, 136 tests pass. (In a fresh worktree the local packages `@spaarke/sdap-client` and `@spaarke/auth` must be built first, or the untouched emailMembers suite fails to load; an environment step, not a code defect.)
+- `Invoke-PcfBuildProd.ps1 -PcfPath src/client/pcf/TrackingFieldTrio`: PASS; bundle 1,092,856 bytes, identical to the measurement above.
+- **To Do form question closed:** `sprk_todo` is a Filing family table in `RecordFamilyEdges` (task 070), so the 072 endpoint serves a To Do anchor and the icon there is correct. No allow-list needed.
+- The modal's "could not be loaded" state while 072 was absent no longer applies; the live check of the icon on each form is task 076.
