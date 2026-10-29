@@ -22,7 +22,7 @@
 
 ## Next actions (mine)
 1. **Task 194b (#2339): MERGED 2cd0f62e2c (PR #2432).** Dev teams live (restricted 16685363, config 2dae7e6e); provisioning takes it as H7c (#2429); guide points at #2429.
-   - **Dev BU1 move** (owner approved 'move dev people into BU1'): planner agent RUNNING → `uacmerge/uacg/rbu1/rbu1_plan.md`; bring the plan + dry run to the owner, no writes before the go; notice to ontology before any write (the seeded policies are user-owned by the owner's account and move with it).
+   - **Dev BU1 move** (owner approved the direction): plan DONE at `uacmerge/uacg/rbu1/rbu1_plan.md` (+ dry-run CSV; 12 owner questions Q1-Q12). **BLOCKER Q1 (measured):** product tables are read at Deep, so a BU1-homed user cannot read root-owned product rows (round 136 gap; it hits customer stamps too). Analysis agent RUNNING → `uacmerge/uacg/rbu1q1/rbu1q1_analysis.md`; then bring the owner Q1 + recommended answers to Q2-Q12. No writes before the go. The plan keeps the seed policies in the root (`DoNotMoveAllRecords` on the owner's account); ontology told to hold the memo-LIKE proof.
    - Then: deploy via R3 → report-only run + ontology memo-LIKE proof (after the move) → owner go for writes → close. Remove C:/wt194 (check junctions).
    - Research queued: how Dataverse homes new users in a non-root BU on customer stamps → hand to provisioning.
    - **Round 137 check (10-29):** a root-homed author's publish is NOT refused. `CheckVersionOwnerAsync` sets no ChildEntityLogicalName, so OrdinaryExitAsync's restricted step is skipped and the version stays author-owned. Told ontology: 172's 409 branch is unreachable (my earlier rec withdrawn), suggested a pin instead; my 171 point 1 withdrawn (D-197 dev 'no change').
