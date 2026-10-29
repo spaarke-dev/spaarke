@@ -182,7 +182,7 @@ public sealed class BudgetInquiryExecutor(
                 Error: check.Denied ?? check.ClientFailure?.ErrorMessage ?? "You do not have permission to send this inquiry.");
 
         var owner = await ownership.ResolveOwnerAsync(
-            RecordOwnershipContext.ForParents(OwnedChildWrite.ParentsOf(Table, item), CallerObjectId(), me.SystemUserId) with
+            OwnedChildWrite.OwnershipOf(Table, item, CallerObjectId(), me.SystemUserId) with // 194b R (B3): the one builder
             {
                 RequestedBy = RecordRequester.Of(me.SystemUserId),
             },

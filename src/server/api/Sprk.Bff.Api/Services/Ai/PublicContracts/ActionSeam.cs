@@ -99,6 +99,11 @@ public sealed class ActionSeam : IActionSeam
         if (string.IsNullOrWhiteSpace(request.Subject))
             return new CreateTaskResult(false, Guid.Empty, "subject is required");
 
+        // UAC task 194b V-fix (verifier A F1): a regarding ownership parent the task table cannot file is refused with its
+        // named code before anything is written (the core refuses it too, but only as a bare Guid.Empty).
+        if (TaskActionCore.RegardingRefusalOf(request.RegardingObjectType, request.RegardingObjectId) is { } refusal)
+            return new CreateTaskResult(false, Guid.Empty, refusal);
+
         var core = new TaskActionCore(_entityService, _coreAncestors, _ownership, _identity, _recordTypes, _logger);
         var taskId = await core.CreateAsync(
             new TaskActionInput(

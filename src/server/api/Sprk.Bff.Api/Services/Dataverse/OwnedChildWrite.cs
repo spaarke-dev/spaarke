@@ -98,13 +98,42 @@ internal static class OwnedChildWrite
 
     /// <summary>The ownership parents a mapped row of <paramref name="table"/> is filed under (resolver's definition — no per-table
     /// list). #2084: a lookup that CITES rather than files (<see cref="RecordOwnershipResolver.IsCitation"/>, the one predicate the
-    /// resolver's own <c>ParentsOf</c> applies) is left out, so a Signal created naming its rule is never filed under the rule.</summary>
+    /// resolver's own <c>ParentsOf</c> applies) is left out, so a Signal created naming its rule is never filed under the rule.
+    /// UAC task 194b fix round F4: in the table's primary order (<see cref="RecordOwnershipContext.InPrimaryOrder"/>, the order the
+    /// reconciler asks the row in once it exists), never the order the caller's payload named the lookups in — the first is the
+    /// primary, whose business unit decides an ordinary row's owner.</summary>
     internal static IReadOnlyList<RecordOwnershipParent> ParentsOf(string table, DataverseWriteItemMapper.MappedItem item) =>
-        item.Lookups
-            .Where(l => RecordOwnershipResolver.IsOwnershipParent(l.RelatedTable) && !RecordOwnershipResolver.IsCitation(table, l.Column))
-            .Select(l => new RecordOwnershipParent(l.RelatedTable, l.RecordId))
-            .Distinct()
-            .ToArray();
+        OwnershipOf(table, item).Parents; // 194b R (B3): the one builder's parents, so the two cannot drift
+
+    /// <summary>UAC task 194b fix round R (B3): the ownership question for a mapped row of <paramref name="table"/> — the one
+    /// builder (<see cref="RecordOwnershipContext.ForRow"/>) over the lookups the item writes and its regarding pair id.</summary>
+    internal static RecordOwnershipContext OwnershipOf(
+        string table, DataverseWriteItemMapper.MappedItem item, Guid? callerObjectId = null, Guid? callerSystemUserId = null) =>
+        RecordOwnershipContext.ForRow(table, LookupsOf(item), PairIdOf(item.JsonBody), callerObjectId, callerSystemUserId);
+
+    /// <summary>UAC task 194b R4: every lookup the mapped item writes, column → the record it names (the builder filters).</summary>
+    internal static IEnumerable<KeyValuePair<string, RecordOwnershipParent?>> LookupsOf(DataverseWriteItemMapper.MappedItem item) =>
+        item.Lookups.Select(l => KeyValuePair.Create(l.Column, (RecordOwnershipParent?)new RecordOwnershipParent(l.RelatedTable, l.RecordId)));
+
+    /// <summary>The body's <c>sprk_regardingrecordid</c> (the regarding pair's id, a text column), or <c>null</c>.</summary>
+    private static string? PairIdOf(string jsonBody)
+    {
+        if (string.IsNullOrWhiteSpace(jsonBody))
+            return null;
+        try
+        {
+            using var body = JsonDocument.Parse(jsonBody);
+            return body.RootElement.ValueKind == JsonValueKind.Object
+                   && body.RootElement.TryGetProperty(CoreAncestorResolver.RegardingRecordIdColumn, out var pair)
+                   && pair.ValueKind == JsonValueKind.String
+                ? pair.GetString()
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
 
     /// <summary>
     /// True when an <c>email.draft</c> takes the owned path: a draft (a <c>sprk_communication</c>, a CHILD in the ownership
@@ -399,7 +428,7 @@ internal static class OwnedChildWrite
         // Task 146 c1-r1 (owner round 13 item 9): the caller asked for this row, so the app-only create records them as its
         // creator person — F3's "or the creator" branch can then admit them, as it admits a run-as-user row's createdby.
         var owner = await ownership.ResolveOwnerAsync(
-            RecordOwnershipContext.ForParents(ParentsOf(table, item), callerObjectId, me.SystemUserId) with
+            OwnershipOf(table, item, callerObjectId, me.SystemUserId) with
             {
                 RequestedBy = RecordRequester.Of(me.SystemUserId),
             },
@@ -1129,9 +1158,12 @@ internal static class OwnedChildWrite
 
         if (!isChild)
         {
+            // UAC task 194b R3b-2: through the one builder, keyed by the columns the update writes.
             var owner = await ownership.ResolveOwnerAsync(
-                RecordOwnershipContext.ForParents(
-                    newParents.Select(l => new RecordOwnershipParent(l.RelatedTable, l.RecordId)), callerObjectId, me.SystemUserId),
+                RecordOwnershipContext.ForRow(
+                    table,
+                    newParents.Select(l => KeyValuePair.Create(l.Column, (RecordOwnershipParent?)new RecordOwnershipParent(l.RelatedTable, l.RecordId))),
+                    PairIdOf(item.JsonBody), callerObjectId, me.SystemUserId),
                 ct).ConfigureAwait(false);
             return owner.IsRefused || owner.IsSecureOwner
                 ? new RefileOutcome { SecureFilingRefused = owner }

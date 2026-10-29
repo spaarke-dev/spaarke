@@ -136,15 +136,17 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         }
 
         // field-mapping-server-write-path-r1 task 015 (FR-09): every create asks ResolveOwnerAsync, the record-first
-        // resolution; the target-style context (not ForParents) because ForParents would drop the friendly spelling.
+        // resolution. UAC task 194b R4-2: over the lookups the worker writes — the association (either spelling, mapped to
+        // its column) and, for an Email or Attachment save, the communication the payload carries (the one every document
+        // this worker creates is linked to; known, so no read) — the same question the save asks.
         var resolution = await ownershipResolver.ResolveOwnerAsync(
-            new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext
-            {
-                // AssociationType may be the friendly spelling ("matter"); the resolver normalizes it.
-                TargetEntityLogicalName = payload.AssociationType,
-                TargetRecordId = payload.AssociationId,
-                CallerObjectId = Guid.TryParse(userId, out var callerObjectId) ? callerObjectId : null,
-            },
+            Sprk.Bff.Api.Services.Office.OfficeDocumentPersistence.DocumentOwnershipOf(
+                payload.AssociationType,
+                payload.AssociationId,
+                Sprk.Bff.Api.Services.Office.OfficeDocumentPersistence.IsEmailDerived(payload.ContentType)
+                    ? payload.RelatedCommunicationId
+                    : null,
+                Guid.TryParse(userId, out var callerObjectId) ? callerObjectId : null),
             cancellationToken).ConfigureAwait(false);
         return resolution.IsOwned ? resolution.OwningTeamId : null;
     }

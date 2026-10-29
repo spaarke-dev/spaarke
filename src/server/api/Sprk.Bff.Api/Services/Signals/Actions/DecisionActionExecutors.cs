@@ -542,15 +542,20 @@ public sealed class ReviseBudgetExecutor : IDecisionActionExecutor
             return (Refuse(DecisionActionReasons.CallerUnresolved, "You could not be identified, so the revision was not recorded."), null);
 
         // The revision's owner (D-33/D-38): secure-if-any over the budget and the matter, never the writer's own business unit.
+        // UAC task 194b R3b-2: through the one builder, keyed by the two columns the writer stamps on the revision
+        // (sprk_budget, sprk_matter) — sprk_budgetrevision's primary order (the budget first), as the reconciler asks it.
         RecordOwnerResolution owner;
         try
         {
-            owner = await _ownership.ResolveOwnerAsync(new RecordOwnershipContext
+            owner = await _ownership.ResolveOwnerAsync(RecordOwnershipContext.ForRow(
+                "sprk_budgetrevision",
+                new[]
+                {
+                    KeyValuePair.Create("sprk_budget", (RecordOwnershipParent?)new RecordOwnershipParent(BudgetEntity, budgetId)),
+                    KeyValuePair.Create("sprk_matter", (RecordOwnershipParent?)new RecordOwnershipParent("sprk_matter", matterId)),
+                },
+                callerObjectId: DecisionExec.CallerObjectId(request.Http)) with
             {
-                TargetEntityLogicalName = "sprk_matter",
-                TargetRecordId = matterId,
-                Parents = [new RecordOwnershipParent(BudgetEntity, budgetId)],
-                CallerObjectId = DecisionExec.CallerObjectId(request.Http),
                 // Task 147 (D-135, #1777): the person who caused the revision, recorded as sprk_createdbyperson by
                 // owner.ApplyTo. userId is the acting user's systemuserid (resolved above, else the plan refused).
                 RequestedBy = RecordRequester.Of(userId),
