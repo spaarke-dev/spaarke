@@ -1186,8 +1186,11 @@ public sealed class SubmissionOverrideService
     /// record's id and its <c>sprk_confirmedby</c> decider (a close that failed is finished). Nothing is taken from the findings column
     /// (F1-1: user-writable, so neither the stamp nor the stored set is trusted); with no writer-created record nothing is closed. The set's
     /// subjects are read from the Signal rows and must be the invoice or its lines, then the caller's rights are asked, as for the decision;
-    /// refused, unanswerable or untrusted, and nothing is written (those, and a fault while checking, only warn and count 0). Returns how
-    /// many closes it ATTEMPTED and did not finish: the caller answers 503 unavailable for a count above zero (F2), AlreadyDecided otherwise.
+    /// refused or untrusted, and nothing is written. Returns how many closes did NOT finish, and the caller answers 503 unavailable for a
+    /// count above zero (F2), AlreadyDecided otherwise. Counted: a close that failed, and a TRANSIENT fault while reading the writer-created
+    /// record, the stored Signals, the invoice or the entity sets (1: the Signals are still Open, so the repeat is not "done"). Not counted
+    /// (PERMANENT, a known limit: only warn, AlreadyDecided): no writer-created record, a record naming no decider, untrusted subjects, a
+    /// writer that refuses to read the set, an invoice that is gone, and a caller without the rights.
     /// </summary>
     private async Task<int> RecloseAsync(Verb verb, Entity row, string? token, CancellationToken ct)
     {
@@ -1233,17 +1236,35 @@ public sealed class SubmissionOverrideService
 
             var check = await StoredSignalSetCheck.SubjectsAsync(_entities, invoiceId, set, ct).ConfigureAwait(false);
             if (!check.Trusted
-                || await ReadInvoiceAsync(invoiceId, InvoiceDecisionColumns, ct).ConfigureAwait(false) is not { } invoice
-                || await AuthorizeCloseAsync(submissionId, invoiceId, invoice, set, check.Subjects, token, ct).ConfigureAwait(false) is not null)
+                || await ReadInvoiceAsync(invoiceId, InvoiceDecisionColumns, ct).ConfigureAwait(false) is not { } invoice)
             {
+                // Permanent: untrusted subjects, or the invoice is gone. A repeat does not change either; the decision's answer stands.
                 _logger.LogWarning("Submission {SubmissionId}: the repeat did not re-close the stored Signals (their subjects, the caller's rights or the invoice could not be shown)", submissionId);
                 return 0;
             }
+
+            if (await AuthorizeCloseAsync(submissionId, invoiceId, invoice, set, check.Subjects, token, ct).ConfigureAwait(false) is { } denied)
+            {
+                _logger.LogWarning("Submission {SubmissionId}: the repeat did not re-close the stored Signals (their subjects, the caller's rights or the invoice could not be shown)", submissionId);
+
+                // A refusal is permanent (no rights, no core record): AlreadyDecided as before. A 503 is the entity-set lookup failing, which
+                // is a read fault: the Signals are still Open, so the repeat is not answered as done (F2).
+                return denied.StatusCode == StatusCodes.Status503ServiceUnavailable ? 1 : 0;
+            }
+        }
+        catch (DecisionRecordRefusedException ex) when (RecordRefusal(submissionId, invoiceId, ex).StatusCode != StatusCodes.Status503ServiceUnavailable)
+        {
+            // Permanent: the writer refused to read the stored set (more than one record under the key, or a set that cannot be read). A repeat
+            // does not change it, so the repeat's answer stands. A lookup that merely faulted (503 in RecordRefusal) falls to the next catch.
+            _logger.LogWarning("Submission {SubmissionId}: the repeat could not use the stored Signals ({Reason}); nothing is re-closed", submissionId, ex.Reason);
+            return 0;
         }
         catch (Exception ex) when (!IsCallerCancellation(ex, ct))
         {
-            _logger.LogWarning("Submission {SubmissionId}: the repeat could not check the stored Signals ({ExceptionType})", submissionId, ex.GetType().Name);
-            return 0;
+            // A fault while reading the writer-created record, the stored Signals or the invoice is transient, and the Signals are still
+            // Open: never an "already decided" answer (F2). Counted as one close not finished; the next repeat reads again.
+            _logger.LogWarning("Submission {SubmissionId}: the repeat could not read the stored Signals ({ExceptionType}); answering unavailable so it is repeated", submissionId, ex.GetType().Name);
+            return 1;
         }
 
         return await HumanDecisionSignalClose.CloseSetAsync(_closeActed, set, recordId, decider, _logger, ct).ConfigureAwait(false);
