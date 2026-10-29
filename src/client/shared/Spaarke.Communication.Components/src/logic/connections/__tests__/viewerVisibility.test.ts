@@ -10,6 +10,8 @@
  *  - `createViewerRecordNameResolver` reads one query per entity per chunk, as the viewer, and caches.
  */
 import {
+  buildEmailConnections,
+  summarizeEmailConnections,
   candidateDisplayName,
   candidateMatchReason,
   candidateRecordNumber,
@@ -142,6 +144,37 @@ describe('only candidates the viewer can read become cards', () => {
   it('a WRITTEN target the viewer cannot read is hidden too', () => {
     const written = [v1Candidate(UNREADABLE, 1, { written: true })];
     expect(deriveConnections(parseProvenance(doc(written, true))!, true, viewer)).toEqual([]);
+  });
+});
+
+describe('buildEmailConnections / summarizeEmailConnections (reading-pane connection path)', () => {
+  const FILED_PROJECT = '44444444-4444-4444-4444-444444444444';
+  const filed = [{ entityType: 'sprk_project', recordId: FILED_PROJECT, recordName: 'Filed Lookup Name' }];
+  const candidates = [v1Candidate(READABLE, 0.9), v1Candidate(UNREADABLE, 0.95)];
+
+  it('engine slots are named by the viewer read; filed associations are always kept', () => {
+    const rows = buildEmailConnections(doc(candidates), STATUS_PENDING_REVIEW, filed, viewer);
+    expect(rows.map(r => [r.targetId, r.targetName])).toEqual(
+      expect.arrayContaining([
+        [READABLE, 'Viewer Read Name'],
+        [FILED_PROJECT, 'Filed Lookup Name'],
+      ])
+    );
+    expect(rows.map(r => r.targetId)).not.toContain(UNREADABLE);
+    expect(JSON.stringify(rows)).not.toMatch(STORED_TEXT);
+  });
+
+  it('no viewer read → filed associations only', () => {
+    const rows = buildEmailConnections(doc(candidates), STATUS_PENDING_REVIEW, filed);
+    expect(rows.map(r => r.targetId)).toEqual([FILED_PROJECT]);
+  });
+
+  it('the status dot counts every stored slot, whatever the viewer can read', () => {
+    const unreadableOnly = doc([v1Candidate(UNREADABLE, 0.9)]);
+    const summary = summarizeEmailConnections(unreadableOnly, STATUS_PENDING_REVIEW, filed);
+    expect(summary.tone).toBe('yellow');
+    expect(summary.suggestedCount).toBe(1);
+    expect(summary.filedCount).toBe(1);
   });
 });
 

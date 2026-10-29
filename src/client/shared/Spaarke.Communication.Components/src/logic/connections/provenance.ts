@@ -699,19 +699,29 @@ function emptyProvenanceDoc(): ProvenanceDoc {
 /**
  * THE single connection-build path for the reading-pane surface: parse the raw
  * provenance JSON, derive engine slots, then fold in what's ACTUALLY filed on the
- * record (authoritative — includes manual "Link another" associations). Used by BOTH
- * `EmailConnectionsReview` (the resolver body) and `summarizeEmailConnections` (the
- * section status dot) so they never disagree.
+ * record (authoritative — includes manual "Link another" associations).
+ *
+ * Engine slots are named only by `viewerName` (the viewer's own read, e.g. the shared
+ * `getViewerRecordNameResolver(webApi).nameOf`): a slot whose candidate the viewer cannot
+ * read, or with no lookup at all, is not returned. Filed associations are always returned.
  */
 export function buildEmailConnections(
   provenanceJson: string | null | undefined,
   associationStatus: number | null | undefined,
-  filed: FiledAssociation[] | undefined
+  filed: FiledAssociation[] | undefined,
+  viewerName?: ViewerTargetName
 ): Connection[] {
   const doc = parseProvenance(provenanceJson) ?? emptyProvenanceDoc();
   const isResolved = associationStatus === ASSOCIATION_STATUS_RESOLVED_VALUE;
-  return mergeFiledConnections(deriveConnections(doc, isResolved), filed ?? []);
+  return mergeFiledConnections(deriveConnections(doc, isResolved, viewerName), filed ?? []);
 }
+
+/**
+ * The status dot counts every stored slot, readable by this viewer or not, so hiding a candidate
+ * never changes the review state. Only slot fields and counts are used; the id stands in for a
+ * name and is never rendered.
+ */
+const EVERY_STORED_SLOT: ViewerTargetName = (_entity, id) => id;
 
 /** Traffic-light tone for the Association section header (🔴 needs decision · 🟡 review · 🟢 all set). */
 export type AssociationTone = 'red' | 'yellow' | 'green';
@@ -755,13 +765,16 @@ export function summarizeConnections(grouped: {
   return { tone, label, filedCount, suggestedCount, needsDecisionCount };
 }
 
-/** Convenience: build → group → summarize in one call for the section status dot. */
+/**
+ * Convenience: build → group → summarize in one call for the section status dot. Counts every
+ * stored slot (no names), so the tone is the same for every viewer.
+ */
 export function summarizeEmailConnections(
   provenanceJson: string | null | undefined,
   associationStatus: number | null | undefined,
   filed: FiledAssociation[] | undefined
 ): AssociationSummary {
-  const connections = buildEmailConnections(provenanceJson, associationStatus, filed);
+  const connections = buildEmailConnections(provenanceJson, associationStatus, filed, EVERY_STORED_SLOT);
   const grouped = groupConnectionsByAction(connections, [], new Set<string>(), new Set<string>());
   return summarizeConnections(grouped);
 }
