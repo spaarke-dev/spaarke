@@ -4,7 +4,7 @@
     <title>Pin D-197 "author wins, root included": a rule publish asks the ownership question without a child table, so 194b never refuses a root-homed author</title>
     <phase>11 UAT</phase>
     <gate>startable: uac-r2 194b (R4b-2c, `RestrictedContentOwnerTeam`) is on master as 2cd0f62e2c</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>One test and one code comment; no behaviour change. It modifies tests, so code-review and adr-check run.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -55,4 +55,9 @@
       <file>projects/spaarke-ontology-platform-r1/notes/decisions.md (D-197)</file>
     </files>
   </knowledge>
+  <completion date="2026-10-29">
+    Rewritten mid-task: the first version (a 409 for `RestrictedContentOwnerTeamUnresolved`) rested on a wrong premise. uac-r2 corrected itself and the main session verified that `CheckVersionOwnerAsync` names no child table, so 194b never refuses a root-homed author (D-197 holds). The implementer stopped correctly on the escalation trigger first (docs lacked 194b); master was merged into docs (`4470c95b86`, repoint `f1133d951b`).
+    Delivered: one comment at the `ResolveOwnerAsync` call and the pin test `Publish_AsksTheResolverWithNoChildTable_SoTheAuthorWins_RootIncluded` (ChildEntityLogicalName null, KeepCreator). Filtered OntologyAdminAuthoring 183/183; mutation (`ChildEntityLogicalName = "sprk_policyversion"`) fails only the pin. Review: main-session read clean; uac-r2 OK at `ddab988203`. PR #2434 merged to docs `fab8c91531`.
+    rework: none task 172
+  </completion>
 </task>
