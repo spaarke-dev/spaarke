@@ -66,8 +66,9 @@ public class RefileWriterAfterRefileGuardTests
     /// <summary>The ratchet baseline: re-file writers that do not run the step yet, each with its reason.</summary>
     private sealed record KnownViolation(Type Type, string Reason);
 
-    // Empty: ThreadResolver and CommunicationService run the step since #2110 (#2091), and the invoice confirm's re-file since #2095
-    // (ebilling-r1; InvoiceDocumentRefile since 050a / D-134). A new entry needs a reason; an entry that no longer violates must be removed.
+    // Empty: ThreadResolver and CommunicationService run the step since #2110 (#2091). The invoice confirm's document re-file (#2095,
+    // InvoiceDocumentRefile since 050a / D-134) is retired by ebilling-r1 task 094: a Submit Invoice source is copied, never re-filed.
+    // A new entry needs a reason; an entry that no longer violates must be removed.
     private static readonly IReadOnlyList<KnownViolation> KnownViolations = Array.Empty<KnownViolation>();
 
     private static readonly Lazy<IReadOnlyList<Type>> BffTypes = new(() => typeof(Program).Assembly.GetTypes());
@@ -82,8 +83,6 @@ public class RefileWriterAfterRefileGuardTests
                  {
                      "Sprk.Bff.Api.Api.ChildRecordEndpoints", "Sprk.Bff.Api.Api.DataverseDocumentsEndpoints",
                      "Sprk.Bff.Api.Services.Ai.Handlers.DataverseUpdateRecordHandler", "Sprk.Bff.Api.Services.Office.ReconciledEmailFiling",
-                     // ebilling-r1 050a (D-134): the confirmed document's re-file moved from InvoiceReviewService into the job.
-                     "Sprk.Bff.Api.Services.Finance.Submission.InvoiceDocumentRefile",
                      // #2091: the thread JOIN (ThreadResolver.JoinThreadAsync, which CommunicationService's respond-into-thread
                      // also calls) re-files through ReparentAsync and runs the step with RefileThreadStep.PlacedByWriter.
                      "Sprk.Bff.Api.Services.Communication.ThreadResolver",

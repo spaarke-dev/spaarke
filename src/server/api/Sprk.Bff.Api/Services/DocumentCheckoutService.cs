@@ -837,6 +837,19 @@ public class DocumentCheckoutService
             return new HasChildDocumentsDeleteResult(childCount, correlationId);
         }
 
+        // 1c. ebilling-r1 task 094 (ontology-r1 088 gate F1; procedure-and-file-model 5.2; owner EB-D-166: blocking is correct): a
+        // Stored File copied from this document (sprk_storedfile.sprk_sourcedocument, Delete = Restrict) refuses the row the same
+        // way, so it is checked here too, before the file is touched - with its own code (fix round F1-c): it is an invoice's
+        // source, not a parent of child documents, and deleting other documents first would not help.
+        var copyCount = await CountStoredFileCopiesAsync(documentId, ct);
+        if (copyCount > 0)
+        {
+            _logger.LogInformation(
+                "Delete refused for document {DocumentId}: {CopyCount} Stored File copies name it as their source [{CorrelationId}]",
+                documentId, copyCount, correlationId);
+            return new InvoiceSourceDeleteResult(correlationId);
+        }
+
         // 2. Delete file from SPE first. fileGone records whether the row's file is gone after this step (deleted now or
         // already missing), for the step-3 Restrict refusal below (task 188 slice D).
         var fileGone = false;
@@ -1039,11 +1052,25 @@ public class DocumentCheckoutService
     public const string HasChildDocumentsCode = "document_has_child_documents";
 
     /// <summary>
+    /// ebilling-r1 task 094 fix round (F1-c; owner EB-D-166): the code of an <see cref="InvoiceSourceDeleteResult"/> - an invoice was
+    /// submitted from the document (a Stored File names it as <c>sprk_sourcedocument</c>, Delete = Restrict), so it is not deleted.
+    /// Internal planes only; the external plane answers <see cref="DocumentInUseCode"/>.
+    /// </summary>
+    public const string InvoiceSourceCode = "document_is_invoice_source";
+
+    /// <summary>
+    /// ebilling-r1 task 094 fix round (F1-c): the external plane's generic code for a delete refused because the document is in use
+    /// (an invoice's source). It names no count and no invoice.
+    /// </summary>
+    public const string DocumentInUseCode = "document_in_use";
+
+    /// <summary>
     /// Dataverse's <c>CannotDeleteDueToAssociation</c> error code ("The object you tried to delete is associated with
     /// another object and cannot be deleted"), the Restrict cascade's refusal of a delete: the Web API's
     /// <c>error.code</c> string. Source: Microsoft Learn, "Web service error codes (Microsoft Dataverse)". For
     /// <c>sprk_document</c> the only Restrict relationship it is the parent of is <c>sprk_document_ParentDocument</c>
-    /// (solution XML), so on a document delete this code means "child documents exist" (task 188 slice D).
+    /// (solution XML), so on a document delete this code means "child documents exist" (task 188 slice D). Since ebilling-r1 task 094
+    /// the Stored File's <c>sprk_sourcedocument</c> lookup (Delete = Restrict) is a second one: a Submit Invoice copy refuses it too.
     /// </summary>
     public const string CannotDeleteDueToAssociationCode = "0x80040227";
 
@@ -1099,6 +1126,32 @@ public class DocumentCheckoutService
         return data.TryGetProperty("value", out var rows) && rows.ValueKind == JsonValueKind.Array
             ? rows.GetArrayLength()
             : throw new HttpRequestException($"Dataverse answered the child documents of document {documentId} without rows.");
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 094 (ontology-r1 088 gate F1): how many Stored Files name <paramref name="documentId"/> as their
+    /// <c>sprk_sourcedocument</c> (a Submit Invoice copy; the lookup is Delete = Restrict), active or not, up to
+    /// <see cref="ChildDocumentCountCap"/>. App-only, ids never returned. A failed read throws (fail closed, like
+    /// <see cref="CountChildDocumentsAsync"/>).
+    /// </summary>
+    private async Task<int> CountStoredFileCopiesAsync(Guid documentId, CancellationToken ct)
+    {
+        var url = $"{Finance.Files.StoredFileSchema.EntitySet}?$select={Finance.Files.StoredFileSchema.IdColumn}" +
+                  $"&$filter=_{Finance.Files.StoredFileSchema.SourceDocument}_value eq {documentId}&$top={ChildDocumentCountCap}";
+        var response = await _httpClient.GetAsync(url, ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            _logger.LogError(
+                "Dataverse returned {StatusCode} for the Stored File copies of document {DocumentId}",
+                response.StatusCode, documentId);
+            throw new HttpRequestException(
+                $"Dataverse error ({response.StatusCode}) reading the Stored File copies of document {documentId}.");
+        }
+
+        var data = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: ct);
+        return data.TryGetProperty("value", out var rows) && rows.ValueKind == JsonValueKind.Array
+            ? rows.GetArrayLength()
+            : throw new HttpRequestException($"Dataverse answered the Stored File copies of document {documentId} without rows.");
     }
 
     /// <summary>
@@ -1751,6 +1804,17 @@ public record FileNotDeletedDeleteResult(string Code, int FailureStatusCode, str
 /// on both routes). A row whose pointer is unbound or mismatched, or whose container is not this stamp's, is still
 /// refused (409), and a fault in the check is a retryable 503.</param>
 public record HasChildDocumentsDeleteResult(int? ChildCount, string CorrelationId, bool FileGone = false)
+    : DeleteResult(false, CorrelationId)
+{
+    public new int StatusCode => 409;
+}
+
+/// <summary>
+/// ebilling-r1 task 094 fix round (F1-c; owner EB-D-166): an invoice was submitted from the document - a Stored File names it as its
+/// <c>sprk_sourcedocument</c> (Delete = Restrict) - so nothing was deleted. Code <see cref="DocumentCheckoutService.InvoiceSourceCode"/>, 409.
+/// </summary>
+/// <param name="CorrelationId">The request's correlation id.</param>
+public record InvoiceSourceDeleteResult(string CorrelationId)
     : DeleteResult(false, CorrelationId)
 {
     public new int StatusCode => 409;

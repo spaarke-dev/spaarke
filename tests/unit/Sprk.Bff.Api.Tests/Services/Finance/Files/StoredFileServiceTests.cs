@@ -92,7 +92,7 @@ public sealed class StoredFileServiceTests
     {
         var rig = new StoredFileRig();
 
-        var result = await rig.Service.CreateForAppAsync(Spec(), new FakeLengthStream((long)int.MaxValue + 1), requestedBy: null, CancellationToken.None);
+        var result = await rig.Service.CreateForAppAsync(Spec(purpose: StoredFilePurpose.InvoiceSupportingFile), new FakeLengthStream((long)int.MaxValue + 1), requestedBy: null, CancellationToken.None);
 
         result.RefusalCode.Should().Be(StoredFileRefusal.SizeOutOfRange);
         rig.Gateway.Names.Should().BeEmpty();
@@ -459,6 +459,36 @@ public sealed class StoredFileServiceTests
         rig.Gateway.Get("invoice-files", again.Blob.BlobPath)!.Content.Should().Equal(Pdf);
     }
 
+    [Theory(DisplayName = "Stage: the same bytes under the id from another source document, communication or eml part are refused; the same source is reused")]
+    [InlineData("document")]
+    [InlineData("communication")]
+    [InlineData("attachment")]
+    [InlineData("attachment-absent")]
+    public async Task Stage_SameBytesFromAnotherSource_IsRefused(string differs)
+    {
+        var rig = new StoredFileRig();
+        var spec = Spec() with
+        {
+            SourceDocumentId = Guid.NewGuid(), SourceCommunicationId = Guid.NewGuid(), SourceAttachmentIdentity = "eml-part-0", SourceVersion = 7,
+        };
+        var first = (await rig.Service.StageAsync(spec, new MemoryStream(Pdf), CancellationToken.None)).Blob!;
+        (await rig.Service.StageAsync(spec with { SourceVersion = 8 }, new MemoryStream(Pdf), CancellationToken.None)).Blob!.Reused
+            .Should().BeTrue("the same source at another version is a retry");
+
+        var other = differs switch
+        {
+            "document" => spec with { SourceDocumentId = Guid.NewGuid() },
+            "communication" => spec with { SourceCommunicationId = Guid.NewGuid() },
+            "attachment" => spec with { SourceAttachmentIdentity = "eml-part-1" },
+            _ => spec with { SourceAttachmentIdentity = null },
+        };
+        var refused = await rig.Service.StageAsync(other, new MemoryStream(Pdf), CancellationToken.None);
+
+        refused.RefusalCode.Should().Be(StoredFileRefusal.ContentConflict);
+        rig.Gateway.Get("invoice-files", first.BlobPath)!.Metadata[StoredFileBlobs.MetadataSourceDocument]
+            .Should().Be(spec.SourceDocumentId!.Value.ToString("D"), "the blob is left unchanged");
+    }
+
     [Fact(DisplayName = "Stage: a non-seekable stream is buffered and staged; not configured refuses with no call")]
     public async Task Stage_NonSeekable_AndNotConfigured()
     {
@@ -657,6 +687,33 @@ public sealed class StoredFileServiceTests
         rig.Dataverse.Calls.Should().BeEmpty();
     }
 
+    [Fact(DisplayName = "094 InvoicePdf writer guard (must fire): the caller upload and the app create refuse an InvoicePdf onto an existing invoice - no blob, no row")]
+    public async Task InvoicePdf_OutsideTheCommit_IsRefused_NothingWritten()
+    {
+        var rig = new StoredFileRig();
+        rig.Probe.Grant("sprk_invoices", InvoiceId, Spaarke.Dataverse.AccessRights.Read | Spaarke.Dataverse.AccessRights.Write);
+
+        var upload = await rig.Service.UploadForCallerAsync(StoredFileRig.Caller(), "token", StoredFilePurpose.InvoicePdf, Invoice, "a.pdf", "application/pdf", new MemoryStream(Pdf), CancellationToken.None);
+        var app = await rig.Service.CreateForAppAsync(Spec(), new MemoryStream(Pdf), requestedBy: null, CancellationToken.None);
+
+        upload.RefusalCode.Should().Be(StoredFileRefusal.InvalidRequest);
+        app.RefusalCode.Should().Be(StoredFileRefusal.InvalidRequest);
+        rig.Gateway.StorageCalls.Should().Be(0);
+        rig.Dataverse.Writes.Should().Be(0);
+        rig.Owners.Verify(o => o.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()), Moq.Times.Never);
+    }
+
+    [Fact(DisplayName = "094 InvoicePdf writer guard (must not fire): the caller upload of a supporting file onto the invoice is created")]
+    public async Task SupportingFile_OntoTheInvoice_IsCreated()
+    {
+        var rig = new StoredFileRig();
+        rig.Probe.Grant("sprk_invoices", InvoiceId, Spaarke.Dataverse.AccessRights.Write);
+
+        var upload = await rig.Service.UploadForCallerAsync(StoredFileRig.Caller(), "token", StoredFilePurpose.InvoiceSupportingFile, Invoice, "a.pdf", "application/pdf", new MemoryStream(Pdf), CancellationToken.None);
+
+        upload.IsCreated.Should().BeTrue();
+    }
+
     [Fact(DisplayName = "Upload must-fire: no Write on the parent → refused, no blob, no row")]
     public async Task Upload_NoWrite_Refused()
     {
@@ -705,7 +762,7 @@ public sealed class StoredFileServiceTests
     public async Task CreateForApp_RetryIsIdempotent()
     {
         var rig = new StoredFileRig();
-        var spec = Spec(StoredFileIds.ForUpload(Submission)) with { SubmissionId = Submission };
+        var spec = Spec(StoredFileIds.ForUpload(Submission), StoredFilePurpose.InvoiceSupportingFile) with { SubmissionId = Submission };
 
         (await rig.Service.CreateForAppAsync(spec, new MemoryStream(Pdf), requestedBy: null, CancellationToken.None)).IsCreated.Should().BeTrue();
 
@@ -722,7 +779,7 @@ public sealed class StoredFileServiceTests
         var rig = new StoredFileRig();
         rig.Dataverse.CreateFault = new TimeoutException("response lost");
         rig.Dataverse.RetrieveFault = new TimeoutException("Dataverse slow");
-        var spec = Spec();
+        var spec = Spec(purpose: StoredFilePurpose.InvoiceSupportingFile);
 
         var act = () => rig.Service.CreateForAppAsync(spec, new MemoryStream(Pdf), requestedBy: null, CancellationToken.None);
 
@@ -735,7 +792,7 @@ public sealed class StoredFileServiceTests
     public async Task CreateFails_ReusedBlob_Kept()
     {
         var rig = new StoredFileRig();
-        var spec = Spec(StoredFileIds.ForUpload(Submission)) with { SubmissionId = Submission };
+        var spec = Spec(StoredFileIds.ForUpload(Submission), StoredFilePurpose.InvoiceSupportingFile) with { SubmissionId = Submission };
         (await rig.Service.StageAsync(spec, new MemoryStream(Pdf), CancellationToken.None)).IsStaged.Should().BeTrue(); // the other attempt
         rig.Dataverse.CreateFault = new TimeoutException("transient");
 
@@ -750,7 +807,7 @@ public sealed class StoredFileServiceTests
     {
         var rig = new StoredFileRig { OwnerAnswer = RecordOwnerResolution.Refused("record_owner_no_source", "none") };
 
-        var result = await rig.Service.CreateForAppAsync(Spec(), new MemoryStream(Pdf), requestedBy: null, CancellationToken.None);
+        var result = await rig.Service.CreateForAppAsync(Spec(purpose: StoredFilePurpose.InvoiceSupportingFile), new MemoryStream(Pdf), requestedBy: null, CancellationToken.None);
 
         result.RefusalCode.Should().Be(StoredFileRefusal.OwnerUnresolved);
         rig.Gateway.StorageCalls.Should().Be(0);
@@ -785,6 +842,159 @@ public sealed class StoredFileServiceTests
         (await rig.Service.OpenForProcessingAsync(malicious, CancellationToken.None)).Outcome.Should().Be(StoredFileProcessingOutcome.Malicious);
         (await rig.Service.OpenForProcessingAsync(removed, CancellationToken.None)).Outcome.Should().Be(StoredFileProcessingOutcome.Missing);
         (await rig.Service.OpenForProcessingAsync(Guid.NewGuid(), CancellationToken.None)).Outcome.Should().Be(StoredFileProcessingOutcome.Missing);
+    }
+
+    // ── 092: the staged read (no row yet) ──
+
+    private static StoredFileRowSpec UploadSpec() => new()
+    {
+        FileId = StoredFileIds.ForUpload(Submission),
+        Purpose = StoredFilePurpose.InvoicePdf,
+        Parent = Invoice,
+        Name = "invoice.pdf",
+        ContentType = "application/pdf",
+        FirmVisible = true,
+        SubmissionId = Submission,
+    };
+
+    /// <summary>Stages <see cref="UploadSpec"/> through the real stage and marks it scanned clean.</summary>
+    private static async Task<StagedBlob> StageCleanAsync(StoredFileRig rig, byte[]? bytes = null)
+    {
+        var staged = (await rig.Service.StageAsync(UploadSpec(), new MemoryStream(bytes ?? Pdf), CancellationToken.None)).Blob!;
+        rig.Gateway.Get(staged.Container, staged.BlobPath)!.Tags = StoredFileRig.CleanTags(rig.Gateway.Now.AddMinutes(1));
+        return staged;
+    }
+
+    [Fact(DisplayName = "092 staged read must-not-fire: a staged blob with no row, scanned clean, returns its bytes and the stage's content type")]
+    public async Task OpenStaged_NoRow_CleanBlob_ReturnsBytes()
+    {
+        var rig = new StoredFileRig();
+        await StageCleanAsync(rig);
+
+        var read = await rig.Service.OpenStagedForProcessingAsync(StoredFilePurpose.InvoicePdf, Invoice, UploadSpec().FileId, CancellationToken.None);
+
+        read.Outcome.Should().Be(StoredFileProcessingOutcome.Ok);
+        read.Content!.ToArray().Should().Equal(Pdf);
+        read.ContentType.Should().Be("application/pdf");
+        rig.Dataverse.Writes.Should().Be(0, "the read writes nothing");
+    }
+
+    [Fact(DisplayName = "092 staged read must-fire: no blob → Missing; no scan verdict → Pending; Malicious → Malicious; bytes that differ from the staged hash → Missing")]
+    public async Task OpenStaged_NoRow_TypedOutcomes()
+    {
+        var fileId = UploadSpec().FileId;
+        var none = new StoredFileRig();
+        (await none.Service.OpenStagedForProcessingAsync(StoredFilePurpose.InvoicePdf, Invoice, fileId, CancellationToken.None))
+            .Outcome.Should().Be(StoredFileProcessingOutcome.Missing);
+
+        var pending = new StoredFileRig();
+        await pending.Service.StageAsync(UploadSpec(), new MemoryStream(Pdf), CancellationToken.None);
+        (await pending.Service.OpenStagedForProcessingAsync(StoredFilePurpose.InvoicePdf, Invoice, fileId, CancellationToken.None))
+            .Outcome.Should().Be(StoredFileProcessingOutcome.Pending, "a freshly staged blob has no scan verdict yet");
+
+        var malicious = new StoredFileRig();
+        var bad = await StageCleanAsync(malicious);
+        malicious.Gateway.Get(bad.Container, bad.BlobPath)!.Tags = new Dictionary<string, string> { [StoredFileBlobs.ScanResultTagKey] = StoredFileBlobs.ScanMaliciousValue };
+        (await malicious.Service.OpenStagedForProcessingAsync(StoredFilePurpose.InvoicePdf, Invoice, fileId, CancellationToken.None))
+            .Outcome.Should().Be(StoredFileProcessingOutcome.Malicious);
+
+        var tampered = new StoredFileRig();
+        var blob = await StageCleanAsync(tampered);
+        tampered.Gateway.Get(blob.Container, blob.BlobPath)!.Content = Encoding.UTF8.GetBytes("other bytes");
+        (await tampered.Service.OpenStagedForProcessingAsync(StoredFilePurpose.InvoicePdf, Invoice, fileId, CancellationToken.None))
+            .Outcome.Should().Be(StoredFileProcessingOutcome.Missing);
+
+        var noHash = new StoredFileRig();
+        var unhashed = await StageCleanAsync(noHash);
+        noHash.Gateway.Get(unhashed.Container, unhashed.BlobPath)!.Metadata.Remove(StoredFileBlobs.MetadataSha256);
+        (await noHash.Service.OpenStagedForProcessingAsync(StoredFilePurpose.InvoicePdf, Invoice, fileId, CancellationToken.None))
+            .Outcome.Should().Be(StoredFileProcessingOutcome.Missing, "a blob with no staged hash cannot be checked");
+    }
+
+    [Fact(DisplayName = "092 staged read: once the row exists the row's rule answers (a Removed row is Missing even with a clean blob)")]
+    public async Task OpenStaged_RowExists_RowRuleAnswers()
+    {
+        var rig = new StoredFileRig();
+        var fileId = UploadSpec().FileId;
+        rig.SeedFile(fileId, Invoice, Pdf, StoredFileStatus.Removed);
+
+        (await rig.Service.OpenStagedForProcessingAsync(StoredFilePurpose.InvoicePdf, Invoice, fileId, CancellationToken.None))
+            .Outcome.Should().Be(StoredFileProcessingOutcome.Missing);
+    }
+
+    [Fact(DisplayName = "092 staged read: a purpose under the wrong parent is Missing with no storage call; an unconfigured store throws (the job retries)")]
+    public async Task OpenStaged_WrongParent_AndNotConfigured()
+    {
+        var rig = new StoredFileRig();
+        (await rig.Service.OpenStagedForProcessingAsync(StoredFilePurpose.ProcedureSource, Invoice, Guid.NewGuid(), CancellationToken.None))
+            .Outcome.Should().Be(StoredFileProcessingOutcome.Missing);
+        rig.Gateway.StorageCalls.Should().Be(0);
+
+        var off = new StoredFileRig(configured: false);
+        var act = () => off.Service.OpenStagedForProcessingAsync(StoredFilePurpose.InvoicePdf, Invoice, Guid.NewGuid(), CancellationToken.None);
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact(DisplayName = "092 GetStaged: returns the stage's facts (same name, hash and size as the stage answered); the row it builds flips to Servable")]
+    public async Task GetStaged_MatchesStage_AndRowFlips()
+    {
+        var rig = new StoredFileRig();
+        var staged = await StageCleanAsync(rig);
+
+        var read = await rig.Service.GetStagedAsync(UploadSpec(), CancellationToken.None);
+
+        read.Should().NotBeNull();
+        read!.Container.Should().Be(staged.Container);
+        read.BlobPath.Should().Be(staged.BlobPath);
+        read.Sha256.Should().Be(staged.Sha256);
+        read.SizeBytes.Should().Be(staged.SizeBytes);
+
+        var create = rig.Service.BuildRow(UploadSpec(), read, RecordOwnerResolution.Owned(StoredFileRig.TeamId), creatorPersonId: null);
+        await rig.Dataverse.Service.CreateAsync(create.Target, CancellationToken.None);
+        (await rig.Service.FlipToServableAsync(UploadSpec().FileId, CancellationToken.None)).Outcome.Should().Be(StoredFileFlipOutcome.Flipped);
+    }
+
+    [Fact(DisplayName = "092 GetStaged must-fire: no blob, or a blob whose metadata hash is not lower-case hex, is null")]
+    public async Task GetStaged_NoBlobOrBadHash_IsNull()
+    {
+        var rig = new StoredFileRig();
+        (await rig.Service.GetStagedAsync(UploadSpec(), CancellationToken.None)).Should().BeNull();
+
+        var staged = await StageCleanAsync(rig);
+        rig.Gateway.Get(staged.Container, staged.BlobPath)!.Metadata[StoredFileBlobs.MetadataSha256] = staged.Sha256.ToUpperInvariant();
+        (await rig.Service.GetStagedAsync(UploadSpec(), CancellationToken.None)).Should().BeNull();
+    }
+
+    [Fact(DisplayName = "092 DeleteStaged must-not-fire: a staged blob no row references is deleted by its name")]
+    public async Task DeleteStaged_NoRow_DeletesTheBlob()
+    {
+        var rig = new StoredFileRig();
+        var staged = await StageCleanAsync(rig);
+
+        (await rig.Service.DeleteStagedAsync(UploadSpec(), CancellationToken.None)).Should().BeTrue();
+
+        rig.Gateway.Get(staged.Container, staged.BlobPath).Should().BeNull();
+        rig.Dataverse.Writes.Should().Be(0);
+    }
+
+    [Fact(DisplayName = "092 DeleteStaged must-fire: a row that references the blob, or a row read that faults, keeps it; an unconfigured store deletes nothing")]
+    public async Task DeleteStaged_RowOrUnknown_KeepsTheBlob()
+    {
+        var withRow = new StoredFileRig();
+        withRow.SeedFile(UploadSpec().FileId, Invoice, Pdf, StoredFileStatus.NotYetServable);
+        var path = StoredFileBlobName.Build(withRow.TenantId, Invoice, UploadSpec().FileId);
+        (await withRow.Service.DeleteStagedAsync(UploadSpec(), CancellationToken.None)).Should().BeFalse();
+        withRow.Gateway.Get(StoredFileSchema.ContainerOf(StoredFilePurpose.InvoicePdf), path).Should().NotBeNull("a row references it");
+
+        var unknown = new StoredFileRig();
+        var staged = await StageCleanAsync(unknown);
+        unknown.Dataverse.RetrieveFault = new TimeoutException("throttled");
+        (await unknown.Service.DeleteStagedAsync(UploadSpec(), CancellationToken.None)).Should().BeFalse();
+        unknown.Gateway.Get(staged.Container, staged.BlobPath).Should().NotBeNull("an unknown row state keeps the blob for the detector");
+
+        var off = new StoredFileRig(configured: false);
+        (await off.Service.DeleteStagedAsync(UploadSpec(), CancellationToken.None)).Should().BeFalse();
+        off.Gateway.StorageCalls.Should().Be(0);
     }
 
     // =============================================================================================================================

@@ -228,7 +228,11 @@ public sealed class RuleSetOutcome<T> where T : class
 /// (empty or Ontology domain) is the uniform "not found" for every operation and is never read into a response or written. This service
 /// never writes <c>sprk_domain</c>. Versions are read only through a billing policy's id.</para>
 /// <para><b>Identity.</b> The route filter has already established, as the caller, that they hold the Dataverse table privileges of a billing
-/// admin (D-76). The writes run as the application (like the rate card import); the rows are owned by the owner team resolved for the caller.</para>
+/// admin (D-76). The writes run as the application (like the rate card import); the rows are owned by the owner team resolved for the caller.
+/// The rule set, policy and version rows are hard-deny tables (EB-D-168 / EB-D-168a, UAC 194b R4b-2): their question is built by
+/// <see cref="RecordOwnershipContext.ForRow"/> for the row's table (<see cref="ContentOwnerContext"/>), so an ordinary answer is the
+/// customer's restricted-content owner team, never a business unit's default team. The source document is not hard-deny and keeps the
+/// caller's business-unit team (<see cref="CallerOwnerContext"/>).</para>
 /// <para>§11: <i>Existing</i> — RateCardImportService (the Draft-to-Published shape, SPE upload, ownership) and the Ontology authoring publish
 /// order (stamp then move). <i>Extension</i> — neither can be extended: the Ontology service is caller-identity and Ontology-domain by
 /// design, and the rate card service owns other tables. <i>Cost of doing nothing</i> — no billing rule can be reviewed or put in force.</para>
@@ -436,10 +440,18 @@ public class RuleSetService
             return RuleSetOutcome<RuleSetCreated>.Invalid(CodeInvalid, errors);
         }
 
-        var owner = await _ownership.ResolveOwnerAsync(OwnerContext(request.CallerObjectId), ct);
+        // Two questions, both before anything is written: the source document is the caller's business-unit team's; the rule set is a
+        // hard-deny row (EB-D-168a: the restricted-content owner team, or a refusal).
+        var owner = await _ownership.ResolveOwnerAsync(CallerOwnerContext(request.CallerObjectId), ct);
         if (!owner.IsOwned)
         {
             return RuleSetOutcome<RuleSetCreated>.OwnerRefused(owner);
+        }
+
+        var ruleSetOwner = await _ownership.ResolveOwnerAsync(ContentOwnerContext(RuleSetEntity, request.CallerObjectId), ct);
+        if (!ruleSetOwner.IsOwned)
+        {
+            return RuleSetOutcome<RuleSetCreated>.OwnerRefused(ruleSetOwner);
         }
 
         var created = new List<(string Entity, Guid Id)>();
@@ -492,7 +504,7 @@ public class RuleSetService
                 row["sprk_firm"] = new EntityReference(FirmEntity, firmId);
             }
 
-            owner.ApplyTo(row);
+            ruleSetOwner.ApplyTo(row);
             var ruleSetId = await _entities.CreateAsync(row, ct);
             created.Add((RuleSetEntity, ruleSetId));
 
@@ -902,7 +914,9 @@ public class RuleSetService
             var present = 0;
             if (valid.Count > 0)
             {
-                var owner = await _ownership.ResolveOwnerAsync(OwnerContext(callerObjectId), ct);
+                // A drafted rule's policy is a hard-deny row; its first version is filed under that policy alone, so it takes the
+                // policy's answer (the version's question over the policy names the same team: EB-D-168a).
+                var owner = await _ownership.ResolveOwnerAsync(ContentOwnerContext(PolicyEntity, callerObjectId), ct);
                 if (!owner.IsOwned)
                 {
                     return RuleSetOutcome<DraftsAdded>.OwnerRefused(owner);
@@ -1308,7 +1322,7 @@ public class RuleSetService
             }
 
             // The working version is, or has been, in force: it is never updated. The edit is a new version.
-            var owner = await _ownership.ResolveOwnerAsync(OwnerContext(edit.CallerObjectId), ct);
+            var owner = await _ownership.ResolveOwnerAsync(ContentOwnerContext(VersionEntity, edit.CallerObjectId), ct);
             if (!owner.IsOwned)
             {
                 return RuleSetOutcome<ProposalEdited>.OwnerRefused(owner);
@@ -2810,11 +2824,30 @@ public class RuleSetService
     // Helpers
     // ───────────────────────────────────────────────────────────────────────────────────────────────
 
-    private static RecordOwnershipContext OwnerContext(Guid? callerObjectId) =>
-        RecordOwnershipContext.ForParents(Array.Empty<RecordOwnershipParent>(), callerObjectId) with
+    /// <summary>
+    /// The ownership question for a HARD-DENY row this service or <see cref="Procedures.ProcedureService"/> writes — <c>sprk_ruleset</c>,
+    /// <c>sprk_policy</c>, <c>sprk_policyversion</c> (EB-D-168 / EB-D-168a, UAC 194b R4b-2) — through the one builder,
+    /// <see cref="RecordOwnershipContext.ForRow"/>, for <paramref name="table"/>. It names no parent: a billing rule set hangs off a Procedure,
+    /// and a billing policy off its rule set, neither an ownership parent; no billing policy or version carries a matter (the census waiver's
+    /// condition 1, <c>RuleSetServiceOwnerTests</c>). So the caller's business unit decides, and the resolver's ordinary exit turns that unit's
+    /// default team into the customer's restricted-content owner team (a refusal, fail closed, for an answer in the root business unit or a
+    /// team that cannot be used); a caller in the Secure Record business unit gets its named owner team.
+    /// </summary>
+    internal static RecordOwnershipContext ContentOwnerContext(string table, Guid? callerObjectId) =>
+        RecordOwnershipContext.ForRow(table, Array.Empty<KeyValuePair<string, RecordOwnershipParent?>>(), callerObjectId: callerObjectId) with
         {
             RequestedBy = RecordRequester.Of(objectId: callerObjectId),
         };
+
+    /// <summary>
+    /// The ownership question for a row that is NOT hard-deny (a rule set's source document; a Procedure and its versions): the caller's own
+    /// business-unit team (no parent named, I-6), as before 194b.
+    /// </summary>
+    internal static RecordOwnershipContext CallerOwnerContext(Guid? callerObjectId) => new()
+    {
+        CallerObjectId = callerObjectId,
+        RequestedBy = RecordRequester.Of(objectId: callerObjectId),
+    };
 
     private async Task<bool> ExistsAsync(string entity, string idColumn, Guid id, CancellationToken ct)
     {

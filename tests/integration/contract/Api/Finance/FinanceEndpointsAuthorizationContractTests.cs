@@ -705,6 +705,107 @@ public class FinanceEndpointsAuthorizationContractTests
         host.Probe.Calls.Should().Equal(new PrivilegeCall(CreateInvoicePrivilege, HasToken: true));
     }
 
+    // ── ebilling-r1 task 094 fix round: the confirm route's Submit Invoice step 1 (F4, F1-b) ──
+
+    private const string Communications = "sprk_communications";
+
+    /// <summary>The confirm's document links <paramref name="communication"/> (an email attachment), as the app-only reader answers it.</summary>
+    private static void DocumentLinksCommunication(FinanceAuthHost host, Guid documentId, Guid communication, Microsoft.Xrm.Sdk.Entity? communicationRow = null)
+    {
+        host.Entities.Setup(e => e.RetrieveAsync("sprk_document", documentId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Microsoft.Xrm.Sdk.Entity("sprk_document", documentId)
+            {
+                ["sprk_relatedcommunication"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_communication", communication),
+            });
+        if (communicationRow is not null)
+        {
+            host.Entities.Setup(e => e.RetrieveAsync("sprk_communication", communication, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(communicationRow);
+        }
+    }
+
+    [Fact(DisplayName = "094 F4 (must fire): the confirm's filter grants Write and Append but not Read on the document: step 1 asks Read itself and refuses 403 source_forbidden; the intake is never called")]
+    public async Task Confirm_DocumentWithoutRead_Is403SourceForbidden_TheIntakeIsNotCalled()
+    {
+        await using var host = await FinanceAuthHost.StartAsync();
+        var body = ConfirmBody.New();
+        host.GrantFullConfirm(body);
+        host.Access.Grant(Documents, body.DocumentId, AccessRights.Write | AccessRights.Append); // the filter's rights, no Read
+
+        var response = await host.SendAsync(Confirm(body));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync())!.AsObject();
+        json["errorCode"]!.GetValue<string>().Should().Be(InvoiceSubmissionErrors.SourceForbidden);
+        host.Probe.RecordRightsCalls.Should().Equal((Documents, body.DocumentId));
+        host.Review.VerifyNoOtherCalls();
+        host.Entities.VerifyNoOtherCalls();
+    }
+
+    [Fact(DisplayName = "094 step 1 (must fire): the confirm's document links a communication the caller cannot Read: 403 source_forbidden; the intake is never called")]
+    public async Task Confirm_DocumentsCommunicationWithoutRead_Is403SourceForbidden_TheIntakeIsNotCalled()
+    {
+        await using var host = await FinanceAuthHost.StartAsync();
+        var body = ConfirmBody.New();
+        host.GrantFullConfirm(body);
+        var communication = Guid.NewGuid();
+        DocumentLinksCommunication(host, body.DocumentId, communication);
+
+        var response = await host.SendAsync(Confirm(body));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync())!.AsObject();
+        json["errorCode"]!.GetValue<string>().Should().Be(InvoiceSubmissionErrors.SourceForbidden);
+        host.Probe.RecordRightsCalls.Should().Equal((Documents, body.DocumentId), (Communications, communication));
+        host.Review.VerifyNoOtherCalls();
+    }
+
+    [Fact(DisplayName = "094 F1-b (must fire): the confirm hands step A to the intake and files nothing itself; A consults the D-140 chain when the intake runs it")]
+    public async Task Confirm_DocumentsCommunicationReadable_HandsStepAToTheIntake_AndFilesNothingFirst()
+    {
+        await using var host = await FinanceAuthHost.StartAsync();
+        var body = ConfirmBody.New();
+        host.GrantFullConfirm(body);
+        var communication = Guid.NewGuid();
+        host.Access.Grant(Communications, communication, AccessRights.Read | AccessRights.Write);
+        DocumentLinksCommunication(host, body.DocumentId, communication, new Microsoft.Xrm.Sdk.Entity("sprk_communication", communication)
+        {
+            ["sprk_regardingmatter"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_matter", body.MatterId), // already filed
+        });
+        bool? stepA = null;
+        var communicationReadBeforeTheIntake = true;
+        host.Review.Setup(r => r.ConfirmInvoiceAsync(It.IsAny<InvoiceReviewConfirmRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(async (InvoiceReviewConfirmRequest request, string _, CancellationToken ct) =>
+            {
+                communicationReadBeforeTheIntake = host.Entities.Invocations.Any(i => i.Arguments.Count > 0 && Equals(i.Arguments[0], "sprk_communication"));
+                stepA = await request.FileSourceBeforeWrite!(ct);
+                return InvoiceSubmissionOutcome.Received(new InvoiceSubmissionReceipt(Guid.NewGuid(), Guid.NewGuid(), "INV-9.1", body.DocumentId));
+            });
+
+        var response = await host.SendAsync(Confirm(body));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        communicationReadBeforeTheIntake.Should().BeFalse("step 1 is read-only on the communication's filing: A runs inside the intake");
+        stepA.Should().BeFalse("the communication is already filed, so A writes nothing");
+    }
+
+    [Fact(DisplayName = "094 F1-b: a step-A refusal inside the intake is the confirm's answer as A gave it, never the route's 500")]
+    public async Task Confirm_StepARefusedInsideTheIntake_IsAsGiven()
+    {
+        await using var host = await FinanceAuthHost.StartAsync();
+        var body = ConfirmBody.New();
+        host.GrantFullConfirm(body);
+        host.Review.Setup(r => r.ConfirmInvoiceAsync(It.IsAny<InvoiceReviewConfirmRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new Sprk.Bff.Api.Api.Finance.InvoiceSubmissionEndpoints.SourceFilingRefusedException(
+                InvoiceSubmissionHttp.Refused(StatusCodes.Status409Conflict, InvoiceSubmissionErrors.DocumentCoreRecordMismatch, "restricted. Nothing was saved.")));
+
+        var response = await host.SendAsync(Confirm(body));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync())!.AsObject();
+        json["errorCode"]!.GetValue<string>().Should().Be(InvoiceSubmissionErrors.DocumentCoreRecordMismatch);
+    }
+
     [Fact(DisplayName = "050a: with eBilling off an authorized confirm is 503 ebilling.disabled and the service is never called")]
     public async Task Confirm_EbillingDisabled_Is503_AfterAuthorization_AndTheServiceIsNotInvoked()
     {
@@ -1118,6 +1219,23 @@ public class FinanceEndpointsAuthorizationContractTests
         /// <summary>How many times the caller's systemuserid was asked for.</summary>
         public int SystemUserIdCalls { get; private set; }
 
+        /// <summary>
+        /// Task 094 fix round F4: the caller's own rights on a record as Dataverse answers them (RetrievePrincipalAccess over OBO), which
+        /// Submit Invoice's step 1 asks after the route's filter. The host answers from the same rights table as the filter's
+        /// (<see cref="RecordingAccessDataSource"/>): one caller, one set of rights.
+        /// </summary>
+        public Func<string, Guid, AccessRights> RecordRights { get; set; } = (_, _) => AccessRights.None;
+
+        /// <summary>Every record-rights question step 1 asked (set, id).</summary>
+        public List<(string Set, Guid Id)> RecordRightsCalls { get; } = new();
+
+        public override Task<AccessRights> GetCallerRightsAsync(
+            string? callerBearerToken, string entitySet, Guid recordId, CancellationToken ct = default)
+        {
+            RecordRightsCalls.Add((entitySet, recordId));
+            return Task.FromResult(string.IsNullOrEmpty(callerBearerToken) ? AccessRights.None : RecordRights(entitySet, recordId));
+        }
+
         public override Task<Guid?> GetCallerSystemUserIdAsync(string? callerBearerToken, CancellationToken ct = default)
         {
             SystemUserIdCalls++;
@@ -1180,6 +1298,9 @@ public class FinanceEndpointsAuthorizationContractTests
 
         public void Grant(string set, Guid id, AccessRights rights) => _rights[(set, id)] = rights;
 
+        /// <summary>The rights granted on a record (None when none were).</summary>
+        public AccessRights RightsOf(string set, Guid id) => _rights.TryGetValue((set, id), out var rights) ? rights : AccessRights.None;
+
         /// <summary>Dataverse gave no answer for this record: rights None with <see cref="AccessSnapshot.Faulted"/> true (an unknown, not a denial).</summary>
         public void Fault(string set, Guid id) => _faulted.Add((set, id));
 
@@ -1238,6 +1359,20 @@ public class FinanceEndpointsAuthorizationContractTests
         public Mock<IFieldMappingDataverseService> RollupWrites { get; } = new(MockBehavior.Strict);
         public RollupSeam Rollup { get; private set; } = null!;
 
+        /// <summary>
+        /// Task 094: the app-only reader the confirm's Submit Invoice step 1 uses AFTER the route's filter (the document's communication).
+        /// The default document links no communication, so step 1 adds nothing to the confirm's own checks.
+        /// </summary>
+        public Mock<IGenericEntityService> Entities { get; } = DocumentWithoutCommunication();
+
+        private static Mock<IGenericEntityService> DocumentWithoutCommunication()
+        {
+            var entities = new Mock<IGenericEntityService>(MockBehavior.Strict);
+            entities.Setup(e => e.RetrieveAsync("sprk_document", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string table, Guid id, string[] _, CancellationToken _) => new Microsoft.Xrm.Sdk.Entity(table, id));
+            return entities;
+        }
+
         /// <param name="registerProbe">False builds a host whose container has NO <see cref="CallerRecordAccessProbe"/>
         /// — the configuration fault the Privilege path must deny on.</param>
         /// <param name="ebillingEnabled">The eBilling flag (050a: the confirm route is gated by it).</param>
@@ -1275,10 +1410,12 @@ public class FinanceEndpointsAuthorizationContractTests
             builder.Services.AddNarrowingWorld(() => World);
             if (registerProbe)
             {
+                Probe.RecordRights = Access.RightsOf; // task 094 F4: step 1's own Read checks see the caller's same rights
                 builder.Services.AddSingleton<CallerRecordAccessProbe>(Probe);
             }
 
             builder.Services.AddSingleton(Review.Object);
+            builder.Services.AddSingleton(Entities.Object);
             builder.Services.AddOptions<EbillingOptions>().Configure(o => o.Enabled = ebillingEnabled);
             builder.Services.AddSingleton(Search.Object);
             builder.Services.AddSingleton(Summary.Object);
@@ -1321,6 +1458,7 @@ public class FinanceEndpointsAuthorizationContractTests
         public void VerifyNoServiceWasInvoked()
         {
             Review.VerifyNoOtherCalls();
+            Entities.VerifyNoOtherCalls(); // task 094: step 1 runs after the filter, never before a denial
             Search.VerifyNoOtherCalls();
             Summary.VerifyNoOtherCalls();
             Kpi.VerifyNoOtherCalls();

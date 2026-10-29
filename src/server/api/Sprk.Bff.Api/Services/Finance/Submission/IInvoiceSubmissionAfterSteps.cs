@@ -76,6 +76,13 @@ public enum SubmissionAfterStepsStatus
 
     /// <summary>The submission row no longer exists (044 K4): nothing was written.</summary>
     SubmissionMissing,
+
+    /// <summary>
+    /// ebilling-r1 task 094 (procedure-and-file-model 9.1 steps 5-6): the resume's commit gate (<see cref="SubmissionCommitGate"/>) failed, so
+    /// the commit was undone and the submission is Failed with <see cref="SubmissionAfterStepsResult.ReasonCode"/>; no after-step ran.
+    /// <see cref="SubmissionAfterStepsResult.UndoHeld"/> says a delete of the undo faulted (a later delivery finishes it).
+    /// </summary>
+    Undone,
 }
 
 /// <summary>The outcome of the after-commit steps for one submission.</summary>
@@ -91,14 +98,8 @@ public sealed record SubmissionAfterStepsResult
     /// <summary>A stable code for <see cref="SubmissionAfterStepsStatus.Retry"/> and <see cref="SubmissionAfterStepsStatus.Refused"/>.</summary>
     public string? ReasonCode { get; init; }
 
-    /// <summary>
-    /// 050a review round 2, item 2(b): true when the run stopped because the confirmed document's re-file was refused
-    /// (<see cref="InvoiceDocumentRefileStatus.Refused"/>): the invoice is committed and its document is NOT filed under it. The handler then
-    /// tells the administrator so in <c>sprk_adminattention</c> (<see cref="AdminAttentionText.StoppedNote(string?, bool)"/>), never silently.
-    /// Review round 3 (uac-r2 F2): also true on the re-file's <see cref="SubmissionAfterStepsStatus.Retry"/> stops (the isolation read faulted,
-    /// or the reparent threw), so a final delivery that runs out of retries says the same.
-    /// </summary>
-    public bool DocumentNotFiled { get; init; }
+    /// <summary>Task 094: on <see cref="SubmissionAfterStepsStatus.Undone"/>, true when the undo is held (not every row of the commit is gone yet).</summary>
+    public bool UndoHeld { get; init; }
 
     /// <summary>The status the submission ends in (only when <see cref="SubmissionAfterStepsStatus.Completed"/>): the terminal status written
     /// now, or the one found when the submission was already terminal (<see cref="AlreadyTerminal"/>).</summary>

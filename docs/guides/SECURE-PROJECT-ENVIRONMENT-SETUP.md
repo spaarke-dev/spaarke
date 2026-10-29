@@ -64,6 +64,7 @@ environment the acceptance gate (H13) runs the same census once more, synchronou
 | Rights | A System Administrator in the target environment |
 | Auth | `az login` to the tenant, then a token for the environment (below). `pac` is **not** used — its *active profile* may point at a different environment, which is an easy way to configure the wrong org |
 | Config | `SecureRecord:BusinessUnitName` and `SecureRecord:OwnerTeamName` in BFF app settings, **or** accept the compiled defaults (`Secure Record` / `Secure Record Owners`). Both are fail-closed lookup keys |
+| Config (hard-deny tables) | `RestrictedContent:OwnerTeamName` in BFF app settings, **or** the compiled default `Spaarke Restricted Content Owners`. A fail-closed lookup key: it must equal `teamName` in `config/restricted-content-owner-role.json` (the team `scripts/Set-CustomerOwnerTeams.ps1` creates), or no team is found and every ordinary hard-deny write is refused (`OwnerTeamNotFound`). Keep the default unless both change together. When `SecureRecord:BusinessUnitName` is not the default, pass it to that script as `-SecureBusinessUnitName` |
 
 ```powershell
 # Pin the environment explicitly. Never rely on an ambient/active profile.

@@ -197,11 +197,14 @@ public class RateCardImportService
             return RateCardOutcome<RateCardImportResult>.Invalid(errors);
         }
 
-        var parents = request.Core is { } c
-            ? new[] { new RecordOwnershipParent(c.EntityLogicalName, c.RecordId) }
-            : Array.Empty<RecordOwnershipParent>();
+        // UAC 194b R3b-2: the card's question through the one builder — its table and the core lookup it will hold (the column named after
+        // the core table, as WriteAsync writes it). The source document it also names is created by this import with this same owner, so it
+        // cannot change the answer; the timekeepers and rates hold no ownership parent and take the card's owner.
+        var cardParents = request.Core is { } c
+            ? new[] { KeyValuePair.Create(c.EntityLogicalName, (RecordOwnershipParent?)new RecordOwnershipParent(c.EntityLogicalName, c.RecordId)) }
+            : Array.Empty<KeyValuePair<string, RecordOwnershipParent?>>();
         var owner = await _ownership.ResolveOwnerAsync(
-            RecordOwnershipContext.ForParents(parents, request.CallerObjectId) with
+            RecordOwnershipContext.ForRow(RateCardEntity, cardParents, callerObjectId: request.CallerObjectId) with
             {
                 RequestedBy = RecordRequester.Of(objectId: request.CallerObjectId),
             },

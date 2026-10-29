@@ -300,9 +300,72 @@ public sealed class ProcedureServiceTests
         set.GetAttributeValue<EntityReference>(RecordCreatorPerson.Column).Id.Should().Be(CallerUserId);
         outcome.Value!.RuleSetId.Should().Be(set.Id);
 
-        // The owner question had no parents and named the caller (model 5.1).
+        // Two owner questions, each with no parents and naming the caller (model 5.1): the Procedure's (the caller's business-unit team) and
+        // the rule set's, a hard-deny row asked for its table (EB-D-168a).
         w.H.Ownership.Verify(o => o.ResolveOwnerAsync(
-            It.Is<RecordOwnershipContext>(c => !c.Parents.Any() && c.RequestedBy != null), It.IsAny<CancellationToken>()), Times.Once);
+            It.Is<RecordOwnershipContext>(c => !c.Parents.Any() && c.RequestedBy != null && c.ChildEntityLogicalName == null), It.IsAny<CancellationToken>()), Times.Once);
+        w.H.Ownership.Verify(o => o.ResolveOwnerAsync(
+            It.Is<RecordOwnershipContext>(c => !c.Parents.Any() && c.RequestedBy != null && c.ChildEntityLogicalName == "sprk_ruleset"), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // ── EB-D-168 / EB-D-168a: the rule set and the copied policy versions are hard-deny rows ──
+
+    private static World WithRealOwnership(Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory directory)
+    {
+        var w = new World();
+        var resolver = directory.Resolver();
+        w.H.Ownership.Setup(o => o.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
+            .Returns((RecordOwnershipContext c, CancellationToken t) => resolver.ResolveOwnerAsync(c, t));
+        return w;
+    }
+
+    private static Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory CallerIn(Guid businessUnit) =>
+        Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory.Standard().WithUser(CallerUserId, CallerOid, businessUnit);
+
+    [Fact(DisplayName = "EB-D-168a: a new Procedure's rule set is owned by the restricted-content owner team; the Procedure by the caller's team")]
+    public async Task Create_TheRuleSetIsOwnedByTheRestrictedContentTeam_TheProcedureByTheCallersTeam()
+    {
+        var w = WithRealOwnership(CallerIn(Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory.CustomerChildBu));
+
+        var outcome = await w.Service().CreateAsync(Create("Guideline", firm: FirmId), CallerOid, default);
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done);
+        w.H.Rows["sprk_ruleset"].Single().GetAttributeValue<EntityReference>("ownerid").Id
+            .Should().Be(Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory.RestrictedContentTeam);
+        w.H.Rows["sprk_procedure"].Single().GetAttributeValue<EntityReference>("ownerid").Id
+            .Should().Be(Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory.CustomerChildTeam, "sprk_procedure is not a hard-deny table");
+    }
+
+    [Fact(DisplayName = "EB-D-168a (fail closed): a Procedure whose rule set is answered in the root business unit is refused and nothing is written")]
+    public async Task Create_RuleSetAnsweredInTheRootBusinessUnit_IsRefused_NothingWritten()
+    {
+        var w = WithRealOwnership(CallerIn(Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory.GeneralBu));
+
+        var outcome = await w.Service().CreateAsync(Create("Guideline", firm: FirmId), CallerOid, default);
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.OwnerRefused);
+        outcome.OwnerRefusal!.RefusalCode.Should().Be(RecordOwnerRefusal.RestrictedContentOwnerTeamUnresolved);
+        w.H.Transactions.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "EB-D-168a: a new version's copied policy versions are owned by the restricted-content owner team; the version by the caller's team")]
+    public async Task CreateVersion_TheCopiesAreOwnedByTheRestrictedContentTeam()
+    {
+        var w = WithRealOwnership(CallerIn(Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory.CustomerChildBu));
+        var p = w.Procedure();
+        var set = w.RuleSetOf(p);
+        var v1 = w.Version(p, 1, ProcedureEntity.VersionStatusActive, Jan1);
+        w.Rule(set, "BILL-A", v1);
+
+        var outcome = await w.Service().CreateVersionAsync(p, Mar1, null, CallerOid, default);
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done);
+        var v2 = outcome.Value!.Version.Id;
+        w.H.Rows["sprk_policyversion"].Where(v => v.GetAttributeValue<EntityReference>("sprk_procedureversion")?.Id == v2)
+            .Should().ContainSingle().Which.GetAttributeValue<EntityReference>("ownerid").Id
+            .Should().Be(Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory.RestrictedContentTeam);
+        w.H.Row("sprk_procedureversion", v2).GetAttributeValue<EntityReference>("ownerid").Id
+            .Should().Be(Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory.CustomerChildTeam);
     }
 
     [Theory]

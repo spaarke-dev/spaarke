@@ -79,8 +79,21 @@ public sealed record SubmissionSnapshot
     /// <summary>The firm invoice number as typed at upload (D-91).</summary>
     public required string FirmInvoiceNumber { get; init; }
 
-    /// <summary><c>sprk_document</c>.</summary>
-    public required Guid DocumentId { get; init; }
+    /// <summary>
+    /// <c>sprk_document</c>: the Submit Invoice SOURCE document (ebilling-r1 task 094; the confirm and from-document routes), whose bytes the
+    /// job copies into the invoice's Stored File (9.1 step 2). <c>null</c> for an upload (ebilling-r1 task 092): its PDF is staged in the
+    /// Finance file store under <see cref="Files.StoredFileIds.ForUpload"/> of the submission.
+    /// </summary>
+    public Guid? DocumentId { get; init; }
+
+    /// <summary>
+    /// Where the invoice's file comes from (task 094; 092 adversarial review item 1): THE one discriminator every channel-specific step
+    /// reads (the job's byte read and staging). Decided once, here, from the stored row; never inferred from a null document elsewhere.
+    /// </summary>
+    public required SubmissionFileSource FileSource { get; init; }
+
+    /// <summary>True when the PDF is the upload staged in the Finance file store (no document; task 092).</summary>
+    public bool IsUpload => FileSource == SubmissionFileSource.Upload;
 
     /// <summary><c>createdon</c> in UTC.</summary>
     public required DateTime CreatedOnUtc { get; init; }
@@ -90,8 +103,13 @@ public sealed record SubmissionSnapshot
 
     /// <summary>
     /// Reads a submission row. Fails closed: a missing tracking number, <c>createdon</c>, firm, core record (or more than one), typed
-    /// firm invoice number, document or supported channel gives a <see cref="SubmissionEvaluationKind.Failed"/> reason code, never a default.
+    /// firm invoice number or supported channel gives a <see cref="SubmissionEvaluationKind.Failed"/> reason code, never a default.
     /// </summary>
+    /// <remarks>ebilling-r1 task 092: no document is an upload (its PDF is in the file store). Task 094 (a deliberate change of 092's rule,
+    /// recorded in notes/094-submit-invoice.md): an INTERNAL submission that names a document is a Submit Invoice source submission,
+    /// whatever its id (the confirm's derived id, the from-document route's, or 095's from-email id), and its bytes are copied, never read
+    /// in place. A document on an SPA submission is the retired intake shape (an SPE upload with a document per submission) and is refused
+    /// with <see cref="SubmissionReasonCodes.DocumentUnavailable"/> (dev data is recreated, not migrated: O-13).</remarks>
     public static (SubmissionSnapshot? Snapshot, string? FailureReasonCode) Read(Entity row)
     {
         ArgumentNullException.ThrowIfNull(row);
@@ -125,15 +143,25 @@ public sealed record SubmissionSnapshot
             return (null, SubmissionReasonCodes.FirmInvoiceNumberMissing);
         }
 
-        if (view.DocumentId is not { } documentId || documentId == Guid.Empty)
-        {
-            return (null, SubmissionReasonCodes.DocumentMissing);
-        }
-
         var channel = row.GetAttributeValue<OptionSetValue>("sprk_channel")?.Value;
         if (channel is not ((int)InvoiceSubmissionChannel.Spa or (int)InvoiceSubmissionChannel.Internal))
         {
             return (null, SubmissionReasonCodes.ChannelUnsupported);
+        }
+
+        var documentId = view.DocumentId is { } linkedDocument && linkedDocument != Guid.Empty ? linkedDocument : (Guid?)null;
+        if (documentId is not null && channel != (int)InvoiceSubmissionChannel.Internal)
+        {
+            return (null, SubmissionReasonCodes.DocumentUnavailable);
+        }
+
+        // Fix round F1-1 (security): the document is a source only for the submission the intake created FOR it - the id derived from that
+        // document (ExistingDocumentSubmissionIdFor; the confirm and the from-document route both use it, after checking the caller's Read on
+        // the document). Any other submission naming a document (a sprk_document written onto an upload submission afterwards, or a derived
+        // submission re-pointed at another document) would have the job copy and extract a document no one checked: it fails closed.
+        if (documentId is { } source && !InvoiceSubmissionService.IsExistingDocumentSubmissionIdOf(source, row.Id))
+        {
+            return (null, SubmissionReasonCodes.DocumentUnavailable);
         }
 
         return (new SubmissionSnapshot
@@ -146,9 +174,26 @@ public sealed record SubmissionSnapshot
             Sequence = sequence.Value,
             FirmInvoiceNumber = view.FirmInvoiceNumber!,
             DocumentId = documentId,
+            FileSource = documentId is null ? SubmissionFileSource.Upload : SubmissionFileSource.SourceDocument,
             CreatedOnUtc = createdOn.Kind == DateTimeKind.Local ? createdOn.ToUniversalTime() : DateTime.SpecifyKind(createdOn, DateTimeKind.Utc),
         }, null);
     }
+}
+
+/// <summary>
+/// ebilling-r1 task 094 (092 adversarial review item 1): where a submission's invoice file comes from, decided once by
+/// <see cref="SubmissionSnapshot.Read"/>. Task 095 adds its from-email kind here (the .eml's marked parts, staged under
+/// <see cref="Files.StoredFileIds.ForAttachment"/>); the job switches on it and refuses (permanently) a kind it does not handle.
+/// The post-commit gate (<see cref="SubmissionCommitGate"/>) needs no kind: it finds the invoice's files by their parent and reads each
+/// row's own source.
+/// </summary>
+public enum SubmissionFileSource
+{
+    /// <summary>The PDF uploaded through a submission route, staged at intake under <see cref="Files.StoredFileIds.ForUpload"/> (task 092).</summary>
+    Upload,
+
+    /// <summary>A Submit Invoice source document whose bytes the job copies (9.1 step 2) under <see cref="Files.StoredFileIds.ForSourceVersion"/>.</summary>
+    SourceDocument,
 }
 
 /// <summary>D-91: how the firm invoice number read from the PDF compares with the typed one.</summary>
@@ -254,6 +299,14 @@ public sealed record SubmissionEvaluationOutcome
 
     /// <summary>Step 5: the decision (073); <see cref="SubmissionDecision.DecidingFindings"/> are the findings that rejected.</summary>
     public SubmissionDecision? Decision { get; init; }
+
+    /// <summary>
+    /// ebilling-r1 task 094 (procedure-and-file-model 9.1 step 2): the copies the job staged from the submission's source before the commit
+    /// (one for a Submit Invoice source document; task 095: one per marked part of the .eml). The persister writes one Stored File row per
+    /// copy and guards each distinct source at the version it was staged from. Empty for an upload (its file is the intake's stage). Set by
+    /// the job after the evaluation (the processor never stages).
+    /// </summary>
+    public IReadOnlyList<StagedSourceCopy> StagedFiles { get; init; } = [];
 
     internal static SubmissionEvaluationOutcome Failed(Guid submissionId, string reasonCode, SubmissionSnapshot? submission = null,
         ExtractedInvoice? read = null) =>

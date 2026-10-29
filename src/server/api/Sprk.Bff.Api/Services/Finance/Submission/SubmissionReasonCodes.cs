@@ -72,14 +72,21 @@ public static class SubmissionReasonCodes
     /// <summary>The submission's channel is not SPA or Internal, so a rejection could not be classified as rejected or blocked.</summary>
     public const string ChannelUnsupported = "ebilling.submission.channel_unsupported";
 
-    /// <summary>The submission names no document (<c>sprk_document</c>).</summary>
+    /// <summary>
+    /// The submission names no document (<c>sprk_document</c>). Not written since ebilling-r1 task 092 (an upload names no document: its PDF
+    /// is in the file store); kept so a stored value still reads as what it meant.
+    /// </summary>
     public const string DocumentMissing = "ebilling.submission.document_missing";
 
     /// <summary>047: no code set resolved for the submission's core record. Since D-126 not a failure: the cause recorded on
     /// <see cref="CodingNoCodeSetHold"/>.</summary>
     public const string NoCodeSet = LineCodingException.NoCodeSet;
 
-    /// <summary>Part E: the submission's document row is gone or has no SharePoint Embedded file pointer. Permanent.</summary>
+    /// <summary>
+    /// Part E: the submission's document row is gone or has no SharePoint Embedded file pointer. Permanent. Since ebilling-r1 task 092 also: the
+    /// uploaded PDF staged in the file store is missing or its bytes do not match the staged hash, or the submission names a document that is
+    /// not an existing-document confirm (the retired intake shape).
+    /// </summary>
     public const string DocumentUnavailable = "ebilling.submission.document_unavailable";
 
     /// <summary>Part E: the document pointer's container could not be verified (<c>RecordContainerResolver</c>'s check, fail closed). Permanent.</summary>
@@ -87,6 +94,41 @@ public static class SubmissionReasonCodes
 
     /// <summary>Part E: a transient fault outlived the job's last delivery and no invoice was committed.</summary>
     public const string ProcessingFailed = "ebilling.submission.processing_failed";
+
+    /// <summary>
+    /// ebilling-r1 task 092 (procedure-and-file-model 9.1 steps 5-6): the invoice's file could not be made servable. Before the commit its
+    /// staged blob is gone or unusable, so no invoice is created. After the commit the flip of a Stored File row failed definitively (blob
+    /// missing, hash mismatch, row not flippable): since task 094 the commit is UNDONE (<see cref="SubmissionCommitGate"/>: the file rows
+    /// and blobs, the approval, the lines and the invoice deleted, the commit's columns cleared) and the submission is Failed with this
+    /// code, on every channel. Until the undo completes the submission is Failed with its file Not yet servable (held).
+    /// </summary>
+    public const string FileUnservable = "ebilling.submission.file_unservable";
+
+    /// <summary>
+    /// ebilling-r1 task 094 (procedure-and-file-model 9.1 step 5; the code task 095's contract pins): the re-run after the commit found
+    /// the Submit Invoice source filed under another core record, its secure roots not covered by the copy's, or it could not be read (any
+    /// fault is a failure, uac-r2 condition 1). The commit was undone (<see cref="SubmissionCommitGate"/>) and the submission is Failed
+    /// with this code and an administrator note; the communication's filing by step A is kept.
+    /// </summary>
+    public const string SourceCheckFailed = "ebilling.submission.source_check_failed";
+
+    /// <summary>
+    /// ebilling-r1 task 094: a job outcome only, never stored: the undo of a commit could not finish (a delete faulted), so the submission
+    /// is Failed (with <see cref="SourceCheckFailed"/> or <see cref="FileUnservable"/>) and its file stays Not yet servable until a later
+    /// delivery completes the compensation (uac-r2 condition 3, "complete or held").
+    /// </summary>
+    public const string UndoHeld = "ebilling.submission.undo_held";
+
+    /// <summary>
+    /// ebilling-r1 task 094 (9.1 step 4): the Submit Invoice source changed since the job staged its copy, and it changed again after one
+    /// re-stage, or its bytes differ from the bytes the job evaluated. Transient: nothing was committed; a redelivery evaluates the source
+    /// as it is then (the final delivery writes Failed with this code). Review round 5: also the permanent refusal of a from-email
+    /// submission whose <c>.eml</c> no longer names the communication its parts were staged from (Failed at once, no retry).
+    /// </summary>
+    public const string SourceChanged = "ebilling.submission.source_changed";
+
+    /// <summary>ebilling-r1 task 092: the uploaded invoice PDF's malware scan said Malicious; it is never read. Permanent; no invoice.</summary>
+    public const string FileMalicious = "ebilling.submission.file_malicious";
 
     // ── Rejected, not read: no invoice (FR-21, D-101) ──
 

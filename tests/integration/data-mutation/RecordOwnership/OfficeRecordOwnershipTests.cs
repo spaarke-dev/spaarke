@@ -9,6 +9,7 @@ using Moq;
 using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Ai.Membership.Models;
+using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Tests.Api.Office;
 using Sprk.Bff.Api.Tests.Shared.Office;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
@@ -75,9 +76,9 @@ public class OfficeRecordOwnershipTests
         world.CreatedDocumentOwningTeams.Should().Equal(RecordOwnershipResolverDouble.DefaultTeamId);
 
         var asked = factory.Ownership.Requests.Should().ContainSingle().Subject;
-        // The friendly spelling the add-in sends; the resolver maps it to sprk_matter (RecordOwnershipResolverTests).
-        asked.TargetEntityLogicalName.Should().Be("matter", "a filed document follows its record, not its uploader");
-        asked.TargetRecordId.Should().Be(matterId);
+        // The friendly spelling the add-in sends, asked as the column the document is written with (194b R4-2).
+        asked.Parents.Should().Equal(new[] { new RecordOwnershipParent("sprk_matter", matterId) },
+            "a filed document follows its record, not its uploader");
 
         // The worker creates an email's attachment children; it must give them the parent's team, not resolve anew.
         var payload = world.FinalizationPayloads.Should().ContainSingle().Subject;

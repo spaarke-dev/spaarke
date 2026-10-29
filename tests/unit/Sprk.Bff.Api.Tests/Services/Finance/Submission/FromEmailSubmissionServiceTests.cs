@@ -224,7 +224,7 @@ public class FromEmailSubmissionServiceTests
     }
 
     [Fact]
-    public async Task Operation_NotYetAvailable_Is503Failed_BeforeTheSave()
+    public async Task Operation_NotAvailable_Is503Failed_BeforeTheSave()
     {
         var world = new W();
         world.Operation.Available = false;
@@ -242,16 +242,6 @@ public class FromEmailSubmissionServiceTests
 
         (await Run(world)).ErrorCode.Should().Be("ebilling.submission.record_unavailable");
         RefusedBeforeAnyWrite(world);
-    }
-
-    [Fact]
-    public async Task TheRealNotYetAvailableSeam_IsUnavailable_AndThrowsIfCalled()
-    {
-        var seam = new SubmitInvoiceFromEmailNotYetAvailable();
-
-        seam.IsAvailable.Should().BeFalse();
-        await FluentActions.Awaiting(() => seam.RequeueAsync(Guid.NewGuid(), Guid.NewGuid(), null, CancellationToken.None))
-            .Should().ThrowAsync<SubmitInvoiceFromEmailNotYetAvailableException>();
     }
 
     // ── the replay of K (contract section 5) and EB-D-160 ───────────────────────────────────────────────────────
@@ -381,6 +371,48 @@ public class FromEmailSubmissionServiceTests
         world.Operation.Requeues.Should().BeEmpty();
     }
 
+    /// <summary>
+    /// Review round 5: the race loser's step A filed the communication before its create lost; the 409 it is answered with keeps the
+    /// filing and says so (contract section 6, "After step A"), as the source-document route's race answer does.
+    /// </summary>
+    [Fact]
+    public async Task ReAttempt_TheRaceLoserFiledTheCommunication_Its409SaysTheFilingIsKept()
+    {
+        var world = new W();
+        var k = W.K();
+        world.AddAttempt(k, 1, InvoiceSubmissionStatus.Failed, creator: W.OtherCallerId);
+        world.Operation.Answer = input =>
+        {
+            world.AddAttempt(k, input.Generation, InvoiceSubmissionStatus.Received, creator: W.OtherCallerId, tracking: "1001.2", eml: Guid.NewGuid());
+            return FromEmailSubmitResult.AlreadyCreated(filed: true);
+        };
+
+        var outcome = await Run(world);
+
+        (outcome.Status, outcome.ErrorCode).Should().Be((409, "ebilling.submission.document_already_submitted"));
+        outcome.Detail.Should().EndWith(InvoiceSubmissionService.FilingKeptSentence)
+            .And.NotContain("Nothing was saved", "the filing this request made is kept");
+    }
+
+    [Fact]
+    public async Task ConcurrentRetry_TheRaceLoserFiled_ItsReplayIsThe202_Unchanged()
+    {
+        var world = new W();
+        var k = W.K();
+        world.AddAttempt(k, 1, InvoiceSubmissionStatus.Failed);
+        world.Operation.Answer = input =>
+        {
+            world.AddAttempt(k, input.Generation, InvoiceSubmissionStatus.Received, tracking: "1001.2", eml: W.EmlId);
+            return FromEmailSubmitResult.AlreadyCreated(filed: true);
+        };
+
+        var outcome = await Run(world);
+
+        outcome.Receipt.Should().Be(new FromEmailReceipt(
+            FromEmailSubmissionKey.SubmissionIdFor(k, 2), FromEmailSubmissionKey.JobIdFor(k, 2), "1001.2", W.EmlId));
+        outcome.Detail.Should().BeNull();
+    }
+
     // ── contract section 5: the same email and Invoice part with other details (095 review F2) ─────────────────
 
     /// <summary>F2 must-fire: another firm invoice number, or another firm, on a live attempt is 409, and nothing is written.</summary>
@@ -485,6 +517,52 @@ public class FromEmailSubmissionServiceTests
         outcome.Receipt!.SubmissionId.Should().Be(FromEmailSubmissionKey.SubmissionIdFor(k, 2));
         outcome.Receipt.JobId.Should().Be(FromEmailSubmissionKey.JobIdFor(k, 2));
         outcome.Receipt.TrackingNumber.Should().Be("1001.2", "the allocator gives the new attempt a new suffix");
+        world.Operation.Submits.Single().Generation.Should().Be(2);
+    }
+
+    // ── Review round 5 (pass-2 F1-1): no new attempt while the failed one's undo is unfinished ──
+
+    /// <summary>Generation 1 Failed by the commit gate with <paramref name="reasonCode"/>; <paramref name="linked"/>: its undo is unfinished
+    /// (the invoice link stays until the undo completes).</summary>
+    private static void AddAttemptFailedByTheGate(W world, string k, string reasonCode, bool linked, Guid? creator = null)
+    {
+        var row = world.AddAttempt(k, 1, InvoiceSubmissionStatus.Failed, creator: creator);
+        row[InvoiceSubmissionPersister.SubmissionReasonCode] = reasonCode;
+        if (linked)
+        {
+            row[InvoiceSubmissionPersister.SubmissionInvoice] = new EntityReference("sprk_invoice", InvoiceSubmissionPersister.InvoiceIdFor(row.Id));
+        }
+    }
+
+    [Theory(DisplayName = "Round 5 (pass-2 F1-1, must fire): a re-attempt while the failed attempt's undo is unfinished (undo reason, invoice still linked) is 503 earlier_attempt_being_removed - no save, no submit, nothing written; whoever made the failed attempt")]
+    [InlineData(SubmissionReasonCodes.SourceCheckFailed, false)]
+    [InlineData(SubmissionReasonCodes.FileUnservable, false)]
+    [InlineData(SubmissionReasonCodes.SourceCheckFailed, true)]
+    public async Task ReAttempt_WhileTheFailedAttemptsUndoIsUnfinished_Is503_NothingWritten(string reasonCode, bool anotherPersons)
+    {
+        var world = new W();
+        AddAttemptFailedByTheGate(world, W.K(), reasonCode, linked: true, creator: anotherPersons ? W.OtherCallerId : null);
+
+        var outcome = await Run(world);
+
+        outcome.Receipt.Should().BeNull();
+        outcome.Status.Should().Be(StatusCodes.Status503ServiceUnavailable);
+        outcome.ErrorCode.Should().Be(InvoiceSubmissionErrors.EarlierAttemptBeingRemoved).And.Be("ebilling.submission.earlier_attempt_being_removed");
+        RefusedBeforeAnyWrite(world);
+    }
+
+    [Theory(DisplayName = "Round 5 (pass-2 F1-1, must not fire): once the failed attempt's undo completed (the invoice link cleared) the re-attempt is generation 2")]
+    [InlineData(SubmissionReasonCodes.SourceCheckFailed)]
+    [InlineData(SubmissionReasonCodes.FileUnservable)]
+    public async Task ReAttempt_OnceTheFailedAttemptsUndoCompleted_IsGenerationTwo(string reasonCode)
+    {
+        var world = new W();
+        var k = W.K();
+        AddAttemptFailedByTheGate(world, k, reasonCode, linked: false);
+
+        var outcome = await Run(world);
+
+        outcome.Receipt!.SubmissionId.Should().Be(FromEmailSubmissionKey.SubmissionIdFor(k, 2));
         world.Operation.Submits.Single().Generation.Should().Be(2);
     }
 

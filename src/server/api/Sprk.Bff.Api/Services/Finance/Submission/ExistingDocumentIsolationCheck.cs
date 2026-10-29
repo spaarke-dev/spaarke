@@ -41,11 +41,41 @@ public enum ExistingDocumentIsolationVerdict
 }
 
 /// <summary>The verdict and, for the log only, why (ids and reasons, never business data).</summary>
-public sealed record ExistingDocumentIsolation(ExistingDocumentIsolationVerdict Verdict, string? Detail = null)
+/// <param name="Roots">Task 094: on <see cref="ExistingDocumentIsolationVerdict.Allowed"/>, the document's secure roots as the walk found them
+/// (none, or exactly the confirm's record); empty when the environment isolates nothing. Null on every other verdict.</param>
+public sealed record ExistingDocumentIsolation(
+    ExistingDocumentIsolationVerdict Verdict, string? Detail = null, IReadOnlyList<(string Table, Guid Id)>? Roots = null)
 {
-    /// <summary>Allowed.</summary>
-    public static ExistingDocumentIsolation Allowed { get; } = new(ExistingDocumentIsolationVerdict.Allowed);
+    /// <summary>Allowed, under no secure root.</summary>
+    public static ExistingDocumentIsolation Allowed { get; } = new(ExistingDocumentIsolationVerdict.Allowed, null, Array.Empty<(string, Guid)>());
 }
+
+/// <summary>Task 094 (procedure-and-file-model 9.1 steps 3 and 5): what <see cref="InvoiceSubmissionService.CheckSourceFilingAsync"/> decided.</summary>
+public enum SourceFilingVerdict
+{
+    /// <summary>Filed under the core record only (D-140) and isolated nowhere else.</summary>
+    Allowed,
+
+    /// <summary>Filed under, or isolated under, something else, or its filing cannot be placed (409 before commit; undo after).</summary>
+    Mismatch,
+
+    /// <summary>The source document no longer exists.</summary>
+    Gone,
+
+    /// <summary>The isolation facts could not be read: nothing is decided (a retry before commit; a failure after).</summary>
+    Unavailable,
+}
+
+/// <summary>Task 094: the source's Restricted, internal-only and thread-privacy state as 9.1 step 3 read it. Owner K: never a refusal ground and
+/// never stored; carried for the log and the tests only. Null is "no such row".</summary>
+public sealed record SourceIsolationFlags(bool Restricted, bool? InternalOnly, int? Privacy);
+
+/// <summary>Task 094: the verdict of the source re-check, why (ids and reasons only), and on Allowed the source's secure roots and flags.</summary>
+public sealed record SourceFilingCheck(
+    SourceFilingVerdict Verdict,
+    string? Detail,
+    IReadOnlyList<(string Table, Guid Id)>? Roots = null,
+    SourceIsolationFlags? Flags = null);
 
 /// <summary>
 /// 050a review round 3 (uac-r2 F1-a / F1-b): the isolation rule of a confirmed existing document. The document's secure roots are found by
@@ -139,11 +169,72 @@ public class ExistingDocumentIsolationCheck
                 return Decided(documentId, core, ExistingDocumentIsolationVerdict.Undetermined, "owned by the Secure Record owner team under no secure root");
             }
 
-            return ExistingDocumentIsolation.Allowed;
+            return new ExistingDocumentIsolation(ExistingDocumentIsolationVerdict.Allowed, null, above.Roots);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             _logger.LogWarning(ex, "Existing-document isolation of {DocumentId} could not be read; nothing is decided", documentId);
+            return new ExistingDocumentIsolation(ExistingDocumentIsolationVerdict.Unavailable, ex.GetType().Name);
+        }
+    }
+
+    private const string CommunicationEntity = "sprk_communication";
+
+    /// <summary>
+    /// ebilling-r1 task 094 fix round (step A): may Submit Invoice's step A file the communication <paramref name="communicationId"/>, which
+    /// the D-140 chain reads as unfiled, under a core record? Allowed only when the communication is under NO secure root and is not owned
+    /// by the Secure Record owner team: an isolated communication is never re-filed by A, whatever record is named (the intake answers
+    /// it as filed elsewhere). A missing row is Allowed (the re-file core answers it). Never throws for a fault: a fault, or an ambiguous
+    /// Secure Record owner team, is <see cref="ExistingDocumentIsolationVerdict.Unavailable"/>. Only the caller's cancellation propagates.
+    /// </summary>
+    public virtual async Task<ExistingDocumentIsolation> CheckCommunicationForFilingAsync(Guid communicationId, CancellationToken ct)
+    {
+        try
+        {
+            var lineage = SecureChildLineage.Children[CommunicationEntity];
+            var query = new QueryExpression(CommunicationEntity)
+            {
+                ColumnSet = new ColumnSet([.. lineage.Lookups.Keys, OwningTeamColumn, OwningUserColumn]),
+                TopCount = 1,
+                NoLock = true,
+            };
+            query.Criteria.AddCondition(lineage.IdColumn, ConditionOperator.Equal, communicationId);
+            var communication = (await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
+            if (communication is null)
+            {
+                return ExistingDocumentIsolation.Allowed;
+            }
+
+            var above = await _shares.SecureRootsAboveAsync(new[] { communication }, ct).ConfigureAwait(false);
+            switch (above.Status)
+            {
+                case SecureChildShareSyncStatus.NotApplicable:
+                    return ExistingDocumentIsolation.Allowed;
+                case SecureChildShareSyncStatus.Completed:
+                    break;
+                default:
+                    _logger.LogWarning("Communication {CommunicationId}: its isolation could not be decided ({Detail})", communicationId, above.Detail ?? above.Status.ToString());
+                    return new ExistingDocumentIsolation(ExistingDocumentIsolationVerdict.Unavailable, above.Detail ?? above.Status.ToString());
+            }
+
+            string? refusal = above.Undetermined.Count > 0 ? string.Join("; ", above.Undetermined)
+                : above.Roots.Count > 0 ? $"under secure root {above.Roots[0].Table} {above.Roots[0].Id}"
+                : communication.GetAttributeValue<EntityReference>(OwningTeamColumn)?.Id is { } team && team != Guid.Empty
+                  && await _shares.IsSecureOwnerTeamAsync(team, ct).ConfigureAwait(false) ? "owned by the Secure Record owner team"
+                : null;
+            if (refusal is null)
+            {
+                return ExistingDocumentIsolation.Allowed;
+            }
+
+            _logger.LogInformation("Communication {CommunicationId} is isolated ({Detail}); step A does not file it", communicationId, refusal);
+            return new ExistingDocumentIsolation(
+                above.Roots.Count > 0 && above.Undetermined.Count == 0 ? ExistingDocumentIsolationVerdict.OtherSecureRoot : ExistingDocumentIsolationVerdict.Undetermined,
+                refusal);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "Communication {CommunicationId}: its isolation could not be read; nothing is decided", communicationId);
             return new ExistingDocumentIsolation(ExistingDocumentIsolationVerdict.Unavailable, ex.GetType().Name);
         }
     }

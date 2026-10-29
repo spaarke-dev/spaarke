@@ -670,6 +670,31 @@ public sealed class InvoiceLineDecisionServiceTests
         w.H.Created.Should().ContainSingle("the repeat recorded nothing twice");
     }
 
+    [Fact(DisplayName = "194b R3b-2: each line's correction rows are asked their own question (ForChild): the invoice primary, then the line and the core record")]
+    public async Task CorrectionRows_AskTheRowsOwnQuestion_InvoicePrimary_OnePerLine()
+    {
+        var w = new World(billedTotal: 300m);
+        var first = w.AddLine(100m, InvoiceLineStatus.Clean, extraction: Extraction);
+        var second = w.AddLine(200m, InvoiceLineStatus.Clean, extraction: Extraction);
+
+        var result = await w.Service().AcceptCleanAsync(w.InvoiceId, Guid.NewGuid(), Decider, CancellationToken.None);
+
+        result.Status.Should().Be(LineDecisionStatus.Applied);
+        var asks = w.Ownership.Invocations
+            .Where(i => i.Method.Name == nameof(IRecordOwnershipResolver.ResolveOwnerAsync))
+            .Select(i => (RecordOwnershipContext)i.Arguments[0])
+            .ToList();
+        asks.Should().HaveCount(2, "one question per line, never one per row");
+        foreach (var (ask, line) in asks.Zip(new[] { first, second }))
+        {
+            ask.ChildEntityLogicalName.Should().Be(InvoiceLineDecisionService.CorrectionEntity);
+            ask.Parents.Should().Equal(
+                new RecordOwnershipParent("sprk_invoice", w.InvoiceId),
+                new RecordOwnershipParent("sprk_billingevent", line.Id),
+                new RecordOwnershipParent("sprk_project", Core));
+        }
+    }
+
     [Fact(DisplayName = "100: correction rows without a resolvable owner refuse the request before the first write")]
     public async Task UnresolvedOwner_RefusesBeforeAnyWrite()
     {

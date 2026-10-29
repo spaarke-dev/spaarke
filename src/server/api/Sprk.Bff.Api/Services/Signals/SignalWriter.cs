@@ -452,16 +452,25 @@ public sealed partial class SignalWriter
     /// same agreement rule uac-r2 applies to an untyped pair (a lookup carrying the pair id). A later core-ancestor stamp in
     /// another <c>sprk_regarding*</c> column (task 144) carries a different id and so never matches.
     /// </remarks>
-    internal static string? SubjectEntityOf(Guid pairId, Func<string, Guid?> lookupIdOf)
+    internal static string? SubjectEntityOf(Guid pairId, Func<string, Guid?> lookupIdOf) =>
+        SubjectEntityOf(SignalEntity, pairId, lookupIdOf);
+
+    /// <summary>
+    /// UAC task 194b: <see cref="SubjectEntityOf(Guid, Func{string, Guid?})"/> for any host table of the shared regarding builder
+    /// (<c>TodoRegardingBuilder.RegardingLookupsByHostTable</c>): a Decision Record is filed under its subject by the same builder,
+    /// so the same agreement rule names it. <c>null</c> for a host table the builder does not file.
+    /// </summary>
+    internal static string? SubjectEntityOf(string hostTable, Guid pairId, Func<string, Guid?> lookupIdOf)
     {
         ArgumentNullException.ThrowIfNull(lookupIdOf);
-        if (pairId == Guid.Empty)
+        if (pairId == Guid.Empty
+            || !TodoRegardingBuilder.RegardingLookupsByHostTable.TryGetValue(hostTable ?? string.Empty, out var lookupByEntity))
         {
             return null;
         }
 
         string? subject = null;
-        foreach (var (entity, lookup) in RegardingLookupByEntity)
+        foreach (var (entity, lookup) in lookupByEntity)
         {
             if (lookupIdOf(lookup) != pairId)
             {
@@ -1503,6 +1512,20 @@ public sealed partial class SignalWriter
         }
     }
 
+    /// <summary>
+    /// UAC task 194b fix round (F3): the ownership question this writer asks for a Signal about the subject — its core record
+    /// derived as a write derives it (<see cref="ResolveCoreAsync"/>, <see cref="PickStampAsync"/> included), the list
+    /// <see cref="OwnershipContextOf"/> builds — and the owner it resolves (<see cref="ResolveOwnerAsync"/>), with no write. The
+    /// parity seam: tests compare it with the reconciler's question for the existing row.
+    /// </summary>
+    internal async Task<(RecordOwnershipContext Question, RecordOwnerResolution Owner)> OwnershipOfAsync(
+        string subjectEntity, Guid subjectId, int lane, CancellationToken ct)
+    {
+        var core = await ResolveCoreAsync(subjectEntity, subjectId, lane, ct).ConfigureAwait(false);
+        var question = OwnershipContextOf(core.Entity, core.Id, core.Stamps, subjectEntity, subjectId, requestedBy: null);
+        return (question, await ResolveOwnerAsync(core, subjectEntity, subjectId, requestedBy: null, ct).ConfigureAwait(false));
+    }
+
     /// <summary>True when the existing Signal's core record (or, for a no-core Signal, its owner team) is not the one planned
     /// now (<paramref name="owner"/>: the resolver's answer for the item, task 143).</summary>
     private static bool CoreRecordChanged(Entity existing, CorePlan core, RecordOwnerResolution owner)
@@ -1594,7 +1617,8 @@ public sealed partial class SignalWriter
 
         parents.Add(new RecordOwnershipParent(subjectEntity, subjectId));
         parents.AddRange(stamps.Select(stamp => new RecordOwnershipParent(stamp.EntityType, stamp.RecordId)));
-        return RecordOwnershipContext.ForParents(parents) with { RequestedBy = requestedBy };
+        // UAC task 194b fix round R (B3): the writer's own order IS sprk_signal's rule (core, subject, stamps) — the closed opt-out.
+        return RecordOwnershipContext.ForParentsInWriterOrder(parents) with { RequestedBy = requestedBy };
     }
 
     /// <summary>

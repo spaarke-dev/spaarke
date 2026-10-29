@@ -30,6 +30,9 @@ namespace Sprk.Bff.Api.Services.Finance.Submission;
 /// number built from it are business data and appear at Debug only. Each refused write is also logged as an error by
 /// <c>DataverseServiceClientImpl.CreateAsync</c> itself, so a retried create leaves one such error per refusal in telemetry; the warning
 /// below names it as a lost race.</para>
+/// <para><b>Undone attempts (task 094, EB-D-167).</b> The undo of a commit clears the submission's firm invoice number but keeps its
+/// tracking number, so the sequence read no longer sees it; the key refuses that number, and a number held by such a row is skipped
+/// (<see cref="MaxHiddenSkips"/>), not counted as a lost race.</para>
 /// <para><b>Known limit.</b> A numbered submission that is later deleted frees its n: the next submission of that invoice number takes it again.
 /// Submissions are not deleted by any eBilling flow (the lifecycle closes them), so this is only a manual-cleanup effect.</para>
 /// </remarks>
@@ -40,6 +43,13 @@ public sealed class TrackingNumberAllocator : ITrackingNumberAllocator
     /// every caller of a ten-way burst (NFR-07) a number; more than ten at once, or a number held by a row the sequence cannot see, is refused.
     /// </summary>
     public const int MaxAttempts = 10;
+
+    /// <summary>
+    /// ebilling-r1 task 094 (EB-D-167): the most numbers one call skips because an undone attempt holds them (its firm invoice number
+    /// cleared, so the sequence read cannot see it). Above the attempts one document or email can make
+    /// (<see cref="FromEmailSubmissionKey.MaxGeneration"/> generations), so a skip run never refuses a legitimate retry.
+    /// </summary>
+    public const int MaxHiddenSkips = 64;
 
     /// <summary>
     /// The longest firm invoice number the allocator accepts: <c>sprk_trackingnumber</c> is 100 characters and holds the number, a dot and an
@@ -97,9 +107,14 @@ public sealed class TrackingNumberAllocator : ITrackingNumberAllocator
             return Reconcile(already, submissionId, firmId, number);
         }
 
-        for (var attempt = 1; ; attempt++)
+        // ebilling-r1 task 094 (EB-D-167): a number may be held by a row the sequence read cannot see - an attempt whose commit was
+        // undone has its firm invoice number cleared (SubmissionCommitGate) but keeps its tracking number under the key. Such a number
+        // is skipped (never re-read as free), and a skip is not a lost race: it has its own bound.
+        var floor = 0;
+        var skips = 0;
+        for (var attempt = 1; ;)
         {
-            var next = await ReadHighestSequenceAsync(firmId, number, ct).ConfigureAwait(false) + 1;
+            var next = Math.Max(await ReadHighestSequenceAsync(firmId, number, ct).ConfigureAwait(false) + 1, floor + 1);
             var trackingNumber = Format(number, next);
 
             try
@@ -120,6 +135,22 @@ public sealed class TrackingNumberAllocator : ITrackingNumberAllocator
             }
             catch (Exception ex) when (DataverseServiceClientImpl.IsAlternateKeyDuplicate(ex))
             {
+                floor = next;
+                if (await IsHeldByAnUnnumberedRowAsync(firmId, trackingNumber, ct).ConfigureAwait(false))
+                {
+                    if (++skips > MaxHiddenSkips)
+                    {
+                        _logger.LogError(
+                            "{Code}: submission={SubmissionId} skips={Skips} - every next number is held by an undone submission; nothing written",
+                            TrackingNumberReasons.Unavailable, submissionId, skips);
+                        return TrackingNumberResult.Refused(TrackingNumberReasons.Unavailable);
+                    }
+
+                    _logger.LogInformation(
+                        "Submission {SubmissionId}: tracking sequence {Sequence} is held by an undone submission; skipped", submissionId, next);
+                    continue;
+                }
+
                 if (attempt >= MaxAttempts)
                 {
                     _logger.LogError(ex,
@@ -132,6 +163,7 @@ public sealed class TrackingNumberAllocator : ITrackingNumberAllocator
                     "Submission {SubmissionId}: tracking sequence {Sequence} was taken by a concurrent submission (attempt {Attempt} of {Max}); " +
                     "re-reading and retrying",
                     submissionId, next, attempt, MaxAttempts);
+                attempt++;
                 continue;
             }
 
@@ -140,6 +172,20 @@ public sealed class TrackingNumberAllocator : ITrackingNumberAllocator
             _logger.LogDebug("Submission {SubmissionId} tracking number {TrackingNumber}", submissionId, trackingNumber);
             return TrackingNumberResult.Created(trackingNumber, next);
         }
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 094 (EB-D-167): true when the firm's row holding <paramref name="trackingNumber"/> has no firm invoice number, so
+    /// the sequence read cannot see it: an attempt whose commit was undone. A row that still has its number (a concurrent winner) or no
+    /// row at all (deleted in between) is a lost race. A fault propagates.
+    /// </summary>
+    private async Task<bool> IsHeldByAnUnnumberedRowAsync(Guid firmId, string trackingNumber, CancellationToken ct)
+    {
+        var query = new QueryExpression(SubmissionEntity) { ColumnSet = new ColumnSet(FirmInvoiceNumberColumn), TopCount = 1 };
+        query.Criteria.AddCondition(FirmColumn, ConditionOperator.Equal, firmId);
+        query.Criteria.AddCondition(TrackingNumberColumn, ConditionOperator.Equal, trackingNumber);
+        var found = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+        return found.Entities.Count == 1 && string.IsNullOrWhiteSpace(found.Entities[0].GetAttributeValue<string>(FirmInvoiceNumberColumn));
     }
 
     /// <summary>The firm invoice number as submitted, trimmed (D-37). Throws for a blank number or one the tracking-number column cannot hold.</summary>

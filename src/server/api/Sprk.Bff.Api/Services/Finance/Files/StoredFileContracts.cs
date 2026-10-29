@@ -87,6 +87,21 @@ public static class StoredFileSchema
     /// <summary>Length limits of the text columns (088).</summary>
     public const int NameMaxLength = 400, ContentTypeMaxLength = 255, AttachmentIdentityMaxLength = 1000, BlobPathMaxLength = 1024;
 
+    /// <summary>
+    /// ebilling-r1 task 094 (review round 5, uac K1-a): a value (a tracking number) made safe to stand in a stored file's display name:
+    /// path separators (<c>/</c>, <c>\</c>) and control characters removed, then trimmed. <c>null</c> when nothing is left.
+    /// </summary>
+    internal static string? NameSegmentOf(string? value)
+    {
+        if (value is null)
+        {
+            return null;
+        }
+
+        var kept = new string(value.Where(c => c is not ('/' or '\\') && !char.IsControl(c)).ToArray()).Trim();
+        return kept.Length > 0 ? kept : null;
+    }
+
     public const string ProcedureVersionTable = "sprk_procedureversion";
     public const string InvoiceTable = "sprk_invoice";
     public const string BillingExportTable = "sprk_billingexport";
@@ -470,6 +485,30 @@ public sealed record StoredFileRowSpec
 /// <param name="SizeBytes">The length in bytes (already checked to fit the column).</param>
 /// <param name="Reused">True when the same bytes were already stored under the id (a retry).</param>
 public sealed record StagedBlob(string Container, string BlobPath, string Sha256, long SizeBytes, bool Reused);
+
+/// <summary>
+/// ebilling-r1 task 094 (from-email): what a from-email Invoice part's stage records beside its own source facts: the ordinals of the
+/// Supporting parts staged with it (each under <c>StoredFileIds.ForAttachment(submission, "eml-part-{n}")</c>) and the part's file
+/// extension. Nothing else of the email (no name, no subject) is recorded.
+/// </summary>
+internal sealed record StagedSourceManifest(IReadOnlyList<int> SupportingOrdinals, string? Extension);
+
+/// <summary>
+/// ebilling-r1 task 094 (from-email): a staged blob read back with the source facts its stage recorded
+/// (<see cref="StoredFileService.ReadStagedSourceAsync"/>). Every fact is null when the stage recorded none (an upload).
+/// <paramref name="SourceUnreadable"/> (review round 5) is true when a source key is present but its value cannot be read: the blob is
+/// NOT an upload, and its readers refuse it (fail closed) rather than treat it as one.
+/// </summary>
+internal sealed record StagedSource(
+    StagedBlob Blob,
+    Guid? SourceDocumentId,
+    Guid? SourceCommunicationId,
+    long? SourceVersion,
+    string? SourceAttachmentIdentity,
+    IReadOnlyList<int> SupportingOrdinals,
+    string? Extension,
+    string? ContentType,
+    bool SourceUnreadable = false);
 
 /// <summary>The answer of a stage: the blob, or a refusal code (nothing written).</summary>
 public sealed record StageResult(StagedBlob? Blob, string? RefusalCode)

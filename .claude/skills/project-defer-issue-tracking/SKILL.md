@@ -5,14 +5,14 @@ techStack: [all]
 appliesTo: ["any project", "deferred work", "newly uncovered issue"]
 alwaysApply: false
 exemplar: none-too-volatile
-last-reviewed: 2026-06-26
+last-reviewed: 2026-10-22
 ---
 
 # project-defer-issue-tracking
 
 > **Category**: Governance
-> **Last Reviewed**: 2026-06-26
-> **Reviewed By**: spaarke-redis-cache-remediation-r1 (created in response to repeated "buried in notes/r7-backlog.md" surfacing problem)
+> **Last Reviewed**: 2026-10-22
+> **Reviewed By**: spaarke-SPA-external-access-platform-r3 (added the project label as the owner field, the hand-off label swap and the public-repo rule for security findings; owner-approved). Created by spaarke-redis-cache-remediation-r1 in response to a repeated "buried in notes/r7-backlog.md" surfacing problem.
 > **Exemplar rationale**: Deferrals are per-project ephemeral state; the procedure + GitHub-issue format is what's reusable.
 
 ---
@@ -215,6 +215,26 @@ After `gh issue create` returns, copy the issue URL back into the project entry'
 
 - If the deferral relates to a specific R# planning round, add a one-line pointer to that project's `current-task.md` under "Implementation Notes" or "Decisions Made"
 - If the entry implies a follow-up project, append to `projects/_global-backlog.md` (create if absent — single repo-wide rollup)
+
+---
+
+## Ownership: the project label is the owner field
+
+GitHub has no owner field, so the **project label** fills that role. Every open issue carries **exactly one** project label: the folder name under `projects/`, which is also the `work/{project-name}` branch and the `spaarke-wt-{project-name}` worktree suffix. A session finds its own issues with `gh issue list --label {project-name} --state open`. (Added 2026-10-22 on owner direction. The R3 triage found handed-off issues carrying no label, or the wrong one.)
+
+| Event | Action |
+|---|---|
+| Filing (Step 4) | Add the project label. If it does not exist yet, create it: `gh label create {project-name} --description "Owned by project {project-name}"`. |
+| Handing an issue to another project | Swap the labels in one call: `gh issue edit {N} --remove-label {from} --add-label {to}`. Add a comment naming the receiving project and the reason, and set the notes entry's Status to `Handed off → {to}`. Do this only after the receiving project or the owner has accepted the hand-off. |
+| An issue someone else filed for this project | Add this project's label as soon as you take it on. |
+| Session start (task-execute Step 0, project-continue) | Run `gh issue list --label {project-name} --state open`. Report any issue that is not in `notes/defer-issues.md` and any that is marked closed there. |
+| Before a push (push-to-github Step 1.6) | Also check that every GitHub Issue URL in `notes/defer-issues.md` that is still open carries this project's label. A missing or foreign label is either a hand-off that was not recorded or a labelling slip, so fix it before pushing. |
+
+An issue with no project label, or with two, has no owner. Fix it when you find it, and do not treat it as someone else's problem.
+
+### Security findings: the repository is public
+
+`spaarke-dev/spaarke` is **public**. Never put a security vulnerability's mechanism (exploit steps, the column or path that grants access, the conditions under which it works) in an issue, PR body, commit message or committed note, this skill's two writes included. Record it outside the repo, tell the owner, and track it the way the owner decides, for example as a private GitHub security advisory. A public issue for such a finding, if the owner wants one, describes only the area ("contact ownership hardening") and points to the private record.
 
 ---
 

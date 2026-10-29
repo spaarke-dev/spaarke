@@ -133,8 +133,10 @@ public sealed record ProcedureRetired(
 /// (<c>withBillingSubject</c>); the job sweep and the admin retire close select the same rows without them (ontology review F1).</para>
 /// <para><b>Identity.</b> The routes have already refused flagged-external callers (step 0) and checked the caller's own rights (Write or Read
 /// on the Procedure, the billing-admin privilege, or Create on <c>sprk_procedure</c>). The writes then run as the BFF application user, because
-/// the dates, status, Applies to and Firm are field-secured to it (I-P2). New rows are owned by the caller's business-unit team
-/// (<see cref="IRecordOwnershipResolver"/> with no parents, model 5.1) and record the caller as creator person.</para>
+/// the dates, status, Applies to and Firm are field-secured to it (I-P2). A new Procedure and its versions are owned by the caller's
+/// business-unit team (<see cref="IRecordOwnershipResolver"/> with no parents, model 5.1); the rule set and the copied policy versions are
+/// hard-deny rows, asked through <see cref="RuleSetService.ContentOwnerContext"/> (EB-D-168 / EB-D-168a: the restricted-content owner team).
+/// Every new row records the caller as creator person.</para>
 /// <para><b>Serialised on the Procedure row.</b> Every write includes a conditional update of the Procedure row (row version as read), so a
 /// publish, a date change, a version create or a scope change racing a retire (or each other) is refused 409 <c>procedure.concurrent_edit</c>
 /// with nothing written, never interleaved.</para>
@@ -256,10 +258,17 @@ public class ProcedureService
             return RuleSetOutcome<ProcedureView>.Invalid(CodeFirmRequired, new[] { FirmRequiredError(type) });
         }
 
-        var owner = await _ownership.ResolveOwnerAsync(OwnerContext(callerObjectId), ct);
+        var owner = await _ownership.ResolveOwnerAsync(RuleSetService.CallerOwnerContext(callerObjectId), ct);
         if (!owner.IsOwned)
         {
             return RuleSetOutcome<ProcedureView>.OwnerRefused(owner);
+        }
+
+        // The Procedure's rule set is a hard-deny row (EB-D-168a): its own question, before anything is written.
+        var ruleSetOwner = await _ownership.ResolveOwnerAsync(RuleSetService.ContentOwnerContext(RuleSetService.RuleSetEntity, callerObjectId), ct);
+        if (!ruleSetOwner.IsOwned)
+        {
+            return RuleSetOutcome<ProcedureView>.OwnerRefused(ruleSetOwner);
         }
 
         var procedureId = Guid.NewGuid();
@@ -284,7 +293,7 @@ public class ProcedureService
         owner.ApplyTo(procedure);
         var ruleSetId = Guid.NewGuid();
         var ruleSet = RuleSetService.NewProcedureRuleSet(ruleSetId, name, procedureId, request.FirmId, InitialVisibleToFirms(type));
-        owner.ApplyTo(ruleSet);
+        ruleSetOwner.ApplyTo(ruleSet);
 
         switch (await SendAsync(new OrganizationRequest[] { new CreateRequest { Target = procedure }, new CreateRequest { Target = ruleSet } }, procedureId, "create"))
         {
@@ -492,7 +501,7 @@ public class ProcedureService
                 return Refused<ProcedureVersionCreated>(StatusCodes.Status409Conflict, CodeRuleSetMissing, "The Procedure has no rule set.");
             }
 
-            var owner = await _ownership.ResolveOwnerAsync(OwnerContext(callerObjectId), ct);
+            var owner = await _ownership.ResolveOwnerAsync(RuleSetService.CallerOwnerContext(callerObjectId), ct);
             if (!owner.IsOwned)
             {
                 return RuleSetOutcome<ProcedureVersionCreated>.OwnerRefused(owner);
@@ -518,7 +527,15 @@ public class ProcedureService
             var copied = 0;
             if (previous is not null)
             {
-                var plan = await _ruleSets.PlanCopyForwardAsync(ruleSet.Id, previous.Id, versionId, owner, ct);
+                // The copied policy versions are hard-deny rows (EB-D-168a): their own question, before anything is written.
+                var copyOwner = await _ownership.ResolveOwnerAsync(
+                    RuleSetService.ContentOwnerContext(RuleSetService.VersionEntity, callerObjectId), ct);
+                if (!copyOwner.IsOwned)
+                {
+                    return RuleSetOutcome<ProcedureVersionCreated>.OwnerRefused(copyOwner);
+                }
+
+                var plan = await _ruleSets.PlanCopyForwardAsync(ruleSet.Id, previous.Id, versionId, copyOwner, ct);
                 if (plan.Truncated)
                 {
                     return Refused<ProcedureVersionCreated>(StatusCodes.Status422UnprocessableEntity, CodeTooManyRules,
@@ -1276,12 +1293,6 @@ public class ProcedureService
         var name = procedureName ?? string.Empty;
         return (name.Length + suffix.Length > MaxNameChars ? name[..(MaxNameChars - suffix.Length)].TrimEnd() : name) + suffix;
     }
-
-    private static RecordOwnershipContext OwnerContext(Guid? callerObjectId) =>
-        RecordOwnershipContext.ForParents(Array.Empty<RecordOwnershipParent>(), callerObjectId) with
-        {
-            RequestedBy = RecordRequester.Of(objectId: callerObjectId),
-        };
 
     private static RuleSetError Error(string field, string message) => new(null, null, field, message, null);
 

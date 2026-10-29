@@ -538,6 +538,22 @@ public sealed class CoreAncestorResolver
         => _columnProbe(entityLogicalName, ct);
 
     /// <summary>
+    /// The CORE record table a <c>sprk_recordtype_ref</c> catalog row names (<c>sprk_recordlogicalname</c>), for a row that stores
+    /// its core as a pair (<c>sprk_corerecordtype</c> + <c>sprk_corerecordid</c>: a Signal, a Decision Record). <c>null</c> when the
+    /// row names a table that is not one of <see cref="CoreRecordEntities"/>. The catalog is configuration, read with the BFF's own
+    /// client. A fault (a missing row included) propagates: each caller maps it to its own contract.
+    /// </summary>
+    public static async Task<string?> CoreTableOfRecordTypeAsync(
+        IGenericEntityService entityService, Guid recordTypeRefId, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(entityService);
+        var row = await entityService.RetrieveAsync("sprk_recordtype_ref", recordTypeRefId, ["sprk_recordlogicalname"], ct)
+            .ConfigureAwait(false);
+        var table = row.GetAttributeValue<string>("sprk_recordlogicalname")?.Trim().ToLowerInvariant();
+        return table is not null && CoreRecordEntities.Contains(table, StringComparer.Ordinal) ? table : null;
+    }
+
+    /// <summary>
     /// Build an <see cref="EntityColumnProbe"/> backed by <see cref="MetadataService"/>. A metadata failure
     /// surfaces as an exception so the caller fails closed rather than reading an empty column set and
     /// concluding "no ancestor".

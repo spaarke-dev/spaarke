@@ -286,6 +286,41 @@ public static partial class ProblemDetailsHelper
     }
 
     /// <summary>
+    /// ebilling-r1 task 094 fix round (F1-c; owner EB-D-166): the internal planes' 409 for a document delete refused because an invoice
+    /// was submitted from the document (a Stored File copy names it as its source; Delete = Restrict). Nothing was deleted. No count and
+    /// no invoice id. <c>reasonCode</c> = <see cref="Sprk.Bff.Api.Services.DocumentCheckoutService.InvoiceSourceCode"/>.
+    /// </summary>
+    public static IResult DocumentIsInvoiceSource(string? traceId = null)
+    {
+        var extensions = new Dictionary<string, object?>
+        {
+            ["reasonCode"] = Sprk.Bff.Api.Services.DocumentCheckoutService.InvoiceSourceCode,
+        };
+        if (!string.IsNullOrWhiteSpace(traceId))
+        {
+            extensions["traceId"] = traceId;
+        }
+
+        return Results.Problem(
+            title: "Document is an invoice's source",
+            statusCode: StatusCodes.Status409Conflict,
+            detail: "An invoice was submitted from this document, so it can't be deleted. Nothing was deleted.",
+            extensions: extensions);
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 094 fix round (F1-c): the external plane's generic 409 for a document delete refused because the document is in
+    /// use (an invoice's source). It names no count, no invoice and no reason beyond "in use". Nothing was deleted. <c>reasonCode</c> =
+    /// <see cref="Sprk.Bff.Api.Services.DocumentCheckoutService.DocumentInUseCode"/>.
+    /// </summary>
+    public static IResult DocumentInUse() =>
+        Results.Problem(
+            title: "Document in use",
+            statusCode: StatusCodes.Status409Conflict,
+            detail: "This document is in use, so it can't be deleted. Nothing was deleted.",
+            extensions: new Dictionary<string, object?> { ["reasonCode"] = Sprk.Bff.Api.Services.DocumentCheckoutService.DocumentInUseCode });
+
+    /// <summary>
     /// The 409 for a re-file whose owner could not be settled against concurrent writers (#2143,
     /// <see cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnsettledException"/>): <c>reasonCode</c>
     /// <see cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnsettledException.ReasonCode"/>, and a detail telling the client to

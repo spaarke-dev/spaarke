@@ -758,6 +758,44 @@ public class SecureChildTransitionTests : IClassFixture<ProvisionProjectTestFixt
     }
 
     /// <summary>
+    /// UAC task 194b fix round R (A2): an Unsecure HOLDS a Decision Record whose question is incomplete (its sprk_steps lists no
+    /// Signals) on the Secure team — and takes the matter's mirror off it as it does a released child's, so the colleague the
+    /// matter was shared with keeps no access through it. Holding only removes access: the call completes and reports it.
+    /// </summary>
+    [Fact]
+    public async Task Unsecure_HoldsADecisionRecordWithAnIncompleteQuestion_RemovesItsMirror_AndReportsItHeld()
+    {
+        var rootId = Guid.NewGuid();
+        SeedRoot("sprk_matter", rootId, owningTeam: SecureTeam);
+        _fixture.UseChildWorldForRoots();
+        var world = _fixture.ChildWorld;
+        var catalog = Guid.NewGuid();
+        world.Add("sprk_recordtype_ref", catalog, ("sprk_recordlogicalname", "sprk_matter"));
+        var record = Guid.NewGuid();
+        world.SecureChild("sprk_decisionrecord", record,
+            ("sprk_matter", "sprk_matter", rootId), ("sprk_regardingmatter", "sprk_matter", rootId));
+        world.Set("sprk_decisionrecord", record, "sprk_corerecordtype", new Microsoft.Xrm.Sdk.EntityReference("sprk_recordtype_ref", catalog));
+        world.Set("sprk_decisionrecord", record, "sprk_corerecordid", rootId.ToString("D"));
+        world.Set("sprk_decisionrecord", record, "sprk_regardingrecordid", rootId.ToString("D"));
+        _fixture.SeedShare(rootId, DataversePrincipalRef.User(Colleague), RecordShareLevels.ViewOnlyRights);
+        _fixture.SeedShare(record, DataversePrincipalRef.User(Colleague), RecordShareLevels.ViewOnlyRights);
+
+        var response = await _fixture.CreateAuthenticatedClient()
+            .PostAsJsonAsync(UnsecureRoute, new { recordType = RecordType("sprk_matter"), recordId = rootId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        world.OwnerOf("sprk_decisionrecord", record).Should().Be(DataversePrincipalRef.Team(SecureTeam), "held, never moved out");
+        _fixture.SharesOn(record).Should().BeEmpty("the colleague keeps no access through the held record");
+        _fixture.IsSecureOf(rootId).Should().BeFalse("the Unsecure completes");
+        var children = (await JsonOf(response)).GetProperty("children");
+        children.GetProperty("held").GetInt32().Should().Be(1);
+        var held = children.GetProperty("heldRecords").EnumerateArray().Should().ContainSingle().Subject;
+        held.GetProperty("table").GetString().Should().Be("sprk_decisionrecord");
+        held.GetProperty("id").GetGuid().Should().Be(record);
+        held.GetProperty("reason").GetString().Should().Contain("incomplete");
+    }
+
+    /// <summary>
     /// AC 2 + AC 5 (task 148 r1, verifier item 1): a STAMPED grandchild — filed under the record by its FR-26 stamp AND under
     /// one of the record's other children — sits at that child's level, and its table can sort BEFORE the child's. Decided
     /// first, it read that parent still on the Secure team (secure-if-any) and stayed isolated with its mirror while the call

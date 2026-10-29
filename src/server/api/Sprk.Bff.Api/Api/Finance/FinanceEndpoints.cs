@@ -263,6 +263,19 @@ public static class FinanceEndpoints
 
         var correlationId = httpContext.TraceIdentifier;
 
+        // ebilling-r1 task 094 (procedure-and-file-model 9.1 step 1): the confirm route runs Submit Invoice's own step 1 - the caller's
+        // Read on the document and on its communication (if it has one), read-only - before the intake. Step A (filing an unfiled
+        // communication to the matter as the caller) is handed to the intake, which runs it after its read-only refusals (fix round
+        // F1-b). Fix round F4: the document's Read is checked here too - the route's filter requires Write (finance.confirm) and
+        // Write|Append (link_invoice), not Read.
+        var prepared = await InvoiceSubmissionEndpoints.PrepareSourceAsync(
+            request.DocumentId, null, new InvoiceCoreRecord(InvoiceCoreRecordKind.Matter, request.MatterId), httpContext,
+            documentReadChecked: false, cancellationToken);
+        if (prepared.Refusal is { } refused)
+        {
+            return refused;
+        }
+
         logger.LogInformation(
             "Invoice review confirm request received. DocumentId={DocumentId}, MatterId={MatterId}, " +
             "CorrelationId={CorrelationId}",
@@ -272,7 +285,11 @@ public static class FinanceEndpoints
         {
             // Task 146 c1-r1 (owner round 13 item 9): the signed-in reviewer asked for the invoice the app creates.
             var outcome = await invoiceReviewService.ConfirmInvoiceAsync(
-                request with { RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfCaller(httpContext.User) },
+                request with
+                {
+                    RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfCaller(httpContext.User),
+                    FileSourceBeforeWrite = prepared.Hook,
+                },
                 correlationId,
                 cancellationToken);
 
@@ -288,6 +305,17 @@ public static class FinanceEndpoints
                 ex.Failure, request.DocumentId, ex.SubmissionId, correlationId);
 
             return ConfirmFailure(ex, correlationId);
+        }
+        catch (InvoiceSubmissionEndpoints.SourceFilingRefusedException ex)
+        {
+            // Step A's refusal (the re-file core's answer, an isolated communication, a fault): nothing was submitted.
+            return ex.Answer;
+        }
+        catch (Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException)
+        {
+            // Step A's COMMUNICATION_REFILE_FORBIDDEN (no Write on the communication): the re-file route's own 403, rendered by the
+            // problem middleware as on that route, never the 500 below.
+            throw;
         }
         catch (Exception ex)
         {

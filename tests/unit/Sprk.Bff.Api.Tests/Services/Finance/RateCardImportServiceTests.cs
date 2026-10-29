@@ -430,6 +430,9 @@ public sealed class RateCardImportServiceTests
         card.GetAttributeValue<EntityReference>("sprk_matter").Id.Should().Be(matterId);
         h.OwnerContexts.Should().ContainSingle().Which.TargetRecordId.Should().Be(matterId);
         h.OwnerContexts[0].CallerObjectId.Should().Be(CallerOid);
+        // 194b R3b-2: asked through ForRow for the card's table, the core under the column the card writes it to.
+        h.OwnerContexts[0].ChildEntityLogicalName.Should().Be(RateCardImportService.RateCardEntity);
+        h.OwnerContexts[0].Parents.Should().Equal(new RecordOwnershipParent("sprk_matter", matterId));
 
         // DEF-015: even when the card is scoped to a matter, the Procedure Library document is not linked to it.
         typeof(UpdateDocumentRequest).GetProperties()

@@ -289,7 +289,7 @@ describe('SaveFlow — Document Name, Outlook (Email) path untouched (escalation
     expect(body!.email.isNameSystemDerived).toBe(true);
   });
 
-  it('typing a name still marks it user-typed (isNameSystemDerived false) — the pre-existing behavior', async () => {
+  it('typing a name marks it user-typed and sends it as documentName; the subject stays the email’s own (#2416)', async () => {
     saveResponses.push(accepted());
     renderOutlook('Q3 Renewal Terms');
 
@@ -298,7 +298,8 @@ describe('SaveFlow — Document Name, Outlook (Email) path untouched (escalation
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     const [body] = await sentBodies();
-    expect(body!.email.subject).toBe('Renewal — filed copy');
+    expect(body!.email.subject).toBe('Q3 Renewal Terms');
+    expect(body!.email.documentName).toBe('Renewal — filed copy');
     expect(body!.email.isNameSystemDerived).toBe(false);
   });
 
