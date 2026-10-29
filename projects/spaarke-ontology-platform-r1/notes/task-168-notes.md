@@ -258,3 +258,64 @@ Fresh detached worktrees: `C:\wt168m` (origin/master `3d54ac845d`) and `C:\wt168
 | **Delta** | **+25,627 B (+0.026 MB)** | +82,908 B | 0 |
 
 No packages were added, so there is no new CVE surface.
+
+## Fix round 3 — the WorkforceHome plane (R3, 2026-10-29)
+
+One finding from R3, the external-access owner. The gate under-notified, which fails closed and is not a leak. It always composed an external assignee's access as a CIAM sign-in. A WorkforceHome contact signs in with their home directory, and the portal resolves that sign-in as a ContactOnly workforce principal. Its composition (`ComposeContactPlaneAsync(…, includeDerivedMemberTerms: true)`) adds standing-grant membership and organization expansion. So a WorkforceHome assignee whose access came only through one of those terms saw the task in the portal but got no email. D-199 says an external contact is emailed exactly when the portal would show them the task. The From behaviour is unchanged.
+
+| # | Change |
+|---|---|
+| 1 | **Composition by plane, composed once.** `DecideExternalAsync` composes ONE principal (`ComposePortalPrincipalAsync`). The matter Read (`ContactRights`, now over that composition's set for the grant table) and the events list's per-row rule (`PortalListsTaskAsync`) are both asked of it. Before, the gate made four compositions per decision; now it makes three. `PortalPlaneOf` picks the plane from `ContactBindingRow.Binding` (`ContactBindingDecision.ReadBinding`, the reader every binding path uses). A Bound binding with plane WorkforceHome gets `WorkforcePrincipalStrategy.ComposeAsync`, over the `WorkforcePrincipalResolution.ForContact` principal that the home resolver builds. Everything else gets `CiamContactPrincipalStrategy.ComposeAsync`, the smaller composition: External, a legacy oid with no marker, an unknown marker value, an unproven empty plane, unbound, and Spaarke-tenant Workforce. The round-2 mapping is kept: Readable means email; Withheld means NoAccess, or Unverified when capped; Unavailable or a throw means Unverified. |
+| 2 | **Workforce composition lifted.** `WorkforcePrincipalStrategy.ComposeAsync` is a new internal static, next to the CIAM one. It makes the same three `ComposeAsync(principal, …)` calls in the same order, uses the same `FromReadBearing` mapping, and sets the same derived fields (`UndatedAccessTermEntityTypes`, `DataverseConfirmsWrites`, `TruncatedRootEntityTypes`). `ResolveAsync` calls it, and the `[WF-AUTH] … resolved … (project sources: …)` line stays in the strategy. `CiamContactComposition` became `ContactPrincipalComposition`, which carries the three sets (`Capped`, `SetFor`). `ComposeContactPlaneAsync` is unchanged, including the inactive-contact and removed-marker guards. |
+| 3 | **A licensed user's home sign-in.** The portal asks the stored link FIRST (`WorkforcePrincipalResolver.ResolveHomeAsync`, `case HomeLinkOutcome.Enabled` → `ForSystemUser`). A WorkforceHome contact whose home pair a licensed user carries is therefore never this contact in the portal (Kind = SystemUser). The gate's "represents" step (`DecideCoreAsync`: `ReadLinkCandidatesAsync` + `Represents`) reads `sprk_primarycontact` and the Spaarke-tenant `azureactivedirectoryobjectid` only, NOT the field-secured home pair. Such a contact could therefore reach the external branch. The gate now makes the same read for a WorkforceHome contact (`HomeLinkAsync`: `IContactIdentityStore.FindHomeLinkedSystemUsersAsync` + `ContactBindingDecision.DecideHomeLink`) before composing. NotLinked goes on. Enabled is Unverified: the person's view is the user's, not the contact's. Disabled is NoAccess, because the portal denies that sign-in. Denied (ambiguous, failed, column missing, a throw, or an unparseable home tenant) is Unverified. `GrantAccessNotifier` has the same gap (filed below), so there was no existing behaviour to copy. Unverified is the fail-closed choice of the two the reviewer allowed. |
+
+**Where a contact linked to a licensed user is caught:**
+- **Linked by `sprk_primarycontact`, or by the Spaarke-tenant oid:** `DecideCoreAsync` (`AssignTaskRecipientGate.cs` ~223-237). If any candidate `Represents` the contact, the external branch is never entered and the decision goes to `DecideInternalAsync`. The test `AWorkforceHomeContact_LinkedToALicensedUserBySprkPrimaryContact_IsDecidedOnTheInternalPath_NeverTheExternalOne` pins this.
+- **Bound on the Spaarke-tenant Workforce plane:** `IsOnboardedWithEmail` refuses it (`GrantAccessNotifier.cs:345`).
+- **Linked by the home pair only:** item 3 above.
+
+### Tests
+
+- New `AssignTaskRecipientGatePlaneTests`, 22 cases. They run over the REAL `AccessibleRecordSetService` (doubles for membership, standing grants, participation reads and the removed marker only) and the REAL `ExternalDataService` over the events-list fake Dataverse.
+  - **Must fire:** a WorkforceHome contact reached only by standing grant, or only by organization expansion, is emailed. The events list served to its home sign-in (the REAL `WorkforcePrincipalStrategy.ResolveAsync` principal → `GetEventsAsync`) lists the task. The CIAM composition gives None (control).
+  - **Must not fire:**
+    - A CIAM contact with the same access gets NoAccess, and its CIAM list is empty.
+    - A removed contact composes an EMPTY principal and gets NoAccess on each plane. The control is the same contact, unmarked, with a grant: it gets an email.
+    - Eight bindings → plane table. Every non-WorkforceHome binding uses the CIAM composition (Strict mock), with three compositions per decision.
+    - Six home-link outcomes → refused, never composed.
+    - An unreadable home tenant → Unverified.
+    - Internal-path pinning (above).
+- New `WorkforcePrincipalStrategyComposeTests`, 3 cases (resolver regression). For ContactOnly and for SystemUser: the three calls in order; every principal field; the Read-bearing mapping (a None entry and a Write-only entry dropped); the derived sets; and exactly one `[WF-AUTH]` resolved line with counts and sources. The lifted static matches.
+- Round-2 tests adapted to the new seam signatures, assertions unchanged: the notifier harness stubs `ComposePortalPrincipalAsync`/`ContactRights`/`PortalListsTaskAsync`, and the seam tests compose once.
+- **Filtered `Sprk.Bff.Api.Tests`** (`AssignTask|CallerPrincipal|Ciam|Workforce|AccessibleRecordSet|ExternalLiveParentRead|ExternalRootEventRead`): 1369/1369. The `AssignTask` filter alone is 142/142; it was 120 in round 2, and the 22 new cases account for the difference.
+- **`Spaarke.ArchTests`, full:** 1665/1665 on the clean build. One earlier run on the same binaries failed 1 of 1665 while a publish was running alongside it; a rerun on the same binaries passed, so it was a load flake, not this change.
+
+### Mutation check (each alone, then reverted; gate + notifier + resolver-regression filter, 115 tests)
+
+| Mutation | Failed |
+|---|---|
+| Plane switch always CIAM (the old behaviour) | 10: must-fire, plane table, home-link and tenant cases |
+| Plane switch always WorkforceHome | 19: CIAM must-not-fire, removed contact, plane table, and the round-2 external notifier/seam tests |
+| Unknown or unreadable plane read as WorkforceHome | 5 (plane table) |
+| Home-link read skipped (the old behaviour) | 7 |
+| Enabled licensed-user link let through | 1 |
+| Resolver: project and matter compositions swapped | 2 |
+| Resolver: `[WF-AUTH]` resolved line dropped | 2 |
+
+All 7 are caught. Each mutation was built fresh, because the mutated file was rewritten each time. The final restore needed a forced rebuild (`touch`): the restored file kept an older mtime, so the incremental build first reused the last mutated DLL. Every count above comes from the clean rebuild.
+
+### Publish size (bff-hygiene item 4)
+
+The publish was run from fresh detached worktrees: `C:\wt168m` (origin/master `7008180304`) and `C:\wt168b` (`bd32be448f`). Each ran `dotnet publish -c Release`, and the output was zipped with `Compress-Archive`. Both worktrees were removed with `Remove-WorktreeSafe.ps1 -Force`; the only untracked content was `pubout/`.
+
+| | Zip | Raw | Files |
+|---|---|---|---|
+| Master | 39,814,110 B | 132,703,428 B | 192 |
+| Branch | 39,819,704 B | 132,728,364 B | 192 |
+| **Delta (whole task 168 vs master)** | **+5,594 B** | +24,936 B | 0 |
+
+No package was added.
+
+### To file
+
+- `GrantAccessNotifier.NotifyContactGrantAsync` has the same home-link gap. A grant to a WorkforceHome contact whose home pair a licensed user carries emails the contact as external, although the portal resolves that person as the user. This is outside this task's scope. It is reported to the main session to file for the external-access owner (not filed from here).
