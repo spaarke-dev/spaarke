@@ -7,7 +7,7 @@ using Microsoft.Xrm.Sdk.Metadata;
 using Sprk.Bff.Api.Services.Dataverse;
 using Xunit;
 
-namespace Sprk.Bff.Api.Tests.Services.Dataverse;
+namespace Sprk.Bff.Api.Tests.Domain.Dataverse;
 
 public class MetadataServiceDisplayNameTests
 {

@@ -126,7 +126,7 @@ call and the caller it impersonated).
 |---|---|
 | 200 for a readable anchor: exact property sets (no extras), kind and edgeKind on members, anchor among the members, `recordType` = each member's table display name, every read impersonates the caller | shape, first page, recordType |
 | a metadata failure for one table: null `recordType` for that table's members, the page still 200 | recordType never fails the read |
-| `MetadataServiceDisplayNameTests` (3, in `tests/unit/Sprk.Bff.Api.Tests/Services/Dataverse`): `ProjectToDto` carries the user-localized label, falls back to the first localized label, and is null when absent | DTO projection |
+| `MetadataServiceDisplayNameTests` (3, in `tests/unit/domain/Dataverse (ADR-038 KEEP path)`): `ProjectToDto` carries the user-localized label, falls back to the first localized label, and is null when absent | DTO projection |
 | `direction=down` / `DOWN&kind=filing`: root omitted, anchor on top | root omitted |
 | default / `full` / `FULL&kind=Filing`: root present | root present |
 | unknown anchor vs unreadable anchor: identical 404 (apart from ids), both asked through the gate method, nothing read | equalised 404 |
