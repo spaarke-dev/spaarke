@@ -181,15 +181,40 @@ is closed as **Acted**, never Dismissed.
 - **A stored set wins.** A retry finds the set stored for this decision id and closes exactly it, with its stored read time; it is never
   re-read or widened, so a Signal raised after the first read stays open. Closing again by the same record is
   `AlreadyClosedByThisRecord` (nothing twice).
-- **A failed close only warns.** One Warning per Signal (ids and codes only); the decision and its response are unchanged. A Signal that
+- **A failed close warns, and (2026-10-29, F2, see below) the answer is then 503 unavailable.** One Warning per Signal (ids and codes only); the decision itself stands. A Signal that
   no longer exists has nothing to close. A repeat of a decided submission (`AlreadyDecided`) re-runs the close over the stored set with the
   stamp's record and decider, after the same rights check; anything it cannot do only warns, and the repeat's answer is unchanged.
+  **2026-10-29: a failed close answers 503 `ebilling.blocked.unavailable`; the repeat completes it** (ontology-r1 review of PR #1911, F2;
+  decision of the coordinator). `CloseSetAsync` returns how many closes failed (a timeout, or `ChangedSinceRead`) and both call sites used
+  to drop it, so a failed close was answered Decided / AlreadyDecided and the Signal stayed Open with no record link. This service has no
+  Incomplete outcome (`BlockedDecisionKind` is Decided, AlreadyDecided, Refused), so it reuses its existing retryable refusal
+  `Unavailable()`; no new kind. (1) The close inside the decision (record, close, state change: the order is unchanged): every Signal is
+  still attempted and the state change and notification still happen (the decision stands, as for a line decision), but a count above
+  zero is answered `Unavailable()` instead of Decided. (2) A repeat of a decided submission (`RecloseAsync`, both call sites, before and
+  under the lock) returns its failed count: above zero is `Unavailable()`, zero is AlreadyDecided as before. (3) A state-write race that
+  ends AlreadyDecided is `Unavailable()` when this run's closes failed. The repeat finds the decided submission, takes the record id, the
+  decider and the set from the WRITER-CREATED record (never the stamp), re-runs the close (`AlreadyClosedByThisRecord` for the ones
+  already closed) and writes no second Decision Record; it answers AlreadyDecided only once every close is done. **A transient read fault
+  on a repeat is the same (2026-10-29):** a fault while reading the writer-created record (the lookup), the stored Signals, the invoice,
+  or the entity sets the rights check needs answers 503 `unavailable` at both reclose sites, because the Signals are still Open; a later
+  repeat with the reads healthy completes the closes and answers AlreadyDecided. The line decisions (100, section 9) answer Incomplete at
+  step `signals` for the same rule.
+  **Known limit (2026-10-29): permanent cases stay AlreadyDecided with one warning, because a repeat cannot change them.**
+  - No writer-created Decision Record: nothing trusted names the set or the record to close by (the stamp is user-writable, F1-1).
+  - A record naming no decider (`sprk_confirmedby`): there is no person to close in (K3).
+  - Untrusted subjects: a Signal's row is not the invoice or one of its lines, or its policy code differs from the row's (F1-1, F1-b).
+  - The writer refuses to read the set (more than one record under the key, or a set it cannot read): it never picks one (ReviewInvalid).
+  - The invoice is gone: there is nothing to authorize the close against.
+  - A caller without the rights (or a probe that cannot answer, which is a no): the app-identity writer closes only for an authorized caller (FR-51).
 - **Races.** Losing the race at the set store to a concurrent run of the same decision is the same `AlreadyDecided` no-op as losing it at
   the state write; any other change is `concurrent_change`.
 
 Tests: `SubmissionOverrideServiceTests` region "D-122 / FR-51" (each verb closes the set as Acted naming the decider; the record lists the
 ids and the set is stored before it; rights asked as the caller; missing AppendTo / Write / an unanswerable probe are 403 with nothing
-written; no Signal asks nothing; a read fault is 503; a failed close warns; a repeat re-closes the stored set; a retry after the state write
+written; no Signal asks nothing; a read fault is 503; a failed close (timeout, or ChangedSinceRead) is 503 unavailable with the decision
+standing; LeftAsIs is Decided; the repeat completes the close with one record and answers AlreadyDecided, and is 503 again while a close still
+fails, also under the lock and after a lost state-write race; a read fault on a repeat (the record lookup, the stored Signals, the invoice) is
+503 at both reclose sites and a healthy repeat completes it with one record, while the writer refusing the stored set stays AlreadyDecided; a clean close is unchanged; a repeat re-closes the stored set; a retry after the state write
 failed closes exactly the stored set and finds its record; the store race; no core record). Seeded mutation (authorization disabled in
 `HumanDecisionSignalClose.AuthorizeAsync`): 12 tests failed, among them
 `Decision_WithoutAppendToOnTheMatter_Is403_AndNothingIsWritten`.

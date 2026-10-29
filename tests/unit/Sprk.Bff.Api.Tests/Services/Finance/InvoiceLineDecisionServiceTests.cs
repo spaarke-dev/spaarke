@@ -124,6 +124,9 @@ public sealed class InvoiceLineDecisionServiceTests
             set == "sprk_billingevents" ? AccessRights.Read : AccessRights.Read | AccessRights.Write | AccessRights.Append | AccessRights.AppendTo;
         public Func<Guid, Exception?> CloseFault = _ => null;
 
+        /// <summary>A forced outcome of the close for a Signal (ChangedSinceRead, LeftAsIs): the writer's non-throwing results.</summary>
+        public Func<Guid, SignalAutomatedCloseOutcome?> CloseOutcome = _ => null;
+
         public World(decimal billedTotal = 1000m, int status = InvoiceStatusCodes.InReview)
         {
             Invoice = new Entity("sprk_invoice", InvoiceId)
@@ -272,6 +275,11 @@ public sealed class InvoiceLineDecisionServiceTests
                 if (CloseFault(signalId) is { } fault)
                 {
                     return Task.FromException<SignalAutomatedCloseOutcome>(fault);
+                }
+
+                if (CloseOutcome(signalId) is { } forced)
+                {
+                    return Task.FromResult(forced);
                 }
 
                 var row = Signals.Single(s => s.Id == signalId);
@@ -1149,8 +1157,8 @@ public sealed class InvoiceLineDecisionServiceTests
         NothingWritten(w);
     }
 
-    [Fact(DisplayName = "100: a failed close only warns: the decision is Applied with the same response, and the line's other Signals are closed")]
-    public async Task CloseFailure_OnlyWarns_AndTheDecisionStands()
+    [Fact(DisplayName = "100 F2: a failed close answers 'incomplete' at step 'signals', not Applied: the decision stands (line, total, record), the line's other Signals are closed, and the failure is warned")]
+    public async Task CloseFailure_IsIncompleteAtSignals_AndTheDecisionStands()
     {
         var w = new World(billedTotal: 100m);
         var line = w.AddLine(100m, InvoiceLineStatus.Flagged);
@@ -1160,11 +1168,107 @@ public sealed class InvoiceLineDecisionServiceTests
 
         var result = await w.Service().DecideAsync(Command(w, LineDecisionAction.Reduce, [new(line.Id, 60m)], Reason), CancellationToken.None);
 
-        result.Status.Should().Be(LineDecisionStatus.Applied);
-        result.Code.Should().Be("ok", "the same answer as a decision whose close succeeded");
-        result.Lines!.Single().Status.Should().Be(nameof(InvoiceLineStatus.Reduced));
+        result.Status.Should().Be(LineDecisionStatus.Incomplete, "a Signal left Open with no record link is not a finished decision");
+        result.Code.Should().Be(LineDecisionCodes.Incomplete);
+        result.FailedStep.Should().Be("signals");
+        result.CommittedLineIds.Should().BeEquivalentTo([line.Id], "the repeat names these lines");
+        Status(w, line).Should().Be(InvoiceLineStatus.Reduced, "the decision stands");
+        w.ApprovedTotal.Should().Be(60m);
+        w.H.Created.Should().ContainSingle("the Decision Record was written before the close");
         w.ClosedBy.Keys.Should().Equal(fine);
         w.Log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Warning && e.Message.Contains(failing.ToString("D"), StringComparison.Ordinal));
+    }
+
+    [Fact(DisplayName = "100 F2: a Signal that kept changing (ChangedSinceRead) is a failed close too: 'incomplete' at 'signals'")]
+    public async Task ChangedSinceRead_IsIncompleteAtSignals()
+    {
+        var w = new World(billedTotal: 100m);
+        var line = w.AddLine(100m, InvoiceLineStatus.Flagged);
+        var changing = w.AddSignal(line.Id, "EB-RATE");
+        w.CloseOutcome = id => id == changing ? SignalAutomatedCloseOutcome.ChangedSinceRead : null;
+
+        var result = await w.Service().DecideAsync(Command(w, LineDecisionAction.Accept, [new(line.Id)]), CancellationToken.None);
+
+        result.Status.Should().Be(LineDecisionStatus.Incomplete);
+        result.FailedStep.Should().Be("signals");
+        w.H.Created.Should().ContainSingle();
+        w.ClosedBy.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "100 F2: a clean close is still Applied: every Signal closed, the same response, no warning or error")]
+    public async Task CleanClose_IsStillApplied()
+    {
+        var w = new World(billedTotal: 100m);
+        var line = w.AddLine(100m, InvoiceLineStatus.Flagged);
+        var a = w.AddSignal(line.Id, "EB-RATE");
+        var b = w.AddSignal(line.Id, "EB-TASK");
+
+        var result = await w.Service().DecideAsync(Command(w, LineDecisionAction.Reduce, [new(line.Id, 60m)], Reason), CancellationToken.None);
+
+        result.Status.Should().Be(LineDecisionStatus.Applied);
+        result.Code.Should().Be("ok");
+        result.FailedStep.Should().BeNull();
+        result.Lines!.Single().Status.Should().Be(nameof(InvoiceLineStatus.Reduced));
+        w.ClosedBy.Keys.Should().BeEquivalentTo([a, b]);
+        w.Log.Entries.Should().NotContain(e => e.Level >= LogLevel.Warning);
+    }
+
+    [Fact(DisplayName = "100 F2: a Signal resolved otherwise (LeftAsIs) is not a failed close: the decision is Applied")]
+    public async Task LeftAsIs_IsNotAFailedClose_AndTheDecisionIsApplied()
+    {
+        var w = new World(billedTotal: 100m);
+        var line = w.AddLine(100m, InvoiceLineStatus.Flagged);
+        var resolvedElsewhere = w.AddSignal(line.Id, "EB-RATE");
+        w.CloseOutcome = id => id == resolvedElsewhere ? SignalAutomatedCloseOutcome.LeftAsIs : null;
+
+        var result = await w.Service().DecideAsync(Command(w, LineDecisionAction.Accept, [new(line.Id)]), CancellationToken.None);
+
+        result.Status.Should().Be(LineDecisionStatus.Applied);
+        w.Log.Entries.Should().NotContain(e => e.Level >= LogLevel.Warning);
+    }
+
+    [Fact(DisplayName = "100 F2: a Decision Record failure is still reported as step 'record' (it comes before a signals failure)")]
+    public async Task RecordFailure_StillWins_OverASignalsFailure()
+    {
+        var w = new World(billedTotal: 200m);
+        var a = w.AddLine(100m, InvoiceLineStatus.Flagged);
+        var b = w.AddLine(100m, InvoiceLineStatus.Flagged);
+        var onA = w.AddSignal(a.Id);
+        w.CloseFault = id => id == onA ? new TimeoutException("dataverse") : null;
+        // The second line's record fails: its identity lookup throws on the second resolution only.
+        var resolutions = 0;
+        w.Identity.Setup(i => i.ResolveAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Returns((Guid user, CancellationToken _) => ++resolutions > 1
+                ? Task.FromException<PersonIdentity>(new InvalidOperationException("identity down"))
+                : Task.FromResult(new PersonIdentity(user, ContactId: Guid.NewGuid())));
+
+        var result = await w.Service().DecideAsync(
+            Command(w, LineDecisionAction.Accept, [new(a.Id), new(b.Id)], bulk: true), CancellationToken.None);
+
+        result.Status.Should().Be(LineDecisionStatus.Incomplete);
+        result.FailedStep.Should().Be("record");
+        w.Closes.Should().ContainSingle(c => c.SignalId == onA, "line a's close was attempted and failed, so the signals count was above zero when line b's record failed");
+        w.H.Created.Should().ContainSingle("line b's record failed");
+    }
+
+    [Fact(DisplayName = "100 F2: a multi-line decision with one failed close still records and closes every other line, then answers 'incomplete' at 'signals' naming all committed lines")]
+    public async Task MultiLine_OneFailedClose_RecordsEveryLine_AndIsIncompleteAtSignals()
+    {
+        var w = new World(billedTotal: 200m);
+        var a = w.AddLine(100m, InvoiceLineStatus.Flagged);
+        var b = w.AddLine(100m, InvoiceLineStatus.Flagged);
+        var onA = w.AddSignal(a.Id);
+        var onB = w.AddSignal(b.Id);
+        w.CloseFault = id => id == onA ? new TimeoutException("dataverse") : null;
+
+        var result = await w.Service().DecideAsync(
+            Command(w, LineDecisionAction.Disallow, [new(a.Id), new(b.Id)], Reason, bulk: true), CancellationToken.None);
+
+        result.Status.Should().Be(LineDecisionStatus.Incomplete);
+        result.FailedStep.Should().Be("signals");
+        result.CommittedLineIds.Should().BeEquivalentTo([a.Id, b.Id]);
+        w.H.Created.Should().HaveCount(2, "a failed close on one line never stops the other line's record");
+        w.ClosedBy.Keys.Should().Equal([onB], "the other line's Signal is still closed");
     }
 
     [Fact(DisplayName = "100: a Signal that no longer exists has nothing to close: no warning, and the decision stands")]
@@ -1206,8 +1310,8 @@ public sealed class InvoiceLineDecisionServiceTests
         w.ClosedBy.Should().NotContainKey(raisedLater, "a Signal raised after the first attempt stays open");
     }
 
-    [Fact(DisplayName = "100: a retry after the close failed finishes it over the stored set, with the stored read time")]
-    public async Task Retry_AfterAFailedClose_FinishesIt()
+    [Fact(DisplayName = "100 F2: the repeat of a decision that was incomplete at 'signals' completes the close over the stored set, with the stored read time, and writes NO second Decision Record")]
+    public async Task Repeat_AfterAFailedClose_CompletesIt_WithNoSecondDecisionRecord()
     {
         var w = new World(billedTotal: 100m);
         var line = w.AddLine(100m, InvoiceLineStatus.Flagged);
@@ -1215,15 +1319,54 @@ public sealed class InvoiceLineDecisionServiceTests
         w.CloseFault = _ => new TimeoutException("dataverse");
         var command = Command(w, LineDecisionAction.Accept, [new(line.Id)]);
         var service = w.Service();
-        (await service.DecideAsync(command, CancellationToken.None)).Status.Should().Be(LineDecisionStatus.Applied);
+        var first = await service.DecideAsync(command, CancellationToken.None);
+        first.Status.Should().Be(LineDecisionStatus.Incomplete);
+        first.FailedStep.Should().Be("signals");
         w.ClosedBy.Should().BeEmpty();
+        w.H.Created.Should().ContainSingle("the one Decision Record, written before the close");
         w.CloseFault = _ => null;
 
-        (await service.DecideAsync(command, CancellationToken.None)).Status.Should().Be(LineDecisionStatus.Applied);
+        var repeat = await service.DecideAsync(command, CancellationToken.None);
 
+        repeat.Status.Should().Be(LineDecisionStatus.Applied);
+        repeat.Lines!.Single().AlreadyRecorded.Should().BeTrue("the repeat found the record, it did not write another");
+        w.H.Created.Should().ContainSingle("no second Decision Record");
         w.ClosedBy.Should().ContainKey(signal);
         w.Closes[1].SetReadAtUtc.Should().Be(w.Closes[0].SetReadAtUtc, "the stored read time, not the retry's");
         w.Closes[1].RecordId.Should().Be(w.Closes[0].RecordId);
+        w.ClosedBy[signal].Should().Be(w.Closes[0].RecordId, "closed by the one record");
+
+        var third = await service.DecideAsync(command, CancellationToken.None);
+        third.Status.Should().Be(LineDecisionStatus.Applied);
+        w.H.Created.Should().ContainSingle();
+        w.ClosedBy.Should().ContainSingle("AlreadyClosedByThisRecord: nothing is closed twice");
+    }
+
+    [Fact(DisplayName = "100 F2: the repeat of a multi-line decision incomplete at 'signals' (the committed ids, the same decision id) closes the missing Signal, one record per line, none duplicated")]
+    public async Task Repeat_OfAMultiLineDecision_CompletesTheMissingClose_WithOneRecordPerLine()
+    {
+        var w = new World(billedTotal: 200m);
+        var a = w.AddLine(100m, InvoiceLineStatus.Flagged);
+        var b = w.AddLine(100m, InvoiceLineStatus.Flagged);
+        var onA = w.AddSignal(a.Id);
+        var onB = w.AddSignal(b.Id);
+        w.CloseFault = id => id == onA ? new TimeoutException("dataverse") : null;
+        var decisionId = Guid.NewGuid();
+        var service = w.Service();
+        var first = await service.DecideAsync(Command(w, LineDecisionAction.Disallow, [new(a.Id), new(b.Id)], Reason, decisionId, bulk: true), CancellationToken.None);
+        first.Status.Should().Be(LineDecisionStatus.Incomplete);
+        w.H.Created.Should().HaveCount(2);
+        w.CloseFault = _ => null;
+
+        var repeat = await service.DecideAsync(
+            Command(w, LineDecisionAction.Disallow, first.CommittedLineIds!.Select(id => new LineDecisionLine(id)), Reason, decisionId, bulk: true), CancellationToken.None);
+
+        repeat.Status.Should().Be(LineDecisionStatus.Applied);
+        repeat.Lines!.Should().OnlyContain(l => l.AlreadyRecorded);
+        w.H.Created.Should().HaveCount(2, "one record per line, written once");
+        w.ClosedBy.Keys.Should().BeEquivalentTo([onA, onB]);
+        w.Closes.Count(c => c.SignalId == onB).Should().Be(2, "onB: closed by the first attempt, then AlreadyClosedByThisRecord on the repeat; never closed twice");
+        w.ClosedBy.Should().HaveCount(2);
     }
 
     [Fact(DisplayName = "100: when the open Signals cannot be read the decision is 'unavailable' and nothing is written")]

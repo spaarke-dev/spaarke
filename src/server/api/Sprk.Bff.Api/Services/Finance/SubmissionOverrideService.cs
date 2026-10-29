@@ -218,8 +218,11 @@ public sealed record BlockedDecisionResult
 /// submission's life), else 409 <see cref="BlockedSubmissionErrors.FindingsUnreadable"/>. When the set is not empty the caller must first
 /// hold AppendTo on the invoice's core record and Write on every Signal's subject, a line's asked on its parent invoice (ontology-r1
 /// 2026-10-20, D-90), asked as the caller; otherwise 403 <see cref="BlockedSubmissionErrors.NotAuthorized"/> and nothing is written. A
-/// failed close only warns; a repeat of a decided submission re-runs the close over the WRITER-CREATED record's set with that record and
-/// its decider (never the stamp).</para>
+/// close that fails (a timeout, or a Signal that kept changing) warns and the rest are still attempted, and the decision stands (the
+/// state change and the notification still happen), but it is then answered 503 <see cref="BlockedSubmissionErrors.Unavailable"/>, never
+/// Decided or AlreadyDecided (2026-10-29, ontology-r1 review of #1911, F2: nothing else closes that Signal later). A repeat of a decided
+/// submission re-runs the close over the WRITER-CREATED record's set with that record and its decider (never the stamp), writes no second
+/// record, and answers AlreadyDecided only once every close is done, else 503 again.</para>
 /// <para><b>Return</b> (no privilege, D-73; the route requires the caller's rights on the submission). It records <c>return-to-firm</c>
 /// under the invoice, moves the invoice In Review to Returned to Firm through the lifecycle service (FR-06, D-43), and sets the submission's
 /// code to <see cref="SubmissionReasonCodes.Returned"/> with the decision in <c>return</c>.</para>
@@ -570,10 +573,12 @@ public sealed class SubmissionOverrideService
 
         if (Refusal(verb, Classify(row), submissionId, row.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.SubmissionInvoice)?.Id) is { } early)
         {
-            if (early.Kind == BlockedDecisionKind.AlreadyDecided)
+            if (early.Kind == BlockedDecisionKind.AlreadyDecided
+                && await RecloseAsync(verb, row, token, ct).ConfigureAwait(false) > 0)
             {
-                // A repeat finishes a close that only warned: the stored set, the stamped record (the response is unchanged).
-                await RecloseAsync(verb, row, token, ct).ConfigureAwait(false);
+                // A repeat finishes a close that failed (the stored set, the writer-created record). While one still fails it is never
+                // answered AlreadyDecided: 503, and the next repeat tries again (F2).
+                return Unavailable(submissionId, early.InvoiceId);
             }
 
             return early;
@@ -658,9 +663,10 @@ public sealed class SubmissionOverrideService
 
         if (Refusal(verb, Classify(row), submissionId, invoiceId) is { } refused)
         {
-            if (refused.Kind == BlockedDecisionKind.AlreadyDecided)
+            if (refused.Kind == BlockedDecisionKind.AlreadyDecided
+                && await RecloseAsync(verb, row, token, ct).ConfigureAwait(false) > 0)
             {
-                await RecloseAsync(verb, row, token, ct).ConfigureAwait(false);
+                return Unavailable(submissionId, invoiceId);
             }
 
             return refused;
@@ -830,8 +836,10 @@ public sealed class SubmissionOverrideService
                 "The decision could not be recorded right now. Nothing was changed. Try again.", invoiceId);
         }
 
-        // ── The stored set, closed as Acted by the record naming the decider (a retry: AlreadyClosedByThisRecord). A failure only warns. ──
-        await HumanDecisionSignalClose.CloseSetAsync(_closeActed, signalSet, recorded.RecordId, decider, _logger, ct).ConfigureAwait(false);
+        // ── The stored set, closed as Acted by the record naming the decider (a retry: AlreadyClosedByThisRecord). Every Signal is still
+        //    attempted and the state change below still runs (the decision stands, as for a line decision), but a close that failed is
+        //    counted: nothing else closes that Signal later, so the answer is 503 unavailable, never Decided (F2). ──
+        var signalsNotClosed = await HumanDecisionSignalClose.CloseSetAsync(_closeActed, signalSet, recorded.RecordId, decider, _logger, ct).ConfigureAwait(false);
 
         // ── Then change state. A failure from here on leaves a record a retry finds and finishes. ──
         if (verb == Verb.Return && invoiceStatus == InvoiceLifecycleStatus.InReview)
@@ -887,7 +895,12 @@ public sealed class SubmissionOverrideService
         }
         catch (System.Data.DBConcurrencyException)
         {
-            return await AfterConflictAsync(verb, submissionId, invoiceId, recorded.RecordId, ct).ConfigureAwait(false);
+            var afterConflict = await AfterConflictAsync(verb, submissionId, invoiceId, recorded.RecordId, ct).ConfigureAwait(false);
+
+            // A concurrent run finished the state change, but this run's closes failed: the repeat (AlreadyDecided) re-runs them.
+            return signalsNotClosed > 0 && afterConflict.Kind == BlockedDecisionKind.AlreadyDecided
+                ? Unavailable(submissionId, invoiceId)
+                : afterConflict;
         }
         catch (Exception ex) when (!IsCallerCancellation(ex, ct))
         {
@@ -895,10 +908,20 @@ public sealed class SubmissionOverrideService
             return Unavailable(submissionId, invoiceId);
         }
 
-        _logger.LogInformation("Submission {SubmissionId} {Outcome} by {Decider}; invoice {InvoiceId}, Decision Record {RecordId}, already recorded {AlreadyRecorded}",
-            submissionId, verb == Verb.Override ? "overridden" : "returned", decider, invoiceId, recorded.RecordId, recorded.AlreadyRecorded);
+        _logger.LogInformation("Submission {SubmissionId} {Outcome} by {Decider}; invoice {InvoiceId}, Decision Record {RecordId}, already recorded {AlreadyRecorded}, Signals not closed {SignalsNotClosed}",
+            submissionId, verb == Verb.Override ? "overridden" : "returned", decider, invoiceId, recorded.RecordId, recorded.AlreadyRecorded, signalsNotClosed);
 
         await NotifyDecidedAsync(verb, submissionId, invoiceId, ct).ConfigureAwait(false);
+
+        if (signalsNotClosed > 0)
+        {
+            // The decision stands (the record, the state change and the notification are done), but a Signal is still Open with no Decision
+            // Record link. The repeat finds the decided submission (AlreadyDecided) and re-runs the close over the writer-created record's set
+            // (RecloseAsync): no second record, and the answer is Decided / AlreadyDecided only once every close is done.
+            _logger.LogWarning("Submission {SubmissionId}: {Count} Signal close(s) of Decision Record {RecordId} did not finish; answering unavailable so the decision is repeated to complete them",
+                submissionId, signalsNotClosed, recorded.RecordId);
+            return Unavailable(submissionId, invoiceId);
+        }
 
         return new BlockedDecisionResult
         {
@@ -1160,19 +1183,23 @@ public sealed class SubmissionOverrideService
 
     /// <summary>
     /// A repeat of a decided submission: re-runs the close over the set the WRITER stored with that decision's Decision Record, with that
-    /// record's id and its <c>sprk_confirmedby</c> decider (a close that only warned is finished). Nothing is taken from the findings column
+    /// record's id and its <c>sprk_confirmedby</c> decider (a close that failed is finished). Nothing is taken from the findings column
     /// (F1-1: user-writable, so neither the stamp nor the stored set is trusted); with no writer-created record nothing is closed. The set's
     /// subjects are read from the Signal rows and must be the invoice or its lines, then the caller's rights are asked, as for the decision;
-    /// refused, unanswerable or untrusted, and nothing is written. Never changes the repeat's answer; faults only warn.
+    /// refused or untrusted, and nothing is written. Returns how many closes did NOT finish, and the caller answers 503 unavailable for a
+    /// count above zero (F2), AlreadyDecided otherwise. Counted: a close that failed, and a TRANSIENT fault while reading the writer-created
+    /// record, the stored Signals, the invoice or the entity sets (1: the Signals are still Open, so the repeat is not "done"). Not counted
+    /// (PERMANENT, a known limit: only warn, AlreadyDecided): no writer-created record, a record naming no decider, untrusted subjects, a
+    /// writer that refuses to read the set, an invoice that is gone, and a caller without the rights.
     /// </summary>
-    private async Task RecloseAsync(Verb verb, Entity row, string? token, CancellationToken ct)
+    private async Task<int> RecloseAsync(Verb verb, Entity row, string? token, CancellationToken ct)
     {
         var submissionId = row.Id;
         if (row.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.SubmissionInvoice)?.Id is not { } invoiceId || invoiceId == Guid.Empty
             || invoiceId != InvoiceSubmissionPersister.InvoiceIdFor(submissionId))
         {
             // F1-a: only the invoice the submission created (sprk_invoice is user-writable); any other link closes nothing.
-            return;
+            return 0;
         }
 
         var decisionId = verb == Verb.Override ? OverrideDecisionIdFor(submissionId) : ReturnDecisionIdFor(submissionId);
@@ -1184,12 +1211,12 @@ public sealed class SubmissionOverrideService
             if (await _findStored(verb == Verb.Override ? OverrideActionCode : ReturnActionCode, invoiceId, decisionId, ct).ConfigureAwait(false) is not { } recorded)
             {
                 _logger.LogWarning("Submission {SubmissionId}: the repeat found no Decision Record written for its {Verb}; nothing is re-closed", submissionId, verb);
-                return;
+                return 0;
             }
 
             if (recorded.Signals.Count == 0)
             {
-                return;
+                return 0;
             }
 
             if (recorded.ConfirmedByUserId is not { } by)
@@ -1197,7 +1224,7 @@ public sealed class SubmissionOverrideService
                 // K3: a human decision's record always names its decider, so this one cannot be re-closed in anyone's name.
                 _logger.LogWarning("Submission {SubmissionId}: Decision Record {RecordId} of its {Verb} names no decider; its {Count} Signals are not re-closed",
                     submissionId, recorded.RecordId, verb, recorded.Signals.Count);
-                return;
+                return 0;
             }
 
             (set, recordId, decider) = (
@@ -1209,20 +1236,38 @@ public sealed class SubmissionOverrideService
 
             var check = await StoredSignalSetCheck.SubjectsAsync(_entities, invoiceId, set, ct).ConfigureAwait(false);
             if (!check.Trusted
-                || await ReadInvoiceAsync(invoiceId, InvoiceDecisionColumns, ct).ConfigureAwait(false) is not { } invoice
-                || await AuthorizeCloseAsync(submissionId, invoiceId, invoice, set, check.Subjects, token, ct).ConfigureAwait(false) is not null)
+                || await ReadInvoiceAsync(invoiceId, InvoiceDecisionColumns, ct).ConfigureAwait(false) is not { } invoice)
+            {
+                // Permanent: untrusted subjects, or the invoice is gone. A repeat does not change either; the decision's answer stands.
+                _logger.LogWarning("Submission {SubmissionId}: the repeat did not re-close the stored Signals (their subjects, the caller's rights or the invoice could not be shown)", submissionId);
+                return 0;
+            }
+
+            if (await AuthorizeCloseAsync(submissionId, invoiceId, invoice, set, check.Subjects, token, ct).ConfigureAwait(false) is { } denied)
             {
                 _logger.LogWarning("Submission {SubmissionId}: the repeat did not re-close the stored Signals (their subjects, the caller's rights or the invoice could not be shown)", submissionId);
-                return;
+
+                // A refusal is permanent (no rights, no core record): AlreadyDecided as before. A 503 is the entity-set lookup failing, which
+                // is a read fault: the Signals are still Open, so the repeat is not answered as done (F2).
+                return denied.StatusCode == StatusCodes.Status503ServiceUnavailable ? 1 : 0;
             }
+        }
+        catch (DecisionRecordRefusedException ex) when (RecordRefusal(submissionId, invoiceId, ex).StatusCode != StatusCodes.Status503ServiceUnavailable)
+        {
+            // Permanent: the writer refused to read the stored set (more than one record under the key, or a set that cannot be read). A repeat
+            // does not change it, so the repeat's answer stands. A lookup that merely faulted (503 in RecordRefusal) falls to the next catch.
+            _logger.LogWarning("Submission {SubmissionId}: the repeat could not use the stored Signals ({Reason}); nothing is re-closed", submissionId, ex.Reason);
+            return 0;
         }
         catch (Exception ex) when (!IsCallerCancellation(ex, ct))
         {
-            _logger.LogWarning("Submission {SubmissionId}: the repeat could not check the stored Signals ({ExceptionType})", submissionId, ex.GetType().Name);
-            return;
+            // A fault while reading the writer-created record, the stored Signals or the invoice is transient, and the Signals are still
+            // Open: never an "already decided" answer (F2). Counted as one close not finished; the next repeat reads again.
+            _logger.LogWarning("Submission {SubmissionId}: the repeat could not read the stored Signals ({ExceptionType}); answering unavailable so it is repeated", submissionId, ex.GetType().Name);
+            return 1;
         }
 
-        await HumanDecisionSignalClose.CloseSetAsync(_closeActed, set, recordId, decider, _logger, ct).ConfigureAwait(false);
+        return await HumanDecisionSignalClose.CloseSetAsync(_closeActed, set, recordId, decider, _logger, ct).ConfigureAwait(false);
     }
 
     /// <summary>The invoice's core record (the line decisions' rule, <see cref="InvoiceLineDecisionService.CoreOf"/>).</summary>

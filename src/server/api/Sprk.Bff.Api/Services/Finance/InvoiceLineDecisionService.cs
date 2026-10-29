@@ -146,7 +146,10 @@ public sealed record LineDecisionResult(
 /// for each decided line that has one, asked ON THE PARENT INVOICE (ontology-r1 2026-10-20: line subject → Write on the parent invoice,
 /// D-90), as the caller (<see cref="HumanDecisionSignalClose.AuthorizeAsync"/>, the commit route's rule with that one mapping);
 /// otherwise 403 and nothing is written. After each line's record, its Signals are closed as Acted by the app-identity writer naming the
-/// decider; a failed close only warns.</para>
+/// decider. A close that fails (a timeout, or a Signal that kept changing) warns and the rest are still attempted, but the decision then
+/// answers 503 <c>ebilling.decision.incomplete</c> with <c>failedStep</c> "signals" instead of Applied (2026-10-29, ontology-r1 review of
+/// #1911, F2): nothing else closes that Signal later. The repeat of the same decision completes the remaining closes over the stored set
+/// and writes no second record.</para>
 /// <para><b>Component justification (CLAUDE.md section 11).</b> Existing: <see cref="InvoiceTotalsService"/> (totals only),
 /// <see cref="BillingDecisionRecorder"/> (the record only), <see cref="InvoiceSubmissionPersister"/> (creates lines); nothing changes a line's decision.
 /// Extension: those owners stay single-purpose (ADR-002 one owner per invariant); this service orchestrates them in the one order that keeps I-1 and
@@ -159,6 +162,10 @@ public sealed class InvoiceLineDecisionService
     public const string DeciderRole = "invoice-reviewer";
 
     internal const string LockKeyPrefix = "ebilling-line-decision:";
+
+    /// <summary>The <see cref="LineDecisionResult.FailedStep"/> of a decision whose Decision Records were written but whose Signal close did
+    /// not finish for every Signal; the repeat of the same decision completes it.</summary>
+    internal const string SignalsStep = "signals";
     internal const string CorrectionEntity = "sprk_invoicecorrection";
     internal const string SystemUserEntity = "systemuser";
     internal const string AcceptedInBulkLabel = "Accepted in bulk";
@@ -709,6 +716,7 @@ public sealed class InvoiceLineDecisionService
         // ── 4. Decision Records: one per line (D-75), idempotent by decision id. Every line is attempted. ──
         var decided = new List<DecidedLineDto>(proposals.Count);
         var failedStep = default(string);
+        var signalsNotClosed = 0;
         for (var i = 0; i < proposals.Count; i++)
         {
             try
@@ -717,8 +725,9 @@ public sealed class InvoiceLineDecisionService
                 decided.Add(new DecidedLineDto(
                     proposals[i].Line.Id, proposals[i].Status.ToString(), proposals[i].Approved, proposals[i].Reason, decidedOn, recorded.AlreadyRecorded));
 
-                // ── 5. The line's Signals, closed as Acted by its record (a retry: AlreadyClosedByThisRecord). A failure only warns. ──
-                await HumanDecisionSignalClose.CloseSetAsync(
+                // ── 5. The line's Signals, closed as Acted by its record (a retry: AlreadyClosedByThisRecord). Every Signal and every line is
+                //    still attempted, but a close that failed is counted: nothing else closes that Signal later, so the answer is 'incomplete'. ──
+                signalsNotClosed += await HumanDecisionSignalClose.CloseSetAsync(
                     _closeActed, signalSets.ByLine[proposals[i].Line.Id], recorded.RecordId, command.DeciderSystemUserId, _logger, ct).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
@@ -729,8 +738,15 @@ public sealed class InvoiceLineDecisionService
             }
         }
 
-        return failedStep is not null
-            ? Incomplete(command, committed, "record", failedStep)
+        if (failedStep is not null)
+        {
+            return Incomplete(command, committed, "record", failedStep);
+        }
+
+        // A Signal left Open with no Decision Record link is not a finished decision (ontology-r1 review of #1911, F2): the repeat re-runs the
+        // close over the stored set, so it completes the remaining closes and writes no second record.
+        return signalsNotClosed > 0
+            ? Incomplete(command, committed, SignalsStep, $"signals-not-closed:{signalsNotClosed}")
             : new LineDecisionResult(LineDecisionStatus.Applied, "ok", Lines: decided, Totals: TotalsOf(invoice, calculation));
     }
 

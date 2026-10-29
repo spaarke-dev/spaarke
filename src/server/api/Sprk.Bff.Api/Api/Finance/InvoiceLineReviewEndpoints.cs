@@ -25,7 +25,9 @@ namespace Sprk.Bff.Api.Api.Finance;
 /// <para><b>Status codes.</b> 200 applied; 400 invalid (<c>errorCode</c> says which rule); 401; 403; 404 uniform (invoice or line absent or
 /// unreadable); 409 (not In Review, line Pending or not decidable, totals refused, another decision in progress, a line changed); 503
 /// <c>ebilling.disabled</c> or a transient failure; 503 <c>ebilling.decision.incomplete</c> when the lines were written but a later step did not
-/// finish (the body names the committed lines to repeat the decision with).</para>
+/// finish (the body names the committed lines to repeat the decision with). Its <c>failedStep</c> is <c>totals</c>, <c>corrections</c>,
+/// <c>record</c>, or <c>signals</c> (2026-10-29: a Signal close failed, so a Signal is still Open; the decision stands and the repeat
+/// completes the close without a second Decision Record).</para>
 /// </remarks>
 public static class InvoiceLineReviewEndpoints
 {

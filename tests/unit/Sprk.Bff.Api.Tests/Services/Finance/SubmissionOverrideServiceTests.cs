@@ -78,13 +78,22 @@ public class SubmissionOverrideServiceTests
         /// <summary>Called inside the conditional submission write, before the row version is compared (a concurrent writer).</summary>
         public Action? OnUpdate { get; set; }
 
+        /// <summary>Called when the invoice's decision lock is taken: the moment between the first read and the re-read under the lock.</summary>
+        public Action? OnLock { get; set; }
+
         // ── D-122 / FR-51: the invoice's lines and Signals, the app-identity close ──
         public List<Guid> LineIds { get; } = [];
         public List<Entity> Signals { get; } = [];
         public List<CloseCall> Closes { get; } = [];
         public Dictionary<Guid, Guid> ClosedBy { get; } = new();
         public Func<Guid, Exception?> CloseFault { get; set; } = _ => null;
+
+        /// <summary>A forced non-throwing outcome of the close for a Signal (ChangedSinceRead, LeftAsIs), as the writer returns them.</summary>
+        public Func<Guid, SignalAutomatedCloseOutcome?> CloseOutcome { get; set; } = _ => null;
         public Exception? SignalReadFault { get; set; }
+
+        /// <summary>Thrown by the lookup of a decision's writer-created Decision Record (the stored-set read), as the writer throws it.</summary>
+        public Exception? FindFault { get; set; }
         public List<string> SignalQueries { get; } = [];
         public int FindCalls { get; set; }
 
@@ -223,6 +232,7 @@ public class SubmissionOverrideServiceTests
                 {
                     Order.Add("lock");
                     LockKeys.Add(key);
+                    OnLock?.Invoke();
                     if (LockFault is { } fault)
                     {
                         return Task.FromException<bool>(fault);
@@ -283,7 +293,9 @@ public class SubmissionOverrideServiceTests
                 (code, invoice, decisionId, ct) =>
                 {
                     FindCalls++;
-                    return Recorder.FindStoredResolvedSetAsync(code, invoice, decisionId, ct);
+                    return FindFault is { } fault
+                        ? Task.FromException<DecisionRecordWriter.BillingStoredResolvedSet?>(fault)
+                        : Recorder.FindStoredResolvedSetAsync(code, invoice, decisionId, ct);
                 },
                 Clock);
 
@@ -351,6 +363,11 @@ public class SubmissionOverrideServiceTests
             if (CloseFault(signalId) is { } fault)
             {
                 return Task.FromException<SignalAutomatedCloseOutcome>(fault);
+            }
+
+            if (CloseOutcome(signalId) is { } forced)
+            {
+                return Task.FromResult(forced);
             }
 
             if (ClosedBy.TryGetValue(signalId, out var by))
@@ -2157,41 +2174,316 @@ public class SubmissionOverrideServiceTests
         w.AssertNothingWritten();
     }
 
-    [Fact]
-    public async Task Decision_WhenAClosesFails_OnlyWarns_TheDecisionStands_AndTheOtherSignalsAreClosed()
+    /// <summary>The Decision Record every close of the decision carried (a failed decision answers no record id, so the closes name it).</summary>
+    private static Guid RecordIdOf(World w) => w.Closes.Select(c => c.RecordId).Distinct().Single();
+
+    /// <summary>F2: a failed close is neither Decided nor AlreadyDecided: the retryable 503 <see cref="BlockedSubmissionErrors.Unavailable"/>.</summary>
+    private static void ShouldBeUnavailable(BlockedDecisionResult result)
+    {
+        result.Kind.Should().Be(BlockedDecisionKind.Refused, "a failed close is never reported as Decided or AlreadyDecided");
+        result.StatusCode.Should().Be(503);
+        result.ErrorCode.Should().Be(BlockedSubmissionErrors.Unavailable);
+        result.Outcome.Should().BeNull();
+    }
+
+    [Theory(DisplayName = "105 F2: a close that fails (timeout) answers 503 unavailable, not Decided: the decision stands (record, state, notification), the other Signals are closed, the failure is warned")]
+    [InlineData("override")]
+    [InlineData("return")]
+    public async Task Decision_WhenAClosesFails_IsUnavailable_NotDecided_TheDecisionStands_AndTheOtherSignalsAreClosed(string verb)
     {
         var (w, _, onInvoice, onLine, acknowledged, _, _) = await SignalWorldAsync();
         w.CloseFault = id => id == onInvoice ? new TimeoutException("dataverse") : null;
 
-        var result = await w.OverrideAsync();
+        var result = await Decide(w, verb);
 
-        result.Kind.Should().Be(BlockedDecisionKind.Decided, "a failed close never fails the decision");
-        result.Outcome.Should().Be("Overridden");
-        w.Status.Should().Be(InvoiceSubmissionStatus.Accepted);
+        ShouldBeUnavailable(result);
+        w.RecordCreates.Should().Be(1, "the Decision Record was written before the close");
+        w.Code.Should().Be(verb == "override" ? SubmissionReasonCodes.Overridden : SubmissionReasonCodes.Returned, "the decision stands");
+        w.Notified.Should().ContainSingle("the decision committed, so it is notified once");
         w.ClosedBy.Keys.Should().BeEquivalentTo([onLine, acknowledged]);
-        w.Log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Warning && e.Message.Contains(onInvoice.ToString("D"), StringComparison.Ordinal));
+        w.Log.Entries.Should().Contain(e => e.Level == LogLevel.Warning && e.Message.Contains(onInvoice.ToString("D"), StringComparison.Ordinal));
+        w.Order.Should().Equal(verb == "override"
+            ? ["lock", "store", "record", "close", "close", "close", "update", "notify", "unlock"]
+            : ["lock", "store", "record", "close", "close", "close", "transition", "update", "notify", "unlock"],
+            "the order is unchanged: record, close, state change; only the answer differs");
     }
 
-    [Fact]
-    public async Task Decision_ARepeatAfterAFailedClose_ReclosesTheStoredSet_WithTheStampedRecordAndDecider_AndNothingNew()
+    [Theory(DisplayName = "105 F2: a Signal that kept changing (ChangedSinceRead) is a failed close too: 503 unavailable")]
+    [InlineData("override")]
+    [InlineData("return")]
+    public async Task Decision_WhenASignalKeepsChanging_IsUnavailable(string verb)
+    {
+        var (w, _, onInvoice, onLine, acknowledged, _, _) = await SignalWorldAsync();
+        w.CloseOutcome = id => id == onInvoice ? SignalAutomatedCloseOutcome.ChangedSinceRead : null;
+
+        var result = await Decide(w, verb);
+
+        ShouldBeUnavailable(result);
+        w.RecordCreates.Should().Be(1);
+        w.ClosedBy.Keys.Should().BeEquivalentTo([onLine, acknowledged]);
+    }
+
+    [Fact(DisplayName = "105 F2: a Signal resolved otherwise (LeftAsIs) is not a failed close: the decision is Decided")]
+    public async Task Decision_WhenASignalWasResolvedOtherwise_LeftAsIs_IsStillDecided()
+    {
+        var (w, _, onInvoice, _, _, _, _) = await SignalWorldAsync();
+        w.CloseOutcome = id => id == onInvoice ? SignalAutomatedCloseOutcome.LeftAsIs : null;
+
+        var result = await w.OverrideAsync();
+
+        result.Kind.Should().Be(BlockedDecisionKind.Decided);
+        w.Log.Entries.Should().NotContain(e => e.Level >= LogLevel.Warning);
+    }
+
+    [Theory(DisplayName = "105 F2: the repeat of a decision whose close failed completes the close with the writer-created record and its decider, answers AlreadyDecided, and writes NO second Decision Record")]
+    [InlineData("override")]
+    [InlineData("return")]
+    public async Task Decision_ARepeatAfterAFailedClose_ReclosesTheStoredSet_WithTheRecordAndDecider_AndNothingNew(string verb)
     {
         var (w, _, onInvoice, onLine, _, _, _) = await SignalWorldAsync();
         w.CloseFault = id => id == onInvoice ? new TimeoutException("dataverse") : null;
-        var first = await w.OverrideAsync();
+        ShouldBeUnavailable(await Decide(w, verb));
+        var recordId = RecordIdOf(w);
         w.CloseFault = _ => null;
         var raisedLater = w.AddSignal("sprk_invoice", World.InvoiceId, "EB-LATE");
         var closedBefore = w.ClosedBy.Count;
 
-        var repeat = await w.OverrideAsync();
+        var repeat = await Decide(w, verb);
 
-        repeat.Kind.Should().Be(BlockedDecisionKind.AlreadyDecided, "the response to a repeat is unchanged");
-        w.ClosedBy[onInvoice].Should().Be(first.RecordId!.Value, "the repeat finished the close with the stamped record");
+        repeat.Kind.Should().Be(BlockedDecisionKind.AlreadyDecided, "AlreadyDecided only once every close is done");
+        w.ClosedBy[onInvoice].Should().Be(recordId, "the repeat finished the close with the writer-created record");
         w.Closes.Last(c => c.SignalId == onInvoice).DecidedBy.Should().Be(World.Caller);
         w.Closes.Last(c => c.SignalId == onInvoice).SetReadAtUtc.Should().Be(FirstReadAt, "the stored read time, not now");
         w.ClosedBy.Should().HaveCount(closedBefore + 1, "only the Signal the first attempt failed to close; the others were AlreadyClosedByThisRecord");
         w.ClosedBy.Should().NotContainKey(raisedLater, "a Signal raised after the set was read stays open");
-        w.ClosedBy[onLine].Should().Be(first.RecordId!.Value);
+        w.ClosedBy[onLine].Should().Be(recordId);
+        w.RecordCreates.Should().Be(1, "exactly one Decision Record");
+        w.Notified.Should().ContainSingle("the repeat does not notify again");
+
+        var third = await Decide(w, verb);
+        third.Kind.Should().Be(BlockedDecisionKind.AlreadyDecided);
+        w.ClosedBy.Should().HaveCount(closedBefore + 1);
         w.RecordCreates.Should().Be(1);
+    }
+
+    [Theory(DisplayName = "105 F2: a repeat whose close still fails (timeout, or a Signal that keeps changing) is 503 unavailable, never AlreadyDecided; a later repeat completes it with one Decision Record")]
+    [InlineData("override", false)]
+    [InlineData("override", true)]
+    [InlineData("return", false)]
+    [InlineData("return", true)]
+    public async Task Repeat_WhoseCloseStillFails_IsUnavailable_AndALaterRepeatCompletesIt(string verb, bool changedSinceRead)
+    {
+        var (w, _, onInvoice, onLine, _, _, _) = await SignalWorldAsync();
+        w.CloseFault = id => id == onInvoice ? new TimeoutException("dataverse") : null;
+        ShouldBeUnavailable(await Decide(w, verb));
+        var recordId = RecordIdOf(w);
+        if (changedSinceRead)
+        {
+            w.CloseFault = _ => null;
+            w.CloseOutcome = id => id == onInvoice ? SignalAutomatedCloseOutcome.ChangedSinceRead : null;
+        }
+
+        var stillFailing = await Decide(w, verb);
+
+        ShouldBeUnavailable(stillFailing);
+        w.ClosedBy.Should().NotContainKey(onInvoice);
+        w.Closes.Count(c => c.SignalId == onInvoice).Should().Be(2, "the repeat attempted the close again");
+
+        w.CloseFault = _ => null;
+        w.CloseOutcome = _ => null;
+        var done = await Decide(w, verb);
+
+        done.Kind.Should().Be(BlockedDecisionKind.AlreadyDecided);
+        w.ClosedBy[onInvoice].Should().Be(recordId);
+        w.ClosedBy[onLine].Should().Be(recordId);
+        w.RecordCreates.Should().Be(1, "exactly one Decision Record across all attempts");
+    }
+
+    [Fact(DisplayName = "105 F2: a repeat that finds the decision finished only UNDER the lock (a concurrent run) also answers 503 unavailable while its close fails, and AlreadyDecided once it completes")]
+    public async Task Repeat_FoundDecidedUnderTheLock_WithAFailingClose_IsUnavailable_ThenAlreadyDecided()
+    {
+        var (w, _, onInvoice, _, _, _, _) = await SignalWorldAsync();
+        w.CloseFault = id => id == onInvoice ? new TimeoutException("dataverse") : null;
+        ShouldBeUnavailable(await w.OverrideAsync());
+        var recordId = RecordIdOf(w);
+
+        // The first read (before the lock) sees the submission still held; the lock is taken, and then the decided state is what the re-read sees.
+        w.SetSubmission(InvoiceSubmissionStatus.Rejected, SubmissionReasonCodes.Blocked);
+        w.OnLock = () => w.SetSubmission(InvoiceSubmissionStatus.Accepted, SubmissionReasonCodes.Overridden);
+        var underTheLock = await w.OverrideAsync();
+
+        ShouldBeUnavailable(underTheLock);
+        w.Order.Count(o => o == "lock").Should().Be(2, "the second call took the lock: its reclose is the under-the-lock site, not the early one");
+        w.Closes.Count(c => c.SignalId == onInvoice).Should().Be(2, "the reclose under the lock attempted the close again");
+
+        w.CloseFault = _ => null;
+        w.SetSubmission(InvoiceSubmissionStatus.Rejected, SubmissionReasonCodes.Blocked);
+        var done = await w.OverrideAsync();
+
+        done.Kind.Should().Be(BlockedDecisionKind.AlreadyDecided);
+        w.ClosedBy[onInvoice].Should().Be(recordId);
+        w.RecordCreates.Should().Be(1);
+    }
+
+    // ── F2 follow-up: a transient read fault on a repeat is never an "already decided" answer ──
+
+    /// <summary>Makes the repeat's reads fault, as each read can: the writer-created record's lookup (the writer's own refusal, and a raw
+    /// fault) and the stored Signals and the invoice (read by the repeat's checks).</summary>
+    private static void InjectReadFault(World w, string kind)
+    {
+        switch (kind)
+        {
+            case "lookup-refused":
+                w.FindFault = new DecisionRecordRefusedException(DecisionRecordRefusalReason.BillingRecordLookupFailed, "the lookup faulted", innerException: new TimeoutException("dataverse"));
+                break;
+            case "lookup-timeout":
+                w.FindFault = new TimeoutException("dataverse");
+                break;
+            case "signals":
+                w.SignalReadFault = new TimeoutException("dataverse");
+                break;
+            case "invoice":
+                w.InvoiceReadFault = new TimeoutException("dataverse");
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(kind));
+        }
+    }
+
+    private static void HealReadFaults(World w)
+    {
+        w.FindFault = null;
+        w.SignalReadFault = null;
+        w.InvoiceReadFault = null;
+    }
+
+    [Theory(DisplayName = "105 F2: a read fault on a repeat (the record lookup, the stored Signals, the invoice) is 503 unavailable, never AlreadyDecided; a later repeat with the reads healthy completes the closes, answers AlreadyDecided and leaves one Decision Record")]
+    [InlineData("override", "lookup-refused")]
+    [InlineData("override", "lookup-timeout")]
+    [InlineData("override", "signals")]
+    [InlineData("override", "invoice")]
+    [InlineData("return", "lookup-refused")]
+    [InlineData("return", "lookup-timeout")]
+    [InlineData("return", "signals")]
+    [InlineData("return", "invoice")]
+    public async Task Repeat_WithAReadFault_IsUnavailable_AndALaterRepeatCompletesIt(string verb, string fault)
+    {
+        var (w, _, onInvoice, onLine, _, _, _) = await SignalWorldAsync();
+        w.CloseFault = id => id == onInvoice ? new TimeoutException("dataverse") : null;
+        ShouldBeUnavailable(await Decide(w, verb));
+        var recordId = RecordIdOf(w);
+        w.CloseFault = _ => null;
+        InjectReadFault(w, fault);
+        var closes = w.Closes.Count;
+
+        var faulted = await Decide(w, verb);
+
+        ShouldBeUnavailable(faulted);
+        w.Closes.Should().HaveCount(closes, "nothing could be read, so no close was attempted and the Signal is still Open");
+        w.ClosedBy.Should().NotContainKey(onInvoice);
+
+        HealReadFaults(w);
+        var done = await Decide(w, verb);
+
+        done.Kind.Should().Be(BlockedDecisionKind.AlreadyDecided);
+        w.ClosedBy[onInvoice].Should().Be(recordId, "the healthy repeat completed the close with the writer-created record");
+        w.ClosedBy[onLine].Should().Be(recordId);
+        w.RecordCreates.Should().Be(1, "exactly one Decision Record across all attempts");
+    }
+
+    [Theory(DisplayName = "105 F2: the same read fault found only UNDER the lock (the second reclose site) is 503 unavailable, and a later repeat completes it with one Decision Record")]
+    // No "invoice" row: under the lock the decision reads the invoice itself before it classifies the submission, so that fault is
+    // 503 before the reclose is reached and would not exercise it.
+    [InlineData("override", "lookup-refused")]
+    [InlineData("override", "lookup-timeout")]
+    [InlineData("override", "signals")]
+    [InlineData("return", "lookup-refused")]
+    [InlineData("return", "lookup-timeout")]
+    [InlineData("return", "signals")]
+    public async Task Repeat_WithAReadFault_UnderTheLock_IsUnavailable_AndALaterRepeatCompletesIt(string verb, string fault)
+    {
+        var (w, _, onInvoice, onLine, _, _, _) = await SignalWorldAsync();
+        w.CloseFault = id => id == onInvoice ? new TimeoutException("dataverse") : null;
+        ShouldBeUnavailable(await Decide(w, verb));
+        var recordId = RecordIdOf(w);
+        w.CloseFault = _ => null;
+        var (decidedStatus, decidedCode) = (w.Status, w.Code);
+
+        // The first read (before the lock) sees the submission still held; the decided state is what the re-read under the lock sees.
+        w.SetSubmission(InvoiceSubmissionStatus.Rejected, SubmissionReasonCodes.Blocked);
+        w.OnLock = () => w.SetSubmission(decidedStatus, decidedCode);
+        InjectReadFault(w, fault);
+        var locksBefore = w.Order.Count(o => o == "lock");
+        var closes = w.Closes.Count;
+
+        var faulted = await Decide(w, verb);
+
+        ShouldBeUnavailable(faulted);
+        w.Order.Count(o => o == "lock").Should().Be(locksBefore + 1, "the reclose that faulted is the one under the lock");
+        w.Closes.Should().HaveCount(closes);
+
+        HealReadFaults(w);
+        w.SetSubmission(InvoiceSubmissionStatus.Rejected, SubmissionReasonCodes.Blocked);
+        var done = await Decide(w, verb);
+
+        done.Kind.Should().Be(BlockedDecisionKind.AlreadyDecided);
+        w.ClosedBy[onInvoice].Should().Be(recordId);
+        w.ClosedBy[onLine].Should().Be(recordId);
+        w.RecordCreates.Should().Be(1);
+    }
+
+    [Fact(DisplayName = "105 F2: the permanent cases stay AlreadyDecided with a warning: the writer refusing to read the stored set (ReviewInvalid) re-closes nothing")]
+    public async Task Repeat_WhenTheWriterRefusesTheStoredSet_StaysAlreadyDecided_AndWarns()
+    {
+        var (w, _, onInvoice, _, _, _, _) = await SignalWorldAsync();
+        w.CloseFault = id => id == onInvoice ? new TimeoutException("dataverse") : null;
+        ShouldBeUnavailable(await w.OverrideAsync());
+        w.CloseFault = _ => null;
+        w.FindFault = new DecisionRecordRefusedException(DecisionRecordRefusalReason.ReviewInvalid, "more than one record matches the key");
+        var closes = w.Closes.Count;
+
+        var repeat = await w.OverrideAsync();
+
+        repeat.Kind.Should().Be(BlockedDecisionKind.AlreadyDecided, "a repeat does not change a refusal; it is a known limit, not a transient fault");
+        w.Closes.Should().HaveCount(closes);
+        w.Log.Entries.Should().Contain(e => e.Level == LogLevel.Warning && e.Message.Contains("nothing is re-closed", StringComparison.Ordinal));
+    }
+
+    [Theory(DisplayName = "105 F2: a clean close is unchanged: Decided, then a repeat is AlreadyDecided with every Signal closed once and no second record")]
+    [InlineData("override")]
+    [InlineData("return")]
+    public async Task CleanClose_IsUnchanged_DecidedThenAlreadyDecided(string verb)
+    {
+        var (w, _, _, _, _, _, _) = await SignalWorldAsync();
+
+        var first = await Decide(w, verb);
+        var closed = w.ClosedBy.Count;
+        var repeat = await Decide(w, verb);
+
+        first.Kind.Should().Be(BlockedDecisionKind.Decided);
+        first.StatusCode.Should().Be(200);
+        repeat.Kind.Should().Be(BlockedDecisionKind.AlreadyDecided);
+        w.ClosedBy.Should().HaveCount(closed, "AlreadyClosedByThisRecord: nothing closed twice");
+        w.RecordCreates.Should().Be(1);
+        w.Log.Entries.Should().NotContain(e => e.Level >= LogLevel.Warning);
+    }
+
+    [Fact(DisplayName = "105 F2: losing the state write to a concurrent run that finished the decision, with this run's close failed, is 503 unavailable, not AlreadyDecided")]
+    public async Task Decision_LosingTheStateWriteToAConcurrentRun_WithAFailedClose_IsUnavailable()
+    {
+        var (w, _, onInvoice, _, _, _, _) = await SignalWorldAsync();
+        w.CloseFault = id => id == onInvoice ? new TimeoutException("dataverse") : null;
+        w.OnUpdate = () =>
+        {
+            // A concurrent run finished this same decision between our read and our write.
+            w.OnUpdate = null;
+            w.SetSubmission(InvoiceSubmissionStatus.Accepted, SubmissionReasonCodes.Overridden);
+            w.Submission["versionnumber"] = w.Submission.GetAttributeValue<long>("versionnumber") + 1;
+        };
+
+        var result = await w.OverrideAsync();
+
+        ShouldBeUnavailable(result);
     }
 
     [Fact]
@@ -2331,7 +2623,8 @@ public class SubmissionOverrideServiceTests
     {
         var (w, _, onInvoice, _, _, _, _) = await SignalWorldAsync();
         w.CloseFault = id => id == onInvoice ? new TimeoutException("dataverse") : null;
-        var first = await w.OverrideAsync();
+        ShouldBeUnavailable(await w.OverrideAsync());
+        var recordId = RecordIdOf(w);
         w.CloseFault = _ => null;
         var root = JsonNode.Parse(w.FindingsJson)!.AsObject();
         root[SubmissionOverrideService.OverrideMember]!["recordId"] = Guid.NewGuid().ToString("D");
@@ -2342,7 +2635,7 @@ public class SubmissionOverrideServiceTests
 
         repeat.Kind.Should().Be(BlockedDecisionKind.AlreadyDecided);
         var reclose = w.Closes.Last(c => c.SignalId == onInvoice);
-        reclose.RecordId.Should().Be(first.RecordId!.Value, "the writer-created record, not the stamp");
+        reclose.RecordId.Should().Be(recordId, "the writer-created record, not the stamp");
         reclose.DecidedBy.Should().Be(World.Caller, "the record's sprk_confirmedby, not the stamp");
     }
 
@@ -2367,14 +2660,14 @@ public class SubmissionOverrideServiceTests
     {
         var (w, _, onInvoice, _, _, _, _) = await SignalWorldAsync();
         w.CloseFault = id => id == onInvoice ? new TimeoutException("dataverse") : null;
-        await w.OverrideAsync();
+        ShouldBeUnavailable(await w.OverrideAsync());
         w.CloseFault = _ => null;
         var closes = w.Closes.Count;
         w.Probe.Rights = (set, _) => set == "sprk_invoices" ? AccessRights.Read : ScriptedProbe.RealReviewerRights(set, Guid.Empty);
 
         var repeat = await w.OverrideAsync();
 
-        repeat.Kind.Should().Be(BlockedDecisionKind.AlreadyDecided, "the repeat's answer is unchanged");
+        repeat.Kind.Should().Be(BlockedDecisionKind.AlreadyDecided, "no close was attempted, so none failed: the repeat's answer is AlreadyDecided as before");
         w.Closes.Should().HaveCount(closes, "no close is attempted for a caller without Write on the invoice");
         w.ClosedBy.Should().NotContainKey(onInvoice);
     }
@@ -2546,7 +2839,8 @@ public class SubmissionOverrideServiceTests
     {
         var (w, _, onInvoice, _, _, _, _) = await SignalWorldAsync();
         w.CloseFault = id => id == onInvoice ? new TimeoutException("dataverse") : null;
-        var first = await w.OverrideAsync();
+        ShouldBeUnavailable(await w.OverrideAsync());
+        var recordId = RecordIdOf(w);
         w.CloseFault = _ => null;
         w.Records.Created.Single(e => e.LogicalName == "sprk_decisionrecord").Attributes.Remove("sprk_confirmedby");
         var closes = w.Closes.Count;
@@ -2556,7 +2850,7 @@ public class SubmissionOverrideServiceTests
         repeat.Kind.Should().Be(BlockedDecisionKind.AlreadyDecided);
         w.Closes.Should().HaveCount(closes, "no close in no one's name");
         w.Log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Warning && e.Message.Contains("names no decider", StringComparison.Ordinal)
-            && e.Message.Contains(first.RecordId!.Value.ToString("D"), StringComparison.Ordinal));
+            && e.Message.Contains(recordId.ToString("D"), StringComparison.Ordinal));
     }
 
     private static string FindFromRepoRoot(params string[] parts)

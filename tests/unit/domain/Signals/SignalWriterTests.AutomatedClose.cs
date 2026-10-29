@@ -240,6 +240,22 @@ public partial class SignalWriterTests
         log.Entries.Should().NotContain(e => e.Level >= LogLevel.Warning);
     }
 
+    [Theory(DisplayName = "K1 (ontology-r1 review of #1911): a system close after the set was read that already names a Decision Record is left as it is - the write would replace that link")]
+    [InlineData("Condition Cleared")]
+    [InlineData("Superseded")]
+    [InlineData("Policy Retired")]
+    public async Task AutomatedClose_ASystemCloseLinkedToARecord_IsLeftAsIs_AndNothingIsWritten(string resolution)
+    {
+        var (writer, org, log) = AutomatedCloseRig("Resolved", resolution, SetReadAt.AddMinutes(1), OtherRecordId);
+
+        (await writer.CloseActedByDecisionAsync(ClosedSignalId, AutoRecordId, SetReadAt, "BILL-AGE", DeciderUserId))
+            .Should().Be(SignalAutomatedCloseOutcome.LeftAsIs);
+
+        org.ConditionalUpdates.Should().BeEmpty("the other record's link is never overwritten");
+        org.UpdateCalls.Should().BeEmpty();
+        log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Information);
+    }
+
     // ── Concurrency ──
 
     [Fact(DisplayName = "049 D-122: a version mismatch re-reads once and decides again; the second write closes it")]
