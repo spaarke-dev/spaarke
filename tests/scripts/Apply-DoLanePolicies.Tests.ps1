@@ -314,6 +314,19 @@ exit $code
             }
         }
 
+        # A chain of $Length business units c0 -> c1 -> ... -> root, none repeating (the walk is bounded at MaxParentWalk).
+        function Get-ChainId([int]$Index) { '00000000-0000-4000-8000-{0:x12}' -f (0xE0000 + $Index) }
+        function New-ChainScenario([int]$Length) {
+            $s = New-Scenario
+            $units = @($s.businessUnits | Where-Object { $_.businessunitid -in $script:Ids.Root, $script:Ids.Secure })
+            for ($i = 0; $i -lt $Length; $i++) {
+                $parent = if ($i -eq $Length - 1) { $script:Ids.Root } else { Get-ChainId ($i + 1) }
+                $units += @{ businessunitid = (Get-ChainId $i); name = "Chain $i"; _parentbusinessunitid_value = $parent }
+            }
+            $s.businessUnits = $units
+            $s
+        }
+
         function Get-Writes($Run) { @($Run.Requests | Where-Object { $_.Method -ne 'GET' }) }
         function Get-Creates($Run, [string]$Table) { @($Run.Requests | Where-Object { $_.Method -eq 'POST' -and $_.Uri -like "*/$Table" }) }
         $script:OwnerBind = "/teams($($script:Ids.Team))"
@@ -434,6 +447,8 @@ exit $code
                     'chain-loops' { ($s.businessUnits | Where-Object businessunitid -eq $script:Ids.Customer)._parentbusinessunitid_value = $script:Ids.Child; ($s.businessUnits | Where-Object businessunitid -eq $script:Ids.Child)._parentbusinessunitid_value = $script:Ids.Customer }
                     'chain-unreadable' { ($s.businessUnits | Where-Object businessunitid -eq $script:Ids.Customer)._parentbusinessunitid_value = $script:Ids.Missing }
                     'team-missing' { $s.teams = @() }
+                    'team-id-is-empty-guid' { $s.teams[0].teamid = [guid]::Empty.ToString() }
+                    'chain-too-long' { $s = New-ChainScenario 35; $arg = Get-ChainId 0 }
                     'team-is-default' { $s.teams[0].isdefault = $true }
                     'team-not-owner-type' { $s.teams[0].teamtype = 1 }
                     'team-in-another-unit' { $s.teams[0]._businessunitid_value = $script:Ids.Secure }
@@ -457,6 +472,8 @@ exit $code
             @{ Case = 'chain-loops'; Expect = 'ParentChainLoops' }
             @{ Case = 'chain-unreadable'; Expect = 'ParentChainUnreadable' }
             @{ Case = 'team-missing'; Expect = 'OwnerTeamNotFound' }
+            @{ Case = 'team-id-is-empty-guid'; Expect = 'OwnerTeamNotFound' }
+            @{ Case = 'chain-too-long'; Expect = 'ParentChainLoops' }
             @{ Case = 'team-is-default'; Expect = 'OwnerTeamNotFound' }
             @{ Case = 'team-not-owner-type'; Expect = 'OwnerTeamNotFound' }
             @{ Case = 'team-in-another-unit'; Expect = 'OwnerTeamNotFound' }
@@ -531,6 +548,110 @@ exit $code
             foreach ($r in @($run.Db.policies) + @($run.Db.versions)) { $r._ownerid_value | Should -Be $script:Ids.User }
         }
     }
+
+    Context 'F1: a parameter that was passed empty is a refusal, never "not passed"' {
+        It '<Mode> with <Label> stops before any request, non-zero' -ForEach @(
+            foreach ($mode in 'apply', 'WhatIf', 'Verify') { foreach ($v in @(@{ Label = 'empty'; Value = '' }, @{ Label = 'null'; Value = $null }, @{ Label = 'blank'; Value = '   ' })) { @{ Mode = $mode; Label = $v.Label; Value = $v.Value } } }
+        ) {
+            $a = @{ CustomerBusinessUnit = $Value }
+            if ($Mode -ne 'apply') { $a[$Mode] = $true }
+            $run = Invoke-ApplyScript (New-Scenario) $a
+            $run.ExitCode | Should -Not -Be 0 -Because $run.Output
+            $run.Output | Should -Match 'CustomerBusinessUnit was passed but is empty'
+            $run.Requests.Count | Should -Be 0
+        }
+
+        It 'must not fire: leaving the parameter out is still the plain path (exit 0, operator-owned rows)' {
+            $script:Plain.ExitCode | Should -Be 0
+            $script:Plain.Output | Should -Not -Match 'CustomerBusinessUnit'
+        }
+    }
+
+    Context 'F2: the read-back holds created rows to the owner' {
+        It 'must fire: a service that drops the owner bind fails the read-back, non-zero' {
+            $s = New-Scenario; $s.ignoreOwnerBind = $true
+            $run = Invoke-ApplyScript $s @{ CustomerBusinessUnit = $script:Ids.Customer }
+            $run.ExitCode | Should -Not -Be 0 -Because $run.Output
+            $run.Output | Should -Match "READ-BACK FAIL: policy POL-\S+: ownerid live='$($script:Ids.User)' expected='$($script:Ids.Team)'"
+            $run.Output | Should -Match "READ-BACK FAIL: version POL-\S+ v1: ownerid live='$($script:Ids.User)'"
+        }
+
+        It 'must not fire: without the parameter the same service behaviour is not judged' {
+            $s = New-Scenario; $s.ignoreOwnerBind = $true
+            (Invoke-ApplyScript $s @{}).ExitCode | Should -Be 0
+        }
+    }
+
+    Context 'F2: a fault after the policy was created, then a rerun' {
+        It 'leaves the policy owned by the team, and the rerun completes without a duplicate' {
+            $s = New-Scenario; $s.failNextPost = 'sprk_policyversions'
+            $first = Invoke-ApplyScript $s @{ CustomerBusinessUnit = $script:Ids.Customer }
+            $first.ExitCode | Should -Not -Be 0 -Because $first.Output
+            $first.Output | Should -Match 'injected fault'
+            @($first.Db.policies).Count | Should -Be 1
+            @($first.Db.policies)[0]._ownerid_value | Should -Be $script:Ids.Team
+            @($first.Db.versions).Count | Should -Be 0
+
+            $s2 = Copy-Scenario $first.Db; $s2.failNextPost = $null
+            $again = Invoke-ApplyScript $s2 @{ CustomerBusinessUnit = $script:Ids.Customer }
+            $again.ExitCode | Should -Be 0 -Because $again.Output
+            (Get-Creates $again 'sprk_policies').Count | Should -Be (@($script:DoLane.policies).Count - 1)
+            @($again.Db.policies).Count | Should -Be @($script:DoLane.policies).Count
+            @($again.Db.policies | ForEach-Object { $_.sprk_policyid } | Select-Object -Unique).Count | Should -Be @($script:DoLane.policies).Count
+            @($again.Db.versions).Count | Should -Be $script:VersionCount
+            foreach ($r in @($again.Db.policies) + @($again.Db.versions)) { $r._ownerid_value | Should -Be $script:Ids.Team }
+        }
+    }
+
+    Context 'F2: an existing operator-owned policy with a new team-owned version' {
+        It 'the apply owns only the new version; -Verify then reports the policy as DRIFT and the version IN SYNC' {
+            $s = Copy-Scenario $script:Plain.Db
+            $first = $script:DoLane.policies[0]
+            $s.versions = @($s.versions | Where-Object { $_.sprk_policyversionid -ne $first.versions[0].versionId })
+            $apply = Invoke-ApplyScript $s @{ CustomerBusinessUnit = $script:Ids.Customer }
+            $apply.ExitCode | Should -Be 0 -Because $apply.Output
+            (Get-Creates $apply 'sprk_policies').Count | Should -Be 0
+            $created = @(Get-Creates $apply 'sprk_policyversions')
+            $created.Count | Should -Be 1
+            ($created[0].Body | ConvertFrom-Json).'ownerid@odata.bind' | Should -Be $script:OwnerBind
+            foreach ($r in @($apply.Db.policies)) { $r._ownerid_value | Should -Be $script:Ids.User }
+
+            $verify = Invoke-ApplyScript (Copy-Scenario $apply.Db) @{ CustomerBusinessUnit = $script:Ids.Customer; Verify = $true }
+            $verify.ExitCode | Should -Be 1 -Because $verify.Output
+            $verify.Output | Should -Match "$($first.code)\s+policy DRIFT: ownerid"
+            $verify.Output | Should -Match "$($first.code)\s+v1 IN SYNC"
+        }
+    }
+
+    Context 'F2: the Secure Record unit and the parent-chain bound' {
+        It 'an environment with no Secure Record unit proceeds (none is it)' {
+            $s = New-Scenario
+            $s.businessUnits = @($s.businessUnits | Where-Object { $_.businessunitid -ne $script:Ids.Secure })
+            $run = Invoke-ApplyScript $s @{ CustomerBusinessUnit = $script:Ids.Customer }
+            $run.ExitCode | Should -Be 0 -Because $run.Output
+            (Get-Creates $run 'sprk_policies').Count | Should -Be @($script:DoLane.policies).Count
+        }
+
+        # The walk reads one unit per step, the root included, for MaxParentWalk + 1 = 33 steps (RestrictedContentOwnerTeam.cs).
+        It 'a chain whose root is the 33rd read is still read to the root (32 units: the unit is just not top level)' {
+            $run = Invoke-ApplyScript (New-ChainScenario 32) @{ CustomerBusinessUnit = (Get-ChainId 0) }
+            $run.ExitCode | Should -Not -Be 0
+            $run.Output | Should -Match 'CustomerBusinessUnitNotTopLevel'
+        }
+
+        It 'the top unit of that 32-unit chain resolves (no chain refusal; the run goes on to find no team)' {
+            $s = New-ChainScenario 32
+            $run = Invoke-ApplyScript $s @{ CustomerBusinessUnit = (Get-ChainId 31) }
+            $run.Output | Should -Not -Match 'ParentChain'
+            $run.Output | Should -Match 'OwnerTeamNotFound'
+        }
+
+        It 'one more unit and the root is past the bound: refused as a loop, though nothing repeats (33 units)' {
+            $run = Invoke-ApplyScript (New-ChainScenario 33) @{ CustomerBusinessUnit = (Get-ChainId 0) }
+            $run.ExitCode | Should -Not -Be 0
+            $run.Output | Should -Match 'ParentChainLoops'
+        }
+    }
 }
 
 Describe 'The owner rule is the C# rule (task 171, D-197)' {
@@ -549,14 +670,46 @@ Describe 'The owner rule is the C# rule (task 171, D-197)' {
         }
     }
 
-    It 'the names and limits equal the class defaults (skipped when the class is not in this checkout)' -Skip:(-not ((Test-Path -LiteralPath (Join-Path $PSScriptRoot '..' '..' 'src' 'server' 'api' 'Sprk.Bff.Api' 'Infrastructure' 'Dataverse' 'RestrictedContentOwnerTeam.cs')) -and (Test-Path -LiteralPath (Join-Path $PSScriptRoot '..' '..' 'src' 'server' 'api' 'Sprk.Bff.Api' 'Infrastructure' 'Dataverse' 'SecureRecordOwnerTeam.cs')))) {
+    It 'the script''s team rule is pinned to the class source (fails in CI when the classes are not checked out)' {
         $dir = Join-Path $script:RepoRoot 'src' 'server' 'api' 'Sprk.Bff.Api' 'Infrastructure' 'Dataverse'
+        $missing = @('RestrictedContentOwnerTeam.cs', 'SecureRecordOwnerTeam.cs' | Where-Object { -not (Test-Path -LiteralPath (Join-Path $dir $_)) })
+        if ($missing.Count -gt 0) {
+            if ($env:CI) { throw "CI: $($missing -join ', ') missing from the checkout; add it to the sparse-checkout of ontology-script-tests." }
+            Set-ItResult -Skipped -Because "$($missing -join ', ') is not in this checkout"
+            return
+        }
         $restricted = Get-Content -LiteralPath (Join-Path $dir 'RestrictedContentOwnerTeam.cs') -Raw
         $secure = Get-Content -LiteralPath (Join-Path $dir 'SecureRecordOwnerTeam.cs') -Raw
+        $text = $script:ScriptText
+
+        # names and limits
         [regex]::Match($restricted, 'DefaultOwnerTeamName = "([^"]+)"').Groups[1].Value | Should -Be $RestrictedOwnerTeamName
         [regex]::Match($secure, 'DefaultBusinessUnitName = "([^"]+)"').Groups[1].Value | Should -Be $SecureBusinessUnitName
         [int][regex]::Match($restricted, 'MaxParentWalk = (\d+)').Groups[1].Value | Should -Be $MaxParentWalk
         [int][regex]::Match($restricted, 'MemberReadLimit = (\d+)').Groups[1].Value | Should -Be $MemberReadLimit
+
+        # the team query: Owner team type, not default, in the unit, named; TOP 2
+        $ownerType = [int][regex]::Match($secure, 'OwnerTeamType = (\d+)').Groups[1].Value
+        $ownerType | Should -Be 0
+        foreach ($pair in @(@('NameColumn', 'name'), @('TeamTypeColumn', 'teamtype'), @('IsDefaultColumn', 'isdefault'), @('BusinessUnitColumn', 'businessunitid'))) {
+            $secure | Should -Match "$($pair[0]) = `"$($pair[1])`""
+        }
+        $restricted | Should -Match 'AddCondition\(SecureRecordOwnerTeam\.NameColumn, ConditionOperator\.Equal, OwnerTeamName\(configuration\)\)'
+        $restricted | Should -Match 'AddCondition\(SecureRecordOwnerTeam\.TeamTypeColumn, ConditionOperator\.Equal, SecureRecordOwnerTeam\.OwnerTeamType\)'
+        $restricted | Should -Match 'AddCondition\(SecureRecordOwnerTeam\.IsDefaultColumn, ConditionOperator\.Equal, false\)'
+        $restricted | Should -Match 'AddCondition\(SecureRecordOwnerTeam\.BusinessUnitColumn, ConditionOperator\.Equal, topBusinessUnitId\)'
+        $restricted | Should -Match '(?s)ColumnSet = new ColumnSet\("teamid"\),\s*TopCount = 2,'
+        $text | Should -Match ([regex]::Escape("teamtype eq $ownerType and isdefault eq false and _businessunitid_value eq `$top&") + [regex]::Escape('`$top=2'))
+        # the member read, the parent walk and the empty-id rule
+        $restricted | Should -Match 'TopCount = MemberReadLimit'
+        $text | Should -Match ([regex]::Escape('teammemberships?`$select=systemuserid&`$filter=teamid eq $teamId&`$top=$MemberReadLimit'))
+        $restricted | Should -Match 'new QueryExpression\("businessunit"\) \{ ColumnSet = new ColumnSet\("parentbusinessunitid"\), TopCount = 1'
+        $text | Should -Match ([regex]::Escape('businessunitid eq $current&`$top=1'))
+        $restricted | Should -Match 'teams\[0\]\.Id == Guid\.Empty'
+        $text | Should -Match ([regex]::Escape('[guid]::Empty.ToString()) { return'))
+        # the Secure Record unit lookup: by name, TOP 2
+        $secure | Should -Match 'new QueryExpression\("businessunit"\) \{ ColumnSet = new ColumnSet\("businessunitid"\), TopCount = 2'
+        $text | Should -Match ([regex]::Escape('$SecureBusinessUnitName)''&`$top=2'))
     }
 
     It 'the Assign privileges are the two tables the script creates rows in' {

@@ -77,8 +77,13 @@ function Invoke-FakeDataverse([string]$Method, [string]$Uri, $Body) {
         }
     }
     elseif ($Method -eq 'POST' -and $route -in 'sprk_policies', 'sprk_policyversions') {
+        # Scenario flag failNextPost = '<table>': the first POST to that table throws (once), as a Dataverse fault would.
+        if ($db.failNextPost -eq $route) { $db.failNextPost = $null; throw "FAKE: injected fault on POST $route" }
         $row = @{ statecode = 0; _ownerid_value = $db.userId }   # no ownerid in the body: the creating user owns the row
-        Merge-FakeBody ($Body | ConvertFrom-Json -AsHashtable -Depth 32) $row
+        $parsed = $Body | ConvertFrom-Json -AsHashtable -Depth 32
+        # Scenario flag ignoreOwnerBind: the service accepts the create but drops the owner bind (what the read-back must catch).
+        if ($db.ignoreOwnerBind) { $parsed.Remove('ownerid@odata.bind') }
+        Merge-FakeBody $parsed $row
         $list = if ($route -eq 'sprk_policies') { 'policies' } else { 'versions' }
         $db[$list] = @($db[$list]) + @($row)
         return $null

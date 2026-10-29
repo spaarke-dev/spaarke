@@ -79,6 +79,11 @@ if (-not $DefinitionPath) { $DefinitionPath = Join-Path $PSScriptRoot '..\config
 if (-not (Test-Path -LiteralPath $DefinitionPath)) { throw "Definition not found: $DefinitionPath" }
 if (-not $DataverseUrl) { throw 'DataverseUrl is required (parameter or $env:DATAVERSE_URL).' }
 $DataverseUrl = $DataverseUrl.TrimEnd('/')
+# Task 171 (D-197): the parameter is judged by whether it was PASSED, not by its value. `-CustomerBusinessUnit $env:X` with X unset
+# binds an empty string; treating that as "not passed" would seed operator-owned rows and report success. Refused before anything else.
+if ($PSBoundParameters.ContainsKey('CustomerBusinessUnit') -and [string]::IsNullOrWhiteSpace($CustomerBusinessUnit)) {
+    throw '-CustomerBusinessUnit was passed but is empty or blank (is the variable it came from unset?). Pass the customer top business unit id or name, or leave the parameter out. Nothing was written.'
+}
 $ApiBase = "$DataverseUrl/api/data/v9.2"
 
 # Per definition kind: the lane the policies must be in and the plan codes of the closed action catalog for that lane
@@ -348,7 +353,7 @@ function Resolve-RestrictedContentOwner([string]$BusinessUnit) {
     if ($secure.Count -eq 1 -and [string]$secure[0].businessunitid -eq $top) { return New-OwnerResult 'CustomerBusinessUnitIsSecureRecord' $null $top 0 }
 
     $teams = @((Invoke-Dv GET "$ApiBase/teams?`$select=teamid&`$filter=name eq '$(ConvertTo-ODataLiteral $RestrictedOwnerTeamName)' and teamtype eq 0 and isdefault eq false and _businessunitid_value eq $top&`$top=2" $null).value)
-    if ($teams.Count -eq 0 -or -not $teams[0].teamid) { return New-OwnerResult 'OwnerTeamNotFound' $null $top 0 }
+    if ($teams.Count -eq 0 -or -not $teams[0].teamid -or [string]$teams[0].teamid -eq [guid]::Empty.ToString()) { return New-OwnerResult 'OwnerTeamNotFound' $null $top 0 }
     if ($teams.Count -gt 1) { return New-OwnerResult 'OwnerTeamAmbiguous' $null $top 0 }
 
     # No member of any kind (human or application user): the membership rows themselves.
@@ -360,6 +365,8 @@ function Resolve-RestrictedContentOwner([string]$BusinessUnit) {
 
 # The Assign privileges the operator is missing (names), by the operator's effective privileges (RetrieveUserPrivileges covers the
 # roles of the user and of their teams). A privilege that does not exist on the environment counts as missing: fail closed.
+# This checks PRESENCE, not DEPTH: Assign at Basic depth does not cover a team in another business unit. A depth shortfall is not
+# caught here; it surfaces as a 403 on the first create, which stops the run (fail closed) before any row exists.
 function Get-MissingAssignPrivileges([string]$UserId) {
     $held = @((Invoke-Dv GET "$ApiBase/systemusers($UserId)/Microsoft.Dynamics.CRM.RetrieveUserPrivileges()" $null).RolePrivileges | ForEach-Object { ([string]$_.PrivilegeId).ToLowerInvariant() })
     foreach ($name in $AssignPrivileges) {
@@ -377,7 +384,7 @@ function Get-AuthoredBy {
 
 # Resolved before anything is written (also in -WhatIf and -Verify). $OwnerTeamId stays $null without -CustomerBusinessUnit.
 $OwnerTeamId = $null
-if ($CustomerBusinessUnit) {
+if ($PSBoundParameters.ContainsKey('CustomerBusinessUnit')) {
     $owner = Resolve-RestrictedContentOwner $CustomerBusinessUnit
     if ($owner.Status -ne 'Resolved') {
         Write-Host "OWNER FAIL: $($owner.Status) for customer business unit '$CustomerBusinessUnit' (business unit $($owner.CustomerBusinessUnitId); members found $($owner.MembersFound))." -ForegroundColor Red
