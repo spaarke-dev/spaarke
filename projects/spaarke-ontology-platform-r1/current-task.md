@@ -3,13 +3,13 @@
 > **Last Updated**: 2026-10-29 (main session, context-handoff at 85%). State only: history is in git log, task `<completion>` blocks and
 > `notes/handoff-history/2026-10.md`. Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 and §6. Decisions: [`notes/decisions.md`](notes/decisions.md)
 > (D-1..D-199). Deferred work: one self-contained GitHub issue per item, label `ontology-deferred`, plus a DI-nn row in both tables of
-> `notes/defer-issues.md` (next free: **DI-137**). Sub-agents never edit this file.
+> `notes/defer-issues.md` (next free: **DI-138**). Sub-agents never edit this file.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Task** | **168** (#2418): fix round 2 is RUNNING (Opus implementer, `C:\wts-168`, from head `e8b460a9ea`). It fixes: uac-r2's multi-root/secure-family per-row rule in the external branch; 429/408 not permanent; Restricted fail-closed off flag-bearing tables; direct seam tests; the job re-reads the task's current filing. Round 1 (`e8b460a9ea`) passed the second Opus review and uac-r2 except for those items. Then re-check the fix diff, send it to uac-r2, wait for CI, merge. **Owner question open:** the From address for external assignees (A: always the system mailbox, recommended; B: as built). |
+| **Task** | **168** (#2418): fix rounds 2 and 3 are done; head `ab6dbb8f16`. uac-r2 PASSED round 2. Round 3 (the composition follows the assignee's portal plane, plus the home-link read) was re-checked by the main session and is with R3 (the resolver lift) and uac-r2 (HomeLinkAsync). Then: CI, merge into docs, mark 168 complete. **Owner question open:** the From address for external assignees (A: always the system mailbox, recommended; B: as built). |
 | **Status** | No lane is running. The worktrees `C:\wts-171` and `C:\wts-172` are removed. uac-r2 was sent the 171 fix-diff SHA `e025152e3b` after the merge; if they raise anything, handle it as a follow-up before docs→master. DI-124 (#2300) has the `-CustomerBusinessUnit` / `-WhatIf` comment. |
 | **Next Action** | 1) Re-check the 168 fix round (D-199) in `C:\wts-168` (plan below). 2) After the owner's next real decision commit: the task-170 App Insights check and the `BUD-` number (Lane facts). 4) Read any uac-r2 reply on the 171 fix diff. |
 
