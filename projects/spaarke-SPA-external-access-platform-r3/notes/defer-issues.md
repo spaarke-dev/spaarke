@@ -803,3 +803,23 @@ The CSV export uses the raw value, not `@formattedValues`. A Money cell is expor
 **Entry-points**
 
 - `src/client/shared/Spaarke.UI.Components/src/components/DataGrid/commandBar/csvExport.ts` (~64-78), `commandBar/defaults.ts:228`
+
+### ISS-023 — The profile form shows an email that registration then refuses
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-29 |
+| **Source** | R3 task 074 probe 5 (Tony Howe, a Dewey Cheatham member with no email attribute) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2449 |
+
+**Description**
+
+When the home token has no `email` claim, the form's prefill falls back to the username, but registration accepts the `email` claim only. The person fills in a form that can never succeed and then sees "We could not read your email address". Registration refusing the username is correct. Fix: have the `registration_required` refusal on `/me` say whether the email is usable, and show the "contact your administrator" state instead of the form when it is not. Workaround: an administrator sets the account's email attribute.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs` (~717-734)
+- `src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/WorkforceIdentityOptions.cs` (`TokenEmail`)
+- `src/client/external-spa/src/pages/RegistrationPage.tsx`
