@@ -123,4 +123,5 @@ CLAUDE.md fact 1 used to read "on the MDA, Dataverse enforces natively and we wr
   - Primary-parent order for `sprk_workassignment`: matter, project, invoice, event (its filing order, `SecureRootInheritance.TypedLookupsOf`); any other lookup (e.g. `sprk_regardingcommunication`) after, by column name.
   - Before: a work assignment, being a root, had no order entry, so its parents ranked by column name (event before matter). Found by field-mapping's 071 review.
   - Shipped in PR #2451 (3d54ac845d): `SecureChildLineage.RootLookupOrder` entry derived from `TypedLookupsOf`. Dev: 0 of 31 work assignments change primary.
-  - Open with the owner: confirm the communication lookup ranking last; how to track two older mismatches found in review (creation vs un-secure for a work assignment filed only under an invoice or event; the Decision Record gate writer vs the owner-check job).
+  - Communication ranking last: CONFIRMED by the owner 2026-10-29 ("a work assignment's parent is the core record; it's important that we have this family structure").
+  - Open with the owner: how to track two older mismatches found in review (creation vs un-secure for a work assignment filed only under an invoice or event; the Decision Record gate writer vs the owner-check job).
