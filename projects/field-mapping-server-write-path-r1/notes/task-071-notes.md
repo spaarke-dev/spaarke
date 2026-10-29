@@ -221,6 +221,10 @@ without reading the ancestor as the caller, `belowHidden.Truncated` was true.
 - **K9, timing.** A malformed or rebound continuation is refused before any read; a stale-top continuation is refused
   after the up-walk. The answer is identical but the timing differs. The difference reveals only that the caller's own
   token was well-formed, never anything about records the caller cannot read.
+- **K11 (review K6), no query budget.** Nothing bounds a read's queries beyond the caller's cancellation token: a huge set is
+  scanned to its end (in pages of `MaxRowsPerQuery` after the first request), and it always terminates.
+- **K12 (review K3), thread reads are not batched.** A thread row is read one at a time, and only when the message's thread
+  column decides its primary parent (B9).
 
 ## Verification
 
@@ -269,6 +273,27 @@ Verification after fix round 1:
 | `tests/Spaarke.ArchTests`, `--no-incremental` build then full run | 1665 passed, 0 failed |
 | Unfiltered `Sprk.Bff.Api.Tests` | Not run (per the brief) |
 | Publish-size delta | Not re-measured in this round: one small source file and no package were added |
+
+### Fix round 2 (review findings F2, F3, K1, K2, K4), 2026-10-29
+
+Live check 2026-10-29 (main session, dev): `sprk_documents` `$orderby=sprk_documentid asc`, then `sprk_documentid gt <10th id>`, returned exactly rows 11–60 in the same order, so the key paging's `gt` agrees with `$orderby`.
+
+| Fix | Change | Test: fail before → pass after |
+|---|---|---|
+| F2 | After its first request an edge is paged at `MaxRowsPerQuery`, not `needed()+1` (`RecordFamilyReader.ForEachChildAsync`) | `ReadAsync_EdgeWithManyRowsFiledUnderAnotherParent_CostsAFewRequestsNotOnePerSmallPage`: 5000 secondary-filed agreements. With the old size: 10 requests (fails the bound of 3); now 2 |
+| F3 | The vacuous `sprk_policies == 2` assertion is removed from the privilege test; a new test uses 51 documents with a file version each (two 50-id chunks in one read) and refuses `sprk_fileversion` | `ReadAsync_RefusedTableQueriedInSeveralChunksOfOneRead_IsAskedOnceNotPerChunk` with the `_noReadPrivilege.Add` removed: asks twice, fails (expected 1). With the cache: 1. Control in the same test: unrefused, 2 calls |
+| K1 | A 403 whose body cannot be read or decoded still throws `DataverseForbiddenException` (status 403, no code or message). The impersonated GET now sends `HttpCompletionOption.ResponseHeadersRead` and disposes the response, because the default buffered the body inside `SendAsync`, where a stream fault or `InvalidOperationException` replaced the 403 before `TryReadErrorAsync` ran. `TryReadErrorAsync` catches the same set as `DataverseWebApiClient.CreateFailureAsync` (`JsonException`, `HttpRequestException`, `IOException`, `InvalidOperationException`, `NotSupportedException`). Its other caller (`ReadPrincipalAccessOrUnknownAsync`) treats `(null, null)` as UNKNOWN and logs it, so the widening is safe there | `RetrieveMultipleImpersonatedAsync_ForbiddenWithAnUnreadableBody_StillThrowsTheForbidden` (3 cases: IO, invalid-operation, http-request): all 3 failed with the old code (each fault escaped as itself), all pass now. A real unsupported-charset header does not fault on .NET 10 (it falls back), so a faulting body stands in for it |
+| K2 | `sprk_policyversion` reason in `AccessTableReaderScanTests.NotAccessTables` reworded | Text only; the scan passes |
+| K4 | A refused read of `sprk_recordtype_ref` logs at Warning; every other table stays Information (ids and table names only) | No new test (per the brief) |
+
+Verification after fix round 2:
+
+| Check | Result |
+|---|---|
+| `dotnet build src/server/api/Sprk.Bff.Api/` | 0 errors, 0 warnings |
+| `Sprk.Bff.Api.Tests --filter "FullyQualifiedName~RecordFamilyReader\|FullyQualifiedName~DataverseWebApiServiceImpersonation\|FullyQualifiedName~DataverseWebApiService"` | 49 passed, 0 failed |
+| `tests/Spaarke.ArchTests`, `--no-incremental` build then full run | 1665 passed, 0 failed |
+| Unfiltered `Sprk.Bff.Api.Tests` | Not run (per the brief) |
 
 ### Not covered by this verification
 
