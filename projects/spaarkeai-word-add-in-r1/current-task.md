@@ -12,13 +12,10 @@
   - Machine: Entra-joined to Helios IP, plus 3 registered work accounts (RightHub Groups, Spaarke Inc., Dewey Cheatham & Howe PC). Likely cause: the per-account Windows SSO cookies Edge and WebView2 send to login.microsoftonline.com are too large in total.
   - Owner steps: an InPrivate test, clear Edge's login.microsoftonline.com site data, then disconnect an unneeded work account (never Helios IP: that is the device join). No code change; nothing to file.
 - Offer to correct the owner's 10-28 test record (comm 12f1f3f8…, doc 536204ff…) only if they ask.
-- **ebilling 094 merged into work/ebilling-r1** (094 head 600079fd11; contract unchanged since 97c793670b). The client for its codes is in **PR #2448, AUTO-MERGE ON**: `task/word-133-094-codes`, **C:\wt133d**; e480113b0c, then review round 1 d5a75a0479.
-  - Every 094 row in §6 and §9 has a sentence. Permanent (upload hint): email_save_failed, document_unavailable, document_not_found, source_communication_mismatch, COMMUNICATION_REFILE_FORBIDDEN. storage_not_configured is a plain refusal.
-  - `filingKept`: the top-level field first, then the pinned sentence. Code = `errorCode ?? reasonCode`, plus `extensions.code` on a 403 only.
-  - Adversarial review: three F1s, plus two plausible points, all fixed in d5a75a0479; I re-checked the fix diff myself. jest: messages and service 145/145, InvoiceView passing.
-  - Inert on master (`?action=submitInvoice` only). **Next:** confirm the merge, then remove C:\wt133d.
-  - ebilling took (a) for the COMMUNICATION_REFILE_FORBIDDEN gap (branch task/ebill-095-errorcode) and is adding top-level `filingKept`. Owed by them: the sha, the SdapProblemException sweep list, the dev notice. I also passed on a possible AfterFiling gap (refusals with only `reasonCode` after step A may miss filingKept) for them to confirm.
-- Cleanup later (Remove-WorktreeSafe): C:\wt2412, C:\wt2412m, C:\wt2416, C:\wt2416c; C:\wt133d after #2448 merges.
+- **ebilling 094 client: #2448 MERGED** at 5119519679 (2026-10-29 14:48Z; inert, `?action=submitInvoice` only). C:\wt133d removed.
+  - Every 094 row in §6 and §9 has a sentence. `filingKept`: the top-level field first, then the pinned sentence. Code = `errorCode ?? reasonCode`, plus `extensions.code` on a 403 only.
+  - ebilling's contract fix is on task/ebill-095-errorcode @ d7218072fb: step A's 403 gets a top-level `errorCode`; `filingKept: true` goes on every refusal after step A filed (including reasonCode-only answers and Office pass-throughs); sweep list received. I checked their contract diff: it matches #2448. **Waiting on ebilling for:** the work sha after the integration merge, and the notice when 095's routes answer on dev (then slice C, with the owner's go).
+- Cleanup later (Remove-WorktreeSafe): C:\wt2412, C:\wt2412m, C:\wt2416, C:\wt2416c.
 
 ## ⚡ Quick Recovery (READ THIS FIRST)
 
