@@ -1804,7 +1804,7 @@ Run intake no longer takes `communicationGraphResource` / `emailGraphResource`. 
 
 ### 7.11 Phase 11 — Secure-record environment setup (H7b; the operator verifies it before telling the customer the environment is ready)
 
-> **Restricted-content owner team: a manual step, not part of provisioning yet (unified-access-control-r2 task 194b R4b-3, R4b-2c).**
+> **Customer owner teams: a manual step until provisioning's H7c ships (#2429) (unified-access-control-r2 task 194b R4b-3, R4b-2c).**
 > A BFF that carries the hard-deny rule (owner rounds 131 and 136) owns every ORDINARY row of `sprk_storedfile`,
 > `sprk_procedureassignment`, `sprk_ruleset`, `sprk_policy` and `sprk_policyversion` by the memberless team
 > `Spaarke Restricted Content Owners` **in the customer's own business unit** — the direct child of the root that **H10**
@@ -1816,8 +1816,8 @@ Run intake no longer takes `communicationGraphResource` / `emailGraphResource`. 
 > ordinary write to those tables (`record_owner_restricted_content_team_unresolved`, also when the team has a member or
 > there are two, when the answer is in the root itself, or when it sits under `Secure Record`), and Dataverse refuses the
 > team as an owner while the role lacks Read. In the interim sequence (§12.2) the BFF deployed in Phase 6 is already running
-> when Phase 7 (H10) creates the unit, so it refuses those writes until Phase 7a's `-Verify` exits 0. Provisioning does not
-> create the team yet, so run `scripts/Set-CustomerOwnerTeams.ps1 -CustomerBusinessUnitId <H10's customerBusinessUnitId>`:
+> when Phase 7 (H10) creates the unit, so it refuses those writes until Phase 7a's `-Verify` exits 0. Provisioning's H7c
+> (#2429: after H7b, before H9 and both seeders) will create both teams from the same role files; until it ships, run `scripts/Set-CustomerOwnerTeams.ps1 -CustomerBusinessUnitId <H10's customerBusinessUnitId>`:
 > dry run, then `-Apply`, then `-Verify`, which must exit 0. The full sequence is §12.2, "Phase 7a". Secure rows of these
 > tables still go to `Secure Record Owners`.
 >
@@ -2328,6 +2328,8 @@ pac admin assign-user --environment "https://spaarke-acme.crm.dynamics.com/" `
 # BFF does not resolve it. Field-mapping's seeder (task 004) and provisioning's H12b seeder (FR-39) WILL own new
 # configuration rows to this team; until they ship, the rows stay with the seeding identity and an operator re-owns them
 # to this team after setup.
+# Provisioning's H7c (#2429) replaces this step in a provisioning run: one handler for both teams, after H7b and before H9,
+# from the same config/*-owner-role.json files, with its own gate and an H13 re-check.
 .\scripts\Set-CustomerOwnerTeams.ps1 -EnvironmentUrl "<dv-org-url>" -CustomerBusinessUnitId "<customerBusinessUnitId>"            # dry run: the plan for both teams, no writes (exit 1 = an owner decision is needed first)
 .\scripts\Set-CustomerOwnerTeams.ps1 -EnvironmentUrl "<dv-org-url>" -CustomerBusinessUnitId "<customerBusinessUnitId>" -Apply     # create each team (and each role once), add its tables, strip the rest, assign
 .\scripts\Set-CustomerOwnerTeams.ps1 -EnvironmentUrl "<dv-org-url>" -CustomerBusinessUnitId "<customerBusinessUnitId>" -Verify    # MUST exit 0 (no drift in either team); the Phase 6 BFF writes hard-deny rows only from then on
